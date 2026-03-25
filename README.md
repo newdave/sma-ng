@@ -1,4 +1,4 @@
-SMA Conversion/Tagging Automation Script
+SMA-NG Conversion/Tagging Automation Script
 ==============
 
 **Automatically converts media files downloaded by various programs to a standardized format, and tags them with the appropriate metadata from TMDB if the container supports tagging.**
@@ -37,7 +37,7 @@ Default Settings
 
 Docker
 --------------
-Two official Docker containers are maintained for Radarr and Sonarr with SMA included. These are meant to work with **completed download handling** enabled. See the respective Docker Hub pages for details
+Two official Docker containers are maintained for Radarr and Sonarr with SMA-NG included. These are meant to work with **completed download handling** enabled. See the respective Docker Hub pages for details
 - https://hub.docker.com/r/mdhiggins/sonarr-sma
 - https://hub.docker.com/r/mdhiggins/radarr-sma
 
@@ -120,7 +120,7 @@ NZBGet Setup
     - Save changes
     - Reload NZBGet
 4. When assigning categories in NZBGet and your chosen media manager, ensure they match the label settings specified here so that file will be passed back to the appropriate location.
-    - In the relevant category set `PostScript` to NZBGetPostProcess.py to ensure SMA is called.
+    - In the relevant category set `PostScript` to NZBGetPostProcess.py to ensure SMA-NG is called.
 
 *Not required if using Completed Download Handling with Sonarr/Radarr*
 

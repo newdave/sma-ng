@@ -1409,7 +1409,7 @@ class MediaProcessor:
             options['sub-encoding'] = self.settings.subencoding
 
         preopts = []
-        postopts = ['-threads', str(self.settings.threads), '-metadata:g', 'encoding_tool=SMA'] + metadata_map
+        postopts = ['-threads', str(self.settings.threads), '-metadata:g', 'encoding_tool=SMA-NG'] + metadata_map
 
         # FFMPEG allows TrueHD experimental
         if options.get('format') in ['mp4'] and any(a for a in options['audio'] if self.getCodecFromOptions(a, info) == 'truehd'):
@@ -1460,7 +1460,7 @@ class MediaProcessor:
                 ffcodec = self.converter.codec_name_to_ffmpeg_codec_name(o['codec'])
                 if not ffcodec:
                     self.log.warning("===========WARNING===========")
-                    self.log.warning("The encoder you have chosen %s is not defined and is not supported by SMA, conversion will likely fail. Please check that this is defined in ./converter/avcodecs.py and if not open a Github feature request to add support." % (o['codec']))
+                    self.log.warning("The encoder you have chosen %s is not defined and is not supported by SMA-NG, conversion will likely fail. Please check that this is defined in ./converter/avcodecs.py and if not open a Github feature request to add support." % (o['codec']))
                     self.log.warning("===========WARNING===========")
                 elif ffcodec not in encoders and ffcodec != 'copy':
                     self.log.warning("===========WARNING===========")
@@ -2259,7 +2259,7 @@ class MediaProcessor:
                 self.log.info("Input and output extensions are the same so passing back the original file [process-same-extensions: %s]." % self.settings.process_same_extensions)
                 return True
             elif info.format.metadata.get('encoder', '').startswith('sma') and not self.settings.force_convert:
-                self.log.info("Input and output extensions match and the file appears to have already been processed by SMA, enable force-convert to override [force-convert: %s]." % self.settings.force_convert)
+                self.log.info("Input and output extensions match and the file appears to have already been processed by SMA-NG, enable force-convert to override [force-convert: %s]." % self.settings.force_convert)
                 return True
             elif self.settings.bypass_copy_all and options and len([x for x in [options['video']] + [x for x in options['audio']] + [x for x in options['subtitle']] if x['codec'] != 'copy']) == 0 and len(options['audio']) == len(info.audio) and len(options['subtitle']) == len(info.subtitle) and not self.settings.force_convert:
                 self.log.info("Input and output extensions match, the file appears to copying all streams, and is not reducing the number of streams, enable force-convert to override [bypass-if-copying-all] [force-convert: %s]." % self.settings.force_convert)

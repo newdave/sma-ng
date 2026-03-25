@@ -270,7 +270,7 @@ def _triggerManagerRescan(instance, dirpath, manager_type, requests):
     url = base_url + "/api/v3/command"
     headers = {
         'X-Api-Key': instance['apikey'],
-        'User-Agent': "SMA - manual"
+        'User-Agent': "SMA-NG - manual"
     }
 
     if manager_type == 'sonarr':
@@ -430,9 +430,9 @@ def showCodecs():
         'subtitle': subtitle_codec_list,
         'attachment': attachment_codec_list
     }
-    print("List of supported codecs within SMA")
+    print("List of supported codecs within SMA-NG")
     print("Format:")
-    print("  [SMA Codec]: [FFMPEG Encoder]")
+    print("  [SMA-NG Codec]: [FFMPEG Encoder]")
     for key in data:
         print("=============")
         print(" " + key)
@@ -442,7 +442,7 @@ def showCodecs():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Manual conversion and tagging script for sickbeard_mp4_automator")
+    parser = argparse.ArgumentParser(description="SMA-NG manual conversion and tagging script")
     parser.add_argument('-i', '--input', help='The source that will be converted. May be a file or a directory')
     parser.add_argument('-c', '--config', help='Specify an alternate configuration file location')
     parser.add_argument('-a', '--auto', action="store_true", help="Enable auto mode, the script will not prompt you for any further input, good for batch files. It will guess the metadata using guessit")

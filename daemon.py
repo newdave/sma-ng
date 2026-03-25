@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SMA Daemon - HTTP webhook server for triggering media conversions.
+SMA-NG Daemon - HTTP webhook server for triggering media conversions.
 
 Listens for HTTP POST requests containing absolute file/directory paths
 and spawns conversion processes using manual.py.
@@ -756,7 +756,7 @@ DOCS_TEMPLATE = '''<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SMA Documentation</title>
+<title>SMA-NG Documentation</title>
 <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
@@ -768,7 +768,7 @@ DOCS_TEMPLATE = '''<!DOCTYPE html>
     %s
   </article>
   <div class="mt-16 mb-8 pt-8 border-t border-gray-700 text-center text-gray-500 text-xs">
-    SMA Documentation &mdash; Generated from docs/README.md
+    SMA-NG Documentation &mdash; Generated from docs/README.md
   </div>
 </div>
 </body>
@@ -780,7 +780,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SMA Daemon</title>
+<title>SMA-NG Daemon</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>[x-cloak]{display:none!important}</style>
@@ -791,7 +791,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
   <!-- Header -->
   <div class="flex items-center justify-between mb-8">
     <div>
-      <h1 class="text-2xl font-bold text-white">SMA Daemon</h1>
+      <h1 class="text-2xl font-bold text-white">SMA-NG</h1>
       <p class="text-gray-400 text-sm">Media Conversion Server</p>
     </div>
     <div class="flex items-center gap-4">
@@ -1332,7 +1332,7 @@ class DaemonServer(HTTPServer):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SMA Daemon - HTTP webhook server for media conversion"
+        description="SMA-NG Daemon - HTTP webhook server for media conversion"
     )
     parser.add_argument(
         '--host', default='127.0.0.1',
@@ -1365,7 +1365,7 @@ def main():
 
     args = parser.parse_args()
 
-    log.info("SMA Daemon starting...")
+    log.info("SMA-NG Daemon starting...")
     log.info("Python %s" % sys.version)
 
     # Initialize managers

@@ -3,16 +3,16 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sickbeard-mp4-automator"
+name = "sma-ng"
 version = "3.0.0"
-description = "Automated media conversion, tagging, and integration pipeline"
+description = "SMA-NG: Next-generation automated media conversion, tagging, and integration pipeline"
 readme = "docs/README.md"
 license = {file = "license.md"}
 requires-python = ">=3.12"
 authors = [
     {name = "mdhiggins"},
 ]
-keywords = ["ffmpeg", "media", "conversion", "mp4", "sonarr", "radarr", "plex"]
+keywords = ["ffmpeg", "media", "conversion", "mp4", "sonarr", "radarr", "plex", "sma-ng"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
@@ -56,8 +56,8 @@ dev = [
 ]
 
 [project.scripts]
-sma = "manual:main"
-sma-daemon = "daemon:main"
+sma-ng = "manual:main"
+sma-ng-daemon = "daemon:main"
 
 [project.urls]
 Homepage = "https://github.com/mdhiggins/sickbeard_mp4_automator"

@@ -23,7 +23,7 @@ Requires Python 3.12+ and FFmpeg installed on system.
 
 ## Project Overview
 
-SMA (Sickbeard MP4 Automator) is a Python-based media conversion and tagging automation tool. It converts media files to MP4 format using FFmpeg and tags them with metadata from TMDB. It integrates with media managers (Sonarr, Radarr, Sickbeard, SickRage) and downloaders (NZBGet, SABNZBD, Deluge, uTorrent, qBittorrent).
+SMA-NG (Next-Generation Media Automator) is a Python-based media conversion and tagging automation tool. It converts media files to MP4 format using FFmpeg and tags them with metadata from TMDB. It integrates with media managers (Sonarr, Radarr, Sickbeard, SickRage) and downloaders (NZBGet, SABNZBD, Deluge, uTorrent, qBittorrent).
 
 ## Common Commands
 
@@ -158,7 +158,7 @@ The daemon can use different `autoProcess.ini` files based on the input file pat
 - Paths are matched using longest-prefix-first (more specific paths take priority)
 - `/mnt/unionfs/Media/Movies/4K/film.mkv` matches `Movies/4K` config, not `Movies`
 - Paths not matching any prefix use `default_config`
-- Config paths can be relative (to SMA root) or absolute
+- Config paths can be relative (to SMA-NG root) or absolute
 
 ### Per-Config Logging
 

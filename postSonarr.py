@@ -174,7 +174,7 @@ log = getLogger("SonarrPostProcess")
 log.info("Sonarr extra script post processing started.")
 
 if os.environ.get('sonarr_eventtype') == "Test":
-    log.info("Successful postSonarr.py SMA test, exiting.")
+    log.info("Successful postSonarr.py SMA-NG test, exiting.")
     sys.exit(0)
 
 if os.environ.get('sonarr_eventtype') != "Download":
@@ -252,7 +252,7 @@ try:
 
         headers = {
             'X-Api-Key': apikey,
-            'User-Agent': "SMA - postSonarr"
+            'User-Agent': "SMA-NG - postSonarr"
         }
 
         subs = backupSubs(success[0], mp, log)
