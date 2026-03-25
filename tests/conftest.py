@@ -78,13 +78,13 @@ def make_media_info(make_stream, make_format):
 @pytest.fixture
 def tmp_ini(tmp_path):
     """Create a temporary autoProcess.ini with minimal valid config."""
-    def _make(content=None):
+    def _make(content=None, gpu=None):
         if content is None:
             content = """[Converter]
 ffmpeg = ffmpeg
 ffprobe = ffprobe
 threads = 0
-hwaccel =
+gpu =
 hwaccels =
 hwaccel-decoders =
 hwdevices =
@@ -339,6 +339,8 @@ ignore-certs = false
 path-mapping =
 plexmatch = true
 """
+        if gpu is not None:
+            content = content.replace('gpu =\n', 'gpu = %s\n' % gpu)
         ini_path = str(tmp_path / "autoProcess.ini")
         with open(ini_path, 'w') as f:
             f.write(content)

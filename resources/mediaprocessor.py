@@ -1,4 +1,3 @@
-from __future__ import unicode_literals
 import os
 import time
 import json
@@ -2025,10 +2024,7 @@ class MediaProcessor:
         if self.settings.output_dir and not self.settings.moveto and os.path.commonpath([self.settings.output_dir, outputfile]) == self.settings.output_dir:
             input_dir, _, _ = self.parseFile(inputfile)
             outputfilename = os.path.split(outputfile)[1]
-            try:
-                newoutputfile = os.path.join(input_dir.decode(sys.getfilesystemencoding()), outputfilename.decode(sys.getfilesystemencoding()))
-            except:
-                newoutputfile = os.path.join(input_dir, outputfilename)
+            newoutputfile = os.path.join(input_dir, outputfilename)
             self.log.info("Output file is in output_dir %s, moving back to original directory %s." % (self.settings.output_dir, input_dir))
             self.log.debug("New outputfile %s." % (newoutputfile))
             try:
@@ -2162,10 +2158,7 @@ class MediaProcessor:
 
         counter = (".%d" % number) if number > 0 else ""
 
-        try:
-            outputfile = os.path.join(output_dir.decode(sys.getfilesystemencoding()), filename.decode(sys.getfilesystemencoding()) + counter + "." + output_extension).encode(sys.getfilesystemencoding())
-        except:
-            outputfile = os.path.join(output_dir, filename + counter + "." + output_extension)
+        outputfile = os.path.join(output_dir, filename + counter + "." + output_extension)
 
         self.log.debug("Output file: %s." % outputfile)
         return outputfile, output_dir
@@ -2456,10 +2449,7 @@ class MediaProcessor:
 
             self.log.info("Relocating MOOV atom to start of file.")
 
-            try:
-                outputfile = inputfile.decode(sys.getfilesystemencoding()) + TEMP_EXT
-            except:
-                outputfile = inputfile + TEMP_EXT
+            outputfile = inputfile + TEMP_EXT
 
             # Clear out the temp file if it exists
             if os.path.exists(outputfile):
@@ -2502,12 +2492,7 @@ class MediaProcessor:
                     try:
                         if os.path.exists(os.path.join(d, os.path.split(inputfile)[1])):
                             self.removeFile(os.path.join(d, os.path.split(inputfile)[1]), 0, 0)
-                        try:
-                            shutil.copy(inputfile.decode(sys.getfilesystemencoding()), d)
-                        except KeyboardInterrupt:
-                            raise
-                        except:
-                            shutil.copy(inputfile, d)
+                        shutil.copy(inputfile, d)
                         self.log.info("%s copied to %s." % (inputfile, d))
                         files.append(os.path.join(d, os.path.split(inputfile)[1]))
                     except KeyboardInterrupt:
@@ -2531,7 +2516,7 @@ class MediaProcessor:
                 try:
                     if os.path.exists(os.path.join(moveto, os.path.basename(inputfile))):
                         self.removeFile(os.path.join(moveto, os.path.basename(inputfile)), 0, 0)
-                    shutil.move(inputfile.decode(sys.getfilesystemencoding()), moveto)
+                    shutil.move(inputfile, moveto)
                     self.log.info("%s moved to %s." % (inputfile, moveto))
                     files[0] = os.path.join(moveto, os.path.basename(inputfile))
                 except KeyboardInterrupt:

@@ -19,9 +19,6 @@ from resources.postprocess import PostProcessor
 from resources.extensions import tmdb_api_key
 from converter.avcodecs import audio_codec_list, video_codec_list, subtitle_codec_list, attachment_codec_list
 
-if sys.version[0] == "3":
-    raw_input = input
-
 os.environ["REGEX_DISABLED"] = "1"  # Fixes Toilal/rebulk#20
 
 log = getLogger("MANUAL")
@@ -65,7 +62,7 @@ def mediatype():
         print("Select media type:")
         for mt in MediaTypes:
             print(str(mt))
-        result = raw_input("#: ")
+        result = input("#: ")
         try:
             return MediaTypes(int(result))
         except KeyboardInterrupt:
@@ -81,14 +78,10 @@ def mediatype():
 def getValue(prompt, num=False):
     try:
         print(prompt + ":")
-        value = raw_input("#: ").strip(' \"')
+        value = input("#: ").strip(' \"')
         # Remove escape characters in non-windows environments
         if os.name != 'nt':
             value = value.replace('\\', '')
-        try:
-            value = value.decode(sys.stdout.encoding)
-        except:
-            pass
         if num is True and value.isdigit() is False:
             print("Must be a numerical value")
             return getValue(prompt, num)
@@ -103,7 +96,7 @@ def getYesNo():
     yes = ['y', 'yes', 'true', '1']
     no = ['n', 'no', 'false', '0']
     try:
-        data = raw_input("# [y/n]: ")
+        data = input("# [y/n]: ")
         if data.lower() in yes:
             return True
         elif data.lower() in no:

@@ -1,11 +1,12 @@
 [Converter]
-ffmpeg = ffmpeg.exe
-ffprobe = ffprobe.exe
+ffmpeg = ffmpeg
+ffprobe = ffprobe
 threads = 0
-hwaccels = 
-hwaccel-decoders = 
-hwdevices = 
-hwaccel-output-format = 
+gpu =
+hwaccels =
+hwaccel-decoders =
+hwdevices =
+hwaccel-output-format =
 output-directory = 
 output-directory-space-ratio = 0.0
 output-format = mp4

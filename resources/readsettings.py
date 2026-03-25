@@ -1,16 +1,7 @@
 import os
 import sys
-import locale
 import shutil
-
-try:
-    from configparser import ConfigParser
-except ImportError:
-    from ConfigParser import SafeConfigParser as ConfigParser
-try:
-    from importlib import reload
-except ImportError:
-    pass
+from configparser import ConfigParser
 import logging
 from resources.extensions import *
 
@@ -85,8 +76,6 @@ class SMAConfigParser(ConfigParser, object):
         return self.getlist(section, option, vars, separator, replace=[' ', '.'])
 
     def getint(self, section, option, vars=None, fallback=0):
-        if sys.version[0] == '2':
-            return int(super(SMAConfigParser, self).get(section, option, vars=vars, fallback=fallback))
         return super(SMAConfigParser, self).getint(section, option, vars=vars, fallback=fallback)
 
     def getboolean(self, section, option, vars=None, fallback=False):
@@ -99,7 +88,7 @@ class ReadSettings:
             'ffmpeg': 'ffmpeg' if os.name != 'nt' else 'ffmpeg.exe',
             'ffprobe': 'ffprobe' if os.name != 'nt' else 'ffprobe.exe',
             'threads': 0,
-            'hwaccel': '',
+            'gpu': '',
             'hwaccels': '',
             'hwaccel-decoders': '',
             'hwdevices': '',
@@ -371,8 +360,6 @@ class ReadSettings:
         self.log = logger or logging.getLogger(__name__)
 
         self.log.info(sys.executable)
-        if sys.version_info.major == 2:
-            self.log.warning("Python 2 is no longer officially supported. Use with caution.")
 
         rootpath = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), self.RELATIVE_TO_ROOT))
 
@@ -406,30 +393,6 @@ class ReadSettings:
             self.log.debug("Configuration file specified is a directory, joining with %s." % (self.CONFIG_DEFAULT))
 
         self.log.info("Loading config file %s." % configFile)
-
-        # Setup encoding to avoid UTF-8 errors
-        if sys.version[0] == '2':
-            SYS_ENCODING = None
-            try:
-                locale.setlocale(locale.LC_ALL, "")
-                SYS_ENCODING = locale.getpreferredencoding()
-            except (locale.Error, IOError):
-                pass
-
-            # For OSes that are poorly configured just force UTF-8
-            if not SYS_ENCODING or SYS_ENCODING in ('ANSI_X3.4-1968', 'US-ASCII', 'ASCII'):
-                SYS_ENCODING = 'UTF-8'
-
-            if not hasattr(sys, "setdefaultencoding"):
-                reload(sys)
-
-            try:
-                # pylint: disable=E1101
-                # On non-unicode builds this will raise an AttributeError, if encoding type is not valid it throws a LookupError
-                sys.setdefaultencoding(SYS_ENCODING)
-            except:
-                self.log.exception("Sorry, your environment is not setup correctly for utf-8 support. Please fix your setup and try again")
-                sys.exit("Sorry, your environment is not setup correctly for utf-8 support. Please fix your setup and try again")
 
         write = False  # Will be changed to true if a value is missing from the config file and needs to be written
 
@@ -484,6 +447,12 @@ class ReadSettings:
             'hwdevices': {'vaapi': '/dev/dri/renderD128'},
             'hwaccel-output-format': {'vaapi': 'vaapi'},
         },
+        'nvenc': {
+            'hwaccels': ['cuda'],
+            'hwaccel-decoders': ['hevc_cuvid', 'h264_cuvid', 'vp9_cuvid', 'av1_cuvid', 'vc1_cuvid'],
+            'hwdevices': {},
+            'hwaccel-output-format': {'cuda': 'cuda'},
+        },
         'videotoolbox': {
             'hwaccels': ['videotoolbox'],
             'hwaccel-decoders': [],
@@ -492,32 +461,27 @@ class ReadSettings:
         },
     }
 
-    # Maps generic codec names to hwaccel-specific encoder names
-    HWACCEL_CODEC_MAP = {
-        'qsv': {
-            'hevc': 'h265qsv', 'h265': 'h265qsv', 'x265': 'h265qsv',
-            'h264': 'h264qsv', 'x264': 'h264qsv',
-            'av1': 'av1qsv',
-            'vp9': 'vp9qsv',
-        },
-        'vaapi': {
-            'hevc': 'h265vaapi', 'h265': 'h265vaapi', 'x265': 'h265vaapi',
-            'h264': 'h264vaapi', 'x264': 'h264vaapi',
-            'av1': 'av1vaapi',
-        },
-        'videotoolbox': {
-            'hevc': 'h265_videotoolbox', 'h265': 'h265_videotoolbox', 'x265': 'h265_videotoolbox',
-            'h264': 'h264_videotoolbox', 'x264': 'h264_videotoolbox',
-        },
+    # Codec name aliases — normalized to canonical names before GPU encoder lookup
+    CODEC_ALIASES = {
+        'hevc': 'h265', 'x265': 'h265',
+        'x264': 'h264',
     }
 
-    def _apply_hwaccel_profile(self, hwaccel):
+    # Maps canonical codec names to GPU-specific encoder names
+    HWACCEL_CODEC_MAP = {
+        'qsv': {'h265': 'h265qsv', 'h264': 'h264qsv', 'av1': 'av1qsv', 'vp9': 'vp9qsv'},
+        'vaapi': {'h265': 'h265vaapi', 'h264': 'h264vaapi', 'av1': 'av1vaapi'},
+        'nvenc': {'h265': 'h265_nvenc', 'h264': 'h264_nvenc', 'av1': 'av1_nvenc'},
+        'videotoolbox': {'h265': 'h265_videotoolbox', 'h264': 'h264_videotoolbox'},
+    }
+
+    def _apply_hwaccel_profile(self, gpu):
         """Apply hardware acceleration profile, setting derived values."""
-        profile = self.HWACCEL_PROFILES.get(hwaccel)
+        profile = self.HWACCEL_PROFILES.get(gpu)
         if not profile:
             return
 
-        self.log.info("Applying hwaccel profile: %s" % hwaccel)
+        self.log.info("Applying hwaccel profile: %s" % gpu)
 
         # Only override if not explicitly set by the user
         if not self.hwaccels:
@@ -529,40 +493,35 @@ class ReadSettings:
         if not self.hwoutputfmt:
             self.hwoutputfmt = dict(profile['hwaccel-output-format'])
 
-    def _apply_hwaccel_codec_map(self, hwaccel):
-        """Map generic video codec names to hwaccel-specific encoder names."""
-        codec_map = self.HWACCEL_CODEC_MAP.get(hwaccel, {})
-        if not codec_map:
-            return
-
+    @staticmethod
+    def _map_codecs_with_fallback(codecs, codec_map):
+        """Resolve codec names through GPU encoder map, keeping software fallbacks."""
         mapped = []
         seen = set()
-        for codec in self.vcodec:
-            resolved = codec_map.get(codec, codec)
+        for codec in codecs:
+            canonical = ReadSettings.CODEC_ALIASES.get(codec, codec)
+            resolved = codec_map.get(canonical, codec)
             if resolved not in seen:
                 mapped.append(resolved)
                 seen.add(resolved)
-            # Also keep the software fallback if it was mapped
             if resolved != codec and codec not in seen:
                 mapped.append(codec)
                 seen.add(codec)
+        return mapped
 
+    def _apply_hwaccel_codec_map(self, gpu):
+        """Map generic video codec names to GPU-specific encoder names."""
+        codec_map = self.HWACCEL_CODEC_MAP.get(gpu, {})
+        if not codec_map:
+            return
+
+        mapped = self._map_codecs_with_fallback(self.vcodec, codec_map)
         if mapped != self.vcodec:
-            self.log.info("Video codecs mapped for %s: %s -> %s" % (hwaccel, self.vcodec, mapped))
+            self.log.info("Video codecs mapped for %s: %s -> %s" % (gpu, self.vcodec, mapped))
             self.vcodec = mapped
 
-        # Same for HDR codecs
         if self.hdr.get('codec'):
-            hdr_mapped = []
-            hdr_seen = set()
-            for codec in self.hdr['codec']:
-                resolved = codec_map.get(codec, codec)
-                if resolved not in hdr_seen:
-                    hdr_mapped.append(resolved)
-                    hdr_seen.add(resolved)
-                if resolved != codec and codec not in hdr_seen:
-                    hdr_mapped.append(codec)
-                    hdr_seen.add(codec)
+            hdr_mapped = self._map_codecs_with_fallback(self.hdr['codec'], codec_map)
             if hdr_mapped != self.hdr['codec']:
                 self.hdr['codec'] = hdr_mapped
 
@@ -572,7 +531,7 @@ class ReadSettings:
         self.ffmpeg = config.getpath(section, 'ffmpeg', vars=os.environ)
         self.ffprobe = config.getpath(section, 'ffprobe', vars=os.environ)
         self.threads = config.getint(section, 'threads')
-        self.hwaccel = config.get(section, 'hwaccel').strip().lower() if config.has_option(section, 'hwaccel') else ''
+        self.gpu = config.get(section, 'gpu').strip().lower() if config.has_option(section, 'gpu') else ''
         self.hwaccels = config.getlist(section, 'hwaccels')
         self.hwaccel_decoders = config.getlist(section, "hwaccel-decoders")
         self.hwdevices = config.getdict(section, "hwdevices", lower=False, replace=[])
@@ -598,9 +557,9 @@ class ReadSettings:
         self.postopts = config.getlist(section, "postopts", separator=self.opts_sep)
         self.regex = config.get(section, 'regex-directory-replace', raw=True)
 
-        # Apply hwaccel shorthand profile (derives hwaccels, decoders, devices, output format)
-        if self.hwaccel:
-            self._apply_hwaccel_profile(self.hwaccel)
+        # Apply GPU profile (derives hwaccels, decoders, devices, output format)
+        if self.gpu:
+            self._apply_hwaccel_profile(self.gpu)
 
         if self.force_convert:
             self.process_same_extensions = True
@@ -698,9 +657,9 @@ class ReadSettings:
         self.naming_tv_template = config.get(section, "tv-template")
         self.naming_movie_template = config.get(section, "movie-template")
 
-        # Apply hwaccel codec mapping (hevc → h265qsv, h264 → h264vaapi, etc.)
-        if self.hwaccel:
-            self._apply_hwaccel_codec_map(self.hwaccel)
+        # Apply GPU codec mapping (hevc → h265qsv, h264 → h264vaapi, etc.)
+        if self.gpu:
+            self._apply_hwaccel_codec_map(self.gpu)
 
         # Audio
         section = "Audio"

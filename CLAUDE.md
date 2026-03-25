@@ -22,6 +22,12 @@ pip install -r setup/requirements-qbittorrent.txt
 
 # For Deluge integration
 pip install -r setup/requirements-deluge.txt
+
+# Generate config with auto-detected GPU (nvenc, qsv, vaapi, videotoolbox, or software)
+make config
+
+# Override GPU detection: make config GPU=nvenc
+# Detect GPU without generating config: make detect-gpu
 ```
 
 Requires Python 3.12+ and FFmpeg installed on system.

@@ -4,10 +4,7 @@ import sys
 import shutil
 from logging.config import fileConfig
 from logging.handlers import BaseRotatingHandler
-try:
-    from configparser import RawConfigParser
-except ImportError:
-    from ConfigParser import RawConfigParser
+from configparser import RawConfigParser
 
 defaults = {
     'loggers': {
