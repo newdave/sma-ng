@@ -1,246 +1,96 @@
+#!/opt/sma/venv/bin/python3
+"""
+SMA-NG uTorrent Post-Processing Script
+
+Submits conversion job to daemon via webhook on torrent completion.
+Optionally performs pre/post actions via uTorrent WebUI.
+
+Args: %L %T %D %K %F %I %N
+      Label, Tracker, Directory, single|multi, Filename, InfoHash, Name
+"""
 import os
-import re
 import sys
-import shutil
-from autoprocess import autoProcessTV, autoProcessTVSR, sonarr, radarr
 from resources.log import getLogger
 from resources.readsettings import ReadSettings
-from resources.mediaprocessor import MediaProcessor
+from resources.webhook_client import submit_job
 
 log = getLogger("uTorrentPostProcess")
-
-log.info("uTorrent post processing started.")
-
-# Args: %L %T %D %K %F %I Label, Tracker, Directory, single|multi, NameofFile(if single), InfoHash
-
-
-def getHost(host='localhost', port=8080, ssl=False):
-    protocol = "https://" if ssl else "http://"
-    return protocol + host + ":" + str(port) + "/"
-
-
-def _authToken(session=None, host=None, username=None, password=None):
-    auth = None
-    if not session:
-        session = requests.Session()
-    response = session.get(host + "gui/token.html", auth=(username, password), verify=False, timeout=30)
-    if response.status_code == 200:
-        auth = re.search("<div.*?>(\S+)<\/div>", response.text).group(1)
-    else:
-        log.error("Authentication Failed - Status Code " + response.status_code + ".")
-
-    return auth, session
-
-
-def _sendRequest(session, host='http://localhost:8080/', username=None, password=None, params=None, files=None, fnct=None):
-    try:
-        response = session.post(host + "gui/", auth=(username, password), params=params, files=files, timeout=30)
-    except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError):
-        log.exception("Problem sending command")
-        return False
-
-    if response.status_code == 200:
-        log.debug("Request sent successfully - %s." % fnct)
-        return True
-
-    log.error("Problem sending command " + fnct + ", return code = " + str(response.status_code) + ".")
-    return False
-
-
-if len(sys.argv) < 6:
-    log.error("Not enough command line parameters present, are you launching this from uTorrent?")
-    log.error("#Args: %L %T %D %K %F %I %N Label, Tracker, Directory, single|multi, NameofFile(if single), InfoHash, Name")
-    log.error("Length was %s" % str(len(sys.argv)))
-    log.error(str(sys.argv[1:]))
-    sys.exit(1)
+log.info("uTorrent post-processing started.")
 
 try:
     settings = ReadSettings()
-    path = str(sys.argv[3])
+
+    if len(sys.argv) < 7:
+        log.error("Not enough arguments. Expected: label tracker directory kind filename info_hash [name]")
+        sys.exit(1)
+
     label = sys.argv[1].lower().strip()
-    kind = sys.argv[4].lower().strip()
-    filename = sys.argv[5].strip()
-    categories = [settings.uTorrent['sb'], settings.uTorrent['sonarr'], settings.uTorrent['radarr'], settings.uTorrent['sr']] + settings.uTorrent['bypass']
-    torrent_hash = sys.argv[6]
-    try:
-        name = sys.argv[7]
-    except:
-        name = sys.argv[6]
-    path_mapping = settings.uTorrent['path-mapping']
+    path = sys.argv[3]
+    kind = sys.argv[4].lower()
+    filename = sys.argv[5]
+    info_hash = sys.argv[6]
+    torrent_name = sys.argv[7] if len(sys.argv) > 7 else info_hash
 
-    log.debug("Path: %s." % path)
-    log.debug("Label: %s." % label)
-    log.debug("Categories: %s." % categories)
-    log.debug("Torrent hash: %s." % torrent_hash)
-    log.debug("Torrent name: %s." % name)
-    log.debug("Kind: %s." % kind)
-    log.debug("Filename: %s." % filename)
+    log.info("Label: %s" % label)
+    log.info("Path: %s" % path)
+    log.info("Kind: %s" % kind)
+    log.info("Torrent: %s (%s)" % (torrent_name, info_hash))
 
-    if not label or len([x for x in categories if x.startswith(label)]) < 1:
-        log.error("No valid label detected.")
-        sys.exit(1)
+    # Check bypass
+    bypass = settings.uTorrent.get('bypass', '').lower()
+    if bypass and label.startswith(bypass):
+        log.info("Bypass label matched, skipping.")
+        sys.exit(0)
 
-    if len(categories) != len(set(categories)):
-        log.error("Duplicate category detected. Category names must be unique.")
-        sys.exit(1)
+    # WebUI actions
+    webui = settings.uTorrent.get('webui', False)
+    actionbefore = settings.uTorrent.get('actionbefore', '').lower()
+    actionafter = settings.uTorrent.get('actionafter', '').lower()
 
-    # Import requests
-    try:
-        import requests
-    except ImportError:
-        log.exception("Python module REQUESTS is required. Install with 'pip install requests' then try again.")
-        sys.exit(1)
+    def utorrent_action(action_name):
+        if not webui or not action_name:
+            return
+        try:
+            import requests
+            host = settings.uTorrent.get('host', 'localhost')
+            port = settings.uTorrent.get('port', 8080)
+            ssl = settings.uTorrent.get('ssl', False)
+            protocol = "https://" if ssl else "http://"
+            user = settings.uTorrent.get('user', '')
+            passwd = settings.uTorrent.get('pass', '')
 
-    try:
-        web_ui = settings.uTorrent['webui']
-        log.debug("WebUI is true.")
-    except:
-        log.debug("WebUI is false.")
-        web_ui = False
+            base_url = "%s%s:%s/gui/" % (protocol, host, port)
+            # Get auth token
+            r = requests.get(base_url + "token.html", auth=(user, passwd))
+            token = r.text.split("'")[1] if "'" in r.text else ''
 
-    delete_dir = False
-    host = getHost(settings.uTorrent['host'], settings.uTorrent['port'], settings.uTorrent['ssl'])
+            url = "%s?action=%s&hash=%s&token=%s" % (base_url, action_name, info_hash, token)
+            requests.get(url, auth=(user, passwd))
+            log.info("uTorrent action '%s' sent for %s." % (action_name, info_hash))
+        except:
+            log.exception("Failed to send uTorrent action '%s'." % action_name)
 
-    # Run a uTorrent action before conversion.
-    session = None
-    auth = None
-    if web_ui:
-        session = requests.Session()
-        if session:
-            auth, session = _authToken(session, host, settings.uTorrent['username'], settings.uTorrent['password'])
-            if auth and settings.uTorrent['actionbefore']:
-                params = {'token': auth, 'action': settings.uTorrent['actionbefore'], 'hash': torrent_hash}
-                _sendRequest(session, host, settings.uTorrent['username'], settings.uTorrent['password'], params, None, "Before Function")
-                log.debug("Sending action %s to uTorrent" % settings.uTorrent['actionbefore'])
+    # Pre-action
+    utorrent_action(actionbefore)
 
-    if settings.uTorrent['convert']:
-        # Check for custom uTorrent output directory
-        if settings.uTorrent['output-dir']:
-            settings.output_dir = settings.uTorrent['output-dir']
-            log.debug("Overriding output_dir to %s." % settings.uTorrent['output-dir'])
-
-        # Perform conversion.
-        log.info("Performing conversion")
-        settings.delete = False
-        if not settings.output_dir:
-            suffix = "convert"
-            if kind == 'single':
-                log.info("Single File Torrent")
-                settings.output_dir = os.path.join(path, ("%s-%s" % (re.sub(settings.regex, '_', name), suffix)))
-            else:
-                log.info("Multi File Torrent")
-                settings.output_dir = os.path.abspath(os.path.join(path, '..', ("%s-%s" % (re.sub(settings.regex, '_', name), suffix))))
-            if not os.path.exists(settings.output_dir):
-                try:
-                    os.makedirs(settings.output_dir)
-                except:
-                    log.exception("Error creating output directory.")
+    # Submit files to daemon
+    if kind == 'single' and filename:
+        filepath = os.path.join(path, filename)
+        if os.path.isfile(filepath):
+            submit_job(filepath, logger=log)
         else:
-            settings.output_dir = re.sub(settings.regex, '_', os.path.abspath(os.path.join(settings.output_dir, re.sub(settings.regex, '_', name))))
-            if not os.path.exists(settings.output_dir):
-                try:
-                    os.makedirs(settings.output_dir)
-                except:
-                    log.exception("Error creating output sub directory.")
-
-        mp = MediaProcessor(settings)
-
-        if kind == 'single':
-            inputfile = os.path.join(path, filename)
-            info = mp.isValidSource(inputfile)
-            if info:
-                log.info("Processing file %s." % inputfile)
-                try:
-                    output = mp.process(inputfile, info=info)
-                    if not output:
-                        log.error("No output file generated for single torrent download.")
-                        sys.exit(1)
-                except:
-                    log.exception("Error converting file %s." % inputfile)
-            else:
-                log.debug("Ignoring file %s." % inputfile)
-        else:
-            log.debug("Processing multiple files.")
-            ignore = []
-            for r, d, f in os.walk(path):
-                for files in f:
-                    inputfile = os.path.join(r, files)
-                    info = mp.isValidSource(inputfile)
-                    if info and inputfile not in ignore:
-                        log.info("Processing file %s." % inputfile)
-                        try:
-                            output = mp.process(inputfile, info=info)
-                            if output and output.get('output'):
-                                ignore.append(output.get('output'))
-                            else:
-                                log.error("Converting file failed %s." % inputfile)
-                        except:
-                            log.exception("Error converting file %s." % inputfile)
-                    else:
-                        log.debug("Ignoring file %s." % inputfile)
-            if len(ignore) < 1:
-                log.error("No output files generated for the entirety of this mutli file torrent, aborting.")
-                sys.exit(1)
-
-        path = settings.output_dir
-        delete_dir = settings.output_dir
+            log.error("File does not exist: %s" % filepath)
+    elif os.path.isdir(path):
+        for root, _, files in os.walk(path):
+            for f in files:
+                submit_job(os.path.join(root, f), logger=log)
     else:
-        suffix = "copy"
-        # name = name[:260-len(suffix)]
-        if kind == 'single':
-            log.info("Single File Torrent")
-            newpath = os.path.join(path, ("%s-%s" % (re.sub(settings.regex, '_', name), suffix)))
-        else:
-            log.info("Multi File Torrent")
-            newpath = os.path.abspath(os.path.join(path, '..', ("%s-%s" % (re.sub(settings.regex, '_', name), suffix))))
-        if not os.path.exists(newpath):
-            try:
-                os.makedirs(newpath)
-                log.debug("Creating temporary directory %s" % newpath)
-            except:
-                log.exception("Error creating temporary directory.")
-        if kind == 'single':
-            inputfile = os.path.join(path, filename)
-            shutil.copy(inputfile, newpath)
-            log.debug("Copying %s to %s" % (inputfile, newpath))
-        else:
-            for r, d, f in os.walk(path):
-                for files in f:
-                    inputfile = os.path.join(r, files)
-                    shutil.copy(inputfile, newpath)
-                    log.debug("Copying %s to %s" % (inputfile, newpath))
-        path = newpath
-        delete_dir = newpath
+        log.error("Path does not exist: %s" % path)
+        sys.exit(1)
 
-    if settings.uTorrent['sb'].startswith(label):
-        log.info("Passing %s directory to Sickbeard." % path)
-        autoProcessTV.processEpisode(path, settings, pathMapping=path_mapping)
-    elif settings.uTorrent['sonarr'].startswith(label):
-        log.info("Passing %s directory to Sonarr." % path)
-        sonarr.processEpisode(path, settings, pathMapping=path_mapping)
-    elif settings.uTorrent['radarr'].startswith(label):
-        log.info("Passing %s directory to Radarr." % path)
-        radarr.processMovie(path, settings, pathMapping=path_mapping)
-    elif settings.uTorrent['sr'].startswith(label):
-        log.info("Passing %s directory to Sickrage." % path)
-        autoProcessTVSR.processEpisode(path, settings, pathMapping=path_mapping)
-    elif [x for x in settings.uTorrent['bypass'] if x.startswith(label)]:
-        log.info("Bypassing any further processing as per category.")
+    # Post-action
+    utorrent_action(actionafter)
 
-    # Run a uTorrent action after conversion.
-    if web_ui:
-        if session and auth and settings.uTorrent['actionafter']:
-            params = {'token': auth, 'action': settings.uTorrent['actionafter'], 'hash': torrent_hash}
-            _sendRequest(session, host, settings.uTorrent['username'], settings.uTorrent['password'], params, None, "After Function")
-            log.debug("Sending action %s to uTorrent" % settings.uTorrent['actionafter'])
-
-    if delete_dir:
-        if os.path.exists(delete_dir):
-            try:
-                os.rmdir(delete_dir)
-                log.debug("Successfully removed tempoary directory %s." % delete_dir)
-            except:
-                log.exception("Unable to delete temporary directory")
 except:
-    log.exception("Unexpected exception.")
+    log.exception("Error in uTorrent post-processing.")
     sys.exit(1)
