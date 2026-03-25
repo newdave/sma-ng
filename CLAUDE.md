@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git Commit Rules
+
+- **Do NOT add `Co-Authored-By` lines referencing Claude, Anthropic, or any AI to commit messages.**
+- Do not add any AI attribution to commits whatsoever.
+
 ## Development Environment
 
 ```bash
