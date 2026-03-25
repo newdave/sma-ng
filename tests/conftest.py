@@ -84,6 +84,7 @@ def tmp_ini(tmp_path):
 ffmpeg = ffmpeg
 ffprobe = ffprobe
 threads = 0
+hwaccel =
 hwaccels =
 hwaccel-decoders =
 hwdevices =

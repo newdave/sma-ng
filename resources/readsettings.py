@@ -99,6 +99,7 @@ class ReadSettings:
             'ffmpeg': 'ffmpeg' if os.name != 'nt' else 'ffmpeg.exe',
             'ffprobe': 'ffprobe' if os.name != 'nt' else 'ffprobe.exe',
             'threads': 0,
+            'hwaccel': '',
             'hwaccels': '',
             'hwaccel-decoders': '',
             'hwdevices': '',
@@ -483,12 +484,109 @@ class ReadSettings:
 
         self._validate_binaries()
 
+    # Hardware acceleration profiles: maps a single hwaccel value to all derived settings
+    HWACCEL_PROFILES = {
+        'qsv': {
+            'hwaccels': ['qsv'],
+            'hwaccel-decoders': ['hevc_qsv', 'h264_qsv', 'vp9_qsv', 'av1_qsv', 'vc1_qsv'],
+            'hwdevices': {'qsv': '/dev/dri/renderD128'},
+            'hwaccel-output-format': {'qsv': 'qsv'},
+        },
+        'vaapi': {
+            'hwaccels': ['vaapi'],
+            'hwaccel-decoders': ['hevc_vaapi', 'h264_vaapi'],
+            'hwdevices': {'vaapi': '/dev/dri/renderD128'},
+            'hwaccel-output-format': {'vaapi': 'vaapi'},
+        },
+        'videotoolbox': {
+            'hwaccels': ['videotoolbox'],
+            'hwaccel-decoders': [],
+            'hwdevices': {},
+            'hwaccel-output-format': {},
+        },
+    }
+
+    # Maps generic codec names to hwaccel-specific encoder names
+    HWACCEL_CODEC_MAP = {
+        'qsv': {
+            'hevc': 'h265qsv', 'h265': 'h265qsv', 'x265': 'h265qsv',
+            'h264': 'h264qsv', 'x264': 'h264qsv',
+            'av1': 'av1qsv',
+            'vp9': 'vp9qsv',
+        },
+        'vaapi': {
+            'hevc': 'h265vaapi', 'h265': 'h265vaapi', 'x265': 'h265vaapi',
+            'h264': 'h264vaapi', 'x264': 'h264vaapi',
+            'av1': 'av1vaapi',
+        },
+        'videotoolbox': {
+            'hevc': 'h265_videotoolbox', 'h265': 'h265_videotoolbox', 'x265': 'h265_videotoolbox',
+            'h264': 'h264_videotoolbox', 'x264': 'h264_videotoolbox',
+        },
+    }
+
+    def _apply_hwaccel_profile(self, hwaccel):
+        """Apply hardware acceleration profile, setting derived values."""
+        profile = self.HWACCEL_PROFILES.get(hwaccel)
+        if not profile:
+            return
+
+        self.log.info("Applying hwaccel profile: %s" % hwaccel)
+
+        # Only override if not explicitly set by the user
+        if not self.hwaccels:
+            self.hwaccels = profile['hwaccels']
+        if not self.hwaccel_decoders:
+            self.hwaccel_decoders = profile['hwaccel-decoders']
+        if not self.hwdevices:
+            self.hwdevices = dict(profile['hwdevices'])
+        if not self.hwoutputfmt:
+            self.hwoutputfmt = dict(profile['hwaccel-output-format'])
+
+    def _apply_hwaccel_codec_map(self, hwaccel):
+        """Map generic video codec names to hwaccel-specific encoder names."""
+        codec_map = self.HWACCEL_CODEC_MAP.get(hwaccel, {})
+        if not codec_map:
+            return
+
+        mapped = []
+        seen = set()
+        for codec in self.vcodec:
+            resolved = codec_map.get(codec, codec)
+            if resolved not in seen:
+                mapped.append(resolved)
+                seen.add(resolved)
+            # Also keep the software fallback if it was mapped
+            if resolved != codec and codec not in seen:
+                mapped.append(codec)
+                seen.add(codec)
+
+        if mapped != self.vcodec:
+            self.log.info("Video codecs mapped for %s: %s -> %s" % (hwaccel, self.vcodec, mapped))
+            self.vcodec = mapped
+
+        # Same for HDR codecs
+        if self.hdr.get('codec'):
+            hdr_mapped = []
+            hdr_seen = set()
+            for codec in self.hdr['codec']:
+                resolved = codec_map.get(codec, codec)
+                if resolved not in hdr_seen:
+                    hdr_mapped.append(resolved)
+                    hdr_seen.add(resolved)
+                if resolved != codec and codec not in hdr_seen:
+                    hdr_mapped.append(codec)
+                    hdr_seen.add(codec)
+            if hdr_mapped != self.hdr['codec']:
+                self.hdr['codec'] = hdr_mapped
+
     def readConfig(self, config):
         # Main converter settings
         section = "Converter"
         self.ffmpeg = config.getpath(section, 'ffmpeg', vars=os.environ)
         self.ffprobe = config.getpath(section, 'ffprobe', vars=os.environ)
         self.threads = config.getint(section, 'threads')
+        self.hwaccel = config.get(section, 'hwaccel').strip().lower() if config.has_option(section, 'hwaccel') else ''
         self.hwaccels = config.getlist(section, 'hwaccels')
         self.hwaccel_decoders = config.getlist(section, "hwaccel-decoders")
         self.hwdevices = config.getdict(section, "hwdevices", lower=False, replace=[])
@@ -513,6 +611,10 @@ class ReadSettings:
         self.preopts = config.getlist(section, "preopts", separator=self.opts_sep)
         self.postopts = config.getlist(section, "postopts", separator=self.opts_sep)
         self.regex = config.get(section, 'regex-directory-replace', raw=True)
+
+        # Apply hwaccel shorthand profile (derives hwaccels, decoders, devices, output format)
+        if self.hwaccel:
+            self._apply_hwaccel_profile(self.hwaccel)
 
         if self.force_convert:
             self.process_same_extensions = True
@@ -603,6 +705,10 @@ class ReadSettings:
         self.hdr['filter'] = config.get(section, 'filter')
         self.hdr['forcefilter'] = config.getboolean(section, 'force-filter')
         self.hdr['profile'] = config.getlist(section, "profile")
+
+        # Apply hwaccel codec mapping (hevc → h265qsv, h264 → h264vaapi, etc.)
+        if self.hwaccel:
+            self._apply_hwaccel_codec_map(self.hwaccel)
 
         # Audio
         section = "Audio"
