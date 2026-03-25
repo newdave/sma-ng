@@ -440,6 +440,115 @@ path-mapping =
         assert settings.Radarr.get('host') == 'localhost'
 
 
+class TestHwaccelProfile:
+    """Test hwaccel shorthand auto-derives all HW acceleration settings."""
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_qsv_profile(self, mock_validate, tmp_ini):
+        """hwaccel=qsv should populate hwaccels, decoders, devices, output format."""
+        ini = tmp_ini()
+        # Patch the ini to add hwaccel = qsv
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('hwaccel =\nhwaccels =', 'hwaccel = qsv\nhwaccels =')
+        with open(ini, 'w') as f:
+            f.write(content)
+
+        settings = ReadSettings(ini)
+        assert settings.hwaccel == 'qsv'
+        assert 'qsv' in settings.hwaccels
+        assert 'hevc_qsv' in settings.hwaccel_decoders
+        assert 'h264_qsv' in settings.hwaccel_decoders
+        assert settings.hwdevices.get('qsv') == '/dev/dri/renderD128'
+        assert settings.hwoutputfmt.get('qsv') == 'qsv'
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_vaapi_profile(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('hwaccel =\nhwaccels =', 'hwaccel = vaapi\nhwaccels =')
+        with open(ini, 'w') as f:
+            f.write(content)
+
+        settings = ReadSettings(ini)
+        assert settings.hwaccel == 'vaapi'
+        assert 'vaapi' in settings.hwaccels
+        assert 'hevc_vaapi' in settings.hwaccel_decoders
+        assert settings.hwdevices.get('vaapi') == '/dev/dri/renderD128'
+        assert settings.hwoutputfmt.get('vaapi') == 'vaapi'
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_videotoolbox_profile(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('hwaccel =\nhwaccels =', 'hwaccel = videotoolbox\nhwaccels =')
+        with open(ini, 'w') as f:
+            f.write(content)
+
+        settings = ReadSettings(ini)
+        assert settings.hwaccel == 'videotoolbox'
+        assert 'videotoolbox' in settings.hwaccels
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_no_hwaccel(self, mock_validate, tmp_ini):
+        """Empty hwaccel should not populate any HW settings."""
+        ini = tmp_ini()
+        settings = ReadSettings(ini)
+        assert settings.hwaccel == ''
+        assert settings.hwaccels == []
+        assert settings.hwaccel_decoders == []
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_explicit_override_preserved(self, mock_validate, tmp_ini):
+        """If user explicitly sets hwaccels alongside hwaccel, the explicit value wins."""
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('hwaccel =\nhwaccels =', 'hwaccel = qsv\nhwaccels = cuda')
+        with open(ini, 'w') as f:
+            f.write(content)
+
+        settings = ReadSettings(ini)
+        # Explicit value should be preserved, not overwritten by profile
+        assert 'cuda' in settings.hwaccels
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_codec_mapping_qsv(self, mock_validate, tmp_ini):
+        """hwaccel=qsv should map hevc→h265qsv with software fallback."""
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('hwaccel =\nhwaccels =', 'hwaccel = qsv\nhwaccels =')
+        content = content.replace('codec = h265, h264', 'codec = hevc, h264')
+        with open(ini, 'w') as f:
+            f.write(content)
+
+        settings = ReadSettings(ini)
+        assert 'h265qsv' in settings.vcodec
+        assert 'hevc' in settings.vcodec
+        assert 'h264qsv' in settings.vcodec
+        assert 'h264' in settings.vcodec
+        # HW encoder should come before software fallback
+        assert settings.vcodec.index('h265qsv') < settings.vcodec.index('hevc')
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_codec_mapping_vaapi(self, mock_validate, tmp_ini):
+        """hwaccel=vaapi should map hevc→h265vaapi."""
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('hwaccel =\nhwaccels =', 'hwaccel = vaapi\nhwaccels =')
+        content = content.replace('codec = h265, h264', 'codec = hevc')
+        with open(ini, 'w') as f:
+            f.write(content)
+
+        settings = ReadSettings(ini)
+        assert 'h265vaapi' in settings.vcodec
+        assert 'hevc' in settings.vcodec
+
+
 class TestValidateBinaries:
     """Test FFmpeg/FFprobe binary validation."""
 

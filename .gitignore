@@ -61,3 +61,5 @@ htmlcov/
 # Temp files
 *.tmp
 *.temp
+tests/fixtures/*.mkv
+tests/fixtures/*.mp4
