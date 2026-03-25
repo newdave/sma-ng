@@ -174,43 +174,6 @@ class TestPostSonarr:
         assert '-e' in extra_args
 
 
-class TestPostSickbeard:
-    """Test postSickbeard.py webhook integration."""
-
-    @patch('resources.webhook_client.submit_and_wait')
-    @patch('resources.readsettings.ReadSettings._validate_binaries')
-    def test_submits_with_tvdb_args(self, mock_validate, mock_submit):
-        mock_submit.return_value = {'id': 1, 'status': 'completed'}
-
-        original_argv = sys.argv
-        sys.argv = ['postSickbeard.py', '/tv/show.mkv', 'show.S01E01', '73871', '1', '1']
-        try:
-            with patch('requests.get') as mock_get:
-                mock_get.return_value = MagicMock(text='OK')
-                try:
-                    exec(compile(open(_script_path('postSickbeard.py')).read(), 'postSickbeard.py', 'exec'))
-                except SystemExit:
-                    pass
-        finally:
-            sys.argv = original_argv
-
-        mock_submit.assert_called_once()
-        extra_args = mock_submit.call_args[1].get('args', [])
-        assert '-tvdb' in extra_args
-        assert '73871' in extra_args
-
-    @patch('resources.webhook_client.submit_and_wait')
-    @patch('resources.readsettings.ReadSettings._validate_binaries')
-    def test_not_enough_args_exits(self, mock_validate, mock_submit):
-        original_argv = sys.argv
-        sys.argv = ['postSickbeard.py', '/file.mkv']
-        try:
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(open(_script_path('postSickbeard.py')).read(), 'postSickbeard.py', 'exec'))
-            assert exc.value.code == 1
-        finally:
-            sys.argv = original_argv
-
 
 class TestSABPostProcess:
     """Test SABPostProcess.py webhook integration."""
@@ -249,7 +212,6 @@ class TestNZBGetPostProcess:
             'NZBPO_SHOULDCONVERT': 'true',
             'NZBPO_SONARR_CAT': 'sonarr',
             'NZBPO_RADARR_CAT': 'radarr',
-            'NZBPO_SICKBEARD_CAT': 'sickbeard',
             'NZBPO_BYPASS_CAT': 'bypass',
             'NZBPP_TOTALSTATUS': 'SUCCESS',
             'NZBPP_DIRECTORY': directory,

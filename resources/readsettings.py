@@ -283,18 +283,8 @@ class ReadSettings:
             'in-progress-check': True,
             'block-reprocess': False,
         },
-        'Sickbeard': {
-            'host': 'localhost',
-            'port': 8081,
-            'ssl': False,
-            'apikey': '',
-            'webroot': '',
-            'username': '',
-            'password': '',
-        },
         'SABNZBD': {
             'convert': True,
-            'sickbeard-category': 'sickbeard',
             'sonarr-category': 'sonarr',
             'radarr-category': 'radarr',
             'bypass-category': 'bypass',
@@ -302,7 +292,7 @@ class ReadSettings:
             'path-mapping': '',
         },
         'Deluge': {
-            'sickbeard-label': 'sickbeard',
+
 
             'sonarr-label': 'sonarr',
             'radarr-label': 'radarr',
@@ -317,7 +307,7 @@ class ReadSettings:
             'path-mapping': '',
         },
         'qBittorrent': {
-            'sickbeard-label': 'sickbeard',
+
 
             'sonarr-label': 'sonarr',
             'radarr-label': 'radarr',
@@ -334,7 +324,7 @@ class ReadSettings:
             'path-mapping': '',
         },
         'uTorrent': {
-            'sickbeard-label': 'sickbeard',
+
 
             'sonarr-label': 'sonarr',
             'radarr-label': 'radarr',
@@ -860,22 +850,10 @@ class ReadSettings:
         self.Sonarr = next((i for i in self.sonarr_instances if i['section'] == 'Sonarr'), {})
         self.Radarr = next((i for i in self.radarr_instances if i['section'] == 'Radarr'), {})
 
-        # Sickbeard
-        section = "Sickbeard"
-        self.Sickbeard = {}
-        self.Sickbeard['host'] = config.get(section, "host")
-        self.Sickbeard['port'] = config.getint(section, "port")
-        self.Sickbeard['apikey'] = config.get(section, "apikey")
-        self.Sickbeard['webroot'] = config.get(section, "webroot")
-        self.Sickbeard['ssl'] = config.getboolean(section, "ssl")
-        self.Sickbeard['user'] = config.get(section, "username")
-        self.Sickbeard['pass'] = config.get(section, "password")
-
         # SAB
         section = "SABNZBD"
         self.SAB = {}
         self.SAB['convert'] = config.getboolean(section, "convert")
-        self.SAB['sb'] = config.get(section, "Sickbeard-category").lower()
         self.SAB['sonarr'] = config.get(section, "Sonarr-category").lower()
         self.SAB['radarr'] = config.get(section, "Radarr-category").lower()
         self.SAB['bypass'] = config.getlist(section, "Bypass-category")
@@ -885,7 +863,7 @@ class ReadSettings:
         # Deluge
         section = "Deluge"
         self.deluge = {}
-        self.deluge['sb'] = config.get(section, "sickbeard-label").lower()
+
         self.deluge['sonarr'] = config.get(section, "sonarr-label").lower()
         self.deluge['radarr'] = config.get(section, "radarr-label").lower()
         self.deluge['bypass'] = config.getlist(section, "bypass-label")
@@ -901,7 +879,7 @@ class ReadSettings:
         # qBittorrent
         section = "qBittorrent"
         self.qBittorrent = {}
-        self.qBittorrent['sb'] = config.get(section, "sickbeard-label").lower()
+
         self.qBittorrent['sonarr'] = config.get(section, "sonarr-label").lower()
         self.qBittorrent['radarr'] = config.get(section, "radarr-label").lower()
         self.qBittorrent['bypass'] = config.getlist(section, "bypass-label")
@@ -919,7 +897,7 @@ class ReadSettings:
         # Read relevant uTorrent section information
         section = "uTorrent"
         self.uTorrent = {}
-        self.uTorrent['sb'] = config.get(section, "sickbeard-label").lower()
+
         self.uTorrent['sonarr'] = config.get(section, "sonarr-label").lower()
         self.uTorrent['radarr'] = config.get(section, "radarr-label").lower()
         self.uTorrent['bypass'] = config.getlist(section, "bypass-label")

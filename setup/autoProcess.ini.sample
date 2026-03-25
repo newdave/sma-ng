@@ -177,18 +177,8 @@ rescan = True
 in-progress-check = True
 block-reprocess = False
 
-[Sickbeard]
-host = localhost
-port = 8081
-ssl = False
-apikey = 
-webroot = 
-username = 
-password = 
-
 [SABNZBD]
 convert = True
-sickbeard-category = sickbeard
 sonarr-category = sonarr
 radarr-category = radarr
 bypass-category = bypass
@@ -196,7 +186,7 @@ output-directory =
 path-mapping = 
 
 [Deluge]
-sickbeard-label = sickbeard
+
 
 sonarr-label = sonarr
 radarr-label = radarr
@@ -211,7 +201,7 @@ remove = False
 path-mapping = 
 
 [qBittorrent]
-sickbeard-label = sickbeard
+
 
 sonarr-label = sonarr
 radarr-label = radarr
@@ -228,7 +218,7 @@ output-directory =
 path-mapping = 
 
 [uTorrent]
-sickbeard-label = sickbeard
+
 
 sonarr-label = sonarr
 radarr-label = radarr
