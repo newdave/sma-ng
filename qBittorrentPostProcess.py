@@ -12,7 +12,7 @@ import os
 import sys
 from resources.log import getLogger
 from resources.readsettings import ReadSettings
-from resources.webhook_client import submit_job
+import resources.webhook_client as webhook
 
 log = getLogger("qBittorrentPostProcess")
 log.info("qBittorrent post-processing started.")
@@ -43,8 +43,13 @@ try:
     log.info("Torrent: %s (%s)" % (torrent_name, info_hash))
 
     # Check bypass
-    bypass = settings.qBittorrent.get('bypass', '').lower()
-    if bypass and label.startswith(bypass):
+    bypass_labels = settings.qBittorrent.get('bypass', [])
+    bypass_matched = False
+    for b in bypass_labels:
+        if b and label.startswith(b):
+            bypass_matched = True
+            break
+    if bypass_matched:
         log.info("Bypass label matched, skipping.")
         sys.exit(0)
 
@@ -75,11 +80,11 @@ try:
 
     # Submit files to daemon
     if os.path.isfile(content_path):
-        submit_job(content_path, logger=log)
+        webhook.submit_job(content_path, logger=log)
     elif os.path.isdir(content_path):
         for root, _, files in os.walk(content_path):
             for f in files:
-                submit_job(os.path.join(root, f), logger=log)
+                webhook.submit_job(os.path.join(root, f), logger=log)
     else:
         log.error("Content path does not exist: %s" % content_path)
         sys.exit(1)

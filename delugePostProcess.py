@@ -9,7 +9,7 @@ import os
 import sys
 from resources.log import getLogger
 from resources.readsettings import ReadSettings
-from resources.webhook_client import submit_job
+import resources.webhook_client as webhook
 
 log = getLogger("DelugePostProcess")
 log.info("Deluge post-processing started.")
@@ -49,8 +49,13 @@ try:
             log.exception("Could not connect to Deluge RPC, proceeding without label check.")
 
     # Check bypass
-    bypass = settings.deluge.get('bypass', '').lower()
-    if bypass and label.startswith(bypass):
+    bypass_labels = settings.deluge.get('bypass', [])
+    bypass_matched = False
+    for b in bypass_labels:
+        if b and label.startswith(b):
+            bypass_matched = True
+            break
+    if bypass_matched:
         log.info("Bypass label matched, skipping conversion.")
         sys.exit(0)
 
@@ -58,9 +63,9 @@ try:
     if os.path.isdir(path):
         for root, _, files in os.walk(path):
             for f in files:
-                submit_job(os.path.join(root, f), logger=log)
+                webhook.submit_job(os.path.join(root, f), logger=log)
     elif os.path.isfile(path):
-        submit_job(path, logger=log)
+        webhook.submit_job(path, logger=log)
     else:
         # Try combining path and torrent name
         combined = os.path.join(path, torrent_name)
@@ -68,9 +73,9 @@ try:
             if os.path.isdir(combined):
                 for root, _, files in os.walk(combined):
                     for f in files:
-                        submit_job(os.path.join(root, f), logger=log)
+                        webhook.submit_job(os.path.join(root, f), logger=log)
             else:
-                submit_job(combined, logger=log)
+                webhook.submit_job(combined, logger=log)
         else:
             log.error("Path does not exist: %s" % path)
             sys.exit(1)

@@ -9,7 +9,7 @@ import os
 import sys
 from resources.log import getLogger
 from resources.readsettings import ReadSettings
-from resources.webhook_client import submit_job
+import resources.webhook_client as webhook
 
 log = getLogger("SABPostProcess")
 log.info("SABnzbd post-processing started.")
@@ -35,8 +35,13 @@ try:
         sys.exit(1)
 
     # Check for bypass category
-    bypass = settings.SAB.get('bypass', '').lower()
-    if bypass and category.startswith(bypass):
+    bypass_cats = settings.SAB.get('bypass', [])
+    bypass_matched = False
+    for b in bypass_cats:
+        if b and category.startswith(b):
+            bypass_matched = True
+            break
+    if bypass_matched:
         log.info("Bypass category matched, skipping conversion.")
         sys.exit(0)
 
@@ -45,9 +50,9 @@ try:
         for r, _, files in os.walk(path):
             for f in files:
                 filepath = os.path.join(r, f)
-                submit_job(filepath, logger=log)
+                webhook.submit_job(filepath, logger=log)
     elif os.path.isfile(path):
-        submit_job(path, logger=log)
+        webhook.submit_job(path, logger=log)
     else:
         log.error("Path does not exist: %s" % path)
         sys.exit(1)
