@@ -60,10 +60,10 @@ sma-ng = "manual:main"
 sma-ng-daemon = "daemon:main"
 
 [project.urls]
-Homepage = "https://github.com/mdhiggins/sickbeard_mp4_automator"
-Documentation = "https://github.com/mdhiggins/sickbeard_mp4_automator/wiki"
-Repository = "https://github.com/mdhiggins/sickbeard_mp4_automator"
-Issues = "https://github.com/mdhiggins/sickbeard_mp4_automator/issues"
+Homepage = "https://github.com/newdave/sma-ng"
+Documentation = "https://github.com/newdave/sma-ng/wiki"
+Repository = "https://github.com/newdave/sma-ng"
+Issues = "https://github.com/newdave/sma-ng/issues"
 
 [tool.setuptools]
 packages = ["resources", "converter", "autoprocess"]

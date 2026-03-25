@@ -30,9 +30,6 @@
 # Sickbeard category name.
 #SICKBEARD_CAT=sickbeard
 #
-# Sickrage category name.
-#SICKRAGE_CAT=sickrage
-#
 # Bypass category name.
 #BYPASS_CAT=bypass
 #
@@ -74,7 +71,6 @@ shouldConvert = os.environ.get('NZBPO_SHOULDCONVERT', 'true').lower() == 'true'
 sonarrcat = os.environ.get('NZBPO_SONARR_CAT', 'sonarr').lower()
 radarrcat = os.environ.get('NZBPO_RADARR_CAT', 'radarr').lower()
 sickbeardcat = os.environ.get('NZBPO_SICKBEARD_CAT', 'sickbeard').lower()
-sickragecat = os.environ.get('NZBPO_SICKRAGE_CAT', 'sickrage').lower()
 bypasscat = os.environ.get('NZBPO_BYPASS_CAT', 'bypass').lower()
 
 # Validate download status

@@ -3,6 +3,8 @@ SMA-NG Conversion/Tagging Automation Script
 
 **Automatically converts media files downloaded by various programs to a standardized format, and tags them with the appropriate metadata from TMDB if the container supports tagging.**
 
+SMA-NG is a quasi-fork of [Sickbeard MP4 Automator](https://github.com/mdhiggins/sickbeard_mp4_automator) by mdhiggins. It builds on that project's foundation with a restructured codebase, new daemon mode, and other enhancements.
+
 ![The Matrix](https://user-images.githubusercontent.com/3608298/76170063-e415c300-6154-11ea-88cd-d26653a47cc5.PNG)
 
 Works on Windows, OSX, and Linux. Despite the name works with much more than just Sickbeard and handles more than MP4s
@@ -13,7 +15,6 @@ Integration
 - [Sonarr](#sonarr-setup)
 - [Radarr](#radarr-setup)
 - [Sickbeard](#sickbeard-setup)
-- [SickRage](#sickrage-setup)
 
 ### Downloaders Supported
 - [NZBGet](#nzbget-setup)
@@ -26,7 +27,7 @@ Dependencies
 --------------
 - [Python 3](https://www.python.org/)
 - [FFmpeg](https://ffmpeg.org/)
-- [Python Packages](https://github.com/mdhiggins/sickbeard_mp4_automator/wiki/Dependencies)
+- [Python Packages](https://github.com/newdave/sma-ng/wiki/Dependencies)
 
 Default Settings
 --------------
@@ -46,13 +47,13 @@ General Configuration
 1. Download or compile FFmpeg 
 2. Install [requirements/dependencies](#dependencies)
 3. Rename `setup\autoProcess.ini.sample` to `autoProcess.ini` and place inside your `config` directory (or attempt to run the script which will generate a new config file if absent)
-4. Set the [configuration options](https://github.com/mdhiggins/sickbeard_mp4_automator/wiki/autoProcess-Settings) to your desired output and include the path of your new FFmpeg / FFprobe binaries
+4. Set the [configuration options](https://github.com/newdave/sma-ng/wiki/autoProcess-Settings) to your desired output and include the path of your new FFmpeg / FFprobe binaries
 5. Run [manual.py](#manual-script-usage) and test out a conversion
 6. Configure direct integration using the instructions below
 
 Sonarr Setup
 --------------
-1. Set your [Sonarr settings](https://github.com/mdhiggins/sickbeard_mp4_automator/wiki/autoProcess-Settings#sonarr) in autoProcess.ini
+1. Set your [Sonarr settings](https://github.com/newdave/sma-ng/wiki/autoProcess-Settings#sonarr) in autoProcess.ini
 2. Browse to the Settings>Download Client tab and enable advanced settings [Show].
 3. Setup the postSonarr.py script via Settings > Connect > Connections > + (Add)
     - `name` - postSonarr
@@ -70,7 +71,7 @@ Sonarr Setup
 
 Radarr Setup
 --------------
-1. Set your [Radarr settings](https://github.com/mdhiggins/sickbeard_mp4_automator/wiki/autoProcess-Settings#radarr) in autoProcess.ini
+1. Set your [Radarr settings](https://github.com/newdave/sma-ng/wiki/autoProcess-Settings#radarr) in autoProcess.ini
 2. Browse to the Settings>Download Client tab and enable advanced settings [Show].
 3. Setup the postRadarr.py script via Settings > Connect > Connections > + (Add)
     - `name` - postRadarr
@@ -92,14 +93,7 @@ Sickbeard Setup
     - Set "extra_scripts" value in the general section to the full path to "python postSickbeard.py" using double backslashes
         - Example: `C:\\Python27\\python C:\\Scripts\\postSickbeard.py`
         - Make sure this is done while Sick Beard is not running or it will be reverted
-2. Set your [SickBeard settings](https://github.com/mdhiggins/sickbeard_mp4_automator/wiki/autoProcess-Settings#sickbeard) in autoProcess.ini
-
-SickRage Setup
---------------
-1. Open the configuration page in Sickrage and scroll down to the option labelled "Extra Scripts". Here enter the path to python followed by the full script path. Examples:
-    - `C:\\Python27\\python.exe C:\\sickbeard_mp4_automator\\postSickbeard.py`
-    - `/usr/bin/python /home/user/sickbeard_mp4_automator/postSickbeard.py`
-2. Set the [Sickrage settings](https://github.com/mdhiggins/sickbeard_mp4_automator/wiki/autoProcess-Settings#sickrage) in autoProcess.ini
+2. Set your [SickBeard settings](https://github.com/newdave/sma-ng/wiki/autoProcess-Settings#sickbeard) in autoProcess.ini
 
 NZBGet Setup
 --------------
@@ -115,7 +109,6 @@ NZBGet Setup
         - `SHOULDCONVERT` - `True`/`False` - Convert file before passing to destination
         - `SONARR_CAT` - default `sonarr` - category of downloads that will be passed to Sonarr
         - `SICKBEARD_CAT` - default `sickbeard` - category of downloads that will be passed to Sickbeard
-        - `SICKRAGE_CAT` - default `sickrage` - category of downloads that will be passed to Sickrage
         - `BYPASS_CAT` - default `bypass` - category of downloads that may be converted but won't be passed on further
     - Save changes
     - Reload NZBGet
@@ -126,13 +119,12 @@ NZBGet Setup
 
 SABNZBD Setup
 --------------
-1. Set your [SABNZBD settings](https://github.com/mdhiggins/sickbeard_mp4_automator/wiki/autoProcess-Settings#sabnzbd) in autoProcess.ini
+1. Set your [SABNZBD settings](https://github.com/newdave/sma-ng/wiki/autoProcess-Settings#sabnzbd) in autoProcess.ini
 2. Point SABNZBD's script directory to the root directory where you have extract the script.
 3. Configure categories. Categories will determine where the download is sent when it is finished
     - `Settings > Categories`
     - Configure `name` to match the settings from the `SABNZBD` section of `autoProcess.ini`
         - Default `sickbeard`
-        - Default `sickrage`
         - Default `sonarr`
         - Default `bypass`
     - Select the SABPostProcess.py script
@@ -159,7 +151,7 @@ Deluge Daemon Setup
 4. Enabled the `Execute` plugin
     - Add event for `Torrent Complete`
     - Set path to the full path to `delugePostProcess.py` or a batch file wrapper that passes command line arguments for Windows users with difficulty executing python files directly
-5. Set your [Deluge settings](https://github.com/mdhiggins/sickbeard_mp4_automator/wiki/autoProcess-Settings#deluge) in autoProcess.ini
+5. Set your [Deluge settings](https://github.com/newdave/sma-ng/wiki/autoProcess-Settings#deluge) in autoProcess.ini
 6. Verify that whatever downloader you are using is assigning the label to match the label settings specified here so that file will be passed back to the appropriate location
 
 *Not required if using Completed Download Handling with Sonarr/Radarr*
@@ -170,7 +162,7 @@ uTorrent Setup
 2. Set `Run Program` option
     - Go to `Options > Preferences > Advanced > Run Program`
     - Point to `uTorrentPostProcess.py` with command line parameters: `%L %T %D %K %F %I %N` in that exact order.
-3. Set your [uTorrent settings](https://github.com/mdhiggins/sickbeard_mp4_automator/wiki/autoProcess-Settings#utorrent) in autoProcess.ini
+3. Set your [uTorrent settings](https://github.com/newdave/sma-ng/wiki/autoProcess-Settings#utorrent) in autoProcess.ini
 4. Verify that whatever media manager you are using is assigning the label to match the label settings specified here so that file will be passed back to the appropriate location
 
 *Not required if using Completed Download Handling with Sonarr/Radarr*
@@ -181,7 +173,7 @@ qBittorrent Setup
 2. Set `Run Program` option
     - Go to `Tools > Options > Run external program on torrent completion`
     - Point to `qBittorrentPostProcess.py` with command line parameters: `"%L" "%T" "%R" "%F" "%N" "%I"` in that exact order.
-3. Set your [qBittorrent settings](https://github.com/mdhiggins/sickbeard_mp4_automator/wiki/autoProcess-Settings#qbittorrent) in autoProcess.ini
+3. Set your [qBittorrent settings](https://github.com/newdave/sma-ng/wiki/autoProcess-Settings#qbittorrent) in autoProcess.ini
 4. Verify that whatever media manager you are using is assigning the label to match the label settings specified here so that file will be passed back to the appropriate location
 
 *Not required if using Completed Download Handling with Sonarr/Radarr*
@@ -191,7 +183,7 @@ Plex Notification
 Send a Plex notification as the final step when all processing is completed. This feature prevents a file from being flagged as "in use" by Plex before processing has completed.
 1. Disable automatic refreshing on your Plex server
     - `Settings > Server > Library` and disable `Update my library automatically` and `Update my library periodically`.
-3. Set your [Plex settings](https://github.com/mdhiggins/sickbeard_mp4_automator/wiki/autoProcess-Settings#plex) in autoProcess.ini
+3. Set your [Plex settings](https://github.com/newdave/sma-ng/wiki/autoProcess-Settings#plex) in autoProcess.ini
 
 If you have secure connections enabled with Plex you will need to add your local IP addresss that the refresh requests are coming from to allow them to trigger the refresh, otherwise you will get an HTTP error. You can alternatively not force encryption by changing `Secure Connections` from `Required` to `Preferred` but this is not recommended as its less secure.
 
@@ -204,7 +196,7 @@ If for some reason you need to override the path to autoProcess.ini (for virtual
 
 Post Process Scripts
 --------------
-- See https://github.com/mdhiggins/sickbeard_mp4_automator/blob/master/post_process/post_process.md
+- See https://github.com/newdave/sma-ng/blob/master/post_process/post_process.md
 
 Manual Script Usage
 --------------

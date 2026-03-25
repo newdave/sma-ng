@@ -12,7 +12,7 @@ import json
 from converter.avcodecs import BaseCodec, video_codec_list
 
 
-console_encoding = locale.getdefaultlocale()[1] or 'UTF-8'
+console_encoding = locale.getencoding() or 'UTF-8'
 
 STRICT = {
     "very": 2,
