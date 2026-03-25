@@ -207,7 +207,7 @@ class Metadata:
                 if self.genre and len(self.genre) > 0:
                     metadata["GENRE"] = self.genre[0].get('name')
 
-                metadata["ENCODER"] = "SMA"
+                metadata["ENCODER"] = "SMA-NG"
 
                 coverpath = None
                 if artwork:
@@ -284,9 +284,9 @@ class Metadata:
                     video["covr"] = [MP4Cover(cover, MP4Cover.FORMAT_JPEG)]  # jpeg poster
 
         if self.original:
-            video["\xa9too"] = "SMA:" + os.path.basename(self.original)
+            video["\xa9too"] = "SMA-NG:" + os.path.basename(self.original)
         else:
-            video["\xa9too"] = "SMA:" + os.path.basename(path)
+            video["\xa9too"] = "SMA-NG:" + os.path.basename(path)
 
         try:
             self.log.info("Trying to write tags.")

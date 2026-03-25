@@ -1,4 +1,4 @@
-"""Shared fixtures for SMA test suite."""
+"""Shared fixtures for SMA-NG test suite."""
 import os
 import sys
 import tempfile

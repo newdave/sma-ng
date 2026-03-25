@@ -1,4 +1,4 @@
-# SMA — Sickbeard MP4 Automator
+# SMA-NG — Next-Generation Media Automator
 
 Automated media conversion, tagging, and integration pipeline. Converts media files to MP4/MKV using FFmpeg with hardware acceleration, tags them with TMDB metadata, and integrates with media managers and download clients.
 
@@ -302,7 +302,7 @@ Instances are matched by `path` using longest-prefix matching. When `manual.py` 
 | `token` | string | Plex authentication token |
 | `ssl` | bool | Use HTTPS |
 | `ignore-certs` | bool | Skip SSL certificate verification |
-| `path-mapping` | dict | Map SMA paths to Plex library paths (comma-separated, `=` delimited) |
+| `path-mapping` | dict | Map SMA-NG paths to Plex library paths (comma-separated, `=` delimited) |
 
 ### [SABNZBD] / [Deluge] / [qBittorrent] / [uTorrent]
 
@@ -551,7 +551,7 @@ When `manual.py` processes `/mnt/media/Movies/4K/film.mp4`, it matches `Radarr-4
 
 ### Plex
 
-Configure `[Plex]` section. SMA refreshes the matching library section after conversion. Use `path-mapping` if Plex sees files at different mount points.
+Configure `[Plex]` section. SMA-NG refreshes the matching library section after conversion. Use `path-mapping` if Plex sees files at different mount points.
 
 ---
 
@@ -561,7 +561,7 @@ Configure `[Plex]` section. SMA refreshes the matching library section after con
 Copy `NZBGetPostProcess.py` to NZBGet's scripts folder. Configure categories in NZBGet WebUI under `NZBGETPOSTPROCESS`.
 
 ### SABnzbd
-Point SABnzbd's script directory to the SMA root. Set `SABPostProcess.py` as the category script. Configure `[SABNZBD]` section.
+Point SABnzbd's script directory to the SMA-NG root. Set `SABPostProcess.py` as the category script. Configure `[SABNZBD]` section.
 
 ### qBittorrent
 In Tools → Options → Run external program on torrent completion:
@@ -675,7 +675,7 @@ codec = h264_videotoolbox, h264
 
 ### converter/avcodecs.py
 
-Codec definitions mapping SMA names to FFmpeg encoders. Each codec class handles its own option parsing and FFmpeg flag generation.
+Codec definitions mapping SMA-NG names to FFmpeg encoders. Each codec class handles its own option parsing and FFmpeg flag generation.
 
 **Video codecs**: H264, H265, AV1, VP9, MPEG-1/2, H263, FLV, Theora + hardware variants (QSV, VAAPI, NVENC, VideoToolbox, V4L2M2M, OMX)
 
@@ -720,7 +720,7 @@ Container format definitions (MP4, MKV, AVI, WebM, etc.) mapping to FFmpeg muxer
 
 ### resources/postprocess.py
 
-**PostProcessor**: Discovers and runs scripts in `post_process/` directory with SMA environment variables.
+**PostProcessor**: Discovers and runs scripts in `post_process/` directory with SMA-NG environment variables.
 
 ### resources/log.py
 
@@ -749,7 +749,7 @@ Plex library refresh via PlexAPI with path mapping support.
 Run `python manual.py -cl` for the full list. Key codecs:
 
 ### Video
-| SMA Name | FFmpeg Encoder | Notes |
+| SMA-NG Name | FFmpeg Encoder | Notes |
 |----------|---------------|-------|
 | `h264` | libx264 | Software H.264 |
 | `h265` / `hevc` | libx265 | Software HEVC |
@@ -765,7 +765,7 @@ Run `python manual.py -cl` for the full list. Key codecs:
 | `vp9` | libvpx-vp9 | Software VP9 |
 
 ### Audio
-| SMA Name | FFmpeg Encoder |
+| SMA-NG Name | FFmpeg Encoder |
 |----------|---------------|
 | `aac` | aac / libfdk_aac |
 | `ac3` | ac3 |
@@ -818,7 +818,7 @@ See `setup/post_process/` for examples (Plex, Emby, Jellyfin, iTunes).
 - Use `crf-profiles` for tiered quality
 
 **Subtitles show as "English (MOV_TEXT)" in Plex**
-- This is Plex reading the raw codec name. SMA sets a title on subtitle streams to improve display.
+- This is Plex reading the raw codec name. SMA-NG sets a title on subtitle streams to improve display.
 
 **Sonarr/Radarr not rescanning after manual.py**
 - Verify `path` field is set in the `[Sonarr]`/`[Radarr]` config section

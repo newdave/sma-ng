@@ -172,7 +172,7 @@ log = getLogger("RadarrPostProcess")
 log.info("Radarr extra script post processing started.")
 
 if os.environ.get('radarr_eventtype') == "Test":
-    log.info("Successful postRadarr.py SMA test, exiting.")
+    log.info("Successful postRadarr.py SMA-NG test, exiting.")
     sys.exit(0)
 
 if os.environ.get('radarr_eventtype') != "Download":
@@ -246,7 +246,7 @@ try:
 
         headers = {
             'X-Api-Key': apikey,
-            'User-Agent': "SMA - postRadarr"
+            'User-Agent': "SMA-NG - postRadarr"
         }
 
         subs = backupSubs(success[0], mp, log)

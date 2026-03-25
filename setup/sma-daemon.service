@@ -1,5 +1,5 @@
 [Unit]
-Description=SMA Daemon - Media Conversion Webhook Server
+Description=SMA-NG Daemon - Media Conversion Webhook Server
 Documentation=https://github.com/mdhiggins/sickbeard_mp4_automator
 After=network.target
 Wants=network.target
@@ -9,14 +9,14 @@ Type=simple
 User=sma
 Group=sma
 
-# Path to SMA installation
+# Path to SMA-NG installation
 WorkingDirectory=/opt/sma
 
 # Python interpreter and daemon script
 ExecStart=/opt/sma/venv/bin/python /opt/sma/daemon.py --host 0.0.0.0 --port 8585 --workers 2
 
 # Health check: verify the HTTP server is responding after startup
-ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5 6; do sleep 2; curl -sf http://127.0.0.1:8585/health > /dev/null && exit 0; done; echo "SMA daemon health check failed after 12s"; exit 1'
+ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5 6; do sleep 2; curl -sf http://127.0.0.1:8585/health > /dev/null && exit 0; done; echo "SMA-NG daemon health check failed after 12s"; exit 1'
 
 # Environment variables (uncomment and modify as needed)
 #Environment="SMA_DAEMON_API_KEY=your_secret_key_here"
