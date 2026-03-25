@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE / Local settings
+.idea/
+.vscode/
+.claude/settings.local.json
+*.swp
+*.swo
+*~
+
+# Project specific
+config/autoProcess.ini
+config/autoProcess.ini-*
+config/autoProcess.ini.*
+config/autoProcess.*.ini
+config/daemon.json
+config/daemon.db
+config/daemon.db-*
+config/daemon.env
+config/sma.log*
+*.log
+logs/*.log
+logs/*.log.*
+archive.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temp files
+*.tmp
+*.temp

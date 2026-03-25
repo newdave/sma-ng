@@ -1,0 +1,21 @@
+{
+  "include": [
+    "*.py",
+    "resources",
+    "converter",
+    "autoprocess",
+    "setup/post_process"
+  ],
+  "exclude": [
+    "venv",
+    "**/__pycache__"
+  ],
+  "venvPath": ".",
+  "venv": "venv",
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": "none",
+  "reportUnusedImport": "warning",
+  "reportUnusedVariable": "warning"
+}

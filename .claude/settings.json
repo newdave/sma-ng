@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python manual.py*)",
+      "Bash(python daemon.py*)",
+      "Bash(curl*localhost*)",
+      "Bash(pip install*)",
+      "Bash(pip list*)",
+      "Bash(ffmpeg -version)",
+      "Bash(ffprobe -version)",
+      "Bash(python -m pytest*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)"
+    ],
+    "deny": []
+  },
+  "ignorePaths": [
+    "venv/**",
+    "**/__pycache__/**",
+    "*.pyc",
+    "config/autoProcess.ini"
+  ]
+}

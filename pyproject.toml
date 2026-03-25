@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sickbeard-mp4-automator"
+version = "3.0.0"
+description = "Automated media conversion, tagging, and integration pipeline"
+readme = "docs/README.md"
+license = {file = "license.md"}
+requires-python = ">=3.12"
+authors = [
+    {name = "mdhiggins"},
+]
+keywords = ["ffmpeg", "media", "conversion", "mp4", "sonarr", "radarr", "plex"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video :: Conversion",
+]
+
+dependencies = [
+    "requests>=2.32,<3",
+    "idna>=3.11,<4",
+    "requests-cache>=1.3,<2",
+    "babelfish>=0.6.1,<1",
+    "tmdbsimple>=2.9,<3",
+    "mutagen>=1.47,<2",
+    "guessit>=3.8,<4",
+    "subliminal>=2.6,<3",
+    "python-dateutil>=2.9,<3",
+    "stevedore>=5.7,<6",
+    "qtfaststart>=1.8,<2",
+    "cleanit>=0.4.9,<1",
+    "plexapi>=4.18,<5",
+]
+
+[project.optional-dependencies]
+qbittorrent = [
+    "python-qbittorrent>=0.4.3,<1",
+]
+deluge = [
+    "deluge-client>=1.10,<2",
+    "gevent>=25.9,<26",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+sma = "manual:main"
+sma-daemon = "daemon:main"
+
+[project.urls]
+Homepage = "https://github.com/mdhiggins/sickbeard_mp4_automator"
+Documentation = "https://github.com/mdhiggins/sickbeard_mp4_automator/wiki"
+Repository = "https://github.com/mdhiggins/sickbeard_mp4_automator"
+Issues = "https://github.com/mdhiggins/sickbeard_mp4_automator/issues"
+
+[tool.setuptools]
+packages = ["resources", "converter", "autoprocess"]
+
+[tool.setuptools.package-data]
+"*" = ["*.sample", "*.md"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 200
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",   # line too long (handled by line-length)
+    "E722",   # bare except (legacy codebase pattern)
+    "F841",   # local variable assigned but never used
+    "E402",   # module level import not at top
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
