@@ -28,7 +28,7 @@ Requires Python 3.12+ and FFmpeg installed on system.
 
 ## Project Overview
 
-SMA-NG (Next-Generation Media Automator) is a Python-based media conversion and tagging automation tool. It converts media files to MP4 format using FFmpeg and tags them with metadata from TMDB. It integrates with media managers (Sonarr, Radarr, Sickbeard) and downloaders (NZBGet, SABNZBD, Deluge, uTorrent, qBittorrent).
+SMA-NG (Next-Generation Media Automator) is a Python-based media conversion and tagging automation tool. It converts media files to MP4 format using FFmpeg and tags them with metadata from TMDB. It integrates with media managers (Sonarr, Radarr) and downloaders (NZBGet, SABNZBD, Deluge, uTorrent, qBittorrent).
 
 ## Common Commands
 
@@ -233,7 +233,6 @@ Use `--db /path/to/daemon.db` to customize database location.
 - `manual.py` - CLI tool for manual conversion/tagging
 - `daemon.py` - HTTP webhook server for triggering conversions via API
 - `postSonarr.py` / `postRadarr.py` - Post-processing scripts triggered by media managers
-- `postSickbeard.py` - Sickbeard post-processing
 - `*PostProcess.py` - Scripts for various downloaders (NZBGet, SAB, Deluge, qBittorrent, uTorrent)
 
 ### Core Modules

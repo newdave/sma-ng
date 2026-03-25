@@ -27,9 +27,6 @@
 # Radarr category name.
 #RADARR_CAT=radarr
 #
-# Sickbeard category name.
-#SICKBEARD_CAT=sickbeard
-#
 # Bypass category name.
 #BYPASS_CAT=bypass
 #
@@ -70,7 +67,6 @@ except ImportError:
 shouldConvert = os.environ.get('NZBPO_SHOULDCONVERT', 'true').lower() == 'true'
 sonarrcat = os.environ.get('NZBPO_SONARR_CAT', 'sonarr').lower()
 radarrcat = os.environ.get('NZBPO_RADARR_CAT', 'radarr').lower()
-sickbeardcat = os.environ.get('NZBPO_SICKBEARD_CAT', 'sickbeard').lower()
 bypasscat = os.environ.get('NZBPO_BYPASS_CAT', 'bypass').lower()
 
 # Validate download status

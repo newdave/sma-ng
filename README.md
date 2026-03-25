@@ -7,14 +7,14 @@ SMA-NG is a quasi-fork of [Sickbeard MP4 Automator](https://github.com/mdhiggins
 
 ![The Matrix](https://user-images.githubusercontent.com/3608298/76170063-e415c300-6154-11ea-88cd-d26653a47cc5.PNG)
 
-Works on Windows, OSX, and Linux. Despite the name works with much more than just Sickbeard and handles more than MP4s
+Works on Windows, OSX, and Linux
 
 Integration
 --------------
 ### Media Managers Supported
 - [Sonarr](#sonarr-setup)
 - [Radarr](#radarr-setup)
-- [Sickbeard](#sickbeard-setup)
+
 
 ### Downloaders Supported
 - [NZBGet](#nzbget-setup)
@@ -87,14 +87,6 @@ Radarr Setup
     - For Radarr V3 you'll need to make a .sh or .bat file to combine your path to python and script
 4. **OPTIONAL** If you desire to convert the file before it is handed back to Radarr, disable 'Completed Download Handling' in Radarr settings and configure your download client to use its included script (scroll down to your relevant download client in the readme). The script will trigger a specific path re-scan, allowing the conversion to be completed before Radarr starts moving stuff around. **You must use either a download script or enabled Completed Download Handling. If neither are used the file will never be passed back**
 
-Sickbeard Setup
---------------
-1. Open Sickbeard's config.ini in Sick Beard installation folder
-    - Set "extra_scripts" value in the general section to the full path to "python postSickbeard.py" using double backslashes
-        - Example: `C:\\Python27\\python C:\\Scripts\\postSickbeard.py`
-        - Make sure this is done while Sick Beard is not running or it will be reverted
-2. Set your [SickBeard settings](https://github.com/newdave/sma-ng/wiki/autoProcess-Settings#sickbeard) in autoProcess.ini
-
 NZBGet Setup
 --------------
 1. Copy the script NZBGetPostProcess.py to NZBGet's script folder.
@@ -105,10 +97,9 @@ NZBGet Setup
         - Default `localhost:6789`
     - Go to `Settings`
     - Select `NZBGETPOSTPROCESS` option at the bottom of the left hand navigation panel and configure the options
-        - `MP4_FOLDER` - default `~/sickbeard_mp4_automator/` - Location of the script. Use full path with trailing backslash.
+        - `MP4_FOLDER` - default `~/sma-ng/` - Location of the script. Use full path with trailing backslash.
         - `SHOULDCONVERT` - `True`/`False` - Convert file before passing to destination
         - `SONARR_CAT` - default `sonarr` - category of downloads that will be passed to Sonarr
-        - `SICKBEARD_CAT` - default `sickbeard` - category of downloads that will be passed to Sickbeard
         - `BYPASS_CAT` - default `bypass` - category of downloads that may be converted but won't be passed on further
     - Save changes
     - Reload NZBGet
@@ -124,7 +115,6 @@ SABNZBD Setup
 3. Configure categories. Categories will determine where the download is sent when it is finished
     - `Settings > Categories`
     - Configure `name` to match the settings from the `SABNZBD` section of `autoProcess.ini`
-        - Default `sickbeard`
         - Default `sonarr`
         - Default `bypass`
     - Select the SABPostProcess.py script
@@ -209,7 +199,7 @@ manual.py -h
 usage: manual.py [-h] [-i INPUT] [-a] [-tv TVDBID] [-s SEASON] [-e EPISODE]
                  [-imdb IMDBID] [-tmdb TMDBID] [-nm] [-nc] [-nd]
 
-Manual conversion and tagging script for sickbeard_mp4_automator
+Manual conversion and tagging script for SMA-NG
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -308,7 +298,6 @@ Credits
 This project makes use of, integrates with, or was inspired by the following projects:
 - http://www.ffmpeg.org/
 - http://www.python.org/
-- http://www.sickbeard.com/
 - http://sabnzbd.org/
 - https://nzbget.net/
 - https://www.deluge-torrent.org/
