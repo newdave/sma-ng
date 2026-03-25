@@ -839,6 +839,5 @@ class FFMpeg(object):
         _, stderr_data = p.communicate()
         if stderr_data == '':
             raise FFMpegError('Error while calling ffmpeg binary')
-        stderr_data.decode(console_encoding)
         if any(not os.path.exists(option[1]) for option in option_list):
             raise FFMpegError('Error creating thumbnail: %s' % stderr_data)

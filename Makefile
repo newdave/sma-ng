@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-all lint test clean daemon convert codecs docs
+.PHONY: help install install-dev install-all lint test clean daemon convert codecs docs detect-gpu config systemd-install
 
 PYTHON ?= python3
 VENV ?= venv
@@ -52,9 +52,46 @@ clean: ## Remove build artifacts and caches
 	find . -type f -name '*.pyc' -delete 2>/dev/null || true
 	rm -rf build/ dist/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage .ruff_cache/
 
-config: ## Create config from sample (won't overwrite existing)
-	@test -f config/autoProcess.ini || cp setup/autoProcess.ini.sample config/autoProcess.ini && echo "Created config/autoProcess.ini"
-	@test -f config/daemon.json || cp setup/daemon.json.sample config/daemon.json && echo "Created config/daemon.json"
+# ---------------------------------------------------------------------------
+# GPU detection
+# ---------------------------------------------------------------------------
+# Detect GPU type: nvenc (NVIDIA), qsv (Intel), videotoolbox (Apple), vaapi (Linux Mesa/AMD), or software
+# Use := for eager evaluation so detection runs at most once per make invocation
+GPU ?= $(shell \
+  if [ "$$(uname)" = "Darwin" ]; then \
+    if sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -qi apple; then \
+      echo videotoolbox; \
+    else \
+      echo software; \
+    fi; \
+  elif command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then \
+    echo nvenc; \
+  elif [ -d /sys/module/i915 ] || (command -v vainfo >/dev/null 2>&1 && vainfo 2>&1 | grep -qi intel); then \
+    echo qsv; \
+  elif [ -e /dev/dri/renderD128 ] && (command -v vainfo >/dev/null 2>&1 && vainfo >/dev/null 2>&1); then \
+    echo vaapi; \
+  else \
+    echo software; \
+  fi \
+)
+
+detect-gpu: ## Detect GPU type for hardware acceleration
+	@echo "$(GPU)"
+
+config: ## Create config with GPU auto-detection (GPU=<type> to override)
+	@mkdir -p config
+	@if [ -f config/autoProcess.ini ]; then \
+		echo "config/autoProcess.ini already exists, skipping (delete it first to regenerate)"; \
+	else \
+		cp setup/autoProcess.ini.sample config/autoProcess.ini; \
+		if [ "$(GPU)" != "software" ]; then \
+			sed -i.bak 's/^gpu *=.*/gpu = $(GPU)/' config/autoProcess.ini && rm -f config/autoProcess.ini.bak; \
+			echo "Created config/autoProcess.ini (gpu = $(GPU))"; \
+		else \
+			echo "Created config/autoProcess.ini (software encoding)"; \
+		fi; \
+	fi
+	@test -f config/daemon.json || (cp setup/daemon.json.sample config/daemon.json && echo "Created config/daemon.json")
 
 systemd-install: ## Install systemd service (run as root)
 	cp setup/sma-daemon.service /etc/systemd/system/
