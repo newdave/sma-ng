@@ -1,0 +1,1434 @@
+#!/usr/bin/env python3
+"""
+SMA Daemon - HTTP webhook server for triggering media conversions.
+
+Listens for HTTP POST requests containing absolute file/directory paths
+and spawns conversion processes using manual.py.
+
+Features:
+- Path-based configuration selection via config/daemon.json
+- Per-config logging to separate files in logs/ directory
+- Only one process per config runs at a time (others queue)
+- SQLite persistence for job queue (survives restarts)
+- API key authentication for webhook endpoints
+
+Usage:
+    python daemon.py                    # Uses default settings
+    python daemon.py --port 8585        # Override port
+    python daemon.py --host 0.0.0.0     # Listen on all interfaces
+    python daemon.py --api-key SECRET   # Require API key for requests
+"""
+
+import sys
+import os
+import argparse
+import json
+import subprocess
+import threading
+import queue
+import logging
+import sqlite3
+from logging.handlers import RotatingFileHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+from datetime import datetime
+from contextlib import contextmanager
+import re as _re
+from resources.log import getLogger
+
+# Main daemon logger
+log = getLogger("DAEMON")
+
+# Default paths
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_DAEMON_CONFIG = os.path.join(SCRIPT_DIR, 'config', 'daemon.json')
+DEFAULT_PROCESS_CONFIG = os.path.join(SCRIPT_DIR, 'config', 'autoProcess.ini')
+LOGS_DIR = os.path.join(SCRIPT_DIR, 'logs')
+DATABASE_PATH = os.path.join(SCRIPT_DIR, 'config', 'daemon.db')
+
+# Job statuses
+STATUS_PENDING = 'pending'
+STATUS_RUNNING = 'running'
+STATUS_COMPLETED = 'completed'
+STATUS_FAILED = 'failed'
+
+
+class JobDatabase:
+    """SQLite database for persistent job queue storage."""
+
+    def __init__(self, db_path=DATABASE_PATH, logger=None):
+        self.db_path = db_path
+        self.log = logger or log
+        self._local = threading.local()
+        self._init_db()
+
+    def _get_connection(self):
+        """Get thread-local database connection."""
+        if not hasattr(self._local, 'connection') or self._local.connection is None:
+            self._local.connection = sqlite3.connect(
+                self.db_path,
+                check_same_thread=False,
+                timeout=30.0
+            )
+            self._local.connection.row_factory = sqlite3.Row
+        return self._local.connection
+
+    @contextmanager
+    def _cursor(self):
+        """Context manager for database cursor with auto-commit."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            yield cursor
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cursor.close()
+
+    def _init_db(self):
+        """Initialize database schema."""
+        with self._cursor() as cursor:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    path TEXT NOT NULL,
+                    config TEXT NOT NULL,
+                    args TEXT DEFAULT '[]',
+                    status TEXT DEFAULT 'pending',
+                    worker_id INTEGER,
+                    error TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP
+                )
+            ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)
+            ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_jobs_config ON jobs(config)
+            ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at)
+            ''')
+
+        self.log.info("Database initialized: %s" % self.db_path)
+
+        # Reset any jobs that were running when daemon stopped
+        self._reset_running_jobs()
+
+    def _reset_running_jobs(self):
+        """Reset jobs that were running when daemon stopped back to pending."""
+        with self._cursor() as cursor:
+            cursor.execute('''
+                UPDATE jobs
+                SET status = ?, worker_id = NULL, started_at = NULL
+                WHERE status = ?
+            ''', (STATUS_PENDING, STATUS_RUNNING))
+            if cursor.rowcount > 0:
+                self.log.info("Reset %d interrupted jobs to pending" % cursor.rowcount)
+
+    def add_job(self, path, config, args=None):
+        """Add a new job to the queue. Returns job ID."""
+        args_json = json.dumps(args or [])
+        with self._cursor() as cursor:
+            cursor.execute('''
+                INSERT INTO jobs (path, config, args, status)
+                VALUES (?, ?, ?, ?)
+            ''', (path, config, args_json, STATUS_PENDING))
+            job_id = cursor.lastrowid
+        self.log.debug("Added job %d: %s" % (job_id, path))
+        return job_id
+
+    def get_pending_jobs(self):
+        """Get all pending jobs ordered by creation time."""
+        with self._cursor() as cursor:
+            cursor.execute('''
+                SELECT * FROM jobs
+                WHERE status = ?
+                ORDER BY created_at ASC
+            ''', (STATUS_PENDING,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_next_pending_job(self):
+        """Get the next pending job (FIFO)."""
+        with self._cursor() as cursor:
+            cursor.execute('''
+                SELECT * FROM jobs
+                WHERE status = ?
+                ORDER BY created_at ASC
+                LIMIT 1
+            ''', (STATUS_PENDING,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def start_job(self, job_id, worker_id):
+        """Mark a job as running."""
+        with self._cursor() as cursor:
+            cursor.execute('''
+                UPDATE jobs
+                SET status = ?, worker_id = ?, started_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (STATUS_RUNNING, worker_id, job_id))
+        self.log.debug("Job %d started by worker %d" % (job_id, worker_id))
+
+    def complete_job(self, job_id):
+        """Mark a job as completed."""
+        with self._cursor() as cursor:
+            cursor.execute('''
+                UPDATE jobs
+                SET status = ?, completed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (STATUS_COMPLETED, job_id))
+        self.log.debug("Job %d completed" % job_id)
+
+    def fail_job(self, job_id, error=None):
+        """Mark a job as failed."""
+        with self._cursor() as cursor:
+            cursor.execute('''
+                UPDATE jobs
+                SET status = ?, error = ?, completed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (STATUS_FAILED, error, job_id))
+        self.log.debug("Job %d failed: %s" % (job_id, error))
+
+    def get_job(self, job_id):
+        """Get a specific job by ID."""
+        with self._cursor() as cursor:
+            cursor.execute('SELECT * FROM jobs WHERE id = ?', (job_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_jobs(self, status=None, config=None, limit=100, offset=0):
+        """Get jobs with optional filtering."""
+        query = 'SELECT * FROM jobs WHERE 1=1'
+        params = []
+
+        if status:
+            query += ' AND status = ?'
+            params.append(status)
+        if config:
+            query += ' AND config = ?'
+            params.append(config)
+
+        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+        params.extend([limit, offset])
+
+        with self._cursor() as cursor:
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_stats(self):
+        """Get job statistics."""
+        with self._cursor() as cursor:
+            cursor.execute('''
+                SELECT status, COUNT(*) as count
+                FROM jobs
+                GROUP BY status
+            ''')
+            stats = {row['status']: row['count'] for row in cursor.fetchall()}
+
+            cursor.execute('SELECT COUNT(*) as total FROM jobs')
+            stats['total'] = cursor.fetchone()['total']
+
+            return stats
+
+    def get_running_jobs(self):
+        """Get all currently running jobs."""
+        with self._cursor() as cursor:
+            cursor.execute('''
+                SELECT * FROM jobs
+                WHERE status = ?
+            ''', (STATUS_RUNNING,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def cleanup_old_jobs(self, days=30):
+        """Remove completed/failed jobs older than specified days."""
+        with self._cursor() as cursor:
+            cursor.execute('''
+                DELETE FROM jobs
+                WHERE status IN (?, ?)
+                AND completed_at < datetime('now', '-' || ? || ' days')
+            ''', (STATUS_COMPLETED, STATUS_FAILED, days))
+            deleted = cursor.rowcount
+        if deleted > 0:
+            self.log.info("Cleaned up %d old jobs" % deleted)
+        return deleted
+
+    def pending_count(self):
+        """Get count of pending jobs."""
+        with self._cursor() as cursor:
+            cursor.execute(
+                'SELECT COUNT(*) as count FROM jobs WHERE status = ?',
+                (STATUS_PENDING,)
+            )
+            return cursor.fetchone()['count']
+
+    def pending_count_for_config(self, config):
+        """Get count of pending jobs for a specific config."""
+        with self._cursor() as cursor:
+            cursor.execute(
+                'SELECT COUNT(*) as count FROM jobs WHERE status = ? AND config = ?',
+                (STATUS_PENDING, config)
+            )
+            return cursor.fetchone()['count']
+
+
+class ConfigLockManager:
+    """
+    Manages per-config locks to ensure only one process runs per config at a time.
+
+    Jobs for the same config will queue and execute sequentially.
+    Jobs for different configs can run in parallel.
+    """
+
+    def __init__(self, logger=None):
+        self.log = logger or log
+        self._master_lock = threading.Lock()
+        self._config_locks = {}  # config_path -> Lock
+        self._active_configs = {}  # config_path -> (job_id, job_path)
+        self._waiting_counts = {}  # config_path -> number of waiting jobs
+
+    def _get_lock(self, config_path):
+        """Get or create a lock for a config (thread-safe)."""
+        with self._master_lock:
+            if config_path not in self._config_locks:
+                self._config_locks[config_path] = threading.Lock()
+                self._waiting_counts[config_path] = 0
+            return self._config_locks[config_path]
+
+    def acquire(self, config_path, job_id, job_path):
+        """
+        Acquire lock for a config. Blocks until the lock is available.
+        Returns True when lock is acquired.
+        """
+        lock = self._get_lock(config_path)
+
+        # Increment waiting count
+        with self._master_lock:
+            self._waiting_counts[config_path] = self._waiting_counts.get(config_path, 0) + 1
+            if config_path in self._active_configs:
+                self.log.info("Job %d waiting for config lock: %s (current: job %d)" % (
+                    job_id,
+                    os.path.basename(config_path),
+                    self._active_configs[config_path][0]
+                ))
+
+        # Block until lock is available
+        lock.acquire()
+
+        # Update state
+        with self._master_lock:
+            self._waiting_counts[config_path] -= 1
+            self._active_configs[config_path] = (job_id, job_path)
+
+        self.log.debug("Job %d acquired lock for config: %s" % (job_id, os.path.basename(config_path)))
+        return True
+
+    def release(self, config_path):
+        """Release lock for a config."""
+        lock = self._get_lock(config_path)
+
+        with self._master_lock:
+            if config_path in self._active_configs:
+                del self._active_configs[config_path]
+
+        try:
+            lock.release()
+            self.log.debug("Released lock for config: %s" % os.path.basename(config_path))
+        except RuntimeError:
+            # Lock was not held
+            pass
+
+    def get_status(self):
+        """Get current lock status for all configs."""
+        with self._master_lock:
+            active = {}
+            for config, (job_id, job_path) in self._active_configs.items():
+                active[config] = {'job_id': job_id, 'path': job_path}
+            return {
+                'active': active,
+                'waiting': {k: v for k, v in self._waiting_counts.items() if v > 0}
+            }
+
+    def is_locked(self, config_path):
+        """Check if a config is currently locked."""
+        with self._master_lock:
+            return config_path in self._active_configs
+
+    def get_active_job(self, config_path):
+        """Get the active job for a config, if any."""
+        with self._master_lock:
+            return self._active_configs.get(config_path)
+
+
+class ConfigLogManager:
+    """Manages separate log files for each configuration."""
+
+    def __init__(self, logs_dir=LOGS_DIR):
+        self.logs_dir = logs_dir
+        self.loggers = {}
+        self.lock = threading.Lock()
+
+        # Ensure logs directory exists
+        if not os.path.isdir(self.logs_dir):
+            os.makedirs(self.logs_dir)
+
+    def _config_to_logname(self, config_path):
+        """Convert config path to log filename."""
+        basename = os.path.basename(config_path)
+        name, _ = os.path.splitext(basename)
+        return name
+
+    def get_logger(self, config_path):
+        """Get or create a logger for a specific config file."""
+        with self.lock:
+            if config_path in self.loggers:
+                return self.loggers[config_path]
+
+            log_name = self._config_to_logname(config_path)
+            log_file = os.path.join(self.logs_dir, f"{log_name}.log")
+
+            logger = logging.getLogger(f"sma.{log_name}")
+            logger.setLevel(logging.DEBUG)
+
+            if not logger.handlers:
+                file_handler = RotatingFileHandler(
+                    log_file,
+                    maxBytes=10 * 1024 * 1024,
+                    backupCount=5,
+                    encoding='utf-8'
+                )
+                file_handler.setLevel(logging.DEBUG)
+                formatter = logging.Formatter(
+                    '%(asctime)s - %(levelname)s - %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S'
+                )
+                file_handler.setFormatter(formatter)
+                logger.addHandler(file_handler)
+
+            self.loggers[config_path] = logger
+            return logger
+
+    def get_log_file(self, config_path):
+        """Get the log file path for a config."""
+        log_name = self._config_to_logname(config_path)
+        return os.path.join(self.logs_dir, f"{log_name}.log")
+
+
+class PathConfigManager:
+    """Manages path-to-config mappings for different media directories."""
+
+    def __init__(self, config_file=None, logger=None):
+        self.log = logger or log
+        self.path_configs = []
+        self.default_config = DEFAULT_PROCESS_CONFIG
+        self.api_key = None  # Can be set from daemon.json
+
+        if config_file and os.path.exists(config_file):
+            self.load_config(config_file)
+        elif os.path.exists(DEFAULT_DAEMON_CONFIG):
+            self.load_config(DEFAULT_DAEMON_CONFIG)
+        else:
+            self.log.info("No daemon config found, using default autoProcess.ini for all paths")
+
+    def load_config(self, config_file):
+        """Load path mappings from daemon.json config file."""
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            self.default_config = config.get('default_config', DEFAULT_PROCESS_CONFIG)
+            if not os.path.isabs(self.default_config):
+                self.default_config = os.path.join(SCRIPT_DIR, self.default_config)
+
+            # Load API key from config (can be overridden by CLI/env)
+            self.api_key = config.get('api_key')
+
+            raw_configs = config.get('path_configs', [])
+
+            for entry in raw_configs:
+                path = entry.get('path', '').rstrip('/')
+                config_path = entry.get('config', '')
+
+                if not path or not config_path:
+                    continue
+
+                if not os.path.isabs(config_path):
+                    config_path = os.path.join(SCRIPT_DIR, config_path)
+
+                self.path_configs.append({
+                    'path': path,
+                    'config': config_path
+                })
+
+            # Sort by path length descending (longest prefix match first)
+            self.path_configs.sort(key=lambda x: len(x['path']), reverse=True)
+
+            self.log.info("Loaded daemon config from %s" % config_file)
+            self.log.info("Default config: %s" % self.default_config)
+            self.log.info("Path mappings (%d):" % len(self.path_configs))
+            for entry in self.path_configs:
+                self.log.info("  %s -> %s" % (entry['path'], entry['config']))
+
+        except Exception as e:
+            self.log.exception("Error loading daemon config: %s" % e)
+
+    def get_config_for_path(self, file_path):
+        """Get the appropriate config file for a given file path."""
+        file_path = os.path.abspath(file_path)
+
+        for entry in self.path_configs:
+            if file_path.startswith(entry['path'] + '/') or file_path == entry['path']:
+                config_path = entry['config']
+                if os.path.exists(config_path):
+                    self.log.debug("Path %s matched %s -> %s" % (file_path, entry['path'], config_path))
+                    return config_path
+                else:
+                    self.log.warning("Config file not found: %s, using default" % config_path)
+
+        self.log.debug("Path %s using default config: %s" % (file_path, self.default_config))
+        return self.default_config
+
+    def get_all_configs(self):
+        """Return list of all unique config files."""
+        configs = {self.default_config}
+        for entry in self.path_configs:
+            configs.add(entry['config'])
+        return list(configs)
+
+
+class ConversionWorker(threading.Thread):
+    """Background worker thread that processes conversion jobs from the database."""
+
+    def __init__(self, worker_id, job_db, job_event, path_config_manager,
+                 config_log_manager, config_lock_manager, logger):
+        super().__init__(daemon=True)
+        self.worker_id = worker_id
+        self.job_db = job_db
+        self.job_event = job_event  # Event to signal new jobs
+        self.path_config_manager = path_config_manager
+        self.config_log_manager = config_log_manager
+        self.config_lock_manager = config_lock_manager
+        self.log = logger
+        self.script_path = os.path.join(SCRIPT_DIR, 'manual.py')
+        self.running = True
+
+    def stop(self):
+        """Signal worker to stop."""
+        self.running = False
+        self.job_event.set()
+
+    def run(self):
+        while self.running:
+            # Wait for job notification or timeout
+            self.job_event.wait(timeout=5.0)
+
+            if not self.running:
+                break
+
+            # Try to get a pending job
+            job = self.job_db.get_next_pending_job()
+            if job:
+                self.process_job(job)
+            else:
+                # Clear event if no jobs (will be set again when new job arrives)
+                self.job_event.clear()
+
+    def process_job(self, job):
+        job_id = job['id']
+        path = job['path']
+        args = json.loads(job['args']) if job['args'] else []
+        config_file = job['config']
+
+        if not os.path.exists(path):
+            self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
+            self.job_db.fail_job(job_id, "Path does not exist")
+            return
+
+        # Mark job as running in database
+        self.job_db.start_job(job_id, self.worker_id)
+
+        # Acquire lock for this config (blocks if another job is using it)
+        self.log.info("Worker %d acquiring lock for job %d: %s" % (
+            self.worker_id, job_id, os.path.basename(config_file)
+        ))
+        self.config_lock_manager.acquire(config_file, job_id, path)
+
+        try:
+            success = self._run_conversion(job_id, path, config_file, args)
+            if success:
+                self.job_db.complete_job(job_id)
+            else:
+                self.job_db.fail_job(job_id, "Conversion process failed")
+        except Exception as e:
+            self.log.exception("Job %d failed: %s" % (job_id, e))
+            self.job_db.fail_job(job_id, str(e))
+        finally:
+            self.config_lock_manager.release(config_file)
+
+    def _run_conversion(self, job_id, path, config_file, extra_args):
+        """Run the actual conversion process. Returns True on success."""
+        config_logger = self.config_log_manager.get_logger(config_file)
+        log_file = self.config_log_manager.get_log_file(config_file)
+
+        self.log.info("Worker %d processing job %d: %s" % (self.worker_id, job_id, path))
+        self.log.info("Using config: %s (log: %s)" % (config_file, log_file))
+
+        config_logger.info("=" * 60)
+        config_logger.info("Job %d started: %s" % (job_id, path))
+        config_logger.info("Config: %s" % config_file)
+        config_logger.info("Worker: %d" % self.worker_id)
+        config_logger.info("Timestamp: %s" % datetime.now().isoformat())
+        config_logger.info("=" * 60)
+
+        cmd = [sys.executable, self.script_path, '-a', '-i', path, '-c', config_file] + extra_args
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True
+            )
+
+            for line in process.stdout:
+                line = line.strip()
+                if line:
+                    config_logger.info(line)
+                    self.log.info("[%s] %s" % (os.path.basename(config_file), line))
+
+            process.wait()
+
+            if process.returncode == 0:
+                msg = "Job %d completed successfully: %s" % (job_id, path)
+                self.log.info(msg)
+                config_logger.info(msg)
+                return True
+            else:
+                msg = "Job %d exited with code %d: %s" % (job_id, process.returncode, path)
+                self.log.error(msg)
+                config_logger.error(msg)
+                return False
+
+        except Exception as e:
+            msg = "Job %d failed: %s" % (job_id, e)
+            self.log.exception(msg)
+            config_logger.exception(msg)
+            return False
+        finally:
+            config_logger.info("Job %d finished: %s" % (job_id, path))
+            config_logger.info("")
+
+
+DOCS_PATH = os.path.join(SCRIPT_DIR, 'docs', 'README.md')
+
+
+def _render_markdown_to_html(md_text):
+    """Minimal Markdown to HTML renderer for documentation display."""
+    lines = md_text.split('\n')
+    html_parts = []
+    in_code = False
+    in_table = False
+    in_list = False
+    list_type = None
+
+    for line in lines:
+        # Fenced code blocks
+        if line.strip().startswith('```'):
+            if in_code:
+                html_parts.append('</code></pre>')
+                in_code = False
+            else:
+                lang = line.strip()[3:].strip()
+                html_parts.append('<pre class="bg-gray-800 rounded-lg p-4 overflow-x-auto my-4 border border-gray-700"><code class="text-sm text-green-300">')
+                in_code = True
+            continue
+        if in_code:
+            html_parts.append(line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'))
+            continue
+
+        # Close table if line doesn't look like table
+        if in_table and not line.strip().startswith('|'):
+            html_parts.append('</tbody></table></div>')
+            in_table = False
+
+        # Close list if line doesn't continue it
+        if in_list and line.strip() and not _re.match(r'^(\s*[-*]\s|^\s*\d+\.\s)', line):
+            html_parts.append('</%s>' % list_type)
+            in_list = False
+
+        stripped = line.strip()
+
+        # Blank line
+        if not stripped:
+            if in_list:
+                html_parts.append('</%s>' % list_type)
+                in_list = False
+            continue
+
+        # Headings
+        hm = _re.match(r'^(#{1,6})\s+(.*)', stripped)
+        if hm:
+            level = len(hm.group(1))
+            text = _inline(hm.group(2))
+            slug = _re.sub(r'[^\w-]', '', hm.group(2).lower().replace(' ', '-'))
+            sizes = {1: 'text-3xl', 2: 'text-2xl', 3: 'text-xl', 4: 'text-lg', 5: 'text-base', 6: 'text-sm'}
+            mt = 'mt-10' if level <= 2 else 'mt-6'
+            html_parts.append('<h%d id="%s" class="%s %s font-bold text-white mb-3">%s</h%d>' % (level, slug, sizes.get(level, 'text-base'), mt, text, level))
+            continue
+
+        # Horizontal rule
+        if _re.match(r'^-{3,}$', stripped):
+            html_parts.append('<hr class="border-gray-700 my-8">')
+            continue
+
+        # Table
+        if stripped.startswith('|'):
+            cells = [c.strip() for c in stripped.split('|')[1:-1]]
+            if all(_re.match(r'^[-:]+$', c) for c in cells):
+                continue  # separator row
+            if not in_table:
+                in_table = True
+                html_parts.append('<div class="overflow-x-auto my-4"><table class="w-full text-sm"><thead><tr class="border-b border-gray-700">')
+                for c in cells:
+                    html_parts.append('<th class="text-left py-2 px-3 text-gray-400">%s</th>' % _inline(c))
+                html_parts.append('</tr></thead><tbody class="divide-y divide-gray-700/50">')
+            else:
+                html_parts.append('<tr class="hover:bg-gray-800/50">')
+                for c in cells:
+                    html_parts.append('<td class="py-2 px-3 text-gray-300">%s</td>' % _inline(c))
+                html_parts.append('</tr>')
+            continue
+
+        # Unordered list
+        lm = _re.match(r'^(\s*)[-*]\s+(.*)', line)
+        if lm:
+            if not in_list:
+                in_list = True
+                list_type = 'ul'
+                html_parts.append('<ul class="list-disc list-inside space-y-1 my-3 text-gray-300">')
+            html_parts.append('<li>%s</li>' % _inline(lm.group(2)))
+            continue
+
+        # Ordered list
+        lm = _re.match(r'^(\s*)\d+\.\s+(.*)', line)
+        if lm:
+            if not in_list:
+                in_list = True
+                list_type = 'ol'
+                html_parts.append('<ol class="list-decimal list-inside space-y-1 my-3 text-gray-300">')
+            html_parts.append('<li>%s</li>' % _inline(lm.group(2)))
+            continue
+
+        # Paragraph
+        html_parts.append('<p class="text-gray-300 my-2 leading-relaxed">%s</p>' % _inline(stripped))
+
+    # Close open blocks
+    if in_code:
+        html_parts.append('</code></pre>')
+    if in_table:
+        html_parts.append('</tbody></table></div>')
+    if in_list:
+        html_parts.append('</%s>' % list_type)
+
+    return '\n'.join(html_parts)
+
+
+def _inline(text):
+    """Process inline Markdown formatting."""
+    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    # Bold
+    text = _re.sub(r'\*\*(.+?)\*\*', r'<strong class="text-white">\1</strong>', text)
+    # Italic
+    text = _re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
+    # Inline code
+    text = _re.sub(r'`([^`]+)`', r'<code class="bg-gray-800 text-blue-300 px-1.5 py-0.5 rounded text-xs">\1</code>', text)
+    # Links
+    text = _re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2" class="text-blue-400 hover:underline">\1</a>', text)
+    return text
+
+
+DOCS_TEMPLATE = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SMA Documentation</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+<div class="max-w-4xl mx-auto px-6 py-10">
+  <div class="mb-6">
+    <a href="/" class="text-blue-400 hover:underline text-sm">&larr; Back to Dashboard</a>
+  </div>
+  <article class="prose-invert">
+    %s
+  </article>
+  <div class="mt-16 mb-8 pt-8 border-t border-gray-700 text-center text-gray-500 text-xs">
+    SMA Documentation &mdash; Generated from docs/README.md
+  </div>
+</div>
+</body>
+</html>'''
+
+
+DASHBOARD_HTML = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SMA Daemon</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>[x-cloak]{display:none!important}</style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+<div x-data="dashboard()" x-init="init()" x-cloak class="max-w-7xl mx-auto px-4 py-6">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-2xl font-bold text-white">SMA Daemon</h1>
+      <p class="text-gray-400 text-sm">Media Conversion Server</p>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href="/docs" class="text-xs text-blue-400 hover:underline">Docs</a>
+      <span class="text-xs text-gray-500" x-text="'Updated ' + lastUpdate"></span>
+      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+            :class="health.status === 'ok' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'">
+        <span class="w-1.5 h-1.5 rounded-full" :class="health.status === 'ok' ? 'bg-green-400' : 'bg-red-400'"></span>
+        <span x-text="health.status === 'ok' ? 'Healthy' : 'Offline'"></span>
+      </span>
+    </div>
+  </div>
+
+  <!-- Submit Job Form -->
+  <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
+    <h2 class="text-sm font-semibold text-green-400 uppercase tracking-wider mb-3">Submit Job</h2>
+    <form @submit.prevent="submitJob()" class="flex gap-3">
+      <input type="text" x-model="submitPath" placeholder="/path/to/file/or/directory"
+             class="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono">
+      <input type="text" x-model="submitArgs" placeholder="extra args (optional)"
+             class="w-48 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500">
+      <button type="submit" :disabled="!submitPath.trim() || submitting"
+              class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium text-white transition-colors whitespace-nowrap">
+        <span x-show="!submitting">Submit</span>
+        <span x-show="submitting">Queuing...</span>
+      </button>
+    </form>
+    <div x-show="submitResult" class="mt-3 text-sm px-3 py-2 rounded-lg"
+         :class="submitError ? 'bg-red-900/50 text-red-300' : 'bg-green-900/50 text-green-300'"
+         x-text="submitResult"></div>
+  </div>
+
+  <!-- Stats Cards -->
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+    <template x-for="s in statCards" :key="s.key">
+      <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+        <div class="text-xs font-medium uppercase tracking-wider" :class="s.color" x-text="s.label"></div>
+        <div class="text-2xl font-bold text-white mt-1" x-text="stats[s.key] || 0"></div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Active & Waiting -->
+  <div class="grid md:grid-cols-2 gap-6 mb-8" x-show="Object.keys(health.active||{}).length || Object.keys(health.waiting||{}).length">
+    <div class="bg-gray-800 rounded-lg border border-gray-700 p-5">
+      <h2 class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-3">Active Jobs</h2>
+      <template x-if="Object.keys(health.active||{}).length === 0">
+        <p class="text-gray-500 text-sm">No active jobs</p>
+      </template>
+      <div class="space-y-2">
+        <template x-for="(info, config) in (health.active||{})" :key="config">
+          <div class="bg-gray-750 rounded p-3 bg-gray-700/50">
+            <div class="text-xs text-gray-400 truncate" x-text="config.split('/').pop()"></div>
+            <div class="text-sm text-white truncate mt-0.5" x-text="info.path"></div>
+            <div class="text-xs text-gray-500 mt-0.5">Job #<span x-text="info.job_id"></span></div>
+          </div>
+        </template>
+      </div>
+    </div>
+    <div class="bg-gray-800 rounded-lg border border-gray-700 p-5">
+      <h2 class="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-3">Waiting Queues</h2>
+      <template x-if="Object.keys(health.waiting||{}).length === 0">
+        <p class="text-gray-500 text-sm">No waiting jobs</p>
+      </template>
+      <div class="space-y-2">
+        <template x-for="(count, config) in (health.waiting||{})" :key="config">
+          <div class="flex items-center justify-between bg-gray-700/50 rounded p-3">
+            <span class="text-sm text-gray-300 truncate" x-text="config.split('/').pop()"></span>
+            <span class="text-xs bg-yellow-900 text-yellow-300 px-2 py-0.5 rounded-full" x-text="count + ' queued'"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Configs -->
+  <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
+    <h2 class="text-sm font-semibold text-purple-400 uppercase tracking-wider mb-3">Config Mappings</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-gray-400 border-b border-gray-700">
+          <th class="pb-2 pr-4">Path</th><th class="pb-2 pr-4">Config</th><th class="pb-2 pr-4">Status</th><th class="pb-2">Pending</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-700/50">
+          <template x-for="c in configs.path_configs || []" :key="c.path">
+            <tr>
+              <td class="py-2 pr-4 text-gray-300 font-mono text-xs" x-text="c.path"></td>
+              <td class="py-2 pr-4 text-gray-400 font-mono text-xs" x-text="c.config.split('/').pop()"></td>
+              <td class="py-2 pr-4">
+                <span x-show="c.active_job" class="text-xs bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">Running</span>
+                <span x-show="!c.active_job" class="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">Idle</span>
+              </td>
+              <td class="py-2 text-gray-400" x-text="c.pending_jobs"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Jobs Table -->
+  <div class="bg-gray-800 rounded-lg border border-gray-700 p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Recent Jobs</h2>
+      <div class="flex gap-2">
+        <template x-for="f in ['all','pending','running','completed','failed']" :key="f">
+          <button @click="filter=f; fetchJobs()"
+                  class="text-xs px-2.5 py-1 rounded-full border transition-colors"
+                  :class="filter===f ? 'border-blue-500 bg-blue-500/20 text-blue-300' : 'border-gray-600 text-gray-400 hover:border-gray-500'"
+                  x-text="f.charAt(0).toUpperCase()+f.slice(1)">
+          </button>
+        </template>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-gray-400 border-b border-gray-700">
+          <th class="pb-2 pr-3 w-16">ID</th><th class="pb-2 pr-3">Path</th><th class="pb-2 pr-3">Config</th><th class="pb-2 pr-3">Status</th><th class="pb-2 pr-3">Created</th><th class="pb-2">Duration</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-700/50">
+          <template x-for="j in jobs" :key="j.id">
+            <tr class="hover:bg-gray-700/30">
+              <td class="py-2 pr-3 text-gray-500 font-mono" x-text="j.id"></td>
+              <td class="py-2 pr-3 text-gray-300 font-mono text-xs truncate max-w-xs" :title="j.path" x-text="j.path.split('/').pop()"></td>
+              <td class="py-2 pr-3 text-gray-400 text-xs" x-text="j.config.split('/').pop()"></td>
+              <td class="py-2 pr-3">
+                <span class="text-xs px-2 py-0.5 rounded-full"
+                      :class="{'pending':'bg-gray-700 text-gray-300','running':'bg-blue-900 text-blue-300','completed':'bg-green-900 text-green-300','failed':'bg-red-900 text-red-300'}[j.status]"
+                      x-text="j.status"></span>
+              </td>
+              <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtTime(j.created_at)"></td>
+              <td class="py-2 text-gray-500 text-xs" x-text="fmtDuration(j)"></td>
+            </tr>
+          </template>
+          <template x-if="jobs.length === 0">
+            <tr><td colspan="6" class="py-8 text-center text-gray-500">No jobs found</td></tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <div class="flex justify-between items-center mt-3 text-xs text-gray-500" x-show="jobs.length > 0">
+      <span x-text="'Showing ' + jobs.length + ' jobs'"></span>
+      <div class="flex gap-2">
+        <button @click="if(page>0){page--;fetchJobs()}" :disabled="page===0"
+                class="px-2 py-1 rounded border border-gray-600 disabled:opacity-30" :class="page>0?'hover:border-gray-500':''">Prev</button>
+        <button @click="page++;fetchJobs()"
+                class="px-2 py-1 rounded border border-gray-600 hover:border-gray-500" :disabled="jobs.length < pageSize">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function dashboard() {
+  return {
+    health: {}, stats: {}, configs: {}, jobs: [],
+    filter: 'all', page: 0, pageSize: 50,
+    lastUpdate: '', interval: null,
+    submitPath: '', submitArgs: '', submitting: false, submitResult: '', submitError: false,
+    statCards: [
+      {key:'total',label:'Total',color:'text-gray-400'},
+      {key:'pending',label:'Pending',color:'text-yellow-400'},
+      {key:'running',label:'Running',color:'text-blue-400'},
+      {key:'completed',label:'Completed',color:'text-green-400'},
+      {key:'failed',label:'Failed',color:'text-red-400'},
+    ],
+    async init() {
+      await this.refresh();
+      this.interval = setInterval(() => this.refresh(), 5000);
+    },
+    async refresh() {
+      try {
+        const [h, s, c] = await Promise.all([
+          fetch('/health').then(r=>r.json()),
+          fetch('/stats').then(r=>r.json()),
+          fetch('/configs').then(r=>r.json()),
+        ]);
+        this.health = h; this.stats = s; this.configs = c;
+        await this.fetchJobs();
+        this.lastUpdate = new Date().toLocaleTimeString();
+      } catch(e) { this.health = {status:'error'}; }
+    },
+    async fetchJobs() {
+      const params = new URLSearchParams({limit: this.pageSize, offset: this.page * this.pageSize});
+      if (this.filter !== 'all') params.set('status', this.filter);
+      const r = await fetch('/jobs?' + params).then(r=>r.json());
+      this.jobs = r.jobs || [];
+    },
+    async submitJob() {
+      this.submitting = true; this.submitResult = ''; this.submitError = false;
+      try {
+        const body = {path: this.submitPath.trim()};
+        if (this.submitArgs.trim()) body.args = this.submitArgs.trim().split(/\\s+/);
+        const r = await fetch('/webhook', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        const d = await r.json();
+        if (r.ok) {
+          this.submitResult = 'Job #' + d.job_id + ' queued for ' + d.path;
+          this.submitPath = ''; this.submitArgs = '';
+          setTimeout(() => this.refresh(), 500);
+        } else {
+          this.submitError = true;
+          this.submitResult = d.error || 'Failed to submit job';
+        }
+      } catch(e) { this.submitError = true; this.submitResult = 'Request failed: ' + e.message; }
+      this.submitting = false;
+      setTimeout(() => this.submitResult = '', 8000);
+    },
+    fmtTime(t) {
+      if (!t) return '-';
+      const d = new Date(t + 'Z');
+      return d.toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    },
+    fmtDuration(j) {
+      if (!j.started_at) return '-';
+      const start = new Date(j.started_at + 'Z');
+      const end = j.completed_at ? new Date(j.completed_at + 'Z') : new Date();
+      const s = Math.round((end - start) / 1000);
+      if (s < 60) return s + 's';
+      if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+      return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+    }
+  };
+}
+</script>
+</body>
+</html>'''
+
+
+class WebhookHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for webhook endpoints."""
+
+    # Endpoints that don't require authentication
+    PUBLIC_ENDPOINTS = ['/', '/health', '/status', '/docs']
+
+    def log_message(self, format, *args):
+        self.server.logger.debug("%s - %s" % (self.address_string(), format % args))
+
+    def send_json_response(self, status_code, data):
+        self.send_response(status_code)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(data, default=str).encode('utf-8'))
+
+    def send_html_response(self, status_code, html):
+        self.send_response(status_code)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(html.encode('utf-8'))
+
+    def wants_html(self):
+        """Check if client prefers HTML (browser) over JSON (API)."""
+        accept = self.headers.get('Accept', '')
+        return 'text/html' in accept and 'application/json' not in accept
+
+    def check_auth(self):
+        """
+        Check if request is authenticated.
+        Returns True if authenticated or no API key is configured.
+        Returns False and sends 401 response if authentication fails.
+        """
+        api_key = self.server.api_key
+        if not api_key:
+            # No API key configured, allow all requests
+            return True
+
+        # Check X-API-Key header
+        request_key = self.headers.get('X-API-Key')
+
+        # Also check Authorization header (Bearer token)
+        if not request_key:
+            auth_header = self.headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                request_key = auth_header[7:]
+
+        if request_key == api_key:
+            return True
+
+        # Authentication failed
+        self.server.logger.warning("Unauthorized request from %s" % self.address_string())
+        self.send_response(401)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('WWW-Authenticate', 'Bearer')
+        self.end_headers()
+        self.wfile.write(json.dumps({'error': 'Unauthorized', 'message': 'Valid API key required'}).encode('utf-8'))
+        return False
+
+    def is_public_endpoint(self, path):
+        """Check if the endpoint is public (doesn't require auth)."""
+        return path in self.PUBLIC_ENDPOINTS
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+
+        # Check authentication for non-public endpoints
+        if not self.is_public_endpoint(parsed.path) and not self.check_auth():
+            return
+
+        if parsed.path == '/' and self.wants_html():
+            self.send_html_response(200, DASHBOARD_HTML)
+            return
+
+        if parsed.path == '/docs':
+            try:
+                with open(DOCS_PATH, 'r', encoding='utf-8') as f:
+                    md_content = f.read()
+                rendered = _render_markdown_to_html(md_content)
+                self.send_html_response(200, DOCS_TEMPLATE % rendered)
+            except FileNotFoundError:
+                self.send_html_response(404, '<h1>Documentation not found</h1><p>docs/README.md missing</p>')
+            return
+
+        if parsed.path in ['/', '/health', '/status']:
+            lock_status = self.server.config_lock_manager.get_status()
+            stats = self.server.job_db.get_stats()
+            self.send_json_response(200, {
+                'status': 'ok',
+                'workers': self.server.worker_count,
+                'jobs': stats,
+                'active': lock_status['active'],
+                'waiting': lock_status['waiting']
+            })
+
+        elif parsed.path == '/jobs':
+            # Get jobs with optional filtering
+            status = query.get('status', [None])[0]
+            config = query.get('config', [None])[0]
+            limit = int(query.get('limit', [100])[0])
+            offset = int(query.get('offset', [0])[0])
+
+            jobs = self.server.job_db.get_jobs(
+                status=status, config=config, limit=limit, offset=offset
+            )
+            self.send_json_response(200, {
+                'jobs': jobs,
+                'count': len(jobs),
+                'limit': limit,
+                'offset': offset
+            })
+
+        elif parsed.path.startswith('/jobs/'):
+            # Get specific job
+            try:
+                job_id = int(parsed.path.split('/')[-1])
+                job = self.server.job_db.get_job(job_id)
+                if job:
+                    self.send_json_response(200, job)
+                else:
+                    self.send_json_response(404, {'error': 'Job not found'})
+            except ValueError:
+                self.send_json_response(400, {'error': 'Invalid job ID'})
+
+        elif parsed.path == '/configs':
+            configs_with_logs = []
+            for entry in self.server.path_config_manager.path_configs:
+                config_path = entry['config']
+                active_job = self.server.config_lock_manager.get_active_job(config_path)
+                pending = self.server.job_db.pending_count_for_config(config_path)
+                configs_with_logs.append({
+                    'path': entry['path'],
+                    'config': config_path,
+                    'log_file': self.server.config_log_manager.get_log_file(config_path),
+                    'active_job': active_job,
+                    'pending_jobs': pending
+                })
+
+            default_config = self.server.path_config_manager.default_config
+            default_active = self.server.config_lock_manager.get_active_job(default_config)
+            default_pending = self.server.job_db.pending_count_for_config(default_config)
+
+            self.send_json_response(200, {
+                'default_config': default_config,
+                'default_log': self.server.config_log_manager.get_log_file(default_config),
+                'default_active_job': default_active,
+                'default_pending_jobs': default_pending,
+                'path_configs': configs_with_logs,
+                'logs_directory': self.server.config_log_manager.logs_dir
+            })
+
+        elif parsed.path == '/stats':
+            stats = self.server.job_db.get_stats()
+            self.send_json_response(200, stats)
+
+        else:
+            self.send_json_response(404, {'error': 'Not found'})
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+
+        # All POST endpoints require authentication
+        if not self.check_auth():
+            return
+
+        if parsed.path in ['/', '/webhook', '/convert']:
+            self._handle_webhook()
+        elif parsed.path == '/cleanup':
+            # Cleanup old completed/failed jobs
+            query = parse_qs(parsed.query)
+            days = int(query.get('days', [30])[0])
+            deleted = self.server.job_db.cleanup_old_jobs(days)
+            self.send_json_response(200, {
+                'deleted': deleted,
+                'days': days
+            })
+        else:
+            self.send_json_response(404, {'error': 'Not found'})
+
+    def _handle_webhook(self):
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length == 0:
+                self.send_json_response(400, {'error': 'Empty request body'})
+                return
+
+            body = self.rfile.read(content_length).decode('utf-8').strip()
+
+            path = None
+            extra_args = []
+            config_override = None
+
+            content_type = self.headers.get('Content-Type', '')
+
+            if 'application/json' in content_type:
+                try:
+                    data = json.loads(body)
+                    if isinstance(data, dict):
+                        path = data.get('path') or data.get('file') or data.get('input')
+                        extra_args = data.get('args', [])
+                        config_override = data.get('config')
+                        if isinstance(extra_args, str):
+                            extra_args = extra_args.split()
+                    elif isinstance(data, str):
+                        path = data
+                except json.JSONDecodeError:
+                    path = body
+            else:
+                path = body
+
+            if not path:
+                self.send_json_response(400, {'error': 'No path provided'})
+                return
+
+            path = os.path.abspath(path)
+
+            if not os.path.exists(path):
+                self.send_json_response(400, {
+                    'error': 'Path does not exist',
+                    'path': path
+                })
+                return
+
+            # Determine config
+            if config_override and os.path.exists(config_override):
+                resolved_config = config_override
+            else:
+                resolved_config = self.server.path_config_manager.get_config_for_path(path)
+
+            # Add job to database
+            job_id = self.server.job_db.add_job(path, resolved_config, extra_args)
+
+            # Signal workers that a new job is available
+            self.server.job_event.set()
+
+            log_file = self.server.config_log_manager.get_log_file(resolved_config)
+            config_busy = self.server.config_lock_manager.is_locked(resolved_config)
+            pending = self.server.job_db.pending_count_for_config(resolved_config)
+
+            self.server.logger.info("Queued job %d: %s (config: %s)" % (
+                job_id, path, resolved_config
+            ))
+
+            self.send_json_response(202, {
+                'status': 'queued',
+                'job_id': job_id,
+                'path': path,
+                'config': resolved_config,
+                'log_file': log_file,
+                'config_busy': config_busy,
+                'pending_jobs': pending
+            })
+
+        except Exception as e:
+            self.server.logger.exception("Error handling request: %s" % e)
+            self.send_json_response(500, {'error': str(e)})
+
+
+class DaemonServer(HTTPServer):
+    """HTTP server with SQLite job queue and worker threads."""
+
+    def __init__(self, server_address, handler_class, job_db, path_config_manager,
+                 config_log_manager, config_lock_manager, logger, worker_count=2,
+                 api_key=None):
+        super().__init__(server_address, handler_class)
+        self.job_db = job_db
+        self.path_config_manager = path_config_manager
+        self.config_log_manager = config_log_manager
+        self.config_lock_manager = config_lock_manager
+        self.logger = logger
+        self.worker_count = worker_count
+        self.api_key = api_key
+        self.workers = []
+        self.job_event = threading.Event()
+
+        # Check for pending jobs from previous run
+        pending = job_db.pending_count()
+        if pending > 0:
+            logger.info("Found %d pending jobs from previous run" % pending)
+            self.job_event.set()
+
+        # Start worker threads
+        for i in range(worker_count):
+            worker = ConversionWorker(
+                worker_id=i + 1,
+                job_db=job_db,
+                job_event=self.job_event,
+                path_config_manager=path_config_manager,
+                config_log_manager=config_log_manager,
+                config_lock_manager=config_lock_manager,
+                logger=logger
+            )
+            worker.start()
+            self.workers.append(worker)
+            logger.debug("Started worker thread %d" % (i + 1))
+
+    def shutdown(self):
+        self.logger.info("Shutting down...")
+
+        # Stop workers
+        for worker in self.workers:
+            worker.stop()
+
+        # Wait for workers
+        for worker in self.workers:
+            worker.join(timeout=5)
+
+        super().shutdown()
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="SMA Daemon - HTTP webhook server for media conversion"
+    )
+    parser.add_argument(
+        '--host', default='127.0.0.1',
+        help='Host to bind to (default: 127.0.0.1)'
+    )
+    parser.add_argument(
+        '--port', type=int, default=8585,
+        help='Port to listen on (default: 8585)'
+    )
+    parser.add_argument(
+        '--workers', type=int, default=2,
+        help='Number of worker threads (default: 2)'
+    )
+    parser.add_argument(
+        '-d', '--daemon-config',
+        help='Path to daemon.json config file (path mappings)'
+    )
+    parser.add_argument(
+        '--logs-dir', default=LOGS_DIR,
+        help='Directory for per-config log files (default: logs/)'
+    )
+    parser.add_argument(
+        '--db', default=DATABASE_PATH,
+        help='Path to SQLite database (default: config/daemon.db)'
+    )
+    parser.add_argument(
+        '--api-key',
+        help='API key for authentication (or set SMA_DAEMON_API_KEY env var)'
+    )
+
+    args = parser.parse_args()
+
+    log.info("SMA Daemon starting...")
+    log.info("Python %s" % sys.version)
+
+    # Initialize managers
+    job_db = JobDatabase(args.db, logger=log)
+    config_log_manager = ConfigLogManager(args.logs_dir)
+    config_lock_manager = ConfigLockManager(logger=log)
+    path_config_manager = PathConfigManager(args.daemon_config, logger=log)
+
+    # Determine API key (priority: CLI arg > env var > config file)
+    api_key = args.api_key or os.environ.get('SMA_DAEMON_API_KEY') or path_config_manager.api_key
+
+    log.info("Database: %s" % args.db)
+    log.info("Logs directory: %s" % config_log_manager.logs_dir)
+    log.info("Concurrency: One process per config (jobs for same config queue)")
+    if api_key:
+        log.info("Authentication: ENABLED (API key required)")
+    else:
+        log.info("Authentication: DISABLED (no API key configured)")
+
+    # Show config mappings
+    log.info("Config to log file mappings:")
+    for config_path in path_config_manager.get_all_configs():
+        log_file = config_log_manager.get_log_file(config_path)
+        exists = "OK" if os.path.exists(config_path) else "MISSING"
+        log.info("  %s [%s] -> %s" % (config_path, exists, log_file))
+
+    server_address = (args.host, args.port)
+
+    try:
+        server = DaemonServer(
+            server_address,
+            WebhookHandler,
+            job_db,
+            path_config_manager,
+            config_log_manager,
+            config_lock_manager,
+            log,
+            worker_count=args.workers,
+            api_key=api_key
+        )
+
+        log.info("Listening on http://%s:%d" % (args.host, args.port))
+        log.info("Worker threads: %d" % args.workers)
+        log.info("Endpoints:")
+        log.info("  POST /webhook      - Submit conversion job")
+        log.info("  GET  /health       - Health check with job stats")
+        log.info("  GET  /jobs         - List jobs (?status=pending&limit=50)")
+        log.info("  GET  /jobs/<id>    - Get specific job")
+        log.info("  GET  /configs      - Show config mappings and status")
+        log.info("  GET  /stats        - Job statistics")
+        log.info("  POST /cleanup      - Remove old jobs (?days=30)")
+        log.info("")
+        log.info("Ready to accept connections.")
+
+        server.serve_forever()
+
+    except KeyboardInterrupt:
+        log.info("Received interrupt signal")
+        server.shutdown()
+    except Exception as e:
+        log.exception("Server error: %s" % e)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
