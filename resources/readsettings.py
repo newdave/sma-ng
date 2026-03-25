@@ -292,19 +292,9 @@ class ReadSettings:
             'username': '',
             'password': '',
         },
-        'Sickrage': {
-            'host': 'localhost',
-            'port': 8081,
-            'ssl': False,
-            'apikey': '',
-            'webroot': '',
-            'username': '',
-            'password': '',
-        },
         'SABNZBD': {
             'convert': True,
             'sickbeard-category': 'sickbeard',
-            'sickrage-category': 'sickrage',
             'sonarr-category': 'sonarr',
             'radarr-category': 'radarr',
             'bypass-category': 'bypass',
@@ -313,7 +303,7 @@ class ReadSettings:
         },
         'Deluge': {
             'sickbeard-label': 'sickbeard',
-            'sickrage-label': 'sickrage',
+
             'sonarr-label': 'sonarr',
             'radarr-label': 'radarr',
             'bypass-label': 'bypass',
@@ -328,7 +318,7 @@ class ReadSettings:
         },
         'qBittorrent': {
             'sickbeard-label': 'sickbeard',
-            'sickrage-label': 'sickrage',
+
             'sonarr-label': 'sonarr',
             'radarr-label': 'radarr',
             'bypass-label': 'bypass',
@@ -345,7 +335,7 @@ class ReadSettings:
         },
         'uTorrent': {
             'sickbeard-label': 'sickbeard',
-            'sickrage-label': 'sickrage',
+
             'sonarr-label': 'sonarr',
             'radarr-label': 'radarr',
             'bypass-label': 'bypass',
@@ -881,23 +871,11 @@ class ReadSettings:
         self.Sickbeard['user'] = config.get(section, "username")
         self.Sickbeard['pass'] = config.get(section, "password")
 
-        # Sickrage
-        section = "Sickrage"
-        self.Sickrage = {}
-        self.Sickrage['host'] = config.get(section, "host")
-        self.Sickrage['port'] = config.getint(section, "port")
-        self.Sickrage['apikey'] = config.get(section, "apikey")
-        self.Sickrage['webroot'] = config.get(section, "webroot")
-        self.Sickrage['ssl'] = config.getboolean(section, "ssl")
-        self.Sickrage['user'] = config.get(section, "username")
-        self.Sickrage['pass'] = config.get(section, "password")
-
         # SAB
         section = "SABNZBD"
         self.SAB = {}
         self.SAB['convert'] = config.getboolean(section, "convert")
         self.SAB['sb'] = config.get(section, "Sickbeard-category").lower()
-        self.SAB['sr'] = config.get(section, "Sickrage-category").lower()
         self.SAB['sonarr'] = config.get(section, "Sonarr-category").lower()
         self.SAB['radarr'] = config.get(section, "Radarr-category").lower()
         self.SAB['bypass'] = config.getlist(section, "Bypass-category")
@@ -908,7 +886,6 @@ class ReadSettings:
         section = "Deluge"
         self.deluge = {}
         self.deluge['sb'] = config.get(section, "sickbeard-label").lower()
-        self.deluge['sr'] = config.get(section, "sickrage-label").lower()
         self.deluge['sonarr'] = config.get(section, "sonarr-label").lower()
         self.deluge['radarr'] = config.get(section, "radarr-label").lower()
         self.deluge['bypass'] = config.getlist(section, "bypass-label")
@@ -925,7 +902,6 @@ class ReadSettings:
         section = "qBittorrent"
         self.qBittorrent = {}
         self.qBittorrent['sb'] = config.get(section, "sickbeard-label").lower()
-        self.qBittorrent['sr'] = config.get(section, "sickrage-label").lower()
         self.qBittorrent['sonarr'] = config.get(section, "sonarr-label").lower()
         self.qBittorrent['radarr'] = config.get(section, "radarr-label").lower()
         self.qBittorrent['bypass'] = config.getlist(section, "bypass-label")
@@ -944,7 +920,6 @@ class ReadSettings:
         section = "uTorrent"
         self.uTorrent = {}
         self.uTorrent['sb'] = config.get(section, "sickbeard-label").lower()
-        self.uTorrent['sr'] = config.get(section, "sickrage-label").lower()
         self.uTorrent['sonarr'] = config.get(section, "sonarr-label").lower()
         self.uTorrent['radarr'] = config.get(section, "radarr-label").lower()
         self.uTorrent['bypass'] = config.getlist(section, "bypass-label")

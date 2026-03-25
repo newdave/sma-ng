@@ -328,19 +328,9 @@ webroot =
 username =
 password =
 
-[Sickrage]
-host = localhost
-port = 8081
-ssl = false
-apikey =
-webroot =
-username =
-password =
-
 [SABNZBD]
 convert = true
 sickbeard-category = sickbeard
-sickrage-category = sickrage
 sonarr-category = sonarr
 radarr-category = radarr
 bypass-category = bypass
@@ -349,7 +339,7 @@ path-mapping =
 
 [Deluge]
 sickbeard-label =
-sickrage-label =
+
 sonarr-label = sonarr
 radarr-label = radarr
 bypass-label = bypass
@@ -364,7 +354,7 @@ path-mapping =
 
 [qBittorrent]
 sickbeard-label = sickbeard
-sickrage-label = sickrage
+
 sonarr-label = sonarr
 radarr-label = radarr
 bypass-label = bypass
@@ -381,7 +371,7 @@ path-mapping =
 
 [uTorrent]
 sickbeard-label = sickbeard
-sickrage-label = sickrage
+
 sonarr-label = sonarr
 radarr-label = radarr
 bypass-label = bypass

@@ -1,6 +1,6 @@
 [Unit]
 Description=SMA-NG Daemon - Media Conversion Webhook Server
-Documentation=https://github.com/mdhiggins/sickbeard_mp4_automator
+Documentation=https://github.com/newdave/sma-ng
 After=network.target
 Wants=network.target
 

@@ -1,9 +1,9 @@
 #!/opt/sma/venv/bin/python3
 """
-SMA-NG Sickbeard/SickRage Post-Processing Script
+SMA-NG Sickbeard Post-Processing Script
 
 Submits conversion job to daemon via webhook, waits for completion,
-then triggers a show refresh on Sickbeard/SickRage.
+then triggers a show refresh on Sickbeard.
 """
 import os
 import sys
@@ -41,23 +41,21 @@ try:
 
     log.info("Conversion completed.")
 
-    # Trigger show refresh on Sickbeard/SickRage
+    # Trigger show refresh on Sickbeard
     try:
         import requests
-        for section_name, section in [('Sickbeard', settings.Sickbeard), ('Sickrage', settings.Sickrage)]:
-            host = section.get('host', '')
-            port = section.get('port', '')
-            apikey = section.get('apikey', '')
-            if not host or not apikey:
-                continue
+        section = settings.Sickbeard
+        host = section.get('host', '')
+        port = section.get('port', '')
+        apikey = section.get('apikey', '')
+        if host and apikey:
             ssl = section.get('ssl', False)
             protocol = "https://" if ssl else "http://"
             webroot = section.get('webroot', '')
             url = "%s%s:%s%s/api/%s/?cmd=show.refresh&tvdbid=%s" % (protocol, host, port, webroot, apikey, tvdb_id)
-            log.info("Requesting %s refresh: %s" % (section_name, url))
+            log.info("Requesting Sickbeard refresh: %s" % url)
             r = requests.get(url, timeout=30)
-            log.info("%s response: %s" % (section_name, r.text.strip()))
-            break
+            log.info("Sickbeard response: %s" % r.text.strip())
     except:
         log.exception("Failed to trigger show refresh.")
 

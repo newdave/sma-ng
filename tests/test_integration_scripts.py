@@ -11,8 +11,14 @@ import importlib
 import pytest
 from unittest.mock import patch, MagicMock, call
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-def _run_script(script_path, mock_submit_return=None, expect_exit=None):
+
+def _script_path(name):
+    return os.path.join(PROJECT_ROOT, name)
+
+
+def _run_script(script_name, mock_submit_return=None, expect_exit=None):
     """Execute a script with webhook_client.submit_job and submit_and_wait mocked.
 
     Patches at the module attribute level so both `from X import Y` and `import X; X.Y()`
@@ -26,6 +32,7 @@ def _run_script(script_path, mock_submit_return=None, expect_exit=None):
     wc.submit_job = mock_submit
     wc.submit_and_wait = mock_submit_and_wait
     exit_code = None
+    script_path = _script_path(script_name)
     try:
         exec(compile(open(script_path).read(), script_path, 'exec'))
     except SystemExit as e:
@@ -59,7 +66,7 @@ class TestPostRadarr:
     def test_test_event_exits(self, mock_validate, mock_submit):
         with patch.dict(os.environ, {'radarr_eventtype': 'Test'}, clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open('postRadarr.py').read(), 'postRadarr.py', 'exec'))
+                exec(compile(open(_script_path('postRadarr.py')).read(), 'postRadarr.py', 'exec'))
             assert exc.value.code == 0
         mock_submit.assert_not_called()
 
@@ -68,7 +75,7 @@ class TestPostRadarr:
     def test_invalid_event_exits(self, mock_validate, mock_submit):
         with patch.dict(os.environ, {'radarr_eventtype': 'Rename'}, clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open('postRadarr.py').read(), 'postRadarr.py', 'exec'))
+                exec(compile(open(_script_path('postRadarr.py')).read(), 'postRadarr.py', 'exec'))
             assert exc.value.code == 1
 
     @patch('requests.post')
@@ -91,7 +98,7 @@ class TestPostRadarr:
 
         with patch.dict(os.environ, self._radarr_env(), clear=False):
             try:
-                exec(compile(open('postRadarr.py').read(), 'postRadarr.py', 'exec'))
+                exec(compile(open(_script_path('postRadarr.py')).read(), 'postRadarr.py', 'exec'))
             except SystemExit:
                 pass
 
@@ -132,7 +139,7 @@ class TestPostSonarr:
     def test_test_event_exits(self, mock_validate, mock_submit):
         with patch.dict(os.environ, {'sonarr_eventtype': 'Test'}, clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open('postSonarr.py').read(), 'postSonarr.py', 'exec'))
+                exec(compile(open(_script_path('postSonarr.py')).read(), 'postSonarr.py', 'exec'))
             assert exc.value.code == 0
 
     @patch('requests.post')
@@ -154,7 +161,7 @@ class TestPostSonarr:
 
         with patch.dict(os.environ, self._sonarr_env(), clear=False):
             try:
-                exec(compile(open('postSonarr.py').read(), 'postSonarr.py', 'exec'))
+                exec(compile(open(_script_path('postSonarr.py')).read(), 'postSonarr.py', 'exec'))
             except SystemExit:
                 pass
 
@@ -181,7 +188,7 @@ class TestPostSickbeard:
             with patch('requests.get') as mock_get:
                 mock_get.return_value = MagicMock(text='OK')
                 try:
-                    exec(compile(open('postSickbeard.py').read(), 'postSickbeard.py', 'exec'))
+                    exec(compile(open(_script_path('postSickbeard.py')).read(), 'postSickbeard.py', 'exec'))
                 except SystemExit:
                     pass
         finally:
@@ -199,7 +206,7 @@ class TestPostSickbeard:
         sys.argv = ['postSickbeard.py', '/file.mkv']
         try:
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open('postSickbeard.py').read(), 'postSickbeard.py', 'exec'))
+                exec(compile(open(_script_path('postSickbeard.py')).read(), 'postSickbeard.py', 'exec'))
             assert exc.value.code == 1
         finally:
             sys.argv = original_argv
@@ -238,12 +245,11 @@ class TestNZBGetPostProcess:
     def _nzbget_env(self, directory, **overrides):
         env = {
             'NZBOP_VERSION': '21.0',
-            'NZBPO_MP4_FOLDER': os.path.dirname(os.path.abspath(__file__)) + '/../',
+            'NZBPO_MP4_FOLDER': os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'),
             'NZBPO_SHOULDCONVERT': 'true',
             'NZBPO_SONARR_CAT': 'sonarr',
             'NZBPO_RADARR_CAT': 'radarr',
             'NZBPO_SICKBEARD_CAT': 'sickbeard',
-            'NZBPO_SICKRAGE_CAT': 'sickrage',
             'NZBPO_BYPASS_CAT': 'bypass',
             'NZBPP_TOTALSTATUS': 'SUCCESS',
             'NZBPP_DIRECTORY': directory,
@@ -260,7 +266,7 @@ class TestNZBGetPostProcess:
 
         with patch.dict(os.environ, self._nzbget_env(str(tmp_path)), clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open('NZBGetPostProcess.py').read(), 'NZBGetPostProcess.py', 'exec'))
+                exec(compile(open(_script_path('NZBGetPostProcess.py')).read(), 'NZBGetPostProcess.py', 'exec'))
             assert exc.value.code == 93  # POSTPROCESS_SUCCESS
 
         assert mock_submit.call_count == 1
@@ -272,7 +278,7 @@ class TestNZBGetPostProcess:
         env = self._nzbget_env(str(tmp_path), NZBPP_CATEGORY='bypass')
         with patch.dict(os.environ, env, clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open('NZBGetPostProcess.py').read(), 'NZBGetPostProcess.py', 'exec'))
+                exec(compile(open(_script_path('NZBGetPostProcess.py')).read(), 'NZBGetPostProcess.py', 'exec'))
             assert exc.value.code == 95  # POSTPROCESS_NONE
 
         mock_submit.assert_not_called()
@@ -284,7 +290,7 @@ class TestNZBGetPostProcess:
         env = self._nzbget_env(str(tmp_path), NZBPO_SHOULDCONVERT='false')
         with patch.dict(os.environ, env, clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open('NZBGetPostProcess.py').read(), 'NZBGetPostProcess.py', 'exec'))
+                exec(compile(open(_script_path('NZBGetPostProcess.py')).read(), 'NZBGetPostProcess.py', 'exec'))
             assert exc.value.code == 95
 
         mock_submit.assert_not_called()
@@ -292,7 +298,7 @@ class TestNZBGetPostProcess:
     def test_no_nzbget_env_exits(self):
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open('NZBGetPostProcess.py').read(), 'NZBGetPostProcess.py', 'exec'))
+                exec(compile(open(_script_path('NZBGetPostProcess.py')).read(), 'NZBGetPostProcess.py', 'exec'))
             assert exc.value.code == 94  # POSTPROCESS_ERROR
 
 
