@@ -196,6 +196,11 @@ force-filter = false
 
 [Audio.ChannelFilters]
 
+[Naming]
+enabled = false
+tv-template = {Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle} [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}
+movie-template = {Movie CleanTitle} ({Release Year}) [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}
+
 [Subtitle]
 codec = mov_text
 codec-image-based =
@@ -352,6 +357,7 @@ servername =
 ssl = false
 ignore-certs = false
 path-mapping =
+plexmatch = true
 """
         ini_path = str(tmp_path / "autoProcess.ini")
         with open(ini_path, 'w') as f:

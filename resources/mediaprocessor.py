@@ -80,6 +80,24 @@ class MediaProcessor:
                     if self.settings.relocate_moov and not tagfailed:
                         self.QTFS(output['output'])
 
+                    # File renaming
+                    if self.settings.naming_enabled and tagdata:
+                        try:
+                            from resources.naming import generate_name, rename_file
+                            new_name = generate_name(output['output'], info, tagdata, self.settings, log=self.log)
+                            if new_name:
+                                output['output'] = rename_file(output['output'], new_name, log=self.log)
+                        except:
+                            self.log.exception("Error during file rename")
+
+                    # Plex .plexmatch file
+                    if self.settings.plexmatch_enabled and tagdata:
+                        try:
+                            from resources.metadata import update_plexmatch
+                            update_plexmatch(output['output'], tagdata, self.settings, log=self.log)
+                        except:
+                            self.log.exception("Error updating .plexmatch")
+
                     # Reverse Ouput
                     output['output'] = self.restoreFromOutput(inputfile, output['output'])
                     for i, sub in enumerate(output['external_subs']):

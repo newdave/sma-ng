@@ -434,3 +434,113 @@ class Metadata:
             except Exception:
                 self.log.exception("Exception while retrieving poster" % poster_path)
         return poster
+
+
+def update_plexmatch(filepath, tagdata, settings, log=None):
+    """
+    Create or update a .plexmatch file for Plex media identification.
+
+    For TV: placed in show root directory, accumulates episode mappings.
+    For Movies: placed in movie directory with title/year/guid.
+
+    Only runs if Plex server is configured and plexmatch is enabled.
+    """
+    import re as _re
+
+    log = log or logging.getLogger(__name__)
+
+    if not getattr(settings, 'plexmatch_enabled', False):
+        return
+    if not tagdata:
+        return
+
+    try:
+        if tagdata.mediatype == MediaType.TV:
+            _write_tv_plexmatch(filepath, tagdata, log)
+        elif tagdata.mediatype == MediaType.Movie:
+            _write_movie_plexmatch(filepath, tagdata, log)
+    except Exception:
+        log.exception("Error updating .plexmatch file")
+
+
+def _write_tv_plexmatch(filepath, tagdata, log):
+    """Write .plexmatch for a TV show directory."""
+    import re as _re
+
+    file_dir = os.path.dirname(filepath)
+    dir_name = os.path.basename(file_dir).lower()
+
+    # Navigate up from "Season XX" to show root
+    if dir_name.startswith('season') or _re.match(r's\d+', dir_name):
+        show_root = os.path.dirname(file_dir)
+    else:
+        show_root = file_dir
+
+    if not os.path.isdir(show_root):
+        return
+
+    plexmatch_path = os.path.join(show_root, '.plexmatch')
+
+    # Parse existing .plexmatch
+    header = {}
+    episodes = {}
+    if os.path.exists(plexmatch_path):
+        with open(plexmatch_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('Episode:'):
+                    parts = line.split(':', 2)
+                    if len(parts) >= 3:
+                        episodes[parts[1].strip()] = parts[2].strip()
+                elif ':' in line:
+                    key, val = line.split(':', 1)
+                    header[key.strip()] = val.strip()
+
+    # Update header
+    header['title'] = tagdata.showname
+    if hasattr(tagdata, 'showdata') and tagdata.showdata:
+        first_air = tagdata.showdata.get('first_air_date', '')
+        if first_air and len(first_air) >= 4:
+            header['year'] = first_air[:4]
+    if hasattr(tagdata, 'tvdbid') and tagdata.tvdbid:
+        header['TvdbId'] = str(tagdata.tvdbid)
+    if hasattr(tagdata, 'imdbid') and tagdata.imdbid:
+        header['ImdbId'] = str(tagdata.imdbid)
+    if tagdata.tmdbid:
+        header['guid'] = 'tmdb://%s' % tagdata.tmdbid
+
+    # Add/update episode entry
+    season = int(tagdata.season or 0)
+    episode = int(tagdata.episode or 0)
+    ep_key = 'S%02dE%02d' % (season, episode)
+    episodes[ep_key] = os.path.relpath(filepath, show_root)
+
+    # Write file
+    with open(plexmatch_path, 'w', encoding='utf-8') as f:
+        for key in ['title', 'year', 'TvdbId', 'ImdbId', 'guid']:
+            if key in header:
+                f.write('%s: %s\n' % (key, header[key]))
+        for ek in sorted(episodes.keys()):
+            f.write('Episode: %s: %s\n' % (ek, episodes[ek]))
+
+    log.info("Updated .plexmatch: %s (%d episodes)" % (plexmatch_path, len(episodes)))
+
+
+def _write_movie_plexmatch(filepath, tagdata, log):
+    """Write .plexmatch for a movie directory."""
+    movie_dir = os.path.dirname(filepath)
+    if not os.path.isdir(movie_dir):
+        return
+
+    plexmatch_path = os.path.join(movie_dir, '.plexmatch')
+    lines = ['title: %s' % (tagdata.title or '')]
+    date = getattr(tagdata, 'date', '') or ''
+    if len(date) >= 4:
+        lines.append('year: %s' % date[:4])
+    if tagdata.tmdbid:
+        lines.append('guid: tmdb://%s' % tagdata.tmdbid)
+
+    with open(plexmatch_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+
+    log.info("Updated .plexmatch: %s" % plexmatch_path)

@@ -120,14 +120,14 @@ class SkipFileException(Exception):
     pass
 
 
-def getInfo(fileName, settings, silent=False, tag=True, tvdbid=None, tmdbid=None, imdbid=None, season=None, episode=None, language=None, original=None):
+def getInfo(fileName, settings, silent=False, tag=True, tvdbid=None, tmdbid=None, imdbid=None, season=None, episode=None, language=None, original=None, type_hint=None):
     if not tag:
         return None
 
     tagdata = None
     # Try to guess the file is guessing is enabled
     if fileName is not None:
-        tagdata = guessInfo(fileName, settings, tvdbid=tvdbid, tmdbid=tmdbid, imdbid=imdbid, season=season, episode=episode, language=language, original=original)
+        tagdata = guessInfo(fileName, settings, tvdbid=tvdbid, tmdbid=tmdbid, imdbid=imdbid, season=season, episode=episode, language=language, original=original, type_hint=type_hint)
 
     if not silent:
         if tagdata:
@@ -169,10 +169,15 @@ def getInfo(fileName, settings, silent=False, tag=True, tvdbid=None, tmdbid=None
             return None
 
 
-def guessInfo(fileName, settings, tmdbid=None, tvdbid=None, imdbid=None, season=None, episode=None, language=None, original=None):
+def guessInfo(fileName, settings, tmdbid=None, tvdbid=None, imdbid=None, season=None, episode=None, language=None, original=None, type_hint=None):
     if not settings.fullpathguess:
         fileName = os.path.basename(fileName)
-    guess = guessit.guessit(original or fileName)
+    guessit_opts = {}
+    if type_hint == 'tv':
+        guessit_opts['type'] = 'episode'
+    elif type_hint == 'movie':
+        guessit_opts['type'] = 'movie'
+    guess = guessit.guessit(original or fileName, guessit_opts)
     try:
         if guess['type'] == 'movie':
             return movieInfo(guess, tmdbid=tmdbid, imdbid=imdbid, language=language, original=original)
@@ -308,7 +313,7 @@ def addtoProcessedArchive(files, processedList, processedArchive):
     log.debug("Adding %s to processed archive %s" % (files, processedArchive))
 
 
-def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=True, tagOnly=False, optionsOnly=False, tmdbid=None, tvdbid=None, imdbid=None, season=None, episode=None, original=None, processedList=None, processedArchive=None):
+def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=True, tagOnly=False, optionsOnly=False, tmdbid=None, tvdbid=None, imdbid=None, season=None, episode=None, original=None, processedList=None, processedArchive=None, type_hint=None):
     if checkAlreadyProcessed(inputfile, processedList):
         log.debug("%s is already processed and will be skipped based on archive %s." % (inputfile, processedArchive))
         return
@@ -320,7 +325,7 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
         return
 
     language = mp.settings.taglanguage or None
-    tagdata = getInfo(inputfile, mp.settings, silent=silent, tag=tag or tagOnly, tmdbid=tmdbid, tvdbid=tvdbid, imdbid=imdbid, season=season, episode=episode, language=language, original=original)
+    tagdata = getInfo(inputfile, mp.settings, silent=silent, tag=tag or tagOnly, tmdbid=tmdbid, tvdbid=tvdbid, imdbid=imdbid, season=season, episode=episode, language=language, original=original, type_hint=type_hint)
 
     if optionsOnly:
         displayOptions(inputfile, mp.settings, tagdata)
@@ -364,6 +369,26 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
         if mp.settings.relocate_moov and not tagfailed:
             mp.QTFS(output['output'])
 
+        # File renaming
+        if mp.settings.naming_enabled and tagdata:
+            try:
+                from resources.naming import generate_name, rename_file
+                import guessit as _guessit
+                guess_data = _guessit.guessit(original or os.path.basename(inputfile))
+                new_name = generate_name(output['output'], info, tagdata, mp.settings, guess_data=guess_data, log=log)
+                if new_name:
+                    output['output'] = rename_file(output['output'], new_name, log=log)
+            except:
+                log.exception("Error during file rename")
+
+        # Plex .plexmatch file
+        if mp.settings.plexmatch_enabled and tagdata:
+            try:
+                from resources.metadata import update_plexmatch
+                update_plexmatch(output['output'], tagdata, mp.settings, log=log)
+            except:
+                log.exception("Error updating .plexmatch")
+
         # Reverse Ouput
         output['output'] = mp.restoreFromOutput(inputfile, output['output'])
         for i, sub in enumerate(output['external_subs']):
@@ -388,7 +413,7 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
         log.error("There was an error processing file %s, no output data received" % inputfile)
 
 
-def walkDir(dir, settings, silent=False, preserveRelative=False, tmdbid=None, imdbid=None, tvdbid=None, tag=True, tagOnly=False, optionsOnly=False, processedList=None, processedArchive=None):
+def walkDir(dir, settings, silent=False, preserveRelative=False, tmdbid=None, imdbid=None, tvdbid=None, tag=True, tagOnly=False, optionsOnly=False, processedList=None, processedArchive=None, type_hint=None):
     files = []
     error = []
     mp = MediaProcessor(settings, logger=log)
@@ -404,7 +429,7 @@ def walkDir(dir, settings, silent=False, preserveRelative=False, tmdbid=None, im
                 displayOptions(filepath, settings)
                 continue
             try:
-                processFile(filepath, mp, info=info, relativePath=relative, silent=silent, tag=tag, tagOnly=tagOnly, optionsOnly=optionsOnly, tmdbid=tmdbid, tvdbid=tvdbid, imdbid=imdbid, processedList=processedList, processedArchive=processedArchive)
+                processFile(filepath, mp, info=info, relativePath=relative, silent=silent, tag=tag, tagOnly=tagOnly, optionsOnly=optionsOnly, tmdbid=tmdbid, tvdbid=tvdbid, imdbid=imdbid, processedList=processedList, processedArchive=processedArchive, type_hint=type_hint)
             except SkipFileException:
                 log.debug("Skipping file %s." % filepath)
             except KeyboardInterrupt:
@@ -466,6 +491,10 @@ def main():
     parser.add_argument('-o', '--original', help="Specify the original source/release filename")
     parser.add_argument('-ms', '--minsize', help="Specify the minimum file size")
     parser.add_argument('-pa', '--processedarchive', help="Specify a processed list/archive so already processed files are skipped", nargs='?', const="archive.json")
+
+    mediatype_group = parser.add_mutually_exclusive_group()
+    mediatype_group.add_argument('--tv', action='store_true', help="Force guessit to treat input as a TV episode")
+    mediatype_group.add_argument('--movie', action='store_true', help="Force guessit to treat input as a movie")
 
     args = vars(parser.parse_args())
 
@@ -543,6 +572,15 @@ def main():
         except TypeError:
             log.error("Invalid minsize")
 
+    # Determine media type hint from CLI flags
+    type_hint = None
+    if args.get('tv'):
+        type_hint = 'tv'
+        log.info("Forcing media type detection to: TV")
+    elif args.get('movie'):
+        type_hint = 'movie'
+        log.info("Forcing media type detection to: Movie")
+
     # Establish the path we will be working with
     if (args['input']):
         path = (str(args['input']))
@@ -554,13 +592,13 @@ def main():
         path = getValue("Enter path to file")
 
     if os.path.isdir(path):
-        walkDir(path, settings, silent=silent, tmdbid=args.get('tmdbid'), tvdbid=args.get('tvdbid'), imdbid=args.get('imdbid'), preserveRelative=args['preserverelative'], tag=settings.tagfile, tagOnly=args.get('tagonly', False), optionsOnly=args['optionsonly'], processedList=processedList, processedArchive=processedArchive)
+        walkDir(path, settings, silent=silent, tmdbid=args.get('tmdbid'), tvdbid=args.get('tvdbid'), imdbid=args.get('imdbid'), preserveRelative=args['preserverelative'], tag=settings.tagfile, tagOnly=args.get('tagonly', False), optionsOnly=args['optionsonly'], processedList=processedList, processedArchive=processedArchive, type_hint=type_hint)
     elif (os.path.isfile(path)):
         mp = MediaProcessor(settings, logger=log)
         info = mp.isValidSource(path)
         if info:
             try:
-                processFile(path, mp, info=info, silent=silent, tag=settings.tagfile, tagOnly=args.get('tagonly', False), optionsOnly=args.get('optionsonly', False), tmdbid=args.get('tmdbid'), tvdbid=args.get('tvdbid'), imdbid=args.get('imdbid'), season=args.get('season'), episode=args.get('episode'), original=args.get('original'), processedList=processedList, processedArchive=processedArchive)
+                processFile(path, mp, info=info, silent=silent, tag=settings.tagfile, tagOnly=args.get('tagonly', False), optionsOnly=args.get('optionsonly', False), tmdbid=args.get('tmdbid'), tvdbid=args.get('tvdbid'), imdbid=args.get('imdbid'), season=args.get('season'), episode=args.get('episode'), original=args.get('original'), processedList=processedList, processedArchive=processedArchive, type_hint=type_hint)
             except SkipFileException:
                 log.debug("Skipping file %s" % path)
 

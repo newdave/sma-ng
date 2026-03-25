@@ -169,6 +169,11 @@ class ReadSettings:
             'force-filter': False,
             'profile': '',
         },
+        'Naming': {
+            'enabled': False,
+            'tv-template': '{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle} [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}',
+            'movie-template': '{Movie CleanTitle} ({Release Year}) [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}',
+        },
         'Audio': {
             'codec': 'ac3',
             'languages': '',
@@ -366,7 +371,8 @@ class ReadSettings:
             'token': '',
             'ssl': True,
             'ignore-certs': False,
-            'path-mapping': ''
+            'path-mapping': '',
+            'plexmatch': True,
         },
     }
 
@@ -706,6 +712,12 @@ class ReadSettings:
         self.hdr['forcefilter'] = config.getboolean(section, 'force-filter')
         self.hdr['profile'] = config.getlist(section, "profile")
 
+        # Naming
+        section = "Naming"
+        self.naming_enabled = config.getboolean(section, "enabled")
+        self.naming_tv_template = config.get(section, "tv-template")
+        self.naming_movie_template = config.get(section, "movie-template")
+
         # Apply hwaccel codec mapping (hevc → h265qsv, h264 → h264vaapi, etc.)
         if self.hwaccel:
             self._apply_hwaccel_codec_map(self.hwaccel)
@@ -961,6 +973,10 @@ class ReadSettings:
         self.Plex['ssl'] = config.getboolean(section, "ssl")
         self.Plex['ignore-certs'] = config.getboolean(section, 'ignore-certs')
         self.Plex['path-mapping'] = config.getdict(section, "path-mapping", dictseparator="=", lower=False, replace=[])
+        self.Plex['plexmatch'] = config.getboolean(section, 'plexmatch')
+
+        # plexmatch is enabled if Plex host is configured and plexmatch option is true
+        self.plexmatch_enabled = bool(self.Plex.get('host') and self.Plex.get('plexmatch', True))
 
     def _validate_binaries(self):
         """Validate that ffmpeg and ffprobe binaries exist and are executable."""
