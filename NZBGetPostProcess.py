@@ -64,7 +64,7 @@ if mp4_folder:
     os.chdir(mp4_folder)
 
 try:
-    from resources.webhook_client import submit_job
+    import resources.webhook_client as webhook
 except ImportError:
     log.error("Cannot import webhook_client. Check MP4_FOLDER setting: %s" % mp4_folder)
     sys.exit(POSTPROCESS_ERROR)
@@ -106,7 +106,7 @@ submitted = 0
 for root, _, files in os.walk(directory):
     for f in files:
         filepath = os.path.join(root, f)
-        result = submit_job(filepath, logger=log)
+        result = webhook.submit_job(filepath, logger=log)
         if result:
             submitted += 1
 
