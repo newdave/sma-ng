@@ -191,3 +191,56 @@ class TestValidLanguage:
     def test_undefined_language_empty_whitelist(self):
         mp = self._make_processor()
         assert mp.validLanguage('und', []) is True
+
+
+class TestIsValidSource:
+    """Test source file validation."""
+
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                from resources.readsettings import ReadSettings
+                settings = ReadSettings()
+                return MediaProcessor(settings)
+
+    def test_nonexistent_file_returns_none(self):
+        mp = self._make_processor()
+        assert mp.isValidSource("/nonexistent/file.mkv") is None
+
+    def test_ignored_extension_returns_none(self, tmp_path):
+        mp = self._make_processor()
+        nfo = tmp_path / "movie.nfo"
+        nfo.write_text("test")
+        assert mp.isValidSource(str(nfo)) is None
+
+    def test_undersized_file_returns_none(self, tmp_path):
+        mp = self._make_processor()
+        mp.settings.minimum_size = 100  # 100MB
+        small = tmp_path / "tiny.mkv"
+        small.write_bytes(b'\x00' * 1024)
+        assert mp.isValidSource(str(small)) is None
+
+
+class TestParseFile:
+    """Test filename parsing utility."""
+
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                from resources.readsettings import ReadSettings
+                settings = ReadSettings()
+                return MediaProcessor(settings)
+
+    def test_parse_simple_path(self):
+        mp = self._make_processor()
+        d, name, ext = mp.parseFile("/path/to/movie.mkv")
+        assert d == "/path/to"
+        assert name == "movie"
+        assert ext == "mkv"
+
+    def test_parse_no_extension(self):
+        mp = self._make_processor()
+        d, name, ext = mp.parseFile("/path/to/file")
+        assert name == "file"
