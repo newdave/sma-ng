@@ -8,6 +8,7 @@ from resources.naming import (
     generate_name, DEFAULT_TV_TEMPLATE, DEFAULT_MOVIE_TEMPLATE,
 )
 from resources.metadata import update_plexmatch, MediaType
+from converter.ffmpeg import MediaInfo
 
 
 class TestSanitizeFilename:
@@ -396,3 +397,210 @@ class TestPlexmatch:
 
         update_plexmatch(str(f), None, self._settings())
         assert not (movie_dir / '.plexmatch').exists()
+
+
+class TestGetQualityLabel:
+    from resources.naming import _get_quality_label
+
+    def test_8k(self):
+        from resources.naming import _get_quality_label
+        assert _get_quality_label(7680) == '8K'
+
+    def test_4k(self):
+        from resources.naming import _get_quality_label
+        assert _get_quality_label(3840) == '4K'
+
+    def test_1080p(self):
+        from resources.naming import _get_quality_label
+        assert _get_quality_label(1920) == '1080p'
+
+    def test_720p(self):
+        from resources.naming import _get_quality_label
+        assert _get_quality_label(1280) == '720p'
+
+    def test_sd(self):
+        from resources.naming import _get_quality_label
+        assert _get_quality_label(640) == 'SD'
+
+    def test_zero(self):
+        from resources.naming import _get_quality_label
+        assert _get_quality_label(0) == 'SD'
+
+
+class TestGetSource:
+    def test_known_source(self):
+        from resources.naming import _get_source
+        assert _get_source({'source': 'bluray'}) == 'BluRay'
+
+    def test_unknown_source_passthrough(self):
+        from resources.naming import _get_source
+        assert _get_source({'source': 'unknown'}) == 'unknown'
+
+    def test_empty_source(self):
+        from resources.naming import _get_source
+        assert _get_source({}) == ''
+
+    def test_webrip(self):
+        from resources.naming import _get_source
+        assert _get_source({'source': 'webrip'}) == 'WEBRip'
+
+
+class TestGetReleaseGroup:
+    def test_present(self):
+        from resources.naming import _get_release_group
+        assert _get_release_group({'release_group': 'FGT'}) == 'FGT'
+
+    def test_absent(self):
+        from resources.naming import _get_release_group
+        assert _get_release_group({}) == ''
+
+
+class TestApplyTemplateFormatSpec:
+    def test_zero_pad_three_digits(self):
+        data = NamingData()
+        data.season = 1
+        data.episode = 5
+        result = apply_template('S{season:000}E{episode:000}', data)
+        assert result == 'S001E005'
+
+    def test_truncation(self):
+        data = NamingData()
+        data.movie_title = 'A Very Long Title'
+        result = apply_template('{Movie Title:10}', data)
+        assert result == 'A Very Lon'
+
+
+class TestNamingDataFromTagdataEdgeCases:
+    def test_none_tagdata(self):
+        data = NamingData()
+        data.from_tagdata(None)
+        assert data.series_title == ''
+
+    def test_tv_no_year(self):
+        from resources.metadata import MediaType
+        tagdata = MagicMock()
+        tagdata.mediatype = MediaType.TV
+        tagdata.showname = 'Show'
+        tagdata.showdata = {}
+        tagdata.season = 1
+        tagdata.episode = 1
+        tagdata.title = 'Pilot'
+        data = NamingData()
+        data.from_tagdata(tagdata)
+        assert data.series_titleyear == 'Show'
+
+    def test_movie_no_date(self):
+        from resources.metadata import MediaType
+        tagdata = MagicMock()
+        tagdata.mediatype = MediaType.Movie
+        tagdata.title = 'Movie'
+        tagdata.date = ''
+        data = NamingData()
+        data.from_tagdata(tagdata)
+        assert data.movie_year == ''
+
+
+class TestNamingDataFromMediaInfoEdgeCases:
+    def test_no_video(self):
+        info = MediaInfo()
+        data = NamingData()
+        data.from_mediainfo(info)
+        assert data.video_codec == ''
+        assert data.quality == ''
+
+    def test_no_audio(self, make_stream):
+        info = MediaInfo()
+        v = make_stream(type='video', codec='h264', video_width=1920)
+        v.framedata = {}
+        info.streams.append(v)
+        data = NamingData()
+        data.from_mediainfo(info)
+        assert data.audio_codec == ''
+
+    def test_atmos_detection(self, make_stream):
+        info = MediaInfo()
+        v = make_stream(type='video', codec='h264', video_width=1920)
+        v.framedata = {}
+        info.streams.append(v)
+        a = make_stream(type='audio', codec='eac3', index=1, audio_channels=8, audio_samplerate=48000, profile='Atmos')
+        info.streams.append(a)
+        data = NamingData()
+        data.from_mediainfo(info)
+        assert 'Atmos' in data.audio_codec
+
+    def test_dts_hd_ma_detection(self, make_stream):
+        info = MediaInfo()
+        v = make_stream(type='video', codec='h264', video_width=1920)
+        v.framedata = {}
+        info.streams.append(v)
+        a = make_stream(type='audio', codec='dts', index=1, audio_channels=8, audio_samplerate=48000, profile='DTS-HD MA')
+        info.streams.append(a)
+        data = NamingData()
+        data.from_mediainfo(info)
+        assert data.audio_codec == 'DTS-HD MA'
+
+    def test_hdr_detection(self, make_stream):
+        info = MediaInfo()
+        v = make_stream(type='video', codec='h265', video_width=3840)
+        v.framedata = {'color_transfer': 'smpte2084'}
+        v.color = {}
+        info.streams.append(v)
+        data = NamingData()
+        data.from_mediainfo(info)
+        assert data.hdr == 'HDR'
+
+
+class TestRenameFileEdgeCases:
+    def test_oserror_returns_original(self, tmp_path):
+        src = tmp_path / 'file.mp4'
+        src.touch()
+        with patch('os.rename', side_effect=OSError("permission denied")):
+            result = rename_file(str(src), 'new_name')
+        assert result == str(src)
+
+
+class TestNamingDataFromArrApi:
+    def test_no_requests_returns_false(self):
+        data = NamingData()
+        with patch('resources.naming._requests', None):
+            assert data._from_arr_api(None, '/file.mkv', 'sonarr', MagicMock()) is False
+
+    def test_no_apikey_returns_false(self):
+        data = NamingData()
+        assert data._from_arr_api({'host': 'localhost', 'port': 8989}, '/file.mkv', 'sonarr', MagicMock()) is False
+
+    @patch('resources.naming._requests')
+    def test_sonarr_success(self, mock_requests):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            'series': {'title': 'My Show', 'year': 2023},
+            'episodes': [{'seasonNumber': 1, 'episodeNumber': 5, 'title': 'The One'}],
+            'quality': {'quality': {'resolution': '1080p', 'source': 'HDTV'}},
+            'releaseGroup': 'LOL'
+        }
+        mock_requests.get.return_value = mock_resp
+        data = NamingData()
+        result = data._from_arr_api(
+            {'host': 'localhost', 'port': 8989, 'apikey': 'key'},
+            '/tv/show.mkv', 'sonarr', MagicMock()
+        )
+        assert result is True
+        assert data.series_title == 'My Show'
+        assert data.episode == 5
+
+    @patch('resources.naming._requests')
+    def test_radarr_success(self, mock_requests):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            'movie': {'title': 'Movie Title', 'year': 2020},
+            'quality': {'quality': {'resolution': '4K', 'source': 'BluRay'}},
+            'releaseGroup': 'FGT'
+        }
+        mock_requests.get.return_value = mock_resp
+        data = NamingData()
+        result = data._from_arr_api(
+            {'host': 'localhost', 'port': 7878, 'apikey': 'key'},
+            '/movies/film.mkv', 'radarr', MagicMock()
+        )
+        assert result is True
+        assert data.movie_title == 'Movie Title'

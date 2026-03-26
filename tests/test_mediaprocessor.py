@@ -244,3 +244,679 @@ class TestParseFile:
         mp = self._make_processor()
         d, name, ext = mp.parseFile("/path/to/file")
         assert name == "file"
+
+    def test_parse_extension_lowercased(self):
+        mp = self._make_processor()
+        d, name, ext = mp.parseFile("/path/to/Movie.MKV")
+        assert ext == "mkv"
+
+    def test_parse_dotted_filename(self):
+        mp = self._make_processor()
+        d, name, ext = mp.parseFile("/path/to/Movie.2024.1080p.mkv")
+        assert ext == "mkv"
+        assert name == "Movie.2024.1080p"
+
+
+class TestCleanDispositions:
+    """Test disposition sanitization."""
+
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.settings.sanitize_disposition = ['forced']
+                mp.log = MagicMock()
+                return mp
+
+    def test_clears_dispositions(self, make_stream):
+        mp = self._make_processor()
+        info = MediaInfo()
+        s = make_stream(type='audio', disposition={'default': True, 'forced': True})
+        info.streams.append(s)
+        mp.cleanDispositions(info)
+        assert s.disposition['forced'] is False
+        assert s.disposition['default'] is True
+
+
+class TestIsAudioStreamAtmos:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_atmos_detected(self, make_stream):
+        mp = self._make_processor()
+        stream = make_stream(type='audio', profile='atmos')
+        assert mp.isAudioStreamAtmos(stream) is True
+
+    def test_non_atmos(self, make_stream):
+        mp = self._make_processor()
+        stream = make_stream(type='audio', profile='lc')
+        assert mp.isAudioStreamAtmos(stream) is False
+
+    def test_no_profile(self, make_stream):
+        mp = self._make_processor()
+        stream = make_stream(type='audio')
+        stream.profile = None
+        assert not mp.isAudioStreamAtmos(stream)
+
+
+class TestGetDefaultAudioLanguage:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_dict_options_with_default(self):
+        mp = self._make_processor()
+        options = {
+            'audio': [
+                {'disposition': '+default-forced', 'language': 'eng'},
+                {'disposition': '-default-forced', 'language': 'fra'}
+            ]
+        }
+        assert mp.getDefaultAudioLanguage(options) == 'eng'
+
+    def test_dict_options_no_default(self):
+        mp = self._make_processor()
+        options = {
+            'audio': [
+                {'disposition': '-default-forced', 'language': 'eng'}
+            ]
+        }
+        assert mp.getDefaultAudioLanguage(options) is None
+
+    def test_mediainfo_options(self, make_stream):
+        mp = self._make_processor()
+        info = MediaInfo()
+        s = make_stream(type='audio', disposition={'default': True, 'forced': False})
+        s.metadata = {'language': 'jpn'}
+        info.streams.append(s)
+        assert mp.getDefaultAudioLanguage(info) == 'jpn'
+
+
+class TestValidDisposition:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_no_ignored_dispositions(self, make_stream):
+        mp = self._make_processor()
+        stream = make_stream(type='audio', disposition={'default': True, 'forced': False})
+        assert mp.validDisposition(stream, []) is True
+
+    def test_ignored_disposition(self, make_stream):
+        mp = self._make_processor()
+        stream = make_stream(type='audio', disposition={'default': True, 'comment': True})
+        assert mp.validDisposition(stream, ['comment']) is False
+
+    def test_unique_disposition_first(self, make_stream):
+        mp = self._make_processor()
+        stream = make_stream(type='audio', disposition={'default': True, 'forced': False})
+        existing = []
+        assert mp.validDisposition(stream, [], unique=True, language='eng', existing=existing) is True
+        assert len(existing) == 1
+
+    def test_unique_disposition_duplicate(self, make_stream):
+        mp = self._make_processor()
+        stream = make_stream(type='audio', disposition={'default': True, 'forced': False})
+        existing = ['eng.' + stream.dispostr]
+        assert mp.validDisposition(stream, [], unique=True, language='eng', existing=existing) is False
+
+
+class TestDispoStringToDict:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_positive_dispositions(self):
+        mp = self._make_processor()
+        result = mp.dispoStringToDict('+default+forced')
+        assert result['default'] is True
+        assert result['forced'] is True
+
+    def test_negative_dispositions(self):
+        mp = self._make_processor()
+        result = mp.dispoStringToDict('-default-forced')
+        assert result['default'] is False
+        assert result['forced'] is False
+
+    def test_mixed(self):
+        mp = self._make_processor()
+        result = mp.dispoStringToDict('+default-forced+comment')
+        assert result['default'] is True
+        assert result['forced'] is False
+        assert result['comment'] is True
+
+    def test_empty_string(self):
+        mp = self._make_processor()
+        assert mp.dispoStringToDict('') == {}
+
+    def test_none(self):
+        mp = self._make_processor()
+        assert mp.dispoStringToDict(None) == {}
+
+
+class TestCheckDisposition:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_all_present(self):
+        mp = self._make_processor()
+        assert mp.checkDisposition(['forced'], {'forced': True, 'default': False}) is True
+
+    def test_missing_disposition(self):
+        mp = self._make_processor()
+        assert mp.checkDisposition(['forced'], {'forced': False, 'default': True}) is False
+
+    def test_empty_allowed(self):
+        mp = self._make_processor()
+        assert mp.checkDisposition([], {'forced': False}) is True
+
+
+class TestTitleDispositionCheck:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_commentary_in_title(self, make_stream):
+        mp = self._make_processor()
+        info = MediaInfo()
+        s = make_stream(type='audio', disposition={'default': False, 'comment': False})
+        s.metadata = {'title': "Director's Commentary", 'language': 'eng'}
+        info.streams.append(s)
+        mp.titleDispositionCheck(info)
+        assert s.disposition['comment'] is True
+
+    def test_forced_in_title(self, make_stream):
+        mp = self._make_processor()
+        info = MediaInfo()
+        s = make_stream(type='subtitle', disposition={'default': False, 'forced': False})
+        s.metadata = {'title': 'Forced Foreign', 'language': 'eng'}
+        info.streams.append(s)
+        mp.titleDispositionCheck(info)
+        assert s.disposition['forced'] is True
+
+    def test_sdh_in_title(self, make_stream):
+        mp = self._make_processor()
+        info = MediaInfo()
+        s = make_stream(type='subtitle', disposition={'default': False, 'hearing_impaired': False})
+        s.metadata = {'title': 'English SDH', 'language': 'eng'}
+        info.streams.append(s)
+        mp.titleDispositionCheck(info)
+        assert s.disposition['hearing_impaired'] is True
+
+
+class TestSublistIndexes:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_finds_sublist(self):
+        mp = self._make_processor()
+        assert mp.sublistIndexes(['a', 'b', 'c', 'a', 'b'], ['a', 'b']) == [0, 3]
+
+    def test_no_match(self):
+        mp = self._make_processor()
+        assert mp.sublistIndexes(['a', 'b', 'c'], ['d', 'e']) == []
+
+    def test_single_element(self):
+        mp = self._make_processor()
+        assert mp.sublistIndexes(['a', 'b', 'a'], ['a']) == [0, 2]
+
+
+class TestGetOutputFile:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.settings.output_dir = None
+                mp.settings.output_extension = 'mp4'
+                mp.log = MagicMock()
+                return mp
+
+    def test_basic_output(self, tmp_path):
+        mp = self._make_processor()
+        outfile, outdir = mp.getOutputFile(str(tmp_path), 'movie', 'mkv')
+        assert outfile.endswith('movie.mp4')
+        assert outdir == str(tmp_path)
+
+    def test_with_number(self, tmp_path):
+        mp = self._make_processor()
+        outfile, _ = mp.getOutputFile(str(tmp_path), 'movie', 'mkv', number=2)
+        assert '.2.' in outfile
+
+    def test_with_temp_extension(self, tmp_path):
+        mp = self._make_processor()
+        outfile, _ = mp.getOutputFile(str(tmp_path), 'movie', 'mkv', temp_extension='tmp')
+        assert outfile.endswith('.tmp')
+
+    def test_output_dir_override(self, tmp_path):
+        mp = self._make_processor()
+        outdir = str(tmp_path / 'output')
+        mp.settings.output_dir = outdir
+        outfile, result_dir = mp.getOutputFile(str(tmp_path), 'movie', 'mkv')
+        assert result_dir == outdir
+
+    def test_ignore_output_dir(self, tmp_path):
+        mp = self._make_processor()
+        mp.settings.output_dir = '/some/output/dir'
+        outfile, result_dir = mp.getOutputFile(str(tmp_path), 'movie', 'mkv', ignore_output_dir=True)
+        assert result_dir == str(tmp_path)
+
+
+class TestGetSourceStream:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_returns_stream(self, make_stream):
+        mp = self._make_processor()
+        info = MediaInfo()
+        s0 = make_stream(type='video', index=0)
+        s1 = make_stream(type='audio', index=1)
+        info.streams = [s0, s1]
+        assert mp.getSourceStream(0, info) == s0
+        assert mp.getSourceStream(1, info) == s1
+
+
+class TestGetSubExtensionFromCodec:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_known_codec(self):
+        mp = self._make_processor()
+        result = mp.getSubExtensionFromCodec('srt')
+        assert result == 'srt'
+
+    def test_unknown_codec_returns_codec(self):
+        mp = self._make_processor()
+        result = mp.getSubExtensionFromCodec('unknown_codec')
+        assert result == 'unknown_codec'
+
+
+class TestRemoveFile:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_removes_existing_file(self, tmp_path):
+        mp = self._make_processor()
+        f = tmp_path / "to_delete.txt"
+        f.write_text("data")
+        assert mp.removeFile(str(f)) is True
+        assert not f.exists()
+
+    def test_nonexistent_file_returns_true(self, tmp_path):
+        mp = self._make_processor()
+        assert mp.removeFile(str(tmp_path / "nonexistent.txt"), retries=0) is True
+
+    def test_replacement(self, tmp_path):
+        mp = self._make_processor()
+        original = tmp_path / "original.txt"
+        replacement = tmp_path / "replacement.txt"
+        original.write_text("old")
+        replacement.write_text("new")
+        result = mp.removeFile(str(original), replacement=str(replacement))
+        assert result is True
+        assert original.exists()
+        with open(str(original)) as f:
+            assert f.read() == "new"
+
+
+class TestOutputDirHasFreeSpace:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_no_ratio_returns_true(self, tmp_path):
+        mp = self._make_processor()
+        mp.settings.output_dir = str(tmp_path)
+        mp.settings.output_dir_ratio = 0.0
+        f = tmp_path / "test.mkv"
+        f.write_text("x")
+        assert mp.outputDirHasFreeSpace(str(f)) is True
+
+    def test_no_output_dir_returns_true(self, tmp_path):
+        mp = self._make_processor()
+        mp.settings.output_dir = None
+        mp.settings.output_dir_ratio = 2.0
+        f = tmp_path / "test.mkv"
+        f.write_text("x")
+        assert mp.outputDirHasFreeSpace(str(f)) is True
+
+
+class TestCanBypassConvert:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.settings.output_extension = 'mp4'
+                mp.settings.force_convert = False
+                mp.settings.process_same_extensions = False
+                mp.settings.bypass_copy_all = False
+                mp.log = MagicMock()
+                return mp
+
+    def test_same_extension_no_process(self):
+        mp = self._make_processor()
+        info = MagicMock()
+        info.format.metadata = {}
+        assert mp.canBypassConvert('/path/to/file.mp4', info) is True
+
+    def test_different_extension(self):
+        mp = self._make_processor()
+        info = MagicMock()
+        assert mp.canBypassConvert('/path/to/file.mkv', info) is False
+
+    def test_same_extension_process_enabled(self):
+        mp = self._make_processor()
+        mp.settings.process_same_extensions = True
+        info = MagicMock()
+        info.format.metadata = {}
+        assert mp.canBypassConvert('/path/to/file.mp4', info) is False
+
+    def test_same_extension_sma_processed(self):
+        mp = self._make_processor()
+        mp.settings.process_same_extensions = True
+        info = MagicMock()
+        info.format.metadata = {'encoder': 'sma-ng v1.0'}
+        assert mp.canBypassConvert('/path/to/file.mp4', info) is True
+
+
+class TestPrintableFFMPEGCommand:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_quotes_spaces(self):
+        mp = self._make_processor()
+        result = mp.printableFFMPEGCommand(['ffmpeg', '-i', '/path with spaces/file.mkv', '-c', 'copy'])
+        assert '"/path with spaces/file.mkv"' in result
+
+    def test_no_quotes_without_spaces(self):
+        mp = self._make_processor()
+        result = mp.printableFFMPEGCommand(['ffmpeg', '-c', 'copy'])
+        assert '"' not in result
+
+
+class TestRawEscape:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_escapes_backslash(self):
+        mp = self._make_processor()
+        # raw() escapes both backslash and colon
+        result = mp.raw('a\\b')
+        assert '\\\\' in result
+
+    def test_escapes_colon(self):
+        mp = self._make_processor()
+        assert mp.raw('file:name') == 'file\\:name'
+
+    def test_no_escaping_needed(self):
+        mp = self._make_processor()
+        assert mp.raw('simple') == 'simple'
+
+
+class TestParseAndNormalize:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_same_denominator(self):
+        mp = self._make_processor()
+        assert mp.parseAndNormalize('50000/50000', 50000) == 50000
+
+    def test_different_denominator(self):
+        mp = self._make_processor()
+        result = mp.parseAndNormalize('1000/100', 50000)
+        assert result == 500000
+
+
+class TestHasValidFrameData:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_valid_hdr_framedata(self):
+        mp = self._make_processor()
+        framedata = {
+            'side_data_list': [
+                {'side_data_type': 'Mastering display metadata'},
+                {'side_data_type': 'Content light level metadata'}
+            ]
+        }
+        assert mp.hasValidFrameData(framedata) is True
+
+    def test_missing_one_type(self):
+        mp = self._make_processor()
+        framedata = {
+            'side_data_list': [
+                {'side_data_type': 'Mastering display metadata'}
+            ]
+        }
+        assert mp.hasValidFrameData(framedata) is False
+
+    def test_no_side_data(self):
+        mp = self._make_processor()
+        assert mp.hasValidFrameData({}) is False
+
+    def test_invalid_framedata(self):
+        mp = self._make_processor()
+        assert mp.hasValidFrameData(None) is False
+
+
+class TestHasBitstreamVideoSubs:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_has_closed_captions(self):
+        mp = self._make_processor()
+        framedata = {
+            'side_data_list': [
+                {'side_data_type': 'Closed Captions'},
+            ]
+        }
+        assert mp.hasBitstreamVideoSubs(framedata) is True
+
+    def test_no_closed_captions(self):
+        mp = self._make_processor()
+        assert mp.hasBitstreamVideoSubs({}) is False
+
+
+class TestIsHDROutput:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_hdr_pix_fmt_and_depth(self):
+        mp = self._make_processor()
+        assert mp.isHDROutput('yuv420p10le', 10) is True
+
+    def test_sdr_pix_fmt(self):
+        mp = self._make_processor()
+        assert mp.isHDROutput('yuv420p', 8) is False
+
+    def test_hdr_pix_fmt_low_depth(self):
+        mp = self._make_processor()
+        assert mp.isHDROutput('yuv420p10le', 8) is False
+
+    def test_no_pix_fmt_high_depth(self):
+        mp = self._make_processor()
+        assert mp.isHDROutput(None, 10) is True
+
+    def test_no_pix_fmt_low_depth(self):
+        mp = self._make_processor()
+        assert mp.isHDROutput(None, 8) is False
+
+
+class TestFfprobeSafeCodecs:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_adds_ffprobe_codec(self):
+        mp = self._make_processor()
+        codecs = ['h264']
+        result = mp.ffprobeSafeCodecs(codecs)
+        # h264 ffprobe name is 'h264' already, so check it doesn't duplicate
+        assert 'h264' in result
+
+    def test_empty_list(self):
+        mp = self._make_processor()
+        assert mp.ffprobeSafeCodecs([]) == []
+
+    def test_none(self):
+        mp = self._make_processor()
+        assert mp.ffprobeSafeCodecs(None) is None
+
+
+class TestSetPermissions:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.settings.permissions = {'chmod': 0o664, 'uid': -1, 'gid': -1}
+                mp.log = MagicMock()
+                return mp
+
+    def test_sets_permissions_on_existing_file(self, tmp_path):
+        mp = self._make_processor()
+        f = tmp_path / "test.txt"
+        f.write_text("data")
+        mp.setPermissions(str(f))
+        # Should not raise
+
+    def test_nonexistent_file_logs(self, tmp_path):
+        mp = self._make_processor()
+        mp.setPermissions(str(tmp_path / "nonexistent.txt"))
+        mp.log.debug.assert_called()
+
+
+class TestScanForExternalMetadata:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.log = MagicMock()
+                return mp
+
+    def test_finds_metadata_file(self, tmp_path):
+        mp = self._make_processor()
+        src = tmp_path / "movie.mkv"
+        src.write_text("x")
+        meta = tmp_path / "movie.metadata.txt"
+        meta.write_text("chapters")
+        result = mp.scanForExternalMetadata(str(src))
+        assert result is not None
+        assert result.endswith("movie.metadata.txt")
+
+    def test_no_metadata_file(self, tmp_path):
+        mp = self._make_processor()
+        src = tmp_path / "movie.mkv"
+        src.write_text("x")
+        result = mp.scanForExternalMetadata(str(src))
+        assert result is None

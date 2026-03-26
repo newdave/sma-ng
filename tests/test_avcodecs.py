@@ -334,3 +334,317 @@ class TestCodecLists:
     def test_no_duplicate_codec_names(self):
         names = [c.codec_name for c in video_codec_list]
         assert len(names) == len(set(names))
+
+
+class TestH265Codec:
+    """Test H.265 software codec."""
+
+    def test_basic(self):
+        codec = H265Codec()
+        opts = codec.parse_options({'codec': 'h265', 'crf': 22})
+        assert '-vcodec' in opts
+        assert 'libx265' in opts
+
+    def test_tag(self):
+        codec = H265Codec()
+        opts = codec.parse_options({'codec': 'h265'})
+        assert '-tag:v' in opts
+        assert 'hvc1' in opts
+
+    def test_level(self):
+        codec = H265Codec()
+        opts = codec.parse_options({'codec': 'h265', 'level': 5.0})
+        # H265 stores level directly
+        assert '-level' in opts
+
+
+class TestNVEncCodecs:
+    """Test NVIDIA hardware codecs."""
+
+    def test_nvenc_h264_basic(self):
+        codec = NVEncH264Codec()
+        opts = codec.parse_options({'codec': 'h264_nvenc', 'crf': 25})
+        assert '-vcodec' in opts
+        assert 'h264_nvenc' in opts
+
+    def test_nvenc_h265_basic(self):
+        codec = NVEncH265Codec()
+        opts = codec.parse_options({'codec': 'h265_nvenc', 'crf': 25})
+        assert '-vcodec' in opts
+        assert 'hevc_nvenc' in opts
+
+
+class TestCopyCodecs:
+    """Test copy codec variants."""
+
+    def test_audio_copy(self):
+        from converter.avcodecs import AudioCopyCodec
+        codec = AudioCopyCodec()
+        opts = codec.parse_options({'codec': 'copy', 'map': 1, 'language': 'eng'})
+        assert '-c:a:0' in opts
+        assert 'copy' in opts
+        assert any('language=eng' in o for o in opts)
+
+    def test_audio_copy_no_language(self):
+        from converter.avcodecs import AudioCopyCodec
+        codec = AudioCopyCodec()
+        opts = codec.parse_options({'codec': 'copy', 'map': 1})
+        assert any('language=und' in o for o in opts)
+
+    def test_audio_copy_with_title(self):
+        from converter.avcodecs import AudioCopyCodec
+        codec = AudioCopyCodec()
+        opts = codec.parse_options({'codec': 'copy', 'map': 0, 'title': 'Stereo'})
+        assert any('title=Stereo' in o for o in opts)
+
+    def test_audio_copy_with_bsf(self):
+        from converter.avcodecs import AudioCopyCodec
+        codec = AudioCopyCodec()
+        opts = codec.parse_options({'codec': 'copy', 'map': 0, 'bsf': 'aac_adtstoasc'})
+        assert '-bsf:a:0' in opts
+
+    def test_video_copy(self):
+        from converter.avcodecs import VideoCopyCodec
+        codec = VideoCopyCodec()
+        opts = codec.parse_options({'codec': 'copy', 'map': 0})
+        assert '-vcodec' in opts
+        assert 'copy' in opts
+
+    def test_video_copy_with_title(self):
+        from converter.avcodecs import VideoCopyCodec
+        codec = VideoCopyCodec()
+        opts = codec.parse_options({'codec': 'copy', 'map': 0, 'title': 'FHD'})
+        assert any('title=FHD' in o for o in opts)
+
+    def test_video_copy_fps(self):
+        from converter.avcodecs import VideoCopyCodec
+        codec = VideoCopyCodec()
+        opts = codec.parse_options({'codec': 'copy', 'map': 0, 'fps': 24.0})
+        assert '-r:v' in opts
+
+    def test_subtitle_copy(self):
+        from converter.avcodecs import SubtitleCopyCodec
+        codec = SubtitleCopyCodec()
+        opts = codec.parse_options({'codec': 'copy', 'map': 2, 'language': 'fra'})
+        assert '-c:s:0' in opts
+        assert 'copy' in opts
+        assert any('language=fra' in o for o in opts)
+
+    def test_subtitle_copy_no_language(self):
+        from converter.avcodecs import SubtitleCopyCodec
+        codec = SubtitleCopyCodec()
+        opts = codec.parse_options({'codec': 'copy', 'map': 2})
+        assert any('language=und' in o for o in opts)
+
+    def test_attachment_copy(self):
+        from converter.avcodecs import AttachmentCopyCodec
+        codec = AttachmentCopyCodec()
+        opts = codec.parse_options({'codec': 'copy', 'map': 5, 'filename': 'font.ttf', 'mimetype': 'font/ttf'})
+        assert '-c:t:0' in opts
+        assert 'copy' in opts
+        assert any('filename=font.ttf' in o for o in opts)
+
+
+class TestNullCodecs:
+    """Test null codec variants."""
+
+    def test_audio_null(self):
+        from converter.avcodecs import AudioNullCodec
+        codec = AudioNullCodec()
+        assert codec.parse_options({}) == ['-an']
+
+    def test_video_null(self):
+        from converter.avcodecs import VideoNullCodec
+        codec = VideoNullCodec()
+        assert codec.parse_options({}) == ['-vn']
+
+    def test_subtitle_null(self):
+        from converter.avcodecs import SubtitleNullCodec
+        codec = SubtitleNullCodec()
+        assert codec.parse_options({}) == ['-sn']
+
+
+class TestBaseCodecHelpers:
+    def test_safe_disposition(self):
+        codec = BaseCodec()
+        dispo = codec.safe_disposition('+default')
+        assert '+default' in dispo
+        # All other dispositions should have - prefix
+        assert '-forced' in dispo
+        assert '-comment' in dispo
+
+    def test_safe_disposition_empty(self):
+        codec = BaseCodec()
+        dispo = codec.safe_disposition('')
+        # All dispositions should have - prefix
+        assert '-default' in dispo
+
+    def test_safe_disposition_none(self):
+        codec = BaseCodec()
+        dispo = codec.safe_disposition(None)
+        assert '-default' in dispo
+
+    def test_supports_bit_depth(self):
+        codec = BaseCodec()
+        assert codec.supportsBitDepth(8) is True
+        assert codec.supportsBitDepth(10) is True
+
+    def test_safe_framedata(self):
+        codec = BaseCodec()
+        assert codec.safe_framedata({}) == ""
+
+
+class TestVideoCodecAspectCorrections:
+    def test_no_source_info(self):
+        codec = H264Codec()
+        w, h, filters = codec._aspect_corrections(0, 0, 1920, 1080, 'stretch')
+        assert w == 1920
+        assert h == 1080
+        assert filters is None
+
+    def test_no_dimensions(self):
+        codec = H264Codec()
+        w, h, filters = codec._aspect_corrections(1920, 1080, 0, 0, 'stretch')
+        assert w == 0 and h == 0 and filters is None
+
+    def test_width_only(self):
+        codec = H264Codec()
+        w, h, filters = codec._aspect_corrections(1920, 1080, 1280, 0, 'stretch')
+        assert w == 1280
+        assert h == 720  # Preserves 16:9
+
+    def test_height_only(self):
+        codec = H264Codec()
+        w, h, filters = codec._aspect_corrections(1920, 1080, 0, 720, 'stretch')
+        assert h == 720
+        assert w == 1280  # Preserves 16:9
+
+    def test_same_aspect(self):
+        codec = H264Codec()
+        w, h, filters = codec._aspect_corrections(1920, 1080, 1280, 720, 'stretch')
+        assert filters is None
+
+    def test_stretch_mode(self):
+        codec = H264Codec()
+        w, h, filters = codec._aspect_corrections(1920, 1080, 800, 600, 'stretch')
+        assert filters is None
+
+    def test_crop_mode(self):
+        codec = H264Codec()
+        w, h, filters = codec._aspect_corrections(1920, 1080, 800, 600, 'crop')
+        assert filters is not None
+        assert 'crop=' in filters
+
+    def test_pad_mode(self):
+        codec = H264Codec()
+        # target is wider than source
+        w, h, filters = codec._aspect_corrections(1280, 720, 800, 600, 'pad')
+        assert filters is not None
+        assert 'pad=' in filters
+
+
+class TestAudioCodecEdgeCases:
+    def test_channels_out_of_range(self):
+        codec = AacCodec()
+        opts = codec.parse_options({'codec': 'aac', 'channels': 0})
+        assert '-ac:a:0' not in opts
+
+    def test_bitrate_clamped_low(self):
+        codec = AacCodec()
+        opts = codec.parse_options({'codec': 'aac', 'bitrate': 1})
+        assert any('8k' in o for o in opts)
+
+    def test_bitrate_clamped_high(self):
+        codec = AacCodec()
+        opts = codec.parse_options({'codec': 'aac', 'bitrate': 9999})
+        assert any('1536k' in o for o in opts)
+
+    def test_samplerate_out_of_range(self):
+        codec = AacCodec()
+        opts = codec.parse_options({'codec': 'aac', 'samplerate': 500})
+        assert '-ar:a:0' not in opts
+
+    def test_language_too_long(self):
+        codec = AacCodec()
+        opts = codec.parse_options({'codec': 'aac', 'language': 'english'})
+        # Language should be dropped, defaults to und
+        assert any('language=und' in o for o in opts)
+
+    def test_flac_basic(self):
+        codec = FlacCodec()
+        opts = codec.parse_options({'codec': 'flac', 'channels': 2})
+        assert '-c:a:0' in opts
+        assert 'flac' in opts
+
+    def test_opus_basic(self):
+        codec = OpusCodec()
+        opts = codec.parse_options({'codec': 'opus', 'channels': 2})
+        assert '-c:a:0' in opts
+
+    def test_audio_map_and_source(self):
+        codec = AacCodec()
+        opts = codec.parse_options({'codec': 'aac', 'map': 1, 'source': 0})
+        assert any('0:1' in o for o in opts)
+
+    def test_audio_with_filter(self):
+        codec = AacCodec()
+        opts = codec.parse_options({'codec': 'aac', 'filter': 'aresample=48000'})
+        assert '-filter:a:0' in opts
+
+    def test_audio_with_profile(self):
+        codec = AacCodec()
+        opts = codec.parse_options({'codec': 'aac', 'profile': 'aac_low'})
+        assert '-profile:a:0' in opts
+
+
+class TestVideoCodecParsing:
+    def test_bitrate_without_crf(self):
+        codec = H264Codec()
+        opts = codec.parse_options({'codec': 'h264', 'bitrate': 5000})
+        assert '-vb' in opts
+        assert any('5000k' in o for o in opts)
+
+    def test_filter_consolidation(self):
+        codec = H264Codec()
+        opts = codec.parse_options({
+            'codec': 'h264', 'filter': 'yadif', 'width': 1920, 'height': 1080,
+            'src_width': 3840, 'src_height': 2160
+        })
+        # Should consolidate multiple -vf into one
+        assert opts.count('-vf') == 1
+
+    def test_field_order(self):
+        codec = H264Codec()
+        opts = codec.parse_options({'codec': 'h264', 'field_order': 'progressive'})
+        assert '-field_order' in opts
+
+    def test_invalid_field_order_removed(self):
+        codec = H264Codec()
+        opts = codec.parse_options({'codec': 'h264', 'field_order': 'invalid'})
+        assert '-field_order' not in opts
+
+    def test_bsf_passthrough(self):
+        codec = H264Codec()
+        opts = codec.parse_options({'codec': 'h264', 'bsf': 'h264_mp4toannexb'})
+        assert '-bsf:v' in opts
+
+    def test_video_title(self):
+        codec = H264Codec()
+        opts = codec.parse_options({'codec': 'h264', 'title': 'FHD'})
+        assert any('title=FHD' in o for o in opts)
+
+    def test_video_no_title(self):
+        codec = H264Codec()
+        opts = codec.parse_options({'codec': 'h264'})
+        assert any('title=' == o for o in opts)
+
+    def test_pix_fmt(self):
+        codec = H264Codec()
+        opts = codec.parse_options({'codec': 'h264', 'pix_fmt': 'yuv420p'})
+        assert '-pix_fmt' in opts
+        assert 'yuv420p' in opts
+
+    def test_crf_out_of_range_removed(self):
+        codec = H264Codec()
+        opts = codec.parse_options({'codec': 'h264', 'crf': 99})
+        assert '-crf' not in opts
