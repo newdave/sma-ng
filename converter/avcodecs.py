@@ -1110,7 +1110,86 @@ class H264CodecAlt(H264Codec):
     codec_name = 'x264'
 
 
-class NVEncH264Codec(H264Codec):
+class HWAccelVideoCodec:
+    """Mixin providing shared parse/produce helpers for hardware-accelerated video codecs.
+
+    Subclasses set class attributes to configure behavior:
+        hw_prefix: str - key prefix for scale vars in safe dict (e.g., 'qsv', 'vaapi', 'nvenc')
+        hw_quality_key: str - safe dict key for quality value ('qp' or 'gq')
+        hw_quality_flag: str - FFmpeg flag ('-qp' or '-global_quality')
+        hw_quality_range: tuple(int, int) - valid (min, max) range for quality value
+    """
+    hw_prefix = ''
+    hw_quality_key = 'qp'
+    hw_quality_flag = '-qp'
+    hw_quality_range = (0, 52)
+
+    def _hw_parse_scale(self, safe):
+        """Convert width/height to hw-prefixed scale variables."""
+        p = self.hw_prefix
+        if 'width' in safe and safe['width']:
+            safe['width'] = 2 * round(safe['width'] / 2)
+            safe[p + '_wscale'] = safe['width']
+            del safe['width']
+        if 'height' in safe and safe['height']:
+            if safe['height'] % 2 == 0:
+                safe[p + '_hscale'] = safe['height']
+            del safe['height']
+
+    def _hw_parse_quality(self, safe):
+        """Convert CRF to hardware quality parameter."""
+        if 'crf' in safe:
+            safe[self.hw_quality_key] = safe['crf']
+            del safe['crf']
+            q = safe[self.hw_quality_key]
+            qmin, qmax = self.hw_quality_range
+            if q < qmin or q > qmax:
+                del safe[self.hw_quality_key]
+            elif 'bitrate' in safe:
+                del safe['bitrate']
+
+    def _hw_parse_pix_fmt(self, safe):
+        """Move pix_fmt to hw-prefixed key."""
+        if 'pix_fmt' in safe:
+            safe[self.hw_prefix + '_pix_fmt'] = safe['pix_fmt']
+            del safe['pix_fmt']
+
+    def _hw_quality_opts(self, safe):
+        """Produce quality flag + rate control options."""
+        optlist = []
+        if self.hw_quality_key in safe:
+            optlist.extend([self.hw_quality_flag, str(safe[self.hw_quality_key])])
+            if 'maxrate' in safe:
+                optlist.extend(['-maxrate:v', str(safe['maxrate'])])
+            if 'bufsize' in safe:
+                optlist.extend(['-bufsize', str(safe['bufsize'])])
+        return optlist
+
+    def _hw_device_opts(self, safe, hwdownload_filter='hwdownload,format=nv12,hwupload'):
+        """Produce device selection and hwdownload options."""
+        optlist = []
+        if 'device' in safe:
+            optlist.extend(['-filter_hw_device', safe['device']])
+            if 'decode_device' in safe and safe['decode_device'] != safe['device']:
+                optlist.extend(['-vf', hwdownload_filter])
+        elif 'decode_device' in safe:
+            optlist.extend(['-vf', hwdownload_filter])
+        return optlist
+
+    def _hw_scale_opts(self, safe, fmtstr=''):
+        """Produce named-parameter scale filter options (w=X:h=Y style)."""
+        p = self.hw_prefix
+        wkey, hkey = p + '_wscale', p + '_hscale'
+        if wkey in safe and hkey in safe:
+            return ['-vf', '%s=w=%s:h=%s%s' % (self.scale_filter, safe[wkey], safe[hkey], fmtstr)]
+        elif wkey in safe:
+            return ['-vf', '%s=w=%s:h=trunc(ow/a/2)*2%s' % (self.scale_filter, safe[wkey], fmtstr)]
+        elif hkey in safe:
+            return ['-vf', '%s=w=trunc((oh*a)/2)*2:h=%s%s' % (self.scale_filter, safe[hkey], fmtstr)]
+        return []
+
+
+class NVEncH264Codec(HWAccelVideoCodec, H264Codec):
     """
     Nvidia H.264/AVC video codec.
     """
@@ -1118,6 +1197,7 @@ class NVEncH264Codec(H264Codec):
     ffmpeg_codec_name = 'h264_nvenc'
     scale_filter = 'scale_npp'
     max_depth = 8
+    hw_prefix = 'nvenc'
     encoder_options = H264Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1125,46 +1205,15 @@ class NVEncH264Codec(H264Codec):
     })
 
     def _codec_specific_parse_options(self, safe, stream=0):
-        if 'width' in safe and safe['width']:
-            safe['width'] = 2 * round(safe['width'] / 2)
-            safe['nvenc_wscale'] = safe['width']
-            del(safe['width'])
-        if 'height' in safe and safe['height']:
-            if safe['height'] % 2 == 0:
-                safe['nvenc_hscale'] = safe['height']
-            del(safe['height'])
-        if 'crf' in safe:
-            safe['qp'] = safe['crf']
-            del safe['crf']
-            qp = safe['qp']
-            if qp < 0 or qp > 52:
-                del safe['qp']
-            elif 'bitrate' in safe:
-                del safe['bitrate']
+        self._hw_parse_scale(safe)
+        self._hw_parse_quality(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
         optlist = super(NVEncH264Codec, self)._codec_specific_produce_ffmpeg_list(safe, stream)
-
-        if 'qp' in safe:
-            optlist.extend(['-qp', str(safe['qp'])])
-            if 'maxrate' in safe:
-                optlist.extend(['-maxrate:v', str(safe['maxrate'])])
-            if 'bufsize' in safe:
-                optlist.extend(['-bufsize', str(safe['bufsize'])])
-
-        if 'device' in safe:
-            optlist.extend(['-filter_hw_device', safe['device']])
-            if 'decode_device' in safe and safe['decode_device'] != safe['device']:
-                optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-        elif 'decode_device' in safe:
-            optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-        if 'nvenc_wscale' in safe and 'nvenc_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=%s' % (self.scale_filter, safe['nvenc_wscale'], safe['nvenc_hscale'])])
-        elif 'nvenc_wscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=trunc(ow/a/2)*2' % (self.scale_filter, safe['nvenc_wscale'])])
-        elif 'nvenc_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=trunc((oh*a)/2)*2:h=%s' % (self.scale_filter, safe['nvenc_hscale'])])
+        optlist.extend(self._hw_quality_opts(safe))
+        optlist.extend(self._hw_device_opts(safe))
+        optlist.extend(self._hw_scale_opts(safe))
         return optlist
 
 
@@ -1192,14 +1241,48 @@ class OMXH264Codec(H264Codec):
     ffmpeg_codec_name = 'h264_omx'
 
 
-class H264VAAPICodec(H264Codec):
+class VAAPIVideoCodec(HWAccelVideoCodec):
+    """VAAPI-specific mixin with device init fallback and hwupload filter chain."""
+    hw_prefix = 'vaapi'
+    default_fmt = 'nv12'
+
+    def _hw_device_opts(self, safe, hwdownload_filter='hwdownload'):
+        optlist = []
+        if 'device' in safe:
+            optlist.extend(['-filter_hw_device', safe['device']])
+            if 'decode_device' in safe and safe['decode_device'] != safe['device']:
+                optlist.extend(['-vf', hwdownload_filter])
+        else:
+            optlist.extend(['-init_hw_device', 'vaapi=vaapi0:/dev/dri/renderD128', '-filter_hw_device', 'vaapi0'])
+            if 'decode_device' in safe:
+                optlist.extend(['-vf', hwdownload_filter])
+        return optlist
+
+    def _hw_vaapi_scale_opts(self, safe):
+        """VAAPI-specific scale filter with format conversion and hwupload."""
+        p = self.hw_prefix
+        wkey, hkey = p + '_wscale', p + '_hscale'
+        fmt = safe.get(p + '_pix_fmt', self.default_fmt)
+        fmtstr = ':format=%s' % safe[p + '_pix_fmt'] if p + '_pix_fmt' in safe else ""
+
+        if wkey in safe and hkey in safe:
+            return ['-vf', 'format=%s|vaapi,hwupload,%s=w=%s:h=%s%s' % (fmt, self.scale_filter, safe[wkey], safe[hkey], fmtstr)]
+        elif wkey in safe:
+            return ['-vf', 'format=%s|vaapi,hwupload,%s=w=%s:h=trunc(ow/a/2)*2%s' % (fmt, self.scale_filter, safe[wkey], fmtstr)]
+        elif hkey in safe:
+            return ['-vf', 'format=%s|vaapi,hwupload,%s=w=trunc((oh*a)/2)*2:h=%s%s' % (fmt, self.scale_filter, safe[hkey], fmtstr)]
+        else:
+            fmtstr = ",%s=%s" % (self.scale_filter, fmtstr[1:]) if fmtstr else ""
+            return ['-vf', "format=%s|vaapi,hwupload%s" % (fmt, fmtstr)]
+
+
+class H264VAAPICodec(VAAPIVideoCodec, H264Codec):
     """
     H.264/AVC VAAPI video codec.
     """
     codec_name = 'h264vaapi'
     ffmpeg_codec_name = 'h264_vaapi'
     scale_filter = 'scale_vaapi'
-    default_fmt = 'nv12'
     encoder_options = H264Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1207,67 +1290,30 @@ class H264VAAPICodec(H264Codec):
     })
 
     def _codec_specific_parse_options(self, safe, stream=0):
-        if 'width' in safe and safe['width']:
-            safe['width'] = 2 * round(safe['width'] / 2)
-            safe['vaapi_wscale'] = safe['width']
-            del(safe['width'])
-        if 'height' in safe and safe['height']:
-            if safe['height'] % 2 == 0:
-                safe['vaapi_hscale'] = safe['height']
-            del(safe['height'])
-        if 'crf' in safe:
-            safe['qp'] = safe['crf']
-            del safe['crf']
-            qp = safe['qp']
-            if qp < 0 or qp > 52:
-                del safe['qp']
-            elif 'bitrate' in safe:
-                del safe['bitrate']
-        if 'pix_fmt' in safe:
-            safe['vaapi_pix_fmt'] = safe['pix_fmt']
-            del safe['pix_fmt']
+        self._hw_parse_scale(safe)
+        self._hw_parse_quality(safe)
+        self._hw_parse_pix_fmt(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
         optlist = super(H264VAAPICodec, self)._codec_specific_produce_ffmpeg_list(safe, stream)
-        if 'qp' in safe:
-            optlist.extend(['-qp', str(safe['qp'])])
-            if 'maxrate' in safe:
-                optlist.extend(['-maxrate:v', str(safe['maxrate'])])
-            if 'bufsize' in safe:
-                optlist.extend(['-bufsize', str(safe['bufsize'])])
-
-        if 'device' in safe:
-            optlist.extend(['-filter_hw_device', safe['device']])
-            if 'decode_device' in safe and safe['decode_device'] != safe['device']:
-                optlist.extend(['-vf', 'hwdownload'])
-        else:
-            optlist.extend(['-init_hw_device', 'vaapi=vaapi0:/dev/dri/renderD128', '-filter_hw_device', 'vaapi0'])
-            if 'decode_device' in safe:
-                optlist.extend(['-vf', 'hwdownload'])
-
-        fmt = safe['vaapi_pix_fmt'] if 'vaapi_pix_fmt' in safe else self.default_fmt
-        fmtstr = ':format=%s' % safe['vaapi_pix_fmt'] if 'vaapi_pix_fmt' in safe else ""
-
-        if 'vaapi_wscale' in safe and 'vaapi_hscale' in safe:
-            optlist.extend(['-vf', 'format=%s|vaapi,hwupload,%s=w=%s:h=%s%s' % (fmt, self.scale_filter, safe['vaapi_wscale'], safe['vaapi_hscale'], fmtstr)])
-        elif 'vaapi_wscale' in safe:
-            optlist.extend(['-vf', 'format=%s|vaapi,hwupload,%s=w=%s:h=trunc(ow/a/2)*2%s' % (fmt, self.scale_filter, safe['vaapi_wscale'], fmtstr)])
-        elif 'vaapi_hscale' in safe:
-            optlist.extend(['-vf', 'format=%s|vaapi,hwupload,%s=w=trunc((oh*a)/2)*2:h=%s%s' % (fmt, self.scale_filter, safe['vaapi_hscale'], fmtstr)])
-        else:
-            fmtstr = ",%s=%s" % (self.scale_filter, fmtstr[1:]) if fmtstr else ""
-            optlist.extend(['-vf', "format=%s|vaapi,hwupload%s" % (fmt, fmtstr)])
+        optlist.extend(self._hw_quality_opts(safe))
+        optlist.extend(self._hw_device_opts(safe))
+        optlist.extend(self._hw_vaapi_scale_opts(safe))
         return optlist
 
 
-class H264QSVCodec(H264Codec):
+class H264QSVCodec(HWAccelVideoCodec, H264Codec):
     """
-    H.264/AVC video codec.
+    H.264/AVC QSV video codec.
     """
     codec_name = 'h264qsv'
     ffmpeg_codec_name = 'h264_qsv'
     scale_filter = 'scale_qsv'
+    hw_prefix = 'qsv'
+    hw_quality_key = 'gq'
+    hw_quality_flag = '-global_quality'
+    hw_quality_range = (1, 51)
     encoder_options = H264Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1276,22 +1322,8 @@ class H264QSVCodec(H264Codec):
 
     def _codec_specific_parse_options(self, safe, stream=0):
         safe = super(H264QSVCodec, self)._codec_specific_parse_options(safe, stream)
-        if 'width' in safe and safe['width']:
-            safe['width'] = 2 * round(safe['width'] / 2)
-            safe['qsv_wscale'] = safe['width']
-            del(safe['width'])
-        if 'height' in safe and safe['height']:
-            if safe['height'] % 2 == 0:
-                safe['qsv_hscale'] = safe['height']
-            del(safe['height'])
-        if 'crf' in safe:
-            safe['gq'] = safe['crf']
-            del safe['crf']
-            gq = safe['gq']
-            if gq < 1 or gq > 51:
-                del safe['gq']
-            elif 'bitrate' in safe:
-                del safe['bitrate']
+        self._hw_parse_scale(safe)
+        self._hw_parse_quality(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
@@ -1307,26 +1339,9 @@ class H264QSVCodec(H264Codec):
             optlist.extend(['-level', '%0.0f' % (safe['level'] * 10)])
             del safe['level']
 
-        if 'gq' in safe:
-            optlist.extend(['-global_quality', str(safe['gq'])])
-            if 'maxrate' in safe:
-                optlist.extend(['-maxrate:v', str(safe['maxrate'])])
-            if 'bufsize' in safe:
-                optlist.extend(['-bufsize', str(safe['bufsize'])])
-
-        if 'device' in safe:
-            optlist.extend(['-filter_hw_device', safe['device']])
-            if 'decode_device' in safe and safe['decode_device'] != safe['device']:
-                optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-        elif 'decode_device' in safe:
-            optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-        if 'qsv_wscale' in safe and 'qsv_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=%s' % (self.scale_filter, safe['qsv_wscale'], safe['qsv_hscale'])])
-        elif 'qsv_wscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=trunc(ow/a/2)*2' % (self.scale_filter, safe['qsv_wscale'])])
-        elif 'qsv_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=trunc((oh*a)/2)*2:h=%s' % (self.scale_filter, safe['qsv_hscale'])])
-
+        optlist.extend(self._hw_quality_opts(safe))
+        optlist.extend(self._hw_device_opts(safe))
+        optlist.extend(self._hw_scale_opts(safe))
         optlist.extend(super(H264QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
         optlist.extend(['-look_ahead', '0'])
         return optlist
@@ -1463,13 +1478,17 @@ class H265CodecAlt(H265Codec):
     codec_name = 'hevc'
 
 
-class H265QSVCodec(H265Codec):
+class H265QSVCodec(HWAccelVideoCodec, H265Codec):
     """
-    HEVC video codec.
+    HEVC QSV video codec.
     """
     codec_name = 'h265qsv'
     ffmpeg_codec_name = 'hevc_qsv'
     scale_filter = 'scale_qsv'
+    hw_prefix = 'qsv'
+    hw_quality_key = 'gq'
+    hw_quality_flag = '-global_quality'
+    hw_quality_range = (1, 51)
     encoder_options = H265Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1478,22 +1497,8 @@ class H265QSVCodec(H265Codec):
 
     def _codec_specific_parse_options(self, safe, stream=0):
         safe = super(H265QSVCodec, self)._codec_specific_parse_options(safe, stream)
-        if 'width' in safe and safe['width']:
-            safe['width'] = 2 * round(safe['width'] / 2)
-            safe['qsv_wscale'] = safe['width']
-            del(safe['width'])
-        if 'height' in safe and safe['height']:
-            if safe['height'] % 2 == 0:
-                safe['qsv_hscale'] = safe['height']
-            del(safe['height'])
-        if 'crf' in safe:
-            safe['gq'] = safe['crf']
-            del safe['crf']
-            gq = safe['gq']
-            if gq < 1 or gq > 51:
-                del safe['gq']
-            elif 'bitrate' in safe:
-                del safe['bitrate']
+        self._hw_parse_scale(safe)
+        self._hw_parse_quality(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
@@ -1509,25 +1514,9 @@ class H265QSVCodec(H265Codec):
             optlist.extend(['-level', '%0.0f' % (safe['level'] * 10)])
             del safe['level']
 
-        if 'gq' in safe:
-            optlist.extend(['-global_quality', str(safe['gq'])])
-            if 'maxrate' in safe:
-                optlist.extend(['-maxrate:v', str(safe['maxrate'])])
-            if 'bufsize' in safe:
-                optlist.extend(['-bufsize', str(safe['bufsize'])])
-
-        if 'device' in safe:
-            optlist.extend(['-filter_hw_device', safe['device']])
-            if 'decode_device' in safe and safe['decode_device'] != safe['device']:
-                optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-        elif 'decode_device' in safe:
-            optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-        if 'qsv_wscale' in safe and 'qsv_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=%s' % (self.scale_filter, safe['qsv_wscale'], safe['qsv_hscale'])])
-        elif 'qsv_wscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=trunc(ow/a/2)*2' % (self.scale_filter, safe['qsv_wscale'])])
-        elif 'qsv_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=trunc((oh*a)/2)*2:h=%s' % (self.scale_filter, safe['qsv_hscale'])])
+        optlist.extend(self._hw_quality_opts(safe))
+        optlist.extend(self._hw_device_opts(safe))
+        optlist.extend(self._hw_scale_opts(safe))
         optlist.extend(super(H265QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
         return optlist
 
@@ -1586,14 +1575,13 @@ class H265QSVCodecPatched(H265QSVCodec):
         return params[:-1]
 
 
-class H265VAAPICodec(H265Codec):
+class H265VAAPICodec(VAAPIVideoCodec, H265Codec):
     """
     H.265/AVC VAAPI video codec.
     """
     codec_name = 'h265vaapi'
     ffmpeg_codec_name = 'hevc_vaapi'
     scale_filter = 'scale_vaapi'
-    default_fmt = 'nv12'
     encoder_options = H265Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1601,57 +1589,16 @@ class H265VAAPICodec(H265Codec):
     })
 
     def _codec_specific_parse_options(self, safe, stream=0):
-        if 'width' in safe and safe['width']:
-            safe['width'] = 2 * round(safe['width'] / 2)
-            safe['vaapi_wscale'] = safe['width']
-            del(safe['width'])
-        if 'height' in safe and safe['height']:
-            if safe['height'] % 2 == 0:
-                safe['vaapi_hscale'] = safe['height']
-            del(safe['height'])
-        if 'crf' in safe:
-            safe['qp'] = safe['crf']
-            del safe['crf']
-            qp = safe['qp']
-            if qp < 0 or qp > 52:
-                del safe['qp']
-            elif 'bitrate' in safe:
-                del safe['bitrate']
-        if 'pix_fmt' in safe:
-            safe['vaapi_pix_fmt'] = safe['pix_fmt']
-            del safe['pix_fmt']
+        self._hw_parse_scale(safe)
+        self._hw_parse_quality(safe)
+        self._hw_parse_pix_fmt(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
         optlist = super(H265VAAPICodec, self)._codec_specific_produce_ffmpeg_list(safe, stream)
-        if 'qp' in safe:
-            optlist.extend(['-qp', str(safe['qp'])])
-            if 'maxrate' in safe:
-                optlist.extend(['-maxrate:v', str(safe['maxrate'])])
-            if 'bufsize' in safe:
-                optlist.extend(['-bufsize', str(safe['bufsize'])])
-
-        if 'device' in safe:
-            optlist.extend(['-filter_hw_device', safe['device']])
-            if 'decode_device' in safe and safe['decode_device'] != safe['device']:
-                optlist.extend(['-vf', 'hwdownload'])
-        else:
-            optlist.extend(['-init_hw_device', 'vaapi=vaapi0:/dev/dri/renderD128', '-filter_hw_device', 'vaapi0'])
-            if 'decode_device' in safe:
-                optlist.extend(['-vf', 'hwdownload'])
-
-        fmt = safe['vaapi_pix_fmt'] if 'vaapi_pix_fmt' in safe else self.default_fmt
-        fmtstr = ':format=%s' % safe['vaapi_pix_fmt'] if 'vaapi_pix_fmt' in safe else ""
-
-        if 'vaapi_wscale' in safe and 'vaapi_hscale' in safe:
-            optlist.extend(['-vf', 'format=%s|vaapi,hwupload,%s=w=%s:h=%s%s' % (fmt, self.scale_filter, safe['vaapi_wscale'], safe['vaapi_hscale'], fmtstr)])
-        elif 'vaapi_wscale' in safe:
-            optlist.extend(['-vf', 'format=%s|vaapi,hwupload,%s=w=%s:h=trunc(ow/a/2)*2%s' % (fmt, self.scale_filter, safe['vaapi_wscale'], fmtstr)])
-        elif 'vaapi_hscale' in safe:
-            optlist.extend(['-vf', 'format=%s|vaapi,hwupload,%s=w=trunc((oh*a)/2)*2:h=%s%s' % (fmt, self.scale_filter, safe['vaapi_hscale'], fmtstr)])
-        else:
-            fmtstr = ",%s=%s" % (self.scale_filter, fmtstr[1:]) if fmtstr else ""
-            optlist.extend(['-vf', "format=%s|vaapi,hwupload%s" % (fmt, fmtstr)])
+        optlist.extend(self._hw_quality_opts(safe))
+        optlist.extend(self._hw_device_opts(safe))
+        optlist.extend(self._hw_vaapi_scale_opts(safe))
         return optlist
 
 
@@ -1675,15 +1622,15 @@ class H265V4l2m2mDecoder(BaseDecoder):
     max_depth = 10
 
 
-class NVEncH265Codec(H265Codec):
+class NVEncH265Codec(HWAccelVideoCodec, H265Codec):
     """
     Nvidia H.265/AVC video codec.
     """
     codec_name = 'h265_nvenc'
     ffmpeg_codec_name = 'hevc_nvenc'
     scale_filter = 'scale_npp'
-    default_fmt = 'nv12'
     max_depth = 10
+    hw_prefix = 'nvenc'
     encoder_options = H265Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1691,51 +1638,19 @@ class NVEncH265Codec(H265Codec):
     })
 
     def _codec_specific_parse_options(self, safe, stream=0):
-        if 'width' in safe and safe['width']:
-            safe['width'] = 2 * round(safe['width'] / 2)
-            safe['nvenc_wscale'] = safe['width']
-            del(safe['width'])
-        if 'height' in safe and safe['height']:
-            if safe['height'] % 2 == 0:
-                safe['nvenc_hscale'] = safe['height']
-            del(safe['height'])
-        if 'crf' in safe:
-            safe['qp'] = safe['crf']
-            del safe['crf']
-            qp = safe['qp']
-            if qp < 0 or qp > 52:
-                del safe['qp']
-            elif 'bitrate' in safe:
-                del safe['bitrate']
-        if 'pix_fmt' in safe:
-            safe['nvenc_pix_fmt'] = safe['pix_fmt']
-            del safe['pix_fmt']
+        self._hw_parse_scale(safe)
+        self._hw_parse_quality(safe)
+        self._hw_parse_pix_fmt(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
         optlist = super(NVEncH265Codec, self)._codec_specific_produce_ffmpeg_list(safe, stream)
-        if 'qp' in safe:
-            optlist.extend(['-qp', str(safe['qp'])])
-            if 'maxrate' in safe:
-                optlist.extend(['-maxrate:v', str(safe['maxrate'])])
-            if 'bufsize' in safe:
-                optlist.extend(['-bufsize', str(safe['bufsize'])])
-
-        if 'device' in safe:
-            optlist.extend(['-filter_hw_device', safe['device']])
-            if 'decode_device' in safe and safe['decode_device'] != safe['device']:
-                optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-        elif 'decode_device' in safe:
-            optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-
-        fmtstr = ':format=%s' % (safe['nvenc_pix_fmt']) if 'nvenc_pix_fmt' in safe else ""
-
-        if 'nvenc_wscale' in safe and 'nvenc_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=%s%s' % (self.scale_filter, safe['nvenc_wscale'], safe['nvenc_hscale'], fmtstr)])
-        elif 'nvenc_wscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=trunc(ow/a/2)*2%s' % (self.scale_filter, safe['nvenc_wscale'], fmtstr)])
-        elif 'nvenc_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=trunc((oh*a)/2)*2:h=%s%s' % (self.scale_filter, safe['nvenc_hscale'], fmtstr)])
+        optlist.extend(self._hw_quality_opts(safe))
+        optlist.extend(self._hw_device_opts(safe))
+        fmtstr = ':format=%s' % safe['nvenc_pix_fmt'] if 'nvenc_pix_fmt' in safe else ""
+        scale = self._hw_scale_opts(safe, fmtstr)
+        if scale:
+            optlist.extend(scale)
         elif fmtstr:
             optlist.extend(['-vf', '%s=%s' % (self.scale_filter, fmtstr[1:])])
         return optlist
@@ -1972,13 +1887,17 @@ class RAV1ECodec(AV1Codec):
     ffmpeg_codec_name = 'librav1e'
 
 
-class AV1QSVCodec(AV1Codec):
+class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
     """
     QSV AV1 Codec
     """
     codec_name = 'av1qsv'
     ffmpeg_codec_name = 'av1_qsv'
     scale_filter = 'scale_qsv'
+    hw_prefix = 'qsv'
+    hw_quality_key = 'gq'
+    hw_quality_flag = '-global_quality'
+    hw_quality_range = (1, 51)
     encoder_options = AV1Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1987,61 +1906,28 @@ class AV1QSVCodec(AV1Codec):
 
     def _codec_specific_parse_options(self, safe, stream=0):
         safe = super(AV1QSVCodec, self)._codec_specific_parse_options(safe, stream)
-        if 'width' in safe and safe['width']:
-            safe['width'] = 2 * round(safe['width'] / 2)
-            safe['qsv_wscale'] = safe['width']
-            del(safe['width'])
-        if 'height' in safe and safe['height']:
-            if safe['height'] % 2 == 0:
-                safe['qsv_hscale'] = safe['height']
-            del(safe['height'])
-        if 'crf' in safe:
-            safe['gq'] = safe['crf']
-            del safe['crf']
-            gq = safe['gq']
-            if gq < 1 or gq > 51:
-                del safe['gq']
-            elif 'bitrate' in safe:
-                del safe['bitrate']
+        self._hw_parse_scale(safe)
+        self._hw_parse_quality(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
         optlist = []
-
         if 'preset' in safe:
             optlist.extend(['-preset', str(safe['preset'])])
-
-        if 'gq' in safe:
-            optlist.extend(['-global_quality', str(safe['gq'])])
-            if 'maxrate' in safe:
-                optlist.extend(['-maxrate:v', str(safe['maxrate'])])
-            if 'bufsize' in safe:
-                optlist.extend(['-bufsize', str(safe['bufsize'])])
-
-        if 'device' in safe:
-            optlist.extend(['-filter_hw_device', safe['device']])
-            if 'decode_device' in safe and safe['decode_device'] != safe['device']:
-                optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-        elif 'decode_device' in safe:
-            optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-        if 'qsv_wscale' in safe and 'qsv_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=%s' % (self.scale_filter, safe['qsv_wscale'], safe['qsv_hscale'])])
-        elif 'qsv_wscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=trunc(ow/a/2)*2' % (self.scale_filter, safe['qsv_wscale'])])
-        elif 'qsv_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=trunc((oh*a)/2)*2:h=%s' % (self.scale_filter, safe['qsv_hscale'])])
-
+        optlist.extend(self._hw_quality_opts(safe))
+        optlist.extend(self._hw_device_opts(safe))
+        optlist.extend(self._hw_scale_opts(safe))
         optlist.extend(['-look_ahead', '0'])
         return optlist
 
-class AV1VAAPICodec(AV1Codec):
+class AV1VAAPICodec(VAAPIVideoCodec, AV1Codec):
     """
     AV1 VAAPI Codec
     """
     codec_name = 'av1vaapi'
     ffmpeg_codec_name = 'av1_vaapi'
     scale_filter = 'scale_vaapi'
-    default_fmt = 'nv12'
+    hw_quality_range = (0, 255)
     encoder_options = AV1Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -2050,61 +1936,18 @@ class AV1VAAPICodec(AV1Codec):
 
     def _codec_specific_parse_options(self, safe, stream=0):
         safe = super(AV1VAAPICodec, self)._codec_specific_parse_options(safe, stream)
-        if 'width' in safe and safe['width']:
-            safe['width'] = 2 * round(safe['width'] / 2)
-            safe['vaapi_wscale'] = safe['width']
-            del(safe['width'])
-        if 'height' in safe and safe['height']:
-            if safe['height'] % 2 == 0:
-                safe['vaapi_hscale'] = safe['height']
-            del(safe['height'])
-        if 'crf' in safe:
-            safe['qp'] = safe['crf']
-            del safe['crf']
-            qp = safe['qp']
-            if qp < 0 or qp > 255:
-                del safe['qp']
-            elif 'bitrate' in safe:
-                del safe['bitrate']
-        if 'pix_fmt' in safe:
-            safe['vaapi_pix_fmt'] = safe['pix_fmt']
-            del safe['pix_fmt']
+        self._hw_parse_scale(safe)
+        self._hw_parse_quality(safe)
+        self._hw_parse_pix_fmt(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
         optlist = []
-
         if 'preset' in safe:
             optlist.extend(['-preset', str(safe['preset'])])
-
-        if 'qp' in safe:
-            optlist.extend(['-qp', str(safe['qp'])])
-            if 'maxrate' in safe:
-                optlist.extend(['-maxrate:v', str(safe['maxrate'])])
-            if 'bufsize' in safe:
-                optlist.extend(['-bufsize', str(safe['bufsize'])])
-
-        if 'device' in safe:
-            optlist.extend(['-filter_hw_device', safe['device']])
-            if 'decode_device' in safe and safe['decode_device'] != safe['device']:
-                optlist.extend(['-vf', 'hwdownload'])
-        else:
-            optlist.extend(['-init_hw_device', 'vaapi=vaapi0:/dev/dri/renderD128', '-filter_hw_device', 'vaapi0'])
-            if 'decode_device' in safe:
-                optlist.extend(['-vf', 'hwdownload'])
-
-        fmt = safe['vaapi_pix_fmt'] if 'vaapi_pix_fmt' in safe else self.default_fmt
-        fmtstr = ':format=%s' % safe['vaapi_pix_fmt'] if 'vaapi_pix_fmt' in safe else ""
-
-        if 'vaapi_wscale' in safe and 'vaapi_hscale' in safe:
-            optlist.extend(['-vf', 'format=%s|vaapi,hwupload,%s=w=%s:h=%s%s' % (fmt, self.scale_filter, safe['vaapi_wscale'], safe['vaapi_hscale'], fmtstr)])
-        elif 'vaapi_wscale' in safe:
-            optlist.extend(['-vf', 'format=%s|vaapi,hwupload,%s=w=%s:h=trunc(ow/a/2)*2%s' % (fmt, self.scale_filter, safe['vaapi_wscale'], fmtstr)])
-        elif 'vaapi_hscale' in safe:
-            optlist.extend(['-vf', 'format=%s|vaapi,hwupload,%s=w=trunc((oh*a)/2)*2:h=%s%s' % (fmt, self.scale_filter, safe['vaapi_hscale'], fmtstr)])
-        else:
-            fmtstr = ",%s=%s" % (self.scale_filter, fmtstr[1:]) if fmtstr else ""
-            optlist.extend(['-vf', "format=%s|vaapi,hwupload%s" % (fmt, fmtstr)])
+        optlist.extend(self._hw_quality_opts(safe))
+        optlist.extend(self._hw_device_opts(safe))
+        optlist.extend(self._hw_vaapi_scale_opts(safe))
         return optlist
 
 class NVEncAV1Codec(AV1Codec):
@@ -2114,13 +1957,17 @@ class NVEncAV1Codec(AV1Codec):
     codec_name = 'av1nvenc'
     ffmpeg_codec_name = 'av1_nvenc'
 
-class Vp9QSVCodec(Vp9Codec):
+class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
     """
     Google VP9 QSV video codec.
     """
     codec_name = 'vp9qsv'
     ffmpeg_codec_name = 'vp9_qsv'
     scale_filter = 'scale_qsv'
+    hw_prefix = 'qsv'
+    hw_quality_key = 'gq'
+    hw_quality_flag = '-global_quality'
+    hw_quality_range = (1, 255)
     encoder_options = Vp9Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -2130,47 +1977,15 @@ class Vp9QSVCodec(Vp9Codec):
     def _codec_specific_parse_options(self, safe, stream=0):
         if 'framedata' in safe:
             safe = super(Vp9QSVCodec, self)._codec_specific_parse_options(safe, stream)
-        if 'width' in safe and safe['width']:
-            safe['width'] = 2 * round(safe['width'] / 2)
-            safe['qsv_wscale'] = safe['width']
-            del(safe['width'])
-        if 'height' in safe and safe['height']:
-            if safe['height'] % 2 == 0:
-                safe['qsv_hscale'] = safe['height']
-            del(safe['height'])
-        if 'crf' in safe:
-            safe['gq'] = safe['crf']
-            del safe['crf']
-            gq = safe['gq']
-            if gq < 1 or gq > 255:
-                del safe['gq']
-            elif 'bitrate' in safe:
-                del safe['bitrate']
+        self._hw_parse_scale(safe)
+        self._hw_parse_quality(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
         optlist = []
-
-        if 'gq' in safe:
-            optlist.extend(['-global_quality', str(safe['gq'])])
-            if 'maxrate' in safe:
-                optlist.extend(['-maxrate:v', str(safe['maxrate'])])
-            if 'bufsize' in safe:
-                optlist.extend(['-bufsize', str(safe['bufsize'])])
-
-        if 'device' in safe:
-            optlist.extend(['-filter_hw_device', safe['device']])
-            if 'decode_device' in safe and safe['decode_device'] != safe['device']:
-                optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-        elif 'decode_device' in safe:
-            optlist.extend(['-vf', 'hwdownload,format=nv12,hwupload'])
-        if 'qsv_wscale' in safe and 'qsv_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=%s' % (self.scale_filter, safe['qsv_wscale'], safe['qsv_hscale'])])
-        elif 'qsv_wscale' in safe:
-            optlist.extend(['-vf', '%s=w=%s:h=trunc(ow/a/2)*2' % (self.scale_filter, safe['qsv_wscale'])])
-        elif 'qsv_hscale' in safe:
-            optlist.extend(['-vf', '%s=w=trunc((oh*a)/2)*2:h=%s' % (self.scale_filter, safe['qsv_hscale'])])
-
+        optlist.extend(self._hw_quality_opts(safe))
+        optlist.extend(self._hw_device_opts(safe))
+        optlist.extend(self._hw_scale_opts(safe))
         optlist.extend(['-look_ahead', '0'])
         return optlist
 
