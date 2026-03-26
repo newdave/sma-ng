@@ -5,7 +5,6 @@ SMA-NG SABnzbd Post-Processing Script
 Submits conversion job to daemon via webhook.
 The daemon handles config selection via path matching and triggers media manager rescans.
 """
-import os
 import sys
 from resources.log import getLogger
 from resources.readsettings import ReadSettings
@@ -34,28 +33,11 @@ try:
         log.error("Download failed with status %d, skipping." % status)
         sys.exit(1)
 
-    # Check for bypass category
-    bypass_cats = settings.SAB.get('bypass', [])
-    bypass_matched = False
-    for b in bypass_cats:
-        if b and category.startswith(b):
-            bypass_matched = True
-            break
-    if bypass_matched:
+    if webhook.check_bypass(settings.SAB.get('bypass', []), category):
         log.info("Bypass category matched, skipping conversion.")
         sys.exit(0)
 
-    # Submit all valid files in directory to daemon
-    if os.path.isdir(path):
-        for r, _, files in os.walk(path):
-            for f in files:
-                filepath = os.path.join(r, f)
-                webhook.submit_job(filepath, logger=log)
-    elif os.path.isfile(path):
-        webhook.submit_job(path, logger=log)
-    else:
-        log.error("Path does not exist: %s" % path)
-        sys.exit(1)
+    webhook.submit_path(path, logger=log)
 
 except:
     log.exception("Error in SABnzbd post-processing.")

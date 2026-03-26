@@ -7,81 +7,10 @@ then performs Radarr-specific API operations (rescan, rename, scene info restore
 """
 import os
 import sys
-import requests
-import time
-import shutil
 from resources.log import getLogger
 from resources.readsettings import ReadSettings
 from resources.webhook_client import submit_and_wait
-
-
-# Radarr API functions
-def rescanRequest(baseURL, headers, movieid, log):
-    url = baseURL + "/api/v3/command"
-    payload = {'name': 'RescanMovie', 'movieId': movieid}
-    log.debug("Radarr RescanMovie: %s" % str(payload))
-    r = requests.post(url, json=payload, headers=headers)
-    rstate = r.json()
-    try:
-        rstate = rstate[0]
-    except:
-        pass
-    log.info("Radarr RescanMovie response: ID %d %s." % (rstate['id'], rstate['status']))
-    return rstate
-
-
-def waitForCommand(baseURL, headers, commandID, log, retries=6, delay=10):
-    url = baseURL + "/api/v3/command/" + str(commandID)
-    r = requests.get(url, headers=headers)
-    command = r.json()
-    attempts = 0
-    while command['status'].lower() not in ['complete', 'completed'] and attempts < retries:
-        time.sleep(delay)
-        r = requests.get(url, headers=headers)
-        command = r.json()
-        attempts += 1
-    return command['status'].lower() in ['complete', 'completed']
-
-
-def renameRequest(baseURL, headers, fileid, movieid, log):
-    url = baseURL + "/api/v3/command"
-    if fileid:
-        payload = {'name': 'RenameFiles', 'files': [fileid], 'movieId': movieid}
-    else:
-        payload = {'name': 'RenameMovies', 'movieIds': [movieid]}
-    r = requests.post(url, json=payload, headers=headers)
-    rstate = r.json()
-    try:
-        rstate = rstate[0]
-    except:
-        pass
-    log.info("Radarr Rename response: ID %d %s." % (rstate['id'], rstate['status']))
-    return rstate
-
-
-def getMovie(baseURL, headers, movieid, log):
-    url = baseURL + "/api/v3/movie/" + str(movieid)
-    r = requests.get(url, headers=headers)
-    return r.json()
-
-
-def updateMovie(baseURL, headers, new, movieid, log):
-    url = baseURL + "/api/v3/movie/" + str(movieid)
-    r = requests.put(url, json=new, headers=headers)
-    return r.json()
-
-
-def getMovieFile(baseURL, headers, moviefileid, log):
-    url = baseURL + "/api/v3/moviefile/" + str(moviefileid)
-    r = requests.get(url, headers=headers)
-    return r.json()
-
-
-def updateMovieFile(baseURL, headers, new, moviefileid, log):
-    url = baseURL + "/api/v3/moviefile/" + str(moviefileid)
-    r = requests.put(url, json=new, headers=headers)
-    return r.json()
-
+from resources.mediamanager import build_api, rescan, rename, api_get, api_put
 
 log = getLogger("RadarrPostProcess")
 log.info("Radarr post-processing started.")
@@ -109,14 +38,12 @@ try:
     log.info("Input file: %s" % inputfile)
     log.info("TMDB ID: %s, IMDB ID: %s" % (tmdbid, imdbid))
 
-    # Build extra args for the daemon
     extra_args = []
     if tmdbid:
         extra_args.extend(['-tmdb', str(tmdbid)])
     if imdbid:
         extra_args.extend(['-imdb', str(imdbid)])
 
-    # Submit to daemon and wait for completion
     job = submit_and_wait(inputfile, args=extra_args if extra_args else None, logger=log)
 
     if not job or job.get('status') != 'completed':
@@ -129,37 +56,24 @@ try:
         log.info("Rescan disabled, exiting.")
         sys.exit(0)
 
-    # Radarr API operations
     try:
-        host = settings.Radarr['host']
-        port = settings.Radarr['port']
-        webroot = settings.Radarr['webroot']
-        apikey = settings.Radarr['apikey']
-        ssl = settings.Radarr['ssl']
-        protocol = "https://" if ssl else "http://"
-        baseURL = protocol + host + ":" + str(port) + webroot
+        base_url, headers = build_api(settings.Radarr, "SMA-NG - postRadarr")
 
-        if not apikey:
+        if not settings.Radarr['apikey']:
             log.error("Radarr API key is blank, cannot update Radarr.")
             sys.exit(1)
 
-        headers = {'X-Api-Key': apikey, 'User-Agent': "SMA-NG - postRadarr"}
-
-        # Trigger rescan
-        rescanCommand = rescanRequest(baseURL, headers, movieid, log)
-        if not waitForCommand(baseURL, headers, rescanCommand['id'], log):
+        if not rescan(base_url, headers, 'RescanMovie', 'movieId', movieid, log):
             log.error("Rescan command timed out.")
             sys.exit(1)
-
         log.info("Rescan completed.")
 
         # Verify file exists
-        movieinfo = getMovie(baseURL, headers, movieid, log)
+        movieinfo = api_get(base_url, headers, 'movie/' + str(movieid), log)
         if not movieinfo.get('hasFile'):
             log.warning("Movie has no file after rescan, triggering second rescan.")
-            rescanAgain = rescanRequest(baseURL, headers, movieid, log)
-            if waitForCommand(baseURL, headers, rescanAgain['id'], log):
-                movieinfo = getMovie(baseURL, headers, movieid, log)
+            if rescan(base_url, headers, 'RescanMovie', 'movieId', movieid, log):
+                movieinfo = api_get(base_url, headers, 'movie/' + str(movieid), log)
                 if not movieinfo.get('hasFile'):
                     log.warning("Still no file after second rescan.")
                     sys.exit(1)
@@ -167,18 +81,19 @@ try:
         # Set monitored
         try:
             movieinfo['monitored'] = True
-            movieinfo = updateMovie(baseURL, headers, movieinfo, movieid, log)
-            log.info("Radarr monitoring updated for %s." % movieinfo['title'])
+            movieinfo = api_put(base_url, headers, 'movie/' + str(movieid), movieinfo, log)
+            log.info("Radarr monitoring updated for %s." % movieinfo.get('title', ''))
         except:
             log.exception("Failed to restore monitored status.")
 
         # Restore scene info
         if scenename or releasegroup:
             try:
-                mf = getMovieFile(baseURL, headers, movieinfo['movieFile']['id'], log)
+                file_id = movieinfo['movieFile']['id']
+                mf = api_get(base_url, headers, 'moviefile/' + str(file_id), log)
                 mf['sceneName'] = scenename
                 mf['releaseGroup'] = releasegroup
-                mf = updateMovieFile(baseURL, headers, mf, movieinfo['movieFile']['id'], log)
+                api_put(base_url, headers, 'moviefile/' + str(file_id), mf, log)
                 log.debug("Restored scene info: %s / %s" % (scenename, releasegroup))
             except:
                 log.exception("Unable to restore scene information.")
@@ -186,8 +101,7 @@ try:
         # Trigger rename
         if settings.Radarr.get('rename'):
             try:
-                renameCommand = renameRequest(baseURL, headers, movieinfo['movieFile']['id'], movieid, log)
-                waitForCommand(baseURL, headers, renameCommand['id'], log)
+                rename(base_url, headers, movieinfo['movieFile']['id'], 'RenameFiles', 'RenameMovies', 'movieId', movieid, log)
             except:
                 log.exception("Failed to trigger rename.")
 

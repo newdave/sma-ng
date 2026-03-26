@@ -42,14 +42,7 @@ try:
     log.info("Content path: %s" % content_path)
     log.info("Torrent: %s (%s)" % (torrent_name, info_hash))
 
-    # Check bypass
-    bypass_labels = settings.qBittorrent.get('bypass', [])
-    bypass_matched = False
-    for b in bypass_labels:
-        if b and label.startswith(b):
-            bypass_matched = True
-            break
-    if bypass_matched:
+    if webhook.check_bypass(settings.qBittorrent.get('bypass', []), label):
         log.info("Bypass label matched, skipping.")
         sys.exit(0)
 
@@ -79,14 +72,7 @@ try:
             log.exception("Failed to pause torrent.")
 
     # Submit files to daemon
-    if os.path.isfile(content_path):
-        webhook.submit_job(content_path, logger=log)
-    elif os.path.isdir(content_path):
-        for root, _, files in os.walk(content_path):
-            for f in files:
-                webhook.submit_job(os.path.join(root, f), logger=log)
-    else:
-        log.error("Content path does not exist: %s" % content_path)
+    if not webhook.submit_path(content_path, logger=log):
         sys.exit(1)
 
     # Post-action

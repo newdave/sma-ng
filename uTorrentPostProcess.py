@@ -36,14 +36,7 @@ try:
     log.info("Kind: %s" % kind)
     log.info("Torrent: %s (%s)" % (torrent_name, info_hash))
 
-    # Check bypass
-    bypass_labels = settings.uTorrent.get('bypass', [])
-    bypass_matched = False
-    for b in bypass_labels:
-        if b and label.startswith(b):
-            bypass_matched = True
-            break
-    if bypass_matched:
+    if webhook.check_bypass(settings.uTorrent.get('bypass', []), label):
         log.info("Bypass label matched, skipping.")
         sys.exit(0)
 
@@ -76,17 +69,9 @@ try:
     # Submit files to daemon
     if kind == 'single' and filename:
         filepath = os.path.join(path, filename)
-        if os.path.isfile(filepath):
-            webhook.submit_job(filepath, logger=log)
-        else:
-            log.error("File does not exist: %s" % filepath)
-    elif os.path.isdir(path):
-        for root, _, files in os.walk(path):
-            for f in files:
-                webhook.submit_job(os.path.join(root, f), logger=log)
+        webhook.submit_path(filepath, logger=log)
     else:
-        log.error("Path does not exist: %s" % path)
-        sys.exit(1)
+        webhook.submit_path(path, logger=log)
 
     # WebUI post-action
     if webui and actionafter:
