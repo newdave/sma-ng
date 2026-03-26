@@ -527,3 +527,172 @@ class TestValidateBinaries:
         ini = tmp_ini()
         with pytest.raises(SystemExit):
             ReadSettings(ini)
+
+
+class TestSMAConfigParserGetPath:
+    def _make_parser(self, section, option, value):
+        p = SMAConfigParser()
+        p.add_section(section)
+        p.set(section, option, value)
+        return p
+
+    def test_returns_normalized_path(self):
+        p = self._make_parser('test', 'path', '/some/path/to/file')
+        result = p.getpath('test', 'path')
+        assert result is not None
+        assert '/' in result
+
+    def test_empty_returns_none(self):
+        p = self._make_parser('test', 'path', '')
+        result = p.getpath('test', 'path')
+        assert result is None
+
+    def test_whitespace_trimmed(self):
+        p = self._make_parser('test', 'path', '  /some/path  ')
+        result = p.getpath('test', 'path')
+        assert not result.startswith(' ')
+
+
+class TestSMAConfigParserGetExtension:
+    def _make_parser(self, section, option, value):
+        p = SMAConfigParser()
+        p.add_section(section)
+        p.set(section, option, value)
+        return p
+
+    def test_basic_extension(self):
+        p = self._make_parser('test', 'ext', 'mp4')
+        assert p.getextension('test', 'ext') == 'mp4'
+
+    def test_strips_dot(self):
+        p = self._make_parser('test', 'ext', '.mp4')
+        assert p.getextension('test', 'ext') == 'mp4'
+
+    def test_lowercase(self):
+        p = self._make_parser('test', 'ext', 'MKV')
+        assert p.getextension('test', 'ext') == 'mkv'
+
+    def test_empty_returns_none(self):
+        p = self._make_parser('test', 'ext', '')
+        assert p.getextension('test', 'ext') is None
+
+
+class TestSMAConfigParserGetExtensions:
+    def _make_parser(self, section, option, value):
+        p = SMAConfigParser()
+        p.add_section(section)
+        p.set(section, option, value)
+        return p
+
+    def test_multiple_extensions(self):
+        p = self._make_parser('test', 'exts', 'nfo, ds_store')
+        result = p.getextensions('test', 'exts')
+        assert 'nfo' in result
+        assert 'ds_store' in result
+
+    def test_strips_dots_and_spaces(self):
+        p = self._make_parser('test', 'exts', '.nfo, .txt')
+        result = p.getextensions('test', 'exts')
+        assert 'nfo' in result
+        assert 'txt' in result
+
+
+class TestSMAConfigParserGetDirectory:
+    def test_creates_directory(self, tmp_path):
+        p = SMAConfigParser()
+        p.add_section('test')
+        p.set('test', 'dir', str(tmp_path / 'subdir'))
+        result = p.getdirectory('test', 'dir')
+        assert result is not None
+
+
+class TestMapCodecsWithFallback:
+    def test_maps_codec(self):
+        result = ReadSettings._map_codecs_with_fallback(['h265', 'h264'], {'h265': 'h265qsv', 'h264': 'h264qsv'})
+        assert result[0] == 'h265qsv'
+        assert 'h265' in result  # fallback kept
+        assert 'h264qsv' in result
+
+    def test_no_mapping(self):
+        result = ReadSettings._map_codecs_with_fallback(['aac'], {})
+        assert result == ['aac']
+
+    def test_dedup(self):
+        result = ReadSettings._map_codecs_with_fallback(['h264', 'h264'], {'h264': 'h264qsv'})
+        assert result.count('h264qsv') == 1
+
+    def test_alias_resolution(self):
+        result = ReadSettings._map_codecs_with_fallback(['hevc'], {'h265': 'h265qsv'})
+        assert 'h265qsv' in result
+        assert 'hevc' in result
+
+
+class TestWriteConfig:
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_writes_config_file(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        settings = ReadSettings(ini)
+        new_path = ini + '.new'
+        settings.writeConfig(settings._cofig, new_path)
+        assert os.path.exists(new_path)
+
+
+class TestCrfProfiles:
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_parses_crf_profiles(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('crf-profiles =', 'crf-profiles = 20000:18:30M:40M, 10000:22:20M:30M')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert len(settings.vcrf_profiles) == 2
+        assert settings.vcrf_profiles[0]['source_bitrate'] == 20000
+        assert settings.vcrf_profiles[0]['crf'] == 18
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_invalid_crf_profile_skipped(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('crf-profiles =', 'crf-profiles = bad:format')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert len(settings.vcrf_profiles) == 0
+
+
+class TestForceConvertOverride:
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_force_convert_sets_process_same(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('force-convert = false', 'force-convert = true')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert settings.force_convert is True
+        assert settings.process_same_extensions is True
+
+
+class TestArtworkParsing:
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_poster_artwork(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        settings = ReadSettings(ini)
+        # Default is 'false' in conftest
+        assert settings.thumbnail is False
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_thumbnail_artwork(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('download-artwork = false', 'download-artwork = thumbnail')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert settings.artwork is True
+        assert settings.thumbnail is True

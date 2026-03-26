@@ -1,7 +1,7 @@
 """Tests for resources/postprocess.py PostProcessor."""
 import os
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from resources.postprocess import PostProcessor
 from resources.metadata import MediaType
 
@@ -32,3 +32,54 @@ class TestPostProcessorEnv:
         pp.setEnv(MediaType.Movie, tmdbid=603)
         assert pp.post_process_environment['SMA_TMDBID'] == '603'
         assert 'SMA_SEASON' not in pp.post_process_environment
+
+
+class TestPostProcessorRunScripts:
+    def test_run_scripts_calls_popen(self):
+        pp = PostProcessor(['/file.mp4'])
+        pp.scripts = ['/tmp/fakescript.sh']
+        mock_proc = MagicMock()
+        mock_proc.communicate.return_value = (b'stdout', b'stderr')
+        mock_proc.wait.return_value = 0
+        with patch.object(pp, 'run_script_command', return_value=mock_proc) as mock_cmd:
+            pp.run_scripts()
+            mock_cmd.assert_called_once_with('/tmp/fakescript.sh')
+
+    def test_run_scripts_wait_mode(self):
+        pp = PostProcessor(['/file.mp4'], wait=True)
+        pp.scripts = ['/tmp/fakescript.sh']
+        mock_proc = MagicMock()
+        mock_proc.communicate.return_value = (b'out', b'err')
+        mock_proc.wait.return_value = 0
+        with patch.object(pp, 'run_script_command', return_value=mock_proc):
+            pp.run_scripts()
+            mock_proc.wait.assert_called_once()
+
+    def test_run_scripts_handles_exception(self):
+        pp = PostProcessor(['/file.mp4'])
+        pp.scripts = ['/tmp/badscript.sh']
+        with patch.object(pp, 'run_script_command', side_effect=OSError("not found")):
+            pp.run_scripts()  # Should not raise
+
+    def test_run_scripts_no_scripts(self):
+        pp = PostProcessor(['/file.mp4'])
+        pp.scripts = []
+        pp.run_scripts()  # Should not raise
+
+    def test_gather_scripts_skips_bad_extensions(self):
+        pp = PostProcessor(['/file.mp4'])
+        # gather_scripts returns a list - verify it doesn't include bad files
+        for script in pp.scripts:
+            ext = os.path.splitext(script)[1]
+            from resources.extensions import bad_post_extensions
+            assert ext not in bad_post_extensions
+
+
+class TestPostProcessorRunScriptCommand:
+    def test_returns_popen(self):
+        pp = PostProcessor(['/file.mp4'])
+        with patch('resources.postprocess.Popen') as mock_popen:
+            mock_popen.return_value = MagicMock()
+            result = pp.run_script_command('/tmp/script.sh')
+            mock_popen.assert_called_once()
+            assert result is not None
