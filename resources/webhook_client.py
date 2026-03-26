@@ -176,3 +176,28 @@ def check_daemon_health(logger=None):
     except Exception:
         log.debug("Daemon health check failed at %s" % url)
         return False
+
+
+def check_bypass(bypass_list, value):
+    """Check if value matches any bypass prefix. Returns True if bypassed."""
+    for b in bypass_list:
+        if b and value.startswith(b):
+            return True
+    return False
+
+
+def submit_path(path, logger=None):
+    """Submit all files at path (file or directory) to daemon. Returns count of submitted jobs."""
+    count = 0
+    if os.path.isfile(path):
+        if submit_job(path, logger=logger):
+            count += 1
+    elif os.path.isdir(path):
+        for root, _, files in os.walk(path):
+            for f in files:
+                if submit_job(os.path.join(root, f), logger=logger):
+                    count += 1
+    else:
+        if logger:
+            logger.error("Path does not exist: %s" % path)
+    return count

@@ -48,35 +48,14 @@ try:
         except:
             log.exception("Could not connect to Deluge RPC, proceeding without label check.")
 
-    # Check bypass
-    bypass_labels = settings.deluge.get('bypass', [])
-    bypass_matched = False
-    for b in bypass_labels:
-        if b and label.startswith(b):
-            bypass_matched = True
-            break
-    if bypass_matched:
+    if webhook.check_bypass(settings.deluge.get('bypass', []), label):
         log.info("Bypass label matched, skipping conversion.")
         sys.exit(0)
 
-    # Submit files to daemon
-    if os.path.isdir(path):
-        for root, _, files in os.walk(path):
-            for f in files:
-                webhook.submit_job(os.path.join(root, f), logger=log)
-    elif os.path.isfile(path):
-        webhook.submit_job(path, logger=log)
-    else:
-        # Try combining path and torrent name
+    # Submit files to daemon — try path first, then path + torrent_name
+    if not webhook.submit_path(path, logger=log):
         combined = os.path.join(path, torrent_name)
-        if os.path.exists(combined):
-            if os.path.isdir(combined):
-                for root, _, files in os.walk(combined):
-                    for f in files:
-                        webhook.submit_job(os.path.join(root, f), logger=log)
-            else:
-                webhook.submit_job(combined, logger=log)
-        else:
+        if not webhook.submit_path(combined, logger=log):
             log.error("Path does not exist: %s" % path)
             sys.exit(1)
 

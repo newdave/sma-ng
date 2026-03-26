@@ -8,6 +8,7 @@ from resources.webhook_client import (
     get_daemon_url, get_api_key, _headers,
     submit_job, get_job_status, wait_for_completion,
     submit_and_wait, check_daemon_health,
+    check_bypass, submit_path,
 )
 
 
@@ -292,3 +293,49 @@ class TestCheckDaemonHealth:
         mock_requests.get.side_effect = Exception("refused")
 
         assert check_daemon_health() is False
+
+
+class TestCheckBypass:
+    """Test bypass category/label checking."""
+
+    def test_match(self):
+        assert check_bypass(['sonarr', 'bypass'], 'bypass-movies') is True
+
+    def test_no_match(self):
+        assert check_bypass(['bypass'], 'sonarr') is False
+
+    def test_empty_list(self):
+        assert check_bypass([], 'anything') is False
+
+    def test_empty_strings_ignored(self):
+        assert check_bypass(['', 'bypass'], 'bypass') is True
+
+    def test_prefix_match(self):
+        assert check_bypass(['tv'], 'tv-sonarr') is True
+
+
+class TestSubmitPath:
+    """Test file/directory submission helper."""
+
+    @patch('resources.webhook_client.submit_job')
+    def test_single_file(self, mock_submit, tmp_path):
+        f = tmp_path / "movie.mkv"
+        f.touch()
+        mock_submit.return_value = {'job_id': 1}
+        count = submit_path(str(f))
+        assert count == 1
+        mock_submit.assert_called_once()
+
+    @patch('resources.webhook_client.submit_job')
+    def test_directory(self, mock_submit, tmp_path):
+        (tmp_path / "a.mkv").touch()
+        (tmp_path / "b.mkv").touch()
+        mock_submit.return_value = {'job_id': 1}
+        count = submit_path(str(tmp_path))
+        assert count == 2
+
+    @patch('resources.webhook_client.submit_job')
+    def test_missing_path_returns_zero(self, mock_submit):
+        count = submit_path("/nonexistent/path")
+        assert count == 0
+        mock_submit.assert_not_called()
