@@ -84,7 +84,6 @@ def tmp_ini(tmp_path):
 ffmpeg = ffmpeg
 ffprobe = ffprobe
 threads = 0
-gpu =
 hwaccels =
 hwaccel-decoders =
 hwdevices =
@@ -126,6 +125,7 @@ strip-metadata = true
 keep-titles = false
 
 [Video]
+gpu =
 codec = h265, h264
 max-bitrate = 0
 preset = medium

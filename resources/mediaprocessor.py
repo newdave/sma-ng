@@ -89,14 +89,6 @@ class MediaProcessor:
                         except:
                             self.log.exception("Error during file rename")
 
-                    # Plex .plexmatch file
-                    if self.settings.plexmatch_enabled and tagdata:
-                        try:
-                            from resources.metadata import update_plexmatch
-                            update_plexmatch(output['output'], tagdata, self.settings, log=self.log)
-                        except:
-                            self.log.exception("Error updating .plexmatch")
-
                     # Reverse Ouput
                     output['output'] = self.restoreFromOutput(inputfile, output['output'])
                     for i, sub in enumerate(output['external_subs']):
@@ -110,8 +102,16 @@ class MediaProcessor:
                     for file in output_files:
                         self.setPermissions(file)
 
+                    # Plex .plexmatch file (after file is in final destination)
+                    if self.settings.plexmatch_enabled and tagdata:
+                        try:
+                            from resources.metadata import update_plexmatch
+                            update_plexmatch(output['output'], tagdata, self.settings, log=self.log)
+                        except:
+                            self.log.exception("Error updating .plexmatch")
+
                     if post:
-                        self.post(output_files, mediatype, tmdbid=tmdbid, season=season, episode=episode)
+                        self.post(output_files, mediatype, tmdbid=tmdbid, tvdbid=tvdbid, imdbid=imdbid, season=season, episode=episode)
 
                     return output_files
             else:
@@ -124,16 +124,6 @@ class MediaProcessor:
 
     def post(self, output_files, mediatype, tvdbid=None, tmdbid=None, imdbid=None, season=None, episode=None):
         if self.settings.postprocess:
-            if not tmdbid:
-                try:
-                    tagdata = Metadata(mediatype, tvdbid=tvdbid, tmdbid=tmdbid, imdbid=imdbid, season=season, episode=episode)
-                    tmdbid = tagdata.tmdbid
-                except KeyboardInterrupt:
-                    raise
-                except:
-                    self.log.exception("Unable to get metadata.")
-                    tagdata = None
-
             # Run any post process scripts
             postprocessor = PostProcessor(output_files, self.log, wait=self.settings.waitpostprocess)
             postprocessor.setEnv(mediatype, tmdbid, season, episode)
@@ -1888,7 +1878,7 @@ class MediaProcessor:
         guess = guessit(path, options)
 
         if tagdata and tagdata.mediatype == MediaType.TV:
-            guess['episode'] = tagdata.episode
+            guess['episode'] = getattr(tagdata, 'episodes', None) or tagdata.episode
             guess['title'] = tagdata.title
             guess['season'] = tagdata.season
         elif tagdata and tagdata.mediatype == MediaType.Movie:
@@ -1953,7 +1943,7 @@ class MediaProcessor:
                         video.series_tvdb_id = tagdata.tvdbid or video.series_tvdb_id
                         video.series_imdb_id = tagdata.imdbid or video.series_imdb_id
                         video.season = tagdata.season or video.season
-                        video.episodes = [tagdata.episode] or video.episodes
+                        video.episodes = getattr(tagdata, 'episodes', None) or [tagdata.episode] or video.episodes
                         video.series = tagdata.showname or video.series
                         video.title = tagdata.title or video.title
 

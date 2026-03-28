@@ -6,8 +6,8 @@ Wants=network.target
 
 [Service]
 Type=simple
-User=sma
-Group=sma
+User=iadmin
+Group=iadmin
 
 # Path to SMA-NG installation
 WorkingDirectory=/opt/sma
@@ -23,7 +23,7 @@ ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5 6; do sleep 2; curl -sf http://127.
 #Environment="SMA_CONFIG=/opt/sma/config/autoProcess.ini"
 
 # Or load from environment file
-#EnvironmentFile=/opt/sma/config/daemon.env
+EnvironmentFile=/opt/sma/config/daemon.env
 
 # Restart behavior
 Restart=on-failure
@@ -33,9 +33,9 @@ TimeoutStopSec=30
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/opt/sma/logs /opt/sma/config
+#ProtectSystem=strict
+#ProtectHome=read-only
+#ReadWritePaths=/opt/sma/logs /opt/sma/config
 
 # Resource limits (adjust based on your needs)
 LimitNOFILE=65536

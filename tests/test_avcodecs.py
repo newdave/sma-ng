@@ -104,10 +104,11 @@ class TestH264QSVCodec:
     def test_scale_filter_is_qsv(self):
         assert H264QSVCodec.scale_filter == 'scale_qsv'
 
-    def test_invalid_crf_removed(self):
+    def test_invalid_crf_uses_default(self):
         codec = H264QSVCodec()
         opts = codec.parse_options({'codec': 'h264qsv', 'crf': 0})
-        assert '-global_quality' not in opts
+        idx = opts.index('-global_quality')
+        assert opts[idx + 1] == str(H264QSVCodec.hw_quality_default)
 
     def test_decode_device_hwdownload(self):
         codec = H264QSVCodec()

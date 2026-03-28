@@ -45,7 +45,12 @@ class PostProcessor:
         self.log.debug("Setting TV metadata.")
         self.post_process_environment['SMA_TMDBID'] = str(tmdbid)
         self.post_process_environment['SMA_SEASON'] = str(season)
-        self.post_process_environment['SMA_EPISODE'] = str(episode)
+        if isinstance(episode, list):
+            self.post_process_environment['SMA_EPISODE'] = str(episode[0])
+            self.post_process_environment['SMA_EPISODES'] = ','.join(str(e) for e in episode)
+        else:
+            self.post_process_environment['SMA_EPISODE'] = str(episode)
+            self.post_process_environment['SMA_EPISODES'] = str(episode)
 
     def setMovie(self, tmdbid):
         self.log.debug("Setting movie metadata.")

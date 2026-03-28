@@ -27,21 +27,24 @@ try:
     settings = ReadSettings()
 
     inputfile = os.environ.get('sonarr_episodefile_path')
-    original = os.environ.get('sonarr_episodefile_scenename')
     tvdb_id = int(os.environ.get('sonarr_series_tvdbid'))
     imdb_id = os.environ.get('sonarr_series_imdbid')
     season = int(os.environ.get('sonarr_episodefile_seasonnumber'))
     seriesid = int(os.environ.get('sonarr_series_id'))
     scenename = os.environ.get('sonarr_episodefile_scenename')
     releasegroup = os.environ.get('sonarr_episodefile_releasegroup')
-    episodefile_id = os.environ.get('sonarr_episodefile_id')
-    episode = int(os.environ.get('sonarr_episodefile_episodenumbers').split(",")[0])
-    episodeid = int(os.environ.get('sonarr_episodefile_episodeids').split(",")[0])
+    episode_numbers = os.environ.get('sonarr_episodefile_episodenumbers').split(",")
+    episode = int(episode_numbers[0])
+    episodeids = [int(x) for x in os.environ.get('sonarr_episodefile_episodeids').split(",")]
 
     log.info("Input file: %s" % inputfile)
-    log.info("TVDB ID: %s, S%02dE%02d" % (tvdb_id, season, episode))
+    ep_nums = [int(e) for e in episode_numbers]
+    ep_display = 'E%02d' % ep_nums[0] if len(ep_nums) == 1 else 'E%02d-E%02d' % (ep_nums[0], ep_nums[-1])
+    log.info("TVDB ID: %s, S%02d%s" % (tvdb_id, season, ep_display))
 
     extra_args = ['-tvdb', str(tvdb_id), '-s', str(season), '-e', str(episode)]
+    for ep in episode_numbers[1:]:
+        extra_args.extend(['-e', ep.strip()])
     if imdb_id:
         extra_args.extend(['-imdb', str(imdb_id)])
 
@@ -69,27 +72,31 @@ try:
             sys.exit(1)
         log.info("Rescan completed.")
 
-        # Verify file exists
-        epinfo = api_get(base_url, headers, 'episode/' + str(episodeid), log)
-        if not epinfo:
-            log.error("No valid episode information found, aborting.")
-            sys.exit(1)
+        # Verify file exists and set monitored for all episodes in the file
+        epinfo = None
+        for eid in episodeids:
+            ep = api_get(base_url, headers, 'episode/' + str(eid), log)
+            if not ep:
+                log.error("No valid episode information found for episode id %d, aborting." % eid)
+                sys.exit(1)
 
-        if not epinfo.get('hasFile'):
-            log.warning("Episode has no file after rescan, triggering second rescan.")
-            if rescan(base_url, headers, 'RescanSeries', 'seriesId', seriesid, log):
-                epinfo = api_get(base_url, headers, 'episode/' + str(episodeid), log)
-                if not epinfo or not epinfo.get('hasFile'):
-                    log.warning("Still no file after second rescan.")
-                    sys.exit(1)
+            if not ep.get('hasFile'):
+                log.warning("Episode %d has no file after rescan, triggering second rescan." % eid)
+                if rescan(base_url, headers, 'RescanSeries', 'seriesId', seriesid, log):
+                    ep = api_get(base_url, headers, 'episode/' + str(eid), log)
+                    if not ep or not ep.get('hasFile'):
+                        log.warning("Episode %d still has no file after second rescan." % eid)
+                        sys.exit(1)
 
-        # Set monitored
-        try:
-            epinfo['monitored'] = True
-            epinfo = api_put(base_url, headers, 'episode/' + str(episodeid), epinfo, log)
-            log.info("Sonarr monitoring updated for %s." % epinfo.get('title', ''))
-        except:
-            log.exception("Failed to restore monitored status.")
+            try:
+                ep['monitored'] = True
+                ep = api_put(base_url, headers, 'episode/' + str(eid), ep, log)
+                log.info("Sonarr monitoring updated for %s." % ep.get('title', ''))
+            except:
+                log.exception("Failed to restore monitored status for episode id %d." % eid)
+
+            if epinfo is None:
+                epinfo = ep  # keep first episode's info for scene restore below
 
         # Restore scene info
         if scenename or releasegroup:

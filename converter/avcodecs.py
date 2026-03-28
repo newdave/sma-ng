@@ -1123,6 +1123,14 @@ class HWAccelVideoCodec:
     hw_quality_key = 'qp'
     hw_quality_flag = '-qp'
     hw_quality_range = (0, 52)
+    hw_quality_default = None
+    hw_presets = None
+
+    def _hw_parse_preset(self, safe):
+        """Validate preset against hw_presets whitelist, remove if unsupported."""
+        if self.hw_presets is not None and 'preset' in safe:
+            if safe['preset'] not in self.hw_presets:
+                del safe['preset']
 
     def _hw_parse_scale(self, safe):
         """Convert width/height to hw-prefixed scale variables."""
@@ -1147,6 +1155,8 @@ class HWAccelVideoCodec:
                 del safe[self.hw_quality_key]
             elif 'bitrate' in safe:
                 del safe['bitrate']
+        if self.hw_quality_key not in safe and 'bitrate' not in safe and self.hw_quality_default is not None:
+            safe[self.hw_quality_key] = self.hw_quality_default
 
     def _hw_parse_pix_fmt(self, safe):
         """Move pix_fmt to hw-prefixed key."""
@@ -1159,10 +1169,11 @@ class HWAccelVideoCodec:
         optlist = []
         if self.hw_quality_key in safe:
             optlist.extend([self.hw_quality_flag, str(safe[self.hw_quality_key])])
-            if 'maxrate' in safe:
-                optlist.extend(['-maxrate:v', str(safe['maxrate'])])
-            if 'bufsize' in safe:
-                optlist.extend(['-bufsize', str(safe['bufsize'])])
+            if self.hw_quality_flag != '-global_quality':
+                if 'maxrate' in safe:
+                    optlist.extend(['-maxrate:v', str(safe['maxrate'])])
+                if 'bufsize' in safe:
+                    optlist.extend(['-bufsize', str(safe['bufsize'])])
         return optlist
 
     def _hw_device_opts(self, safe, hwdownload_filter='hwdownload,format=nv12,hwupload'):
@@ -1198,6 +1209,7 @@ class NVEncH264Codec(HWAccelVideoCodec, H264Codec):
     scale_filter = 'scale_npp'
     max_depth = 8
     hw_prefix = 'nvenc'
+    hw_quality_default = 23
     encoder_options = H264Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1244,6 +1256,7 @@ class OMXH264Codec(H264Codec):
 class VAAPIVideoCodec(HWAccelVideoCodec):
     """VAAPI-specific mixin with device init fallback and hwupload filter chain."""
     hw_prefix = 'vaapi'
+    hw_quality_default = 23
     default_fmt = 'nv12'
 
     def _hw_device_opts(self, safe, hwdownload_filter='hwdownload'):
@@ -1314,6 +1327,8 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
     hw_quality_key = 'gq'
     hw_quality_flag = '-global_quality'
     hw_quality_range = (1, 51)
+    hw_quality_default = 25
+    hw_presets = ()
     encoder_options = H264Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1324,6 +1339,8 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
         safe = super(H264QSVCodec, self)._codec_specific_parse_options(safe, stream)
         self._hw_parse_scale(safe)
         self._hw_parse_quality(safe)
+        self._hw_parse_pix_fmt(safe)
+        self._hw_parse_preset(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
@@ -1341,7 +1358,12 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
 
         optlist.extend(self._hw_quality_opts(safe))
         optlist.extend(self._hw_device_opts(safe))
-        optlist.extend(self._hw_scale_opts(safe))
+        fmtstr = ':format=%s' % safe['qsv_pix_fmt'] if 'qsv_pix_fmt' in safe else ""
+        scale = self._hw_scale_opts(safe, fmtstr)
+        if scale:
+            optlist.extend(scale)
+        elif fmtstr:
+            optlist.extend(['-vf', '%s=%s' % (self.scale_filter, fmtstr[1:])])
         optlist.extend(super(H264QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
         optlist.extend(['-look_ahead', '0'])
         return optlist
@@ -1489,6 +1511,8 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
     hw_quality_key = 'gq'
     hw_quality_flag = '-global_quality'
     hw_quality_range = (1, 51)
+    hw_quality_default = 25
+    hw_presets = ()
     encoder_options = H265Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1499,6 +1523,8 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
         safe = super(H265QSVCodec, self)._codec_specific_parse_options(safe, stream)
         self._hw_parse_scale(safe)
         self._hw_parse_quality(safe)
+        self._hw_parse_pix_fmt(safe)
+        self._hw_parse_preset(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
@@ -1516,7 +1542,12 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
 
         optlist.extend(self._hw_quality_opts(safe))
         optlist.extend(self._hw_device_opts(safe))
-        optlist.extend(self._hw_scale_opts(safe))
+        fmtstr = ':format=%s' % safe['qsv_pix_fmt'] if 'qsv_pix_fmt' in safe else ""
+        scale = self._hw_scale_opts(safe, fmtstr)
+        if scale:
+            optlist.extend(scale)
+        elif fmtstr:
+            optlist.extend(['-vf', '%s=%s' % (self.scale_filter, fmtstr[1:])])
         optlist.extend(super(H265QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
         return optlist
 
@@ -1631,6 +1662,7 @@ class NVEncH265Codec(HWAccelVideoCodec, H265Codec):
     scale_filter = 'scale_npp'
     max_depth = 10
     hw_prefix = 'nvenc'
+    hw_quality_default = 23
     encoder_options = H265Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1898,6 +1930,8 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
     hw_quality_key = 'gq'
     hw_quality_flag = '-global_quality'
     hw_quality_range = (1, 51)
+    hw_quality_default = 25
+    hw_presets = ()
     encoder_options = AV1Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1908,6 +1942,8 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
         safe = super(AV1QSVCodec, self)._codec_specific_parse_options(safe, stream)
         self._hw_parse_scale(safe)
         self._hw_parse_quality(safe)
+        self._hw_parse_pix_fmt(safe)
+        self._hw_parse_preset(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
@@ -1916,7 +1952,12 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
             optlist.extend(['-preset', str(safe['preset'])])
         optlist.extend(self._hw_quality_opts(safe))
         optlist.extend(self._hw_device_opts(safe))
-        optlist.extend(self._hw_scale_opts(safe))
+        fmtstr = ':format=%s' % safe['qsv_pix_fmt'] if 'qsv_pix_fmt' in safe else ""
+        scale = self._hw_scale_opts(safe, fmtstr)
+        if scale:
+            optlist.extend(scale)
+        elif fmtstr:
+            optlist.extend(['-vf', '%s=%s' % (self.scale_filter, fmtstr[1:])])
         optlist.extend(['-look_ahead', '0'])
         return optlist
 
@@ -1968,6 +2009,8 @@ class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
     hw_quality_key = 'gq'
     hw_quality_flag = '-global_quality'
     hw_quality_range = (1, 255)
+    hw_quality_default = 25
+    hw_presets = ()
     encoder_options = Vp9Codec.encoder_options.copy()
     encoder_options.update({
         'decode_device': str,
@@ -1979,13 +2022,20 @@ class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
             safe = super(Vp9QSVCodec, self)._codec_specific_parse_options(safe, stream)
         self._hw_parse_scale(safe)
         self._hw_parse_quality(safe)
+        self._hw_parse_pix_fmt(safe)
+        self._hw_parse_preset(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
         optlist = []
         optlist.extend(self._hw_quality_opts(safe))
         optlist.extend(self._hw_device_opts(safe))
-        optlist.extend(self._hw_scale_opts(safe))
+        fmtstr = ':format=%s' % safe['qsv_pix_fmt'] if 'qsv_pix_fmt' in safe else ""
+        scale = self._hw_scale_opts(safe, fmtstr)
+        if scale:
+            optlist.extend(scale)
+        elif fmtstr:
+            optlist.extend(['-vf', '%s=%s' % (self.scale_filter, fmtstr[1:])])
         optlist.extend(['-look_ahead', '0'])
         return optlist
 
