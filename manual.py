@@ -328,7 +328,8 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
     elif tagdata.mediatype == MediaType.Movie:
         log.info("Processing %s" % (tagdata.title))
     elif tagdata.mediatype == MediaType.TV:
-        ep_display = "E".join("%02d" % e for e in tagdata.episodes)
+        ep_nums = ["%02d" % e for e in tagdata.episodes]
+        ep_display = 'E' + ep_nums[0] if len(ep_nums) == 1 else 'E%s-E%s' % (ep_nums[0], ep_nums[-1])
         log.info("Processing %s S%02d%s - %s" % (tagdata.showname, int(tagdata.season), ep_display, tagdata.title))
 
     if tagOnly:
@@ -397,8 +398,8 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
         if mp.settings.postprocess:
             if tagdata:
                 mp.post(output_files, tagdata.mediatype, tmdbid=tagdata.tmdbid, season=tagdata.season, episode=tagdata.episodes or tagdata.episode)
-            else:
-                mp.post(output_files, mediatype, tmdbid=tmdbid, season=season, episode=episode)
+            elif type_hint:
+                mp.post(output_files, type_hint, tmdbid=tmdbid, season=season, episode=episode)
         addtoProcessedArchive(output_files + [output['input']] if not output['input_deleted'] else output_files, processedList, processedArchive)
 
         # Trigger rescan on matching Sonarr/Radarr instance

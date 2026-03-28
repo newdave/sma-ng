@@ -352,3 +352,12 @@ plexmatch = true
 def tmp_db(tmp_path):
     """Create a temporary database path."""
     return str(tmp_path / "test_daemon.db")
+
+
+@pytest.fixture
+def job_db(tmp_db):
+    """Yield an open JobDatabase and close it after the test."""
+    from daemon import JobDatabase
+    db = JobDatabase(tmp_db)
+    yield db
+    db.close()

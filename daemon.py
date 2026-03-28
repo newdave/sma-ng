@@ -73,6 +73,12 @@ class JobDatabase:
             self._local.connection.row_factory = sqlite3.Row
         return self._local.connection
 
+    def close(self):
+        """Close the thread-local database connection."""
+        if hasattr(self._local, 'connection') and self._local.connection is not None:
+            self._local.connection.close()
+            self._local.connection = None
+
     @contextmanager
     def _cursor(self):
         """Context manager for database cursor with auto-commit."""

@@ -27,7 +27,7 @@ class PostProcessor:
         post_process_directory = os.path.join(current_directory, '../post_process')
         scripts = []
         for script in sorted(os.listdir(post_process_directory)):
-            if os.path.splitext(script)[1] in bad_post_extensions or os.path.isdir(script) or script in bad_post_files:
+            if os.path.splitext(script)[1] in bad_post_extensions or os.path.isdir(os.path.join(post_process_directory, script)) or script in bad_post_files:
                 self.log.debug("Skipping %s." % script)
                 continue
             else:

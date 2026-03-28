@@ -18,6 +18,12 @@ def _script_path(name):
     return os.path.join(PROJECT_ROOT, name)
 
 
+def _read_script(name):
+    """Read a script file with a proper context manager."""
+    with open(_script_path(name)) as f:
+        return f.read()
+
+
 def _run_script(script_name, mock_submit_return=None, expect_exit=None):
     """Execute a script with webhook_client.submit_job and submit_and_wait mocked.
 
@@ -34,7 +40,8 @@ def _run_script(script_name, mock_submit_return=None, expect_exit=None):
     exit_code = None
     script_path = _script_path(script_name)
     try:
-        exec(compile(open(script_path).read(), script_path, 'exec'))
+        with open(script_path) as f:
+            exec(compile(f.read(), script_path, 'exec'))
     except SystemExit as e:
         exit_code = e.code
     finally:
@@ -66,7 +73,7 @@ class TestPostRadarr:
     def test_test_event_exits(self, mock_validate, mock_submit):
         with patch.dict(os.environ, {'radarr_eventtype': 'Test'}, clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open(_script_path('postRadarr.py')).read(), 'postRadarr.py', 'exec'))
+                exec(compile(_read_script('postRadarr.py'), 'postRadarr.py', 'exec'))
             assert exc.value.code == 0
         mock_submit.assert_not_called()
 
@@ -75,7 +82,7 @@ class TestPostRadarr:
     def test_invalid_event_exits(self, mock_validate, mock_submit):
         with patch.dict(os.environ, {'radarr_eventtype': 'Rename'}, clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open(_script_path('postRadarr.py')).read(), 'postRadarr.py', 'exec'))
+                exec(compile(_read_script('postRadarr.py'), 'postRadarr.py', 'exec'))
             assert exc.value.code == 1
 
     @patch('requests.post')
@@ -98,7 +105,7 @@ class TestPostRadarr:
 
         with patch.dict(os.environ, self._radarr_env(), clear=False):
             try:
-                exec(compile(open(_script_path('postRadarr.py')).read(), 'postRadarr.py', 'exec'))
+                exec(compile(_read_script('postRadarr.py'), 'postRadarr.py', 'exec'))
             except SystemExit:
                 pass
 
@@ -139,7 +146,7 @@ class TestPostSonarr:
     def test_test_event_exits(self, mock_validate, mock_submit):
         with patch.dict(os.environ, {'sonarr_eventtype': 'Test'}, clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open(_script_path('postSonarr.py')).read(), 'postSonarr.py', 'exec'))
+                exec(compile(_read_script('postSonarr.py'), 'postSonarr.py', 'exec'))
             assert exc.value.code == 0
 
     @patch('requests.post')
@@ -161,7 +168,7 @@ class TestPostSonarr:
 
         with patch.dict(os.environ, self._sonarr_env(), clear=False):
             try:
-                exec(compile(open(_script_path('postSonarr.py')).read(), 'postSonarr.py', 'exec'))
+                exec(compile(_read_script('postSonarr.py'), 'postSonarr.py', 'exec'))
             except SystemExit:
                 pass
 
@@ -228,7 +235,7 @@ class TestNZBGetPostProcess:
 
         with patch.dict(os.environ, self._nzbget_env(str(tmp_path)), clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open(_script_path('NZBGetPostProcess.py')).read(), 'NZBGetPostProcess.py', 'exec'))
+                exec(compile(_read_script('NZBGetPostProcess.py'), 'NZBGetPostProcess.py', 'exec'))
             assert exc.value.code == 93  # POSTPROCESS_SUCCESS
 
         assert mock_submit.call_count == 1
@@ -240,7 +247,7 @@ class TestNZBGetPostProcess:
         env = self._nzbget_env(str(tmp_path), NZBPP_CATEGORY='bypass')
         with patch.dict(os.environ, env, clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open(_script_path('NZBGetPostProcess.py')).read(), 'NZBGetPostProcess.py', 'exec'))
+                exec(compile(_read_script('NZBGetPostProcess.py'), 'NZBGetPostProcess.py', 'exec'))
             assert exc.value.code == 95  # POSTPROCESS_NONE
 
         mock_submit.assert_not_called()
@@ -252,7 +259,7 @@ class TestNZBGetPostProcess:
         env = self._nzbget_env(str(tmp_path), NZBPO_SHOULDCONVERT='false')
         with patch.dict(os.environ, env, clear=False):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open(_script_path('NZBGetPostProcess.py')).read(), 'NZBGetPostProcess.py', 'exec'))
+                exec(compile(_read_script('NZBGetPostProcess.py'), 'NZBGetPostProcess.py', 'exec'))
             assert exc.value.code == 95
 
         mock_submit.assert_not_called()
@@ -260,7 +267,7 @@ class TestNZBGetPostProcess:
     def test_no_nzbget_env_exits(self):
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(SystemExit) as exc:
-                exec(compile(open(_script_path('NZBGetPostProcess.py')).read(), 'NZBGetPostProcess.py', 'exec'))
+                exec(compile(_read_script('NZBGetPostProcess.py'), 'NZBGetPostProcess.py', 'exec'))
             assert exc.value.code == 94  # POSTPROCESS_ERROR
 
 
