@@ -117,7 +117,6 @@ class TestReadSettingsMultiInstance:
 ffmpeg = ffmpeg
 ffprobe = ffprobe
 threads = 0
-gpu =
 hwaccels =
 hwaccel-decoders =
 hwdevices =
@@ -159,6 +158,7 @@ strip-metadata = true
 keep-titles = false
 
 [Video]
+gpu =
 codec = h265
 max-bitrate = 0
 preset = medium
@@ -633,7 +633,7 @@ class TestWriteConfig:
         ini = tmp_ini()
         settings = ReadSettings(ini)
         new_path = ini + '.new'
-        settings.writeConfig(settings._cofig, new_path)
+        settings.writeConfig(settings._config, new_path)
         assert os.path.exists(new_path)
 
 

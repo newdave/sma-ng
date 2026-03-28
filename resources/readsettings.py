@@ -35,7 +35,7 @@ class SMAConfigParser(ConfigParser, object):
                 if valueModifier:
                     try:
                         split[1] = valueModifier(split[1])
-                    except:
+                    except (ValueError, TypeError):
                         self.log.exception("Invalid value for getdict")
                         continue
                 output[split[0]] = split[1]
@@ -51,7 +51,7 @@ class SMAConfigParser(ConfigParser, object):
         directory = self.getpath(section, option, vars)
         try:
             os.makedirs(directory)
-        except:
+        except (OSError, TypeError):
             pass
         return directory
 
@@ -62,7 +62,7 @@ class SMAConfigParser(ConfigParser, object):
             if not os.path.isdir(d):
                 try:
                     os.makedirs(d)
-                except:
+                except (OSError, TypeError):
                     pass
         return directories
 
@@ -88,7 +88,6 @@ class ReadSettings:
             'ffmpeg': 'ffmpeg' if os.name != 'nt' else 'ffmpeg.exe',
             'ffprobe': 'ffprobe' if os.name != 'nt' else 'ffprobe.exe',
             'threads': 0,
-            'gpu': '',
             'hwaccels': '',
             'hwaccel-decoders': '',
             'hwdevices': '',
@@ -130,7 +129,8 @@ class ReadSettings:
             'keep-titles': False,
         },
         'Video': {
-            'codec': 'h264, x264',
+            'gpu': '',
+            'codec': 'h265',
             'max-bitrate': 0,
             'bitrate-ratio': '',
             'crf': -1,
@@ -281,8 +281,6 @@ class ReadSettings:
             'path-mapping': '',
         },
         'Deluge': {
-
-
             'sonarr-label': 'sonarr',
             'radarr-label': 'radarr',
             'bypass-label': 'bypass',
@@ -296,8 +294,6 @@ class ReadSettings:
             'path-mapping': '',
         },
         'qBittorrent': {
-
-
             'sonarr-label': 'sonarr',
             'radarr-label': 'radarr',
             'bypass-label': 'bypass',
@@ -313,8 +309,6 @@ class ReadSettings:
             'path-mapping': '',
         },
         'uTorrent': {
-
-
             'sonarr-label': 'sonarr',
             'radarr-label': 'radarr',
             'bypass-label': 'bypass',
@@ -376,7 +370,7 @@ class ReadSettings:
                     os.rename(oldConfigFile, defaultConfigFile)
                     self.log.info("Moved configuration file to new default location %s." % defaultConfigFile)
                     configFile = defaultConfigFile
-                except:
+                except OSError:
                     configFile = oldConfigFile
                     self.log.debug("Unable to move configuration file to new location, using old location.")
             else:
@@ -400,7 +394,7 @@ class ReadSettings:
         if os.path.isfile(configFile):
             try:
                 config.read(configFile)
-            except:
+            except Exception:
                 self.log.exception("Error reading config file %s." % configFile)
                 sys.exit(1)
         else:
@@ -428,7 +422,7 @@ class ReadSettings:
 
         self.readConfig(config)
 
-        self._cofig = config
+        self._config = config
         self._configFile = configFile
 
         self._validate_binaries()
@@ -526,12 +520,24 @@ class ReadSettings:
                 self.hdr['codec'] = hdr_mapped
 
     def readConfig(self, config):
-        # Main converter settings
+        # GPU is in [Video] but affects both converter (hwaccel profile) and video (codec mapping)
+        self.gpu = config.get("Video", 'gpu').strip().lower() if config.has_option("Video", 'gpu') else ''
+
+        self._read_converter(config)
+        self._read_permissions(config)
+        self._read_metadata(config)
+        self._read_video(config)
+        self._read_audio(config)
+        self._read_subtitles(config)
+        self._read_sonarr_radarr(config)
+        self._read_downloaders(config)
+        self._read_plex(config)
+
+    def _read_converter(self, config):
         section = "Converter"
         self.ffmpeg = config.getpath(section, 'ffmpeg', vars=os.environ)
         self.ffprobe = config.getpath(section, 'ffprobe', vars=os.environ)
         self.threads = config.getint(section, 'threads')
-        self.gpu = config.get(section, 'gpu').strip().lower() if config.has_option(section, 'gpu') else ''
         self.hwaccels = config.getlist(section, 'hwaccels')
         self.hwaccel_decoders = config.getlist(section, "hwaccel-decoders")
         self.hwdevices = config.getdict(section, "hwdevices", lower=False, replace=[])
@@ -557,7 +563,6 @@ class ReadSettings:
         self.postopts = config.getlist(section, "postopts", separator=self.opts_sep)
         self.regex = config.get(section, 'regex-directory-replace', raw=True)
 
-        # Apply GPU profile (derives hwaccels, decoders, devices, output format)
         if self.gpu:
             self._apply_hwaccel_profile(self.gpu)
 
@@ -565,19 +570,19 @@ class ReadSettings:
             self.process_same_extensions = True
             self.log.warning("Force-convert is true, so process-same-extensions is being overridden to true as well")
 
-        # Permissions
+    def _read_permissions(self, config):
         section = "Permissions"
         self.permissions = {}
         self.permissions['chmod'] = config.get(section, 'chmod')
         try:
             self.permissions['chmod'] = int(self.permissions['chmod'], 8)
-        except:
+        except (ValueError, TypeError):
             self.log.exception("Invalid permissions, defaulting to 664.")
             self.permissions['chmod'] = int("0664", 8)
         self.permissions['uid'] = config.getint(section, 'uid', vars=os.environ)
         self.permissions['gid'] = config.getint(section, 'gid', vars=os.environ)
 
-        # Metadata
+    def _read_metadata(self, config):
         section = "Metadata"
         self.relocate_moov = config.getboolean(section, "relocate-moov")
         self.fullpathguess = config.getboolean(section, "full-path-guess")
@@ -594,14 +599,14 @@ class ReadSettings:
             self.thumbnail = False
             try:
                 self.artwork = config.getboolean(section, "download-artwork")
-            except:
+            except (ValueError, TypeError):
                 self.artwork = True
                 self.log.error("Invalid download-artwork value, defaulting to 'poster'.")
         self.sanitize_disposition = config.getlist(section, "sanitize-disposition")
         self.strip_metadata = config.getboolean(section, "strip-metadata")
         self.keep_titles = config.getboolean(section, "keep-titles")
 
-        # Video
+    def _read_video(self, config):
         section = "Video"
         self.vcodec = config.getlist(section, "codec")
         self.vmaxbitrate = config.getint(section, "max-bitrate")
@@ -621,7 +626,7 @@ class ReadSettings:
                         'bufsize': vcrfp[3]
                     }
                     self.vcrf_profiles.append(p)
-                except:
+                except (ValueError, TypeError):
                     self.log.exception("Error parsing video-crf-profile '%s'." % vcrfp_raw)
             else:
                 self.log.error("Invalid video-crf-profile length '%s'." % vcrfp_raw)
@@ -657,11 +662,10 @@ class ReadSettings:
         self.naming_tv_template = config.get(section, "tv-template")
         self.naming_movie_template = config.get(section, "movie-template")
 
-        # Apply GPU codec mapping (hevc → h265qsv, h264 → h264vaapi, etc.)
         if self.gpu:
             self._apply_hwaccel_codec_map(self.gpu)
 
-        # Audio
+    def _read_audio(self, config):
         section = "Audio"
         self.acodec = config.getlist(section, "codec")
         self.awl = config.getlist(section, 'languages')
@@ -698,7 +702,7 @@ class ReadSettings:
                     try:
                         channels = [int(x) for x in key.split("-", 1)]
                         self.afilterchannels[channels[0]] = {channels[1]: config.get(section, key)}
-                    except:
+                    except (ValueError, IndexError):
                         self.log.exception("Unable to parse %s %s, skipping." % (section, key))
                         continue
 
@@ -712,7 +716,7 @@ class ReadSettings:
         self.ua_filter = config.get(section, "filter")
         self.ua_forcefilter = config.getboolean(section, 'force-filter')
 
-        # Subtitles
+    def _read_subtitles(self, config):
         section = "Subtitle"
         self.scodec = config.getlist(section, 'codec')
         self.scodec_image = config.getlist(section, 'codec-image-based')
@@ -740,24 +744,20 @@ class ReadSettings:
         self.sub_sorting_codecs = config.getlist(section, 'codecs')
         self.burn_sorting = config.getlist(section, 'burn-sorting')
 
-        # CleanIt
         section = "Subtitle.CleanIt"
         self.cleanit = config.getboolean(section, "enabled")
         self.cleanit_config = config.get(section, "config-path")
         self.cleanit_tags = config.getlist(section, "tags")
 
-        # FFSubsync
         section = "Subtitle.FFSubsync"
         self.ffsubsync = config.getboolean(section, "enabled")
 
-        # Subliminal
         section = "Subtitle.Subliminal"
         self.downloadsubs = config.getboolean(section, "download-subs")
         self.downloadforcedsubs = config.getboolean(section, "download-forced-subs")
         self.hearing_impaired = config.getboolean(section, "include-hearing-impaired-subs")
         self.subproviders = config.getlist(section, 'providers')
 
-        # Subliminal Auth Information
         section = "Subtitle.Subliminal.Auth"
         self.subproviders_auth = {}
         if config.has_section(section):
@@ -769,11 +769,11 @@ class ReadSettings:
                             self.log.error("Unable to parse %s %s, skipping." % (section, key))
                             continue
                         self.subproviders_auth[key.strip()] = {'username': credentials[0], 'password': credentials[1]}
-                    except:
+                    except (ValueError, AttributeError):
                         self.log.exception("Unable to parse %s %s, skipping." % (section, key))
                         continue
 
-        # Sonarr / Radarr instances
+    def _read_sonarr_radarr(self, config):
         self.sonarr_instances = []
         self.radarr_instances = []
         for section in config.sections():
@@ -801,49 +801,40 @@ class ReadSettings:
                 else:
                     self.radarr_instances.append(instance)
 
-        # Sort instances by path length descending for longest-prefix matching
         self.sonarr_instances.sort(key=lambda x: len(x.get('path', '')), reverse=True)
         self.radarr_instances.sort(key=lambda x: len(x.get('path', '')), reverse=True)
 
-        # Backward compatibility: self.Sonarr / self.Radarr point to the base instance
         self.Sonarr = next((i for i in self.sonarr_instances if i['section'] == 'Sonarr'), {})
         self.Radarr = next((i for i in self.radarr_instances if i['section'] == 'Radarr'), {})
 
-        # SAB
+    def _read_downloader_labels(self, config, section, label_key='label'):
+        """Read the common sonarr/radarr/bypass label fields for a downloader section."""
+        return {
+            'sonarr': config.get(section, "sonarr-%s" % label_key).lower(),
+            'radarr': config.get(section, "radarr-%s" % label_key).lower(),
+            'bypass': config.getlist(section, "bypass-%s" % label_key),
+            'convert': config.getboolean(section, "convert"),
+            'output-dir': config.getdirectory(section, "output-directory"),
+            'path-mapping': config.getdict(section, "path-mapping", dictseparator="=", lower=False, replace=[]),
+        }
+
+    def _read_downloaders(self, config):
+        # SAB uses "category" instead of "label"
         section = "SABNZBD"
-        self.SAB = {}
-        self.SAB['convert'] = config.getboolean(section, "convert")
-        self.SAB['sonarr'] = config.get(section, "Sonarr-category").lower()
-        self.SAB['radarr'] = config.get(section, "Radarr-category").lower()
-        self.SAB['bypass'] = config.getlist(section, "Bypass-category")
-        self.SAB['output-dir'] = config.getdirectory(section, "output-directory")
-        self.SAB['path-mapping'] = config.getdict(section, "path-mapping", dictseparator="=", lower=False, replace=[])
+        self.SAB = self._read_downloader_labels(config, section, label_key='category')
 
         # Deluge
         section = "Deluge"
-        self.deluge = {}
-
-        self.deluge['sonarr'] = config.get(section, "sonarr-label").lower()
-        self.deluge['radarr'] = config.get(section, "radarr-label").lower()
-        self.deluge['bypass'] = config.getlist(section, "bypass-label")
-        self.deluge['convert'] = config.getboolean(section, "convert")
+        self.deluge = self._read_downloader_labels(config, section)
         self.deluge['host'] = config.get(section, "host")
         self.deluge['port'] = config.getint(section, "port")
         self.deluge['user'] = config.get(section, "username")
         self.deluge['pass'] = config.get(section, "password")
-        self.deluge['output-dir'] = config.getdirectory(section, "output-directory")
         self.deluge['remove'] = config.getboolean(section, "remove")
-        self.deluge['path-mapping'] = config.getdict(section, "path-mapping", dictseparator="=", lower=False, replace=[])
 
         # qBittorrent
         section = "qBittorrent"
-        self.qBittorrent = {}
-
-        self.qBittorrent['sonarr'] = config.get(section, "sonarr-label").lower()
-        self.qBittorrent['radarr'] = config.get(section, "radarr-label").lower()
-        self.qBittorrent['bypass'] = config.getlist(section, "bypass-label")
-        self.qBittorrent['convert'] = config.getboolean(section, "convert")
-        self.qBittorrent['output-dir'] = config.getdirectory(section, "output-directory")
+        self.qBittorrent = self._read_downloader_labels(config, section)
         self.qBittorrent['actionbefore'] = config.get(section, "action-before")
         self.qBittorrent['actionafter'] = config.get(section, "action-after")
         self.qBittorrent['host'] = config.get(section, "host")
@@ -851,17 +842,10 @@ class ReadSettings:
         self.qBittorrent['ssl'] = config.getboolean(section, "ssl")
         self.qBittorrent['username'] = config.get(section, "username")
         self.qBittorrent['password'] = config.get(section, "password")
-        self.qBittorrent['path-mapping'] = config.getdict(section, "path-mapping", dictseparator="=", lower=False, replace=[])
 
-        # Read relevant uTorrent section information
+        # uTorrent
         section = "uTorrent"
-        self.uTorrent = {}
-
-        self.uTorrent['sonarr'] = config.get(section, "sonarr-label").lower()
-        self.uTorrent['radarr'] = config.get(section, "radarr-label").lower()
-        self.uTorrent['bypass'] = config.getlist(section, "bypass-label")
-        self.uTorrent['convert'] = config.getboolean(section, "convert")
-        self.uTorrent['output-dir'] = config.getdirectory(section, "output-directory")
+        self.uTorrent = self._read_downloader_labels(config, section)
         self.uTorrent['webui'] = config.getboolean(section, "webui")
         self.uTorrent['actionbefore'] = config.get(section, "action-before")
         self.uTorrent['actionafter'] = config.get(section, "action-after")
@@ -870,9 +854,8 @@ class ReadSettings:
         self.uTorrent['ssl'] = config.getboolean(section, "ssl")
         self.uTorrent['username'] = config.get(section, "username")
         self.uTorrent['password'] = config.get(section, "password")
-        self.uTorrent['path-mapping'] = config.getdict(section, "path-mapping", dictseparator="=", lower=False, replace=[])
 
-        # Plex
+    def _read_plex(self, config):
         section = "Plex"
         self.Plex = {}
         self.Plex['username'] = config.get(section, "username")
@@ -887,7 +870,6 @@ class ReadSettings:
         self.Plex['path-mapping'] = config.getdict(section, "path-mapping", dictseparator="=", lower=False, replace=[])
         self.Plex['plexmatch'] = config.getboolean(section, 'plexmatch')
 
-        # plexmatch is enabled if Plex host is configured and plexmatch option is true
         self.plexmatch_enabled = bool(self.Plex.get('host') and self.Plex.get('plexmatch', True))
 
     def _validate_binaries(self):
@@ -979,8 +961,16 @@ class ReadSettings:
                 config.remove_option("Universal Audio", "move-after")
                 write = True
 
+            # gpu moved from [Converter] to [Video]
+            if config.has_option("Converter", "gpu"):
+                gpu_val = config.get("Converter", "gpu")
+                config.remove_option("Converter", "gpu")
+                if not config.has_option("Video", "gpu"):
+                    config.set("Video", "gpu", gpu_val)
+                write = True
+
             if write:
                 self.writeConfig(config, configFile)
-        except:
+        except Exception:
             self.log.exception("Unable to migrate old sorting options.")
         return config

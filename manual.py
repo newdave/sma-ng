@@ -211,8 +211,6 @@ def movieInfo(guessData, tmdbid=None, imdbid=None, language=None, original=None)
 def tvInfo(guessData, tmdbid=None, tvdbid=None, imdbid=None, season=None, episode=None, language=None, original=None):
     season = season or guessData.get("season", 0)
     episode = episode or guessData.get("episode", 0)
-    if type(episode) == list:
-        episode = episode[0]
 
     if not tmdbid and not tvdbid and not imdbid:
         tmdb.API_KEY = tmdb_api_key
@@ -230,7 +228,8 @@ def tvInfo(guessData, tmdbid=None, tvdbid=None, imdbid=None, season=None, episod
         tmdbid = result['id']
 
     metadata = Metadata(MediaType.TV, tmdbid=tmdbid, imdbid=imdbid, tvdbid=tvdbid, season=season, episode=episode, language=language, logger=log, original=original)
-    log.info("Matched TV episode as %s (TMDB ID: %d) S%02dE%02d" % (metadata.showname, int(metadata.tmdbid), int(season), int(episode)))
+    ep_display = "E".join("%02d" % e for e in metadata.episodes)
+    log.info("Matched TV episode as %s (TMDB ID: %d) S%02d%s" % (metadata.showname, int(metadata.tmdbid), int(season), ep_display))
     return metadata
 
 
@@ -329,7 +328,8 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
     elif tagdata.mediatype == MediaType.Movie:
         log.info("Processing %s" % (tagdata.title))
     elif tagdata.mediatype == MediaType.TV:
-        log.info("Processing %s Season %02d Episode %02d - %s" % (tagdata.showname, int(tagdata.season), int(tagdata.episode), tagdata.title))
+        ep_display = "E".join("%02d" % e for e in tagdata.episodes)
+        log.info("Processing %s S%02d%s - %s" % (tagdata.showname, int(tagdata.season), ep_display, tagdata.title))
 
     if tagOnly:
         if tagdata:
@@ -348,7 +348,7 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
         if not language:
             language = mp.getDefaultAudioLanguage(output["options"]) or None
             if language and tagdata:
-                tagdata = Metadata(tagdata.mediatype, tmdbid=tagdata.tmdbid, imdbid=tagdata.imdbid, tvdbid=tagdata.tvdbid, season=tagdata.season, episode=tagdata.episode, original=original, language=language, logger=log)
+                tagdata = Metadata(tagdata.mediatype, tmdbid=tagdata.tmdbid, imdbid=tagdata.imdbid, tvdbid=tagdata.tvdbid, season=tagdata.season, episode=tagdata.episodes or tagdata.episode, original=original, language=language, logger=log)
         log.debug("Tag language setting is %s, using language %s for tagging." % (mp.settings.taglanguage or None, language))
         tagfailed = False
         if tagdata:
@@ -374,14 +374,6 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
             except:
                 log.exception("Error during file rename")
 
-        # Plex .plexmatch file
-        if mp.settings.plexmatch_enabled and tagdata:
-            try:
-                from resources.metadata import update_plexmatch
-                update_plexmatch(output['output'], tagdata, mp.settings, log=log)
-            except:
-                log.exception("Error updating .plexmatch")
-
         # Reverse Ouput
         output['output'] = mp.restoreFromOutput(inputfile, output['output'])
         for i, sub in enumerate(output['external_subs']):
@@ -393,9 +385,18 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
             output_files.extend(mp.replicate(sub, relativePath=relativePath))
         for file in output_files:
             mp.setPermissions(file)
+
+        # Plex .plexmatch file (after file is in final destination)
+        if mp.settings.plexmatch_enabled and tagdata:
+            try:
+                from resources.metadata import update_plexmatch
+                update_plexmatch(output['output'], tagdata, mp.settings, log=log)
+            except:
+                log.exception("Error updating .plexmatch")
+
         if mp.settings.postprocess:
             if tagdata:
-                mp.post(output_files, tagdata.mediatype, tmdbid=tagdata.tmdbid, season=tagdata.season, episode=tagdata.episode)
+                mp.post(output_files, tagdata.mediatype, tmdbid=tagdata.tmdbid, season=tagdata.season, episode=tagdata.episodes or tagdata.episode)
             else:
                 mp.post(output_files, mediatype, tmdbid=tmdbid, season=season, episode=episode)
         addtoProcessedArchive(output_files + [output['input']] if not output['input_deleted'] else output_files, processedList, processedArchive)
@@ -465,7 +466,7 @@ def main():
     parser.add_argument('-c', '--config', help='Specify an alternate configuration file location')
     parser.add_argument('-a', '--auto', action="store_true", help="Enable auto mode, the script will not prompt you for any further input, good for batch files. It will guess the metadata using guessit")
     parser.add_argument('-s', '--season', help="Specifiy the season number")
-    parser.add_argument('-e', '--episode', help="Specify the episode number")
+    parser.add_argument('-e', '--episode', action="append", help="Specify the episode number (repeat for multi-episode, e.g. -e 1 -e 2)")
     parser.add_argument('-tvdb', '--tvdbid', help="Specify the TVDB ID for media")
     parser.add_argument('-imdb', '--imdbid', help="Specify the IMDB ID for media")
     parser.add_argument('-tmdb', '--tmdbid', help="Specify the TMDB ID for media")

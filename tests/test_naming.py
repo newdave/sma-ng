@@ -33,6 +33,7 @@ class TestApplyTemplate:
         d.series_titleyear = 'Doc (US) (2025)'
         d.season = 2
         d.episode = 18
+        d.episodes = [18]
         d.episode_title = 'Orientation'
         d.episode_cleantitle = 'Orientation'
         d.quality = '1080p'
@@ -187,6 +188,7 @@ class TestNamingDataFromTagdata:
         tagdata.showdata = {'first_air_date': '2008-01-20'}
         tagdata.season = 3
         tagdata.episode = 10
+        tagdata.episodes = [10]
         tagdata.title = 'Fly'
 
         data = NamingData()
@@ -265,6 +267,7 @@ class TestGenerateName:
         tagdata.showdata = {'first_air_date': '2020-01-01'}
         tagdata.season = 1
         tagdata.episode = 1
+        tagdata.episodes = [1]
         tagdata.title = 'Pilot'
 
         info = make_media_info(video_codec='hevc', video_width=1920, audio_codec='aac', audio_channels=2)
@@ -278,13 +281,14 @@ class TestGenerateName:
 class TestPlexmatch:
     """Test .plexmatch file generation."""
 
-    def _tv_tagdata(self):
+    def _tv_tagdata(self, episode=3, episodes=None):
         tagdata = MagicMock()
         tagdata.mediatype = MediaType.TV
         tagdata.showname = 'Detectorists'
         tagdata.showdata = {'first_air_date': '2014-10-02'}
         tagdata.season = 1
-        tagdata.episode = 3
+        tagdata.episode = episode
+        tagdata.episodes = episodes or [episode]
         tagdata.title = 'Episode 3'
         tagdata.tmdbid = '61855'
         tagdata.tvdbid = '280847'
@@ -330,17 +334,15 @@ class TestPlexmatch:
         # First episode
         ep1 = s1_dir / 'ep01.mp4'
         ep1.touch()
-        td1 = self._tv_tagdata()
+        td1 = self._tv_tagdata(episode=1, episodes=[1])
         td1.season = 1
-        td1.episode = 1
         update_plexmatch(str(ep1), td1, self._settings())
 
         # Second episode
         ep2 = s1_dir / 'ep02.mp4'
         ep2.touch()
-        td2 = self._tv_tagdata()
+        td2 = self._tv_tagdata(episode=2, episodes=[2])
         td2.season = 1
-        td2.episode = 2
         update_plexmatch(str(ep2), td2, self._settings())
 
         content = (show_dir / '.plexmatch').read_text()
@@ -355,9 +357,8 @@ class TestPlexmatch:
         for ep_num in [5, 2, 8]:
             f = s_dir / ('ep%02d.mp4' % ep_num)
             f.touch()
-            td = self._tv_tagdata()
+            td = self._tv_tagdata(episode=ep_num, episodes=[ep_num])
             td.season = 2
-            td.episode = ep_num
             update_plexmatch(str(f), td, self._settings())
 
         lines = (show_dir / '.plexmatch').read_text().strip().split('\n')
@@ -484,6 +485,7 @@ class TestNamingDataFromTagdataEdgeCases:
         tagdata.showdata = {}
         tagdata.season = 1
         tagdata.episode = 1
+        tagdata.episodes = [1]
         tagdata.title = 'Pilot'
         data = NamingData()
         data.from_tagdata(tagdata)
@@ -604,3 +606,161 @@ class TestNamingDataFromArrApi:
         )
         assert result is True
         assert data.movie_title == 'Movie Title'
+
+
+class TestMultiEpisodeNaming:
+    """Tests for multi-episode filename formatting."""
+
+    def _tv_data(self, **overrides):
+        d = NamingData()
+        d.series_title = 'Breaking Bad'
+        d.series_year = '2008'
+        d.series_titleyear = 'Breaking Bad (2008)'
+        d.season = 3
+        d.episode = 10
+        d.episodes = [10]
+        d.episode_title = 'Fly'
+        d.episode_cleantitle = 'Fly'
+        d.quality = '1080p'
+        d.quality_full = 'BluRay-1080p'
+        d.source = 'BluRay'
+        d.video_codec = 'x265'
+        d.audio_codec = 'AAC'
+        d.audio_channels = '2.0'
+        d.hdr = ''
+        d.release_group = ''
+        for k, v in overrides.items():
+            setattr(d, k, v)
+        return d
+
+    def test_single_episode_unchanged(self):
+        data = self._tv_data()
+        result = apply_template('S{season:00}E{episode:00}', data)
+        assert result == 'S03E10'
+
+    def test_two_episodes(self):
+        data = self._tv_data(episodes=[1, 2], episode=1)
+        result = apply_template('S{season:00}E{episode:00}', data)
+        assert result == 'S03E01-E02'
+
+    def test_three_episodes(self):
+        data = self._tv_data(episodes=[5, 6, 7], episode=5)
+        result = apply_template('S{season:00}E{episode:00}', data)
+        assert result == 'S03E05-E07'
+
+    def test_multi_episode_three_digit_pad(self):
+        data = self._tv_data(episodes=[1, 2], episode=1)
+        result = apply_template('S{season:000}E{episode:000}', data)
+        assert result == 'S003E001-E002'
+
+    def test_multi_episode_no_format(self):
+        data = self._tv_data(episodes=[10, 11], episode=10)
+        result = apply_template('S{season}E{episode}', data)
+        assert result == 'S3E10-E11'
+
+    def test_multi_episode_full_template(self):
+        data = self._tv_data(
+            episodes=[1, 2], episode=1,
+            episode_title='Pilot / The Cat\'s in the Bag...',
+            episode_cleantitle='Pilot  The Cat\'s in the Bag...',
+            release_group='LOL'
+        )
+        result = apply_template(DEFAULT_TV_TEMPLATE, data)
+        assert 'S03E01-E02' in result
+        assert 'The Cat\'s in the Bag...' in result
+        assert '-LOL' in result
+
+    def test_multi_episode_from_tagdata(self):
+        """Test that NamingData.from_tagdata preserves multi-episode info."""
+        from resources.metadata import MediaType
+        tagdata = MagicMock()
+        tagdata.mediatype = MediaType.TV
+        tagdata.showname = 'Test Show'
+        tagdata.showdata = {'first_air_date': '2020-01-01'}
+        tagdata.season = 1
+        tagdata.episode = 1
+        tagdata.episodes = [1, 2, 3]
+        tagdata.title = 'Part 1 / Part 2 / Part 3'
+
+        data = NamingData()
+        data.from_tagdata(tagdata)
+        assert data.episodes == [1, 2, 3]
+        assert data.episode == 1
+
+        result = apply_template('S{season:00}E{episode:00}', data)
+        assert result == 'S01E01-E03'
+
+    def test_multi_episode_from_tagdata_no_episodes_attr(self):
+        """Test fallback when tagdata has no episodes attribute."""
+        from resources.metadata import MediaType
+        tagdata = MagicMock(spec=['mediatype', 'showname', 'showdata', 'season', 'episode', 'title'])
+        tagdata.mediatype = MediaType.TV
+        tagdata.showname = 'Test Show'
+        tagdata.showdata = {'first_air_date': '2020-01-01'}
+        tagdata.season = 1
+        tagdata.episode = 5
+        tagdata.title = 'Episode 5'
+
+        data = NamingData()
+        data.from_tagdata(tagdata)
+        assert data.episodes == [5]
+
+
+class TestMultiEpisodePlexmatch:
+    """Tests for multi-episode .plexmatch entries."""
+
+    def test_multi_episode_creates_entries_for_all(self, tmp_path):
+        show_root = tmp_path / "Show Name"
+        season_dir = show_root / "Season 01"
+        season_dir.mkdir(parents=True)
+        ep_file = season_dir / "S01E01E02.mp4"
+        ep_file.write_text("x")
+
+        tagdata = MagicMock()
+        tagdata.mediatype = MediaType.TV
+        tagdata.showname = "Show Name"
+        tagdata.showdata = {'first_air_date': '2020-01-15'}
+        tagdata.tvdbid = 12345
+        tagdata.imdbid = 'tt1234567'
+        tagdata.tmdbid = 99999
+        tagdata.season = 1
+        tagdata.episode = 1
+        tagdata.episodes = [1, 2]
+
+        from resources.metadata import _write_tv_plexmatch
+        _write_tv_plexmatch(str(ep_file), tagdata, MagicMock())
+
+        plexmatch = show_root / ".plexmatch"
+        assert plexmatch.exists()
+        content = plexmatch.read_text()
+        assert 'Episode: S01E01:' in content
+        assert 'Episode: S01E02:' in content
+
+    def test_multi_episode_same_file_path(self, tmp_path):
+        """Both episode entries should point to the same file."""
+        show_root = tmp_path / "Show"
+        season_dir = show_root / "Season 02"
+        season_dir.mkdir(parents=True)
+        ep_file = season_dir / "S02E05E06E07.mp4"
+        ep_file.write_text("x")
+
+        tagdata = MagicMock()
+        tagdata.mediatype = MediaType.TV
+        tagdata.showname = "Show"
+        tagdata.showdata = {}
+        tagdata.tvdbid = None
+        tagdata.imdbid = None
+        tagdata.tmdbid = 100
+        tagdata.season = 2
+        tagdata.episode = 5
+        tagdata.episodes = [5, 6, 7]
+
+        from resources.metadata import _write_tv_plexmatch
+        _write_tv_plexmatch(str(ep_file), tagdata, MagicMock())
+
+        content = (show_root / ".plexmatch").read_text()
+        lines = [l for l in content.strip().split('\n') if l.startswith('Episode:')]
+        assert len(lines) == 3
+        # All entries point to same file
+        paths = [l.split(':', 2)[2].strip() for l in lines]
+        assert len(set(paths)) == 1

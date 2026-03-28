@@ -112,6 +112,7 @@ class NamingData:
         self.series_titleyear = ''
         self.season = 0
         self.episode = 0
+        self.episodes = []
         self.episode_title = ''
         self.episode_cleantitle = ''
 
@@ -169,6 +170,7 @@ class NamingData:
             self.series_titleyear = '%s (%s)' % (self.series_title, year) if year else self.series_title
             self.season = int(tagdata.season or 0)
             self.episode = int(tagdata.episode or 0)
+            self.episodes = list(tagdata.episodes) if getattr(tagdata, 'episodes', None) else [self.episode]
             self.episode_title = tagdata.title or ''
             self.episode_cleantitle = sanitize_filename(self.episode_title)
         elif tagdata.mediatype == MediaType.Movie:
@@ -204,12 +206,19 @@ class NamingData:
             log.debug("Failed to query %s API for naming data" % arr_type)
             return False
 
+    def _apply_arr_quality(self, data):
+        """Extract quality/source/release-group from a Sonarr or Radarr parse response."""
+        if data.get('quality'):
+            q = data['quality'].get('quality', {})
+            self.quality = q.get('resolution', self.quality) or self.quality
+            self.source = q.get('source', self.source) or self.source
+        if data.get('releaseGroup'):
+            self.release_group = data['releaseGroup']
+        self.quality_full = ('%s-%s' % (self.source, self.quality)) if self.source else self.quality
+
     def _parse_sonarr_response(self, base_url, headers, filepath, log):
         """Query Sonarr for episode file info and extract naming data."""
         try:
-            # Search for the episode file by path
-            r = _requests.get(base_url + '/api/v3/episodefile', headers=headers, params={'seriesId': -1}, timeout=10)
-            # Alternative: parse from series
             r = _requests.get(base_url + '/api/v3/parse', headers=headers, params={'title': os.path.basename(filepath)}, timeout=10)
             data = r.json()
 
@@ -220,21 +229,18 @@ class NamingData:
                 self.series_titleyear = '%s (%s)' % (self.series_title, self.series_year) if self.series_year else self.series_title
 
             if data.get('episodes') and len(data['episodes']) > 0:
-                ep = data['episodes'][0]
-                self.season = ep.get('seasonNumber', self.season)
-                self.episode = ep.get('episodeNumber', self.episode)
-                self.episode_title = ep.get('title', self.episode_title)
+                eps = data['episodes']
+                self.season = eps[0].get('seasonNumber', self.season)
+                self.episode = eps[0].get('episodeNumber', self.episode)
+                self.episodes = [ep.get('episodeNumber') for ep in eps if ep.get('episodeNumber') is not None]
+                titles = [ep.get('title', '') for ep in eps if ep.get('title')]
+                self.episode_title = ' / '.join(titles) if titles else self.episode_title
                 self.episode_cleantitle = sanitize_filename(self.episode_title)
 
-            if data.get('quality'):
-                q = data['quality'].get('quality', {})
-                self.quality = q.get('resolution', self.quality) or self.quality
-                self.source = q.get('source', self.source) or self.source
+            self._apply_arr_quality(data)
 
-            if data.get('releaseGroup'):
-                self.release_group = data['releaseGroup']
-
-            log.debug("Got naming data from Sonarr: %s S%02dE%02d" % (self.series_title, self.season, self.episode))
+            ep_display = '-E'.join('%02d' % e for e in self.episodes) if self.episodes else '%02d' % self.episode
+            log.debug("Got naming data from Sonarr: %s S%02dE%s" % (self.series_title, self.season, ep_display))
             return True
         except Exception:
             return False
@@ -251,15 +257,8 @@ class NamingData:
                 self.movie_cleantitle = sanitize_filename(self.movie_title)
                 self.movie_year = str(movie.get('year', self.movie_year))
 
-            if data.get('quality'):
-                q = data['quality'].get('quality', {})
-                self.quality = q.get('resolution', self.quality) or self.quality
-                self.source = q.get('source', self.source) or self.source
+            self._apply_arr_quality(data)
 
-            if data.get('releaseGroup'):
-                self.release_group = data['releaseGroup']
-
-            self.quality_full = ('%s-%s' % (self.source, self.quality)) if self.source else self.quality
             log.debug("Got naming data from Radarr: %s (%s)" % (self.movie_title, self.movie_year))
             return True
         except Exception:
@@ -288,7 +287,7 @@ def apply_template(template, data):
         'series title': data.series_title,
         'series year': data.series_year,
         'season': data.season,
-        'episode': data.episode,
+        'episode': data.episodes if len(data.episodes) > 1 else data.episode,
         'episode title': data.episode_title,
         'episode cleantitle': data.episode_cleantitle,
         'movie title': data.movie_title,
@@ -321,6 +320,14 @@ def apply_template(template, data):
 
     def _apply_format(val, fmt):
         """Apply format spec to a value. :00 = pad to 2 digits, :000 = pad to 3, :90 = truncate to 90 chars."""
+        if isinstance(val, list):
+            # Multi-episode list: format as first-last range
+            # e.g. [1, 2, 3] with :00 produces "01-E03"
+            first = _apply_format(val[0], fmt)
+            if len(val) == 1:
+                return first
+            last = _apply_format(val[-1], fmt)
+            return '%s-E%s' % (first, last)
         if not fmt:
             return str(val)
         fmt_spec = fmt[1:]  # strip the ":"

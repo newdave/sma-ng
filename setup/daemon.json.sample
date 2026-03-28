@@ -11,8 +11,16 @@
       "config": "config/autoProcess.movies-4k.ini"
     },
     {
-      "path": "/mnt/unionfs/Media/Movies",
-      "config": "config/autoProcess.movies.ini"
+      "path": "/mnt/unionfs/Media/Movies/1080P",
+      "config": "config/autoProcess.movies-1080p.ini"
+    },
+    {
+      "path": "/mnt/unionfs/Media/Kids",
+      "config": "config/autoProcess.tv-kids.ini"
+    },
+    {
+      "path": "/mnt/unionfs/Media/Movies/Kids",
+      "config": "config/autoProcess.movies-kids.ini"
     }
   ]
 }

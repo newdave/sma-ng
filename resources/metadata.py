@@ -48,6 +48,7 @@ class Metadata:
         self.imdbid = None
         self.season = None
         self.episode = None
+        self.episodes = None
         self.original_language = None
 
         tmdb.API_KEY = tmdb_api_key
@@ -95,18 +96,33 @@ class Metadata:
             self.date = self.moviedata['release_date']
             self.imdbid = self.externalids.get('imdb_id') or imdbid
         elif self.mediatype == MediaType.TV:
+            # Normalize episode to a list for multi-episode support
+            if isinstance(episode, list):
+                self.episodes = [int(e) for e in episode]
+            else:
+                self.episodes = [int(episode)]
             self.season = int(season)
-            self.episode = int(episode)
+            self.episode = self.episodes[0]
 
             seriesquery = tmdb.TV(self.tmdbid)
             seasonquery = tmdb.TV_Seasons(self.tmdbid, season)
-            episodequery = tmdb.TV_Episodes(self.tmdbid, season, episode)
 
             self.showdata = seriesquery.info(language=self.language)
             self.seasondata = seasonquery.info(language=self.language)
-            self.episodedata = episodequery.info(language=self.language)
-            self.credit = episodequery.credits()
             self.externalids = seriesquery.external_ids(language=self.language)
+
+            # Fetch metadata for all episodes
+            self.episodedata_list = []
+            credit_list = []
+            for ep in self.episodes:
+                episodequery = tmdb.TV_Episodes(self.tmdbid, season, ep)
+                self.episodedata_list.append(episodequery.info(language=self.language))
+                credit_list.append(episodequery.credits())
+
+            # Primary episode data (first episode) for backwards compatibility
+            self.episodedata = self.episodedata_list[0]
+            self.credit = credit_list[0]
+
             try:
                 content_ratings = seriesquery.content_ratings()
                 rating = next(x for x in content_ratings['results'] if x['iso_3166_1'] == 'US')['rating']
@@ -121,8 +137,21 @@ class Metadata:
             self.showname = self.showdata['name']
             self.genre = self.showdata['genres']
             self.network = self.showdata['networks']
-            self.title = self.episodedata['name'] or "Episode %d" % (episode)
-            self.description = self.episodedata['overview']
+
+            # Combine episode titles and descriptions for multi-episode files
+            if len(self.episodes) > 1:
+                titles = []
+                descriptions = []
+                for epdata in self.episodedata_list:
+                    titles.append(epdata['name'] or "Episode %d" % epdata.get('episode_number', 0))
+                    if epdata.get('overview'):
+                        descriptions.append(epdata['overview'])
+                self.title = " / ".join(titles)
+                self.description = " | ".join(descriptions) if descriptions else ""
+            else:
+                self.title = self.episodedata['name'] or "Episode %d" % self.episode
+                self.description = self.episodedata['overview']
+
             self.date = self.episodedata['air_date']
             self.imdbid = self.externalids.get('imdb_id') or imdbid
             self.tvdbid = self.externalids.get('tvdb_id') or tvdbid
@@ -509,11 +538,13 @@ def _write_tv_plexmatch(filepath, tagdata, log):
     if tagdata.tmdbid:
         header['guid'] = 'tmdb://%s' % tagdata.tmdbid
 
-    # Add/update episode entry
+    # Add/update episode entries (supports multi-episode files)
     season = int(tagdata.season or 0)
-    episode = int(tagdata.episode or 0)
-    ep_key = 'S%02dE%02d' % (season, episode)
-    episodes[ep_key] = os.path.relpath(filepath, show_root)
+    episode_list = getattr(tagdata, 'episodes', None) or [int(tagdata.episode or 0)]
+    rel_path = os.path.relpath(filepath, show_root)
+    for ep in episode_list:
+        ep_key = 'S%02dE%02d' % (season, int(ep))
+        episodes[ep_key] = rel_path
 
     # Write file
     with open(plexmatch_path, 'w', encoding='utf-8') as f:

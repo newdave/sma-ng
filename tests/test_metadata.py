@@ -78,6 +78,96 @@ class TestResolveTmdbID:
         assert result is None
 
 
+class TestMultiEpisodeMetadata:
+    """Test multi-episode support in Metadata class."""
+
+    @patch('resources.metadata.tmdb.TV_Episodes')
+    @patch('resources.metadata.tmdb.TV_Seasons')
+    @patch('resources.metadata.tmdb.TV')
+    @patch('resources.metadata.Metadata.resolveTmdbID', return_value=1396)
+    def test_single_episode_as_int(self, mock_resolve, mock_tv, mock_seasons, mock_episodes):
+        mock_tv.return_value.info.return_value = {'name': 'Breaking Bad', 'genres': [], 'networks': [], 'original_language': 'en'}
+        mock_tv.return_value.external_ids.return_value = {}
+        mock_tv.return_value.content_ratings.return_value = {'results': []}
+        mock_seasons.return_value.info.return_value = {'episodes': []}
+        mock_episodes.return_value.info.return_value = {'name': 'Fly', 'overview': 'A fly...', 'air_date': '2010-05-23', 'episode_number': 10}
+        mock_episodes.return_value.credits.return_value = {'cast': [], 'crew': []}
+
+        m = Metadata(MediaType.TV, tmdbid=1396, season=3, episode=10)
+        assert m.episode == 10
+        assert m.episodes == [10]
+        assert m.title == 'Fly'
+
+    @patch('resources.metadata.tmdb.TV_Episodes')
+    @patch('resources.metadata.tmdb.TV_Seasons')
+    @patch('resources.metadata.tmdb.TV')
+    @patch('resources.metadata.Metadata.resolveTmdbID', return_value=1396)
+    def test_multi_episode_list(self, mock_resolve, mock_tv, mock_seasons, mock_episodes):
+        mock_tv.return_value.info.return_value = {'name': 'Breaking Bad', 'genres': [], 'networks': [], 'original_language': 'en'}
+        mock_tv.return_value.external_ids.return_value = {}
+        mock_tv.return_value.content_ratings.return_value = {'results': []}
+        mock_seasons.return_value.info.return_value = {'episodes': []}
+
+        ep1_data = {'name': 'Pilot', 'overview': 'A teacher...', 'air_date': '2008-01-20', 'episode_number': 1}
+        ep2_data = {'name': "Cat's in the Bag...", 'overview': 'Walt and Jesse...', 'air_date': '2008-01-27', 'episode_number': 2}
+
+        call_count = [0]
+        def episode_info(language=None):
+            result = [ep1_data, ep2_data][call_count[0]]
+            call_count[0] += 1
+            return result
+
+        mock_ep_instance = MagicMock()
+        mock_ep_instance.info.side_effect = episode_info
+        mock_ep_instance.credits.return_value = {'cast': [], 'crew': []}
+        mock_episodes.return_value = mock_ep_instance
+
+        m = Metadata(MediaType.TV, tmdbid=1396, season=1, episode=[1, 2])
+        assert m.episode == 1
+        assert m.episodes == [1, 2]
+        assert 'Pilot' in m.title
+        assert "Cat's in the Bag..." in m.title
+        assert ' / ' in m.title
+        assert 'A teacher...' in m.description
+        assert 'Walt and Jesse...' in m.description
+
+    @patch('resources.metadata.tmdb.TV_Episodes')
+    @patch('resources.metadata.tmdb.TV_Seasons')
+    @patch('resources.metadata.tmdb.TV')
+    @patch('resources.metadata.Metadata.resolveTmdbID', return_value=1396)
+    def test_multi_episode_string_list(self, mock_resolve, mock_tv, mock_seasons, mock_episodes):
+        """Test that string episode numbers are converted to int."""
+        mock_tv.return_value.info.return_value = {'name': 'Show', 'genres': [], 'networks': [], 'original_language': 'en'}
+        mock_tv.return_value.external_ids.return_value = {}
+        mock_tv.return_value.content_ratings.return_value = {'results': []}
+        mock_seasons.return_value.info.return_value = {'episodes': []}
+        mock_episodes.return_value.info.return_value = {'name': 'Ep', 'overview': '', 'air_date': '2020-01-01', 'episode_number': 1}
+        mock_episodes.return_value.credits.return_value = {'cast': [], 'crew': []}
+
+        m = Metadata(MediaType.TV, tmdbid=1396, season=1, episode=['3', '4'])
+        assert m.episodes == [3, 4]
+        assert m.episode == 3
+
+    @patch('resources.metadata.tmdb.TV_Episodes')
+    @patch('resources.metadata.tmdb.TV_Seasons')
+    @patch('resources.metadata.tmdb.TV')
+    @patch('resources.metadata.Metadata.resolveTmdbID', return_value=1396)
+    def test_single_episode_backwards_compat(self, mock_resolve, mock_tv, mock_seasons, mock_episodes):
+        """Ensure single-episode usage still works identically."""
+        mock_tv.return_value.info.return_value = {'name': 'Show', 'genres': [], 'networks': [], 'original_language': 'en'}
+        mock_tv.return_value.external_ids.return_value = {}
+        mock_tv.return_value.content_ratings.return_value = {'results': []}
+        mock_seasons.return_value.info.return_value = {'episodes': [{'name': 'E5'}]}
+        mock_episodes.return_value.info.return_value = {'name': 'Episode 5', 'overview': 'Desc', 'air_date': '2020-01-05', 'episode_number': 5}
+        mock_episodes.return_value.credits.return_value = {'cast': [], 'crew': []}
+
+        m = Metadata(MediaType.TV, tmdbid=1396, season=1, episode=5)
+        assert m.episode == 5
+        assert m.episodes == [5]
+        assert m.title == 'Episode 5'
+        assert m.description == 'Desc'
+
+
 class TestSetHD:
     def _make_metadata(self):
         """Create a Metadata instance without __init__ for testing helper methods."""
@@ -334,6 +424,7 @@ class TestWriteTvPlexmatch:
         tagdata.tmdbid = 99999
         tagdata.season = 1
         tagdata.episode = 3
+        tagdata.episodes = [3]
 
         _write_tv_plexmatch(str(ep_file), tagdata, MagicMock())
 
@@ -360,6 +451,7 @@ class TestWriteTvPlexmatch:
         tagdata.tmdbid = 100
         tagdata.season = 1
         tagdata.episode = 2
+        tagdata.episodes = [2]
 
         _write_tv_plexmatch(str(season_dir / "ep2.mp4"), tagdata, MagicMock())
 
