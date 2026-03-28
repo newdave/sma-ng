@@ -291,8 +291,9 @@ class Metadata:
             video["tvsn"] = [self.season]  # Season number
             video["disk"] = [(self.season, 0)]  # Season number as disk
             video["\xa9alb"] = self.showname + ", Season " + str(self.season)  # iTunes Album as Season
-            video["tves"] = [self.episode]  # Episode number
-            video["trkn"] = [(self.episode, len(self.seasondata.get('episodes', [])))]  # Episode number iTunes
+            if not (isinstance(self.episodes, list) and len(self.episodes) > 1):
+                video["tves"] = [self.episode]  # Episode number
+                video["trkn"] = [(self.episode, len(self.seasondata.get('episodes', [])))]  # Episode number iTunes
             video["stik"] = [10]  # TV show iTunes category
 
         if self.HD:
@@ -306,7 +307,8 @@ class Metadata:
         if artwork:
             coverpath = self.getArtwork(path, inputfile, thumbnail=thumbnail)
             if coverpath is not None:
-                cover = open(coverpath, 'rb').read()
+                with open(coverpath, 'rb') as f:
+                    cover = f.read()
                 if coverpath.endswith('png'):
                     video["covr"] = [MP4Cover(cover, MP4Cover.FORMAT_PNG)]  # png poster
                 else:
@@ -461,7 +463,7 @@ class Metadata:
             try:
                 poster = self.urlretrieve("https://image.tmdb.org/t/p/original" + poster_path, savepath)[0]
             except Exception:
-                self.log.exception("Exception while retrieving poster" % poster_path)
+                self.log.exception("Exception while retrieving poster: %s" % poster_path)
         return poster
 
 

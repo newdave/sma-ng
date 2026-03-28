@@ -14,132 +14,124 @@ from daemon import (
 class TestJobDatabase:
     """Test SQLite job database operations."""
 
-    def test_add_and_get_job(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        job_id = db.add_job('/path/to/file.mkv', '/config/autoProcess.ini')
-        job = db.get_job(job_id)
+    def test_add_and_get_job(self, job_db):
+        job_id = job_db.add_job('/path/to/file.mkv', '/config/autoProcess.ini')
+        job = job_db.get_job(job_id)
         assert job is not None
         assert job['path'] == '/path/to/file.mkv'
         assert job['config'] == '/config/autoProcess.ini'
         assert job['status'] == STATUS_PENDING
 
-    def test_job_lifecycle(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        job_id = db.add_job('/test.mkv', '/config.ini')
+    def test_job_lifecycle(self, job_db):
+        job_id = job_db.add_job('/test.mkv', '/config.ini')
 
-        db.start_job(job_id, worker_id=1)
-        job = db.get_job(job_id)
+        job_db.start_job(job_id, worker_id=1)
+        job = job_db.get_job(job_id)
         assert job['status'] == STATUS_RUNNING
         assert job['worker_id'] == 1
         assert job['started_at'] is not None
 
-        db.complete_job(job_id)
-        job = db.get_job(job_id)
+        job_db.complete_job(job_id)
+        job = job_db.get_job(job_id)
         assert job['status'] == STATUS_COMPLETED
         assert job['completed_at'] is not None
 
-    def test_fail_job(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        job_id = db.add_job('/test.mkv', '/config.ini')
-        db.start_job(job_id, 1)
-        db.fail_job(job_id, 'Conversion failed')
-        job = db.get_job(job_id)
+    def test_fail_job(self, job_db):
+        job_id = job_db.add_job('/test.mkv', '/config.ini')
+        job_db.start_job(job_id, 1)
+        job_db.fail_job(job_id, 'Conversion failed')
+        job = job_db.get_job(job_id)
         assert job['status'] == STATUS_FAILED
         assert job['error'] == 'Conversion failed'
 
-    def test_get_pending_jobs(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        db.add_job('/a.mkv', '/config.ini')
-        db.add_job('/b.mkv', '/config.ini')
-        job_id3 = db.add_job('/c.mkv', '/config.ini')
-        db.start_job(job_id3, 1)
-        pending = db.get_pending_jobs()
+    def test_get_pending_jobs(self, job_db):
+        job_db.add_job('/a.mkv', '/config.ini')
+        job_db.add_job('/b.mkv', '/config.ini')
+        job_id3 = job_db.add_job('/c.mkv', '/config.ini')
+        job_db.start_job(job_id3, 1)
+        pending = job_db.get_pending_jobs()
         assert len(pending) == 2
 
-    def test_get_next_pending_fifo(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        id1 = db.add_job('/first.mkv', '/config.ini')
-        db.add_job('/second.mkv', '/config.ini')
-        job = db.get_next_pending_job()
+    def test_get_next_pending_fifo(self, job_db):
+        id1 = job_db.add_job('/first.mkv', '/config.ini')
+        job_db.add_job('/second.mkv', '/config.ini')
+        job = job_db.get_next_pending_job()
         assert job['id'] == id1
 
-    def test_get_stats(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        id1 = db.add_job('/a.mkv', '/c.ini')
-        id2 = db.add_job('/b.mkv', '/c.ini')
-        id3 = db.add_job('/c.mkv', '/c.ini')
-        db.start_job(id1, 1)
-        db.complete_job(id1)
-        db.start_job(id2, 1)
-        db.fail_job(id2, 'error')
-        stats = db.get_stats()
+    def test_get_stats(self, job_db):
+        id1 = job_db.add_job('/a.mkv', '/c.ini')
+        id2 = job_db.add_job('/b.mkv', '/c.ini')
+        job_db.add_job('/c.mkv', '/c.ini')
+        job_db.start_job(id1, 1)
+        job_db.complete_job(id1)
+        job_db.start_job(id2, 1)
+        job_db.fail_job(id2, 'error')
+        stats = job_db.get_stats()
         assert stats.get(STATUS_COMPLETED, 0) == 1
         assert stats.get(STATUS_FAILED, 0) == 1
         assert stats.get(STATUS_PENDING, 0) == 1
         assert stats['total'] == 3
 
-    def test_get_jobs_with_filter(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        db.add_job('/a.mkv', '/tv.ini')
-        id2 = db.add_job('/b.mkv', '/movie.ini')
-        db.start_job(id2, 1)
-        db.complete_job(id2)
-        completed = db.get_jobs(status=STATUS_COMPLETED)
+    def test_get_jobs_with_filter(self, job_db):
+        job_db.add_job('/a.mkv', '/tv.ini')
+        id2 = job_db.add_job('/b.mkv', '/movie.ini')
+        job_db.start_job(id2, 1)
+        job_db.complete_job(id2)
+        completed = job_db.get_jobs(status=STATUS_COMPLETED)
         assert len(completed) == 1
         assert completed[0]['path'] == '/b.mkv'
 
-    def test_get_jobs_pagination(self, tmp_db):
-        db = JobDatabase(tmp_db)
+    def test_get_jobs_pagination(self, job_db):
         for i in range(10):
-            db.add_job('/file%d.mkv' % i, '/c.ini')
-        page1 = db.get_jobs(limit=3, offset=0)
-        page2 = db.get_jobs(limit=3, offset=3)
+            job_db.add_job('/file%d.mkv' % i, '/c.ini')
+        page1 = job_db.get_jobs(limit=3, offset=0)
+        page2 = job_db.get_jobs(limit=3, offset=3)
         assert len(page1) == 3
         assert len(page2) == 3
         assert page1[0]['id'] != page2[0]['id']
 
-    def test_pending_count(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        db.add_job('/a.mkv', '/c.ini')
-        db.add_job('/b.mkv', '/c.ini')
-        assert db.pending_count() == 2
+    def test_pending_count(self, job_db):
+        job_db.add_job('/a.mkv', '/c.ini')
+        job_db.add_job('/b.mkv', '/c.ini')
+        assert job_db.pending_count() == 2
 
-    def test_pending_count_for_config(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        db.add_job('/a.mkv', '/tv.ini')
-        db.add_job('/b.mkv', '/tv.ini')
-        db.add_job('/c.mkv', '/movie.ini')
-        assert db.pending_count_for_config('/tv.ini') == 2
-        assert db.pending_count_for_config('/movie.ini') == 1
+    def test_pending_count_for_config(self, job_db):
+        job_db.add_job('/a.mkv', '/tv.ini')
+        job_db.add_job('/b.mkv', '/tv.ini')
+        job_db.add_job('/c.mkv', '/movie.ini')
+        assert job_db.pending_count_for_config('/tv.ini') == 2
+        assert job_db.pending_count_for_config('/movie.ini') == 1
 
-    def test_get_nonexistent_job(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        assert db.get_job(9999) is None
+    def test_get_nonexistent_job(self, job_db):
+        assert job_db.get_job(9999) is None
 
-    def test_job_args_stored(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        job_id = db.add_job('/test.mkv', '/c.ini', args=['-tmdb', '603'])
-        job = db.get_job(job_id)
+    def test_job_args_stored(self, job_db):
+        job_id = job_db.add_job('/test.mkv', '/c.ini', args=['-tmdb', '603'])
+        job = job_db.get_job(job_id)
         args = json.loads(job['args'])
         assert args == ['-tmdb', '603']
 
     def test_reset_running_jobs(self, tmp_db):
+        from daemon import JobDatabase
         db = JobDatabase(tmp_db)
         job_id = db.add_job('/test.mkv', '/c.ini')
         db.start_job(job_id, 1)
         assert db.get_job(job_id)['status'] == STATUS_RUNNING
-        # Simulate daemon restart
+        db.close()
+        # Simulate daemon restart — second instance must also be closed
         db2 = JobDatabase(tmp_db)
-        job = db2.get_job(job_id)
-        assert job['status'] == STATUS_PENDING
+        try:
+            job = db2.get_job(job_id)
+            assert job['status'] == STATUS_PENDING
+        finally:
+            db2.close()
 
-    def test_cleanup_old_jobs(self, tmp_db):
-        db = JobDatabase(tmp_db)
-        job_id = db.add_job('/old.mkv', '/c.ini')
-        db.start_job(job_id, 1)
-        db.complete_job(job_id)
+    def test_cleanup_old_jobs(self, job_db):
+        job_id = job_db.add_job('/old.mkv', '/c.ini')
+        job_db.start_job(job_id, 1)
+        job_db.complete_job(job_id)
         # Cleanup with 0 days should remove it
-        deleted = db.cleanup_old_jobs(days=0)
+        deleted = job_db.cleanup_old_jobs(days=0)
         assert deleted >= 0  # May be 0 if completed_at is "now"
 
 

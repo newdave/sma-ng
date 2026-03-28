@@ -1049,7 +1049,7 @@ class MediaProcessor:
                 # Custom
                 try:
                     if blockAudioCopy and blockAudioCopy(self, a, inputfile):
-                        self.log.exception("Custom audio stream copy check is preventing copying the stream.")
+                        self.log.debug("Custom audio stream copy check is preventing copying the stream.")
                         adebug = adebug + ".custom"
                         acodec = self.settings.acodec[0]
                 except KeyboardInterrupt:
