@@ -108,7 +108,11 @@ class Metadata:
             seasonquery = tmdb.TV_Seasons(self.tmdbid, season)
 
             self.showdata = seriesquery.info(language=self.language)
-            self.seasondata = seasonquery.info(language=self.language)
+            try:
+                self.seasondata = seasonquery.info(language=self.language)
+            except Exception as e:
+                self.log.warning("Unable to retrieve season %s data from TMDB (tmdbid %s): %s", season, self.tmdbid, e)
+                self.seasondata = {}
             self.externalids = seriesquery.external_ids(language=self.language)
 
             # Fetch metadata for all episodes
@@ -116,8 +120,13 @@ class Metadata:
             credit_list = []
             for ep in self.episodes:
                 episodequery = tmdb.TV_Episodes(self.tmdbid, season, ep)
-                self.episodedata_list.append(episodequery.info(language=self.language))
-                credit_list.append(episodequery.credits())
+                try:
+                    self.episodedata_list.append(episodequery.info(language=self.language))
+                    credit_list.append(episodequery.credits())
+                except Exception as e:
+                    self.log.warning("Unable to retrieve episode S%sE%s data from TMDB (tmdbid %s): %s", season, ep, self.tmdbid, e)
+                    self.episodedata_list.append({'name': None, 'overview': None, 'air_date': None})
+                    credit_list.append({'cast': [], 'crew': []})
 
             # Primary episode data (first episode) for backwards compatibility
             self.episodedata = self.episodedata_list[0]
@@ -277,7 +286,8 @@ class Metadata:
             video["\xa9nam"] = self.title  # Movie title
             video["desc"] = self.tagline  # Short description
             video["ldes"] = self.description  # Long description
-            video["\xa9day"] = self.date  # Year
+            if self.date is not None:
+                video["\xa9day"] = self.date  # Year
             video["stik"] = [9]  # Movie iTunes category
         elif self.mediatype == MediaType.TV:
             video["tvsh"] = self.showname  # TV show title
@@ -287,7 +297,8 @@ class Metadata:
             video["ldes"] = self.description  # Long description
             network = [x['name'] for x in self.network]
             video["tvnn"] = network  # Network
-            video["\xa9day"] = self.date  # Air Date
+            if self.date is not None:
+                video["\xa9day"] = self.date  # Air Date
             video["tvsn"] = [self.season]  # Season number
             video["disk"] = [(self.season, 0)]  # Season number as disk
             video["\xa9alb"] = self.showname + ", Season " + str(self.season)  # iTunes Album as Season
