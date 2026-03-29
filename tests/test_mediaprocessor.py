@@ -870,6 +870,100 @@ class TestFfprobeSafeCodecs:
         assert mp.ffprobeSafeCodecs(None) is None
 
 
+class TestAtomicFileOps:
+    def _make_processor(self):
+        with patch('resources.mediaprocessor.Converter'):
+            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+                from resources.mediaprocessor import MediaProcessor
+                mp = MediaProcessor.__new__(MediaProcessor)
+                mp.settings = MagicMock()
+                mp.settings.permissions = {'chmod': 0o664, 'uid': -1, 'gid': -1}
+                mp.settings.copyto = []
+                mp.settings.moveto = None
+                mp.log = MagicMock()
+                return mp
+
+    def test_atomic_copy_success(self, tmp_path):
+        mp = self._make_processor()
+        src = tmp_path / "source.mp4"
+        src.write_bytes(b"media data")
+        dst = tmp_path / "dest" / "output.mp4"
+        dst.parent.mkdir()
+        mp._atomic_copy(str(src), str(dst))
+        assert dst.read_bytes() == b"media data"
+        assert not (tmp_path / "dest" / "output.mp4.smatmp").exists()
+
+    def test_atomic_copy_cleans_up_temp_on_failure(self, tmp_path):
+        mp = self._make_processor()
+        src = tmp_path / "source.mp4"
+        src.write_bytes(b"media data")
+        dst = tmp_path / "output.mp4"
+        with patch('shutil.copy2', side_effect=OSError("disk full")):
+            with pytest.raises(OSError):
+                mp._atomic_copy(str(src), str(dst))
+        assert not (tmp_path / "output.mp4.smatmp").exists()
+
+    def test_atomic_move_same_filesystem(self, tmp_path):
+        mp = self._make_processor()
+        src = tmp_path / "source.mp4"
+        src.write_bytes(b"media data")
+        dst = tmp_path / "dest.mp4"
+        with patch('os.rename') as mock_rename:
+            mp._atomic_move(str(src), str(dst))
+        mock_rename.assert_called_once_with(str(src), str(dst))
+
+    def test_atomic_move_cross_filesystem_fallback(self, tmp_path):
+        mp = self._make_processor()
+        src = tmp_path / "source.mp4"
+        src.write_bytes(b"media data")
+        dst = tmp_path / "dest.mp4"
+        with patch('os.rename', side_effect=OSError(18, "Invalid cross-device link")):
+            with patch.object(mp, '_atomic_copy') as mock_copy:
+                with patch('os.remove') as mock_remove:
+                    mp._atomic_move(str(src), str(dst))
+        mock_copy.assert_called_once_with(str(src), str(dst))
+        mock_remove.assert_called_once_with(str(src))
+
+    def test_replicate_copyto_uses_atomic_copy(self, tmp_path):
+        mp = self._make_processor()
+        src = tmp_path / "movie.mp4"
+        src.write_bytes(b"x")
+        dest_dir = tmp_path / "library"
+        dest_dir.mkdir()
+        mp.settings.copyto = [str(dest_dir)]
+        mp.settings.moveto = None
+        with patch.object(mp, '_atomic_copy') as mock_copy:
+            mp.replicate(str(src))
+        mock_copy.assert_called_once_with(str(src), str(dest_dir / "movie.mp4"))
+
+    def test_replicate_moveto_uses_atomic_move(self, tmp_path):
+        mp = self._make_processor()
+        src = tmp_path / "movie.mp4"
+        src.write_bytes(b"x")
+        dest_dir = tmp_path / "library"
+        dest_dir.mkdir()
+        mp.settings.copyto = []
+        mp.settings.moveto = str(dest_dir)
+        with patch.object(mp, '_atomic_move') as mock_move:
+            mp.replicate(str(src))
+        mock_move.assert_called_once_with(str(src), str(dest_dir / "movie.mp4"))
+
+    def test_restore_from_output_uses_atomic_move(self, tmp_path):
+        mp = self._make_processor()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        inputfile = str(input_dir / "movie.mkv")
+        outputfile = str(output_dir / "movie.mp4")
+        mp.settings.output_dir = str(output_dir)
+        mp.settings.moveto = None
+        with patch.object(mp, '_atomic_move') as mock_move, \
+             patch.object(mp, 'parseFile', return_value=(str(input_dir), 'movie', 'mp4')):
+            mp.restoreFromOutput(inputfile, outputfile)
+        mock_move.assert_called_once_with(outputfile, str(input_dir / "movie.mp4"))
+
+
 class TestSetPermissions:
     def _make_processor(self):
         with patch('resources.mediaprocessor.Converter'):
@@ -920,3 +1014,91 @@ class TestScanForExternalMetadata:
         src.write_text("x")
         result = mp.scanForExternalMetadata(str(src))
         assert result is None
+
+
+class TestCrfProfileOverridesCopy:
+    """Test that a CRF profile match forces transcoding even when codec could be copied."""
+
+    def test_crf_profile_match_forces_transcode(self, tmp_ini, make_media_info):
+        """When source bitrate exceeds a CRF profile threshold, the stream must be
+        transcoded (not copied) even if the source codec matches the desired codec."""
+        with patch('resources.readsettings.ReadSettings._validate_binaries'):
+            from resources.readsettings import ReadSettings
+            from resources.mediaprocessor import MediaProcessor
+
+            settings = ReadSettings(tmp_ini())
+            # Use single codec so source h264 matches and would normally be copied
+            settings.vcodec = ['h264']
+            # Profile: source > 5000 kbps → transcode with crf=18, 3M/6M rate control
+            settings.vcrf_profiles = [{'source_bitrate': 5000, 'crf': 18, 'maxrate': '3M', 'bufsize': '6M'}]
+
+        mock_converter = MagicMock()
+        mock_converter.ffmpeg.codecs = {
+            'h264': {'encoders': ['libx264']},
+            'aac': {'encoders': ['aac']},
+        }
+        mock_converter.ffmpeg.pix_fmts = {'yuv420p': 8}
+        mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {'h264': 'libx264', 'aac': 'aac'}.get(c, c)
+
+        mp = MediaProcessor.__new__(MediaProcessor)
+        mp.settings = settings
+        mp.converter = mock_converter
+        mp.log = MagicMock()
+        mp.deletesubs = set()
+
+        # 7 Mbit source: total=7128kbps, audio=128kbps → video estimate ≈ 6650kbps > 5000 threshold
+        info = make_media_info(
+            video_codec='h264',
+            video_bitrate=7000000,
+            total_bitrate=7128000,
+            audio_bitrate=128000,
+        )
+
+        with patch('resources.mediaprocessor.Converter.encoder', return_value=None), \
+             patch('resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name', side_effect=lambda c: c):
+            options, *_ = mp.generateOptions('/fake/input.mkv', info=info)
+
+        assert options is not None
+        assert options['video']['codec'] == 'h264', "CRF profile match must override copy and transcode"
+        assert options['video']['crf'] == 18
+        assert options['video']['maxrate'] == '3M'
+        assert options['video']['bufsize'] == '6M'
+
+    def test_no_crf_profile_match_allows_copy(self, tmp_ini, make_media_info):
+        """When source bitrate is below the CRF profile threshold, copy is not overridden."""
+        with patch('resources.readsettings.ReadSettings._validate_binaries'):
+            from resources.readsettings import ReadSettings
+            from resources.mediaprocessor import MediaProcessor
+
+            settings = ReadSettings(tmp_ini())
+            settings.vcodec = ['h264']
+            # Profile only triggers above 10000 kbps — our 7 Mbit source won't match
+            settings.vcrf_profiles = [{'source_bitrate': 10000, 'crf': 18, 'maxrate': '6M', 'bufsize': '12M'}]
+
+        mock_converter = MagicMock()
+        mock_converter.ffmpeg.codecs = {
+            'h264': {'encoders': ['libx264']},
+            'aac': {'encoders': ['aac']},
+        }
+        mock_converter.ffmpeg.pix_fmts = {'yuv420p': 8}
+        mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {'h264': 'libx264', 'aac': 'aac'}.get(c, c)
+
+        mp = MediaProcessor.__new__(MediaProcessor)
+        mp.settings = settings
+        mp.converter = mock_converter
+        mp.log = MagicMock()
+        mp.deletesubs = set()
+
+        info = make_media_info(
+            video_codec='h264',
+            video_bitrate=7000000,
+            total_bitrate=7128000,
+            audio_bitrate=128000,
+        )
+
+        with patch('resources.mediaprocessor.Converter.encoder', return_value=None), \
+             patch('resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name', side_effect=lambda c: c):
+            options, *_ = mp.generateOptions('/fake/input.mkv', info=info)
+
+        assert options is not None
+        assert options['video']['codec'] == 'copy'

@@ -777,6 +777,10 @@ class MediaProcessor:
                         vmaxrate = profile['maxrate']
                         vbufsize = profile['bufsize']
                         self.log.info("Acceptable profile match found for VBR %s using CRF %d, maxrate %s, bufsize %s." % (vbitrate_estimate, vcrf, vmaxrate, vbufsize))
+                        if vcodec == 'copy':
+                            self.log.debug("CRF profile match requires transcoding, overriding copy [video-crf-profiles].")
+                            vdebug = vdebug + ".crf-profile"
+                            vcodec = vcodecs[0]
                         break
                 except:
                     self.log.exception("Error setting VCRF profile information.")
@@ -2018,15 +2022,13 @@ class MediaProcessor:
             self.log.info("Output file is in output_dir %s, moving back to original directory %s." % (self.settings.output_dir, input_dir))
             self.log.debug("New outputfile %s." % (newoutputfile))
             try:
-                shutil.move(outputfile, newoutputfile)
+                self._atomic_move(outputfile, newoutputfile)
             except KeyboardInterrupt:
                 raise
             except:
                 self.log.exception("First attempt to move the file has failed.")
                 try:
-                    if os.path.exists(newoutputfile):
-                        self.removeFile(newoutputfile, 0, 0)
-                    shutil.move(outputfile, newoutputfile)
+                    self._atomic_move(outputfile, newoutputfile)
                 except KeyboardInterrupt:
                     raise
                 except:
@@ -2471,20 +2473,19 @@ class MediaProcessor:
                     d = os.path.join(d, relativePath)
                 if not os.path.exists(d):
                     os.makedirs(d)
+                dst_path = os.path.join(d, os.path.split(inputfile)[1])
                 try:
-                    shutil.copy(inputfile, d)
+                    self._atomic_copy(inputfile, dst_path)
                     self.log.info("%s copied to %s." % (inputfile, d))
-                    files.append(os.path.join(d, os.path.split(inputfile)[1]))
+                    files.append(dst_path)
                 except KeyboardInterrupt:
                     raise
                 except:
                     self.log.exception("First attempt to copy the file has failed.")
                     try:
-                        if os.path.exists(os.path.join(d, os.path.split(inputfile)[1])):
-                            self.removeFile(os.path.join(d, os.path.split(inputfile)[1]), 0, 0)
-                        shutil.copy(inputfile, d)
+                        self._atomic_copy(inputfile, dst_path)
                         self.log.info("%s copied to %s." % (inputfile, d))
-                        files.append(os.path.join(d, os.path.split(inputfile)[1]))
+                        files.append(dst_path)
                     except KeyboardInterrupt:
                         raise
                     except:
@@ -2495,20 +2496,19 @@ class MediaProcessor:
             moveto = os.path.join(self.settings.moveto, relativePath) if relativePath else self.settings.moveto
             if not os.path.exists(moveto):
                 os.makedirs(moveto)
+            moveto_path = os.path.join(moveto, os.path.basename(inputfile))
             try:
-                shutil.move(inputfile, moveto)
+                self._atomic_move(inputfile, moveto_path)
                 self.log.info("%s moved to %s." % (inputfile, moveto))
-                files[0] = os.path.join(moveto, os.path.basename(inputfile))
+                files[0] = moveto_path
             except KeyboardInterrupt:
                 raise
             except:
                 self.log.exception("First attempt to move the file has failed.")
                 try:
-                    if os.path.exists(os.path.join(moveto, os.path.basename(inputfile))):
-                        self.removeFile(os.path.join(moveto, os.path.basename(inputfile)), 0, 0)
-                    shutil.move(inputfile, moveto)
+                    self._atomic_move(inputfile, moveto_path)
                     self.log.info("%s moved to %s." % (inputfile, moveto))
-                    files[0] = os.path.join(moveto, os.path.basename(inputfile))
+                    files[0] = moveto_path
                 except KeyboardInterrupt:
                     raise
                 except:
@@ -2529,6 +2529,29 @@ class MediaProcessor:
             except:
                 self.log.exception("Unable to check free space on output directory %s [output-directory-space-ratio]." % self.settings.output_dir)
         return True
+
+    # Copy src to dst atomically: write to a temp file then rename into place
+    def _atomic_copy(self, src, dst):
+        dst_tmp = dst + '.smatmp'
+        try:
+            shutil.copy2(src, dst_tmp)
+            self.setPermissions(dst_tmp)
+            os.replace(dst_tmp, dst)
+        except:
+            try:
+                if os.path.exists(dst_tmp):
+                    os.remove(dst_tmp)
+            except:
+                pass
+            raise
+
+    # Move src to dst atomically: rename if same filesystem, else atomic copy + delete
+    def _atomic_move(self, src, dst):
+        try:
+            os.rename(src, dst)
+        except OSError:
+            self._atomic_copy(src, dst)
+            os.remove(src)
 
     # Robust file removal function, with options to retry in the event the file is in use, and replace a deleted file
     def removeFile(self, filename, retries=2, delay=10, replacement=None):
