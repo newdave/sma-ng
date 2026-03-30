@@ -1,0 +1,81 @@
+services:
+
+  # ────────────────────────────────────────────────────────────────────
+  # CPU-only (no GPU acceleration)
+  # Usage: docker compose up sma
+  # ────────────────────────────────────────────────────────────────────
+  sma:
+    build:
+      context: .
+      target: runtime
+    image: sma-ng:latest
+    container_name: sma-ng
+    restart: unless-stopped
+    ports:
+      - "${SMA_PORT:-8585}:8585"
+    volumes:
+      - ./config:/config
+      - ./logs:/logs
+      - ${MEDIA_PATH:-/mnt/media}:/media
+    environment:
+      - SMA_CONFIG=/config/autoProcess.ini
+      - SMA_DAEMON_API_KEY=${SMA_DAEMON_API_KEY:-}
+      - SMA_DAEMON_DB_URL=${SMA_DAEMON_DB_URL:-}
+    env_file:
+      - path: ./config/daemon.env
+        required: false
+
+  # ────────────────────────────────────────────────────────────────────
+  # NVIDIA GPU (NVENC/NVDEC)
+  # Requirements: nvidia-container-toolkit installed on host
+  # Usage: docker compose --profile nvidia up sma-nvidia
+  # ────────────────────────────────────────────────────────────────────
+  sma-nvidia:
+    extends:
+      service: sma
+    container_name: sma-ng-nvidia
+    profiles: [nvidia]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
+
+  # ────────────────────────────────────────────────────────────────────
+  # Intel GPU (QSV + VAAPI via iHD driver)
+  # Requirements: Intel GPU on host; intel-media-va-driver or
+  #               intel-media-va-driver-non-free installed on host
+  # Usage: docker compose --profile intel up sma-intel
+  # ────────────────────────────────────────────────────────────────────
+  sma-intel:
+    extends:
+      service: sma
+    container_name: sma-ng-intel
+    profiles: [intel]
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      # Add the 'render' and 'video' group IDs from the host so the
+      # container user can access /dev/dri/renderD128
+      - "render"
+      - "video"
+
+  # ────────────────────────────────────────────────────────────────────
+  # AMD GPU (VAAPI via radeonsi/amdgpu driver)
+  # Usage: docker compose --profile amd up sma-amd
+  # ────────────────────────────────────────────────────────────────────
+  sma-amd:
+    extends:
+      service: sma
+    container_name: sma-ng-amd
+    profiles: [amd]
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "render"
+      - "video"
