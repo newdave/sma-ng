@@ -16,30 +16,30 @@
 ### OPTIONS                                                                ###
 #
 # SMA-NG installation path.
-#MP4_FOLDER=~/sma-ng/
+# MP4_FOLDER=~/sma-ng/
 #
 # Convert file before passing to destination (true, false).
-#SHOULDCONVERT=true
+# SHOULDCONVERT=true
 #
 # Sonarr category name.
-#SONARR_CAT=sonarr
+# SONARR_CAT=sonarr
 #
 # Radarr category name.
-#RADARR_CAT=radarr
+# RADARR_CAT=radarr
 #
 # Bypass category name.
-#BYPASS_CAT=bypass
+# BYPASS_CAT=bypass
 #
 ### NZBGET POST-PROCESSING SCRIPT                                          ###
 ##############################################################################
+import logging
 import os
 import sys
-import logging
 
 log = logging.getLogger("NZBGetPostProcess")
 log.setLevel(logging.DEBUG)
 handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
 log.addHandler(handler)
 
 # NZBGet exit codes
@@ -48,11 +48,11 @@ POSTPROCESS_ERROR = 94
 POSTPROCESS_NONE = 95
 
 # Validate NZBGet environment
-if not os.environ.get('NZBOP_VERSION'):
+if not os.environ.get("NZBOP_VERSION"):
     log.error("This script requires NZBGet v11.0+.")
     sys.exit(POSTPROCESS_ERROR)
 
-mp4_folder = os.environ.get('NZBPO_MP4_FOLDER', '').strip()
+mp4_folder = os.environ.get("NZBPO_MP4_FOLDER", "").strip()
 if mp4_folder:
     sys.path.insert(0, mp4_folder)
     os.chdir(mp4_folder)
@@ -64,18 +64,18 @@ except ImportError:
     sys.exit(POSTPROCESS_ERROR)
 
 # Read NZBGet settings
-shouldConvert = os.environ.get('NZBPO_SHOULDCONVERT', 'true').lower() == 'true'
-sonarrcat = os.environ.get('NZBPO_SONARR_CAT', 'sonarr').lower()
-radarrcat = os.environ.get('NZBPO_RADARR_CAT', 'radarr').lower()
-bypasscat = os.environ.get('NZBPO_BYPASS_CAT', 'bypass').lower()
+shouldConvert = os.environ.get("NZBPO_SHOULDCONVERT", "true").lower() == "true"
+sonarrcat = os.environ.get("NZBPO_SONARR_CAT", "sonarr").lower()
+radarrcat = os.environ.get("NZBPO_RADARR_CAT", "radarr").lower()
+bypasscat = os.environ.get("NZBPO_BYPASS_CAT", "bypass").lower()
 
 # Validate download status
-if os.environ.get('NZBPP_TOTALSTATUS') != 'SUCCESS':
+if os.environ.get("NZBPP_TOTALSTATUS") != "SUCCESS":
     log.warning("Download not successful, skipping.")
     sys.exit(POSTPROCESS_NONE)
 
-directory = os.environ.get('NZBPP_DIRECTORY', '')
-category = os.environ.get('NZBPP_CATEGORY', '').lower()
+directory = os.environ.get("NZBPP_DIRECTORY", "")
+category = os.environ.get("NZBPP_CATEGORY", "").lower()
 
 log.info("Directory: %s" % directory)
 log.info("Category: %s" % category)

@@ -4,10 +4,11 @@ SMA-NG Webhook Client
 Shared module for submitting conversion jobs to the SMA-NG daemon
 and polling for completion. Used by all integration scripts.
 """
-import os
-import time
+
 import json
 import logging
+import os
+import time
 
 try:
     import requests
@@ -15,31 +16,31 @@ except ImportError:
     requests = None
 
 # Daemon connection defaults
-DEFAULT_HOST = '127.0.0.1'
+DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8585
-ENV_DAEMON_HOST = 'SMA_DAEMON_HOST'
-ENV_DAEMON_PORT = 'SMA_DAEMON_PORT'
-ENV_DAEMON_API_KEY = 'SMA_DAEMON_API_KEY'
+ENV_DAEMON_HOST = "SMA_DAEMON_HOST"
+ENV_DAEMON_PORT = "SMA_DAEMON_PORT"
+ENV_DAEMON_API_KEY = "SMA_DAEMON_API_KEY"
 
 
 def get_daemon_url():
     """Get daemon base URL from environment or defaults."""
     host = os.environ.get(ENV_DAEMON_HOST, DEFAULT_HOST)
     port = os.environ.get(ENV_DAEMON_PORT, DEFAULT_PORT)
-    return 'http://%s:%s' % (host, port)
+    return "http://%s:%s" % (host, port)
 
 
 def get_api_key():
     """Get API key from environment."""
-    return os.environ.get(ENV_DAEMON_API_KEY, '')
+    return os.environ.get(ENV_DAEMON_API_KEY, "")
 
 
 def _headers():
     """Build request headers with optional API key."""
-    headers = {'Content-Type': 'application/json', 'User-Agent': 'SMA-NG webhook-client'}
+    headers = {"Content-Type": "application/json", "User-Agent": "SMA-NG webhook-client"}
     api_key = get_api_key()
     if api_key:
-        headers['X-API-Key'] = api_key
+        headers["X-API-Key"] = api_key
     return headers
 
 
@@ -63,12 +64,12 @@ def submit_job(path, config=None, args=None, logger=None):
         log.error("Python 'requests' module required for webhook client. Install with: pip install requests")
         return None
 
-    url = get_daemon_url() + '/webhook'
-    payload = {'path': path}
+    url = get_daemon_url() + "/webhook"
+    payload = {"path": path}
     if config:
-        payload['config'] = config
+        payload["config"] = config
     if args:
-        payload['args'] = args
+        payload["args"] = args
 
     try:
         log.info("Submitting job to daemon: %s" % path)
@@ -77,12 +78,10 @@ def submit_job(path, config=None, args=None, logger=None):
         r = requests.post(url, json=payload, headers=_headers(), timeout=30)
         result = r.json()
         if r.status_code in (200, 201, 202):
-            log.info("Job %d queued: %s (config: %s)" % (
-                result.get('job_id', 0), path, os.path.basename(result.get('config', ''))
-            ))
+            log.info("Job %d queued: %s (config: %s)" % (result.get("job_id", 0), path, os.path.basename(result.get("config", ""))))
             return result
         else:
-            log.error("Daemon returned %d: %s" % (r.status_code, result.get('error', 'Unknown error')))
+            log.error("Daemon returned %d: %s" % (r.status_code, result.get("error", "Unknown error")))
             return None
     except requests.ConnectionError:
         log.error("Cannot connect to SMA-NG daemon at %s. Is the daemon running?" % get_daemon_url())
@@ -95,7 +94,7 @@ def submit_job(path, config=None, args=None, logger=None):
 def get_job_status(job_id, logger=None):
     """Get current status of a job."""
     log = logger or logging.getLogger(__name__)
-    url = '%s/jobs/%d' % (get_daemon_url(), job_id)
+    url = "%s/jobs/%d" % (get_daemon_url(), job_id)
     try:
         r = requests.get(url, headers=_headers(), timeout=10)
         if r.status_code == 200:
@@ -129,15 +128,15 @@ def wait_for_completion(job_id, logger=None, poll_interval=5, timeout=0):
             log.warning("Lost contact with daemon while polling job %d" % job_id)
             return None
 
-        status = job.get('status', '')
-        if status == 'completed':
+        status = job.get("status", "")
+        if status == "completed":
             elapsed = int(time.time() - start)
             log.info("Job %d completed in %ds" % (job_id, elapsed))
             return job
-        elif status == 'failed':
-            log.error("Job %d failed: %s" % (job_id, job.get('error', 'Unknown')))
+        elif status == "failed":
+            log.error("Job %d failed: %s" % (job_id, job.get("error", "Unknown")))
             return job
-        elif status in ('pending', 'running'):
+        elif status in ("pending", "running"):
             if timeout > 0 and (time.time() - start) > timeout:
                 log.warning("Timed out waiting for job %d after %ds" % (job_id, timeout))
                 return None
@@ -158,7 +157,7 @@ def submit_and_wait(path, config=None, args=None, logger=None, poll_interval=5, 
     if not result:
         return None
 
-    job_id = result.get('job_id')
+    job_id = result.get("job_id")
     if not job_id:
         return None
 
@@ -168,11 +167,11 @@ def submit_and_wait(path, config=None, args=None, logger=None, poll_interval=5, 
 def check_daemon_health(logger=None):
     """Check if the daemon is running and healthy."""
     log = logger or logging.getLogger(__name__)
-    url = get_daemon_url() + '/health'
+    url = get_daemon_url() + "/health"
     try:
         r = requests.get(url, timeout=5)
         data = r.json()
-        return data.get('status') == 'ok'
+        return data.get("status") == "ok"
     except Exception:
         log.debug("Daemon health check failed at %s" % url)
         return False

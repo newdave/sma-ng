@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-from plexapi.server import PlexServer
-from plexapi.myplex import MyPlexAccount
 import os
+
+from plexapi.myplex import MyPlexAccount
+from plexapi.server import PlexServer
 
 USERNAME = "newdave"
 TOKEN = "ztwEQ-7tKZs9uAmszfzd"

@@ -2,9 +2,9 @@
 
 import os
 
-from converter.avcodecs import video_codec_list, audio_codec_list, subtitle_codec_list, attachment_codec_list, decoder_list, BaseDecoder
+from converter.avcodecs import BaseDecoder, attachment_codec_list, audio_codec_list, decoder_list, subtitle_codec_list, video_codec_list
+from converter.ffmpeg import FFMpeg, FFMpegConvertError, FFMpegError
 from converter.formats import format_list
-from converter.ffmpeg import FFMpeg, FFMpegError, FFMpegConvertError
 
 
 class ConverterError(Exception):
@@ -23,8 +23,7 @@ class Converter(object):
         Initialize a new Converter object.
         """
 
-        self.ffmpeg = FFMpeg(ffmpeg_path=ffmpeg_path,
-                             ffprobe_path=ffprobe_path)
+        self.ffmpeg = FFMpeg(ffmpeg_path=ffmpeg_path, ffprobe_path=ffprobe_path)
         self.video_codecs = {}
         self.audio_codecs = {}
         self.subtitle_codecs = {}
@@ -83,120 +82,120 @@ class Converter(object):
         source_options = []
 
         if not isinstance(opt, dict):
-            raise ConverterError('Invalid output specification')
+            raise ConverterError("Invalid output specification")
 
         try:
-            f = opt['format']
+            f = opt["format"]
             format_options = self.formats[f]().parse_options(opt)
         except:
             format_options = []
 
-        if 'source' not in opt or len(opt['source']) < 1:
-            raise ConverterError('No source file provided')
+        if "source" not in opt or len(opt["source"]) < 1:
+            raise ConverterError("No source file provided")
 
-        if 'audio' not in opt and 'video' not in opt and 'subtitle' not in opt:
-            raise ConverterError('Neither audio nor video nor subtitle streams requested')
+        if "audio" not in opt and "video" not in opt and "subtitle" not in opt:
+            raise ConverterError("Neither audio nor video nor subtitle streams requested")
 
         # Sources
-        if 'source' in opt:
-            y = opt['source']
+        if "source" in opt:
+            y = opt["source"]
 
             if isinstance(y, str):
                 y = [y]
 
             for x in y:
                 if not os.path.exists(x):
-                    raise ConverterError('Source file does not exist')
+                    raise ConverterError("Source file does not exist")
 
                 # Creates the new nested dictionary to preserve backwards compatibility
-                if 'subtitle' in opt and isinstance(opt['subtitle'], dict):
-                    opt['subtitle'] = [opt['subtitle']]
+                if "subtitle" in opt and isinstance(opt["subtitle"], dict):
+                    opt["subtitle"] = [opt["subtitle"]]
 
-                sindex = opt['source'].index(x)
+                sindex = opt["source"].index(x)
                 if any(s.get("source", 0) == sindex for s in opt["subtitle"]):
-                    source_options.append('-fix_sub_duration')
-                    if 'sub-encoding' in opt:
-                        source_options.extend(['-sub_charenc', opt['sub-encoding']])
-                source_options.extend(['-i', x])
+                    source_options.append("-fix_sub_duration")
+                    if "sub-encoding" in opt:
+                        source_options.extend(["-sub_charenc", opt["sub-encoding"]])
+                source_options.extend(["-i", x])
 
         # Audio
-        if 'audio' in opt:
-            y = opt['audio']
+        if "audio" in opt:
+            y = opt["audio"]
 
             # Creates the new nested dictionary to preserve backwards compatibility
             if isinstance(y, dict):
                 y = [y]
 
             for x in y:
-                if not isinstance(x, dict) or 'codec' not in x:
-                    raise ConverterError('Invalid audio codec specification')
+                if not isinstance(x, dict) or "codec" not in x:
+                    raise ConverterError("Invalid audio codec specification")
 
-                c = x['codec']
+                c = x["codec"]
                 if c not in self.audio_codecs:
-                    raise ConverterError('Requested unknown audio codec ' + str(c))
+                    raise ConverterError("Requested unknown audio codec " + str(c))
 
                 audio_options.extend(self.audio_codecs[c]().parse_options(x, y.index(x)))
                 if audio_options is None:
-                    raise ConverterError('Unknown audio codec error')
+                    raise ConverterError("Unknown audio codec error")
 
         # Subtitle
-        if 'subtitle' in opt:
-            y = opt['subtitle']
+        if "subtitle" in opt:
+            y = opt["subtitle"]
 
             # Creates the new nested dictionary to preserve backwards compatibility
             if isinstance(y, dict):
                 y = [y]
 
             for x in y:
-                if not isinstance(x, dict) or 'codec' not in x:
-                    raise ConverterError('Invalid subtitle codec specification')
+                if not isinstance(x, dict) or "codec" not in x:
+                    raise ConverterError("Invalid subtitle codec specification")
 
-                c = x['codec']
+                c = x["codec"]
                 if c not in self.subtitle_codecs:
-                    raise ConverterError('Requested unknown subtitle codec ' + str(c))
+                    raise ConverterError("Requested unknown subtitle codec " + str(c))
 
                 subtitle_options.extend(self.subtitle_codecs[c]().parse_options(x, y.index(x)))
                 if subtitle_options is None:
-                    raise ConverterError('Unknown subtitle codec error')
+                    raise ConverterError("Unknown subtitle codec error")
 
         # Attachments
-        if 'attachment' in opt:
-            y = opt['attachment']
+        if "attachment" in opt:
+            y = opt["attachment"]
 
             # Creates the new nested dictionary to preserve backwards compatibility
             if isinstance(y, dict):
                 y = [y]
 
             for x in y:
-                if not isinstance(x, dict) or 'codec' not in x:
-                    raise ConverterError('Invalid attachment codec specification')
+                if not isinstance(x, dict) or "codec" not in x:
+                    raise ConverterError("Invalid attachment codec specification")
 
-                if 'filename' not in x:
+                if "filename" not in x:
                     raise ConverterError("Attachment codec requires a filename")
 
-                if 'mimetype' not in x:
+                if "mimetype" not in x:
                     raise ConverterError("Attachment codec requires a mimetype")
 
-                c = x['codec']
+                c = x["codec"]
                 if c not in self.attachment_codecs:
-                    raise ConverterError('Requested unknown attachment codec ' + str(c))
+                    raise ConverterError("Requested unknown attachment codec " + str(c))
 
                 attachment_options.extend(self.attachment_codecs[c]().parse_options(x, y.index(x)))
                 if attachment_options is None:
-                    raise ConverterError('Unknown attachment codec error')
+                    raise ConverterError("Unknown attachment codec error")
 
-        if 'video' in opt:
-            x = opt['video']
-            if not isinstance(x, dict) or 'codec' not in x:
-                raise ConverterError('Invalid video codec specification')
+        if "video" in opt:
+            x = opt["video"]
+            if not isinstance(x, dict) or "codec" not in x:
+                raise ConverterError("Invalid video codec specification")
 
-            c = x['codec']
+            c = x["codec"]
             if c not in self.video_codecs:
-                raise ConverterError('Requested unknown video codec ' + str(c))
+                raise ConverterError("Requested unknown video codec " + str(c))
 
             video_options = self.video_codecs[c]().parse_options(x)
             if video_options is None:
-                raise ConverterError('Unknown video codec error')
+                raise ConverterError("Unknown video codec error")
 
         metadata_options = ["-map_metadata", "-1"] if strip_metadata else []
 
@@ -204,9 +203,9 @@ class Converter(object):
         optlist = source_options + metadata_options + video_options + audio_options + subtitle_options + attachment_options + format_options
 
         if twopass == 1:
-            optlist.extend(['-pass', '1'])
+            optlist.extend(["-pass", "1"])
         elif twopass == 2:
-            optlist.extend(['-pass', '2'])
+            optlist.extend(["-pass", "2"])
 
         return optlist
 
@@ -222,14 +221,14 @@ class Converter(object):
             i += 1
 
         os.rename(outfile, infile)
-        opts = ['-i', infile, '-map', '0:v?', '-c:v', 'copy', '-map', '0:a?', '-c:a', 'copy', '-map', '0:s?', '-c:s', 'copy', '-map', '0:t?', '-c:t', 'copy']
+        opts = ["-i", infile, "-map", "0:v?", "-c:v", "copy", "-map", "0:a?", "-c:a", "copy", "-map", "0:s?", "-c:s", "copy", "-map", "0:t?", "-c:t", "copy"]
 
         info = self.ffmpeg.probe(infile)
         i = len(info.attachment)
 
         if coverpath:
-            opts.extend(['-attach', coverpath])
-            if coverpath.endswith('png'):
+            opts.extend(["-attach", coverpath])
+            if coverpath.endswith("png"):
                 opts.extend(["-metadata:s:t:" + str(i), "mimetype=image/png", "-metadata:s:t:" + str(i), "filename=cover.png"])
             else:
                 opts.extend(["-metadata:s:t:" + str(i), "mimetype=image/jpeg", "-metadata:s:t:" + str(i), "filename=cover.jpg"])
@@ -238,7 +237,7 @@ class Converter(object):
             opts.extend(["-metadata", "%s=%s" % (k, metadata[k])])
 
         if cues_to_front:
-            opts.extend(['-cues_to_front', "true"])
+            opts.extend(["-cues_to_front", "true"])
 
         for timecode, debug in self.ffmpeg.convert(outfile, opts, timeout=0):
             yield int((100.0 * timecode) / info.format.duration), debug
@@ -288,55 +287,43 @@ class Converter(object):
         """
 
         if not isinstance(options, dict):
-            raise ConverterError('Invalid options')
+            raise ConverterError("Invalid options")
 
-        if 'source' not in options:
-            raise ConverterError('No source specified')
+        if "source" not in options:
+            raise ConverterError("No source specified")
 
-        infile = options['source'][0]
+        infile = options["source"][0]
 
         info = self.ffmpeg.probe(infile)
         if info is None:
             raise ConverterError("Can't get information about source file")
 
         if not info.video and not info.audio and not info.subtitle:
-            raise ConverterError('Source file has no audio, video, or subtitle streams')
+            raise ConverterError("Source file has no audio, video, or subtitle streams")
 
-        if info.video and 'video' in options:
+        if info.video and "video" in options:
             options = options.copy()
-            v = options['video'] = options['video'].copy()
-            v['src_width'] = info.video.video_width
-            v['src_height'] = info.video.video_height
+            v = options["video"] = options["video"].copy()
+            v["src_width"] = info.video.video_width
+            v["src_height"] = info.video.video_height
 
         if not info.format.duration:
             info.format.duration = 0.01
 
         if info.video and info.format.duration < 0.01:
-            raise ConverterError('Zero-length media')
+            raise ConverterError("Zero-length media")
 
         if twopass:
             optlist1 = self.parse_options(options, 1, strip_metadata=strip_metadata)
-            for timecode, debug in self.ffmpeg.convert(outfile,
-                                                       optlist1,
-                                                       timeout=timeout,
-                                                       preopts=preopts,
-                                                       postopts=postopts):
+            for timecode, debug in self.ffmpeg.convert(outfile, optlist1, timeout=timeout, preopts=preopts, postopts=postopts):
                 yield int((50.0 * timecode) / info.format.duration), debug
 
             optlist2 = self.parse_options(options, 2, strip_metadata=strip_metadata)
-            for timecode, debug in self.ffmpeg.convert(outfile,
-                                                       optlist2,
-                                                       timeout=timeout,
-                                                       preopts=preopts,
-                                                       postopts=postopts):
+            for timecode, debug in self.ffmpeg.convert(outfile, optlist2, timeout=timeout, preopts=preopts, postopts=postopts):
                 yield int(50.0 + (50.0 * timecode) / info.format.duration), debug
         else:
             optlist = self.parse_options(options, twopass, strip_metadata=strip_metadata)
-            for timecode, debug in self.ffmpeg.convert(outfile,
-                                                       optlist,
-                                                       timeout=timeout,
-                                                       preopts=preopts,
-                                                       postopts=postopts):
+            for timecode, debug in self.ffmpeg.convert(outfile, optlist, timeout=timeout, preopts=preopts, postopts=postopts):
                 yield int((100.0 * timecode) / info.format.duration), debug
 
     def probe(self, fname, posters_as_video=True):

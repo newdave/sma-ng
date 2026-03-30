@@ -19,22 +19,22 @@ Usage:
     python daemon.py --api-key SECRET   # Require API key for requests
 """
 
-import sys
-import os
-import socket
 import argparse
 import json
-import subprocess
-import threading
-import queue
 import logging
-import sqlite3
-from logging.handlers import RotatingFileHandler
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
-from datetime import datetime, timezone
-from contextlib import contextmanager
+import os
 import re as _re
+import socket
+import sqlite3
+import subprocess
+import sys
+import threading
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from logging.handlers import RotatingFileHandler
+from urllib.parse import parse_qs, urlparse
+
 from resources.log import getLogger
 
 # Main daemon logger
@@ -42,16 +42,16 @@ log = getLogger("DAEMON")
 
 # Default paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DAEMON_CONFIG = os.path.join(SCRIPT_DIR, 'config', 'daemon.json')
-DEFAULT_PROCESS_CONFIG = os.path.join(SCRIPT_DIR, 'config', 'autoProcess.ini')
-LOGS_DIR = os.path.join(SCRIPT_DIR, 'logs')
-DATABASE_PATH = os.path.join(SCRIPT_DIR, 'config', 'daemon.db')
+DEFAULT_DAEMON_CONFIG = os.path.join(SCRIPT_DIR, "config", "daemon.json")
+DEFAULT_PROCESS_CONFIG = os.path.join(SCRIPT_DIR, "config", "autoProcess.ini")
+LOGS_DIR = os.path.join(SCRIPT_DIR, "logs")
+DATABASE_PATH = os.path.join(SCRIPT_DIR, "config", "daemon.db")
 
 # Job statuses
-STATUS_PENDING = 'pending'
-STATUS_RUNNING = 'running'
-STATUS_COMPLETED = 'completed'
-STATUS_FAILED = 'failed'
+STATUS_PENDING = "pending"
+STATUS_RUNNING = "running"
+STATUS_COMPLETED = "completed"
+STATUS_FAILED = "failed"
 
 
 class JobDatabase:
@@ -65,18 +65,14 @@ class JobDatabase:
 
     def _get_connection(self):
         """Get thread-local database connection."""
-        if not hasattr(self._local, 'connection') or self._local.connection is None:
-            self._local.connection = sqlite3.connect(
-                self.db_path,
-                check_same_thread=False,
-                timeout=30.0
-            )
+        if not hasattr(self._local, "connection") or self._local.connection is None:
+            self._local.connection = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
             self._local.connection.row_factory = sqlite3.Row
         return self._local.connection
 
     def close(self):
         """Close the thread-local database connection."""
-        if hasattr(self._local, 'connection') and self._local.connection is not None:
+        if hasattr(self._local, "connection") and self._local.connection is not None:
             self._local.connection.close()
             self._local.connection = None
 
@@ -97,7 +93,7 @@ class JobDatabase:
     def _init_db(self):
         """Initialize database schema."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS jobs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     path TEXT NOT NULL,
@@ -111,21 +107,21 @@ class JobDatabase:
                     started_at TIMESTAMP,
                     completed_at TIMESTAMP
                 )
-            ''')
+            """)
             # Migrate existing databases that lack node_id
             try:
-                cursor.execute('ALTER TABLE jobs ADD COLUMN node_id TEXT')
+                cursor.execute("ALTER TABLE jobs ADD COLUMN node_id TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
-            cursor.execute('''
+            cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)
-            ''')
-            cursor.execute('''
+            """)
+            cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_jobs_config ON jobs(config)
-            ''')
-            cursor.execute('''
+            """)
+            cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at)
-            ''')
+            """)
 
         self.log.info("Database initialized: %s" % self.db_path)
 
@@ -135,11 +131,14 @@ class JobDatabase:
     def _reset_running_jobs(self):
         """Reset jobs that were running when daemon stopped back to pending."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE jobs
                 SET status = ?, worker_id = NULL, node_id = NULL, started_at = NULL
                 WHERE status = ?
-            ''', (STATUS_PENDING, STATUS_RUNNING))
+            """,
+                (STATUS_PENDING, STATUS_RUNNING),
+            )
             if cursor.rowcount > 0:
                 self.log.info("Reset %d interrupted jobs to pending" % cursor.rowcount)
 
@@ -147,17 +146,23 @@ class JobDatabase:
         """Add a new job to the queue. Returns job ID, or None if a duplicate is already pending/running."""
         args_json = json.dumps(args or [])
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT id FROM jobs WHERE path = ? AND status IN (?, ?) LIMIT 1
-            ''', (path, STATUS_PENDING, STATUS_RUNNING))
+            """,
+                (path, STATUS_PENDING, STATUS_RUNNING),
+            )
             existing = cursor.fetchone()
             if existing:
-                self.log.debug("Duplicate job for path: %s (existing job %d)" % (path, existing['id']))
+                self.log.debug("Duplicate job for path: %s (existing job %d)" % (path, existing["id"]))
                 return None
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO jobs (path, config, args, status)
                 VALUES (?, ?, ?, ?)
-            ''', (path, config, args_json, STATUS_PENDING))
+            """,
+                (path, config, args_json, STATUS_PENDING),
+            )
             job_id = cursor.lastrowid
         self.log.debug("Added job %d: %s" % (job_id, path))
         return job_id
@@ -165,108 +170,132 @@ class JobDatabase:
     def find_active_job(self, path):
         """Find a pending or running job for the given path, if any."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM jobs WHERE path = ? AND status IN (?, ?) LIMIT 1
-            ''', (path, STATUS_PENDING, STATUS_RUNNING))
+            """,
+                (path, STATUS_PENDING, STATUS_RUNNING),
+            )
             row = cursor.fetchone()
             return dict(row) if row else None
 
     def claim_next_job(self, worker_id, node_id):
         """Atomically claim the next pending job for this worker. Returns job dict or None."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM jobs
                 WHERE status = ?
                 ORDER BY created_at ASC
                 LIMIT 1
-            ''', (STATUS_PENDING,))
+            """,
+                (STATUS_PENDING,),
+            )
             row = cursor.fetchone()
             if row is None:
                 return None
             job = dict(row)
             # Use conditional UPDATE to guard against a concurrent claim on the same row
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE jobs
                 SET status = ?, worker_id = ?, node_id = ?, started_at = CURRENT_TIMESTAMP
                 WHERE id = ? AND status = ?
-            ''', (STATUS_RUNNING, worker_id, node_id, job['id'], STATUS_PENDING))
+            """,
+                (STATUS_RUNNING, worker_id, node_id, job["id"], STATUS_PENDING),
+            )
             if cursor.rowcount == 0:
                 return None  # Another worker claimed it first
-        self.log.debug("Worker %d claimed job %d: %s" % (worker_id, job['id'], job['path']))
+        self.log.debug("Worker %d claimed job %d: %s" % (worker_id, job["id"], job["path"]))
         return job
 
     def get_pending_jobs(self):
         """Get all pending jobs ordered by creation time."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM jobs
                 WHERE status = ?
                 ORDER BY created_at ASC
-            ''', (STATUS_PENDING,))
+            """,
+                (STATUS_PENDING,),
+            )
             return [dict(row) for row in cursor.fetchall()]
 
     def get_next_pending_job(self):
         """Get the next pending job (FIFO)."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM jobs
                 WHERE status = ?
                 ORDER BY created_at ASC
                 LIMIT 1
-            ''', (STATUS_PENDING,))
+            """,
+                (STATUS_PENDING,),
+            )
             row = cursor.fetchone()
             return dict(row) if row else None
 
     def start_job(self, job_id, worker_id):
         """Mark a job as running."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE jobs
                 SET status = ?, worker_id = ?, started_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            ''', (STATUS_RUNNING, worker_id, job_id))
+            """,
+                (STATUS_RUNNING, worker_id, job_id),
+            )
         self.log.debug("Job %d started by worker %d" % (job_id, worker_id))
 
     def complete_job(self, job_id):
         """Mark a job as completed."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE jobs
                 SET status = ?, completed_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            ''', (STATUS_COMPLETED, job_id))
+            """,
+                (STATUS_COMPLETED, job_id),
+            )
         self.log.debug("Job %d completed" % job_id)
 
     def fail_job(self, job_id, error=None):
         """Mark a job as failed."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE jobs
                 SET status = ?, error = ?, completed_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            ''', (STATUS_FAILED, error, job_id))
+            """,
+                (STATUS_FAILED, error, job_id),
+            )
         self.log.debug("Job %d failed: %s" % (job_id, error))
 
     def get_job(self, job_id):
         """Get a specific job by ID."""
         with self._cursor() as cursor:
-            cursor.execute('SELECT * FROM jobs WHERE id = ?', (job_id,))
+            cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
 
     def get_jobs(self, status=None, config=None, limit=100, offset=0):
         """Get jobs with optional filtering."""
-        query = 'SELECT * FROM jobs WHERE 1=1'
+        query = "SELECT * FROM jobs WHERE 1=1"
         params = []
 
         if status:
-            query += ' AND status = ?'
+            query += " AND status = ?"
             params.append(status)
         if config:
-            query += ' AND config = ?'
+            query += " AND config = ?"
             params.append(config)
 
-        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         with self._cursor() as cursor:
@@ -276,35 +305,41 @@ class JobDatabase:
     def get_stats(self):
         """Get job statistics."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute("""
                 SELECT status, COUNT(*) as count
                 FROM jobs
                 GROUP BY status
-            ''')
-            stats = {row['status']: row['count'] for row in cursor.fetchall()}
+            """)
+            stats = {row["status"]: row["count"] for row in cursor.fetchall()}
 
-            cursor.execute('SELECT COUNT(*) as total FROM jobs')
-            stats['total'] = cursor.fetchone()['total']
+            cursor.execute("SELECT COUNT(*) as total FROM jobs")
+            stats["total"] = cursor.fetchone()["total"]
 
             return stats
 
     def get_running_jobs(self):
         """Get all currently running jobs."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM jobs
                 WHERE status = ?
-            ''', (STATUS_RUNNING,))
+            """,
+                (STATUS_RUNNING,),
+            )
             return [dict(row) for row in cursor.fetchall()]
 
     def cleanup_old_jobs(self, days=30):
         """Remove completed/failed jobs older than specified days."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 DELETE FROM jobs
                 WHERE status IN (?, ?)
                 AND completed_at < datetime('now', '-' || ? || ' days')
-            ''', (STATUS_COMPLETED, STATUS_FAILED, days))
+            """,
+                (STATUS_COMPLETED, STATUS_FAILED, days),
+            )
             deleted = cursor.rowcount
         if deleted > 0:
             self.log.info("Cleaned up %d old jobs" % deleted)
@@ -313,30 +348,27 @@ class JobDatabase:
     def pending_count(self):
         """Get count of pending jobs."""
         with self._cursor() as cursor:
-            cursor.execute(
-                'SELECT COUNT(*) as count FROM jobs WHERE status = ?',
-                (STATUS_PENDING,)
-            )
-            return cursor.fetchone()['count']
+            cursor.execute("SELECT COUNT(*) as count FROM jobs WHERE status = ?", (STATUS_PENDING,))
+            return cursor.fetchone()["count"]
 
     def pending_count_for_config(self, config):
         """Get count of pending jobs for a specific config."""
         with self._cursor() as cursor:
-            cursor.execute(
-                'SELECT COUNT(*) as count FROM jobs WHERE status = ? AND config = ?',
-                (STATUS_PENDING, config)
-            )
-            return cursor.fetchone()['count']
+            cursor.execute("SELECT COUNT(*) as count FROM jobs WHERE status = ? AND config = ?", (STATUS_PENDING, config))
+            return cursor.fetchone()["count"]
 
     def requeue_job(self, job_id):
         """Reset a failed job back to pending. Returns True if the job was requeued."""
         with self._cursor() as cursor:
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE jobs
                 SET status = ?, worker_id = NULL, node_id = NULL,
                     error = NULL, started_at = NULL, completed_at = NULL
                 WHERE id = ? AND status = ?
-            ''', (STATUS_PENDING, job_id, STATUS_FAILED))
+            """,
+                (STATUS_PENDING, job_id, STATUS_FAILED),
+            )
             requeued = cursor.rowcount > 0
         if requeued:
             self.log.info("Requeued failed job %d" % job_id)
@@ -344,15 +376,15 @@ class JobDatabase:
 
     def requeue_failed_jobs(self, config=None):
         """Reset all failed jobs (optionally filtered by config) back to pending."""
-        sql = '''
+        sql = """
             UPDATE jobs
             SET status = ?, worker_id = NULL, node_id = NULL,
                 error = NULL, started_at = NULL, completed_at = NULL
             WHERE status = ?
-        '''
+        """
         params = [STATUS_PENDING, STATUS_FAILED]
         if config:
-            sql += ' AND config = ?'
+            sql += " AND config = ?"
             params.append(config)
         with self._cursor() as cursor:
             cursor.execute(sql, params)
@@ -376,13 +408,10 @@ class PostgreSQLJobDatabase:
     def __init__(self, db_url, logger=None, max_connections=10):
         try:
             import psycopg2
-            import psycopg2.pool
             import psycopg2.extras
+            import psycopg2.pool
         except ImportError:
-            raise ImportError(
-                "psycopg2 is required for PostgreSQL support. "
-                "Install with: pip install psycopg2-binary"
-            )
+            raise ImportError("psycopg2 is required for PostgreSQL support. Install with: pip install psycopg2-binary")
         self.db_url = db_url
         self.log = logger or log
         self._node_id = socket.gethostname()
@@ -415,7 +444,7 @@ class PostgreSQLJobDatabase:
         """Create schema if it does not exist, then recover this node's interrupted jobs."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
+                cur.execute("""
                     CREATE TABLE IF NOT EXISTS jobs (
                         id           SERIAL PRIMARY KEY,
                         path         TEXT NOT NULL,
@@ -429,11 +458,11 @@ class PostgreSQLJobDatabase:
                         started_at   TIMESTAMPTZ,
                         completed_at TIMESTAMPTZ
                     )
-                ''')
-                cur.execute('CREATE INDEX IF NOT EXISTS idx_jobs_status  ON jobs(status)')
-                cur.execute('CREATE INDEX IF NOT EXISTS idx_jobs_config  ON jobs(config)')
-                cur.execute('CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at)')
-                cur.execute('''
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status  ON jobs(status)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_config  ON jobs(config)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at)")
+                cur.execute("""
                     CREATE TABLE IF NOT EXISTS cluster_nodes (
                         node_id      TEXT PRIMARY KEY,
                         host         TEXT NOT NULL,
@@ -444,12 +473,12 @@ class PostgreSQLJobDatabase:
                         running_jobs INTEGER NOT NULL DEFAULT 0,
                         pending_jobs INTEGER NOT NULL DEFAULT 0
                     )
-                ''')
+                """)
                 # Migration: add started_at to existing tables
-                cur.execute('''
+                cur.execute("""
                     ALTER TABLE cluster_nodes
                     ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                ''')
+                """)
         self.log.info("PostgreSQL database initialized: %s" % self.db_url)
         self._reset_running_jobs()
 
@@ -457,11 +486,14 @@ class PostgreSQLJobDatabase:
         """Reset only this node's interrupted running jobs back to pending on startup."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
+                cur.execute(
+                    """
                     UPDATE jobs
                     SET status = %s, worker_id = NULL, node_id = NULL, started_at = NULL
                     WHERE status = %s AND node_id = %s
-                ''', (STATUS_PENDING, STATUS_RUNNING, self._node_id))
+                """,
+                    (STATUS_PENDING, STATUS_RUNNING, self._node_id),
+                )
                 count = cur.rowcount
         if count > 0:
             self.log.info("Reset %d interrupted jobs to pending (node: %s)" % (count, self._node_id))
@@ -471,19 +503,13 @@ class PostgreSQLJobDatabase:
         args_json = json.dumps(args or [])
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    'SELECT id FROM jobs WHERE path = %s AND status IN (%s, %s) LIMIT 1',
-                    (path, STATUS_PENDING, STATUS_RUNNING)
-                )
+                cur.execute("SELECT id FROM jobs WHERE path = %s AND status IN (%s, %s) LIMIT 1", (path, STATUS_PENDING, STATUS_RUNNING))
                 existing = cur.fetchone()
                 if existing:
-                    self.log.debug("Duplicate job for path: %s (existing job %d)" % (path, existing['id']))
+                    self.log.debug("Duplicate job for path: %s (existing job %d)" % (path, existing["id"]))
                     return None
-                cur.execute(
-                    'INSERT INTO jobs (path, config, args, status) VALUES (%s, %s, %s, %s) RETURNING id',
-                    (path, config, args_json, STATUS_PENDING)
-                )
-                job_id = cur.fetchone()['id']
+                cur.execute("INSERT INTO jobs (path, config, args, status) VALUES (%s, %s, %s, %s) RETURNING id", (path, config, args_json, STATUS_PENDING))
+                job_id = cur.fetchone()["id"]
         self.log.debug("Added job %d: %s" % (job_id, path))
         return job_id
 
@@ -491,10 +517,7 @@ class PostgreSQLJobDatabase:
         """Find a pending or running job for the given path, if any."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    'SELECT * FROM jobs WHERE path = %s AND status IN (%s, %s) LIMIT 1',
-                    (path, STATUS_PENDING, STATUS_RUNNING)
-                )
+                cur.execute("SELECT * FROM jobs WHERE path = %s AND status IN (%s, %s) LIMIT 1", (path, STATUS_PENDING, STATUS_RUNNING))
                 row = cur.fetchone()
                 return dict(row) if row else None
 
@@ -507,23 +530,29 @@ class PostgreSQLJobDatabase:
         """
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
+                cur.execute(
+                    """
                     SELECT id, path, config, args
                     FROM jobs
                     WHERE status = %s
                     ORDER BY created_at ASC
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
-                ''', (STATUS_PENDING,))
+                """,
+                    (STATUS_PENDING,),
+                )
                 row = cur.fetchone()
                 if row is None:
                     return None
-                job_id = row['id']
-                cur.execute('''
+                job_id = row["id"]
+                cur.execute(
+                    """
                     UPDATE jobs
                     SET status = %s, worker_id = %s, node_id = %s, started_at = NOW()
                     WHERE id = %s
-                ''', (STATUS_RUNNING, worker_id, node_id, job_id))
+                """,
+                    (STATUS_RUNNING, worker_id, node_id, job_id),
+                )
         # Fetch the full job row outside the transaction for the caller
         return self.get_job(job_id)
 
@@ -531,20 +560,14 @@ class PostgreSQLJobDatabase:
         """Get all pending jobs ordered by creation time."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    'SELECT * FROM jobs WHERE status = %s ORDER BY created_at ASC',
-                    (STATUS_PENDING,)
-                )
+                cur.execute("SELECT * FROM jobs WHERE status = %s ORDER BY created_at ASC", (STATUS_PENDING,))
                 return [dict(r) for r in cur.fetchall()]
 
     def get_next_pending_job(self):
         """Get the next pending job without claiming it (read-only)."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    'SELECT * FROM jobs WHERE status = %s ORDER BY created_at ASC LIMIT 1',
-                    (STATUS_PENDING,)
-                )
+                cur.execute("SELECT * FROM jobs WHERE status = %s ORDER BY created_at ASC LIMIT 1", (STATUS_PENDING,))
                 row = cur.fetchone()
                 return dict(row) if row else None
 
@@ -552,50 +575,47 @@ class PostgreSQLJobDatabase:
         """Mark a job as running (not used by workers — they use claim_next_job)."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
+                cur.execute(
+                    """
                     UPDATE jobs SET status = %s, worker_id = %s, started_at = NOW() WHERE id = %s
-                ''', (STATUS_RUNNING, worker_id, job_id))
+                """,
+                    (STATUS_RUNNING, worker_id, job_id),
+                )
         self.log.debug("Job %d started by worker %d" % (job_id, worker_id))
 
     def complete_job(self, job_id):
         """Mark a job as completed."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    'UPDATE jobs SET status = %s, completed_at = NOW() WHERE id = %s',
-                    (STATUS_COMPLETED, job_id)
-                )
+                cur.execute("UPDATE jobs SET status = %s, completed_at = NOW() WHERE id = %s", (STATUS_COMPLETED, job_id))
         self.log.debug("Job %d completed" % job_id)
 
     def fail_job(self, job_id, error=None):
         """Mark a job as failed."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    'UPDATE jobs SET status = %s, error = %s, completed_at = NOW() WHERE id = %s',
-                    (STATUS_FAILED, error, job_id)
-                )
+                cur.execute("UPDATE jobs SET status = %s, error = %s, completed_at = NOW() WHERE id = %s", (STATUS_FAILED, error, job_id))
         self.log.debug("Job %d failed: %s" % (job_id, error))
 
     def get_job(self, job_id):
         """Get a specific job by ID."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('SELECT * FROM jobs WHERE id = %s', (job_id,))
+                cur.execute("SELECT * FROM jobs WHERE id = %s", (job_id,))
                 row = cur.fetchone()
                 return dict(row) if row else None
 
     def get_jobs(self, status=None, config=None, limit=100, offset=0):
         """Get jobs with optional filtering."""
-        query = 'SELECT * FROM jobs WHERE 1=1'
+        query = "SELECT * FROM jobs WHERE 1=1"
         params = []
         if status:
-            query += ' AND status = %s'
+            query += " AND status = %s"
             params.append(status)
         if config:
-            query += ' AND config = %s'
+            query += " AND config = %s"
             params.append(config)
-        query += ' ORDER BY created_at DESC LIMIT %s OFFSET %s'
+        query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
         params.extend([limit, offset])
         with self._conn() as conn:
             with conn.cursor() as cur:
@@ -606,28 +626,31 @@ class PostgreSQLJobDatabase:
         """Get job statistics."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('SELECT status, COUNT(*) AS count FROM jobs GROUP BY status')
-                stats = {r['status']: r['count'] for r in cur.fetchall()}
-                cur.execute('SELECT COUNT(*) AS total FROM jobs')
-                stats['total'] = cur.fetchone()['total']
+                cur.execute("SELECT status, COUNT(*) AS count FROM jobs GROUP BY status")
+                stats = {r["status"]: r["count"] for r in cur.fetchall()}
+                cur.execute("SELECT COUNT(*) AS total FROM jobs")
+                stats["total"] = cur.fetchone()["total"]
         return stats
 
     def get_running_jobs(self):
         """Get all currently running jobs."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('SELECT * FROM jobs WHERE status = %s', (STATUS_RUNNING,))
+                cur.execute("SELECT * FROM jobs WHERE status = %s", (STATUS_RUNNING,))
                 return [dict(r) for r in cur.fetchall()]
 
     def cleanup_old_jobs(self, days=30):
         """Remove completed/failed jobs older than specified days."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
+                cur.execute(
+                    """
                     DELETE FROM jobs
                     WHERE status IN (%s, %s)
                     AND completed_at < NOW() - make_interval(days => %s)
-                ''', (STATUS_COMPLETED, STATUS_FAILED, days))
+                """,
+                    (STATUS_COMPLETED, STATUS_FAILED, days),
+                )
                 deleted = cur.rowcount
         if deleted > 0:
             self.log.info("Cleaned up %d old jobs" % deleted)
@@ -637,18 +660,15 @@ class PostgreSQLJobDatabase:
         """Get count of pending jobs."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('SELECT COUNT(*) AS count FROM jobs WHERE status = %s', (STATUS_PENDING,))
-                return cur.fetchone()['count']
+                cur.execute("SELECT COUNT(*) AS count FROM jobs WHERE status = %s", (STATUS_PENDING,))
+                return cur.fetchone()["count"]
 
     def pending_count_for_config(self, config):
         """Get count of pending jobs for a specific config."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    'SELECT COUNT(*) AS count FROM jobs WHERE status = %s AND config = %s',
-                    (STATUS_PENDING, config)
-                )
-                return cur.fetchone()['count']
+                cur.execute("SELECT COUNT(*) AS count FROM jobs WHERE status = %s AND config = %s", (STATUS_PENDING, config))
+                return cur.fetchone()["count"]
 
     def heartbeat(self, node_id, host, workers, started_at):
         """Upsert this node's heartbeat row in cluster_nodes.
@@ -659,7 +679,8 @@ class PostgreSQLJobDatabase:
         """
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
+                cur.execute(
+                    """
                     INSERT INTO cluster_nodes (node_id, host, workers, last_seen, started_at, status, running_jobs, pending_jobs)
                     VALUES (
                         %s, %s, %s, NOW(), %s, 'online',
@@ -674,7 +695,9 @@ class PostgreSQLJobDatabase:
                         status       = 'online',
                         running_jobs = EXCLUDED.running_jobs,
                         pending_jobs = EXCLUDED.pending_jobs
-                ''', (node_id, host, workers, started_at, node_id))
+                """,
+                    (node_id, host, workers, started_at, node_id),
+                )
 
     def get_cluster_nodes(self):
         """Return all rows from cluster_nodes ordered by last_seen descending.
@@ -683,12 +706,12 @@ class PostgreSQLJobDatabase:
         """
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
+                cur.execute("""
                     SELECT *,
                            EXTRACT(EPOCH FROM (NOW() - started_at))::INT AS uptime_seconds
                     FROM cluster_nodes
                     ORDER BY last_seen DESC
-                ''')
+                """)
                 return [dict(r) for r in cur.fetchall()]
 
     def recover_stale_nodes(self, stale_seconds=120):
@@ -699,50 +722,57 @@ class PostgreSQLJobDatabase:
         recovered = []
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
+                cur.execute(
+                    """
                     SELECT node_id FROM cluster_nodes
                     WHERE status = 'online'
                     AND last_seen < NOW() - make_interval(secs => %s)
-                ''', (stale_seconds,))
-                stale_nodes = [r['node_id'] for r in cur.fetchall()]
+                """,
+                    (stale_seconds,),
+                )
+                stale_nodes = [r["node_id"] for r in cur.fetchall()]
 
                 for stale_node_id in stale_nodes:
-                    cur.execute('''
+                    cur.execute(
+                        """
                         UPDATE jobs
                         SET status = %s, worker_id = NULL, node_id = NULL, started_at = NULL
                         WHERE status = %s AND node_id = %s
-                    ''', (STATUS_PENDING, STATUS_RUNNING, stale_node_id))
+                    """,
+                        (STATUS_PENDING, STATUS_RUNNING, stale_node_id),
+                    )
                     job_count = cur.rowcount
-                    cur.execute('''
+                    cur.execute(
+                        """
                         UPDATE cluster_nodes SET status = 'offline' WHERE node_id = %s
-                    ''', (stale_node_id,))
+                    """,
+                        (stale_node_id,),
+                    )
                     recovered.append((stale_node_id, job_count))
 
         for stale_node_id, job_count in recovered:
-            self.log.warning(
-                "Node %s declared stale — requeued %d running jobs" % (stale_node_id, job_count)
-            )
+            self.log.warning("Node %s declared stale — requeued %d running jobs" % (stale_node_id, job_count))
         return recovered
 
     def mark_node_offline(self, node_id):
         """Mark this node as offline (called on clean shutdown)."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE cluster_nodes SET status = 'offline' WHERE node_id = %s",
-                    (node_id,)
-                )
+                cur.execute("UPDATE cluster_nodes SET status = 'offline' WHERE node_id = %s", (node_id,))
 
     def requeue_job(self, job_id):
         """Reset a failed job back to pending. Returns True if the job was requeued."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute('''
+                cur.execute(
+                    """
                     UPDATE jobs
                     SET status = %s, worker_id = NULL, node_id = NULL,
                         error = NULL, started_at = NULL, completed_at = NULL
                     WHERE id = %s AND status = %s
-                ''', (STATUS_PENDING, job_id, STATUS_FAILED))
+                """,
+                    (STATUS_PENDING, job_id, STATUS_FAILED),
+                )
                 requeued = cur.rowcount > 0
         if requeued:
             self.log.info("Requeued failed job %d" % job_id)
@@ -750,15 +780,15 @@ class PostgreSQLJobDatabase:
 
     def requeue_failed_jobs(self, config=None):
         """Reset all failed jobs (optionally filtered by config) back to pending."""
-        sql = '''
+        sql = """
             UPDATE jobs
             SET status = %s, worker_id = NULL, node_id = NULL,
                 error = NULL, started_at = NULL, completed_at = NULL
             WHERE status = %s
-        '''
+        """
         params = [STATUS_PENDING, STATUS_FAILED]
         if config:
-            sql += ' AND config = %s'
+            sql += " AND config = %s"
             params.append(config)
         with self._conn() as conn:
             with conn.cursor() as cur:
@@ -803,11 +833,7 @@ class ConfigLockManager:
         with self._master_lock:
             self._waiting_counts[config_path] = self._waiting_counts.get(config_path, 0) + 1
             if config_path in self._active_configs:
-                self.log.info("Job %d waiting for config lock: %s (current: job %d)" % (
-                    job_id,
-                    os.path.basename(config_path),
-                    self._active_configs[config_path][0]
-                ))
+                self.log.info("Job %d waiting for config lock: %s (current: job %d)" % (job_id, os.path.basename(config_path), self._active_configs[config_path][0]))
 
         # Block until lock is available
         lock.acquire()
@@ -840,11 +866,8 @@ class ConfigLockManager:
         with self._master_lock:
             active = {}
             for config, (job_id, job_path) in self._active_configs.items():
-                active[config] = {'job_id': job_id, 'path': job_path}
-            return {
-                'active': active,
-                'waiting': {k: v for k, v in self._waiting_counts.items() if v > 0}
-            }
+                active[config] = {"job_id": job_id, "path": job_path}
+            return {"active": active, "waiting": {k: v for k, v in self._waiting_counts.items() if v > 0}}
 
     def is_locked(self, config_path):
         """Check if a config is currently locked."""
@@ -888,17 +911,9 @@ class ConfigLogManager:
             logger.setLevel(logging.DEBUG)
 
             if not logger.handlers:
-                file_handler = RotatingFileHandler(
-                    log_file,
-                    maxBytes=10 * 1024 * 1024,
-                    backupCount=5,
-                    encoding='utf-8'
-                )
+                file_handler = RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8")
                 file_handler.setLevel(logging.DEBUG)
-                formatter = logging.Formatter(
-                    '%(asctime)s - %(levelname)s - %(message)s',
-                    datefmt='%Y-%m-%d %H:%M:%S'
-                )
+                formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
                 file_handler.setFormatter(formatter)
                 logger.addHandler(file_handler)
 
@@ -918,9 +933,9 @@ class PathConfigManager:
         self.log = logger or log
         self.path_configs = []
         self.default_config = DEFAULT_PROCESS_CONFIG
-        self.api_key = None    # Can be set from daemon.json
-        self.db_url = None     # Can be set from daemon.json
-        self.ffmpeg_dir = None # Can be set from daemon.json
+        self.api_key = None  # Can be set from daemon.json
+        self.db_url = None  # Can be set from daemon.json
+        self.ffmpeg_dir = None  # Can be set from daemon.json
 
         if config_file and os.path.exists(config_file):
             self.load_config(config_file)
@@ -932,27 +947,27 @@ class PathConfigManager:
     def load_config(self, config_file):
         """Load path mappings from daemon.json config file."""
         try:
-            with open(config_file, 'r', encoding='utf-8') as f:
+            with open(config_file, "r", encoding="utf-8") as f:
                 config = json.load(f)
 
-            self.default_config = config.get('default_config', DEFAULT_PROCESS_CONFIG)
+            self.default_config = config.get("default_config", DEFAULT_PROCESS_CONFIG)
             if not os.path.isabs(self.default_config):
                 self.default_config = os.path.join(SCRIPT_DIR, self.default_config)
 
             # Load API key from config (can be overridden by CLI/env)
-            self.api_key = config.get('api_key')
+            self.api_key = config.get("api_key")
 
             # Load PostgreSQL URL from config (can be overridden by CLI/env)
-            self.db_url = config.get('db_url')
+            self.db_url = config.get("db_url")
 
             # Load FFmpeg directory from config (can be overridden by CLI/env)
-            self.ffmpeg_dir = config.get('ffmpeg_dir')
+            self.ffmpeg_dir = config.get("ffmpeg_dir")
 
-            raw_configs = config.get('path_configs', [])
+            raw_configs = config.get("path_configs", [])
 
             for entry in raw_configs:
-                path = entry.get('path', '').rstrip('/')
-                config_path = entry.get('config', '')
+                path = entry.get("path", "").rstrip("/")
+                config_path = entry.get("config", "")
 
                 if not path or not config_path:
                     continue
@@ -960,19 +975,16 @@ class PathConfigManager:
                 if not os.path.isabs(config_path):
                     config_path = os.path.join(SCRIPT_DIR, config_path)
 
-                self.path_configs.append({
-                    'path': path,
-                    'config': config_path
-                })
+                self.path_configs.append({"path": path, "config": config_path})
 
             # Sort by path length descending (longest prefix match first)
-            self.path_configs.sort(key=lambda x: len(x['path']), reverse=True)
+            self.path_configs.sort(key=lambda x: len(x["path"]), reverse=True)
 
             self.log.info("Loaded daemon config from %s" % config_file)
             self.log.info("Default config: %s" % self.default_config)
             self.log.info("Path mappings (%d):" % len(self.path_configs))
             for entry in self.path_configs:
-                self.log.info("  %s -> %s" % (entry['path'], entry['config']))
+                self.log.info("  %s -> %s" % (entry["path"], entry["config"]))
 
         except Exception as e:
             self.log.exception("Error loading daemon config: %s" % e)
@@ -982,10 +994,10 @@ class PathConfigManager:
         file_path = os.path.abspath(file_path)
 
         for entry in self.path_configs:
-            if file_path.startswith(entry['path'] + '/') or file_path == entry['path']:
-                config_path = entry['config']
+            if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
+                config_path = entry["config"]
                 if os.path.exists(config_path):
-                    self.log.debug("Path %s matched %s -> %s" % (file_path, entry['path'], config_path))
+                    self.log.debug("Path %s matched %s -> %s" % (file_path, entry["path"], config_path))
                     return config_path
                 else:
                     self.log.warning("Config file not found: %s, using default" % config_path)
@@ -997,15 +1009,14 @@ class PathConfigManager:
         """Return list of all unique config files."""
         configs = {self.default_config}
         for entry in self.path_configs:
-            configs.add(entry['config'])
+            configs.add(entry["config"])
         return list(configs)
 
 
 class ConversionWorker(threading.Thread):
     """Background worker thread that processes conversion jobs from the database."""
 
-    def __init__(self, worker_id, job_db, job_event, path_config_manager,
-                 config_log_manager, config_lock_manager, logger, ffmpeg_dir=None):
+    def __init__(self, worker_id, job_db, job_event, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None):
         super().__init__(daemon=True)
         self.worker_id = worker_id
         self.node_id = socket.gethostname()
@@ -1015,7 +1026,7 @@ class ConversionWorker(threading.Thread):
         self.config_log_manager = config_log_manager
         self.config_lock_manager = config_lock_manager
         self.log = logger
-        self.script_path = os.path.join(SCRIPT_DIR, 'manual.py')
+        self.script_path = os.path.join(SCRIPT_DIR, "manual.py")
         self.ffmpeg_dir = ffmpeg_dir
         self.running = True
 
@@ -1041,10 +1052,10 @@ class ConversionWorker(threading.Thread):
                 self.job_event.clear()
 
     def process_job(self, job):
-        job_id = job['id']
-        path = job['path']
-        args = json.loads(job['args']) if job['args'] else []
-        config_file = job['config']
+        job_id = job["id"]
+        path = job["path"]
+        args = json.loads(job["args"]) if job["args"] else []
+        config_file = job["config"]
 
         if not os.path.exists(path):
             self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
@@ -1054,9 +1065,7 @@ class ConversionWorker(threading.Thread):
         # Job is already marked running by claim_next_job()
 
         # Acquire lock for this config (blocks if another job is using it)
-        self.log.info("Worker %d acquiring lock for job %d: %s" % (
-            self.worker_id, job_id, os.path.basename(config_file)
-        ))
+        self.log.info("Worker %d acquiring lock for job %d: %s" % (self.worker_id, job_id, os.path.basename(config_file)))
         self.config_lock_manager.acquire(config_file, job_id, path)
 
         try:
@@ -1086,11 +1095,11 @@ class ConversionWorker(threading.Thread):
         config_logger.info("Timestamp: %s" % datetime.now().isoformat())
         config_logger.info("=" * 60)
 
-        cmd = [sys.executable, self.script_path, '-a', '-i', path, '-c', config_file] + extra_args
+        cmd = [sys.executable, self.script_path, "-a", "-i", path, "-c", config_file] + extra_args
 
         env = os.environ.copy()
         if self.ffmpeg_dir:
-            env['PATH'] = self.ffmpeg_dir + os.pathsep + env.get('PATH', '')
+            env["PATH"] = self.ffmpeg_dir + os.pathsep + env.get("PATH", "")
 
         try:
             process = subprocess.Popen(
@@ -1130,12 +1139,12 @@ class ConversionWorker(threading.Thread):
             config_logger.info("")
 
 
-DOCS_PATH = os.path.join(SCRIPT_DIR, 'docs', 'README.md')
+DOCS_PATH = os.path.join(SCRIPT_DIR, "docs", "README.md")
 
 
 def _render_markdown_to_html(md_text):
     """Minimal Markdown to HTML renderer for documentation display."""
-    lines = md_text.split('\n')
+    lines = md_text.split("\n")
     html_parts = []
     in_code = False
     in_table = False
@@ -1144,9 +1153,9 @@ def _render_markdown_to_html(md_text):
 
     for line in lines:
         # Fenced code blocks
-        if line.strip().startswith('```'):
+        if line.strip().startswith("```"):
             if in_code:
-                html_parts.append('</code></pre>')
+                html_parts.append("</code></pre>")
                 in_code = False
             else:
                 lang = line.strip()[3:].strip()
@@ -1154,17 +1163,17 @@ def _render_markdown_to_html(md_text):
                 in_code = True
             continue
         if in_code:
-            html_parts.append(line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'))
+            html_parts.append(line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
             continue
 
         # Close table if line doesn't look like table
-        if in_table and not line.strip().startswith('|'):
-            html_parts.append('</tbody></table></div>')
+        if in_table and not line.strip().startswith("|"):
+            html_parts.append("</tbody></table></div>")
             in_table = False
 
         # Close list if line doesn't continue it
-        if in_list and line.strip() and not _re.match(r'^(\s*[-*]\s|^\s*\d+\.\s)', line):
-            html_parts.append('</%s>' % list_type)
+        if in_list and line.strip() and not _re.match(r"^(\s*[-*]\s|^\s*\d+\.\s)", line):
+            html_parts.append("</%s>" % list_type)
             in_list = False
 
         stripped = line.strip()
@@ -1172,30 +1181,30 @@ def _render_markdown_to_html(md_text):
         # Blank line
         if not stripped:
             if in_list:
-                html_parts.append('</%s>' % list_type)
+                html_parts.append("</%s>" % list_type)
                 in_list = False
             continue
 
         # Headings
-        hm = _re.match(r'^(#{1,6})\s+(.*)', stripped)
+        hm = _re.match(r"^(#{1,6})\s+(.*)", stripped)
         if hm:
             level = len(hm.group(1))
             text = _inline(hm.group(2))
-            slug = _re.sub(r'[^\w-]', '', hm.group(2).lower().replace(' ', '-'))
-            sizes = {1: 'text-3xl', 2: 'text-2xl', 3: 'text-xl', 4: 'text-lg', 5: 'text-base', 6: 'text-sm'}
-            mt = 'mt-10' if level <= 2 else 'mt-6'
-            html_parts.append('<h%d id="%s" class="%s %s font-bold text-white mb-3">%s</h%d>' % (level, slug, sizes.get(level, 'text-base'), mt, text, level))
+            slug = _re.sub(r"[^\w-]", "", hm.group(2).lower().replace(" ", "-"))
+            sizes = {1: "text-3xl", 2: "text-2xl", 3: "text-xl", 4: "text-lg", 5: "text-base", 6: "text-sm"}
+            mt = "mt-10" if level <= 2 else "mt-6"
+            html_parts.append('<h%d id="%s" class="%s %s font-bold text-white mb-3">%s</h%d>' % (level, slug, sizes.get(level, "text-base"), mt, text, level))
             continue
 
         # Horizontal rule
-        if _re.match(r'^-{3,}$', stripped):
+        if _re.match(r"^-{3,}$", stripped):
             html_parts.append('<hr class="border-gray-700 my-8">')
             continue
 
         # Table
-        if stripped.startswith('|'):
-            cells = [c.strip() for c in stripped.split('|')[1:-1]]
-            if all(_re.match(r'^[-:]+$', c) for c in cells):
+        if stripped.startswith("|"):
+            cells = [c.strip() for c in stripped.split("|")[1:-1]]
+            if all(_re.match(r"^[-:]+$", c) for c in cells):
                 continue  # separator row
             if not in_table:
                 in_table = True
@@ -1207,27 +1216,27 @@ def _render_markdown_to_html(md_text):
                 html_parts.append('<tr class="hover:bg-gray-800/50">')
                 for c in cells:
                     html_parts.append('<td class="py-2 px-3 text-gray-300">%s</td>' % _inline(c))
-                html_parts.append('</tr>')
+                html_parts.append("</tr>")
             continue
 
         # Unordered list
-        lm = _re.match(r'^(\s*)[-*]\s+(.*)', line)
+        lm = _re.match(r"^(\s*)[-*]\s+(.*)", line)
         if lm:
             if not in_list:
                 in_list = True
-                list_type = 'ul'
+                list_type = "ul"
                 html_parts.append('<ul class="list-disc list-inside space-y-1 my-3 text-gray-300">')
-            html_parts.append('<li>%s</li>' % _inline(lm.group(2)))
+            html_parts.append("<li>%s</li>" % _inline(lm.group(2)))
             continue
 
         # Ordered list
-        lm = _re.match(r'^(\s*)\d+\.\s+(.*)', line)
+        lm = _re.match(r"^(\s*)\d+\.\s+(.*)", line)
         if lm:
             if not in_list:
                 in_list = True
-                list_type = 'ol'
+                list_type = "ol"
                 html_parts.append('<ol class="list-decimal list-inside space-y-1 my-3 text-gray-300">')
-            html_parts.append('<li>%s</li>' % _inline(lm.group(2)))
+            html_parts.append("<li>%s</li>" % _inline(lm.group(2)))
             continue
 
         # Paragraph
@@ -1235,30 +1244,30 @@ def _render_markdown_to_html(md_text):
 
     # Close open blocks
     if in_code:
-        html_parts.append('</code></pre>')
+        html_parts.append("</code></pre>")
     if in_table:
-        html_parts.append('</tbody></table></div>')
+        html_parts.append("</tbody></table></div>")
     if in_list:
-        html_parts.append('</%s>' % list_type)
+        html_parts.append("</%s>" % list_type)
 
-    return '\n'.join(html_parts)
+    return "\n".join(html_parts)
 
 
 def _inline(text):
     """Process inline Markdown formatting."""
-    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     # Bold
-    text = _re.sub(r'\*\*(.+?)\*\*', r'<strong class="text-white">\1</strong>', text)
+    text = _re.sub(r"\*\*(.+?)\*\*", r'<strong class="text-white">\1</strong>', text)
     # Italic
-    text = _re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
+    text = _re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
     # Inline code
-    text = _re.sub(r'`([^`]+)`', r'<code class="bg-gray-800 text-blue-300 px-1.5 py-0.5 rounded text-xs">\1</code>', text)
+    text = _re.sub(r"`([^`]+)`", r'<code class="bg-gray-800 text-blue-300 px-1.5 py-0.5 rounded text-xs">\1</code>', text)
     # Links
-    text = _re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2" class="text-blue-400 hover:underline">\1</a>', text)
+    text = _re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2" class="text-blue-400 hover:underline">\1</a>', text)
     return text
 
 
-DOCS_TEMPLATE = '''<!DOCTYPE html>
+DOCS_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -1279,10 +1288,10 @@ DOCS_TEMPLATE = '''<!DOCTYPE html>
   </div>
 </div>
 </body>
-</html>'''
+</html>"""
 
 
-DASHBOARD_HTML = '''<!DOCTYPE html>
+DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -1533,34 +1542,34 @@ function dashboard() {
 }
 </script>
 </body>
-</html>'''
+</html>"""
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
     """HTTP request handler for webhook endpoints."""
 
     # Endpoints that don't require authentication
-    PUBLIC_ENDPOINTS = ['/', '/health', '/status', '/docs']
+    PUBLIC_ENDPOINTS = ["/", "/health", "/status", "/docs"]
 
     def log_message(self, format, *args):
         self.server.logger.debug("%s - %s" % (self.address_string(), format % args))
 
     def send_json_response(self, status_code, data):
         self.send_response(status_code)
-        self.send_header('Content-Type', 'application/json')
+        self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(json.dumps(data, default=str).encode('utf-8'))
+        self.wfile.write(json.dumps(data, default=str).encode("utf-8"))
 
     def send_html_response(self, status_code, html):
         self.send_response(status_code)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
-        self.wfile.write(html.encode('utf-8'))
+        self.wfile.write(html.encode("utf-8"))
 
     def wants_html(self):
         """Check if client prefers HTML (browser) over JSON (API)."""
-        accept = self.headers.get('Accept', '')
-        return 'text/html' in accept and 'application/json' not in accept
+        accept = self.headers.get("Accept", "")
+        return "text/html" in accept and "application/json" not in accept
 
     def check_auth(self):
         """
@@ -1574,12 +1583,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return True
 
         # Check X-API-Key header
-        request_key = self.headers.get('X-API-Key')
+        request_key = self.headers.get("X-API-Key")
 
         # Also check Authorization header (Bearer token)
         if not request_key:
-            auth_header = self.headers.get('Authorization', '')
-            if auth_header.startswith('Bearer '):
+            auth_header = self.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
                 request_key = auth_header[7:]
 
         if request_key == api_key:
@@ -1588,10 +1597,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # Authentication failed
         self.server.logger.warning("Unauthorized request from %s" % self.address_string())
         self.send_response(401)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('WWW-Authenticate', 'Bearer')
+        self.send_header("Content-Type", "application/json")
+        self.send_header("WWW-Authenticate", "Bearer")
         self.end_headers()
-        self.wfile.write(json.dumps({'error': 'Unauthorized', 'message': 'Valid API key required'}).encode('utf-8'))
+        self.wfile.write(json.dumps({"error": "Unauthorized", "message": "Valid API key required"}).encode("utf-8"))
         return False
 
     def is_public_endpoint(self, path):
@@ -1606,121 +1615,122 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if not self.is_public_endpoint(parsed.path) and not self.check_auth():
             return
 
-        if parsed.path == '/' and self.wants_html():
+        if parsed.path == "/" and self.wants_html():
             self.send_html_response(200, DASHBOARD_HTML)
             return
 
-        if parsed.path == '/docs':
+        if parsed.path == "/docs":
             try:
-                with open(DOCS_PATH, 'r', encoding='utf-8') as f:
+                with open(DOCS_PATH, "r", encoding="utf-8") as f:
                     md_content = f.read()
                 rendered = _render_markdown_to_html(md_content)
                 self.send_html_response(200, DOCS_TEMPLATE % rendered)
             except FileNotFoundError:
-                self.send_html_response(404, '<h1>Documentation not found</h1><p>docs/README.md missing</p>')
+                self.send_html_response(404, "<h1>Documentation not found</h1><p>docs/README.md missing</p>")
             return
 
-        if parsed.path in ['/', '/health']:
+        if parsed.path in ["/", "/health"]:
             lock_status = self.server.config_lock_manager.get_status()
             stats = self.server.job_db.get_stats()
             now = datetime.now(timezone.utc)
             uptime = int((now - self.server.started_at).total_seconds())
-            self.send_json_response(200, {
-                'status': 'ok',
-                'node': self.server.node_id,
-                'started_at': self.server.started_at.isoformat(),
-                'uptime_seconds': uptime,
-                'workers': self.server.worker_count,
-                'jobs': stats,
-                'active': lock_status['active'],
-                'waiting': lock_status['waiting']
-            })
+            self.send_json_response(
+                200,
+                {
+                    "status": "ok",
+                    "node": self.server.node_id,
+                    "started_at": self.server.started_at.isoformat(),
+                    "uptime_seconds": uptime,
+                    "workers": self.server.worker_count,
+                    "jobs": stats,
+                    "active": lock_status["active"],
+                    "waiting": lock_status["waiting"],
+                },
+            )
 
-        elif parsed.path == '/status':
+        elif parsed.path == "/status":
             # Cluster-wide status — only meaningful with PostgreSQL backend
             if isinstance(self.server.job_db, PostgreSQLJobDatabase):
                 nodes = self.server.job_db.get_cluster_nodes()
                 stats = self.server.job_db.get_stats()
-                self.send_json_response(200, {
-                    'cluster': nodes,
-                    'jobs': stats,
-                })
+                self.send_json_response(
+                    200,
+                    {
+                        "cluster": nodes,
+                        "jobs": stats,
+                    },
+                )
             else:
                 # SQLite single-node — return local health
                 lock_status = self.server.config_lock_manager.get_status()
                 stats = self.server.job_db.get_stats()
-                self.send_json_response(200, {
-                    'status': 'ok',
-                    'node': self.server.node_id,
-                    'note': 'Cluster status requires PostgreSQL backend (--db-url)',
-                    'workers': self.server.worker_count,
-                    'jobs': stats,
-                    'active': lock_status['active'],
-                    'waiting': lock_status['waiting']
-                })
+                self.send_json_response(
+                    200,
+                    {
+                        "status": "ok",
+                        "node": self.server.node_id,
+                        "note": "Cluster status requires PostgreSQL backend (--db-url)",
+                        "workers": self.server.worker_count,
+                        "jobs": stats,
+                        "active": lock_status["active"],
+                        "waiting": lock_status["waiting"],
+                    },
+                )
 
-        elif parsed.path == '/jobs':
+        elif parsed.path == "/jobs":
             # Get jobs with optional filtering
-            status = query.get('status', [None])[0]
-            config = query.get('config', [None])[0]
-            limit = int(query.get('limit', [100])[0])
-            offset = int(query.get('offset', [0])[0])
+            status = query.get("status", [None])[0]
+            config = query.get("config", [None])[0]
+            limit = int(query.get("limit", [100])[0])
+            offset = int(query.get("offset", [0])[0])
 
-            jobs = self.server.job_db.get_jobs(
-                status=status, config=config, limit=limit, offset=offset
-            )
-            self.send_json_response(200, {
-                'jobs': jobs,
-                'count': len(jobs),
-                'limit': limit,
-                'offset': offset
-            })
+            jobs = self.server.job_db.get_jobs(status=status, config=config, limit=limit, offset=offset)
+            self.send_json_response(200, {"jobs": jobs, "count": len(jobs), "limit": limit, "offset": offset})
 
-        elif parsed.path.startswith('/jobs/'):
+        elif parsed.path.startswith("/jobs/"):
             # Get specific job
             try:
-                job_id = int(parsed.path.split('/')[-1])
+                job_id = int(parsed.path.split("/")[-1])
                 job = self.server.job_db.get_job(job_id)
                 if job:
                     self.send_json_response(200, job)
                 else:
-                    self.send_json_response(404, {'error': 'Job not found'})
+                    self.send_json_response(404, {"error": "Job not found"})
             except ValueError:
-                self.send_json_response(400, {'error': 'Invalid job ID'})
+                self.send_json_response(400, {"error": "Invalid job ID"})
 
-        elif parsed.path == '/configs':
+        elif parsed.path == "/configs":
             configs_with_logs = []
             for entry in self.server.path_config_manager.path_configs:
-                config_path = entry['config']
+                config_path = entry["config"]
                 active_job = self.server.config_lock_manager.get_active_job(config_path)
                 pending = self.server.job_db.pending_count_for_config(config_path)
-                configs_with_logs.append({
-                    'path': entry['path'],
-                    'config': config_path,
-                    'log_file': self.server.config_log_manager.get_log_file(config_path),
-                    'active_job': active_job,
-                    'pending_jobs': pending
-                })
+                configs_with_logs.append(
+                    {"path": entry["path"], "config": config_path, "log_file": self.server.config_log_manager.get_log_file(config_path), "active_job": active_job, "pending_jobs": pending}
+                )
 
             default_config = self.server.path_config_manager.default_config
             default_active = self.server.config_lock_manager.get_active_job(default_config)
             default_pending = self.server.job_db.pending_count_for_config(default_config)
 
-            self.send_json_response(200, {
-                'default_config': default_config,
-                'default_log': self.server.config_log_manager.get_log_file(default_config),
-                'default_active_job': default_active,
-                'default_pending_jobs': default_pending,
-                'path_configs': configs_with_logs,
-                'logs_directory': self.server.config_log_manager.logs_dir
-            })
+            self.send_json_response(
+                200,
+                {
+                    "default_config": default_config,
+                    "default_log": self.server.config_log_manager.get_log_file(default_config),
+                    "default_active_job": default_active,
+                    "default_pending_jobs": default_pending,
+                    "path_configs": configs_with_logs,
+                    "logs_directory": self.server.config_log_manager.logs_dir,
+                },
+            )
 
-        elif parsed.path == '/stats':
+        elif parsed.path == "/stats":
             stats = self.server.job_db.get_stats()
             self.send_json_response(200, stats)
 
         else:
-            self.send_json_response(404, {'error': 'Not found'})
+            self.send_json_response(404, {"error": "Not found"})
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -1729,70 +1739,63 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if not self.check_auth():
             return
 
-        if parsed.path in ['/', '/webhook', '/convert']:
+        if parsed.path in ["/", "/webhook", "/convert"]:
             self._handle_webhook()
-        elif parsed.path == '/cleanup':
+        elif parsed.path == "/cleanup":
             # Cleanup old completed/failed jobs
             query = parse_qs(parsed.query)
-            days = int(query.get('days', [30])[0])
+            days = int(query.get("days", [30])[0])
             deleted = self.server.job_db.cleanup_old_jobs(days)
-            self.send_json_response(200, {
-                'deleted': deleted,
-                'days': days
-            })
-        elif parsed.path == '/jobs/requeue':
+            self.send_json_response(200, {"deleted": deleted, "days": days})
+        elif parsed.path == "/jobs/requeue":
             # Bulk requeue all failed jobs, optionally filtered by config
             query = parse_qs(parsed.query)
-            config = query.get('config', [None])[0]
+            config = query.get("config", [None])[0]
             count = self.server.job_db.requeue_failed_jobs(config=config)
             if count > 0:
                 self.server.job_event.set()
-            self.send_json_response(200, {'requeued': count})
-        elif parsed.path.startswith('/jobs/') and parsed.path.endswith('/requeue'):
+            self.send_json_response(200, {"requeued": count})
+        elif parsed.path.startswith("/jobs/") and parsed.path.endswith("/requeue"):
             # Requeue a single failed job: POST /jobs/<id>/requeue
             try:
-                job_id = int(parsed.path.split('/')[-2])
+                job_id = int(parsed.path.split("/")[-2])
                 requeued = self.server.job_db.requeue_job(job_id)
                 if requeued:
                     self.server.job_event.set()
-                    self.send_json_response(200, {'requeued': True, 'job_id': job_id})
+                    self.send_json_response(200, {"requeued": True, "job_id": job_id})
                 else:
                     job = self.server.job_db.get_job(job_id)
                     if job is None:
-                        self.send_json_response(404, {'error': 'Job not found'})
+                        self.send_json_response(404, {"error": "Job not found"})
                     else:
-                        self.send_json_response(409, {
-                            'error': 'Job cannot be requeued',
-                            'status': job['status'],
-                            'note': 'Only failed jobs can be requeued'
-                        })
+                        self.send_json_response(409, {"error": "Job cannot be requeued", "status": job["status"], "note": "Only failed jobs can be requeued"})
             except ValueError:
-                self.send_json_response(400, {'error': 'Invalid job ID'})
+                self.send_json_response(400, {"error": "Invalid job ID"})
         else:
-            self.send_json_response(404, {'error': 'Not found'})
+            self.send_json_response(404, {"error": "Not found"})
 
     def _handle_webhook(self):
         try:
-            content_length = int(self.headers.get('Content-Length', 0))
+            content_length = int(self.headers.get("Content-Length", 0))
             if content_length == 0:
-                self.send_json_response(400, {'error': 'Empty request body'})
+                self.send_json_response(400, {"error": "Empty request body"})
                 return
 
-            body = self.rfile.read(content_length).decode('utf-8').strip()
+            body = self.rfile.read(content_length).decode("utf-8").strip()
 
             path = None
             extra_args = []
             config_override = None
 
-            content_type = self.headers.get('Content-Type', '')
+            content_type = self.headers.get("Content-Type", "")
 
-            if 'application/json' in content_type:
+            if "application/json" in content_type:
                 try:
                     data = json.loads(body)
                     if isinstance(data, dict):
-                        path = data.get('path') or data.get('file') or data.get('input')
-                        extra_args = data.get('args', [])
-                        config_override = data.get('config')
+                        path = data.get("path") or data.get("file") or data.get("input")
+                        extra_args = data.get("args", [])
+                        config_override = data.get("config")
                         if isinstance(extra_args, str):
                             extra_args = extra_args.split()
                     elif isinstance(data, str):
@@ -1803,16 +1806,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 path = body
 
             if not path:
-                self.send_json_response(400, {'error': 'No path provided'})
+                self.send_json_response(400, {"error": "No path provided"})
                 return
 
             path = os.path.abspath(path)
 
             if not os.path.exists(path):
-                self.send_json_response(400, {
-                    'error': 'Path does not exist',
-                    'path': path
-                })
+                self.send_json_response(400, {"error": "Path does not exist", "path": path})
                 return
 
             # Determine config
@@ -1827,12 +1827,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
             if job_id is None:
                 existing = self.server.job_db.find_active_job(path)
                 self.server.logger.info("Duplicate job submission for: %s" % path)
-                self.send_json_response(200, {
-                    'status': 'duplicate',
-                    'job_id': existing['id'] if existing else None,
-                    'path': path,
-                    'config': resolved_config,
-                })
+                self.send_json_response(
+                    200,
+                    {
+                        "status": "duplicate",
+                        "job_id": existing["id"] if existing else None,
+                        "path": path,
+                        "config": resolved_config,
+                    },
+                )
                 return
 
             # Signal workers that a new job is available
@@ -1842,23 +1845,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
             config_busy = self.server.config_lock_manager.is_locked(resolved_config)
             pending = self.server.job_db.pending_count_for_config(resolved_config)
 
-            self.server.logger.info("Queued job %d: %s (config: %s)" % (
-                job_id, path, resolved_config
-            ))
+            self.server.logger.info("Queued job %d: %s (config: %s)" % (job_id, path, resolved_config))
 
-            self.send_json_response(202, {
-                'status': 'queued',
-                'job_id': job_id,
-                'path': path,
-                'config': resolved_config,
-                'log_file': log_file,
-                'config_busy': config_busy,
-                'pending_jobs': pending
-            })
+            self.send_json_response(202, {"status": "queued", "job_id": job_id, "path": path, "config": resolved_config, "log_file": log_file, "config_busy": config_busy, "pending_jobs": pending})
 
         except Exception as e:
             self.server.logger.exception("Error handling request: %s" % e)
-            self.send_json_response(500, {'error': str(e)})
+            self.send_json_response(500, {"error": str(e)})
 
 
 class HeartbeatThread(threading.Thread):
@@ -1894,9 +1887,7 @@ class HeartbeatThread(threading.Thread):
                 self.job_db.heartbeat(self.node_id, self.host, self.worker_count, self.started_at)
                 recovered = self.job_db.recover_stale_nodes(self.stale_seconds)
                 for stale_id, job_count in recovered:
-                    self.log.warning(
-                        "Recovered %d jobs from stale node %s" % (job_count, stale_id)
-                    )
+                    self.log.warning("Recovered %d jobs from stale node %s" % (job_count, stale_id))
                 if any(job_count > 0 for _, job_count in recovered):
                     self.job_event.set()  # Wake workers to pick up requeued jobs
             except Exception:
@@ -1907,9 +1898,21 @@ class HeartbeatThread(threading.Thread):
 class DaemonServer(HTTPServer):
     """HTTP server with job queue and worker threads."""
 
-    def __init__(self, server_address, handler_class, job_db, path_config_manager,
-                 config_log_manager, config_lock_manager, logger, worker_count=2,
-                 api_key=None, heartbeat_interval=30, stale_seconds=120, ffmpeg_dir=None):
+    def __init__(
+        self,
+        server_address,
+        handler_class,
+        job_db,
+        path_config_manager,
+        config_log_manager,
+        config_lock_manager,
+        logger,
+        worker_count=2,
+        api_key=None,
+        heartbeat_interval=30,
+        stale_seconds=120,
+        ffmpeg_dir=None,
+    ):
         super().__init__(server_address, handler_class)
         self.job_db = job_db
         self.path_config_manager = path_config_manager
@@ -1958,9 +1961,7 @@ class DaemonServer(HTTPServer):
             started_at=self.started_at,
         )
         self.heartbeat_thread.start()
-        logger.debug("Started heartbeat thread (interval: %ds, stale after: %ds)" % (
-            heartbeat_interval, stale_seconds
-        ))
+        logger.debug("Started heartbeat thread (interval: %ds, stale after: %ds)" % (heartbeat_interval, stale_seconds))
 
     def shutdown(self):
         self.logger.info("Shutting down...")
@@ -1986,60 +1987,24 @@ class DaemonServer(HTTPServer):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="SMA-NG Daemon - HTTP webhook server for media conversion"
+    parser = argparse.ArgumentParser(description="SMA-NG Daemon - HTTP webhook server for media conversion")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8585, help="Port to listen on (default: 8585)")
+    parser.add_argument("--workers", type=int, default=2, help="Number of worker threads (default: 2)")
+    parser.add_argument("-d", "--daemon-config", help="Path to daemon.json config file (path mappings)")
+    parser.add_argument("--logs-dir", default=LOGS_DIR, help="Directory for per-config log files (default: logs/)")
+    parser.add_argument("--db", default=DATABASE_PATH, help="Path to SQLite database (default: config/daemon.db)")
+    parser.add_argument(
+        "--db-url", help="PostgreSQL connection URL for distributed multi-node operation (e.g. postgresql://user:pass@host/sma). When set, --db is ignored and all nodes share this database."
     )
     parser.add_argument(
-        '--host', default='127.0.0.1',
-        help='Host to bind to (default: 127.0.0.1)'
+        "--ffmpeg-dir", help="Directory containing ffmpeg and ffprobe binaries. Prepended to PATH for each conversion subprocess. If omitted, relies on PATH already containing the binaries."
     )
+    parser.add_argument("--heartbeat-interval", type=int, default=30, help="Seconds between cluster heartbeat updates (default: 30). Only used with --db-url.")
     parser.add_argument(
-        '--port', type=int, default=8585,
-        help='Port to listen on (default: 8585)'
+        "--stale-seconds", type=int, default=120, help="Seconds without a heartbeat before a node is declared stale and its running jobs are requeued (default: 120). Only used with --db-url."
     )
-    parser.add_argument(
-        '--workers', type=int, default=2,
-        help='Number of worker threads (default: 2)'
-    )
-    parser.add_argument(
-        '-d', '--daemon-config',
-        help='Path to daemon.json config file (path mappings)'
-    )
-    parser.add_argument(
-        '--logs-dir', default=LOGS_DIR,
-        help='Directory for per-config log files (default: logs/)'
-    )
-    parser.add_argument(
-        '--db', default=DATABASE_PATH,
-        help='Path to SQLite database (default: config/daemon.db)'
-    )
-    parser.add_argument(
-        '--db-url',
-        help='PostgreSQL connection URL for distributed multi-node operation '
-             '(e.g. postgresql://user:pass@host/sma). '
-             'When set, --db is ignored and all nodes share this database.'
-    )
-    parser.add_argument(
-        '--ffmpeg-dir',
-        help='Directory containing ffmpeg and ffprobe binaries. '
-             'Prepended to PATH for each conversion subprocess. '
-             'If omitted, relies on PATH already containing the binaries.'
-    )
-    parser.add_argument(
-        '--heartbeat-interval', type=int, default=30,
-        help='Seconds between cluster heartbeat updates (default: 30). '
-             'Only used with --db-url.'
-    )
-    parser.add_argument(
-        '--stale-seconds', type=int, default=120,
-        help='Seconds without a heartbeat before a node is declared stale '
-             'and its running jobs are requeued (default: 120). '
-             'Only used with --db-url.'
-    )
-    parser.add_argument(
-        '--api-key',
-        help='API key for authentication (or set SMA_DAEMON_API_KEY env var)'
-    )
+    parser.add_argument("--api-key", help="API key for authentication (or set SMA_DAEMON_API_KEY env var)")
 
     args = parser.parse_args()
 
@@ -2052,13 +2017,13 @@ def main():
     path_config_manager = PathConfigManager(args.daemon_config, logger=log)
 
     # Determine API key (priority: CLI arg > env var > config file)
-    api_key = args.api_key or os.environ.get('SMA_DAEMON_API_KEY') or path_config_manager.api_key
+    api_key = args.api_key or os.environ.get("SMA_DAEMON_API_KEY") or path_config_manager.api_key
 
     # Determine database (priority: CLI --db-url > env var > config file > SQLite fallback)
-    db_url = args.db_url or os.environ.get('SMA_DAEMON_DB_URL') or path_config_manager.db_url
+    db_url = args.db_url or os.environ.get("SMA_DAEMON_DB_URL") or path_config_manager.db_url
 
     # Determine FFmpeg directory (priority: CLI --ffmpeg-dir > env var > config file)
-    ffmpeg_dir = args.ffmpeg_dir or os.environ.get('SMA_DAEMON_FFMPEG_DIR') or path_config_manager.ffmpeg_dir
+    ffmpeg_dir = args.ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or path_config_manager.ffmpeg_dir
     if db_url:
         job_db = PostgreSQLJobDatabase(db_url, logger=log)
         db_label = "PostgreSQL: %s" % db_url
@@ -2071,9 +2036,7 @@ def main():
     if ffmpeg_dir:
         log.info("FFmpeg/FFprobe directory: %s" % ffmpeg_dir)
     if db_url:
-        log.info("Heartbeat interval: %ds (stale after %ds)" % (
-            args.heartbeat_interval, args.stale_seconds
-        ))
+        log.info("Heartbeat interval: %ds (stale after %ds)" % (args.heartbeat_interval, args.stale_seconds))
     log.info("Logs directory: %s" % config_log_manager.logs_dir)
     log.info("Concurrency: One process per config (jobs for same config queue)")
     if api_key:
@@ -2129,5 +2092,5 @@ def main():
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

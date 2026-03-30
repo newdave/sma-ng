@@ -1,12 +1,12 @@
 #!/usr/bin/python
-import os
 import json
+import os
 
 
 def main():
     print("Sample Post Script")
 
-    files = json.loads(os.environ.get('SMA_FILES'))
+    files = json.loads(os.environ.get("SMA_FILES"))
 
     for filename in files:
         print(filename)

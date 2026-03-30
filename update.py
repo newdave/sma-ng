@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 
+import configparser
+import logging
 import os
 import sys
-import logging
-import configparser
 import xml.etree.ElementTree as ET
+
 from resources.readsettings import ReadSettings
 
 xml = "/config/config.xml"
@@ -61,6 +62,5 @@ def main():
     fp.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-

@@ -1,5 +1,5 @@
 @echo off
-:: Make sure "Edit>Preferences>Advanced>Copy files to iTunes Media folder when adding to library" is unchecked before implementing this. 
+:: Make sure "Edit>Preferences>Advanced>Copy files to iTunes Media folder when adding to library" is unchecked before implementing this.
 :: Pull file path from SMA
 set var=%MH_FILES%
 :: Remove [] from Path pulled from SMA

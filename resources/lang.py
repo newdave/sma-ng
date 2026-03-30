@@ -1,4 +1,5 @@
 from babelfish import Language
+
 from converter.avcodecs import BaseCodec
 
 
@@ -7,7 +8,7 @@ def getAlpha3TCode(code, default=None):
     if not code or code == BaseCodec.UNDEFINED:
         return lang
 
-    code = code.strip().lower().replace('.', '')
+    code = code.strip().lower().replace(".", "")
 
     if len(code) == 3:
         try:
@@ -33,7 +34,7 @@ def getAlpha2BCode(code, default=None):
     if not code or code == BaseCodec.UNDEFINED:
         return lang
 
-    code = code.strip().lower().replace('.', '')
+    code = code.strip().lower().replace(".", "")
 
     if len(code) == 3:
         try:

@@ -44,7 +44,7 @@ Two official Docker containers are maintained for Radarr and Sonarr with SMA-NG 
 
 General Configuration
 --------------
-1. Download or compile FFmpeg 
+1. Download or compile FFmpeg
 2. Install [requirements/dependencies](#dependencies)
 3. Rename `setup\autoProcess.ini.sample` to `autoProcess.ini` and place inside your `config` directory (or attempt to run the script which will generate a new config file if absent)
 4. Set the [configuration options](https://github.com/newdave/sma-ng/wiki/autoProcess-Settings) to your desired output and include the path of your new FFmpeg / FFprobe binaries
@@ -234,10 +234,10 @@ optional arguments:
                         Preserves relative directories when processing
                         multiple files using the copy-to or move-to
                         functionality
-  -pse, --processsameextensions   
-                        Overrides process-same-extensions setting in 
+  -pse, --processsameextensions
+                        Overrides process-same-extensions setting in
                         autoProcess.ini enabling the reprocessing of files
-  -fc, --forceconvert   Overrides force-convert setting in autoProcess.ini and 
+  -fc, --forceconvert   Overrides force-convert setting in autoProcess.ini and
                         also enables process-same-extenions if true forcing the conversion of files
   -oo, --optionsonly    Display generated conversion options only, do not perform conversion
   -cl, --codeclist      Print a list of supported codecs and their paired FFMPEG encoders
