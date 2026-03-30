@@ -220,6 +220,23 @@ class MediaProcessor:
                 else:
                     delete = False
 
+            if delete and self.settings.recycle_bin and os.path.isfile(inputfile):
+                try:
+                    os.makedirs(self.settings.recycle_bin, exist_ok=True)
+                    recycle_dst = os.path.join(self.settings.recycle_bin, os.path.basename(inputfile))
+                    if os.path.exists(recycle_dst):
+                        base, ext = os.path.splitext(os.path.basename(inputfile))
+                        i = 2
+                        while os.path.exists(recycle_dst):
+                            recycle_dst = os.path.join(self.settings.recycle_bin, "%s.%d%s" % (base, i, ext))
+                            i += 1
+                    self._atomic_copy(inputfile, recycle_dst)
+                    self.log.info("Original file recycled to %s." % recycle_dst)
+                except KeyboardInterrupt:
+                    raise
+                except:
+                    self.log.exception("Failed to copy original to recycle bin %s." % self.settings.recycle_bin)
+
             if delete:
                 self.log.debug("Attempting to remove %s." % inputfile)
                 if self.removeFile(inputfile):

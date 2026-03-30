@@ -233,6 +233,37 @@ jobs(id, path, config, args, status, worker_id, error, created_at, started_at, c
 
 Use `--db /path/to/daemon.db` to customize database location.
 
+### PostgreSQL (Distributed / Multi-Node)
+
+For multi-node deployments, the daemon can use a shared PostgreSQL database instead of SQLite. This enables distributed job coordination — no two nodes will ever process the same file.
+
+**Configure PostgreSQL (priority order):**
+1. Command line: `--db-url postgresql://user:pass@host/sma`
+2. Environment variable: `SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma`
+3. Config file: `"db_url": "postgresql://user:pass@host/sma"` in daemon.json
+
+When `db_url` is set, `--db` (SQLite path) is ignored.
+
+**daemon.json example:**
+```json
+{
+  "default_config": "config/autoProcess.ini",
+  "db_url": "postgresql://sma:password@db-host:5432/sma",
+  "path_configs": [...]
+}
+```
+
+**daemon.env example:**
+```bash
+SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
+```
+
+**Cluster-specific options:**
+- `--heartbeat-interval N` — seconds between node heartbeat updates (default: 30)
+- `--stale-seconds N` — seconds without a heartbeat before a node's running jobs are requeued (default: 120)
+
+The `/health` endpoint includes cluster-wide status when using PostgreSQL, showing active and waiting jobs across all nodes.
+
 ## Architecture
 
 ### Entry Points
@@ -264,12 +295,27 @@ Use `--db /path/to/daemon.db` to customize database location.
 The main config file is `config/autoProcess.ini` (copy from `setup/autoProcess.ini.sample`). Override location via `SMA_CONFIG` environment variable.
 
 Key sections:
-- `[Converter]` - FFmpeg paths, output format, threading
+- `[Converter]` - FFmpeg paths, output format, threading, file disposition (`delete-original`, `copy-to`, `move-to`, `recycle-bin`)
 - `[Video]` - Codec preferences, bitrate, CRF profiles
 - `[Audio]` - Codec, languages, channel handling
 - `[Subtitle]` - Embedding, burning, subtitle downloads via Subliminal
 - `[Sonarr]`/`[Radarr]` - API settings for media manager integration
 - `[Plex]` - Library refresh settings
+
+### Recycle Bin
+
+When `delete-original = True`, SMA can preserve the original source file in a configurable directory before deleting it. Set `recycle-bin` in `[Converter]`:
+
+```ini
+[Converter]
+delete-original = True
+recycle-bin = /mnt/recycle
+```
+
+- Only runs when `delete-original = True` and the recycle bin path is set
+- Uses atomic copy (temp file + `os.replace`) — safe across filesystems
+- Appends `.2`, `.3`... suffix if a file with the same name already exists in the bin
+- A failed copy is logged but does not abort the conversion or the deletion
 
 ### Processing Flow
 

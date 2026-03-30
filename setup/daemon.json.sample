@@ -1,6 +1,8 @@
 {
   "default_config": "config/autoProcess.ini",
   "api_key": null,
+  "db_url": null,
+  "ffmpeg_dir": null,
   "path_configs": [
     {
       "path": "/mnt/unionfs/Media/TV",

@@ -1102,3 +1102,577 @@ class TestCrfProfileOverridesCopy:
 
         assert options is not None
         assert options['video']['codec'] == 'copy'
+
+
+def _make_mp():
+    """Shared helper: build a MediaProcessor with mocked converter and settings."""
+    with patch('resources.mediaprocessor.Converter'):
+        with patch('resources.readsettings.ReadSettings._validate_binaries'):
+            from resources.mediaprocessor import MediaProcessor
+            mp = MediaProcessor.__new__(MediaProcessor)
+            mp.settings = MagicMock()
+            mp.log = MagicMock()
+            return mp
+
+
+class TestValidLanguage:
+    def test_empty_whitelist_allows_any(self):
+        mp = _make_mp()
+        assert mp.validLanguage('eng', []) is True
+        assert mp.validLanguage('fra', []) is True
+
+    def test_language_in_whitelist(self):
+        mp = _make_mp()
+        assert mp.validLanguage('eng', ['eng', 'fra']) is True
+
+    def test_language_not_in_whitelist(self):
+        mp = _make_mp()
+        assert mp.validLanguage('deu', ['eng', 'fra']) is False
+
+    def test_blocked_language_excluded(self):
+        mp = _make_mp()
+        assert mp.validLanguage('eng', ['eng', 'fra'], blocked=['eng']) is False
+
+    def test_blocked_overrides_empty_whitelist(self):
+        mp = _make_mp()
+        assert mp.validLanguage('eng', [], blocked=['eng']) is False
+
+    def test_empty_blocked_list_allows_whitelist(self):
+        mp = _make_mp()
+        assert mp.validLanguage('eng', ['eng'], blocked=[]) is True
+
+
+class TestDispoStringToDict:
+    def test_plus_sets_true(self):
+        mp = _make_mp()
+        assert mp.dispoStringToDict('+default') == {'default': True}
+
+    def test_minus_sets_false(self):
+        mp = _make_mp()
+        assert mp.dispoStringToDict('-forced') == {'forced': False}
+
+    def test_mixed_signs(self):
+        mp = _make_mp()
+        result = mp.dispoStringToDict('+default-forced+comment')
+        assert result == {'default': True, 'forced': False, 'comment': True}
+
+    def test_none_returns_empty(self):
+        mp = _make_mp()
+        assert mp.dispoStringToDict(None) == {}
+
+    def test_empty_string_returns_empty(self):
+        mp = _make_mp()
+        assert mp.dispoStringToDict('') == {}
+
+
+class TestCheckDisposition:
+    def test_all_required_present_and_true(self):
+        mp = _make_mp()
+        assert mp.checkDisposition(['default'], {'default': True, 'forced': False}) is True
+
+    def test_required_false_returns_false(self):
+        mp = _make_mp()
+        assert mp.checkDisposition(['forced'], {'default': True, 'forced': False}) is False
+
+    def test_empty_allowed_always_true(self):
+        mp = _make_mp()
+        assert mp.checkDisposition([], {'default': False}) is True
+
+    def test_missing_key_returns_false(self):
+        mp = _make_mp()
+        assert mp.checkDisposition(['comment'], {'default': True}) is False
+
+
+class TestSublistIndexes:
+    def test_finds_single_match(self):
+        mp = _make_mp()
+        assert mp.sublistIndexes(['a', 'b', 'c'], ['b', 'c']) == [1]
+
+    def test_finds_multiple_matches(self):
+        mp = _make_mp()
+        assert mp.sublistIndexes(['a', 'b', 'a', 'b'], ['a', 'b']) == [0, 2]
+
+    def test_no_match_returns_empty(self):
+        mp = _make_mp()
+        assert mp.sublistIndexes(['a', 'b', 'c'], ['x', 'y']) == []
+
+    def test_single_element_pattern(self):
+        mp = _make_mp()
+        assert mp.sublistIndexes(['a', 'b', 'a'], ['a']) == [0, 2]
+
+
+class TestMinResolvedMap:
+    def test_map_in_combination_returns_min(self):
+        mp = _make_mp()
+        assert mp.minResolvedMap(3, [[1, 2, 3]]) == 1
+
+    def test_map_not_in_any_combination_returns_itself(self):
+        mp = _make_mp()
+        assert mp.minResolvedMap(5, [[1, 2, 3]]) == 5
+
+    def test_empty_combinations(self):
+        mp = _make_mp()
+        assert mp.minResolvedMap(7, []) == 7
+
+
+class TestGetSourceIndexFromMap:
+    def test_returns_stream_position(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        info = MediaInfo()
+        s0 = make_stream(index=0)
+        s1 = make_stream(index=1, type='audio')
+        s2 = make_stream(index=2, type='subtitle')
+        info.streams = [s0, s1, s2]
+        assert mp.getSourceIndexFromMap(1, info, []) == 1
+
+    def test_returns_999_for_missing_map(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        info = MediaInfo()
+        info.streams = [make_stream(index=0)]
+        assert mp.getSourceIndexFromMap(99, info, []) == 999
+
+    def test_resolves_via_combination(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        info = MediaInfo()
+        s0 = make_stream(index=0)
+        s1 = make_stream(index=3, type='audio')
+        info.streams = [s0, s1]
+        # map=3 is in combo [1,3], min=1; stream with index=1 doesn't exist → 999
+        assert mp.getSourceIndexFromMap(3, info, [[1, 3]]) == 999
+
+
+class TestTitleDispositionCheck:
+    def test_comment_in_title(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        s = make_stream(type='audio', metadata={'title': 'Commentary Track', 'language': 'eng'})
+        s.disposition = {'default': False, 'forced': False, 'comment': False}
+        info = MediaInfo()
+        info.streams = [s]
+        mp.titleDispositionCheck(info)
+        assert s.disposition['comment'] is True
+
+    def test_sdh_sets_hearing_impaired(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        s = make_stream(type='subtitle', metadata={'title': 'English SDH', 'language': 'eng'})
+        s.disposition = {'default': False, 'forced': False, 'hearing_impaired': False}
+        info = MediaInfo()
+        info.streams = [s]
+        mp.titleDispositionCheck(info)
+        assert s.disposition['hearing_impaired'] is True
+
+    def test_forced_in_title(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        s = make_stream(type='subtitle', metadata={'title': 'Forced Subtitles', 'language': 'eng'})
+        s.disposition = {'default': False, 'forced': False}
+        info = MediaInfo()
+        info.streams = [s]
+        mp.titleDispositionCheck(info)
+        assert s.disposition['forced'] is True
+
+    def test_no_match_unchanged(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        s = make_stream(type='audio', metadata={'title': 'Main Audio', 'language': 'eng'})
+        s.disposition = {'default': True, 'forced': False, 'comment': False}
+        info = MediaInfo()
+        info.streams = [s]
+        mp.titleDispositionCheck(info)
+        assert s.disposition['comment'] is False
+
+    def test_case_insensitive(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        s = make_stream(type='subtitle', metadata={'title': 'FORCED ENGLISH', 'language': 'eng'})
+        s.disposition = {'forced': False}
+        info = MediaInfo()
+        info.streams = [s]
+        mp.titleDispositionCheck(info)
+        assert s.disposition['forced'] is True
+
+
+class TestSafeLanguage:
+    def _make_audio_stream(self, lang, make_stream):
+        s = make_stream(type='audio', metadata={'language': lang})
+        s.disposition = {'default': True, 'forced': False, 'comment': False, 'hearing_impaired': False, 'visual_impaired': False}
+        return s
+
+    def test_normalizes_undefined_audio_to_adl(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        mp.settings.awl = ['eng']
+        mp.settings.swl = ['eng']
+        mp.settings.adl = 'eng'
+        mp.settings.sdl = None
+        mp.settings.audio_original_language = False
+        mp.settings.subtitle_original_language = False
+        mp.settings.ignored_audio_dispositions = []
+        info = MediaInfo()
+        audio = self._make_audio_stream('und', make_stream)
+        info.streams = [audio]
+        awl, swl = mp.safeLanguage(info)
+        # 'und' normalized to 'eng' (adl)
+        assert audio.metadata['language'] == 'eng'
+
+    def test_relaxes_awl_when_no_valid_tracks(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        mp.settings.awl = ['fra']
+        mp.settings.swl = []
+        mp.settings.adl = None
+        mp.settings.sdl = None
+        mp.settings.audio_original_language = False
+        mp.settings.subtitle_original_language = False
+        mp.settings.ignored_audio_dispositions = []
+        info = MediaInfo()
+        audio = self._make_audio_stream('eng', make_stream)
+        info.streams = [audio]
+        awl, _ = mp.safeLanguage(info)
+        # No 'fra' tracks found → awl relaxed to []
+        assert awl == []
+
+    def test_appends_original_language_to_awl(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        mp.settings.awl = ['eng']
+        mp.settings.swl = []
+        mp.settings.adl = None
+        mp.settings.sdl = None
+        mp.settings.audio_original_language = True
+        mp.settings.subtitle_original_language = False
+        mp.settings.ignored_audio_dispositions = []
+        tagdata = MagicMock()
+        tagdata.original_language = 'jpn'
+        info = MediaInfo()
+        audio = self._make_audio_stream('eng', make_stream)
+        info.streams = [audio]
+        awl, _ = mp.safeLanguage(info, tagdata)
+        assert 'jpn' in awl
+
+
+class TestMapStreamCombinations:
+    def test_matching_combination_same_language_and_dispo(self, make_stream):
+        mp = _make_mp()
+        mp.settings.stream_codec_combinations = [['aac', 'ac3']]
+        a1 = make_stream(type='audio', codec='aac', index=0, metadata={'language': 'eng'})
+        a1.disposition = {'default': True, 'forced': False}
+        a2 = make_stream(type='audio', codec='ac3', index=1, metadata={'language': 'eng'})
+        a2.disposition = {'default': True, 'forced': False}
+        result = mp.mapStreamCombinations([a1, a2])
+        assert result == [[0, 1]]
+
+    def test_different_language_not_matched(self, make_stream):
+        mp = _make_mp()
+        mp.settings.stream_codec_combinations = [['aac', 'ac3']]
+        a1 = make_stream(type='audio', codec='aac', index=0, metadata={'language': 'eng'})
+        a1.disposition = {'default': False, 'forced': False}
+        a2 = make_stream(type='audio', codec='ac3', index=1, metadata={'language': 'fra'})
+        a2.disposition = {'default': False, 'forced': False}
+        result = mp.mapStreamCombinations([a1, a2])
+        assert result == []
+
+    def test_no_combinations_configured(self, make_stream):
+        mp = _make_mp()
+        mp.settings.stream_codec_combinations = []
+        a1 = make_stream(type='audio', codec='aac', index=0, metadata={'language': 'eng'})
+        a1.disposition = {'default': False, 'forced': False}
+        result = mp.mapStreamCombinations([a1])
+        assert result == []
+
+    def test_combination_not_present_in_streams(self, make_stream):
+        mp = _make_mp()
+        mp.settings.stream_codec_combinations = [['eac3', 'truehd']]
+        a1 = make_stream(type='audio', codec='aac', index=0, metadata={'language': 'eng'})
+        a1.disposition = {'default': False, 'forced': False}
+        result = mp.mapStreamCombinations([a1])
+        assert result == []
+
+
+class TestDuplicateStreamSort:
+    def test_copy_codec_sorted_first(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        info = MediaInfo()
+        s0 = make_stream(index=0, type='audio')
+        s0.disposition = {'default': False}
+        s1 = make_stream(index=1, type='audio')
+        s1.disposition = {'default': False}
+        info.streams = [s0, s1]
+        opts = [
+            {'map': 1, 'codec': 'aac', 'bitrate': 256},
+            {'map': 0, 'codec': 'copy', 'bitrate': 128},
+        ]
+        mp.duplicateStreamSort(opts, info)
+        assert opts[0]['codec'] == 'copy'
+
+    def test_higher_bitrate_sorted_first_when_same_codec(self, make_stream):
+        mp = _make_mp()
+        from converter.ffmpeg import MediaInfo
+        info = MediaInfo()
+        s0 = make_stream(index=0, type='audio')
+        s0.disposition = {'default': False}
+        s1 = make_stream(index=1, type='audio')
+        s1.disposition = {'default': False}
+        info.streams = [s0, s1]
+        opts = [
+            {'map': 0, 'codec': 'aac', 'bitrate': 128},
+            {'map': 1, 'codec': 'aac', 'bitrate': 320},
+        ]
+        mp.duplicateStreamSort(opts, info)
+        assert opts[0]['bitrate'] == 320
+
+
+class TestFfprobeSafeCodecs:
+    def test_adds_ffprobe_variant_when_missing(self):
+        mp = _make_mp()
+        with patch('resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name', return_value='h264'):
+            result = mp.ffprobeSafeCodecs(['hevc'])
+            assert 'h264' in result
+
+    def test_does_not_duplicate_when_already_present(self):
+        mp = _make_mp()
+        with patch('resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name', return_value='aac'):
+            result = mp.ffprobeSafeCodecs(['aac', 'ac3'])
+            assert result.count('aac') == 1
+
+    def test_returns_none_for_empty_list(self):
+        mp = _make_mp()
+        result = mp.ffprobeSafeCodecs([])
+        assert result == []
+
+    def test_none_ffprobe_value_ignored(self):
+        mp = _make_mp()
+        with patch('resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name', return_value=None):
+            result = mp.ffprobeSafeCodecs(['custom_codec'])
+            assert result == ['custom_codec']
+
+
+class TestSetDefaultAudioStream:
+    def test_sets_default_when_none_present(self):
+        mp = _make_mp()
+        mp.settings.adl = 'eng'
+        mp.settings.audio_sorting_default = []
+        streams = [
+            {'language': 'eng', 'codec': 'aac', 'channels': 2, 'disposition': '-default'},
+            {'language': 'fra', 'codec': 'aac', 'channels': 2, 'disposition': '-default'},
+        ]
+        mp.setDefaultAudioStream(streams)
+        assert '+default' in streams[0]['disposition']
+        assert '+default' not in streams[1].get('disposition', '')
+
+    def test_prefers_preferred_language(self):
+        mp = _make_mp()
+        mp.settings.adl = 'fra'
+        mp.settings.audio_sorting_default = []
+        streams = [
+            {'language': 'eng', 'codec': 'aac', 'channels': 2, 'disposition': '+default'},
+            {'language': 'fra', 'codec': 'aac', 'channels': 2, 'disposition': '-default'},
+        ]
+        mp.setDefaultAudioStream(streams)
+        assert '+default' in streams[1]['disposition']
+
+    def test_removes_extra_defaults_in_preferred_language(self):
+        mp = _make_mp()
+        mp.settings.adl = 'eng'
+        mp.settings.audio_sorting_default = []
+        streams = [
+            {'language': 'eng', 'codec': 'aac', 'channels': 2, 'disposition': '+default'},
+            {'language': 'eng', 'codec': 'ac3', 'channels': 6, 'disposition': '+default'},
+        ]
+        mp.setDefaultAudioStream(streams)
+        # Only one should remain with +default
+        count = sum(1 for s in streams if '+default' in s.get('disposition', ''))
+        assert count == 1
+
+    def test_empty_streams_no_error(self):
+        mp = _make_mp()
+        mp.settings.adl = 'eng'
+        mp.settings.audio_sorting_default = []
+        mp.setDefaultAudioStream([])  # Should not raise
+
+    def test_removes_default_from_non_preferred_language(self):
+        mp = _make_mp()
+        mp.settings.adl = 'eng'
+        mp.settings.audio_sorting_default = []
+        streams = [
+            {'language': 'eng', 'codec': 'aac', 'channels': 2, 'disposition': '-default'},
+            {'language': 'jpn', 'codec': 'aac', 'channels': 2, 'disposition': '+default'},
+        ]
+        mp.setDefaultAudioStream(streams)
+        # jpn stream should lose +default, eng stream should gain it
+        assert '+default' not in streams[1].get('disposition', '')
+        assert '+default' in streams[0]['disposition']
+
+
+class TestSetDefaultSubtitleStream:
+    def test_sets_default_when_sdl_and_force(self):
+        mp = _make_mp()
+        mp.settings.sdl = 'eng'
+        mp.settings.sforcedefault = True
+        streams = [
+            {'language': 'eng', 'disposition': '-default'},
+            {'language': 'fra', 'disposition': '-default'},
+        ]
+        mp.setDefaultSubtitleStream(streams)
+        assert '+default' in streams[0]['disposition']
+
+    def test_does_not_override_existing_default(self):
+        mp = _make_mp()
+        mp.settings.sdl = 'eng'
+        mp.settings.sforcedefault = True
+        streams = [
+            {'language': 'fra', 'disposition': '+default'},
+            {'language': 'eng', 'disposition': '-default'},
+        ]
+        mp.setDefaultSubtitleStream(streams)
+        # Already has a default → don't override
+        assert '+default' in streams[0]['disposition']
+
+    def test_skips_when_no_sdl(self):
+        mp = _make_mp()
+        mp.settings.sdl = None
+        mp.settings.sforcedefault = True
+        streams = [{'language': 'eng', 'disposition': '-default'}]
+        mp.setDefaultSubtitleStream(streams)
+        assert '+default' not in streams[0]['disposition']
+
+    def test_skips_when_empty_streams(self):
+        mp = _make_mp()
+        mp.settings.sdl = 'eng'
+        mp.settings.sforcedefault = True
+        mp.setDefaultSubtitleStream([])  # Should not raise
+
+
+class TestSortStreams:
+    def _make_info(self, make_stream):
+        from converter.ffmpeg import MediaInfo
+        info = MediaInfo()
+        s0 = make_stream(index=0, type='audio')
+        s1 = make_stream(index=1, type='audio')
+        s2 = make_stream(index=2, type='audio')
+        info.streams = [s0, s1, s2]
+        return info
+
+    def test_sorts_by_channels_descending(self, make_stream):
+        mp = _make_mp()
+        info = self._make_info(make_stream)
+        streams = [
+            {'map': 0, 'channels': 2, 'codec': 'aac', 'language': 'eng'},
+            {'map': 1, 'channels': 6, 'codec': 'aac', 'language': 'eng'},
+            {'map': 2, 'channels': 8, 'codec': 'aac', 'language': 'eng'},
+        ]
+        result = mp.sortStreams(streams, ['channels.d'], ['eng'], ['aac'], info)
+        assert result[0]['channels'] == 8
+        assert result[1]['channels'] == 6
+        assert result[2]['channels'] == 2
+
+    def test_sorts_by_channels_ascending(self, make_stream):
+        mp = _make_mp()
+        info = self._make_info(make_stream)
+        streams = [
+            {'map': 0, 'channels': 8, 'codec': 'aac', 'language': 'eng'},
+            {'map': 1, 'channels': 2, 'codec': 'aac', 'language': 'eng'},
+        ]
+        result = mp.sortStreams(streams, ['channels.a'], ['eng'], ['aac'], info)
+        assert result[0]['channels'] == 2
+
+    def test_sorts_by_language_preference(self, make_stream):
+        mp = _make_mp()
+        info = self._make_info(make_stream)
+        streams = [
+            {'map': 0, 'channels': 2, 'codec': 'aac', 'language': 'deu'},
+            {'map': 1, 'channels': 2, 'codec': 'aac', 'language': 'eng'},
+            {'map': 2, 'channels': 2, 'codec': 'aac', 'language': 'fra'},
+        ]
+        result = mp.sortStreams(streams, ['language'], ['eng', 'fra', 'deu'], ['aac'], info)
+        assert result[0]['language'] == 'eng'
+        assert result[1]['language'] == 'fra'
+        assert result[2]['language'] == 'deu'
+
+    def test_sorts_by_disposition_flag(self, make_stream):
+        mp = _make_mp()
+        info = self._make_info(make_stream)
+        streams = [
+            {'map': 0, 'channels': 2, 'codec': 'aac', 'language': 'eng', 'disposition': '-default'},
+            {'map': 1, 'channels': 2, 'codec': 'aac', 'language': 'eng', 'disposition': '+default'},
+        ]
+        result = mp.sortStreams(streams, ['d.default.d'], ['eng'], ['aac'], info)
+        assert result[0]['disposition'] == '+default'
+
+    def test_single_stream_unchanged(self, make_stream):
+        mp = _make_mp()
+        info = self._make_info(make_stream)
+        streams = [{'map': 0, 'channels': 2, 'codec': 'aac', 'language': 'eng'}]
+        result = mp.sortStreams(streams, ['channels.d'], ['eng'], ['aac'], info)
+        assert result == streams
+
+    def test_unknown_sort_key_skipped(self, make_stream):
+        mp = _make_mp()
+        info = self._make_info(make_stream)
+        streams = [
+            {'map': 0, 'channels': 2, 'codec': 'aac', 'language': 'eng'},
+            {'map': 1, 'channels': 6, 'codec': 'aac', 'language': 'eng'},
+        ]
+        result = mp.sortStreams(streams, ['nonexistent_key'], ['eng'], ['aac'], info)
+        # Should not raise, returns original order
+        assert len(result) == 2
+
+
+class TestSetAcceleration:
+    def _make_mp_with_hwaccel(self, hwaccels_available, settings_hwaccels,
+                               pix_fmts=None, codecs=None, hwdevices=None,
+                               hwoutputfmt=None, hwaccel_decoders=None):
+        mp = _make_mp()
+        mp.converter = MagicMock()
+        mp.converter.ffmpeg.hwaccels = hwaccels_available
+        mp.converter.ffmpeg.pix_fmts = pix_fmts or {'yuv420p': 8}
+        mp.converter.ffmpeg.codecs = codecs or {'h264': {'decoders': [], 'encoders': []}}
+        mp.settings.hwaccels = settings_hwaccels
+        mp.settings.hwdevices = hwdevices or {}
+        mp.settings.hwoutputfmt = hwoutputfmt or {}
+        mp.settings.hwaccel_decoders = hwaccel_decoders or []
+        return mp
+
+    def test_no_hwaccel_match_returns_empty_opts(self):
+        mp = self._make_mp_with_hwaccel(
+            hwaccels_available=['cuda'],
+            settings_hwaccels=['videotoolbox'],
+        )
+        opts, device = mp.setAcceleration('h264', 'yuv420p')
+        assert opts == []
+        assert device is None
+
+    def test_matching_hwaccel_adds_flag(self):
+        mp = self._make_mp_with_hwaccel(
+            hwaccels_available=['cuda', 'videotoolbox'],
+            settings_hwaccels=['videotoolbox'],
+        )
+        mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value='h264_videotoolbox')
+        opts, device = mp.setAcceleration('h264', 'yuv420p')
+        assert '-hwaccel' in opts
+        assert 'videotoolbox' in opts
+
+    def test_hwdevice_appended_when_configured(self):
+        mp = self._make_mp_with_hwaccel(
+            hwaccels_available=['vaapi'],
+            settings_hwaccels=['vaapi'],
+            hwdevices={'vaapi': '/dev/dri/renderD128'},
+        )
+        mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value='h264_vaapi')
+        opts, device = mp.setAcceleration('h264', 'yuv420p')
+        assert device == '/dev/dri/renderD128'
+        assert '-init_hw_device' in opts
+
+    def test_empty_hwaccels_settings_returns_empty(self):
+        mp = self._make_mp_with_hwaccel(
+            hwaccels_available=['cuda'],
+            settings_hwaccels=[],
+        )
+        opts, device = mp.setAcceleration('h264', 'yuv420p')
+        assert opts == []
+        assert device is None
