@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+#MISE description="Run make target on all DEPLOY_HOSTS without syncing (REMOTE_MAKE=restart mise run deploy:remote-make)"
+#MISE depends=["deploy:check"]
+set -euo pipefail
+
+LOCAL="setup/.local.ini"
+CFG="scripts/local-config.sh"
+DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+
+failed=""
+for host in $DEPLOY_HOSTS; do
+  cfg="$CFG $LOCAL $host"
+  dir=$($cfg DEPLOY_DIR ~/sma)
+  port=$($cfg SSH_PORT 22)
+  key=$($cfg SSH_KEY "")
+  ffmpeg_dir=$($cfg FFMPEG_DIR "")
+  remote_make="${REMOTE_MAKE:-$($cfg REMOTE_MAKE install)}"
+
+  ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+  [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
+
+  make_env=""
+  [ -n "$ffmpeg_dir" ] && make_env="SMA_DAEMON_FFMPEG_DIR=$ffmpeg_dir"
+
+  echo "==> [$host] make $remote_make"
+  # shellcheck disable=SC2086
+  ssh $ssh_opts "$host" "cd $dir && $make_env make $remote_make" || failed="$failed $host"
+done
+
+if [ -n "$failed" ]; then
+  echo "ERROR: remote-make failed for:$failed" >&2
+  exit 1
+fi

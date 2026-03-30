@@ -1,0 +1,453 @@
+#!/usr/bin/env bash
+#MISE description="Roll config to remote hosts: create missing configs from samples, add new keys from updated samples"
+#MISE depends=["deploy:check"]
+set -euo pipefail
+
+LOCAL="setup/.local.ini"
+CFG="scripts/local-config.sh"
+ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
+
+# Build an ssh_opts array from port and optional key path.
+mk_ssh_opts() {
+  local port="$1" key="$2"
+  SSH_OPTS=(-p "$port" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+  [ -n "$key" ] && SSH_OPTS+=(-i "$(eval echo "$key")")
+}
+
+# Detect GPU on a remote host; echoes one of: nvenc qsv vaapi videotoolbox software
+detect_remote_gpu() {
+  local host="$1"
+  # shellcheck disable=SC2087
+  ssh "${SSH_OPTS[@]}" "$host" 'bash -s' <<'REMOTE'
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+      echo nvenc
+    elif [ -d /sys/module/i915 ] || (command -v vainfo >/dev/null 2>&1 && vainfo 2>&1 | grep -qi intel); then
+      echo qsv
+    elif [ -e /dev/dri/renderD128 ] && command -v vainfo >/dev/null 2>&1 && vainfo >/dev/null 2>&1; then
+      echo vaapi
+    else
+      echo software
+    fi
+REMOTE
+}
+
+# Read all key=value lines from an INI sample file; output "section.key" per line.
+# Used to find keys present in the sample but absent from a live config.
+ini_keys() {
+  awk '
+    /^\[/ { gsub(/^\[|\].*/, ""); sec=$0; next }
+    /^[^#;].*=/ {
+      eq = index($0, "=")
+      k  = substr($0, 1, eq-1)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", k)
+      print sec "." k
+    }
+  ' "$1"
+}
+
+# For each key in the sample that is absent from the live config, append it
+# under the correct section header with its sample default value.
+# Args: <sample-file> <live-file>
+ini_add_missing_keys() {
+  local sample="$1" live="$2"
+  python3 - "$sample" "$live" <<'PY'
+import sys, re
+
+def parse_keys(path):
+    """Return {section: {key: value}} for all non-comment key=value lines."""
+    sections = {}
+    cur = None
+    with open(path) as f:
+        for line in f:
+            s = line.strip()
+            m = re.match(r'^\[(.+)\]', s)
+            if m:
+                cur = m.group(1)
+                sections.setdefault(cur, {})
+            elif cur and re.match(r'^[^#;].*=', s):
+                k, _, v = s.partition('=')
+                sections[cur][k.strip()] = v.strip()
+    return sections
+
+sample_secs = parse_keys(sys.argv[1])
+live_secs   = parse_keys(sys.argv[2])
+
+additions = {}  # section -> [(key, value)]
+for sec, keys in sample_secs.items():
+    for k, v in keys.items():
+        if k not in live_secs.get(sec, {}):
+            additions.setdefault(sec, []).append((k, v))
+
+if not additions:
+    sys.exit(0)
+
+# Rewrite the live file, inserting missing keys immediately after their
+# section header so they are always correctly associated with that section.
+with open(sys.argv[2]) as f:
+    lines = f.readlines()
+
+out = []
+cur = None
+inserted = set()
+for line in lines:
+    out.append(line)
+    m = re.match(r'^\[(.+)\]', line.strip())
+    if m:
+        # Flush any pending inserts for the previous section before moving on
+        cur = m.group(1)
+    elif cur and re.match(r'^\[', line.strip()):
+        pass  # handled above
+    # After a section header line, inject missing keys for that section
+    if m and cur in additions and cur not in inserted:
+        for k, v in additions[cur]:
+            out.append(f'{k} = {v}\n')
+            print(f'  + [{cur}] {k} = {v}')
+        inserted.add(cur)
+
+# Any sections that never appeared in the live file get appended at the end
+for sec, pairs in additions.items():
+    if sec not in inserted:
+        out.append(f'\n[{sec}]\n')
+        for k, v in pairs:
+            out.append(f'{k} = {v}\n')
+            print(f'  + [{sec}] {k} = {v}')
+
+with open(sys.argv[2], 'w') as f:
+    f.writelines(out)
+PY
+}
+
+for host in $DEPLOY_HOSTS; do
+  cfg="$CFG $LOCAL $host"
+  dir=$($cfg DEPLOY_DIR ~/sma)
+  port=$($cfg SSH_PORT 22)
+  key=$($cfg SSH_KEY "")
+  use_sudo=$($cfg DEPLOY_USE_SUDO "false")
+  ffmpeg_dir=$($cfg FFMPEG_DIR "")
+
+  mk_ssh_opts "$port" "$key"
+
+  sudo_prefix=""
+  [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
+
+  # Collect service sections once per host — used by both INI stamping and daemon.json.
+  services_json=$(python3 scripts/services-json.py "$LOCAL")
+
+  echo ""
+  echo "==> [$host] rolling config in $dir/config"
+
+  # ── detect GPU ──────────────────────────────────────────────────────────
+  gpu=$(detect_remote_gpu "$host")
+  echo "  GPU: $gpu"
+
+  # ── create missing config files from samples ────────────────────────────
+  echo "  checking for missing config files..."
+  # shellcheck disable=SC2087
+  if ssh "${SSH_OPTS[@]}" "$host" "test -f $dir/config/autoProcess.ini" 2>/dev/null; then
+    echo "  exists: config/autoProcess.ini"
+  else
+    echo "  creating: config/autoProcess.ini (gpu=$gpu)"
+    # shellcheck disable=SC2087
+    ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}bash -s" "$dir" "$gpu" <<'REMOTE'
+      dir="$1" gpu="$2"
+      cp "$dir/setup/autoProcess.ini.sample" "$dir/config/autoProcess.ini"
+      if [ "$gpu" != "software" ]; then
+        sed -i "s/^gpu *=.*/gpu = $gpu/" "$dir/config/autoProcess.ini"
+      fi
+REMOTE
+  fi
+
+  # shellcheck disable=SC2087
+  if ssh "${SSH_OPTS[@]}" "$host" "test -f $dir/config/daemon.json" 2>/dev/null; then
+    echo "  exists: config/daemon.json"
+  else
+    echo "  creating: config/daemon.json"
+    # shellcheck disable=SC2087
+    ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}cp $dir/setup/daemon.json.sample $dir/config/daemon.json"
+  fi
+
+  # shellcheck disable=SC2087
+  if ssh "${SSH_OPTS[@]}" "$host" "test -f $dir/config/daemon.env" 2>/dev/null; then
+    echo "  exists: config/daemon.env"
+  else
+    echo "  creating: config/daemon.env"
+    # shellcheck disable=SC2087
+    ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}cp $dir/setup/daemon.env.sample $dir/config/daemon.env"
+  fi
+
+  # ── sync new INI keys from sample into each existing *.ini ──────────────
+  echo "  checking for new keys in autoProcess.ini.sample..."
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' EXIT
+
+  # Fetch all remote *.ini configs locally for diffing
+  # shellcheck disable=SC2086
+  rsync -az -e "ssh ${SSH_OPTS[*]}" \
+    "$host:$dir/config/" "$tmpdir/remote/" \
+    --include='*.ini' --exclude='*' 2>/dev/null || true
+
+  changed_files=()
+  for remote_ini in "$tmpdir"/remote/*.ini; do
+    [ -f "$remote_ini" ] || continue
+    basename=$(basename "$remote_ini")
+    echo "  merging new keys into $basename..."
+    ini_add_missing_keys "setup/autoProcess.ini.sample" "$remote_ini"
+    changed_files+=("$remote_ini")
+  done
+
+  # Push updated configs back if any were modified
+  if [ "${#changed_files[@]}" -gt 0 ]; then
+    echo "  pushing updated configs to $host:$dir/config/"
+    # shellcheck disable=SC2086
+    rsync -az -e "ssh ${SSH_OPTS[*]}" \
+      "$tmpdir/remote/" "$host:$dir/config/" \
+      --include='*.ini' --exclude='*'
+  fi
+
+  # ── stamp service credentials into all *.ini configs ───────────────────
+  # $services_json was already collected above for the daemon.json step.
+  if [ "$services_json" != "{}" ]; then
+    echo "  stamping service credentials into all *.ini configs"
+    # shellcheck disable=SC2087  # $dir and $services_json expand client-side (intentional)
+    ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir" <<PYREMOTE
+import sys, os, re, glob, json
+
+deploy_dir = sys.argv[1]
+overrides  = json.loads("""$services_json""")
+
+# Build a map from config_file basename -> service section name so we can
+# derive a per-service recycle-bin subdirectory for each *.ini config.
+# e.g. config/autoProcess.tv.ini -> "Sonarr" -> recycle-bin = <base>/Sonarr
+config_to_service = {}
+for sec, keys in overrides.items():
+    cf = keys.get('config_file', '').strip()
+    if cf:
+        config_to_service[os.path.basename(cf)] = sec
+
+recycle_base = overrides.get('Converter', {}).get('recycle-bin', '').strip()
+
+for ini_path in sorted(glob.glob(os.path.join(deploy_dir, 'config', '*.ini'))):
+    basename   = os.path.basename(ini_path)
+    service    = config_to_service.get(basename)
+    lines      = open(ini_path).readlines()
+    out, cur_sec, changed = [], None, False
+    for line in lines:
+        m = re.match(r'^\[(.+)\]', line.strip())
+        if m:
+            cur_sec = m.group(1)
+            out.append(line)
+            continue
+        sec_overrides = overrides.get(cur_sec, {})
+        if sec_overrides:
+            m2 = re.match(r'^(\s*)(\S[^=]*?)\s*=\s*(.*)', line)
+            if m2:
+                indent, key, old_val = m2.groups()
+                key = key.strip()
+                new_val = sec_overrides.get(key)
+                # recycle-bin gets a per-service subdirectory when the config
+                # belongs to a known service and a base path is configured.
+                if key == 'recycle-bin' and cur_sec == 'Converter' and recycle_base and service:
+                    new_val = f'{recycle_base}/{service}'
+                if new_val is not None and new_val != old_val.strip():
+                    print(f'  [{cur_sec}] {key}: {old_val.strip()!r} -> {new_val!r}  ({basename})')
+                    line = f'{indent}{key} = {new_val}\n'
+                    changed = True
+        out.append(line)
+    if changed:
+        open(ini_path, 'w').writelines(out)
+PYREMOTE
+  else
+    echo "  no service credentials configured in $LOCAL, skipping"
+  fi
+
+  # ── apply FFMPEG_DIR to all *.ini configs if set ────────────────────────
+  if [ -n "$ffmpeg_dir" ]; then
+    echo "  setting ffmpeg/ffprobe paths to $ffmpeg_dir in all *.ini configs"
+    # shellcheck disable=SC2087
+    ssh "${SSH_OPTS[@]}" "$host" "
+      for f in $dir/config/*.ini; do
+        sed -i 's|^ffmpeg *=.*|ffmpeg = $ffmpeg_dir/ffmpeg|' \"\$f\"
+        sed -i 's|^ffprobe *=.*|ffprobe = $ffmpeg_dir/ffprobe|' \"\$f\"
+      done
+    "
+  fi
+
+  # ── stamp daemon credentials into config/daemon.json and config/daemon.env ──
+  daemon_api_key=$("$CFG" "$LOCAL" daemon api_key "")
+  daemon_db_url=$("$CFG" "$LOCAL" daemon db_url "")
+  daemon_ffmpeg_dir=$("$CFG" "$LOCAL" daemon ffmpeg_dir "")
+  # daemon ffmpeg_dir falls back to [deploy]/[host] FFMPEG_DIR if not set
+  [ -z "$daemon_ffmpeg_dir" ] && daemon_ffmpeg_dir="$ffmpeg_dir"
+
+  if [ -n "$daemon_api_key" ] || [ -n "$daemon_db_url" ] || [ -n "$daemon_ffmpeg_dir" ] || [ "$services_json" != "{}" ]; then
+    echo "  stamping daemon credentials into config/daemon.json and config/daemon.env"
+    # shellcheck disable=SC2087  # variables expand client-side (intentional)
+    ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir" <<PYREMOTE
+import sys, os, json, re
+
+deploy_dir    = sys.argv[1]
+api_key       = """$daemon_api_key"""
+db_url        = """$daemon_db_url"""
+ffmpeg_dir    = """$daemon_ffmpeg_dir"""
+services      = json.loads("""$services_json""")
+
+# ── daemon.json ───────────────────────────────────────────────────────────
+json_path = os.path.join(deploy_dir, 'config', 'daemon.json')
+if os.path.exists(json_path):
+    with open(json_path) as f:
+        cfg = json.load(f)
+    changed = False
+    for field, val in [('api_key', api_key), ('db_url', db_url), ('ffmpeg_dir', ffmpeg_dir)]:
+        if val and cfg.get(field) != val:
+            print(f'  daemon.json {field}: {cfg.get(field)!r} -> {val!r}')
+            cfg[field] = val
+            changed = True
+
+    # Rebuild path_configs from service sections that have media_path + config_file.
+    # Entries are sorted longest-path-first so the daemon's prefix matching works
+    # correctly (more specific paths take priority).
+    path_entries = []
+    for sec, keys in services.items():
+        media_path  = keys.get('media_path', '').strip()
+        config_file = keys.get('config_file', '').strip()
+        if media_path and config_file:
+            path_entries.append({'path': media_path, 'config': config_file})
+    if path_entries:
+        path_entries.sort(key=lambda e: len(e['path']), reverse=True)
+        old = cfg.get('path_configs', [])
+        if old != path_entries:
+            print(f'  daemon.json path_configs: rebuilding {len(path_entries)} entries')
+            for e in path_entries:
+                print(f'    {e["path"]} -> {e["config"]}')
+            cfg['path_configs'] = path_entries
+            changed = True
+
+    if changed:
+        with open(json_path, 'w') as f:
+            json.dump(cfg, f, indent=2)
+            f.write('\n')
+else:
+    print('  WARNING: config/daemon.json not found, skipping')
+
+# ── daemon.env ────────────────────────────────────────────────────────────
+env_path = os.path.join(deploy_dir, 'config', 'daemon.env')
+if os.path.exists(env_path):
+    env_vars = {
+        'SMA_DAEMON_API_KEY':   api_key,
+        'SMA_DAEMON_DB_URL':    db_url,
+        'SMA_DAEMON_FFMPEG_DIR': ffmpeg_dir,
+    }
+    with open(env_path) as f:
+        lines = f.readlines()
+    out = []
+    seen = set()
+    for line in lines:
+        m = re.match(r'^#?\s*(SMA_DAEMON_\w+)\s*=', line)
+        if m:
+            var = m.group(1)
+            val = env_vars.get(var, '')
+            if val and var not in seen:
+                old = line.rstrip()
+                line = f'{var}={val}\n'
+                if old != line.rstrip():
+                    print(f'  daemon.env {var}: updated')
+                seen.add(var)
+        out.append(line)
+    # append any vars not already present in the file
+    for var, val in env_vars.items():
+        if val and var not in seen:
+            print(f'  daemon.env {var}: added')
+            out.append(f'{var}={val}\n')
+    with open(env_path, 'w') as f:
+        f.writelines(out)
+else:
+    print('  WARNING: config/daemon.env not found, skipping')
+PYREMOTE
+  else
+    echo "  no daemon credentials configured in $LOCAL [daemon], skipping"
+  fi
+
+  # ── deploy post-process scripts ──────────────────────────────────────────
+  echo "  deploying post-process scripts from setup/post_process/ to post_process/"
+
+  # Read credentials for each script type from .local.ini
+  plex_token=$("$CFG" "$LOCAL" Plex token "")
+  plex_username=$("$CFG" "$LOCAL" Plex username "")
+  plex_servername=$("$CFG" "$LOCAL" Plex servername "")
+  jellyfin_url=$("$CFG" "$LOCAL" Jellyfin url "")
+  jellyfin_token=$("$CFG" "$LOCAL" Jellyfin token "")
+  emby_url=$("$CFG" "$LOCAL" Emby url "")
+  emby_apikey=$("$CFG" "$LOCAL" Emby apikey "")
+
+  # shellcheck disable=SC2087  # variables expand client-side (intentional)
+  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir" <<PYREMOTE
+import sys, os, re, glob
+
+deploy_dir = sys.argv[1]
+shebang    = f'#!/{deploy_dir}/venv/bin/python3'
+
+def stamp_shebang(content):
+    """Replace the first shebang line with the venv-relative one."""
+    if content.startswith('#!'):
+        return re.sub(r'^#!.*', shebang, content, count=1)
+    return shebang + '\n' + content
+
+# ── stamp shebang in root-level entry-point scripts ──────────────────────
+entry_points = glob.glob(os.path.join(deploy_dir, '*.py'))
+for path in sorted(entry_points):
+    with open(path) as f:
+        content = f.read()
+    new_content = stamp_shebang(content)
+    if new_content != content:
+        with open(path, 'w') as f:
+            f.write(new_content)
+        print(f'  shebang updated: {os.path.basename(path)}')
+
+# ── copy and stamp post-process scripts ──────────────────────────────────
+src_dir = os.path.join(deploy_dir, 'setup', 'post_process')
+dst_dir = os.path.join(deploy_dir, 'post_process')
+os.makedirs(dst_dir, exist_ok=True)
+
+# Credentials keyed by script basename
+STAMP_RULES = {
+    'plex.py': [
+        (r'^(TOKEN\s*=\s*)["\'].*["\']',      r'\g<1>"""$plex_token"""'),
+        (r'^(USERNAME\s*=\s*)["\'].*["\']',    r'\g<1>"""$plex_username"""'),
+        (r'^(SERVERNAME\s*=\s*)["\'].*["\']',  r'\g<1>"""$plex_servername"""'),
+    ],
+    'jellyfin.py': [
+        (r'^(TOKEN\s*=\s*)["\'].*["\']',       r'\g<1>"""$jellyfin_token"""'),
+        (r'^(url\s*=\s*)["\'].*["\']',         r'\g<1>"""$jellyfin_url"""'),
+    ],
+    'emby.py': [
+        (r'^(BASEURL\s*=\s*)["\'].*["\']',     r'\g<1>"""$emby_url"""'),
+        (r'^(APIKEY\s*=\s*)["\'].*["\']',      r'\g<1>"""$emby_apikey"""'),
+    ],
+}
+
+for src in sorted(glob.glob(os.path.join(src_dir, '*.py'))):
+    name = os.path.basename(src)
+    dst  = os.path.join(dst_dir, name)
+    with open(src) as f:
+        content = f.read()
+    content = stamp_shebang(content)
+    rules = STAMP_RULES.get(name, [])
+    changed = False
+    for pattern, replacement in rules:
+        new_content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+        if new_content != content:
+            changed = True
+            content = new_content
+    with open(dst, 'w') as f:
+        f.write(content)
+    os.chmod(dst, 0o755)
+    status = 'stamped' if changed else 'copied'
+    print(f'  {status}: post_process/{name}')
+PYREMOTE
+
+  echo "  done"
+done
+
+echo ""
+echo "Config roll complete: $DEPLOY_HOSTS"
