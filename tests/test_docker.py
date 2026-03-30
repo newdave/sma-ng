@@ -310,6 +310,51 @@ class TestComposeGpuProfiles:
             assert compose["services"][svc]["extends"]["service"] == "sma"
 
 
+class TestComposePostgres:
+    def test_postgres_service_exists(self, compose):
+        assert "postgres" in compose["services"]
+
+    def test_postgres_profile(self, compose):
+        assert "postgres" in compose["services"]["postgres"]["profiles"]
+
+    def test_postgres_uses_alpine_image(self, compose):
+        assert "postgres" in compose["services"]["postgres"]["image"]
+        assert "alpine" in compose["services"]["postgres"]["image"]
+
+    def test_postgres_restart_policy(self, compose):
+        assert compose["services"]["postgres"]["restart"] == "unless-stopped"
+
+    def test_postgres_has_named_volume(self, compose):
+        vols = compose["services"]["postgres"]["volumes"]
+        assert any("pgdata" in str(v) for v in vols)
+
+    def test_postgres_named_volume_declared(self, compose):
+        assert "sma-pgdata" in compose.get("volumes", {})
+
+    def test_postgres_env_vars_set(self, compose):
+        env = compose["services"]["postgres"]["environment"]
+        env_str = str(env)
+        assert "POSTGRES_DB" in env_str
+        assert "POSTGRES_USER" in env_str
+        assert "POSTGRES_PASSWORD" in env_str
+
+    def test_postgres_has_healthcheck(self, compose):
+        hc = compose["services"]["postgres"].get("healthcheck")
+        assert hc is not None
+        assert "pg_isready" in str(hc["test"])
+
+    def test_sma_depends_on_postgres_optional(self, compose):
+        # depends_on must be present but required: false so sma still starts
+        # without the postgres profile
+        dep = compose["services"]["sma"].get("depends_on", {})
+        assert "postgres" in dep
+        assert dep["postgres"].get("required") is False
+
+    def test_sma_db_url_env_passthrough(self, compose):
+        env = compose["services"]["sma"]["environment"]
+        assert any("SMA_DAEMON_DB_URL" in str(e) for e in env)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # .dockerignore tests
 # ──────────────────────────────────────────────────────────────────────────────
