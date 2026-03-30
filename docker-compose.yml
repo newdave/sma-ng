@@ -1,8 +1,41 @@
 services:
 
   # ────────────────────────────────────────────────────────────────────
+  # Optional PostgreSQL database
+  #
+  # Use this when you don't have an external PostgreSQL instance.
+  # Activate with the 'postgres' profile:
+  #   docker compose --profile postgres up
+  #
+  # SMA will automatically use it when SMA_DAEMON_DB_URL is unset and
+  # this service is running — set the variable in daemon.env or pass it
+  # directly:
+  #   SMA_DAEMON_DB_URL=postgresql://sma:sma@postgres:5432/sma
+  # ────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: sma-postgres
+    profiles: [postgres]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sma}
+      POSTGRES_USER: ${POSTGRES_USER:-sma}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or environment}
+    volumes:
+      - sma-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sma} -d ${POSTGRES_DB:-sma}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ────────────────────────────────────────────────────────────────────
   # CPU-only (no GPU acceleration)
   # Usage: docker compose up sma
+  #
+  # With bundled PostgreSQL:
+  #   docker compose --profile postgres up
   # ────────────────────────────────────────────────────────────────────
   sma:
     build:
@@ -23,6 +56,10 @@ services:
       - SMA_DAEMON_DB_URL=${SMA_DAEMON_DB_URL:-}
     env_file:
       - path: ./config/daemon.env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
         required: false
 
   # ────────────────────────────────────────────────────────────────────
@@ -79,3 +116,8 @@ services:
     group_add:
       - "render"
       - "video"
+
+volumes:
+  # Persistent storage for the bundled PostgreSQL instance.
+  # Only created when the 'postgres' profile is active.
+  sma-pgdata:
