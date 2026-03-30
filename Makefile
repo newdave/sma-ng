@@ -8,7 +8,8 @@
 
 .PHONY: help install install-dev install-all clean config systemd-install restart install-mise \
         lint lint-fix test test-cov detect-gpu daemon convert codecs preview \
-        deploy-check deploy-setup deploy remote-make
+        deploy-check deploy-setup deploy remote-make \
+        docker-build docker-run docker-shell docker-smoke
 
 PYTHON ?= python3
 VENV   ?= venv
@@ -158,3 +159,30 @@ deploy: ## Sync code to all DEPLOY_HOSTS and run REMOTE_MAKE on each
 
 remote-make: ## Run make target on all DEPLOY_HOSTS without syncing
 	$(call MISE_OR_DIRECT,deploy:remote-make,$(error mise is required for deployment tasks))
+
+# ---------------------------------------------------------------------------
+# Docker
+# ---------------------------------------------------------------------------
+
+TAG    ?= sma-ng:local
+FFMPEG_VERSION ?= 8.0
+
+docker-build: ## Build the Docker image locally (TAG=sma-ng:local FFMPEG_VERSION=8.0 to override)
+	$(call MISE_OR_DIRECT,docker:build, \
+	  docker build --target runtime --build-arg FFMPEG_VERSION=$(FFMPEG_VERSION) --tag $(TAG) .)
+
+docker-run: ## Run the locally-built image (TAG=sma-ng:local to override)
+	$(call MISE_OR_DIRECT,docker:run, \
+	  mkdir -p config logs && docker run --rm -p 8585:8585 \
+	    -v $(CURDIR)/config:/config -v $(CURDIR)/logs:/logs $(TAG))
+
+docker-shell: ## Open a shell in the locally-built image
+	$(call MISE_OR_DIRECT,docker:shell, \
+	  docker run --rm -it -v $(CURDIR)/config:/config -v $(CURDIR)/logs:/logs \
+	    --entrypoint /bin/sh $(TAG))
+
+docker-smoke: ## Smoke-test the locally-built image (imports + ffmpeg)
+	$(call MISE_OR_DIRECT,docker:smoke, \
+	  docker run --rm --entrypoint python $(TAG) \
+	    -c "import daemon, resources.readsettings, converter; print('imports OK')" && \
+	  docker run --rm --entrypoint ffmpeg $(TAG) -version | head -2)

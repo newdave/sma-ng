@@ -44,15 +44,25 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-,format=short
 
+      # On PRs: build only (no push) to verify the Dockerfile is valid.
+      # On push to main or tags: build and push to GHCR.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           target: runtime
           push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             FFMPEG_VERSION=8.0
+
+      - name: Smoke-test image (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run --rm --entrypoint python \
+            ${{ fromJSON(steps.meta.outputs.json).tags[0] }} \
+            -c "import daemon; print('daemon module OK')"

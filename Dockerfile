@@ -5,6 +5,10 @@
 # opus, etc.) are linked statically. GPU acceleration APIs (VAAPI, QSV via
 # oneVPL, NVENC via nv-codec-headers) are linked dynamically because they
 # must dlopen GPU-vendor driver backends at runtime on the host machine.
+#
+# Note: libfdk-aac is intentionally excluded — it is non-free and not
+# available in Debian's main repository. FFmpeg's native AAC encoder is used
+# instead (--enable-encoder=aac is on by default).
 # ──────────────────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS ffmpeg-builder
 
@@ -28,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdrm-dev \
     # oneVPL / Intel QSV (dynamic — MFX dispatcher loaded at runtime)
     libvpl-dev \
-    # Codec libraries (static)
+    # Codec libraries (statically linked into the binary)
     libssl-dev \
     zlib1g-dev \
     libx264-dev \
@@ -38,7 +42,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libvorbis-dev \
     libogg-dev \
     libvpx-dev \
-    libfdk-aac-dev \
     libass-dev \
     libfreetype6-dev \
     libfontconfig1-dev \
@@ -68,16 +71,14 @@ RUN ./configure \
     --extra-cflags="-I/usr/local/include" \
     --extra-ldflags="-L/usr/local/lib" \
     --pkg-config-flags="--static" \
-    # Link all codec libraries statically
+    # Link codec libraries statically — produce portable standalone binaries
     --extra-libs="-lpthread -lm -lz -ldl" \
-    # Disable shared FFmpeg libs — produce standalone binaries
     --enable-static \
     --disable-shared \
-    # Enable GPL and non-free (required for x264, fdk-aac)
+    # GPL required for x264/x265; version3 for additional LGPL-v3 codecs
     --enable-gpl \
-    --enable-nonfree \
     --enable-version3 \
-    # Disable unnecessary components to keep the binary lean
+    # Strip documentation and debug symbols to keep the binary lean
     --disable-doc \
     --disable-htmlpages \
     --disable-manpages \
@@ -90,8 +91,6 @@ RUN ./configure \
     --enable-libdrm \
     --enable-libvpl \
     --enable-ffnvcodec \
-    --enable-nvenc \
-    --enable-nvdec \
     # Codec support (statically linked)
     --enable-libx264 \
     --enable-libx265 \
@@ -99,7 +98,6 @@ RUN ./configure \
     --enable-libopus \
     --enable-libvorbis \
     --enable-libvpx \
-    --enable-libfdk-aac \
     --enable-libass \
     --enable-libfreetype \
     --enable-libfontconfig \
@@ -122,9 +120,9 @@ FROM python:3.12-slim-bookworm AS python-builder
 
 WORKDIR /build
 
-COPY setup/requirements.txt ./
+COPY setup/requirements.txt ./requirements.txt
 COPY pyproject.toml ./
-COPY README.md ./docs/README.md
+COPY README.md ./
 
 RUN pip install --upgrade pip \
     && pip install --prefix=/install --no-warn-script-location -r requirements.txt
