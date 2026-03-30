@@ -1,28 +1,45 @@
-# .local — per-machine deployment configuration
+# .local — per-machine deployment configuration (INI format)
 #
-# Copy this file to .local and fill in your host details.
+# Copy this file to .local and customise it.
 # .local is gitignored and never committed.
 #
-# ── required ──────────────────────────────────────────────────────────────────
+# Resolution order for each key:
+#   host-specific section  >  [deploy] defaults  >  built-in Makefile default
 #
-# DEPLOY_HOSTS   Space-separated list of SSH targets (user@host or host).
-#                Each host is synced in sequence; on-host make calls run
-#                against all hosts in parallel.
-#
+# ── [deploy] — project-wide defaults and host list ────────────────────────────
+
+[deploy]
+
+# Space-separated list of SSH targets (user@host or host).
+# Hosts are synced in sequence; on-host make calls iterate the same list.
 DEPLOY_HOSTS = user@server1.example.com user@server2.example.com
 
-# ── optional ──────────────────────────────────────────────────────────────────
-#
-# DEPLOY_DIR     Remote directory to sync into.        Default: ~/sma
-# DEPLOY_BRANCH  Git branch to check out on the host.  Default: (no checkout)
-# SSH_KEY        Path to SSH identity file.             Default: (ssh default)
-# SSH_PORT       SSH port.                              Default: 22
-# RSYNC_EXTRA    Extra flags forwarded to rsync.        Default: (none)
-# REMOTE_MAKE    make target(s) to run after each sync. Default: install
-#
-# DEPLOY_DIR    = /opt/sma
-# DEPLOY_BRANCH = main
-# SSH_KEY       = ~/.ssh/id_ed25519_sma
-# SSH_PORT      = 22
-# RSYNC_EXTRA   = --exclude='config/' --exclude='logs/'
-# REMOTE_MAKE   = install restart
+# Remote directory to sync into.
+DEPLOY_DIR   = ~/sma
+
+# SSH port.
+SSH_PORT     = 22
+
+# make target(s) to run on the host after each sync.
+REMOTE_MAKE  = install
+
+# Directory containing the ffmpeg and ffprobe binaries on the remote host.
+# Passed as SMA_DAEMON_FFMPEG_DIR so the daemon (or entrypoint) can pick up
+# the correct paths without editing autoProcess.ini by hand.
+FFMPEG_DIR   = /usr/local/bin
+
+# ── per-host overrides ────────────────────────────────────────────────────────
+# Any key from [deploy] can be overridden for a specific host by adding a
+# section whose name matches the SSH target exactly.
+
+[user@server1.example.com]
+DEPLOY_DIR   = /opt/sma
+SSH_KEY      = ~/.ssh/id_ed25519_sma
+REMOTE_MAKE  = install restart
+FFMPEG_DIR   = /opt/ffmpeg/bin
+
+[user@server2.example.com]
+SSH_PORT     = 2222
+FFMPEG_DIR   = /usr/bin
+# RSYNC_EXTRA can be set per-host too, e.g. to add --bwlimit:
+# RSYNC_EXTRA  = --bwlimit=2000
