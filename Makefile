@@ -107,7 +107,7 @@ systemd-install: ## Install systemd service (run as root)
 # See .local.sample for all available keys.
 # ---------------------------------------------------------------------------
 
-_LOCAL     = .local
+_LOCAL     = setup/.local.ini
 _CFG       = scripts/local-config.sh
 
 # Read DEPLOY_HOSTS from the [deploy] section at parse time so the loop in
@@ -116,7 +116,7 @@ DEPLOY_HOSTS := $(shell [ -f $(_LOCAL) ] && $(_CFG) $(_LOCAL) deploy DEPLOY_HOST
 
 deploy-check: ## Verify .local exists and DEPLOY_HOSTS is set
 	@if [ ! -f $(_LOCAL) ]; then \
-		echo "ERROR: $(_LOCAL) not found. Copy .local.sample to .local and configure it."; \
+		echo "ERROR: $(_LOCAL) not found. Copy setup/.local.ini.sample to setup/.local.ini and configure it."; \
 		exit 1; \
 	fi
 	@if [ -z "$(DEPLOY_HOSTS)" ]; then \
