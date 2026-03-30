@@ -13,7 +13,6 @@
 FROM debian:bookworm-slim AS ffmpeg-builder
 
 ARG FFMPEG_VERSION=8.0
-ARG MAKEFLAGS="-j$(nproc)"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -107,7 +106,7 @@ RUN ./configure \
     # Network / TLS
     --enable-openssl \
     --enable-protocol=https \
-    && make ${MAKEFLAGS} \
+    && make -j$(nproc) \
     && make install \
     && strip /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
 
