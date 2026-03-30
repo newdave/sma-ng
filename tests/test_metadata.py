@@ -722,3 +722,548 @@ class TestUpdatePlexmatch:
         tagdata.mediatype = MediaType.Movie
         update_plexmatch('/path/file.mp4', tagdata, settings)
         mock_write.assert_called_once()
+
+
+class TestSetHD:
+    def _make_metadata(self):
+        m = Metadata.__new__(Metadata)
+        m.log = MagicMock()
+        m.HD = None
+        return m
+
+    def test_4k_by_width(self):
+        m = self._make_metadata()
+        m.setHD(3840, 1080)
+        assert m.HD == [3]
+
+    def test_4k_by_height(self):
+        m = self._make_metadata()
+        m.setHD(1920, 2160)
+        assert m.HD == [3]
+
+    def test_1080p_by_width(self):
+        m = self._make_metadata()
+        m.setHD(1920, 800)
+        assert m.HD == [2]
+
+    def test_1080p_by_height(self):
+        m = self._make_metadata()
+        m.setHD(1280, 1080)
+        assert m.HD == [2]
+
+    def test_720p_by_width(self):
+        m = self._make_metadata()
+        m.setHD(1280, 480)
+        assert m.HD == [1]
+
+    def test_720p_by_height(self):
+        m = self._make_metadata()
+        m.setHD(640, 720)
+        assert m.HD == [1]
+
+    def test_sd(self):
+        m = self._make_metadata()
+        m.setHD(640, 480)
+        assert m.HD == [0]
+
+
+class TestGetShortDescription:
+    def _make_metadata(self):
+        m = Metadata.__new__(Metadata)
+        m.log = MagicMock()
+        m.description = None
+        return m
+
+    def test_short_description_returned_as_is(self):
+        m = self._make_metadata()
+        assert m.getShortDescription("Short.") == "Short."
+
+    def test_long_description_truncated_at_sentence(self):
+        m = self._make_metadata()
+        text = "First sentence. " + "x" * 300
+        result = m.getShortDescription(text)
+        assert len(result) <= 256
+        assert result.endswith('.')
+
+    def test_exactly_255_chars_returned_as_is(self):
+        m = self._make_metadata()
+        text = "a" * 255
+        assert m.getShortDescription(text) == text
+
+    def test_short_description_property_empty_when_no_description(self):
+        m = self._make_metadata()
+        m.description = None
+        assert m.shortDescription == ""
+
+    def test_short_description_property_delegates(self):
+        m = self._make_metadata()
+        m.description = "Hello world."
+        assert m.shortDescription == "Hello world."
+
+
+class TestGetRating:
+    def _make_movie_metadata(self):
+        m = Metadata.__new__(Metadata)
+        m.log = MagicMock()
+        m.mediatype = MediaType.Movie
+        return m
+
+    def _make_tv_metadata(self):
+        m = Metadata.__new__(Metadata)
+        m.log = MagicMock()
+        m.mediatype = MediaType.TV
+        return m
+
+    def test_known_mpaa_rating(self):
+        m = self._make_movie_metadata()
+        assert m.getRating('PG-13') == 'mpaa|PG-13|300'
+
+    def test_known_tv_rating(self):
+        m = self._make_tv_metadata()
+        assert m.getRating('TV-MA') == 'us-tv|TV-MA|600'
+
+    def test_unknown_rating_movie_returns_not_rated(self):
+        m = self._make_movie_metadata()
+        result = m.getRating('X')
+        assert 'mpaa' in result
+        assert 'Not Rated' in result
+
+    def test_unknown_rating_tv_returns_not_rated(self):
+        m = self._make_tv_metadata()
+        result = m.getRating('UNKNOWN')
+        assert 'us-tv' in result
+
+    def test_case_insensitive(self):
+        m = self._make_movie_metadata()
+        assert m.getRating('pg-13') == m.getRating('PG-13')
+
+    def test_r_rating(self):
+        m = self._make_movie_metadata()
+        assert m.getRating('R') == 'mpaa|R|400'
+
+
+class TestXmlProperty:
+    def _make_metadata_with_credit(self, cast=None, crew=None):
+        m = Metadata.__new__(Metadata)
+        m.log = MagicMock()
+        m.credit = {'cast': cast or [], 'crew': crew or []}
+        return m
+
+    def test_contains_plist_structure(self):
+        m = self._make_metadata_with_credit()
+        xml = m.xml
+        assert '<?xml' in xml
+        assert '<plist' in xml
+        assert '</plist>' in xml
+
+    def test_includes_cast(self):
+        m = self._make_metadata_with_credit(
+            cast=[{'name': 'John Doe'}, {'name': 'Jane Smith'}]
+        )
+        xml = m.xml
+        assert 'John Doe' in xml
+        assert 'Jane Smith' in xml
+
+    def test_max_5_cast_members(self):
+        m = self._make_metadata_with_credit(
+            cast=[{'name': 'Actor %d' % i} for i in range(10)]
+        )
+        xml = m.xml
+        assert xml.count('<key>name</key>') <= 20  # 5 cast + 5 crew max
+        assert 'Actor 5' not in xml
+        assert 'Actor 4' in xml
+
+    def test_includes_director(self):
+        m = self._make_metadata_with_credit(
+            crew=[{'name': 'Kubrick', 'department': 'Directing'}]
+        )
+        assert 'Kubrick' in m.xml
+
+    def test_includes_writer(self):
+        m = self._make_metadata_with_credit(
+            crew=[{'name': 'Sorkin', 'department': 'Writing'}]
+        )
+        assert 'Sorkin' in m.xml
+
+    def test_includes_producer(self):
+        m = self._make_metadata_with_credit(
+            crew=[{'name': 'Bruckheimer', 'department': 'Production'}]
+        )
+        assert 'Bruckheimer' in m.xml
+
+    def test_no_credit_still_valid_xml(self):
+        m = Metadata.__new__(Metadata)
+        m.log = MagicMock()
+        m.credit = None
+        xml = m.xml
+        assert '<?xml' in xml
+        assert '</plist>' in xml
+
+    def test_crew_department_case_insensitive(self):
+        m = self._make_metadata_with_credit(
+            crew=[{'name': 'Nolan', 'department': 'directing'}]
+        )
+        assert 'Nolan' in m.xml
+
+
+class TestGetDefaultLanguage:
+    @patch('resources.metadata.tmdb.Movies')
+    def test_movie_returns_language(self, mock_movies_cls):
+        mock_query = MagicMock()
+        mock_query.info.return_value = {'original_language': 'en'}
+        mock_movies_cls.return_value = mock_query
+        with patch('resources.metadata.getAlpha3TCode', return_value='eng'):
+            result = Metadata.getDefaultLanguage(603, MediaType.Movie)
+        assert result == 'eng'
+
+    @patch('resources.metadata.tmdb.TV')
+    def test_tv_returns_language(self, mock_tv_cls):
+        mock_query = MagicMock()
+        mock_query.info.return_value = {'original_language': 'ja'}
+        mock_tv_cls.return_value = mock_query
+        with patch('resources.metadata.getAlpha3TCode', return_value='jpn'):
+            result = Metadata.getDefaultLanguage(1396, MediaType.TV)
+        assert result == 'jpn'
+
+    def test_none_tmdbid_returns_none(self):
+        result = Metadata.getDefaultLanguage(None, MediaType.Movie)
+        assert result is None
+
+    def test_invalid_mediatype_returns_none(self):
+        result = Metadata.getDefaultLanguage(603, 'invalid')
+        assert result is None
+
+
+class TestWriteTagsMutagen:
+    def _make_movie_metadata(self):
+        m = Metadata.__new__(Metadata)
+        m.log = MagicMock()
+        m.mediatype = MediaType.Movie
+        m.title = 'The Matrix'
+        m.tagline = 'Welcome to the Real World'
+        m.description = 'A hacker discovers reality is a simulation.'
+        m.date = '1999-03-31'
+        m.genre = [{'name': 'Action'}]
+        m.rating = 'mpaa|R|400'
+        m.HD = None
+        m.original = None
+        m.tmdbid = 603
+        m.credit = None
+        return m
+
+    def _make_tv_metadata(self):
+        m = Metadata.__new__(Metadata)
+        m.log = MagicMock()
+        m.mediatype = MediaType.TV
+        m.title = 'Pilot'
+        m.showname = 'Breaking Bad'
+        m.description = 'Walter White begins his journey.'
+        m.date = '2008-01-20'
+        m.genre = [{'name': 'Drama'}]
+        m.rating = 'us-tv|TV-MA|600'
+        m.HD = None
+        m.original = None
+        m.tmdbid = 1396
+        m.credit = None
+        m.season = 1
+        m.episode = 1
+        m.episodes = [1]
+        m.network = [{'name': 'AMC'}]
+        m.seasondata = {'episodes': [{}] * 7}
+        return m
+
+    def test_movie_writes_title_and_stik(self):
+        m = self._make_movie_metadata()
+        mock_video = MagicMock()
+        with patch('resources.metadata.MP4', return_value=mock_video), \
+             patch.object(m, 'getArtwork', return_value=None), \
+             patch.object(type(m), 'xml', new_callable=PropertyMock, return_value='<dict/>'):
+            result = m.writeTags('/fake/movie.mp4', '/fake/movie.mp4', MagicMock())
+        assert result is True
+        keys_set = {call[0][0] for call in mock_video.__setitem__.call_args_list}
+        assert '\xa9nam' in keys_set
+        assert 'stik' in keys_set
+
+    def test_movie_stik_is_9(self):
+        m = self._make_movie_metadata()
+        mock_video = MagicMock()
+        with patch('resources.metadata.MP4', return_value=mock_video), \
+             patch.object(m, 'getArtwork', return_value=None), \
+             patch.object(type(m), 'xml', new_callable=PropertyMock, return_value='<dict/>'):
+            m.writeTags('/fake/movie.mp4', '/fake/movie.mp4', MagicMock())
+        stik_call = next(c for c in mock_video.__setitem__.call_args_list if c[0][0] == 'stik')
+        assert stik_call[0][1] == [9]
+
+    def test_tv_stik_is_10(self):
+        m = self._make_tv_metadata()
+        mock_video = MagicMock()
+        with patch('resources.metadata.MP4', return_value=mock_video), \
+             patch.object(m, 'getArtwork', return_value=None), \
+             patch.object(type(m), 'xml', new_callable=PropertyMock, return_value='<dict/>'), \
+             patch.object(type(m), 'shortDescription', new_callable=PropertyMock, return_value='Short.'):
+            m.writeTags('/fake/tv.mp4', '/fake/tv.mp4', MagicMock())
+        stik_call = next(c for c in mock_video.__setitem__.call_args_list if c[0][0] == 'stik')
+        assert stik_call[0][1] == [10]
+
+    def test_tv_single_episode_includes_tves_trkn(self):
+        m = self._make_tv_metadata()
+        mock_video = MagicMock()
+        with patch('resources.metadata.MP4', return_value=mock_video), \
+             patch.object(m, 'getArtwork', return_value=None), \
+             patch.object(type(m), 'xml', new_callable=PropertyMock, return_value='<dict/>'), \
+             patch.object(type(m), 'shortDescription', new_callable=PropertyMock, return_value='Short.'):
+            m.writeTags('/fake/tv.mp4', '/fake/tv.mp4', MagicMock())
+        keys_set = {c[0][0] for c in mock_video.__setitem__.call_args_list}
+        assert 'tves' in keys_set
+        assert 'trkn' in keys_set
+
+    def test_tv_multi_episode_omits_tves_trkn(self):
+        m = self._make_tv_metadata()
+        m.episodes = [1, 2]  # multi-episode
+        mock_video = MagicMock()
+        with patch('resources.metadata.MP4', return_value=mock_video), \
+             patch.object(m, 'getArtwork', return_value=None), \
+             patch.object(type(m), 'xml', new_callable=PropertyMock, return_value='<dict/>'), \
+             patch.object(type(m), 'shortDescription', new_callable=PropertyMock, return_value='Short.'):
+            m.writeTags('/fake/tv.mp4', '/fake/tv.mp4', MagicMock())
+        keys_set = {c[0][0] for c in mock_video.__setitem__.call_args_list}
+        assert 'tves' not in keys_set
+        assert 'trkn' not in keys_set
+
+    def test_hd_tag_set_when_hd(self):
+        m = self._make_movie_metadata()
+        m.HD = [2]
+        mock_video = MagicMock()
+        with patch('resources.metadata.MP4', return_value=mock_video), \
+             patch.object(m, 'getArtwork', return_value=None), \
+             patch.object(type(m), 'xml', new_callable=PropertyMock, return_value='<dict/>'):
+            m.writeTags('/fake/movie.mp4', '/fake/movie.mp4', MagicMock())
+        keys_set = {c[0][0] for c in mock_video.__setitem__.call_args_list}
+        assert 'hdvd' in keys_set
+
+    def test_rating_tag_set(self):
+        m = self._make_movie_metadata()
+        mock_video = MagicMock()
+        with patch('resources.metadata.MP4', return_value=mock_video), \
+             patch.object(m, 'getArtwork', return_value=None), \
+             patch.object(type(m), 'xml', new_callable=PropertyMock, return_value='<dict/>'):
+            m.writeTags('/fake/movie.mp4', '/fake/movie.mp4', MagicMock())
+        keys_set = {c[0][0] for c in mock_video.__setitem__.call_args_list}
+        assert '----:com.apple.iTunes:iTunEXTC' in keys_set
+
+    def test_sets_hd_from_dimensions(self):
+        m = self._make_movie_metadata()
+        mock_video = MagicMock()
+        with patch('resources.metadata.MP4', return_value=mock_video), \
+             patch.object(m, 'getArtwork', return_value=None), \
+             patch.object(type(m), 'xml', new_callable=PropertyMock, return_value='<dict/>'):
+            m.writeTags('/fake/movie.mp4', '/fake/movie.mp4', MagicMock(), width=1920, height=1080)
+        assert m.HD == [2]
+
+    def test_fallback_to_ffmpeg_on_mp4_error(self):
+        from mutagen.mp4 import MP4StreamInfoError
+        m = self._make_movie_metadata()
+        mock_converter = MagicMock()
+        mock_conv = iter([(None, ['ffmpeg', '-i', 'x']), (100, 'done')])
+        mock_converter.tag.return_value = mock_conv
+        with patch('resources.metadata.MP4', side_effect=MP4StreamInfoError), \
+             patch.object(m, 'getArtwork', return_value=None):
+            result = m.writeTags('/fake/movie.mp4', '/fake/movie.mp4', mock_converter)
+        assert result is True
+
+    def test_returns_false_on_save_error(self):
+        m = self._make_movie_metadata()
+        mock_video = MagicMock()
+        mock_video.save.side_effect = Exception("disk full")
+        with patch('resources.metadata.MP4', return_value=mock_video), \
+             patch.object(m, 'getArtwork', return_value=None), \
+             patch.object(type(m), 'xml', new_callable=PropertyMock, return_value='<dict/>'):
+            result = m.writeTags('/fake/movie.mp4', '/fake/movie.mp4', MagicMock())
+        assert result is False
+
+
+class TestGetArtwork:
+    def _make_metadata(self, mediatype=MediaType.Movie):
+        m = Metadata.__new__(Metadata)
+        m.log = MagicMock()
+        m.mediatype = mediatype
+        m.tmdbid = 603
+        m.moviedata = {'poster_path': '/abc.jpg'}
+        m.episodedata = {'still_path': None}
+        m.seasondata = {'poster_path': '/season.jpg'}
+        m.showdata = {'poster_path': '/show.jpg'}
+        return m
+
+    def test_local_poster_file_used(self, tmp_path):
+        m = self._make_metadata()
+        # Create a local jpg next to inputfile
+        inputfile = str(tmp_path / 'movie.mkv')
+        poster = str(tmp_path / 'movie.jpg')
+        open(poster, 'wb').close()
+        result = m.getArtwork(inputfile, inputfile)
+        assert result == poster
+
+    def test_smaposter_file_used_when_no_basename_match(self, tmp_path):
+        m = self._make_metadata()
+        inputfile = str(tmp_path / 'movie.mkv')
+        smaposter = str(tmp_path / 'smaposter.jpg')
+        open(smaposter, 'wb').close()
+        result = m.getArtwork(inputfile, inputfile)
+        assert result == smaposter
+
+    def test_downloads_when_no_local_file(self, tmp_path):
+        m = self._make_metadata()
+        inputfile = str(tmp_path / 'movie.mkv')
+        with patch.object(m, 'urlretrieve', return_value=('/tmp/poster-603.jpg', None)) as mock_url:
+            result = m.getArtwork(inputfile, inputfile)
+        mock_url.assert_called_once()
+        assert result == '/tmp/poster-603.jpg'
+
+    def test_returns_none_when_no_poster_path(self, tmp_path):
+        m = self._make_metadata()
+        m.moviedata = {'poster_path': None}
+        inputfile = str(tmp_path / 'movie.mkv')
+        result = m.getArtwork(inputfile, inputfile)
+        assert result is None
+
+    def test_tv_thumbnail_uses_still_path(self, tmp_path):
+        m = self._make_metadata(MediaType.TV)
+        m.episodedata = {'still_path': '/still.jpg'}
+        inputfile = str(tmp_path / 'episode.mkv')
+        with patch.object(m, 'urlretrieve', return_value=('/tmp/poster-603.jpg', None)):
+            result = m.getArtwork(inputfile, inputfile, thumbnail=True)
+        assert result == '/tmp/poster-603.jpg'
+
+    def test_tv_falls_back_to_show_poster(self, tmp_path):
+        m = self._make_metadata(MediaType.TV)
+        m.seasondata = {'poster_path': None}
+        m.showdata = {'poster_path': '/show.jpg'}
+        inputfile = str(tmp_path / 'episode.mkv')
+        with patch.object(m, 'urlretrieve', return_value=('/tmp/poster-603.jpg', None)):
+            result = m.getArtwork(inputfile, inputfile, thumbnail=False)
+        assert result == '/tmp/poster-603.jpg'
+
+
+class TestWriteTvPlexmatch:
+    def _make_tagdata(self, showname='Breaking Bad', season=1, episode=1, tmdbid=1396):
+        t = MagicMock()
+        t.showname = showname
+        t.season = season
+        t.episode = episode
+        t.episodes = [episode]
+        t.tmdbid = tmdbid
+        t.tvdbid = 81189
+        t.imdbid = 'tt0903747'
+        t.showdata = {'first_air_date': '2008-01-20'}
+        return t
+
+    def test_creates_plexmatch_in_show_root(self, tmp_path):
+        show_dir = tmp_path / 'Breaking Bad'
+        season_dir = show_dir / 'Season 01'
+        season_dir.mkdir(parents=True)
+        filepath = str(season_dir / 'S01E01.mp4')
+
+        tagdata = self._make_tagdata()
+        _write_tv_plexmatch(filepath, tagdata, MagicMock())
+
+        plexmatch = show_dir / '.plexmatch'
+        assert plexmatch.exists()
+
+    def test_writes_title_and_year(self, tmp_path):
+        show_dir = tmp_path / 'Breaking Bad'
+        season_dir = show_dir / 'Season 01'
+        season_dir.mkdir(parents=True)
+        filepath = str(season_dir / 'S01E01.mp4')
+
+        tagdata = self._make_tagdata()
+        _write_tv_plexmatch(filepath, tagdata, MagicMock())
+
+        content = (show_dir / '.plexmatch').read_text()
+        assert 'title: Breaking Bad' in content
+        assert 'year: 2008' in content
+
+    def test_writes_episode_entry(self, tmp_path):
+        show_dir = tmp_path / 'Breaking Bad'
+        season_dir = show_dir / 'Season 01'
+        season_dir.mkdir(parents=True)
+        filepath = str(season_dir / 'S01E01.mp4')
+
+        tagdata = self._make_tagdata(episode=3)
+        tagdata.episodes = [3]
+        _write_tv_plexmatch(filepath, tagdata, MagicMock())
+
+        content = (show_dir / '.plexmatch').read_text()
+        assert 'Episode: S01E03:' in content
+
+    def test_accumulates_episodes_across_calls(self, tmp_path):
+        show_dir = tmp_path / 'Breaking Bad'
+        season_dir = show_dir / 'Season 01'
+        season_dir.mkdir(parents=True)
+
+        for ep in [1, 2, 3]:
+            filepath = str(season_dir / ('S01E0%d.mp4' % ep))
+            tagdata = self._make_tagdata(episode=ep)
+            tagdata.episodes = [ep]
+            _write_tv_plexmatch(filepath, tagdata, MagicMock())
+
+        content = (show_dir / '.plexmatch').read_text()
+        assert 'S01E01' in content
+        assert 'S01E02' in content
+        assert 'S01E03' in content
+
+    def test_tmdb_guid_written(self, tmp_path):
+        show_dir = tmp_path / 'Show'
+        show_dir.mkdir()
+        filepath = str(show_dir / 'S01E01.mp4')
+
+        tagdata = self._make_tagdata(tmdbid=9999)
+        _write_tv_plexmatch(filepath, tagdata, MagicMock())
+
+        content = (show_dir / '.plexmatch').read_text()
+        assert 'guid: tmdb://9999' in content
+
+
+class TestWriteMoviePlexmatch:
+    def _make_tagdata(self, title='The Matrix', date='1999-03-31', tmdbid=603):
+        t = MagicMock()
+        t.title = title
+        t.date = date
+        t.tmdbid = tmdbid
+        return t
+
+    def test_creates_plexmatch_in_movie_dir(self, tmp_path):
+        movie_dir = tmp_path / 'The Matrix (1999)'
+        movie_dir.mkdir()
+        filepath = str(movie_dir / 'The Matrix.mp4')
+
+        _write_movie_plexmatch(filepath, self._make_tagdata(), MagicMock())
+        assert (movie_dir / '.plexmatch').exists()
+
+    def test_writes_title_year_guid(self, tmp_path):
+        movie_dir = tmp_path / 'The Matrix (1999)'
+        movie_dir.mkdir()
+        filepath = str(movie_dir / 'The Matrix.mp4')
+
+        _write_movie_plexmatch(filepath, self._make_tagdata(), MagicMock())
+        content = (movie_dir / '.plexmatch').read_text()
+        assert 'title: The Matrix' in content
+        assert 'year: 1999' in content
+        assert 'guid: tmdb://603' in content
+
+    def test_missing_date_omits_year(self, tmp_path):
+        movie_dir = tmp_path / 'Movie'
+        movie_dir.mkdir()
+        filepath = str(movie_dir / 'movie.mp4')
+
+        _write_movie_plexmatch(filepath, self._make_tagdata(date=''), MagicMock())
+        content = (movie_dir / '.plexmatch').read_text()
+        assert 'year' not in content
+
+    def test_no_tmdbid_omits_guid(self, tmp_path):
+        movie_dir = tmp_path / 'Movie'
+        movie_dir.mkdir()
+        filepath = str(movie_dir / 'movie.mp4')
+
+        _write_movie_plexmatch(filepath, self._make_tagdata(tmdbid=None), MagicMock())
+        content = (movie_dir / '.plexmatch').read_text()
+        assert 'guid' not in content

@@ -102,6 +102,7 @@ class ReadSettings:
             'copy-to': '',
             'move-to': '',
             'delete-original': True,
+            'recycle-bin': '',
             'process-same-extensions': False,
             'bypass-if-copying-all': False,
             'force-convert': False,
@@ -552,6 +553,7 @@ class ReadSettings:
         self.copyto = config.getdirectories(section, "copy-to", separator='|')
         self.moveto = config.getdirectory(section, "move-to")
         self.delete = config.getboolean(section, "delete-original")
+        self.recycle_bin = config.get(section, "recycle-bin").strip() or None
         self.process_same_extensions = config.getboolean(section, "process-same-extensions")
         self.bypass_copy_all = config.getboolean(section, "bypass-if-copying-all")
         self.force_convert = config.getboolean(section, "force-convert")

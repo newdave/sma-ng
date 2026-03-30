@@ -359,3 +359,127 @@ class TestUTorrentPostProcess:
             mock_submit.assert_not_called()
         finally:
             sys.argv = original_argv
+
+
+class TestNZBGetPostProcessExtended:
+    """Test additional NZBGetPostProcess.py branches."""
+
+    def _nzbget_env(self, directory, **overrides):
+        env = {
+            'NZBOP_VERSION': '21.0',
+            'NZBPO_MP4_FOLDER': os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'),
+            'NZBPO_SHOULDCONVERT': 'true',
+            'NZBPO_SONARR_CAT': 'sonarr',
+            'NZBPO_RADARR_CAT': 'radarr',
+            'NZBPO_BYPASS_CAT': 'bypass',
+            'NZBPP_TOTALSTATUS': 'SUCCESS',
+            'NZBPP_DIRECTORY': directory,
+            'NZBPP_NZBFILENAME': 'test.nzb',
+            'NZBPP_CATEGORY': 'movies',
+        }
+        env.update(overrides)
+        return env
+
+    @patch('resources.webhook_client.submit_job')
+    def test_failed_download_skips(self, mock_submit, tmp_path):
+        env = self._nzbget_env(str(tmp_path), NZBPP_TOTALSTATUS='FAILURE')
+        with patch.dict(os.environ, env, clear=False):
+            with pytest.raises(SystemExit) as exc:
+                exec(compile(_read_script('NZBGetPostProcess.py'), 'NZBGetPostProcess.py', 'exec'))
+            assert exc.value.code == 95  # POSTPROCESS_NONE
+        mock_submit.assert_not_called()
+
+    @patch('resources.webhook_client.submit_job')
+    def test_invalid_directory_exits_error(self, mock_submit, tmp_path):
+        env = self._nzbget_env('/nonexistent/directory')
+        with patch.dict(os.environ, env, clear=False):
+            with pytest.raises(SystemExit) as exc:
+                exec(compile(_read_script('NZBGetPostProcess.py'), 'NZBGetPostProcess.py', 'exec'))
+            assert exc.value.code == 94  # POSTPROCESS_ERROR
+        mock_submit.assert_not_called()
+
+    @patch('resources.webhook_client.submit_job')
+    def test_no_files_submitted_exits_none(self, mock_submit, tmp_path):
+        # Empty directory — no files to submit
+        mock_submit.return_value = None
+        env = self._nzbget_env(str(tmp_path))
+        with patch.dict(os.environ, env, clear=False):
+            with pytest.raises(SystemExit) as exc:
+                exec(compile(_read_script('NZBGetPostProcess.py'), 'NZBGetPostProcess.py', 'exec'))
+            assert exc.value.code == 95  # POSTPROCESS_NONE
+
+
+class TestSABPostProcessExtended:
+    """Test additional SABPostProcess.py branches."""
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_insufficient_args_exits(self, mock_validate):
+        original_argv = sys.argv
+        sys.argv = ['SABPostProcess.py', '/path', 'nzb']  # too few args
+        try:
+            with pytest.raises(SystemExit) as exc:
+                exec(compile(_read_script('SABPostProcess.py'), 'SABPostProcess.py', 'exec'))
+            assert exc.value.code == 1
+        finally:
+            sys.argv = original_argv
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_bypass_category_skips(self, mock_validate, tmp_path):
+        original_argv = sys.argv
+        sys.argv = ['SABPostProcess.py', str(tmp_path), 'nzb', 'clean', '0', 'bypass', 'group', '0']
+        try:
+            mock_submit, _ = _run_script('SABPostProcess.py')
+            mock_submit.assert_not_called()
+        finally:
+            sys.argv = original_argv
+
+
+class TestUTorrentPostProcessExtended:
+    """Test additional uTorrentPostProcess.py branches."""
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_insufficient_args_exits(self, mock_validate, tmp_path):
+        original_argv = sys.argv
+        sys.argv = ['uTorrentPostProcess.py', 'label', 'tracker']  # too few args
+        try:
+            with pytest.raises(SystemExit) as exc:
+                exec(compile(_read_script('uTorrentPostProcess.py'), 'uTorrentPostProcess.py', 'exec'))
+            assert exc.value.code == 1
+        finally:
+            sys.argv = original_argv
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_webui_pre_action_called(self, mock_validate, tmp_path):
+        f = tmp_path / 'movie.mkv'
+        f.touch()
+        original_argv = sys.argv
+        sys.argv = ['uTorrentPostProcess.py', 'movies', 'tracker', str(tmp_path),
+                    'single', 'movie.mkv', 'hash123', 'Movie']
+        try:
+            with patch('requests.get') as mock_get:
+                mock_token_resp = MagicMock()
+                mock_token_resp.text = "token='MYTOKEN'"
+                mock_get.return_value = mock_token_resp
+
+                with patch('resources.readsettings.ReadSettings.__init__', return_value=None) as mock_init:
+                    # Build a mock settings object with webui enabled
+                    def fake_init(self_inner, *a, **kw):
+                        self_inner.uTorrent = {
+                            'bypass': [],
+                            'webui': True,
+                            'actionbefore': 'pause',
+                            'actionafter': 'resume',
+                            'host': 'localhost',
+                            'port': 8080,
+                            'ssl': False,
+                            'user': '',
+                            'pass': '',
+                        }
+                    mock_init.side_effect = fake_init
+                    mock_submit, _ = _run_script('uTorrentPostProcess.py')
+
+            # Two GET calls: one for pre-action token, one for pre-action itself
+            # (and similarly for post)
+            assert mock_get.call_count >= 2
+        finally:
+            sys.argv = original_argv

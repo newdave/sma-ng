@@ -696,3 +696,142 @@ class TestArtworkParsing:
         settings = ReadSettings(ini)
         assert settings.artwork is True
         assert settings.thumbnail is True
+
+
+class TestPermissionsParsing:
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_invalid_chmod_defaults_to_664(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('chmod = 0664', 'chmod = notoctal')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert settings.permissions['chmod'] == 0o664
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_valid_chmod_is_parsed(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('chmod = 0664', 'chmod = 0755')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert settings.permissions['chmod'] == 0o755
+
+
+class TestArtworkParsingExtended:
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_poster_value(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('download-artwork = false', 'download-artwork = poster')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert settings.artwork is True
+        assert settings.thumbnail is False
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_invalid_artwork_value_defaults_to_true(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('download-artwork = false', 'download-artwork = maybe')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert settings.artwork is True
+
+
+class TestMigrateFromOld:
+    """Test migrateFromOld() handles deprecated config options."""
+
+    def _make_settings_and_config(self, tmp_ini, extra_options=''):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        if extra_options:
+            content = content.replace('[Audio]\ncodec = aac', '[Audio]\ncodec = aac\n' + extra_options)
+        with open(ini, 'w') as f:
+            f.write(content)
+        return ini
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_sort_streams_false_clears_sorting(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('[Converter]\nffmpeg', '[Converter]\nsort-streams = false\nffmpeg')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert settings.audio_sorting == []
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_prefer_more_channels_true_replaces_channels(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        # Add deprecated option and a sorting value that uses 'channels'
+        content = content.replace(
+            'sorting = language, channels.d, map, d.comment',
+            'sorting = language, channels, map, d.comment'
+        )
+        content = content.replace('[Audio]\ncodec = aac', '[Audio]\ncodec = aac\nprefer-more-channels = true')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert 'channels.d' in settings.audio_sorting
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_prefer_more_channels_false_uses_channels_a(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('[Audio]\ncodec = aac', '[Audio]\ncodec = aac\nprefer-more-channels = false')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert 'channels.a' in settings.audio_sorting
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_gpu_moved_from_converter_to_video(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('[Converter]\nffmpeg', '[Converter]\ngpu = nvenc\nffmpeg')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert settings.gpu == 'nvenc'
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_final_sort_with_map_not_already_present(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace(
+            'sorting = language, channels.d, map, d.comment',
+            'sorting = language, channels.d, d.comment'
+        )
+        content = content.replace('[Audio.Sorting]', '[Audio.Sorting]\nfinal-sort = true')
+        with open(ini, 'w') as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert 'map' in settings.audio_sorting
+
+    @patch('resources.readsettings.ReadSettings._validate_binaries')
+    def test_copy_original_before_removed(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, 'r') as f:
+            content = f.read()
+        content = content.replace('[Audio]\ncodec = aac', '[Audio]\ncodec = aac\ncopy-original-before = true')
+        with open(ini, 'w') as f:
+            f.write(content)
+        # Should not raise — deprecated option is silently removed
+        settings = ReadSettings(ini)
+        assert settings is not None
