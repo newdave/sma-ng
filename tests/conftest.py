@@ -1,83 +1,99 @@
 """Shared fixtures for SMA-NG test suite."""
+
 import os
 import sys
-import tempfile
+
 import pytest
 
 # Ensure project root is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from converter.ffmpeg import MediaStreamInfo, MediaFormatInfo, MediaInfo
+from converter.ffmpeg import MediaFormatInfo, MediaInfo, MediaStreamInfo
 
 
 @pytest.fixture
 def make_stream():
     """Factory fixture for creating MediaStreamInfo objects."""
-    def _make(type='video', codec='h264', index=0, **kwargs):
+
+    def _make(type="video", codec="h264", index=0, **kwargs):
         s = MediaStreamInfo()
         s.type = type
         s.codec = codec
         s.index = index
-        s.metadata = kwargs.pop('metadata', {'language': 'eng'})
-        s.disposition = kwargs.pop('disposition', {'default': True, 'forced': False})
+        s.metadata = kwargs.pop("metadata", {"language": "eng"})
+        s.disposition = kwargs.pop("disposition", {"default": True, "forced": False})
         for k, v in kwargs.items():
             setattr(s, k, v)
         return s
+
     return _make
 
 
 @pytest.fixture
 def make_format():
     """Factory fixture for creating MediaFormatInfo objects."""
+
     def _make(**kwargs):
         f = MediaFormatInfo()
-        f.format = kwargs.get('format', 'matroska,webm')
-        f.bitrate = kwargs.get('bitrate', 10000000.0)
-        f.duration = kwargs.get('duration', 7200.0)
+        f.format = kwargs.get("format", "matroska,webm")
+        f.bitrate = kwargs.get("bitrate", 10000000.0)
+        f.duration = kwargs.get("duration", 7200.0)
         return f
+
     return _make
 
 
 @pytest.fixture
 def make_media_info(make_stream, make_format):
     """Factory fixture for creating MediaInfo objects with sensible defaults."""
-    def _make(video_codec='h264', video_bitrate=8000000, video_width=1920, video_height=1080,
-              audio_codec='aac', audio_channels=2, audio_bitrate=128000,
-              subtitle_codec=None, total_bitrate=10000000):
+
+    def _make(video_codec="h264", video_bitrate=8000000, video_width=1920, video_height=1080, audio_codec="aac", audio_channels=2, audio_bitrate=128000, subtitle_codec=None, total_bitrate=10000000):
         info = MediaInfo()
         info.format = make_format(bitrate=total_bitrate)
 
         video = make_stream(
-            type='video', codec=video_codec, index=0,
-            bitrate=video_bitrate, video_width=video_width, video_height=video_height,
-            fps=23.976, pix_fmt='yuv420p', profile='main', video_level=4.1,
-            field_order='progressive',
-            metadata={}, disposition={'default': True, 'forced': False}
+            type="video",
+            codec=video_codec,
+            index=0,
+            bitrate=video_bitrate,
+            video_width=video_width,
+            video_height=video_height,
+            fps=23.976,
+            pix_fmt="yuv420p",
+            profile="main",
+            video_level=4.1,
+            field_order="progressive",
+            metadata={},
+            disposition={"default": True, "forced": False},
         )
         video.framedata = {}
         info.streams.append(video)
 
         audio = make_stream(
-            type='audio', codec=audio_codec, index=1,
-            bitrate=audio_bitrate, audio_channels=audio_channels, audio_samplerate=48000,
-            metadata={'language': 'eng'}, disposition={'default': True, 'forced': False}
+            type="audio",
+            codec=audio_codec,
+            index=1,
+            bitrate=audio_bitrate,
+            audio_channels=audio_channels,
+            audio_samplerate=48000,
+            metadata={"language": "eng"},
+            disposition={"default": True, "forced": False},
         )
         info.streams.append(audio)
 
         if subtitle_codec:
-            sub = make_stream(
-                type='subtitle', codec=subtitle_codec, index=2,
-                metadata={'language': 'eng'}, disposition={'default': False, 'forced': False}
-            )
+            sub = make_stream(type="subtitle", codec=subtitle_codec, index=2, metadata={"language": "eng"}, disposition={"default": False, "forced": False})
             info.streams.append(sub)
 
         return info
+
     return _make
 
 
 @pytest.fixture
 def tmp_ini(tmp_path):
     """Create a temporary autoProcess.ini with minimal valid config."""
+
     def _make(content=None, gpu=None):
         if content is None:
             content = """[Converter]
@@ -340,11 +356,12 @@ path-mapping =
 plexmatch = true
 """
         if gpu is not None:
-            content = content.replace('gpu =\n', 'gpu = %s\n' % gpu)
+            content = content.replace("gpu =\n", "gpu = %s\n" % gpu)
         ini_path = str(tmp_path / "autoProcess.ini")
-        with open(ini_path, 'w') as f:
+        with open(ini_path, "w") as f:
             f.write(content)
         return ini_path
+
     return _make
 
 
@@ -358,6 +375,7 @@ def tmp_db(tmp_path):
 def job_db(tmp_db):
     """Yield an open JobDatabase and close it after the test."""
     from daemon import JobDatabase
+
     db = JobDatabase(tmp_db)
     yield db
     db.close()

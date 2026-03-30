@@ -1,8 +1,9 @@
-import os
-import logging
 import json
-from subprocess import Popen, PIPE
-from resources.extensions import bad_post_files, bad_post_extensions
+import logging
+import os
+from subprocess import PIPE, Popen
+
+from resources.extensions import bad_post_extensions, bad_post_files
 from resources.metadata import MediaType
 
 
@@ -19,12 +20,12 @@ class PostProcessor:
     def set_script_environment(self, files):
         self.log.debug("Setting script environment.")
         self.post_process_environment = os.environ.copy()
-        self.post_process_environment['SMA_FILES'] = json.dumps(files)
+        self.post_process_environment["SMA_FILES"] = json.dumps(files)
 
     def gather_scripts(self):
         self.log.debug("Gathering scripts.")
         current_directory = os.path.dirname(os.path.realpath(__file__))
-        post_process_directory = os.path.join(current_directory, '../post_process')
+        post_process_directory = os.path.join(current_directory, "../post_process")
         scripts = []
         for script in sorted(os.listdir(post_process_directory)):
             if os.path.splitext(script)[1] in bad_post_extensions or os.path.isdir(os.path.join(post_process_directory, script)) or script in bad_post_files:
@@ -43,18 +44,18 @@ class PostProcessor:
 
     def setTV(self, tmdbid, season, episode):
         self.log.debug("Setting TV metadata.")
-        self.post_process_environment['SMA_TMDBID'] = str(tmdbid)
-        self.post_process_environment['SMA_SEASON'] = str(season)
+        self.post_process_environment["SMA_TMDBID"] = str(tmdbid)
+        self.post_process_environment["SMA_SEASON"] = str(season)
         if isinstance(episode, list):
-            self.post_process_environment['SMA_EPISODE'] = str(episode[0])
-            self.post_process_environment['SMA_EPISODES'] = ','.join(str(e) for e in episode)
+            self.post_process_environment["SMA_EPISODE"] = str(episode[0])
+            self.post_process_environment["SMA_EPISODES"] = ",".join(str(e) for e in episode)
         else:
-            self.post_process_environment['SMA_EPISODE'] = str(episode)
-            self.post_process_environment['SMA_EPISODES'] = str(episode)
+            self.post_process_environment["SMA_EPISODE"] = str(episode)
+            self.post_process_environment["SMA_EPISODES"] = str(episode)
 
     def setMovie(self, tmdbid):
         self.log.debug("Setting movie metadata.")
-        self.post_process_environment['SMA_TMDBID'] = str(tmdbid)
+        self.post_process_environment["SMA_TMDBID"] = str(tmdbid)
 
     def run_scripts(self):
         self.log.debug("Running scripts.")
@@ -73,5 +74,4 @@ class PostProcessor:
                 self.log.exception("Failed to execute script %s." % script)
 
     def run_script_command(self, script):
-        return Popen([str(script)], shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, env=self.post_process_environment,
-                     close_fds=(os.name != 'nt'))
+        return Popen([str(script)], shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, env=self.post_process_environment, close_fds=(os.name != "nt"))

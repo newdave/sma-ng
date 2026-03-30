@@ -8,11 +8,12 @@ Handles pre/post actions (pause, resume, delete) on the torrent.
 Args: "%L" "%T" "%R" "%F" "%N" "%I"
       Category, Tracker, RootPath, ContentPath, TorrentName, InfoHash
 """
-import os
+
 import sys
+
+import resources.webhook_client as webhook
 from resources.log import getLogger
 from resources.readsettings import ReadSettings
-import resources.webhook_client as webhook
 
 log = getLogger("qBittorrentPostProcess")
 log.info("qBittorrent post-processing started.")
@@ -42,29 +43,30 @@ try:
     log.info("Content path: %s" % content_path)
     log.info("Torrent: %s (%s)" % (torrent_name, info_hash))
 
-    if webhook.check_bypass(settings.qBittorrent.get('bypass', []), label):
+    if webhook.check_bypass(settings.qBittorrent.get("bypass", []), label):
         log.info("Bypass label matched, skipping.")
         sys.exit(0)
 
     # Connect to qBittorrent for pre/post actions
     qbt_client = None
-    actionbefore = settings.qBittorrent.get('actionbefore', '').lower()
-    actionafter = settings.qBittorrent.get('actionafter', '').lower()
+    actionbefore = settings.qBittorrent.get("actionbefore", "").lower()
+    actionafter = settings.qBittorrent.get("actionafter", "").lower()
 
     if actionbefore or actionafter:
         try:
             from qbittorrent import Client
-            host = settings.qBittorrent.get('host', 'localhost')
-            port = settings.qBittorrent.get('port', 8080)
-            ssl = settings.qBittorrent.get('ssl', False)
+
+            host = settings.qBittorrent.get("host", "localhost")
+            port = settings.qBittorrent.get("port", 8080)
+            ssl = settings.qBittorrent.get("ssl", False)
             protocol = "https://" if ssl else "http://"
-            qbt_client = Client('%s%s:%s/' % (protocol, host, port))
-            qbt_client.login(settings.qBittorrent.get('user', ''), settings.qBittorrent.get('pass', ''))
+            qbt_client = Client("%s%s:%s/" % (protocol, host, port))
+            qbt_client.login(settings.qBittorrent.get("user", ""), settings.qBittorrent.get("pass", ""))
         except:
             log.exception("Failed to connect to qBittorrent WebUI.")
 
     # Pre-action
-    if qbt_client and actionbefore == 'pause':
+    if qbt_client and actionbefore == "pause":
         try:
             qbt_client.pause(info_hash)
             log.info("Paused torrent %s." % info_hash)
@@ -78,13 +80,13 @@ try:
     # Post-action
     if qbt_client and actionafter:
         try:
-            if actionafter == 'resume':
+            if actionafter == "resume":
                 qbt_client.resume(info_hash)
                 log.info("Resumed torrent %s." % info_hash)
-            elif actionafter == 'delete':
+            elif actionafter == "delete":
                 qbt_client.delete(info_hash)
                 log.info("Deleted torrent %s (kept data)." % info_hash)
-            elif actionafter == 'deletedata':
+            elif actionafter == "deletedata":
                 qbt_client.delete_permanently(info_hash)
                 log.info("Deleted torrent %s and data." % info_hash)
         except:

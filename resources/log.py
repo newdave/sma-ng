@@ -1,89 +1,79 @@
 import logging
 import os
-import sys
 import shutil
+from configparser import RawConfigParser
 from logging.config import fileConfig
 from logging.handlers import BaseRotatingHandler
-from configparser import RawConfigParser
 
 defaults = {
-    'loggers': {
-        'keys': 'root, manual, nzbget, daemon',
+    "loggers": {
+        "keys": "root, manual, nzbget, daemon",
     },
-    'handlers': {
-        'keys': 'consoleHandler, nzbgetHandler, fileHandler, manualHandler, daemonHandler',
+    "handlers": {
+        "keys": "consoleHandler, nzbgetHandler, fileHandler, manualHandler, daemonHandler",
     },
-    'formatters': {
-        'keys': 'simpleFormatter, minimalFormatter, nzbgetFormatter, daemonFormatter',
+    "formatters": {
+        "keys": "simpleFormatter, minimalFormatter, nzbgetFormatter, daemonFormatter",
     },
-    'logger_root': {
-        'level': 'DEBUG',
-        'handlers': 'consoleHandler, fileHandler',
+    "logger_root": {
+        "level": "DEBUG",
+        "handlers": "consoleHandler, fileHandler",
     },
-    'logger_nzbget': {
-        'level': 'DEBUG',
-        'handlers': 'nzbgetHandler, fileHandler',
-        'propagate': 0,
-        'qualname': 'NZBGetPostProcess',
+    "logger_nzbget": {
+        "level": "DEBUG",
+        "handlers": "nzbgetHandler, fileHandler",
+        "propagate": 0,
+        "qualname": "NZBGetPostProcess",
     },
-    'logger_manual': {
-        'level': 'DEBUG',
-        'handlers': 'manualHandler, fileHandler',
-        'propagate': 0,
-        'qualname': 'MANUAL',
+    "logger_manual": {
+        "level": "DEBUG",
+        "handlers": "manualHandler, fileHandler",
+        "propagate": 0,
+        "qualname": "MANUAL",
     },
-    'logger_daemon': {
-        'level': 'DEBUG',
-        'handlers': 'daemonHandler, fileHandler',
-        'propagate': 0,
-        'qualname': 'DAEMON',
+    "logger_daemon": {
+        "level": "DEBUG",
+        "handlers": "daemonHandler, fileHandler",
+        "propagate": 0,
+        "qualname": "DAEMON",
     },
-    'handler_consoleHandler': {
-        'class': 'StreamHandler',
-        'level': 'INFO',
-        'formatter': 'simpleFormatter',
-        'args': '(sys.stdout,)',
+    "handler_consoleHandler": {
+        "class": "StreamHandler",
+        "level": "INFO",
+        "formatter": "simpleFormatter",
+        "args": "(sys.stdout,)",
     },
-    'handler_nzbgetHandler': {
-        'class': 'StreamHandler',
-        'level': 'INFO',
-        'formatter': 'nzbgetFormatter',
-        'args': '(sys.stdout,)',
+    "handler_nzbgetHandler": {
+        "class": "StreamHandler",
+        "level": "INFO",
+        "formatter": "nzbgetFormatter",
+        "args": "(sys.stdout,)",
     },
-    'handler_manualHandler': {
-        'class': 'StreamHandler',
-        'level': 'INFO',
-        'formatter': 'minimalFormatter',
-        'args': '(sys.stdout,)',
+    "handler_manualHandler": {
+        "class": "StreamHandler",
+        "level": "INFO",
+        "formatter": "minimalFormatter",
+        "args": "(sys.stdout,)",
     },
-    'handler_daemonHandler': {
-        'class': 'StreamHandler',
-        'level': 'INFO',
-        'formatter': 'daemonFormatter',
-        'args': '(sys.stdout,)',
+    "handler_daemonHandler": {
+        "class": "StreamHandler",
+        "level": "INFO",
+        "formatter": "daemonFormatter",
+        "args": "(sys.stdout,)",
     },
-    'handler_fileHandler': {
-        'class': 'handlers.RotatingFileHandler',
-        'level': 'INFO',
-        'formatter': 'simpleFormatter',
-        'args': "('%(logfilename)s', 'a', 100000, 3, 'utf-8')",
+    "handler_fileHandler": {
+        "class": "handlers.RotatingFileHandler",
+        "level": "INFO",
+        "formatter": "simpleFormatter",
+        "args": "('%(logfilename)s', 'a', 100000, 3, 'utf-8')",
     },
-    'formatter_simpleFormatter': {
-        'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        'datefmt': '%Y-%m-%d %H:%M:%S',
+    "formatter_simpleFormatter": {
+        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        "datefmt": "%Y-%m-%d %H:%M:%S",
     },
-    'formatter_minimalFormatter': {
-        'format': '%(message)s',
-        'datefmt': ''
-    },
-    'formatter_nzbgetFormatter': {
-        'format': '[%(levelname)s] %(message)s',
-        'datefmt': ''
-    },
-    'formatter_daemonFormatter': {
-        'format': '%(asctime)s [%(levelname)s] %(message)s',
-        'datefmt': '%Y-%m-%d %H:%M:%S'
-    }
+    "formatter_minimalFormatter": {"format": "%(message)s", "datefmt": ""},
+    "formatter_nzbgetFormatter": {"format": "[%(levelname)s] %(message)s", "datefmt": ""},
+    "formatter_daemonFormatter": {"format": "%(asctime)s [%(levelname)s] %(message)s", "datefmt": "%Y-%m-%d %H:%M:%S"},
 }
 
 CONFIG_DEFAULT = "logging.ini"
@@ -108,11 +98,11 @@ def checkLoggingConfig(configfile):
                 config.set(s, k, str(defaults[s][k]))
 
     # Remove sysLogHandler if you're on Windows
-    if 'sysLogHandler' in config.get('handlers', 'keys'):
-        config.set('handlers', 'keys', config.get('handlers', 'keys').replace('sysLogHandler', ''))
+    if "sysLogHandler" in config.get("handlers", "keys"):
+        config.set("handlers", "keys", config.get("handlers", "keys").replace("sysLogHandler", ""))
         write = True
-    while config.get('handlers', 'keys').endswith(",") or config.get('handlers', 'keys').endswith(" "):
-        config.set('handlers', 'keys', config.get('handlers', 'keys')[:-1])
+    while config.get("handlers", "keys").endswith(",") or config.get("handlers", "keys").endswith(" "):
+        config.set("handlers", "keys", config.get("handlers", "keys")[:-1])
         write = True
     if write:
         fp = open(configfile, "w")
@@ -144,7 +134,7 @@ def getLogger(name=None, custompath=None):
     checkLoggingConfig(configfile)
 
     logfile = os.path.abspath(os.path.join(logpath, LOG_NAME)).replace("\\", "\\\\")
-    fileConfig(configfile, defaults={'logfilename': logfile})
+    fileConfig(configfile, defaults={"logfilename": logfile})
 
     logger = logging.getLogger(name)
     rotatingFileHandlers = [x for x in logger.handlers if isinstance(x, BaseRotatingHandler)]
@@ -161,6 +151,6 @@ def rotator(source, dest):
         except:
             try:
                 shutil.copyfile(source, dest)
-                open(source, 'w').close()
+                open(source, "w").close()
             except Exception as e:
                 print("Error rotating logfiles: %s." % (e))

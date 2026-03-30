@@ -1,23 +1,23 @@
 #!/opt/sma/venv/bin/python3
 
-import sys
-import os
-import guessit
-import locale
-import glob
 import argparse
-import struct
 import enum
+import glob
 import json
 import logging
+import os
+import struct
+import sys
+
+import guessit
 import tmdbsimple as tmdb
-from resources.log import getLogger
-from resources.readsettings import ReadSettings
-from resources.mediaprocessor import MediaProcessor
-from resources.metadata import Metadata, MediaType
-from resources.postprocess import PostProcessor
+
+from converter.avcodecs import attachment_codec_list, audio_codec_list, subtitle_codec_list, video_codec_list
 from resources.extensions import tmdb_api_key
-from converter.avcodecs import audio_codec_list, video_codec_list, subtitle_codec_list, attachment_codec_list
+from resources.log import getLogger
+from resources.mediaprocessor import MediaProcessor
+from resources.metadata import MediaType, Metadata
+from resources.readsettings import ReadSettings
 
 os.environ["REGEX_DISABLED"] = "1"  # Fixes Toilal/rebulk#20
 
@@ -42,7 +42,7 @@ class MediaTypes(enum.Enum):
             cls.TV_TVDB: "TV (via TVDB)",
             cls.TV_IMDB: "TV (via IMDB)",
             cls.CONVERT: "Convert without tagging",
-            cls.SKIP: "Skip file"
+            cls.SKIP: "Skip file",
         }
 
     def __str__(self):
@@ -78,10 +78,10 @@ def mediatype():
 def getValue(prompt, num=False):
     try:
         print(prompt + ":")
-        value = input("#: ").strip(' \"')
+        value = input("#: ").strip(' "')
         # Remove escape characters in non-windows environments
-        if os.name != 'nt':
-            value = value.replace('\\', '')
+        if os.name != "nt":
+            value = value.replace("\\", "")
         if num is True and value.isdigit() is False:
             print("Must be a numerical value")
             return getValue(prompt, num)
@@ -93,8 +93,8 @@ def getValue(prompt, num=False):
 
 
 def getYesNo():
-    yes = ['y', 'yes', 'true', '1']
-    no = ['n', 'no', 'false', '0']
+    yes = ["y", "yes", "true", "1"]
+    no = ["n", "no", "false", "0"]
     try:
         data = input("# [y/n]: ")
         if data.lower() in yes:
@@ -166,15 +166,15 @@ def guessInfo(fileName, settings, tmdbid=None, tvdbid=None, imdbid=None, season=
     if not settings.fullpathguess:
         fileName = os.path.basename(fileName)
     guessit_opts = {}
-    if type_hint == 'tv':
-        guessit_opts['type'] = 'episode'
-    elif type_hint == 'movie':
-        guessit_opts['type'] = 'movie'
+    if type_hint == "tv":
+        guessit_opts["type"] = "episode"
+    elif type_hint == "movie":
+        guessit_opts["type"] = "movie"
     guess = guessit.guessit(original or fileName, guessit_opts)
     try:
-        if guess['type'] == 'movie':
+        if guess["type"] == "movie":
             return movieInfo(guess, tmdbid=tmdbid, imdbid=imdbid, language=language, original=original)
-        elif guess['type'] == 'episode':
+        elif guess["type"] == "episode":
             return tvInfo(guess, tmdbid=tmdbid, tvdbid=tvdbid, imdbid=imdbid, season=season, episode=episode, language=language, original=original)
         else:
             return None
@@ -189,8 +189,8 @@ def movieInfo(guessData, tmdbid=None, imdbid=None, language=None, original=None)
     if not tmdbid and not imdbid:
         tmdb.API_KEY = tmdb_api_key
         search = tmdb.Search()
-        title = guessData['title']
-        if 'year' in guessData:
+        title = guessData["title"]
+        if "year" in guessData:
             _ = search.movie(query=title, year=guessData["year"])
             if len(search.results) < 1:
                 _ = search.movie(query=title, year=guessData["year"])
@@ -200,7 +200,7 @@ def movieInfo(guessData, tmdbid=None, imdbid=None, language=None, original=None)
             return None
         result = search.results[0]
         # release = result['release_date']
-        tmdbid = result['id']
+        tmdbid = result["id"]
         log.debug("Guessed filename resulted in TMDB ID %s" % tmdbid)
 
     metadata = Metadata(MediaType.Movie, tmdbid=tmdbid, imdbid=imdbid, language=language, logger=log, original=original)
@@ -216,7 +216,7 @@ def tvInfo(guessData, tmdbid=None, tvdbid=None, imdbid=None, season=None, episod
         tmdb.API_KEY = tmdb_api_key
         search = tmdb.Search()
         series = guessData["title"]
-        if 'year' in guessData:
+        if "year" in guessData:
             _ = search.tv(query=series, first_air_date_year=guessData["year"])
             if len(search.results) < 1:
                 _ = search.tv(query=series)
@@ -225,7 +225,7 @@ def tvInfo(guessData, tmdbid=None, tvdbid=None, imdbid=None, season=None, episod
         if search and len(search.results) < 1:
             return None
         result = search.results[0]
-        tmdbid = result['id']
+        tmdbid = result["id"]
 
     metadata = Metadata(MediaType.TV, tmdbid=tmdbid, imdbid=imdbid, tvdbid=tvdbid, season=season, episode=episode, language=language, logger=log, original=original)
     ep_display = "E".join("%02d" % e for e in metadata.episodes)
@@ -245,16 +245,16 @@ def triggerRescan(filepath, settings):
 
     # Check Sonarr instances
     for instance in settings.sonarr_instances:
-        ipath = instance.get('path', '')
-        if ipath and dirpath.startswith(ipath) and instance.get('apikey') and instance.get('rescan', True):
-            _triggerManagerRescan(instance, dirpath, 'sonarr', requests)
+        ipath = instance.get("path", "")
+        if ipath and dirpath.startswith(ipath) and instance.get("apikey") and instance.get("rescan", True):
+            _triggerManagerRescan(instance, dirpath, "sonarr", requests)
             return
 
     # Check Radarr instances
     for instance in settings.radarr_instances:
-        ipath = instance.get('path', '')
-        if ipath and dirpath.startswith(ipath) and instance.get('apikey') and instance.get('rescan', True):
-            _triggerManagerRescan(instance, dirpath, 'radarr', requests)
+        ipath = instance.get("path", "")
+        if ipath and dirpath.startswith(ipath) and instance.get("apikey") and instance.get("rescan", True):
+            _triggerManagerRescan(instance, dirpath, "radarr", requests)
             return
 
     log.debug("No matching Sonarr/Radarr instance found for path %s, skipping rescan." % dirpath)
@@ -262,30 +262,27 @@ def triggerRescan(filepath, settings):
 
 def _triggerManagerRescan(instance, dirpath, manager_type, requests):
     """Send rescan API request to a Sonarr or Radarr instance."""
-    protocol = "https://" if instance.get('ssl') else "http://"
-    base_url = protocol + instance['host'] + ":" + str(instance['port']) + instance['webroot']
+    protocol = "https://" if instance.get("ssl") else "http://"
+    base_url = protocol + instance["host"] + ":" + str(instance["port"]) + instance["webroot"]
     url = base_url + "/api/v3/command"
-    headers = {
-        'X-Api-Key': instance['apikey'],
-        'User-Agent': "SMA-NG - manual"
-    }
+    headers = {"X-Api-Key": instance["apikey"], "User-Agent": "SMA-NG - manual"}
 
-    if manager_type == 'sonarr':
-        payload = {'name': 'DownloadedEpisodesScan', 'path': dirpath}
+    if manager_type == "sonarr":
+        payload = {"name": "DownloadedEpisodesScan", "path": dirpath}
     else:
-        payload = {'name': 'DownloadedMoviesScan', 'path': dirpath}
+        payload = {"name": "DownloadedMoviesScan", "path": dirpath}
 
     try:
-        log.info("Requesting %s [%s] to rescan '%s'." % (manager_type.title(), instance['section'], dirpath))
+        log.info("Requesting %s [%s] to rescan '%s'." % (manager_type.title(), instance["section"], dirpath))
         r = requests.post(url, json=payload, headers=headers)
         rstate = r.json()
         try:
             rstate = rstate[0]
         except (KeyError, IndexError, TypeError):
             pass
-        log.info("%s response: ID %s %s." % (instance['section'], rstate.get('id', '?'), rstate.get('status', '?')))
+        log.info("%s response: ID %s %s." % (instance["section"], rstate.get("id", "?"), rstate.get("status", "?")))
     except Exception:
-        log.exception("Failed to trigger rescan on %s [%s]." % (manager_type.title(), instance['section']))
+        log.exception("Failed to trigger rescan on %s [%s]." % (manager_type.title(), instance["section"]))
 
 
 def checkAlreadyProcessed(inputfile, processedList):
@@ -300,12 +297,30 @@ def addtoProcessedArchive(files, processedList, processedArchive):
         return
 
     processedList.extend(files)
-    with open(processedArchive, 'w', encoding="utf8") as pa:
+    with open(processedArchive, "w", encoding="utf8") as pa:
         json.dump(list(set(processedList)), pa, indent=4)
     log.debug("Adding %s to processed archive %s" % (files, processedArchive))
 
 
-def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=True, tagOnly=False, optionsOnly=False, tmdbid=None, tvdbid=None, imdbid=None, season=None, episode=None, original=None, processedList=None, processedArchive=None, type_hint=None):
+def processFile(
+    inputfile,
+    mp,
+    info=None,
+    relativePath=None,
+    silent=False,
+    tag=True,
+    tagOnly=False,
+    optionsOnly=False,
+    tmdbid=None,
+    tvdbid=None,
+    imdbid=None,
+    season=None,
+    episode=None,
+    original=None,
+    processedList=None,
+    processedArchive=None,
+    type_hint=None,
+):
     if checkAlreadyProcessed(inputfile, processedList):
         log.debug("%s is already processed and will be skipped based on archive %s." % (inputfile, processedArchive))
         return
@@ -317,7 +332,20 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
         return
 
     language = mp.settings.taglanguage or None
-    tagdata = getInfo(inputfile, mp.settings, silent=silent, tag=tag or tagOnly, tmdbid=tmdbid, tvdbid=tvdbid, imdbid=imdbid, season=season, episode=episode, language=language, original=original, type_hint=type_hint)
+    tagdata = getInfo(
+        inputfile,
+        mp.settings,
+        silent=silent,
+        tag=tag or tagOnly,
+        tmdbid=tmdbid,
+        tvdbid=tvdbid,
+        imdbid=imdbid,
+        season=season,
+        episode=episode,
+        language=language,
+        original=original,
+        type_hint=type_hint,
+    )
 
     if optionsOnly:
         displayOptions(inputfile, mp.settings, tagdata)
@@ -329,13 +357,15 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
         log.info("Processing %s" % (tagdata.title))
     elif tagdata.mediatype == MediaType.TV:
         ep_nums = ["%02d" % e for e in tagdata.episodes]
-        ep_display = 'E' + ep_nums[0] if len(ep_nums) == 1 else 'E%s-E%s' % (ep_nums[0], ep_nums[-1])
+        ep_display = "E" + ep_nums[0] if len(ep_nums) == 1 else "E%s-E%s" % (ep_nums[0], ep_nums[-1])
         log.info("Processing %s S%02d%s - %s" % (tagdata.showname, int(tagdata.season), ep_display, tagdata.title))
 
     if tagOnly:
         if tagdata:
             try:
-                tagdata.writeTags(inputfile, inputfile, mp.converter, mp.settings.artwork, mp.settings.thumbnail, cues_to_front=(os.path.splitext(inputfile)[1].lower() in ['.mkv'] and mp.settings.relocate_moov))
+                tagdata.writeTags(
+                    inputfile, inputfile, mp.converter, mp.settings.artwork, mp.settings.thumbnail, cues_to_front=(os.path.splitext(inputfile)[1].lower() in [".mkv"] and mp.settings.relocate_moov)
+                )
                 if mp.settings.relocate_moov:
                     mp.QTFS(inputfile)
             except KeyboardInterrupt:
@@ -349,40 +379,52 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
         if not language:
             language = mp.getDefaultAudioLanguage(output["options"]) or None
             if language and tagdata:
-                tagdata = Metadata(tagdata.mediatype, tmdbid=tagdata.tmdbid, imdbid=tagdata.imdbid, tvdbid=tagdata.tvdbid, season=tagdata.season, episode=tagdata.episodes or tagdata.episode, original=original, language=language, logger=log)
+                tagdata = Metadata(
+                    tagdata.mediatype,
+                    tmdbid=tagdata.tmdbid,
+                    imdbid=tagdata.imdbid,
+                    tvdbid=tagdata.tvdbid,
+                    season=tagdata.season,
+                    episode=tagdata.episodes or tagdata.episode,
+                    original=original,
+                    language=language,
+                    logger=log,
+                )
         log.debug("Tag language setting is %s, using language %s for tagging." % (mp.settings.taglanguage or None, language))
         tagfailed = False
         if tagdata:
             try:
-                tagdata.writeTags(output['output'], inputfile, mp.converter, mp.settings.artwork, mp.settings.thumbnail, width=output['x'], height=output['y'], cues_to_front=output['cues_to_front'])
+                tagdata.writeTags(output["output"], inputfile, mp.converter, mp.settings.artwork, mp.settings.thumbnail, width=output["x"], height=output["y"], cues_to_front=output["cues_to_front"])
             except KeyboardInterrupt:
                 raise
             except:
                 log.exception("There was an error tagging the file")
                 tagfailed = True
         if mp.settings.relocate_moov and not tagfailed:
-            mp.QTFS(output['output'])
+            mp.QTFS(output["output"])
 
         # File renaming
         if mp.settings.naming_enabled and tagdata:
             try:
-                from resources.naming import generate_name, rename_file
                 import guessit as _guessit
+
+                from resources.naming import generate_name, rename_file
+
                 guess_data = _guessit.guessit(original or os.path.basename(inputfile))
-                new_name = generate_name(output['output'], info, tagdata, mp.settings, guess_data=guess_data, log=log)
+                new_name = generate_name(output["output"], info, tagdata, mp.settings, guess_data=guess_data, log=log)
                 if new_name:
-                    output['output'] = rename_file(output['output'], new_name, log=log)
+                    output["output"] = rename_file(output["output"], new_name, log=log)
             except:
                 log.exception("Error during file rename")
 
         # Reverse Ouput
-        output['output'] = mp.restoreFromOutput(inputfile, output['output'])
-        for i, sub in enumerate(output['external_subs']):
-            output['external_subs'][i] = mp.restoreFromOutput(inputfile, sub)
+        output["output"] = mp.restoreFromOutput(inputfile, output["output"])
+        for i, sub in enumerate(output["external_subs"]):
+            output["external_subs"][i] = mp.restoreFromOutput(inputfile, sub)
 
-        output_files = mp.replicate(output['output'], relativePath=relativePath)
+        output_files = mp.replicate(output["output"], relativePath=relativePath)
         print(json.dumps(output, indent=4))
-        for sub in [x for x in output['external_subs'] if os.path.exists(x)]:
+        for sub in [x for x in output["external_subs"] if os.path.exists(x)]:
             output_files.extend(mp.replicate(sub, relativePath=relativePath))
         for file in output_files:
             mp.setPermissions(file)
@@ -391,7 +433,8 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
         if mp.settings.plexmatch_enabled and tagdata:
             try:
                 from resources.metadata import update_plexmatch
-                update_plexmatch(output['output'], tagdata, mp.settings, log=log)
+
+                update_plexmatch(output["output"], tagdata, mp.settings, log=log)
             except:
                 log.exception("Error updating .plexmatch")
 
@@ -400,15 +443,17 @@ def processFile(inputfile, mp, info=None, relativePath=None, silent=False, tag=T
                 mp.post(output_files, tagdata.mediatype, tmdbid=tagdata.tmdbid, season=tagdata.season, episode=tagdata.episodes or tagdata.episode)
             elif type_hint:
                 mp.post(output_files, type_hint, tmdbid=tmdbid, season=season, episode=episode)
-        addtoProcessedArchive(output_files + [output['input']] if not output['input_deleted'] else output_files, processedList, processedArchive)
+        addtoProcessedArchive(output_files + [output["input"]] if not output["input_deleted"] else output_files, processedList, processedArchive)
 
         # Trigger rescan on matching Sonarr/Radarr instance
-        triggerRescan(output['output'], mp.settings)
+        triggerRescan(output["output"], mp.settings)
     else:
         log.error("There was an error processing file %s, no output data received" % inputfile)
 
 
-def walkDir(dir, settings, silent=False, preserveRelative=False, tmdbid=None, imdbid=None, tvdbid=None, tag=True, tagOnly=False, optionsOnly=False, processedList=None, processedArchive=None, type_hint=None):
+def walkDir(
+    dir, settings, silent=False, preserveRelative=False, tmdbid=None, imdbid=None, tvdbid=None, tag=True, tagOnly=False, optionsOnly=False, processedList=None, processedArchive=None, type_hint=None
+):
     files = []
     error = []
     mp = MediaProcessor(settings, logger=log)
@@ -424,7 +469,22 @@ def walkDir(dir, settings, silent=False, preserveRelative=False, tmdbid=None, im
                 displayOptions(filepath, settings)
                 continue
             try:
-                processFile(filepath, mp, info=info, relativePath=relative, silent=silent, tag=tag, tagOnly=tagOnly, optionsOnly=optionsOnly, tmdbid=tmdbid, tvdbid=tvdbid, imdbid=imdbid, processedList=processedList, processedArchive=processedArchive, type_hint=type_hint)
+                processFile(
+                    filepath,
+                    mp,
+                    info=info,
+                    relativePath=relative,
+                    silent=silent,
+                    tag=tag,
+                    tagOnly=tagOnly,
+                    optionsOnly=optionsOnly,
+                    tmdbid=tmdbid,
+                    tvdbid=tvdbid,
+                    imdbid=imdbid,
+                    processedList=processedList,
+                    processedArchive=processedArchive,
+                    type_hint=type_hint,
+                )
             except SkipFileException:
                 log.debug("Skipping file %s." % filepath)
             except KeyboardInterrupt:
@@ -444,12 +504,7 @@ def displayOptions(path, settings, tagdata=None):
 
 
 def showCodecs():
-    data = {
-        'video': video_codec_list,
-        'audio': audio_codec_list,
-        'subtitle': subtitle_codec_list,
-        'attachment': attachment_codec_list
-    }
+    data = {"video": video_codec_list, "audio": audio_codec_list, "subtitle": subtitle_codec_list, "attachment": attachment_codec_list}
     print("List of supported codecs within SMA-NG")
     print("Format:")
     print("  [SMA-NG Codec]: [FFMPEG Encoder]")
@@ -463,65 +518,69 @@ def showCodecs():
 
 def main():
     parser = argparse.ArgumentParser(description="SMA-NG manual conversion and tagging script")
-    parser.add_argument('-i', '--input', help='The source that will be converted. May be a file or a directory')
-    parser.add_argument('-c', '--config', help='Specify an alternate configuration file location')
-    parser.add_argument('-a', '--auto', action="store_true", help="Enable auto mode, the script will not prompt you for any further input, good for batch files. It will guess the metadata using guessit")
-    parser.add_argument('-s', '--season', help="Specifiy the season number")
-    parser.add_argument('-e', '--episode', action="append", help="Specify the episode number (repeat for multi-episode, e.g. -e 1 -e 2)")
-    parser.add_argument('-tvdb', '--tvdbid', help="Specify the TVDB ID for media")
-    parser.add_argument('-imdb', '--imdbid', help="Specify the IMDB ID for media")
-    parser.add_argument('-tmdb', '--tmdbid', help="Specify the TMDB ID for media")
-    parser.add_argument('-nm', '--nomove', action='store_true', help="Overrides and disables the custom moving of file options that come from output_dir and move-to")
-    parser.add_argument('-nc', '--nocopy', action='store_true', help="Overrides and disables the custom copying of file options that come from output_dir and move-to")
-    parser.add_argument('-nd', '--nodelete', action='store_true', help="Overrides and disables deleting of original files")
-    parser.add_argument('-nt', '--notag', action="store_true", help="Overrides and disables tagging when using the automated option")
-    parser.add_argument('-to', '--tagonly', action="store_true", help="Only tag without conversion")
-    parser.add_argument('-np', '--nopost', action="store_true", help="Overrides and disables the execution of additional post processing scripts")
-    parser.add_argument('-pr', '--preserverelative', action='store_true', help="Preserves relative directories when processing multiple files using the copy-to or move-to functionality")
-    parser.add_argument('-pse', '--processsameextensions', action='store_true', help="Overrides process-same-extensions setting in autoProcess.ini enabling the reprocessing of files")
-    parser.add_argument('-fc', '--forceconvert', action='store_true', help="Overrides force-convert setting in autoProcess.ini and also enables process-same-extenions if true forcing the conversion of files")
-    parser.add_argument('-m', '--moveto', help="Override move-to value setting in autoProcess.ini changing the final destination of the file")
-    parser.add_argument('-oo', '--optionsonly', action="store_true", help="Display generated conversion options only, do not perform conversion")
-    parser.add_argument('-cl', '--codeclist', action="store_true", help="Print a list of supported codecs and their paired FFMPEG encoders")
-    parser.add_argument('-o', '--original', help="Specify the original source/release filename")
-    parser.add_argument('-ms', '--minsize', help="Specify the minimum file size")
-    parser.add_argument('-pa', '--processedarchive', help="Specify a processed list/archive so already processed files are skipped", nargs='?', const="archive.json")
+    parser.add_argument("-i", "--input", help="The source that will be converted. May be a file or a directory")
+    parser.add_argument("-c", "--config", help="Specify an alternate configuration file location")
+    parser.add_argument(
+        "-a", "--auto", action="store_true", help="Enable auto mode, the script will not prompt you for any further input, good for batch files. It will guess the metadata using guessit"
+    )
+    parser.add_argument("-s", "--season", help="Specifiy the season number")
+    parser.add_argument("-e", "--episode", action="append", help="Specify the episode number (repeat for multi-episode, e.g. -e 1 -e 2)")
+    parser.add_argument("-tvdb", "--tvdbid", help="Specify the TVDB ID for media")
+    parser.add_argument("-imdb", "--imdbid", help="Specify the IMDB ID for media")
+    parser.add_argument("-tmdb", "--tmdbid", help="Specify the TMDB ID for media")
+    parser.add_argument("-nm", "--nomove", action="store_true", help="Overrides and disables the custom moving of file options that come from output_dir and move-to")
+    parser.add_argument("-nc", "--nocopy", action="store_true", help="Overrides and disables the custom copying of file options that come from output_dir and move-to")
+    parser.add_argument("-nd", "--nodelete", action="store_true", help="Overrides and disables deleting of original files")
+    parser.add_argument("-nt", "--notag", action="store_true", help="Overrides and disables tagging when using the automated option")
+    parser.add_argument("-to", "--tagonly", action="store_true", help="Only tag without conversion")
+    parser.add_argument("-np", "--nopost", action="store_true", help="Overrides and disables the execution of additional post processing scripts")
+    parser.add_argument("-pr", "--preserverelative", action="store_true", help="Preserves relative directories when processing multiple files using the copy-to or move-to functionality")
+    parser.add_argument("-pse", "--processsameextensions", action="store_true", help="Overrides process-same-extensions setting in autoProcess.ini enabling the reprocessing of files")
+    parser.add_argument(
+        "-fc", "--forceconvert", action="store_true", help="Overrides force-convert setting in autoProcess.ini and also enables process-same-extenions if true forcing the conversion of files"
+    )
+    parser.add_argument("-m", "--moveto", help="Override move-to value setting in autoProcess.ini changing the final destination of the file")
+    parser.add_argument("-oo", "--optionsonly", action="store_true", help="Display generated conversion options only, do not perform conversion")
+    parser.add_argument("-cl", "--codeclist", action="store_true", help="Print a list of supported codecs and their paired FFMPEG encoders")
+    parser.add_argument("-o", "--original", help="Specify the original source/release filename")
+    parser.add_argument("-ms", "--minsize", help="Specify the minimum file size")
+    parser.add_argument("-pa", "--processedarchive", help="Specify a processed list/archive so already processed files are skipped", nargs="?", const="archive.json")
 
     mediatype_group = parser.add_mutually_exclusive_group()
-    mediatype_group.add_argument('--tv', action='store_true', help="Force guessit to treat input as a TV episode")
-    mediatype_group.add_argument('--movie', action='store_true', help="Force guessit to treat input as a movie")
+    mediatype_group.add_argument("--tv", action="store_true", help="Force guessit to treat input as a TV episode")
+    mediatype_group.add_argument("--movie", action="store_true", help="Force guessit to treat input as a movie")
 
     args = vars(parser.parse_args())
 
     # Setup the silent mode
-    silent = args['auto']
+    silent = args["auto"]
 
     log.info("Python %s-bit %s." % (struct.calcsize("P") * 8, sys.version))
     log.info("Guessit version: %s." % guessit.__version__)
 
-    if args['codeclist']:
+    if args["codeclist"]:
         showCodecs()
         return
 
     # Settings overrides
-    if args['config'] and os.path.exists(args['config']):
-        settings = ReadSettings(args['config'], logger=log)
-    elif args['config'] and os.path.exists(os.path.join(os.path.dirname(sys.argv[0]), args['config'])):
-        settings = ReadSettings(os.path.join(os.path.dirname(sys.argv[0]), args['config']), logger=log)
+    if args["config"] and os.path.exists(args["config"]):
+        settings = ReadSettings(args["config"], logger=log)
+    elif args["config"] and os.path.exists(os.path.join(os.path.dirname(sys.argv[0]), args["config"])):
+        settings = ReadSettings(os.path.join(os.path.dirname(sys.argv[0]), args["config"]), logger=log)
     else:
         settings = ReadSettings(logger=log)
 
     processedArchive = None
     processedList = None
-    if args['processedarchive'] and os.path.exists(args['processedarchive']):
-        processedArchive = args['processedarchive']
+    if args["processedarchive"] and os.path.exists(args["processedarchive"]):
+        processedArchive = args["processedarchive"]
         log.info("Processed archived specified at %s" % (processedArchive))
-    elif args['processedarchive'] and os.path.exists(os.path.join(os.path.dirname(sys.argv[0]), args['processedarchive'])):
-        processedArchive = os.path.join(os.path.dirname(sys.argv[0]), args['processedarchive'])
+    elif args["processedarchive"] and os.path.exists(os.path.join(os.path.dirname(sys.argv[0]), args["processedarchive"])):
+        processedArchive = os.path.join(os.path.dirname(sys.argv[0]), args["processedarchive"])
         log.info("Processed archived specified at %s" % (processedArchive))
-    elif args['processedarchive']:
-        processedArchive = os.path.normpath(args['processedarchive'])
-        with open(processedArchive, 'w', encoding="utf8") as pa:
+    elif args["processedarchive"]:
+        processedArchive = os.path.normpath(args["processedarchive"])
+        with open(processedArchive, "w", encoding="utf8") as pa:
             json.dump([], pa)
         log.info("Processed archived specified at %s but file does not exist, creating" % (processedArchive))
     if processedArchive:
@@ -529,56 +588,56 @@ def main():
         processedList = json.load(pa)
         log.info("Loaded archive list containing %d files" % (len(processedList)))
 
-    if (args['nomove']):
+    if args["nomove"]:
         settings.output_dir = None
         settings.moveto = None
         log.info("No-move enabled")
-    elif (args['moveto']):
-        settings.moveto = args['moveto']
-        log.info("Overriden move-to to " + args['moveto'])
-    if (args['nocopy']):
+    elif args["moveto"]:
+        settings.moveto = args["moveto"]
+        log.info("Overriden move-to to " + args["moveto"])
+    if args["nocopy"]:
         settings.copyto = None
         log.info("No-copy enabled")
-    if (args['nodelete']):
+    if args["nodelete"]:
         settings.delete = False
         log.info("No-delete enabled")
-    if (args['processsameextensions']):
+    if args["processsameextensions"]:
         settings.process_same_extensions = True
         log.info("Reprocessing of same extensions enabled")
-    if (args['forceconvert']):
+    if args["forceconvert"]:
         settings.process_same_extensions = True
         settings.force_convert = True
         log.info("Force conversion of files enabled. As a result conversion of mp4 files is also enabled")
-    if (args['tagonly']):
+    if args["tagonly"]:
         log.info("Tag only enabled")
-    elif (args['notag']):
+    elif args["notag"]:
         settings.tagfile = False
         log.info("No-tagging enabled")
-    if (args['nopost']):
+    if args["nopost"]:
         settings.postprocess = False
         log.info("No post processing enabled")
-    if (args['optionsonly']):
+    if args["optionsonly"]:
         logging.getLogger("resources.mediaprocessor").setLevel(logging.CRITICAL)
         log.info("Options only mode enabled")
-    if (args['minsize']):
+    if args["minsize"]:
         try:
-            settings.minimum_size = int(args['minsize'])
-            log.info("Minimum size set to %d mb" % (int(args['minsize'])))
+            settings.minimum_size = int(args["minsize"])
+            log.info("Minimum size set to %d mb" % (int(args["minsize"])))
         except TypeError:
             log.error("Invalid minsize")
 
     # Determine media type hint from CLI flags
     type_hint = None
-    if args.get('tv'):
-        type_hint = 'tv'
+    if args.get("tv"):
+        type_hint = "tv"
         log.info("Forcing media type detection to: TV")
-    elif args.get('movie'):
-        type_hint = 'movie'
+    elif args.get("movie"):
+        type_hint = "movie"
         log.info("Forcing media type detection to: Movie")
 
     # Establish the path we will be working with
-    if (args['input']):
-        path = (str(args['input']))
+    if args["input"]:
+        path = str(args["input"])
         try:
             path = glob.glob(path)[0]
         except:
@@ -587,13 +646,44 @@ def main():
         path = getValue("Enter path to file")
 
     if os.path.isdir(path):
-        walkDir(path, settings, silent=silent, tmdbid=args.get('tmdbid'), tvdbid=args.get('tvdbid'), imdbid=args.get('imdbid'), preserveRelative=args['preserverelative'], tag=settings.tagfile, tagOnly=args.get('tagonly', False), optionsOnly=args['optionsonly'], processedList=processedList, processedArchive=processedArchive, type_hint=type_hint)
-    elif (os.path.isfile(path)):
+        walkDir(
+            path,
+            settings,
+            silent=silent,
+            tmdbid=args.get("tmdbid"),
+            tvdbid=args.get("tvdbid"),
+            imdbid=args.get("imdbid"),
+            preserveRelative=args["preserverelative"],
+            tag=settings.tagfile,
+            tagOnly=args.get("tagonly", False),
+            optionsOnly=args["optionsonly"],
+            processedList=processedList,
+            processedArchive=processedArchive,
+            type_hint=type_hint,
+        )
+    elif os.path.isfile(path):
         mp = MediaProcessor(settings, logger=log)
         info = mp.isValidSource(path)
         if info:
             try:
-                processFile(path, mp, info=info, silent=silent, tag=settings.tagfile, tagOnly=args.get('tagonly', False), optionsOnly=args.get('optionsonly', False), tmdbid=args.get('tmdbid'), tvdbid=args.get('tvdbid'), imdbid=args.get('imdbid'), season=args.get('season'), episode=args.get('episode'), original=args.get('original'), processedList=processedList, processedArchive=processedArchive, type_hint=type_hint)
+                processFile(
+                    path,
+                    mp,
+                    info=info,
+                    silent=silent,
+                    tag=settings.tagfile,
+                    tagOnly=args.get("tagonly", False),
+                    optionsOnly=args.get("optionsonly", False),
+                    tmdbid=args.get("tmdbid"),
+                    tvdbid=args.get("tvdbid"),
+                    imdbid=args.get("imdbid"),
+                    season=args.get("season"),
+                    episode=args.get("episode"),
+                    original=args.get("original"),
+                    processedList=processedList,
+                    processedArchive=processedArchive,
+                    type_hint=type_hint,
+                )
             except SkipFileException:
                 log.debug("Skipping file %s" % path)
 
@@ -603,5 +693,5 @@ def main():
         log.info("File %s does not exist" % (path))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

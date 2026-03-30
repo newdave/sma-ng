@@ -8,11 +8,13 @@ Optionally performs pre/post actions via uTorrent WebUI.
 Args: %L %T %D %K %F %I %N
       Label, Tracker, Directory, single|multi, Filename, InfoHash, Name
 """
+
 import os
 import sys
+
+import resources.webhook_client as webhook
 from resources.log import getLogger
 from resources.readsettings import ReadSettings
-import resources.webhook_client as webhook
 
 log = getLogger("uTorrentPostProcess")
 log.info("uTorrent post-processing started.")
@@ -36,14 +38,14 @@ try:
     log.info("Kind: %s" % kind)
     log.info("Torrent: %s (%s)" % (torrent_name, info_hash))
 
-    if webhook.check_bypass(settings.uTorrent.get('bypass', []), label):
+    if webhook.check_bypass(settings.uTorrent.get("bypass", []), label):
         log.info("Bypass label matched, skipping.")
         sys.exit(0)
 
     # WebUI pre-action
-    webui = settings.uTorrent.get('webui', False)
-    actionbefore = settings.uTorrent.get('actionbefore', '')
-    actionafter = settings.uTorrent.get('actionafter', '')
+    webui = settings.uTorrent.get("webui", False)
+    actionbefore = settings.uTorrent.get("actionbefore", "")
+    actionafter = settings.uTorrent.get("actionafter", "")
     if isinstance(actionbefore, str):
         actionbefore = actionbefore.lower()
     if isinstance(actionafter, str):
@@ -52,22 +54,23 @@ try:
     if webui and actionbefore:
         try:
             import requests as _req
-            _host = settings.uTorrent.get('host', 'localhost')
-            _port = settings.uTorrent.get('port', 8080)
-            _ssl = settings.uTorrent.get('ssl', False)
+
+            _host = settings.uTorrent.get("host", "localhost")
+            _port = settings.uTorrent.get("port", 8080)
+            _ssl = settings.uTorrent.get("ssl", False)
             _proto = "https://" if _ssl else "http://"
-            _user = settings.uTorrent.get('user', '')
-            _passwd = settings.uTorrent.get('pass', '')
+            _user = settings.uTorrent.get("user", "")
+            _passwd = settings.uTorrent.get("pass", "")
             _base = "%s%s:%s/gui/" % (_proto, _host, _port)
             _r = _req.get(_base + "token.html", auth=(_user, _passwd))
-            _token = _r.text.split("'")[1] if "'" in _r.text else ''
+            _token = _r.text.split("'")[1] if "'" in _r.text else ""
             _req.get("%s?action=%s&hash=%s&token=%s" % (_base, actionbefore, info_hash, _token), auth=(_user, _passwd))
             log.info("uTorrent action '%s' sent for %s." % (actionbefore, info_hash))
         except:
             log.exception("Failed to send uTorrent pre-action.")
 
     # Submit files to daemon
-    if kind == 'single' and filename:
+    if kind == "single" and filename:
         filepath = os.path.join(path, filename)
         webhook.submit_path(filepath, logger=log)
     else:
@@ -77,15 +80,16 @@ try:
     if webui and actionafter:
         try:
             import requests as _req
-            _host = settings.uTorrent.get('host', 'localhost')
-            _port = settings.uTorrent.get('port', 8080)
-            _ssl = settings.uTorrent.get('ssl', False)
+
+            _host = settings.uTorrent.get("host", "localhost")
+            _port = settings.uTorrent.get("port", 8080)
+            _ssl = settings.uTorrent.get("ssl", False)
             _proto = "https://" if _ssl else "http://"
-            _user = settings.uTorrent.get('user', '')
-            _passwd = settings.uTorrent.get('pass', '')
+            _user = settings.uTorrent.get("user", "")
+            _passwd = settings.uTorrent.get("pass", "")
             _base = "%s%s:%s/gui/" % (_proto, _host, _port)
             _r = _req.get(_base + "token.html", auth=(_user, _passwd))
-            _token = _r.text.split("'")[1] if "'" in _r.text else ''
+            _token = _r.text.split("'")[1] if "'" in _r.text else ""
             _req.get("%s?action=%s&hash=%s&token=%s" % (_base, actionafter, info_hash, _token), auth=(_user, _passwd))
             log.info("uTorrent action '%s' sent for %s." % (actionafter, info_hash))
         except:

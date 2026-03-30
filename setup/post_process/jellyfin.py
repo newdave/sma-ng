@@ -8,9 +8,7 @@ def main():
     print("Jellyfin Post-Processing Refresh Script")
     url = "https://jellyfin.tld:8096/Library/Refresh"
 
-    headers = {
-        "X-MediaBrowser-Token": TOKEN
-    }
+    headers = {"X-MediaBrowser-Token": TOKEN}
 
     try:
         r = requests.post(url, headers=headers)

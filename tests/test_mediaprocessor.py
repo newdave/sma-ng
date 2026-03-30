@@ -1,17 +1,20 @@
 """Tests for resources/mediaprocessor.py - core processing logic."""
-import pytest
+
 from unittest.mock import MagicMock, patch
-from converter.ffmpeg import MediaStreamInfo, MediaFormatInfo, MediaInfo
-from converter.avcodecs import BaseCodec
+
+import pytest
+
+from converter.ffmpeg import MediaInfo
 
 
 class TestEstimateVideoBitrate:
     """Test video bitrate estimation from container info."""
 
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 settings = MagicMock()
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = settings
@@ -30,10 +33,10 @@ class TestEstimateVideoBitrate:
         mp = self._make_processor()
         info = MediaInfo()
         info.format = make_format(bitrate=10000000)
-        video = make_stream(type='video', codec='h264', bitrate=None)
+        video = make_stream(type="video", codec="h264", bitrate=None)
         video.framedata = {}
         info.streams.append(video)
-        audio = make_stream(type='audio', codec='aac', index=1, bitrate=None, audio_channels=2)
+        audio = make_stream(type="audio", codec="aac", index=1, bitrate=None, audio_channels=2)
         info.streams.append(audio)
         result = mp.estimateVideoBitrate(info)
         assert result is not None
@@ -43,10 +46,10 @@ class TestEstimateVideoBitrate:
         mp = self._make_processor()
         info = MediaInfo()
         info.format = make_format(bitrate=50000000)
-        video = make_stream(type='video', codec='h264', bitrate=5000000)
+        video = make_stream(type="video", codec="h264", bitrate=5000000)
         video.framedata = {}
         info.streams.append(video)
-        audio = make_stream(type='audio', codec='aac', index=1, bitrate=128000, audio_channels=2)
+        audio = make_stream(type="audio", codec="aac", index=1, bitrate=128000, audio_channels=2)
         info.streams.append(audio)
         result = mp.estimateVideoBitrate(info)
         assert result is not None
@@ -58,9 +61,10 @@ class TestStreamTitles:
     """Test stream title generation for video, audio, and subtitles."""
 
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.settings.keep_titles = False
@@ -69,99 +73,100 @@ class TestStreamTitles:
 
     def test_video_title_4k(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='video', video_width=3840, video_height=2160)
+        stream = make_stream(type="video", video_width=3840, video_height=2160)
         title = mp.videoStreamTitle(stream, {})
-        assert title == '4K'
+        assert title == "4K"
 
     def test_video_title_fhd(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='video', video_width=1920, video_height=1080)
+        stream = make_stream(type="video", video_width=1920, video_height=1080)
         title = mp.videoStreamTitle(stream, {})
-        assert title == 'FHD'
+        assert title == "FHD"
 
     def test_video_title_hd(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='video', video_width=1280, video_height=720)
+        stream = make_stream(type="video", video_width=1280, video_height=720)
         title = mp.videoStreamTitle(stream, {})
-        assert title == 'HD'
+        assert title == "HD"
 
     def test_video_title_sd(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='video', video_width=640, video_height=480)
+        stream = make_stream(type="video", video_width=640, video_height=480)
         title = mp.videoStreamTitle(stream, {})
-        assert title == 'SD'
+        assert title == "SD"
 
     def test_video_title_hdr(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='video', video_width=3840, video_height=2160)
+        stream = make_stream(type="video", video_width=3840, video_height=2160)
         title = mp.videoStreamTitle(stream, {}, hdr=True)
-        assert 'HDR' in title
-        assert '4K' in title
+        assert "HDR" in title
+        assert "4K" in title
 
     def test_video_title_from_options(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='video', video_width=0, video_height=0)
-        title = mp.videoStreamTitle(stream, {'width': 1920, 'height': 1080})
-        assert title == 'FHD'
+        stream = make_stream(type="video", video_width=0, video_height=0)
+        title = mp.videoStreamTitle(stream, {"width": 1920, "height": 1080})
+        assert title == "FHD"
 
     def test_audio_title_stereo(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio', disposition={'default': False, 'forced': False})
-        title = mp.audioStreamTitle(stream, {'channels': 2})
-        assert title == 'Stereo'
+        stream = make_stream(type="audio", disposition={"default": False, "forced": False})
+        title = mp.audioStreamTitle(stream, {"channels": 2})
+        assert title == "Stereo"
 
     def test_audio_title_mono(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio', disposition={'default': False, 'forced': False})
-        title = mp.audioStreamTitle(stream, {'channels': 1})
-        assert title == 'Mono'
+        stream = make_stream(type="audio", disposition={"default": False, "forced": False})
+        title = mp.audioStreamTitle(stream, {"channels": 1})
+        assert title == "Mono"
 
     def test_audio_title_surround(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio', disposition={'default': False, 'forced': False})
-        title = mp.audioStreamTitle(stream, {'channels': 6})
-        assert '5.1' in title
+        stream = make_stream(type="audio", disposition={"default": False, "forced": False})
+        title = mp.audioStreamTitle(stream, {"channels": 6})
+        assert "5.1" in title
 
     def test_audio_title_71(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio', disposition={'default': False, 'forced': False})
-        title = mp.audioStreamTitle(stream, {'channels': 8})
-        assert '7.1' in title
+        stream = make_stream(type="audio", disposition={"default": False, "forced": False})
+        title = mp.audioStreamTitle(stream, {"channels": 8})
+        assert "7.1" in title
 
     def test_audio_title_commentary(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio', disposition={'default': False, 'forced': False, 'comment': True})
-        title = mp.audioStreamTitle(stream, {'channels': 2})
-        assert 'Commentary' in title or 'Comment' in title.lower() or title is not None
+        stream = make_stream(type="audio", disposition={"default": False, "forced": False, "comment": True})
+        title = mp.audioStreamTitle(stream, {"channels": 2})
+        assert "Commentary" in title or "Comment" in title.lower() or title is not None
 
     def test_subtitle_title_no_disposition(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='subtitle', disposition={'default': False, 'forced': False})
+        stream = make_stream(type="subtitle", disposition={"default": False, "forced": False})
         title = mp.subtitleStreamTitle(stream, {})
-        assert title == 'Full'
+        assert title == "Full"
 
     def test_subtitle_title_forced(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='subtitle', disposition={'default': False, 'forced': True})
+        stream = make_stream(type="subtitle", disposition={"default": False, "forced": True})
         title = mp.subtitleStreamTitle(stream, {})
-        assert 'Forced' in title or title is not None
+        assert "Forced" in title or title is not None
 
     def test_subtitle_title_keeps_existing(self, make_stream):
         mp = self._make_processor()
         mp.settings.keep_titles = True
-        stream = make_stream(type='subtitle', metadata={'title': 'Custom Title', 'language': 'eng'})
-        stream.disposition = {'default': False, 'forced': False}
+        stream = make_stream(type="subtitle", metadata={"title": "Custom Title", "language": "eng"})
+        stream.disposition = {"default": False, "forced": False}
         title = mp.subtitleStreamTitle(stream, {})
-        assert title == 'Custom Title'
+        assert title == "Custom Title"
 
 
 class TestValidLanguage:
     """Test language validation logic."""
 
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -169,38 +174,39 @@ class TestValidLanguage:
 
     def test_in_whitelist(self):
         mp = self._make_processor()
-        assert mp.validLanguage('eng', ['eng', 'fra']) is True
+        assert mp.validLanguage("eng", ["eng", "fra"]) is True
 
     def test_not_in_whitelist(self):
         mp = self._make_processor()
-        assert mp.validLanguage('deu', ['eng', 'fra']) is False
+        assert mp.validLanguage("deu", ["eng", "fra"]) is False
 
     def test_empty_whitelist_accepts_all(self):
         mp = self._make_processor()
-        assert mp.validLanguage('deu', []) is True
+        assert mp.validLanguage("deu", []) is True
 
     def test_blocked_language(self):
         mp = self._make_processor()
-        assert mp.validLanguage('eng', ['eng', 'fra'], blocked=['eng']) is False
+        assert mp.validLanguage("eng", ["eng", "fra"], blocked=["eng"]) is False
 
     def test_undefined_language(self):
         mp = self._make_processor()
         # 'und' is not in whitelist and is not special-cased
-        assert mp.validLanguage('und', ['eng']) is False
+        assert mp.validLanguage("und", ["eng"]) is False
 
     def test_undefined_language_empty_whitelist(self):
         mp = self._make_processor()
-        assert mp.validLanguage('und', []) is True
+        assert mp.validLanguage("und", []) is True
 
 
 class TestIsValidSource:
     """Test source file validation."""
 
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
                 from resources.readsettings import ReadSettings
+
                 settings = ReadSettings()
                 return MediaProcessor(settings)
 
@@ -218,7 +224,7 @@ class TestIsValidSource:
         mp = self._make_processor()
         mp.settings.minimum_size = 100  # 100MB
         small = tmp_path / "tiny.mkv"
-        small.write_bytes(b'\x00' * 1024)
+        small.write_bytes(b"\x00" * 1024)
         assert mp.isValidSource(str(small)) is None
 
 
@@ -226,10 +232,11 @@ class TestParseFile:
     """Test filename parsing utility."""
 
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
                 from resources.readsettings import ReadSettings
+
                 settings = ReadSettings()
                 return MediaProcessor(settings)
 
@@ -261,30 +268,32 @@ class TestCleanDispositions:
     """Test disposition sanitization."""
 
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
-                mp.settings.sanitize_disposition = ['forced']
+                mp.settings.sanitize_disposition = ["forced"]
                 mp.log = MagicMock()
                 return mp
 
     def test_clears_dispositions(self, make_stream):
         mp = self._make_processor()
         info = MediaInfo()
-        s = make_stream(type='audio', disposition={'default': True, 'forced': True})
+        s = make_stream(type="audio", disposition={"default": True, "forced": True})
         info.streams.append(s)
         mp.cleanDispositions(info)
-        assert s.disposition['forced'] is False
-        assert s.disposition['default'] is True
+        assert s.disposition["forced"] is False
+        assert s.disposition["default"] is True
 
 
 class TestIsAudioStreamAtmos:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -292,26 +301,27 @@ class TestIsAudioStreamAtmos:
 
     def test_atmos_detected(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio', profile='atmos')
+        stream = make_stream(type="audio", profile="atmos")
         assert mp.isAudioStreamAtmos(stream) is True
 
     def test_non_atmos(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio', profile='lc')
+        stream = make_stream(type="audio", profile="lc")
         assert mp.isAudioStreamAtmos(stream) is False
 
     def test_no_profile(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio')
+        stream = make_stream(type="audio")
         stream.profile = None
         assert not mp.isAudioStreamAtmos(stream)
 
 
 class TestGetDefaultAudioLanguage:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -319,37 +329,29 @@ class TestGetDefaultAudioLanguage:
 
     def test_dict_options_with_default(self):
         mp = self._make_processor()
-        options = {
-            'audio': [
-                {'disposition': '+default-forced', 'language': 'eng'},
-                {'disposition': '-default-forced', 'language': 'fra'}
-            ]
-        }
-        assert mp.getDefaultAudioLanguage(options) == 'eng'
+        options = {"audio": [{"disposition": "+default-forced", "language": "eng"}, {"disposition": "-default-forced", "language": "fra"}]}
+        assert mp.getDefaultAudioLanguage(options) == "eng"
 
     def test_dict_options_no_default(self):
         mp = self._make_processor()
-        options = {
-            'audio': [
-                {'disposition': '-default-forced', 'language': 'eng'}
-            ]
-        }
+        options = {"audio": [{"disposition": "-default-forced", "language": "eng"}]}
         assert mp.getDefaultAudioLanguage(options) is None
 
     def test_mediainfo_options(self, make_stream):
         mp = self._make_processor()
         info = MediaInfo()
-        s = make_stream(type='audio', disposition={'default': True, 'forced': False})
-        s.metadata = {'language': 'jpn'}
+        s = make_stream(type="audio", disposition={"default": True, "forced": False})
+        s.metadata = {"language": "jpn"}
         info.streams.append(s)
-        assert mp.getDefaultAudioLanguage(info) == 'jpn'
+        assert mp.getDefaultAudioLanguage(info) == "jpn"
 
 
 class TestValidDisposition:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -357,33 +359,34 @@ class TestValidDisposition:
 
     def test_no_ignored_dispositions(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio', disposition={'default': True, 'forced': False})
+        stream = make_stream(type="audio", disposition={"default": True, "forced": False})
         assert mp.validDisposition(stream, []) is True
 
     def test_ignored_disposition(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio', disposition={'default': True, 'comment': True})
-        assert mp.validDisposition(stream, ['comment']) is False
+        stream = make_stream(type="audio", disposition={"default": True, "comment": True})
+        assert mp.validDisposition(stream, ["comment"]) is False
 
     def test_unique_disposition_first(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio', disposition={'default': True, 'forced': False})
+        stream = make_stream(type="audio", disposition={"default": True, "forced": False})
         existing = []
-        assert mp.validDisposition(stream, [], unique=True, language='eng', existing=existing) is True
+        assert mp.validDisposition(stream, [], unique=True, language="eng", existing=existing) is True
         assert len(existing) == 1
 
     def test_unique_disposition_duplicate(self, make_stream):
         mp = self._make_processor()
-        stream = make_stream(type='audio', disposition={'default': True, 'forced': False})
-        existing = ['eng.' + stream.dispostr]
-        assert mp.validDisposition(stream, [], unique=True, language='eng', existing=existing) is False
+        stream = make_stream(type="audio", disposition={"default": True, "forced": False})
+        existing = ["eng." + stream.dispostr]
+        assert mp.validDisposition(stream, [], unique=True, language="eng", existing=existing) is False
 
 
 class TestDispoStringToDict:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -391,26 +394,26 @@ class TestDispoStringToDict:
 
     def test_positive_dispositions(self):
         mp = self._make_processor()
-        result = mp.dispoStringToDict('+default+forced')
-        assert result['default'] is True
-        assert result['forced'] is True
+        result = mp.dispoStringToDict("+default+forced")
+        assert result["default"] is True
+        assert result["forced"] is True
 
     def test_negative_dispositions(self):
         mp = self._make_processor()
-        result = mp.dispoStringToDict('-default-forced')
-        assert result['default'] is False
-        assert result['forced'] is False
+        result = mp.dispoStringToDict("-default-forced")
+        assert result["default"] is False
+        assert result["forced"] is False
 
     def test_mixed(self):
         mp = self._make_processor()
-        result = mp.dispoStringToDict('+default-forced+comment')
-        assert result['default'] is True
-        assert result['forced'] is False
-        assert result['comment'] is True
+        result = mp.dispoStringToDict("+default-forced+comment")
+        assert result["default"] is True
+        assert result["forced"] is False
+        assert result["comment"] is True
 
     def test_empty_string(self):
         mp = self._make_processor()
-        assert mp.dispoStringToDict('') == {}
+        assert mp.dispoStringToDict("") == {}
 
     def test_none(self):
         mp = self._make_processor()
@@ -419,9 +422,10 @@ class TestDispoStringToDict:
 
 class TestCheckDisposition:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -429,22 +433,23 @@ class TestCheckDisposition:
 
     def test_all_present(self):
         mp = self._make_processor()
-        assert mp.checkDisposition(['forced'], {'forced': True, 'default': False}) is True
+        assert mp.checkDisposition(["forced"], {"forced": True, "default": False}) is True
 
     def test_missing_disposition(self):
         mp = self._make_processor()
-        assert mp.checkDisposition(['forced'], {'forced': False, 'default': True}) is False
+        assert mp.checkDisposition(["forced"], {"forced": False, "default": True}) is False
 
     def test_empty_allowed(self):
         mp = self._make_processor()
-        assert mp.checkDisposition([], {'forced': False}) is True
+        assert mp.checkDisposition([], {"forced": False}) is True
 
 
 class TestTitleDispositionCheck:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -453,36 +458,37 @@ class TestTitleDispositionCheck:
     def test_commentary_in_title(self, make_stream):
         mp = self._make_processor()
         info = MediaInfo()
-        s = make_stream(type='audio', disposition={'default': False, 'comment': False})
-        s.metadata = {'title': "Director's Commentary", 'language': 'eng'}
+        s = make_stream(type="audio", disposition={"default": False, "comment": False})
+        s.metadata = {"title": "Director's Commentary", "language": "eng"}
         info.streams.append(s)
         mp.titleDispositionCheck(info)
-        assert s.disposition['comment'] is True
+        assert s.disposition["comment"] is True
 
     def test_forced_in_title(self, make_stream):
         mp = self._make_processor()
         info = MediaInfo()
-        s = make_stream(type='subtitle', disposition={'default': False, 'forced': False})
-        s.metadata = {'title': 'Forced Foreign', 'language': 'eng'}
+        s = make_stream(type="subtitle", disposition={"default": False, "forced": False})
+        s.metadata = {"title": "Forced Foreign", "language": "eng"}
         info.streams.append(s)
         mp.titleDispositionCheck(info)
-        assert s.disposition['forced'] is True
+        assert s.disposition["forced"] is True
 
     def test_sdh_in_title(self, make_stream):
         mp = self._make_processor()
         info = MediaInfo()
-        s = make_stream(type='subtitle', disposition={'default': False, 'hearing_impaired': False})
-        s.metadata = {'title': 'English SDH', 'language': 'eng'}
+        s = make_stream(type="subtitle", disposition={"default": False, "hearing_impaired": False})
+        s.metadata = {"title": "English SDH", "language": "eng"}
         info.streams.append(s)
         mp.titleDispositionCheck(info)
-        assert s.disposition['hearing_impaired'] is True
+        assert s.disposition["hearing_impaired"] is True
 
 
 class TestSublistIndexes:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -490,64 +496,66 @@ class TestSublistIndexes:
 
     def test_finds_sublist(self):
         mp = self._make_processor()
-        assert mp.sublistIndexes(['a', 'b', 'c', 'a', 'b'], ['a', 'b']) == [0, 3]
+        assert mp.sublistIndexes(["a", "b", "c", "a", "b"], ["a", "b"]) == [0, 3]
 
     def test_no_match(self):
         mp = self._make_processor()
-        assert mp.sublistIndexes(['a', 'b', 'c'], ['d', 'e']) == []
+        assert mp.sublistIndexes(["a", "b", "c"], ["d", "e"]) == []
 
     def test_single_element(self):
         mp = self._make_processor()
-        assert mp.sublistIndexes(['a', 'b', 'a'], ['a']) == [0, 2]
+        assert mp.sublistIndexes(["a", "b", "a"], ["a"]) == [0, 2]
 
 
 class TestGetOutputFile:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.settings.output_dir = None
-                mp.settings.output_extension = 'mp4'
+                mp.settings.output_extension = "mp4"
                 mp.log = MagicMock()
                 return mp
 
     def test_basic_output(self, tmp_path):
         mp = self._make_processor()
-        outfile, outdir = mp.getOutputFile(str(tmp_path), 'movie', 'mkv')
-        assert outfile.endswith('movie.mp4')
+        outfile, outdir = mp.getOutputFile(str(tmp_path), "movie", "mkv")
+        assert outfile.endswith("movie.mp4")
         assert outdir == str(tmp_path)
 
     def test_with_number(self, tmp_path):
         mp = self._make_processor()
-        outfile, _ = mp.getOutputFile(str(tmp_path), 'movie', 'mkv', number=2)
-        assert '.2.' in outfile
+        outfile, _ = mp.getOutputFile(str(tmp_path), "movie", "mkv", number=2)
+        assert ".2." in outfile
 
     def test_with_temp_extension(self, tmp_path):
         mp = self._make_processor()
-        outfile, _ = mp.getOutputFile(str(tmp_path), 'movie', 'mkv', temp_extension='tmp')
-        assert outfile.endswith('.tmp')
+        outfile, _ = mp.getOutputFile(str(tmp_path), "movie", "mkv", temp_extension="tmp")
+        assert outfile.endswith(".tmp")
 
     def test_output_dir_override(self, tmp_path):
         mp = self._make_processor()
-        outdir = str(tmp_path / 'output')
+        outdir = str(tmp_path / "output")
         mp.settings.output_dir = outdir
-        outfile, result_dir = mp.getOutputFile(str(tmp_path), 'movie', 'mkv')
+        outfile, result_dir = mp.getOutputFile(str(tmp_path), "movie", "mkv")
         assert result_dir == outdir
 
     def test_ignore_output_dir(self, tmp_path):
         mp = self._make_processor()
-        mp.settings.output_dir = '/some/output/dir'
-        outfile, result_dir = mp.getOutputFile(str(tmp_path), 'movie', 'mkv', ignore_output_dir=True)
+        mp.settings.output_dir = "/some/output/dir"
+        outfile, result_dir = mp.getOutputFile(str(tmp_path), "movie", "mkv", ignore_output_dir=True)
         assert result_dir == str(tmp_path)
 
 
 class TestGetSourceStream:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -556,8 +564,8 @@ class TestGetSourceStream:
     def test_returns_stream(self, make_stream):
         mp = self._make_processor()
         info = MediaInfo()
-        s0 = make_stream(type='video', index=0)
-        s1 = make_stream(type='audio', index=1)
+        s0 = make_stream(type="video", index=0)
+        s1 = make_stream(type="audio", index=1)
         info.streams = [s0, s1]
         assert mp.getSourceStream(0, info) == s0
         assert mp.getSourceStream(1, info) == s1
@@ -565,9 +573,10 @@ class TestGetSourceStream:
 
 class TestGetSubExtensionFromCodec:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -575,20 +584,21 @@ class TestGetSubExtensionFromCodec:
 
     def test_known_codec(self):
         mp = self._make_processor()
-        result = mp.getSubExtensionFromCodec('srt')
-        assert result == 'srt'
+        result = mp.getSubExtensionFromCodec("srt")
+        assert result == "srt"
 
     def test_unknown_codec_returns_codec(self):
         mp = self._make_processor()
-        result = mp.getSubExtensionFromCodec('unknown_codec')
-        assert result == 'unknown_codec'
+        result = mp.getSubExtensionFromCodec("unknown_codec")
+        assert result == "unknown_codec"
 
 
 class TestRemoveFile:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -620,9 +630,10 @@ class TestRemoveFile:
 
 class TestOutputDirHasFreeSpace:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -647,12 +658,13 @@ class TestOutputDirHasFreeSpace:
 
 class TestCanBypassConvert:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
-                mp.settings.output_extension = 'mp4'
+                mp.settings.output_extension = "mp4"
                 mp.settings.force_convert = False
                 mp.settings.process_same_extensions = False
                 mp.settings.bypass_copy_all = False
@@ -663,33 +675,34 @@ class TestCanBypassConvert:
         mp = self._make_processor()
         info = MagicMock()
         info.format.metadata = {}
-        assert mp.canBypassConvert('/path/to/file.mp4', info) is True
+        assert mp.canBypassConvert("/path/to/file.mp4", info) is True
 
     def test_different_extension(self):
         mp = self._make_processor()
         info = MagicMock()
-        assert mp.canBypassConvert('/path/to/file.mkv', info) is False
+        assert mp.canBypassConvert("/path/to/file.mkv", info) is False
 
     def test_same_extension_process_enabled(self):
         mp = self._make_processor()
         mp.settings.process_same_extensions = True
         info = MagicMock()
         info.format.metadata = {}
-        assert mp.canBypassConvert('/path/to/file.mp4', info) is False
+        assert mp.canBypassConvert("/path/to/file.mp4", info) is False
 
     def test_same_extension_sma_processed(self):
         mp = self._make_processor()
         mp.settings.process_same_extensions = True
         info = MagicMock()
-        info.format.metadata = {'encoder': 'sma-ng v1.0'}
-        assert mp.canBypassConvert('/path/to/file.mp4', info) is True
+        info.format.metadata = {"encoder": "sma-ng v1.0"}
+        assert mp.canBypassConvert("/path/to/file.mp4", info) is True
 
 
 class TestPrintableFFMPEGCommand:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -697,20 +710,21 @@ class TestPrintableFFMPEGCommand:
 
     def test_quotes_spaces(self):
         mp = self._make_processor()
-        result = mp.printableFFMPEGCommand(['ffmpeg', '-i', '/path with spaces/file.mkv', '-c', 'copy'])
+        result = mp.printableFFMPEGCommand(["ffmpeg", "-i", "/path with spaces/file.mkv", "-c", "copy"])
         assert '"/path with spaces/file.mkv"' in result
 
     def test_no_quotes_without_spaces(self):
         mp = self._make_processor()
-        result = mp.printableFFMPEGCommand(['ffmpeg', '-c', 'copy'])
+        result = mp.printableFFMPEGCommand(["ffmpeg", "-c", "copy"])
         assert '"' not in result
 
 
 class TestRawEscape:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -719,23 +733,24 @@ class TestRawEscape:
     def test_escapes_backslash(self):
         mp = self._make_processor()
         # raw() escapes both backslash and colon
-        result = mp.raw('a\\b')
-        assert '\\\\' in result
+        result = mp.raw("a\\b")
+        assert "\\\\" in result
 
     def test_escapes_colon(self):
         mp = self._make_processor()
-        assert mp.raw('file:name') == 'file\\:name'
+        assert mp.raw("file:name") == "file\\:name"
 
     def test_no_escaping_needed(self):
         mp = self._make_processor()
-        assert mp.raw('simple') == 'simple'
+        assert mp.raw("simple") == "simple"
 
 
 class TestParseAndNormalize:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -743,19 +758,20 @@ class TestParseAndNormalize:
 
     def test_same_denominator(self):
         mp = self._make_processor()
-        assert mp.parseAndNormalize('50000/50000', 50000) == 50000
+        assert mp.parseAndNormalize("50000/50000", 50000) == 50000
 
     def test_different_denominator(self):
         mp = self._make_processor()
-        result = mp.parseAndNormalize('1000/100', 50000)
+        result = mp.parseAndNormalize("1000/100", 50000)
         assert result == 500000
 
 
 class TestHasValidFrameData:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -763,21 +779,12 @@ class TestHasValidFrameData:
 
     def test_valid_hdr_framedata(self):
         mp = self._make_processor()
-        framedata = {
-            'side_data_list': [
-                {'side_data_type': 'Mastering display metadata'},
-                {'side_data_type': 'Content light level metadata'}
-            ]
-        }
+        framedata = {"side_data_list": [{"side_data_type": "Mastering display metadata"}, {"side_data_type": "Content light level metadata"}]}
         assert mp.hasValidFrameData(framedata) is True
 
     def test_missing_one_type(self):
         mp = self._make_processor()
-        framedata = {
-            'side_data_list': [
-                {'side_data_type': 'Mastering display metadata'}
-            ]
-        }
+        framedata = {"side_data_list": [{"side_data_type": "Mastering display metadata"}]}
         assert mp.hasValidFrameData(framedata) is False
 
     def test_no_side_data(self):
@@ -791,9 +798,10 @@ class TestHasValidFrameData:
 
 class TestHasBitstreamVideoSubs:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -802,8 +810,8 @@ class TestHasBitstreamVideoSubs:
     def test_has_closed_captions(self):
         mp = self._make_processor()
         framedata = {
-            'side_data_list': [
-                {'side_data_type': 'Closed Captions'},
+            "side_data_list": [
+                {"side_data_type": "Closed Captions"},
             ]
         }
         assert mp.hasBitstreamVideoSubs(framedata) is True
@@ -815,9 +823,10 @@ class TestHasBitstreamVideoSubs:
 
 class TestIsHDROutput:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -825,15 +834,15 @@ class TestIsHDROutput:
 
     def test_hdr_pix_fmt_and_depth(self):
         mp = self._make_processor()
-        assert mp.isHDROutput('yuv420p10le', 10) is True
+        assert mp.isHDROutput("yuv420p10le", 10) is True
 
     def test_sdr_pix_fmt(self):
         mp = self._make_processor()
-        assert mp.isHDROutput('yuv420p', 8) is False
+        assert mp.isHDROutput("yuv420p", 8) is False
 
     def test_hdr_pix_fmt_low_depth(self):
         mp = self._make_processor()
-        assert mp.isHDROutput('yuv420p10le', 8) is False
+        assert mp.isHDROutput("yuv420p10le", 8) is False
 
     def test_no_pix_fmt_high_depth(self):
         mp = self._make_processor()
@@ -846,9 +855,10 @@ class TestIsHDROutput:
 
 class TestFfprobeSafeCodecs:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -856,10 +866,10 @@ class TestFfprobeSafeCodecs:
 
     def test_adds_ffprobe_codec(self):
         mp = self._make_processor()
-        codecs = ['h264']
+        codecs = ["h264"]
         result = mp.ffprobeSafeCodecs(codecs)
         # h264 ffprobe name is 'h264' already, so check it doesn't duplicate
-        assert 'h264' in result
+        assert "h264" in result
 
     def test_empty_list(self):
         mp = self._make_processor()
@@ -872,12 +882,13 @@ class TestFfprobeSafeCodecs:
 
 class TestAtomicFileOps:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
-                mp.settings.permissions = {'chmod': 0o664, 'uid': -1, 'gid': -1}
+                mp.settings.permissions = {"chmod": 0o664, "uid": -1, "gid": -1}
                 mp.settings.copyto = []
                 mp.settings.moveto = None
                 mp.log = MagicMock()
@@ -898,7 +909,7 @@ class TestAtomicFileOps:
         src = tmp_path / "source.mp4"
         src.write_bytes(b"media data")
         dst = tmp_path / "output.mp4"
-        with patch('shutil.copy2', side_effect=OSError("disk full")):
+        with patch("shutil.copy2", side_effect=OSError("disk full")):
             with pytest.raises(OSError):
                 mp._atomic_copy(str(src), str(dst))
         assert not (tmp_path / "output.mp4.smatmp").exists()
@@ -908,7 +919,7 @@ class TestAtomicFileOps:
         src = tmp_path / "source.mp4"
         src.write_bytes(b"media data")
         dst = tmp_path / "dest.mp4"
-        with patch('os.rename') as mock_rename:
+        with patch("os.rename") as mock_rename:
             mp._atomic_move(str(src), str(dst))
         mock_rename.assert_called_once_with(str(src), str(dst))
 
@@ -917,9 +928,9 @@ class TestAtomicFileOps:
         src = tmp_path / "source.mp4"
         src.write_bytes(b"media data")
         dst = tmp_path / "dest.mp4"
-        with patch('os.rename', side_effect=OSError(18, "Invalid cross-device link")):
-            with patch.object(mp, '_atomic_copy') as mock_copy:
-                with patch('os.remove') as mock_remove:
+        with patch("os.rename", side_effect=OSError(18, "Invalid cross-device link")):
+            with patch.object(mp, "_atomic_copy") as mock_copy:
+                with patch("os.remove") as mock_remove:
                     mp._atomic_move(str(src), str(dst))
         mock_copy.assert_called_once_with(str(src), str(dst))
         mock_remove.assert_called_once_with(str(src))
@@ -932,7 +943,7 @@ class TestAtomicFileOps:
         dest_dir.mkdir()
         mp.settings.copyto = [str(dest_dir)]
         mp.settings.moveto = None
-        with patch.object(mp, '_atomic_copy') as mock_copy:
+        with patch.object(mp, "_atomic_copy") as mock_copy:
             mp.replicate(str(src))
         mock_copy.assert_called_once_with(str(src), str(dest_dir / "movie.mp4"))
 
@@ -944,7 +955,7 @@ class TestAtomicFileOps:
         dest_dir.mkdir()
         mp.settings.copyto = []
         mp.settings.moveto = str(dest_dir)
-        with patch.object(mp, '_atomic_move') as mock_move:
+        with patch.object(mp, "_atomic_move") as mock_move:
             mp.replicate(str(src))
         mock_move.assert_called_once_with(str(src), str(dest_dir / "movie.mp4"))
 
@@ -958,20 +969,20 @@ class TestAtomicFileOps:
         outputfile = str(output_dir / "movie.mp4")
         mp.settings.output_dir = str(output_dir)
         mp.settings.moveto = None
-        with patch.object(mp, '_atomic_move') as mock_move, \
-             patch.object(mp, 'parseFile', return_value=(str(input_dir), 'movie', 'mp4')):
+        with patch.object(mp, "_atomic_move") as mock_move, patch.object(mp, "parseFile", return_value=(str(input_dir), "movie", "mp4")):
             mp.restoreFromOutput(inputfile, outputfile)
         mock_move.assert_called_once_with(outputfile, str(input_dir / "movie.mp4"))
 
 
 class TestSetPermissions:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
-                mp.settings.permissions = {'chmod': 0o664, 'uid': -1, 'gid': -1}
+                mp.settings.permissions = {"chmod": 0o664, "uid": -1, "gid": -1}
                 mp.log = MagicMock()
                 return mp
 
@@ -990,9 +1001,10 @@ class TestSetPermissions:
 
 class TestScanForExternalMetadata:
     def _make_processor(self):
-        with patch('resources.mediaprocessor.Converter'):
-            with patch('resources.readsettings.ReadSettings._validate_binaries'):
+        with patch("resources.mediaprocessor.Converter"):
+            with patch("resources.readsettings.ReadSettings._validate_binaries"):
                 from resources.mediaprocessor import MediaProcessor
+
                 mp = MediaProcessor.__new__(MediaProcessor)
                 mp.settings = MagicMock()
                 mp.log = MagicMock()
@@ -1022,23 +1034,23 @@ class TestCrfProfileOverridesCopy:
     def test_crf_profile_match_forces_transcode(self, tmp_ini, make_media_info):
         """When source bitrate exceeds a CRF profile threshold, the stream must be
         transcoded (not copied) even if the source codec matches the desired codec."""
-        with patch('resources.readsettings.ReadSettings._validate_binaries'):
-            from resources.readsettings import ReadSettings
+        with patch("resources.readsettings.ReadSettings._validate_binaries"):
             from resources.mediaprocessor import MediaProcessor
+            from resources.readsettings import ReadSettings
 
             settings = ReadSettings(tmp_ini())
             # Use single codec so source h264 matches and would normally be copied
-            settings.vcodec = ['h264']
+            settings.vcodec = ["h264"]
             # Profile: source > 5000 kbps → transcode with crf=18, 3M/6M rate control
-            settings.vcrf_profiles = [{'source_bitrate': 5000, 'crf': 18, 'maxrate': '3M', 'bufsize': '6M'}]
+            settings.vcrf_profiles = [{"source_bitrate": 5000, "crf": 18, "maxrate": "3M", "bufsize": "6M"}]
 
         mock_converter = MagicMock()
         mock_converter.ffmpeg.codecs = {
-            'h264': {'encoders': ['libx264']},
-            'aac': {'encoders': ['aac']},
+            "h264": {"encoders": ["libx264"]},
+            "aac": {"encoders": ["aac"]},
         }
-        mock_converter.ffmpeg.pix_fmts = {'yuv420p': 8}
-        mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {'h264': 'libx264', 'aac': 'aac'}.get(c, c)
+        mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8}
+        mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {"h264": "libx264", "aac": "aac"}.get(c, c)
 
         mp = MediaProcessor.__new__(MediaProcessor)
         mp.settings = settings
@@ -1048,40 +1060,39 @@ class TestCrfProfileOverridesCopy:
 
         # 7 Mbit source: total=7128kbps, audio=128kbps → video estimate ≈ 6650kbps > 5000 threshold
         info = make_media_info(
-            video_codec='h264',
+            video_codec="h264",
             video_bitrate=7000000,
             total_bitrate=7128000,
             audio_bitrate=128000,
         )
 
-        with patch('resources.mediaprocessor.Converter.encoder', return_value=None), \
-             patch('resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name', side_effect=lambda c: c):
-            options, *_ = mp.generateOptions('/fake/input.mkv', info=info)
+        with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+            options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
 
         assert options is not None
-        assert options['video']['codec'] == 'h264', "CRF profile match must override copy and transcode"
-        assert options['video']['crf'] == 18
-        assert options['video']['maxrate'] == '3M'
-        assert options['video']['bufsize'] == '6M'
+        assert options["video"]["codec"] == "h264", "CRF profile match must override copy and transcode"
+        assert options["video"]["crf"] == 18
+        assert options["video"]["maxrate"] == "3M"
+        assert options["video"]["bufsize"] == "6M"
 
     def test_no_crf_profile_match_allows_copy(self, tmp_ini, make_media_info):
         """When source bitrate is below the CRF profile threshold, copy is not overridden."""
-        with patch('resources.readsettings.ReadSettings._validate_binaries'):
-            from resources.readsettings import ReadSettings
+        with patch("resources.readsettings.ReadSettings._validate_binaries"):
             from resources.mediaprocessor import MediaProcessor
+            from resources.readsettings import ReadSettings
 
             settings = ReadSettings(tmp_ini())
-            settings.vcodec = ['h264']
+            settings.vcodec = ["h264"]
             # Profile only triggers above 10000 kbps — our 7 Mbit source won't match
-            settings.vcrf_profiles = [{'source_bitrate': 10000, 'crf': 18, 'maxrate': '6M', 'bufsize': '12M'}]
+            settings.vcrf_profiles = [{"source_bitrate": 10000, "crf": 18, "maxrate": "6M", "bufsize": "12M"}]
 
         mock_converter = MagicMock()
         mock_converter.ffmpeg.codecs = {
-            'h264': {'encoders': ['libx264']},
-            'aac': {'encoders': ['aac']},
+            "h264": {"encoders": ["libx264"]},
+            "aac": {"encoders": ["aac"]},
         }
-        mock_converter.ffmpeg.pix_fmts = {'yuv420p': 8}
-        mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {'h264': 'libx264', 'aac': 'aac'}.get(c, c)
+        mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8}
+        mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {"h264": "libx264", "aac": "aac"}.get(c, c)
 
         mp = MediaProcessor.__new__(MediaProcessor)
         mp.settings = settings
@@ -1090,25 +1101,25 @@ class TestCrfProfileOverridesCopy:
         mp.deletesubs = set()
 
         info = make_media_info(
-            video_codec='h264',
+            video_codec="h264",
             video_bitrate=7000000,
             total_bitrate=7128000,
             audio_bitrate=128000,
         )
 
-        with patch('resources.mediaprocessor.Converter.encoder', return_value=None), \
-             patch('resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name', side_effect=lambda c: c):
-            options, *_ = mp.generateOptions('/fake/input.mkv', info=info)
+        with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+            options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
 
         assert options is not None
-        assert options['video']['codec'] == 'copy'
+        assert options["video"]["codec"] == "copy"
 
 
 def _make_mp():
     """Shared helper: build a MediaProcessor with mocked converter and settings."""
-    with patch('resources.mediaprocessor.Converter'):
-        with patch('resources.readsettings.ReadSettings._validate_binaries'):
+    with patch("resources.mediaprocessor.Converter"):
+        with patch("resources.readsettings.ReadSettings._validate_binaries"):
             from resources.mediaprocessor import MediaProcessor
+
             mp = MediaProcessor.__new__(MediaProcessor)
             mp.settings = MagicMock()
             mp.log = MagicMock()
@@ -1118,43 +1129,43 @@ def _make_mp():
 class TestValidLanguage:
     def test_empty_whitelist_allows_any(self):
         mp = _make_mp()
-        assert mp.validLanguage('eng', []) is True
-        assert mp.validLanguage('fra', []) is True
+        assert mp.validLanguage("eng", []) is True
+        assert mp.validLanguage("fra", []) is True
 
     def test_language_in_whitelist(self):
         mp = _make_mp()
-        assert mp.validLanguage('eng', ['eng', 'fra']) is True
+        assert mp.validLanguage("eng", ["eng", "fra"]) is True
 
     def test_language_not_in_whitelist(self):
         mp = _make_mp()
-        assert mp.validLanguage('deu', ['eng', 'fra']) is False
+        assert mp.validLanguage("deu", ["eng", "fra"]) is False
 
     def test_blocked_language_excluded(self):
         mp = _make_mp()
-        assert mp.validLanguage('eng', ['eng', 'fra'], blocked=['eng']) is False
+        assert mp.validLanguage("eng", ["eng", "fra"], blocked=["eng"]) is False
 
     def test_blocked_overrides_empty_whitelist(self):
         mp = _make_mp()
-        assert mp.validLanguage('eng', [], blocked=['eng']) is False
+        assert mp.validLanguage("eng", [], blocked=["eng"]) is False
 
     def test_empty_blocked_list_allows_whitelist(self):
         mp = _make_mp()
-        assert mp.validLanguage('eng', ['eng'], blocked=[]) is True
+        assert mp.validLanguage("eng", ["eng"], blocked=[]) is True
 
 
 class TestDispoStringToDict:
     def test_plus_sets_true(self):
         mp = _make_mp()
-        assert mp.dispoStringToDict('+default') == {'default': True}
+        assert mp.dispoStringToDict("+default") == {"default": True}
 
     def test_minus_sets_false(self):
         mp = _make_mp()
-        assert mp.dispoStringToDict('-forced') == {'forced': False}
+        assert mp.dispoStringToDict("-forced") == {"forced": False}
 
     def test_mixed_signs(self):
         mp = _make_mp()
-        result = mp.dispoStringToDict('+default-forced+comment')
-        assert result == {'default': True, 'forced': False, 'comment': True}
+        result = mp.dispoStringToDict("+default-forced+comment")
+        assert result == {"default": True, "forced": False, "comment": True}
 
     def test_none_returns_empty(self):
         mp = _make_mp()
@@ -1162,43 +1173,43 @@ class TestDispoStringToDict:
 
     def test_empty_string_returns_empty(self):
         mp = _make_mp()
-        assert mp.dispoStringToDict('') == {}
+        assert mp.dispoStringToDict("") == {}
 
 
 class TestCheckDisposition:
     def test_all_required_present_and_true(self):
         mp = _make_mp()
-        assert mp.checkDisposition(['default'], {'default': True, 'forced': False}) is True
+        assert mp.checkDisposition(["default"], {"default": True, "forced": False}) is True
 
     def test_required_false_returns_false(self):
         mp = _make_mp()
-        assert mp.checkDisposition(['forced'], {'default': True, 'forced': False}) is False
+        assert mp.checkDisposition(["forced"], {"default": True, "forced": False}) is False
 
     def test_empty_allowed_always_true(self):
         mp = _make_mp()
-        assert mp.checkDisposition([], {'default': False}) is True
+        assert mp.checkDisposition([], {"default": False}) is True
 
     def test_missing_key_returns_false(self):
         mp = _make_mp()
-        assert mp.checkDisposition(['comment'], {'default': True}) is False
+        assert mp.checkDisposition(["comment"], {"default": True}) is False
 
 
 class TestSublistIndexes:
     def test_finds_single_match(self):
         mp = _make_mp()
-        assert mp.sublistIndexes(['a', 'b', 'c'], ['b', 'c']) == [1]
+        assert mp.sublistIndexes(["a", "b", "c"], ["b", "c"]) == [1]
 
     def test_finds_multiple_matches(self):
         mp = _make_mp()
-        assert mp.sublistIndexes(['a', 'b', 'a', 'b'], ['a', 'b']) == [0, 2]
+        assert mp.sublistIndexes(["a", "b", "a", "b"], ["a", "b"]) == [0, 2]
 
     def test_no_match_returns_empty(self):
         mp = _make_mp()
-        assert mp.sublistIndexes(['a', 'b', 'c'], ['x', 'y']) == []
+        assert mp.sublistIndexes(["a", "b", "c"], ["x", "y"]) == []
 
     def test_single_element_pattern(self):
         mp = _make_mp()
-        assert mp.sublistIndexes(['a', 'b', 'a'], ['a']) == [0, 2]
+        assert mp.sublistIndexes(["a", "b", "a"], ["a"]) == [0, 2]
 
 
 class TestMinResolvedMap:
@@ -1219,16 +1230,18 @@ class TestGetSourceIndexFromMap:
     def test_returns_stream_position(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
+
         info = MediaInfo()
         s0 = make_stream(index=0)
-        s1 = make_stream(index=1, type='audio')
-        s2 = make_stream(index=2, type='subtitle')
+        s1 = make_stream(index=1, type="audio")
+        s2 = make_stream(index=2, type="subtitle")
         info.streams = [s0, s1, s2]
         assert mp.getSourceIndexFromMap(1, info, []) == 1
 
     def test_returns_999_for_missing_map(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
+
         info = MediaInfo()
         info.streams = [make_stream(index=0)]
         assert mp.getSourceIndexFromMap(99, info, []) == 999
@@ -1236,9 +1249,10 @@ class TestGetSourceIndexFromMap:
     def test_resolves_via_combination(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
+
         info = MediaInfo()
         s0 = make_stream(index=0)
-        s1 = make_stream(index=3, type='audio')
+        s1 = make_stream(index=3, type="audio")
         info.streams = [s0, s1]
         # map=3 is in combo [1,3], min=1; stream with index=1 doesn't exist → 999
         assert mp.getSourceIndexFromMap(3, info, [[1, 3]]) == 999
@@ -1248,81 +1262,88 @@ class TestTitleDispositionCheck:
     def test_comment_in_title(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
-        s = make_stream(type='audio', metadata={'title': 'Commentary Track', 'language': 'eng'})
-        s.disposition = {'default': False, 'forced': False, 'comment': False}
+
+        s = make_stream(type="audio", metadata={"title": "Commentary Track", "language": "eng"})
+        s.disposition = {"default": False, "forced": False, "comment": False}
         info = MediaInfo()
         info.streams = [s]
         mp.titleDispositionCheck(info)
-        assert s.disposition['comment'] is True
+        assert s.disposition["comment"] is True
 
     def test_sdh_sets_hearing_impaired(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
-        s = make_stream(type='subtitle', metadata={'title': 'English SDH', 'language': 'eng'})
-        s.disposition = {'default': False, 'forced': False, 'hearing_impaired': False}
+
+        s = make_stream(type="subtitle", metadata={"title": "English SDH", "language": "eng"})
+        s.disposition = {"default": False, "forced": False, "hearing_impaired": False}
         info = MediaInfo()
         info.streams = [s]
         mp.titleDispositionCheck(info)
-        assert s.disposition['hearing_impaired'] is True
+        assert s.disposition["hearing_impaired"] is True
 
     def test_forced_in_title(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
-        s = make_stream(type='subtitle', metadata={'title': 'Forced Subtitles', 'language': 'eng'})
-        s.disposition = {'default': False, 'forced': False}
+
+        s = make_stream(type="subtitle", metadata={"title": "Forced Subtitles", "language": "eng"})
+        s.disposition = {"default": False, "forced": False}
         info = MediaInfo()
         info.streams = [s]
         mp.titleDispositionCheck(info)
-        assert s.disposition['forced'] is True
+        assert s.disposition["forced"] is True
 
     def test_no_match_unchanged(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
-        s = make_stream(type='audio', metadata={'title': 'Main Audio', 'language': 'eng'})
-        s.disposition = {'default': True, 'forced': False, 'comment': False}
+
+        s = make_stream(type="audio", metadata={"title": "Main Audio", "language": "eng"})
+        s.disposition = {"default": True, "forced": False, "comment": False}
         info = MediaInfo()
         info.streams = [s]
         mp.titleDispositionCheck(info)
-        assert s.disposition['comment'] is False
+        assert s.disposition["comment"] is False
 
     def test_case_insensitive(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
-        s = make_stream(type='subtitle', metadata={'title': 'FORCED ENGLISH', 'language': 'eng'})
-        s.disposition = {'forced': False}
+
+        s = make_stream(type="subtitle", metadata={"title": "FORCED ENGLISH", "language": "eng"})
+        s.disposition = {"forced": False}
         info = MediaInfo()
         info.streams = [s]
         mp.titleDispositionCheck(info)
-        assert s.disposition['forced'] is True
+        assert s.disposition["forced"] is True
 
 
 class TestSafeLanguage:
     def _make_audio_stream(self, lang, make_stream):
-        s = make_stream(type='audio', metadata={'language': lang})
-        s.disposition = {'default': True, 'forced': False, 'comment': False, 'hearing_impaired': False, 'visual_impaired': False}
+        s = make_stream(type="audio", metadata={"language": lang})
+        s.disposition = {"default": True, "forced": False, "comment": False, "hearing_impaired": False, "visual_impaired": False}
         return s
 
     def test_normalizes_undefined_audio_to_adl(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
-        mp.settings.awl = ['eng']
-        mp.settings.swl = ['eng']
-        mp.settings.adl = 'eng'
+
+        mp.settings.awl = ["eng"]
+        mp.settings.swl = ["eng"]
+        mp.settings.adl = "eng"
         mp.settings.sdl = None
         mp.settings.audio_original_language = False
         mp.settings.subtitle_original_language = False
         mp.settings.ignored_audio_dispositions = []
         info = MediaInfo()
-        audio = self._make_audio_stream('und', make_stream)
+        audio = self._make_audio_stream("und", make_stream)
         info.streams = [audio]
         awl, swl = mp.safeLanguage(info)
         # 'und' normalized to 'eng' (adl)
-        assert audio.metadata['language'] == 'eng'
+        assert audio.metadata["language"] == "eng"
 
     def test_relaxes_awl_when_no_valid_tracks(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
-        mp.settings.awl = ['fra']
+
+        mp.settings.awl = ["fra"]
         mp.settings.swl = []
         mp.settings.adl = None
         mp.settings.sdl = None
@@ -1330,7 +1351,7 @@ class TestSafeLanguage:
         mp.settings.subtitle_original_language = False
         mp.settings.ignored_audio_dispositions = []
         info = MediaInfo()
-        audio = self._make_audio_stream('eng', make_stream)
+        audio = self._make_audio_stream("eng", make_stream)
         info.streams = [audio]
         awl, _ = mp.safeLanguage(info)
         # No 'fra' tracks found → awl relaxed to []
@@ -1339,7 +1360,8 @@ class TestSafeLanguage:
     def test_appends_original_language_to_awl(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
-        mp.settings.awl = ['eng']
+
+        mp.settings.awl = ["eng"]
         mp.settings.swl = []
         mp.settings.adl = None
         mp.settings.sdl = None
@@ -1347,48 +1369,48 @@ class TestSafeLanguage:
         mp.settings.subtitle_original_language = False
         mp.settings.ignored_audio_dispositions = []
         tagdata = MagicMock()
-        tagdata.original_language = 'jpn'
+        tagdata.original_language = "jpn"
         info = MediaInfo()
-        audio = self._make_audio_stream('eng', make_stream)
+        audio = self._make_audio_stream("eng", make_stream)
         info.streams = [audio]
         awl, _ = mp.safeLanguage(info, tagdata)
-        assert 'jpn' in awl
+        assert "jpn" in awl
 
 
 class TestMapStreamCombinations:
     def test_matching_combination_same_language_and_dispo(self, make_stream):
         mp = _make_mp()
-        mp.settings.stream_codec_combinations = [['aac', 'ac3']]
-        a1 = make_stream(type='audio', codec='aac', index=0, metadata={'language': 'eng'})
-        a1.disposition = {'default': True, 'forced': False}
-        a2 = make_stream(type='audio', codec='ac3', index=1, metadata={'language': 'eng'})
-        a2.disposition = {'default': True, 'forced': False}
+        mp.settings.stream_codec_combinations = [["aac", "ac3"]]
+        a1 = make_stream(type="audio", codec="aac", index=0, metadata={"language": "eng"})
+        a1.disposition = {"default": True, "forced": False}
+        a2 = make_stream(type="audio", codec="ac3", index=1, metadata={"language": "eng"})
+        a2.disposition = {"default": True, "forced": False}
         result = mp.mapStreamCombinations([a1, a2])
         assert result == [[0, 1]]
 
     def test_different_language_not_matched(self, make_stream):
         mp = _make_mp()
-        mp.settings.stream_codec_combinations = [['aac', 'ac3']]
-        a1 = make_stream(type='audio', codec='aac', index=0, metadata={'language': 'eng'})
-        a1.disposition = {'default': False, 'forced': False}
-        a2 = make_stream(type='audio', codec='ac3', index=1, metadata={'language': 'fra'})
-        a2.disposition = {'default': False, 'forced': False}
+        mp.settings.stream_codec_combinations = [["aac", "ac3"]]
+        a1 = make_stream(type="audio", codec="aac", index=0, metadata={"language": "eng"})
+        a1.disposition = {"default": False, "forced": False}
+        a2 = make_stream(type="audio", codec="ac3", index=1, metadata={"language": "fra"})
+        a2.disposition = {"default": False, "forced": False}
         result = mp.mapStreamCombinations([a1, a2])
         assert result == []
 
     def test_no_combinations_configured(self, make_stream):
         mp = _make_mp()
         mp.settings.stream_codec_combinations = []
-        a1 = make_stream(type='audio', codec='aac', index=0, metadata={'language': 'eng'})
-        a1.disposition = {'default': False, 'forced': False}
+        a1 = make_stream(type="audio", codec="aac", index=0, metadata={"language": "eng"})
+        a1.disposition = {"default": False, "forced": False}
         result = mp.mapStreamCombinations([a1])
         assert result == []
 
     def test_combination_not_present_in_streams(self, make_stream):
         mp = _make_mp()
-        mp.settings.stream_codec_combinations = [['eac3', 'truehd']]
-        a1 = make_stream(type='audio', codec='aac', index=0, metadata={'language': 'eng'})
-        a1.disposition = {'default': False, 'forced': False}
+        mp.settings.stream_codec_combinations = [["eac3", "truehd"]]
+        a1 = make_stream(type="audio", codec="aac", index=0, metadata={"language": "eng"})
+        a1.disposition = {"default": False, "forced": False}
         result = mp.mapStreamCombinations([a1])
         assert result == []
 
@@ -1397,48 +1419,50 @@ class TestDuplicateStreamSort:
     def test_copy_codec_sorted_first(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
+
         info = MediaInfo()
-        s0 = make_stream(index=0, type='audio')
-        s0.disposition = {'default': False}
-        s1 = make_stream(index=1, type='audio')
-        s1.disposition = {'default': False}
+        s0 = make_stream(index=0, type="audio")
+        s0.disposition = {"default": False}
+        s1 = make_stream(index=1, type="audio")
+        s1.disposition = {"default": False}
         info.streams = [s0, s1]
         opts = [
-            {'map': 1, 'codec': 'aac', 'bitrate': 256},
-            {'map': 0, 'codec': 'copy', 'bitrate': 128},
+            {"map": 1, "codec": "aac", "bitrate": 256},
+            {"map": 0, "codec": "copy", "bitrate": 128},
         ]
         mp.duplicateStreamSort(opts, info)
-        assert opts[0]['codec'] == 'copy'
+        assert opts[0]["codec"] == "copy"
 
     def test_higher_bitrate_sorted_first_when_same_codec(self, make_stream):
         mp = _make_mp()
         from converter.ffmpeg import MediaInfo
+
         info = MediaInfo()
-        s0 = make_stream(index=0, type='audio')
-        s0.disposition = {'default': False}
-        s1 = make_stream(index=1, type='audio')
-        s1.disposition = {'default': False}
+        s0 = make_stream(index=0, type="audio")
+        s0.disposition = {"default": False}
+        s1 = make_stream(index=1, type="audio")
+        s1.disposition = {"default": False}
         info.streams = [s0, s1]
         opts = [
-            {'map': 0, 'codec': 'aac', 'bitrate': 128},
-            {'map': 1, 'codec': 'aac', 'bitrate': 320},
+            {"map": 0, "codec": "aac", "bitrate": 128},
+            {"map": 1, "codec": "aac", "bitrate": 320},
         ]
         mp.duplicateStreamSort(opts, info)
-        assert opts[0]['bitrate'] == 320
+        assert opts[0]["bitrate"] == 320
 
 
 class TestFfprobeSafeCodecs:
     def test_adds_ffprobe_variant_when_missing(self):
         mp = _make_mp()
-        with patch('resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name', return_value='h264'):
-            result = mp.ffprobeSafeCodecs(['hevc'])
-            assert 'h264' in result
+        with patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", return_value="h264"):
+            result = mp.ffprobeSafeCodecs(["hevc"])
+            assert "h264" in result
 
     def test_does_not_duplicate_when_already_present(self):
         mp = _make_mp()
-        with patch('resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name', return_value='aac'):
-            result = mp.ffprobeSafeCodecs(['aac', 'ac3'])
-            assert result.count('aac') == 1
+        with patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", return_value="aac"):
+            result = mp.ffprobeSafeCodecs(["aac", "ac3"])
+            assert result.count("aac") == 1
 
     def test_returns_none_for_empty_list(self):
         mp = _make_mp()
@@ -1447,103 +1471,103 @@ class TestFfprobeSafeCodecs:
 
     def test_none_ffprobe_value_ignored(self):
         mp = _make_mp()
-        with patch('resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name', return_value=None):
-            result = mp.ffprobeSafeCodecs(['custom_codec'])
-            assert result == ['custom_codec']
+        with patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", return_value=None):
+            result = mp.ffprobeSafeCodecs(["custom_codec"])
+            assert result == ["custom_codec"]
 
 
 class TestSetDefaultAudioStream:
     def test_sets_default_when_none_present(self):
         mp = _make_mp()
-        mp.settings.adl = 'eng'
+        mp.settings.adl = "eng"
         mp.settings.audio_sorting_default = []
         streams = [
-            {'language': 'eng', 'codec': 'aac', 'channels': 2, 'disposition': '-default'},
-            {'language': 'fra', 'codec': 'aac', 'channels': 2, 'disposition': '-default'},
+            {"language": "eng", "codec": "aac", "channels": 2, "disposition": "-default"},
+            {"language": "fra", "codec": "aac", "channels": 2, "disposition": "-default"},
         ]
         mp.setDefaultAudioStream(streams)
-        assert '+default' in streams[0]['disposition']
-        assert '+default' not in streams[1].get('disposition', '')
+        assert "+default" in streams[0]["disposition"]
+        assert "+default" not in streams[1].get("disposition", "")
 
     def test_prefers_preferred_language(self):
         mp = _make_mp()
-        mp.settings.adl = 'fra'
+        mp.settings.adl = "fra"
         mp.settings.audio_sorting_default = []
         streams = [
-            {'language': 'eng', 'codec': 'aac', 'channels': 2, 'disposition': '+default'},
-            {'language': 'fra', 'codec': 'aac', 'channels': 2, 'disposition': '-default'},
+            {"language": "eng", "codec": "aac", "channels": 2, "disposition": "+default"},
+            {"language": "fra", "codec": "aac", "channels": 2, "disposition": "-default"},
         ]
         mp.setDefaultAudioStream(streams)
-        assert '+default' in streams[1]['disposition']
+        assert "+default" in streams[1]["disposition"]
 
     def test_removes_extra_defaults_in_preferred_language(self):
         mp = _make_mp()
-        mp.settings.adl = 'eng'
+        mp.settings.adl = "eng"
         mp.settings.audio_sorting_default = []
         streams = [
-            {'language': 'eng', 'codec': 'aac', 'channels': 2, 'disposition': '+default'},
-            {'language': 'eng', 'codec': 'ac3', 'channels': 6, 'disposition': '+default'},
+            {"language": "eng", "codec": "aac", "channels": 2, "disposition": "+default"},
+            {"language": "eng", "codec": "ac3", "channels": 6, "disposition": "+default"},
         ]
         mp.setDefaultAudioStream(streams)
         # Only one should remain with +default
-        count = sum(1 for s in streams if '+default' in s.get('disposition', ''))
+        count = sum(1 for s in streams if "+default" in s.get("disposition", ""))
         assert count == 1
 
     def test_empty_streams_no_error(self):
         mp = _make_mp()
-        mp.settings.adl = 'eng'
+        mp.settings.adl = "eng"
         mp.settings.audio_sorting_default = []
         mp.setDefaultAudioStream([])  # Should not raise
 
     def test_removes_default_from_non_preferred_language(self):
         mp = _make_mp()
-        mp.settings.adl = 'eng'
+        mp.settings.adl = "eng"
         mp.settings.audio_sorting_default = []
         streams = [
-            {'language': 'eng', 'codec': 'aac', 'channels': 2, 'disposition': '-default'},
-            {'language': 'jpn', 'codec': 'aac', 'channels': 2, 'disposition': '+default'},
+            {"language": "eng", "codec": "aac", "channels": 2, "disposition": "-default"},
+            {"language": "jpn", "codec": "aac", "channels": 2, "disposition": "+default"},
         ]
         mp.setDefaultAudioStream(streams)
         # jpn stream should lose +default, eng stream should gain it
-        assert '+default' not in streams[1].get('disposition', '')
-        assert '+default' in streams[0]['disposition']
+        assert "+default" not in streams[1].get("disposition", "")
+        assert "+default" in streams[0]["disposition"]
 
 
 class TestSetDefaultSubtitleStream:
     def test_sets_default_when_sdl_and_force(self):
         mp = _make_mp()
-        mp.settings.sdl = 'eng'
+        mp.settings.sdl = "eng"
         mp.settings.sforcedefault = True
         streams = [
-            {'language': 'eng', 'disposition': '-default'},
-            {'language': 'fra', 'disposition': '-default'},
+            {"language": "eng", "disposition": "-default"},
+            {"language": "fra", "disposition": "-default"},
         ]
         mp.setDefaultSubtitleStream(streams)
-        assert '+default' in streams[0]['disposition']
+        assert "+default" in streams[0]["disposition"]
 
     def test_does_not_override_existing_default(self):
         mp = _make_mp()
-        mp.settings.sdl = 'eng'
+        mp.settings.sdl = "eng"
         mp.settings.sforcedefault = True
         streams = [
-            {'language': 'fra', 'disposition': '+default'},
-            {'language': 'eng', 'disposition': '-default'},
+            {"language": "fra", "disposition": "+default"},
+            {"language": "eng", "disposition": "-default"},
         ]
         mp.setDefaultSubtitleStream(streams)
         # Already has a default → don't override
-        assert '+default' in streams[0]['disposition']
+        assert "+default" in streams[0]["disposition"]
 
     def test_skips_when_no_sdl(self):
         mp = _make_mp()
         mp.settings.sdl = None
         mp.settings.sforcedefault = True
-        streams = [{'language': 'eng', 'disposition': '-default'}]
+        streams = [{"language": "eng", "disposition": "-default"}]
         mp.setDefaultSubtitleStream(streams)
-        assert '+default' not in streams[0]['disposition']
+        assert "+default" not in streams[0]["disposition"]
 
     def test_skips_when_empty_streams(self):
         mp = _make_mp()
-        mp.settings.sdl = 'eng'
+        mp.settings.sdl = "eng"
         mp.settings.sforcedefault = True
         mp.setDefaultSubtitleStream([])  # Should not raise
 
@@ -1551,10 +1575,11 @@ class TestSetDefaultSubtitleStream:
 class TestSortStreams:
     def _make_info(self, make_stream):
         from converter.ffmpeg import MediaInfo
+
         info = MediaInfo()
-        s0 = make_stream(index=0, type='audio')
-        s1 = make_stream(index=1, type='audio')
-        s2 = make_stream(index=2, type='audio')
+        s0 = make_stream(index=0, type="audio")
+        s1 = make_stream(index=1, type="audio")
+        s2 = make_stream(index=2, type="audio")
         info.streams = [s0, s1, s2]
         return info
 
@@ -1562,76 +1587,74 @@ class TestSortStreams:
         mp = _make_mp()
         info = self._make_info(make_stream)
         streams = [
-            {'map': 0, 'channels': 2, 'codec': 'aac', 'language': 'eng'},
-            {'map': 1, 'channels': 6, 'codec': 'aac', 'language': 'eng'},
-            {'map': 2, 'channels': 8, 'codec': 'aac', 'language': 'eng'},
+            {"map": 0, "channels": 2, "codec": "aac", "language": "eng"},
+            {"map": 1, "channels": 6, "codec": "aac", "language": "eng"},
+            {"map": 2, "channels": 8, "codec": "aac", "language": "eng"},
         ]
-        result = mp.sortStreams(streams, ['channels.d'], ['eng'], ['aac'], info)
-        assert result[0]['channels'] == 8
-        assert result[1]['channels'] == 6
-        assert result[2]['channels'] == 2
+        result = mp.sortStreams(streams, ["channels.d"], ["eng"], ["aac"], info)
+        assert result[0]["channels"] == 8
+        assert result[1]["channels"] == 6
+        assert result[2]["channels"] == 2
 
     def test_sorts_by_channels_ascending(self, make_stream):
         mp = _make_mp()
         info = self._make_info(make_stream)
         streams = [
-            {'map': 0, 'channels': 8, 'codec': 'aac', 'language': 'eng'},
-            {'map': 1, 'channels': 2, 'codec': 'aac', 'language': 'eng'},
+            {"map": 0, "channels": 8, "codec": "aac", "language": "eng"},
+            {"map": 1, "channels": 2, "codec": "aac", "language": "eng"},
         ]
-        result = mp.sortStreams(streams, ['channels.a'], ['eng'], ['aac'], info)
-        assert result[0]['channels'] == 2
+        result = mp.sortStreams(streams, ["channels.a"], ["eng"], ["aac"], info)
+        assert result[0]["channels"] == 2
 
     def test_sorts_by_language_preference(self, make_stream):
         mp = _make_mp()
         info = self._make_info(make_stream)
         streams = [
-            {'map': 0, 'channels': 2, 'codec': 'aac', 'language': 'deu'},
-            {'map': 1, 'channels': 2, 'codec': 'aac', 'language': 'eng'},
-            {'map': 2, 'channels': 2, 'codec': 'aac', 'language': 'fra'},
+            {"map": 0, "channels": 2, "codec": "aac", "language": "deu"},
+            {"map": 1, "channels": 2, "codec": "aac", "language": "eng"},
+            {"map": 2, "channels": 2, "codec": "aac", "language": "fra"},
         ]
-        result = mp.sortStreams(streams, ['language'], ['eng', 'fra', 'deu'], ['aac'], info)
-        assert result[0]['language'] == 'eng'
-        assert result[1]['language'] == 'fra'
-        assert result[2]['language'] == 'deu'
+        result = mp.sortStreams(streams, ["language"], ["eng", "fra", "deu"], ["aac"], info)
+        assert result[0]["language"] == "eng"
+        assert result[1]["language"] == "fra"
+        assert result[2]["language"] == "deu"
 
     def test_sorts_by_disposition_flag(self, make_stream):
         mp = _make_mp()
         info = self._make_info(make_stream)
         streams = [
-            {'map': 0, 'channels': 2, 'codec': 'aac', 'language': 'eng', 'disposition': '-default'},
-            {'map': 1, 'channels': 2, 'codec': 'aac', 'language': 'eng', 'disposition': '+default'},
+            {"map": 0, "channels": 2, "codec": "aac", "language": "eng", "disposition": "-default"},
+            {"map": 1, "channels": 2, "codec": "aac", "language": "eng", "disposition": "+default"},
         ]
-        result = mp.sortStreams(streams, ['d.default.d'], ['eng'], ['aac'], info)
-        assert result[0]['disposition'] == '+default'
+        result = mp.sortStreams(streams, ["d.default.d"], ["eng"], ["aac"], info)
+        assert result[0]["disposition"] == "+default"
 
     def test_single_stream_unchanged(self, make_stream):
         mp = _make_mp()
         info = self._make_info(make_stream)
-        streams = [{'map': 0, 'channels': 2, 'codec': 'aac', 'language': 'eng'}]
-        result = mp.sortStreams(streams, ['channels.d'], ['eng'], ['aac'], info)
+        streams = [{"map": 0, "channels": 2, "codec": "aac", "language": "eng"}]
+        result = mp.sortStreams(streams, ["channels.d"], ["eng"], ["aac"], info)
         assert result == streams
 
     def test_unknown_sort_key_skipped(self, make_stream):
         mp = _make_mp()
         info = self._make_info(make_stream)
         streams = [
-            {'map': 0, 'channels': 2, 'codec': 'aac', 'language': 'eng'},
-            {'map': 1, 'channels': 6, 'codec': 'aac', 'language': 'eng'},
+            {"map": 0, "channels": 2, "codec": "aac", "language": "eng"},
+            {"map": 1, "channels": 6, "codec": "aac", "language": "eng"},
         ]
-        result = mp.sortStreams(streams, ['nonexistent_key'], ['eng'], ['aac'], info)
+        result = mp.sortStreams(streams, ["nonexistent_key"], ["eng"], ["aac"], info)
         # Should not raise, returns original order
         assert len(result) == 2
 
 
 class TestSetAcceleration:
-    def _make_mp_with_hwaccel(self, hwaccels_available, settings_hwaccels,
-                               pix_fmts=None, codecs=None, hwdevices=None,
-                               hwoutputfmt=None, hwaccel_decoders=None):
+    def _make_mp_with_hwaccel(self, hwaccels_available, settings_hwaccels, pix_fmts=None, codecs=None, hwdevices=None, hwoutputfmt=None, hwaccel_decoders=None):
         mp = _make_mp()
         mp.converter = MagicMock()
         mp.converter.ffmpeg.hwaccels = hwaccels_available
-        mp.converter.ffmpeg.pix_fmts = pix_fmts or {'yuv420p': 8}
-        mp.converter.ffmpeg.codecs = codecs or {'h264': {'decoders': [], 'encoders': []}}
+        mp.converter.ffmpeg.pix_fmts = pix_fmts or {"yuv420p": 8}
+        mp.converter.ffmpeg.codecs = codecs or {"h264": {"decoders": [], "encoders": []}}
         mp.settings.hwaccels = settings_hwaccels
         mp.settings.hwdevices = hwdevices or {}
         mp.settings.hwoutputfmt = hwoutputfmt or {}
@@ -1640,39 +1663,39 @@ class TestSetAcceleration:
 
     def test_no_hwaccel_match_returns_empty_opts(self):
         mp = self._make_mp_with_hwaccel(
-            hwaccels_available=['cuda'],
-            settings_hwaccels=['videotoolbox'],
+            hwaccels_available=["cuda"],
+            settings_hwaccels=["videotoolbox"],
         )
-        opts, device = mp.setAcceleration('h264', 'yuv420p')
+        opts, device = mp.setAcceleration("h264", "yuv420p")
         assert opts == []
         assert device is None
 
     def test_matching_hwaccel_adds_flag(self):
         mp = self._make_mp_with_hwaccel(
-            hwaccels_available=['cuda', 'videotoolbox'],
-            settings_hwaccels=['videotoolbox'],
+            hwaccels_available=["cuda", "videotoolbox"],
+            settings_hwaccels=["videotoolbox"],
         )
-        mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value='h264_videotoolbox')
-        opts, device = mp.setAcceleration('h264', 'yuv420p')
-        assert '-hwaccel' in opts
-        assert 'videotoolbox' in opts
+        mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_videotoolbox")
+        opts, device = mp.setAcceleration("h264", "yuv420p")
+        assert "-hwaccel" in opts
+        assert "videotoolbox" in opts
 
     def test_hwdevice_appended_when_configured(self):
         mp = self._make_mp_with_hwaccel(
-            hwaccels_available=['vaapi'],
-            settings_hwaccels=['vaapi'],
-            hwdevices={'vaapi': '/dev/dri/renderD128'},
+            hwaccels_available=["vaapi"],
+            settings_hwaccels=["vaapi"],
+            hwdevices={"vaapi": "/dev/dri/renderD128"},
         )
-        mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value='h264_vaapi')
-        opts, device = mp.setAcceleration('h264', 'yuv420p')
-        assert device == '/dev/dri/renderD128'
-        assert '-init_hw_device' in opts
+        mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_vaapi")
+        opts, device = mp.setAcceleration("h264", "yuv420p")
+        assert device == "/dev/dri/renderD128"
+        assert "-init_hw_device" in opts
 
     def test_empty_hwaccels_settings_returns_empty(self):
         mp = self._make_mp_with_hwaccel(
-            hwaccels_available=['cuda'],
+            hwaccels_available=["cuda"],
             settings_hwaccels=[],
         )
-        opts, device = mp.setAcceleration('h264', 'yuv420p')
+        opts, device = mp.setAcceleration("h264", "yuv420p")
         assert opts == []
         assert device is None

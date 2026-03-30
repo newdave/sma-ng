@@ -82,6 +82,12 @@ ignore = [
     "E722",   # bare except (legacy codebase pattern)
     "F841",   # local variable assigned but never used
     "E402",   # module level import not at top
+    "F401",   # unused imports (legacy modules with wildcard re-exports)
+    "F403",   # star imports (legacy pattern in converter/autoprocess modules)
+    "F405",   # undefined names from star import (consequence of F403)
+    "F811",   # redefined while unused (intentional overrides in codec classes)
+    "F601",   # multi-value repeated key literal (legacy config dicts)
+    "E741",   # ambiguous variable name (l, O, I used in codec/ffmpeg code)
 ]
 
 [tool.pytest.ini_options]
