@@ -104,7 +104,8 @@ class TestDockerfileFFmpegBuild:
         assert "--enable-vaapi" in dockerfile_raw
 
     def test_enable_nvenc(self, dockerfile_raw):
-        assert "--enable-nvenc" in dockerfile_raw
+        # NVENC/NVDEC enabled via ffnvcodec headers (--enable-ffnvcodec covers both)
+        assert "--enable-ffnvcodec" in dockerfile_raw
 
     def test_enable_ffnvcodec(self, dockerfile_raw):
         assert "--enable-ffnvcodec" in dockerfile_raw
@@ -119,12 +120,14 @@ class TestDockerfileFFmpegBuild:
         assert "--enable-static" in dockerfile_raw
         assert "--disable-shared" in dockerfile_raw
 
-    def test_gpl_and_nonfree_enabled(self, dockerfile_raw):
+    def test_gpl_and_version3_enabled(self, dockerfile_raw):
         assert "--enable-gpl" in dockerfile_raw
-        assert "--enable-nonfree" in dockerfile_raw
+        # version3 enables additional LGPL-v3 codecs; nonfree intentionally omitted
+        # (fdk-aac is non-free and not in Debian main)
+        assert "--enable-version3" in dockerfile_raw
 
     def test_core_codecs_enabled(self, dockerfile_raw):
-        for flag in ("--enable-libx264", "--enable-libx265", "--enable-libfdk-aac", "--enable-libopus", "--enable-libvorbis", "--enable-libvpx"):
+        for flag in ("--enable-libx264", "--enable-libx265", "--enable-libopus", "--enable-libvorbis", "--enable-libvpx"):
             assert flag in dockerfile_raw, f"Missing codec flag: {flag}"
 
     def test_av1_codecs_enabled(self, dockerfile_raw):

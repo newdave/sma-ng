@@ -70,8 +70,6 @@ RUN ./configure \
     --prefix=/usr/local \
     --extra-cflags="-I/usr/local/include" \
     --extra-ldflags="-L/usr/local/lib" \
-    --pkg-config-flags="--static" \
-    # Link codec libraries statically — produce portable standalone binaries
     --extra-libs="-lpthread -lm -lz -ldl" \
     --enable-static \
     --disable-shared \
