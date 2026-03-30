@@ -63,3 +63,6 @@ htmlcov/
 *.temp
 tests/fixtures/*.mkv
 tests/fixtures/*.mp4
+
+# Local deployment overrides
+.local
