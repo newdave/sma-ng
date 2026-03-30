@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#MISE description="Sync code to all DEPLOY_HOSTS and run REMOTE_MAKE on each"
+#MISE depends=["deploy:check"]
+set -euo pipefail
+
+LOCAL="setup/.local.ini"
+CFG="scripts/local-config.sh"
+DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+
+_missing_prereq_pattern='(command not found|No such file or directory|not found.*make|make.*not found|python3.*not found|rsync.*not found)'
+
+failed=""
+for host in $DEPLOY_HOSTS; do
+  cfg="$CFG $LOCAL $host"
+  dir=$($cfg DEPLOY_DIR ~/sma)
+  port=$($cfg SSH_PORT 22)
+  key=$($cfg SSH_KEY "")
+  branch=$($cfg DEPLOY_BRANCH "")
+  remote_make=$($cfg REMOTE_MAKE install)
+  rsync_extra=$($cfg RSYNC_EXTRA "")
+  ffmpeg_dir=$($cfg FFMPEG_DIR "")
+
+  ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+  [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
+
+  make_env=""
+  [ -n "$ffmpeg_dir" ] && make_env="SMA_DAEMON_FFMPEG_DIR=$ffmpeg_dir"
+
+  echo ""
+  echo "==> [$host] syncing to $dir"
+  # shellcheck disable=SC2086
+  rsync -az --delete \
+    -e "ssh $ssh_opts" \
+    --exclude='.git/' \
+    --exclude='venv/' \
+    --exclude='config/' \
+    --exclude='logs/' \
+    --exclude='__pycache__/' \
+    --exclude='*.pyc' \
+    --exclude='.local' \
+    --exclude='*.egg-info/' \
+    $rsync_extra \
+    . "$host:$dir" || { failed="$failed $host"; continue; }
+
+  if [ -n "$branch" ]; then
+    echo "==> [$host] checking out $branch"
+    # shellcheck disable=SC2086
+    ssh $ssh_opts "$host" "cd $dir && git checkout $branch"
+  fi
+
+  # Ensure venv exists before running any make target (including restart-only deploys).
+  echo "==> [$host] ensuring venv"
+  # shellcheck disable=SC2086
+  ssh $ssh_opts "$host" "cd $dir && PATH=\$PATH:/usr/bin:/usr/local/bin make install"
+
+  label=""
+  [ -n "$ffmpeg_dir" ] && label=" (FFMPEG_DIR=$ffmpeg_dir)"
+  echo "==> [$host] make $remote_make$label"
+
+  _run_make() {
+    # shellcheck disable=SC2086
+    ssh $ssh_opts "$host" "cd $dir && PATH=\$PATH:/usr/bin:/usr/local/bin $make_env make $remote_make"
+  }
+
+  errfile=$(mktemp)
+  trap 'rm -f "$errfile"' EXIT
+
+  if _run_make 2> >(tee "$errfile" >&2); then
+    continue
+  fi
+
+  if grep -qE "$_missing_prereq_pattern" "$errfile"; then
+    echo ""
+    echo "  WARNING: [$host] pre-req missing — running deploy:setup then retrying"
+    HOST="$host" mise run deploy:setup
+    echo ""
+    echo "==> [$host] retrying: make $remote_make$label"
+    _run_make || failed="$failed $host"
+  else
+    failed="$failed $host"
+  fi
+done
+
+if [ -n "$failed" ]; then
+  echo ""
+  echo "ERROR: deployment failed for:$failed" >&2
+  exit 1
+fi
+
+echo ""
+echo "Deployment complete: $DEPLOY_HOSTS"

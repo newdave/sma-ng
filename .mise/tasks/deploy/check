@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#MISE description="Verify setup/.local.ini exists and DEPLOY_HOSTS is set"
+set -euo pipefail
+
+LOCAL="setup/.local.ini"
+CFG="scripts/local-config.sh"
+
+if [ ! -f "$LOCAL" ]; then
+  echo "ERROR: $LOCAL not found. Copy setup/.local.ini.sample to setup/.local.ini and configure it." >&2
+  exit 1
+fi
+
+DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+if [ -z "$DEPLOY_HOSTS" ]; then
+  echo "ERROR: DEPLOY_HOSTS is not set in the [deploy] section of $LOCAL." >&2
+  exit 1
+fi
+
+echo "Deployment targets: $DEPLOY_HOSTS"

@@ -14,7 +14,7 @@ move-to =
 delete-original = True
 recycle-bin =
 process-same-extensions = False
-bypass-if-copying-all = False
+bypass-if-copying-all = True
 force-convert = False
 post-process = False
 wait-post-process = False
@@ -57,7 +57,7 @@ codec = h265
 max-bitrate = 0
 bitrate-ratio = hevc:1.0, h264:0.65, mpeg2video:0.45, vc1:0.50, vp9:0.85, av1:1.1, *:0.60
 crf = -1
-crf-profiles = 4000:22:3M:6M,8000:22:5M:10M,15000:22:15M:30M
+crf-profiles = 4000:22:3M:6M,8000:22:5M:10M,15000:22:15M:30M,25000:21:25M:50M
 preset =
 codec-parameters =
 dynamic-parameters = true
@@ -128,7 +128,7 @@ force-filter = False
 codec = mov_text
 codec-image-based =
 languages =
-default-language =
+default-language = eng
 force-default = True
 include-original-language = False
 first-stream-of-language = False
@@ -151,12 +151,12 @@ burn-sorting = language, d.comment, d.default.d, d.forced.d
 codecs =
 
 [Subtitle.CleanIt]
-enabled = False
+enabled = true
 config-path =
 tags =
 
 [Subtitle.FFSubsync]
-enabled = False
+enabled = true
 
 [Subtitle.Subliminal]
 download-subs = False

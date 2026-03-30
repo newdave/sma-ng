@@ -1,7 +1,7 @@
-# .local — per-machine deployment configuration (INI format)
+# setup/.local.ini — per-machine deployment configuration (INI format)
 #
-# Copy this file to .local and customise it.
-# .local is gitignored and never committed.
+# Copy this file to setup/.local.ini and customise it.
+# setup/.local.ini is gitignored and never committed.
 #
 # Resolution order for each key:
 #   host-specific section  >  [deploy] defaults  >  built-in Makefile default
@@ -20,6 +20,14 @@ DEPLOY_DIR   = ~/sma
 # SSH port.
 SSH_PORT     = 22
 
+# SSH key to use for all hosts (path to private key, ~ is expanded).
+# If the key does not exist, `make deploy-setup` will generate it.
+# SSH_KEY      = ~/.ssh/id_ed25519_sma
+
+# Use sudo on the remote host when creating DEPLOY_DIR and running make targets.
+# Required when DEPLOY_DIR is owned by root (e.g. /opt/sma).
+DEPLOY_USE_SUDO = false
+
 # make target(s) to run on the host after each sync.
 REMOTE_MAKE  = install
 
@@ -27,6 +35,109 @@ REMOTE_MAKE  = install
 # Passed as SMA_DAEMON_FFMPEG_DIR so the daemon (or entrypoint) can pick up
 # the correct paths without editing autoProcess.ini by hand.
 FFMPEG_DIR   = /usr/local/bin
+
+# ── daemon configuration ───────────────────────────────────────────────────────
+# Keys here mirror daemon.json fields and are stamped into config/daemon.json
+# by `mise run deploy:config`. Environment-variable equivalents are shown in
+# comments for reference.
+
+[daemon]
+# API key for protecting daemon endpoints (SMA_DAEMON_API_KEY).
+api_key  =
+
+# PostgreSQL connection URL for multi-node deployments (SMA_DAEMON_DB_URL).
+# Leave blank to use SQLite (config/daemon.db).
+db_url   =
+
+# Directory containing ffmpeg/ffprobe binaries (SMA_DAEMON_FFMPEG_DIR).
+# Overrides the [deploy] FFMPEG_DIR value if set.
+ffmpeg_dir =
+
+# ── autoProcess.ini overrides ─────────────────────────────────────────────────
+# Section names mirror autoProcess.ini exactly.
+# `mise run deploy:config` stamps these into every *.ini on remote hosts.
+
+[Converter]
+# Base directory for the recycle bin (leave blank to disable).
+# deploy:config appends the service name as a subdirectory for each config,
+# e.g. /mnt/recycle -> /mnt/recycle/Sonarr, /mnt/recycle/Radarr, etc.
+recycle-bin =
+
+# ── service credentials ────────────────────────────────────────────────────────
+# Add one section per service instance; omit keys you don't want to override.
+
+# media_path: root path for this instance's library on the remote host.
+#   When set, deploy:config adds an entry to daemon.json path_configs so the
+#   daemon uses config_file for any job whose path starts with media_path.
+# config_file: relative path (from DEPLOY_DIR) to the autoProcess.ini for
+#   this instance.  Required when media_path is set.
+
+[Sonarr]
+host        = sonarr.example.com
+port        = 443
+ssl         = true
+apikey      =
+webroot     =
+media_path  =
+config_file = config/autoProcess.sonarr.ini
+
+[Sonarr-Instance]
+host        = sonarr-instance.example.com
+port        = 443
+ssl         = true
+apikey      =
+webroot     =
+media_path  =
+config_file = config/autoProcess.sonarr-instance.ini
+
+[Radarr]
+host        = radarr.example.com
+port        = 443
+ssl         = true
+apikey      =
+webroot     =
+media_path  =
+config_file = config/autoProcess.radarr.ini
+
+[Radarr-Instance-1]
+host        = radarr-instance-1.example.com
+port        = 443
+ssl         = true
+apikey      =
+webroot     =
+media_path  =
+config_file = config/autoProcess.radarr-instance-1.ini
+
+[Radarr-Instance-2]
+host        = radarr-instance-2.example.com
+port        = 443
+ssl         = true
+apikey      =
+webroot     =
+media_path  =
+config_file = config/autoProcess.radarr-instance-2.ini
+
+[Plex]
+host  = plex.example.com
+port  = 32400
+ssl   = false
+token =
+# Plex account username (used by the post-process plex.py script).
+username   =
+# Plex server name as shown in the Plex web UI (used by post-process plex.py).
+servername =
+
+[Jellyfin]
+# Base URL of your Jellyfin server, e.g. https://jellyfin.example.com:8096
+url   =
+# Jellyfin API token (Admin → Dashboard → API Keys)
+token =
+
+[Emby]
+# Base URL of your Emby server, e.g. http://emby.example.com:8096
+url    =
+# Emby API key (Admin → Dashboard → API Keys)
+apikey =
 
 # ── per-host overrides ────────────────────────────────────────────────────────
 # Any key from [deploy] can be overridden for a specific host by adding a

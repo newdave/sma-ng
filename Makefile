@@ -1,15 +1,33 @@
-.PHONY: help install install-dev install-all lint lint-fix test test-cov clean daemon convert codecs preview detect-gpu config systemd-install \
-        deploy deploy-check deploy-host remote-make
+# Makefile — thin shim for local developer commands and on-host targets.
+#
+# Local development tasks (install, test, deploy, etc.) are managed by mise.
+# Run `mise tasks` to list them, or `mise run <task>` to execute.
+#
+# On-host targets (install, config, systemd-install, restart) remain here
+# because remote hosts are reached via SSH and may not have mise installed.
+
+.PHONY: help install install-dev install-all clean config systemd-install restart install-mise \
+        lint lint-fix test test-cov detect-gpu daemon convert codecs preview \
+        deploy-check deploy-setup deploy remote-make
 
 PYTHON ?= python3
-VENV ?= venv
-PIP = $(VENV)/bin/pip
-PY = $(VENV)/bin/python
+VENV   ?= venv
+PIP     = $(VENV)/bin/pip
+PY      = $(VENV)/bin/python
+
+# ---------------------------------------------------------------------------
+# Help
+# ---------------------------------------------------------------------------
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
+	  awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-venv: ## Create virtual environment
+# ---------------------------------------------------------------------------
+# On-host targets (called remotely via SSH — mise not required)
+# ---------------------------------------------------------------------------
+
+venv:
 	$(PYTHON) -m venv $(VENV)
 	$(PIP) install --upgrade pip
 
@@ -24,41 +42,15 @@ install-all: install ## Install all optional dependencies
 	$(PIP) install -r setup/requirements-deluge.txt
 	$(PIP) install -e ".[dev]"
 
-lint: ## Run linter (ruff)
-	$(PY) -m ruff check .
+restart: ## Restart the sma-daemon systemd service
+	sudo systemctl restart sma-daemon
 
-lint-fix: ## Run linter with auto-fix
-	$(PY) -m ruff check --fix .
+systemd-install: ## Install and enable the sma-daemon systemd service
+	sudo cp setup/sma-daemon.service /etc/systemd/system/
+	sudo systemctl daemon-reload
+	sudo systemctl enable --now sma-daemon
 
-test: ## Run tests
-	$(PY) -m pytest tests/
-
-test-cov: ## Run tests with coverage
-	$(PY) -m pytest tests/ --cov=resources --cov=converter --cov-report=html
-
-daemon: ## Start the daemon server
-	$(PY) daemon.py --host 0.0.0.0 --port 8585
-
-convert: ## Convert a file (usage: make convert FILE=/path/to/file.mkv)
-	$(PY) manual.py -i "$(FILE)" -a
-
-codecs: ## List supported codecs
-	$(PY) manual.py -cl
-
-preview: ## Preview conversion options (usage: make preview FILE=/path/to/file.mkv)
-	$(PY) manual.py -i "$(FILE)" -oo
-
-clean: ## Remove build artifacts and caches
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name '*.pyc' -delete 2>/dev/null || true
-	rm -rf build/ dist/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage .ruff_cache/
-
-# ---------------------------------------------------------------------------
-# GPU detection
-# ---------------------------------------------------------------------------
-# Detect GPU type: nvenc (NVIDIA), qsv (Intel), videotoolbox (Apple), vaapi (Linux Mesa/AMD), or software
-# Use := for eager evaluation so detection runs at most once per make invocation
-GPU ?= $(shell \
+_GPU := $(shell \
   if [ "$$(uname)" = "Darwin" ]; then \
     if sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -qi apple; then \
       echo videotoolbox; \
@@ -75,9 +67,7 @@ GPU ?= $(shell \
     echo software; \
   fi \
 )
-
-detect-gpu: ## Detect GPU type for hardware acceleration
-	@echo "$(GPU)"
+GPU ?= $(_GPU)
 
 config: ## Create config with GPU auto-detection (GPU=<type> to override)
 	@mkdir -p config
@@ -94,104 +84,77 @@ config: ## Create config with GPU auto-detection (GPU=<type> to override)
 	fi
 	@test -f config/daemon.json || (cp setup/daemon.json.sample config/daemon.json && echo "Created config/daemon.json")
 
-systemd-install: ## Install systemd service (run as root)
-	cp setup/sma-daemon.service /etc/systemd/system/
-	systemctl daemon-reload
-	@echo "Service installed. Enable with: systemctl enable --now sma-daemon"
-
 # ---------------------------------------------------------------------------
-# Deployment
-#
-# Copy .local.sample to .local (INI format) and fill in [deploy] DEPLOY_HOSTS.
-# Per-host sections override [deploy] defaults for any key.
-# See .local.sample for all available keys.
+# mise migration helper
 # ---------------------------------------------------------------------------
 
-_LOCAL     = setup/.local.ini
-_CFG       = scripts/local-config.sh
+install-mise: ## Install mise and trust this project's mise.toml
+	@if command -v mise >/dev/null 2>&1; then \
+		echo "mise is already installed: $$(mise --version)"; \
+	else \
+		echo "Installing mise..."; \
+		curl https://mise.run | sh; \
+		echo ""; \
+		echo "Add mise to your shell profile, e.g.:"; \
+		echo "  echo 'eval \"\$$(~/.local/bin/mise activate bash)\"' >> ~/.bashrc"; \
+		echo "  echo 'eval \"\$$(~/.local/bin/mise activate zsh)\"'  >> ~/.zshrc"; \
+	fi
+	@mise trust mise.toml 2>/dev/null || true
+	@echo ""
+	@echo "Run 'mise tasks' to list available tasks."
+	@echo "Run 'mise run install' to set up the Python environment."
 
-# Read DEPLOY_HOSTS from the [deploy] section at parse time so the loop in
-# the deploy/remote-make recipes can iterate over it.
-DEPLOY_HOSTS := $(shell [ -f $(_LOCAL) ] && $(_CFG) $(_LOCAL) deploy DEPLOY_HOSTS || true)
+# ---------------------------------------------------------------------------
+# Local shims — delegate to mise when available, fall back to direct invocation
+# ---------------------------------------------------------------------------
+
+_MISE := $(shell command -v mise 2>/dev/null)
+
+define MISE_OR_DIRECT
+  $(if $(_MISE), mise run $(1), $(2))
+endef
+
+lint: ## Run linter (ruff)
+	$(call MISE_OR_DIRECT,lint,$(PY) -m ruff check .)
+
+lint-fix: ## Run linter with auto-fix
+	$(call MISE_OR_DIRECT,lint-fix,$(PY) -m ruff check --fix .)
+
+test: ## Run tests
+	$(call MISE_OR_DIRECT,test,$(PY) -m pytest tests/)
+
+test-cov: ## Run tests with coverage
+	$(call MISE_OR_DIRECT,test-cov,$(PY) -m pytest tests/ --cov=resources --cov=converter --cov-report=html)
+
+clean: ## Remove build artifacts and caches
+	$(call MISE_OR_DIRECT,clean, \
+	  find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true; \
+	  find . -type f -name '*.pyc' -delete 2>/dev/null || true; \
+	  rm -rf build/ dist/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage .ruff_cache/)
+
+detect-gpu: ## Detect GPU type for hardware acceleration
+	$(call MISE_OR_DIRECT,detect-gpu,echo $(GPU))
+
+daemon: ## Start the daemon server
+	$(call MISE_OR_DIRECT,daemon,$(PY) daemon.py --host 0.0.0.0 --port 8585)
+
+convert: ## Convert a file (usage: make convert FILE=/path/to/file.mkv)
+	$(call MISE_OR_DIRECT,convert -- "$(FILE)",$(PY) manual.py -i "$(FILE)" -a)
+
+codecs: ## List supported codecs
+	$(call MISE_OR_DIRECT,codecs,$(PY) manual.py -cl)
+
+preview: ## Preview conversion options (usage: make preview FILE=/path/to/file.mkv)
+	$(call MISE_OR_DIRECT,preview -- "$(FILE)",$(PY) manual.py -i "$(FILE)" -oo)
 
 deploy-check: ## Verify .local exists and DEPLOY_HOSTS is set
-	@if [ ! -f $(_LOCAL) ]; then \
-		echo "ERROR: $(_LOCAL) not found. Copy setup/.local.ini.sample to setup/.local.ini and configure it."; \
-		exit 1; \
-	fi
-	@if [ -z "$(DEPLOY_HOSTS)" ]; then \
-		echo "ERROR: DEPLOY_HOSTS is not set in the [deploy] section of $(_LOCAL)."; \
-		exit 1; \
-	fi
-	@echo "Deployment targets: $(DEPLOY_HOSTS)"
+	$(call MISE_OR_DIRECT,deploy:check,$(error mise is required for deployment tasks))
 
-# Internal target — resolve per-host config, rsync, optional branch checkout,
-# then run the on-host make target.  Called as: make deploy-host _HOST=user@host
-deploy-host:
-	@host="$(_HOST)"; \
-	cfg="$(_CFG) $(_LOCAL) $$host"; \
-	dir=$$($$cfg DEPLOY_DIR ~/sma); \
-	port=$$($$cfg SSH_PORT 22); \
-	key=$$($$cfg SSH_KEY ""); \
-	branch=$$($$cfg DEPLOY_BRANCH ""); \
-	remote_make=$$($$cfg REMOTE_MAKE install); \
-	rsync_extra=$$($$cfg RSYNC_EXTRA ""); \
-	ffmpeg_dir=$$($$cfg FFMPEG_DIR ""); \
-	ssh_opts="-p $$port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"; \
-	[ -n "$$key" ] && ssh_opts="$$ssh_opts -i $$key"; \
-	echo "==> [$$host] syncing to $$dir"; \
-	rsync -az --delete \
-		-e "ssh $$ssh_opts" \
-		--exclude='.git/' \
-		--exclude='venv/' \
-		--exclude='config/' \
-		--exclude='logs/' \
-		--exclude='__pycache__/' \
-		--exclude='*.pyc' \
-		--exclude='.local' \
-		--exclude='*.egg-info/' \
-		$$rsync_extra \
-		. $$host:$$dir; \
-	if [ -n "$$branch" ]; then \
-		echo "==> [$$host] checking out $$branch"; \
-		ssh $$ssh_opts $$host "cd $$dir && git checkout $$branch"; \
-	fi; \
-	make_env=""; \
-	[ -n "$$ffmpeg_dir" ] && make_env="SMA_DAEMON_FFMPEG_DIR=$$ffmpeg_dir"; \
-	echo "==> [$$host] make $$remote_make$$([ -n \"$$ffmpeg_dir\" ] && echo \" (FFMPEG_DIR=$$ffmpeg_dir)\" || true)"; \
-	ssh $$ssh_opts $$host "cd $$dir && $$make_env make $$remote_make"
+deploy-setup: ## Prepare remote hosts: SSH key, ssh-copy-id, DEPLOY_DIR, ffmpeg check
+	$(call MISE_OR_DIRECT,deploy:setup,$(error mise is required for deployment tasks))
 
-deploy: deploy-check ## Sync code to all DEPLOY_HOSTS and run REMOTE_MAKE on each
-	@failed=""; \
-	for host in $(DEPLOY_HOSTS); do \
-		echo ""; \
-		$(MAKE) --no-print-directory deploy-host _HOST=$$host || failed="$$failed $$host"; \
-	done; \
-	if [ -n "$$failed" ]; then \
-		echo ""; \
-		echo "ERROR: deployment failed for:$$failed"; \
-		exit 1; \
-	fi
-	@echo ""
-	@echo "Deployment complete: $(DEPLOY_HOSTS)"
+deploy: ## Sync code to all DEPLOY_HOSTS and run REMOTE_MAKE on each
+	$(call MISE_OR_DIRECT,deploy:run,$(error mise is required for deployment tasks))
 
-remote-make: deploy-check ## Run on-host make on all DEPLOY_HOSTS without syncing (usage: make remote-make REMOTE_MAKE=restart)
-	@failed=""; \
-	for host in $(DEPLOY_HOSTS); do \
-		cfg="$(_CFG) $(_LOCAL) $$host"; \
-		dir=$$($$cfg DEPLOY_DIR ~/sma); \
-		port=$$($$cfg SSH_PORT 22); \
-		key=$$($$cfg SSH_KEY ""); \
-		ffmpeg_dir=$$($$cfg FFMPEG_DIR ""); \
-		remote_make="$${REMOTE_MAKE:-$$($$cfg REMOTE_MAKE install)}"; \
-		ssh_opts="-p $$port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"; \
-		[ -n "$$key" ] && ssh_opts="$$ssh_opts -i $$key"; \
-		make_env=""; \
-		[ -n "$$ffmpeg_dir" ] && make_env="SMA_DAEMON_FFMPEG_DIR=$$ffmpeg_dir"; \
-		echo "==> [$$host] make $$remote_make"; \
-		ssh $$ssh_opts $$host "cd $$dir && $$make_env make $$remote_make" || failed="$$failed $$host"; \
-	done; \
-	if [ -n "$$failed" ]; then \
-		echo "ERROR: remote-make failed for:$$failed"; \
-		exit 1; \
-	fi
+remote-make: ## Run make target on all DEPLOY_HOSTS without syncing
+	$(call MISE_OR_DIRECT,deploy:remote-make,$(error mise is required for deployment tasks))
