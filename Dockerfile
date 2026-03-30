@@ -190,7 +190,11 @@ RUN groupadd -g ${GID} sma && useradd -u ${UID} -g sma -s /bin/sh -m sma
 WORKDIR /app
 COPY --chown=sma:sma . .
 
-# Runtime directories (override with volume mounts)
+# Install entrypoint script (root-owned, world-executable)
+COPY docker-entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Runtime directories (seeded at startup via entrypoint; override with volume mounts)
 RUN mkdir -p /config /logs \
     && chown -R sma:sma /config /logs /app
 
@@ -203,8 +207,8 @@ USER sma
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8585/health')" || exit 1
 
-# tini as PID 1 for clean signal handling / zombie reaping
-ENTRYPOINT ["/usr/bin/tini", "--"]
+# tini as PID 1 → entrypoint seeds /config → daemon starts
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["python", "daemon.py", \
      "--host", "0.0.0.0", \
      "--port", "8585", \
