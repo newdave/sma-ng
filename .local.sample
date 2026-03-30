@@ -1,0 +1,28 @@
+# .local — per-machine deployment configuration
+#
+# Copy this file to .local and fill in your host details.
+# .local is gitignored and never committed.
+#
+# ── required ──────────────────────────────────────────────────────────────────
+#
+# DEPLOY_HOSTS   Space-separated list of SSH targets (user@host or host).
+#                Each host is synced in sequence; on-host make calls run
+#                against all hosts in parallel.
+#
+DEPLOY_HOSTS = user@server1.example.com user@server2.example.com
+
+# ── optional ──────────────────────────────────────────────────────────────────
+#
+# DEPLOY_DIR     Remote directory to sync into.        Default: ~/sma
+# DEPLOY_BRANCH  Git branch to check out on the host.  Default: (no checkout)
+# SSH_KEY        Path to SSH identity file.             Default: (ssh default)
+# SSH_PORT       SSH port.                              Default: 22
+# RSYNC_EXTRA    Extra flags forwarded to rsync.        Default: (none)
+# REMOTE_MAKE    make target(s) to run after each sync. Default: install
+#
+# DEPLOY_DIR    = /opt/sma
+# DEPLOY_BRANCH = main
+# SSH_KEY       = ~/.ssh/id_ed25519_sma
+# SSH_PORT      = 22
+# RSYNC_EXTRA   = --exclude='config/' --exclude='logs/'
+# REMOTE_MAKE   = install restart

@@ -1,4 +1,5 @@
-.PHONY: help install install-dev install-all lint test clean daemon convert codecs docs detect-gpu config systemd-install
+.PHONY: help install install-dev install-all lint test clean daemon convert codecs docs detect-gpu config systemd-install \
+        deploy deploy-check deploy-host remote-make
 
 PYTHON ?= python3
 VENV ?= venv
@@ -97,3 +98,82 @@ systemd-install: ## Install systemd service (run as root)
 	cp setup/sma-daemon.service /etc/systemd/system/
 	systemctl daemon-reload
 	@echo "Service installed. Enable with: systemctl enable --now sma-daemon"
+
+# ---------------------------------------------------------------------------
+# Deployment
+#
+# Copy .local.sample to .local and fill in DEPLOY_HOSTS (and optionally
+# DEPLOY_DIR, SSH_KEY, SSH_PORT, RSYNC_EXTRA, REMOTE_MAKE, DEPLOY_BRANCH).
+# ---------------------------------------------------------------------------
+
+# Pull in .local if it exists; variables defined there override the defaults
+# below but can still be overridden on the command line.
+-include .local
+
+DEPLOY_DIR    ?= ~/sma
+SSH_PORT      ?= 22
+REMOTE_MAKE   ?= install
+RSYNC_EXTRA   ?=
+
+# Build SSH / rsync option strings from the optional variables
+_SSH_OPTS  = -p $(SSH_PORT) -o BatchMode=yes -o StrictHostKeyChecking=accept-new
+_SSH_OPTS += $(if $(SSH_KEY),-i $(SSH_KEY),)
+_RSYNC_SSH = ssh $(_SSH_OPTS)
+
+deploy-check: ## Verify .local exists and DEPLOY_HOSTS is set
+	@if [ ! -f .local ]; then \
+		echo "ERROR: .local not found. Copy .local.sample to .local and set DEPLOY_HOSTS."; \
+		exit 1; \
+	fi
+	@if [ -z "$(DEPLOY_HOSTS)" ]; then \
+		echo "ERROR: DEPLOY_HOSTS is not set in .local."; \
+		exit 1; \
+	fi
+	@echo "Deployment targets: $(DEPLOY_HOSTS)"
+
+# Internal target — sync + optional branch checkout + on-host make for ONE host.
+# Called as: make deploy-host _HOST=user@host
+deploy-host:
+	@echo "==> Syncing to $(_HOST):$(DEPLOY_DIR)"
+	rsync -az --delete \
+		-e "$(_RSYNC_SSH)" \
+		--exclude='.git/' \
+		--exclude='venv/' \
+		--exclude='config/' \
+		--exclude='logs/' \
+		--exclude='__pycache__/' \
+		--exclude='*.pyc' \
+		--exclude='.local' \
+		--exclude='*.egg-info/' \
+		$(RSYNC_EXTRA) \
+		. $(_HOST):$(DEPLOY_DIR)
+	$(if $(DEPLOY_BRANCH), \
+		@echo "==> Checking out $(DEPLOY_BRANCH) on $(_HOST)"; \
+		ssh $(_SSH_OPTS) $(_HOST) "cd $(DEPLOY_DIR) && git checkout $(DEPLOY_BRANCH)",)
+	@echo "==> Running 'make $(REMOTE_MAKE)' on $(_HOST)"
+	ssh $(_SSH_OPTS) $(_HOST) "cd $(DEPLOY_DIR) && make $(REMOTE_MAKE)"
+
+deploy: deploy-check ## Sync code to all DEPLOY_HOSTS and run REMOTE_MAKE on each
+	@failed=""; \
+	for host in $(DEPLOY_HOSTS); do \
+		echo ""; \
+		$(MAKE) --no-print-directory deploy-host _HOST=$$host || { failed="$$failed $$host"; }; \
+	done; \
+	if [ -n "$$failed" ]; then \
+		echo ""; \
+		echo "ERROR: deployment failed for:$$failed"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "Deployment complete: $(DEPLOY_HOSTS)"
+
+remote-make: deploy-check ## Run REMOTE_MAKE on all DEPLOY_HOSTS without syncing (usage: make remote-make REMOTE_MAKE=restart)
+	@failed=""; \
+	for host in $(DEPLOY_HOSTS); do \
+		echo "==> $$host: make $(REMOTE_MAKE)"; \
+		ssh $(_SSH_OPTS) $$host "cd $(DEPLOY_DIR) && make $(REMOTE_MAKE)" || { failed="$$failed $$host"; }; \
+	done; \
+	if [ -n "$$failed" ]; then \
+		echo "ERROR: remote-make failed for:$$failed"; \
+		exit 1; \
+	fi
