@@ -122,6 +122,12 @@ class JobDatabase:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at)
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS scanned_files (
+                    path       TEXT PRIMARY KEY,
+                    scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
         self.log.info("Database initialized: %s" % self.db_path)
 
@@ -393,6 +399,29 @@ class JobDatabase:
             self.log.info("Requeued %d failed jobs" % count)
         return count
 
+    def filter_unscanned(self, paths):
+        """Return the subset of paths not yet recorded in scanned_files."""
+        if not paths:
+            return []
+        with self._cursor() as cursor:
+            placeholders = ",".join("?" * len(paths))
+            cursor.execute(
+                "SELECT path FROM scanned_files WHERE path IN (%s)" % placeholders,
+                paths,
+            )
+            already = {row["path"] for row in cursor.fetchall()}
+        return [p for p in paths if p not in already]
+
+    def record_scanned(self, paths):
+        """Record paths as scanned. Ignores duplicates."""
+        if not paths:
+            return
+        with self._cursor() as cursor:
+            cursor.executemany(
+                "INSERT OR IGNORE INTO scanned_files (path) VALUES (?)",
+                [(p,) for p in paths],
+            )
+
 
 class PostgreSQLJobDatabase:
     """PostgreSQL-backed job queue for distributed multi-node operation.
@@ -478,6 +507,12 @@ class PostgreSQLJobDatabase:
                 cur.execute("""
                     ALTER TABLE cluster_nodes
                     ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS scanned_files (
+                        path       TEXT PRIMARY KEY,
+                        scanned_at TIMESTAMPTZ DEFAULT NOW()
+                    )
                 """)
         self.log.info("PostgreSQL database initialized: %s" % self.db_url)
         self._reset_running_jobs()
@@ -797,6 +832,30 @@ class PostgreSQLJobDatabase:
         if count > 0:
             self.log.info("Requeued %d failed jobs" % count)
         return count
+
+    def filter_unscanned(self, paths):
+        """Return the subset of paths not yet recorded in scanned_files."""
+        if not paths:
+            return []
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT path FROM scanned_files WHERE path = ANY(%s)",
+                    (paths,),
+                )
+                already = {row["path"] for row in cur.fetchall()}
+        return [p for p in paths if p not in already]
+
+    def record_scanned(self, paths):
+        """Record paths as scanned. Ignores duplicates."""
+        if not paths:
+            return
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO scanned_files (path) VALUES (%s) ON CONFLICT DO NOTHING",
+                    [(p,) for p in paths],
+                )
 
 
 class ConfigLockManager:
@@ -1274,6 +1333,11 @@ DOCS_TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SMA-NG Documentation</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .copy-btn { position:absolute; top:0.5rem; right:0.5rem; opacity:0; transition:opacity 0.15s; }
+  pre:hover .copy-btn { opacity:1; }
+  pre { position:relative; }
+</style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
 <div class="max-w-4xl mx-auto px-6 py-10">
@@ -1287,6 +1351,21 @@ DOCS_TEMPLATE = """<!DOCTYPE html>
     SMA-NG Documentation &mdash; Generated from docs/README.md
   </div>
 </div>
+<script>
+document.querySelectorAll('pre').forEach(pre => {
+  const btn = document.createElement('button');
+  btn.className = 'copy-btn bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white text-xs px-2 py-1 rounded';
+  btn.textContent = 'Copy';
+  btn.addEventListener('click', () => {
+    const code = pre.querySelector('code');
+    navigator.clipboard.writeText(code ? code.textContent : pre.textContent).then(() => {
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+    });
+  });
+  pre.appendChild(btn);
+});
+</script>
 </body>
 </html>"""
 
@@ -1299,7 +1378,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <title>SMA-NG Daemon</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-<style>[x-cloak]{display:none!important}</style>
+<style>
+[x-cloak]{display:none!important}
+/* Tooltip */
+.tooltip { position:relative; display:inline-block; }
+.tooltip .tip {
+  visibility:hidden; opacity:0; transition:opacity 0.15s;
+  position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
+  background:#1f2937; border:1px solid #374151; color:#d1d5db;
+  font-size:0.7rem; line-height:1.4; white-space:nowrap; max-width:280px;
+  white-space:normal; text-align:center;
+  padding:0.35rem 0.6rem; border-radius:0.375rem; z-index:50; pointer-events:none;
+}
+.tooltip:hover .tip { visibility:visible; opacity:1; }
+</style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
 <div x-data="dashboard()" x-init="init()" x-cloak class="max-w-7xl mx-auto px-4 py-6">
@@ -1308,17 +1400,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div class="flex items-center justify-between mb-8">
     <div>
       <h1 class="text-2xl font-bold text-white">SMA-NG</h1>
-      <p class="text-gray-400 text-sm">Media Conversion Server</p>
+      <p class="text-gray-400 text-sm">Media Conversion Daemon</p>
     </div>
     <div class="flex items-center gap-4">
       <a href="/docs" class="text-xs text-blue-400 hover:underline">Docs</a>
-      <span class="text-xs text-gray-500" x-show="health.node" x-text="health.node"></span>
-      <span class="text-xs text-gray-500" x-show="health.uptime_seconds != null" x-text="'Up ' + fmtUptime(health.uptime_seconds)"></span>
+      <span class="tooltip text-xs text-gray-500" x-show="health.node" x-text="health.node">
+        <span class="tip">Hostname of this daemon node</span>
+      </span>
+      <span class="tooltip text-xs text-gray-500" x-show="health.uptime_seconds != null" x-text="'Up ' + fmtUptime(health.uptime_seconds)">
+        <span class="tip">Time since daemon started</span>
+      </span>
       <span class="text-xs text-gray-500" x-text="'Updated ' + lastUpdate"></span>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+      <span class="tooltip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
             :class="health.status === 'ok' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'">
         <span class="w-1.5 h-1.5 rounded-full" :class="health.status === 'ok' ? 'bg-green-400' : 'bg-red-400'"></span>
         <span x-text="health.status === 'ok' ? 'Healthy' : 'Offline'"></span>
+        <span class="tip">Daemon health status — refreshes every 5 seconds</span>
       </span>
     </div>
   </div>
@@ -1328,13 +1425,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <h2 class="text-sm font-semibold text-green-400 uppercase tracking-wider mb-3">Submit Job</h2>
     <form @submit.prevent="submitJob()" class="flex gap-3">
       <input type="text" x-model="submitPath" placeholder="/path/to/file/or/directory"
+             title="Absolute path to the media file or directory to convert"
              class="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono">
-      <input type="text" x-model="submitArgs" placeholder="extra args (optional)"
-             class="w-48 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500">
+      <input type="text" x-model="submitArgs" placeholder="extra args e.g. -tmdb 603"
+             title="Optional extra arguments passed to manual.py (e.g. -tmdb 603, -tvdb 73871 -s 3 -e 10)"
+             class="w-56 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono">
       <button type="submit" :disabled="!submitPath.trim() || submitting"
+              title="Queue this path for conversion"
               class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium text-white transition-colors whitespace-nowrap">
         <span x-show="!submitting">Submit</span>
-        <span x-show="submitting">Queuing...</span>
+        <span x-show="submitting">Queuing…</span>
       </button>
     </form>
     <div x-show="submitResult" class="mt-3 text-sm px-3 py-2 rounded-lg"
@@ -1342,67 +1442,106 @@ DASHBOARD_HTML = """<!DOCTYPE html>
          x-text="submitResult"></div>
   </div>
 
-  <!-- Stats Cards -->
-  <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-    <template x-for="s in statCards" :key="s.key">
-      <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-        <div class="text-xs font-medium uppercase tracking-wider" :class="s.color" x-text="s.label"></div>
-        <div class="text-2xl font-bold text-white mt-1" x-text="stats[s.key] || 0"></div>
-      </div>
-    </template>
-  </div>
+  <!-- Stats + Workers -->
+  <div class="grid md:grid-cols-3 gap-6 mb-8">
 
-  <!-- Active & Waiting -->
-  <div class="grid md:grid-cols-2 gap-6 mb-8" x-show="Object.keys(health.active||{}).length || Object.keys(health.waiting||{}).length">
+    <!-- Stats Cards (span 2 cols) -->
+    <div class="md:col-span-2">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Job Statistics</h2>
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <template x-for="s in statCards" :key="s.key">
+          <div class="tooltip bg-gray-800 rounded-lg p-4 border border-gray-700 cursor-default"
+               @click="if(s.key!=='total'){filter=s.key;fetchJobs();document.getElementById('jobs-table').scrollIntoView({behavior:'smooth'})}">
+            <div class="text-xs font-medium uppercase tracking-wider" :class="s.color" x-text="s.label"></div>
+            <div class="text-2xl font-bold text-white mt-1" x-text="stats[s.key] ?? 0"></div>
+            <span class="tip" x-text="s.tip"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Workers -->
     <div class="bg-gray-800 rounded-lg border border-gray-700 p-5">
-      <h2 class="text-sm font-semibold text-blue-400 uppercase tracking-wider mb-3">Active Jobs</h2>
-      <template x-if="Object.keys(health.active||{}).length === 0">
-        <p class="text-gray-500 text-sm">No active jobs</p>
-      </template>
-      <div class="space-y-2">
+      <h2 class="tooltip text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 cursor-default">
+        Workers
+        <span class="tip">Background threads that pick up and run conversion jobs. Each config can only run one job at a time.</span>
+      </h2>
+      <div class="flex items-baseline gap-2 mb-3">
+        <span class="text-3xl font-bold text-white" x-text="activeWorkers"></span>
+        <span class="text-gray-500 text-sm" x-text="'/ ' + (health.workers || 0) + ' busy'"></span>
+      </div>
+      <div class="space-y-1.5" x-show="Object.keys(health.active||{}).length">
         <template x-for="(info, config) in (health.active||{})" :key="config">
-          <div class="bg-gray-750 rounded p-3 bg-gray-700/50">
-            <div class="text-xs text-gray-400 truncate" x-text="config.split('/').pop()"></div>
-            <div class="text-sm text-white truncate mt-0.5" x-text="info.path"></div>
-            <div class="text-xs text-gray-500 mt-0.5">Job #<span x-text="info.job_id"></span></div>
+          <div class="bg-gray-700/50 rounded p-2">
+            <div class="flex items-center gap-2 mb-0.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
+              <span class="text-xs text-blue-300 font-medium truncate" x-text="config.split('/').pop()"></span>
+            </div>
+            <div class="tooltip text-xs text-gray-400 truncate pl-3.5 cursor-default" :title="info.path" x-text="info.path.split('/').pop()">
+              <span class="tip" x-text="info.path"></span>
+            </div>
+            <div class="text-xs text-gray-600 pl-3.5">Job #<span x-text="info.job_id"></span></div>
           </div>
         </template>
       </div>
-    </div>
-    <div class="bg-gray-800 rounded-lg border border-gray-700 p-5">
-      <h2 class="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-3">Waiting Queues</h2>
-      <template x-if="Object.keys(health.waiting||{}).length === 0">
-        <p class="text-gray-500 text-sm">No waiting jobs</p>
-      </template>
-      <div class="space-y-2">
+      <p class="text-gray-600 text-xs" x-show="!Object.keys(health.active||{}).length">No active conversions</p>
+
+      <!-- Waiting queues -->
+      <div class="mt-3 space-y-1" x-show="Object.keys(health.waiting||{}).length">
+        <div class="text-xs text-gray-500 mb-1">Queued</div>
         <template x-for="(count, config) in (health.waiting||{})" :key="config">
-          <div class="flex items-center justify-between bg-gray-700/50 rounded p-3">
-            <span class="text-sm text-gray-300 truncate" x-text="config.split('/').pop()"></span>
-            <span class="text-xs bg-yellow-900 text-yellow-300 px-2 py-0.5 rounded-full" x-text="count + ' queued'"></span>
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-400 truncate" x-text="config.split('/').pop()"></span>
+            <span class="tooltip text-xs bg-yellow-900/60 text-yellow-300 px-2 py-0.5 rounded-full ml-2 flex-shrink-0" x-text="count">
+              <span class="tip">Jobs waiting for this config's lock to be released</span>
+            </span>
           </div>
         </template>
       </div>
     </div>
   </div>
 
-  <!-- Configs -->
+  <!-- Config Mappings -->
   <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
-    <h2 class="text-sm font-semibold text-purple-400 uppercase tracking-wider mb-3">Config Mappings</h2>
+    <h2 class="tooltip text-sm font-semibold text-purple-400 uppercase tracking-wider mb-3 cursor-default">
+      Config Mappings
+      <span class="tip">Path prefixes matched longest-first to determine which autoProcess.ini a job uses</span>
+    </h2>
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
-        <thead><tr class="text-left text-gray-400 border-b border-gray-700">
-          <th class="pb-2 pr-4">Path</th><th class="pb-2 pr-4">Config</th><th class="pb-2 pr-4">Status</th><th class="pb-2">Pending</th>
+        <thead><tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
+          <th class="pb-2 pr-4 font-medium">Path Prefix</th>
+          <th class="pb-2 pr-4 font-medium">Config</th>
+          <th class="pb-2 pr-4 font-medium">
+            <span class="tooltip cursor-default">Status<span class="tip">Whether this config is currently running a job</span></span>
+          </th>
+          <th class="pb-2 pr-4 font-medium">
+            <span class="tooltip cursor-default">Pending<span class="tip">Jobs waiting in queue for this config</span></span>
+          </th>
+          <th class="pb-2 font-medium">Log</th>
         </tr></thead>
-        <tbody class="divide-y divide-gray-700/50">
+        <tbody class="divide-y divide-gray-700/50 text-xs">
+          <!-- Default config row -->
+          <tr x-show="configs.default_config" class="opacity-70 hover:opacity-100 hover:bg-gray-700/20">
+            <td class="py-2 pr-4 text-gray-500 font-mono italic">default</td>
+            <td class="py-2 pr-4 text-gray-400 font-mono" x-text="(configs.default_config||'').split('/').pop()"></td>
+            <td class="py-2 pr-4">
+              <span x-show="configs.default_active_job" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">Running</span>
+              <span x-show="!configs.default_active_job" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
+            </td>
+            <td class="py-2 pr-4 text-gray-500" x-text="configs.default_pending_jobs || 0"></td>
+            <td class="py-2 text-gray-600 font-mono" x-text="(configs.default_log||'').split('/').pop()"></td>
+          </tr>
           <template x-for="c in configs.path_configs || []" :key="c.path">
-            <tr>
-              <td class="py-2 pr-4 text-gray-300 font-mono text-xs" x-text="c.path"></td>
-              <td class="py-2 pr-4 text-gray-400 font-mono text-xs" x-text="c.config.split('/').pop()"></td>
+            <tr class="hover:bg-gray-700/20">
+              <td class="py-2 pr-4 text-gray-300 font-mono" :title="c.path" x-text="c.path"></td>
+              <td class="py-2 pr-4 text-gray-400 font-mono" x-text="c.config.split('/').pop()"></td>
               <td class="py-2 pr-4">
-                <span x-show="c.active_job" class="text-xs bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">Running</span>
-                <span x-show="!c.active_job" class="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">Idle</span>
+                <span x-show="c.active_job" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">Running</span>
+                <span x-show="!c.active_job" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
               </td>
-              <td class="py-2 text-gray-400" x-text="c.pending_jobs"></td>
+              <td class="py-2 pr-4 text-gray-400" x-text="c.pending_jobs || 0"></td>
+              <td class="py-2 text-gray-600 font-mono" x-text="c.log_file ? c.log_file.split('/').pop() : ''"></td>
             </tr>
           </template>
         </tbody>
@@ -1411,12 +1550,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 
   <!-- Jobs Table -->
-  <div class="bg-gray-800 rounded-lg border border-gray-700 p-5">
+  <div id="jobs-table" class="bg-gray-800 rounded-lg border border-gray-700 p-5">
     <div class="flex items-center justify-between mb-3">
       <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Recent Jobs</h2>
       <div class="flex gap-2">
         <template x-for="f in ['all','pending','running','completed','failed']" :key="f">
-          <button @click="filter=f; fetchJobs()"
+          <button @click="filter=f; page=0; fetchJobs()"
                   class="text-xs px-2.5 py-1 rounded-full border transition-colors"
                   :class="filter===f ? 'border-blue-500 bg-blue-500/20 text-blue-300' : 'border-gray-600 text-gray-400 hover:border-gray-500'"
                   x-text="f.charAt(0).toUpperCase()+f.slice(1)">
@@ -1426,18 +1565,29 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
-        <thead><tr class="text-left text-gray-400 border-b border-gray-700">
-          <th class="pb-2 pr-3 w-16">ID</th><th class="pb-2 pr-3">Path</th><th class="pb-2 pr-3">Config</th><th class="pb-2 pr-3">Status</th><th class="pb-2 pr-3">Created</th><th class="pb-2">Duration</th>
+        <thead><tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
+          <th class="pb-2 pr-3 w-12 font-medium">ID</th>
+          <th class="pb-2 pr-3 font-medium">File</th>
+          <th class="pb-2 pr-3 font-medium">Config</th>
+          <th class="pb-2 pr-3 font-medium">Status</th>
+          <th class="pb-2 pr-3 font-medium">Created</th>
+          <th class="pb-2 font-medium">Duration</th>
         </tr></thead>
         <tbody class="divide-y divide-gray-700/50">
           <template x-for="j in jobs" :key="j.id">
-            <tr class="hover:bg-gray-700/30">
-              <td class="py-2 pr-3 text-gray-500 font-mono" x-text="j.id"></td>
-              <td class="py-2 pr-3 text-gray-300 font-mono text-xs truncate max-w-xs" :title="j.path" x-text="j.path.split('/').pop()"></td>
-              <td class="py-2 pr-3 text-gray-400 text-xs" x-text="j.config.split('/').pop()"></td>
+            <tr class="hover:bg-gray-700/30 group">
+              <td class="py-2 pr-3 text-gray-600 font-mono text-xs" x-text="j.id"></td>
+              <td class="py-2 pr-3 text-xs max-w-xs">
+                <div class="tooltip cursor-default">
+                  <span class="text-gray-300 font-mono" x-text="j.path.split('/').pop()"></span>
+                  <span class="tip" x-text="j.path"></span>
+                </div>
+                <div x-show="j.error" class="text-red-400 mt-0.5 truncate max-w-xs" :title="j.error" x-text="j.error"></div>
+              </td>
+              <td class="py-2 pr-3 text-gray-500 font-mono text-xs" x-text="j.config ? j.config.split('/').pop() : ''"></td>
               <td class="py-2 pr-3">
                 <span class="text-xs px-2 py-0.5 rounded-full"
-                      :class="{'pending':'bg-gray-700 text-gray-300','running':'bg-blue-900 text-blue-300','completed':'bg-green-900 text-green-300','failed':'bg-red-900 text-red-300'}[j.status]"
+                      :class="{'pending':'bg-gray-700 text-gray-300','running':'bg-blue-900 text-blue-300','completed':'bg-green-900 text-green-300','failed':'bg-red-900 text-red-300'}[j.status] || 'bg-gray-700 text-gray-400'"
                       x-text="j.status"></span>
               </td>
               <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtTime(j.created_at)"></td>
@@ -1445,18 +1595,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </tr>
           </template>
           <template x-if="jobs.length === 0">
-            <tr><td colspan="6" class="py-8 text-center text-gray-500">No jobs found</td></tr>
+            <tr><td colspan="6" class="py-8 text-center text-gray-500 text-sm">No jobs found</td></tr>
           </template>
         </tbody>
       </table>
     </div>
-    <div class="flex justify-between items-center mt-3 text-xs text-gray-500" x-show="jobs.length > 0">
-      <span x-text="'Showing ' + jobs.length + ' jobs'"></span>
+    <div class="flex justify-between items-center mt-3 text-xs text-gray-500" x-show="jobs.length > 0 || page > 0">
+      <span x-text="page === 0 ? 'Showing ' + jobs.length + ' jobs' : 'Page ' + (page+1) + ' · ' + jobs.length + ' jobs'"></span>
       <div class="flex gap-2">
         <button @click="if(page>0){page--;fetchJobs()}" :disabled="page===0"
                 class="px-2 py-1 rounded border border-gray-600 disabled:opacity-30" :class="page>0?'hover:border-gray-500':''">Prev</button>
-        <button @click="page++;fetchJobs()"
-                class="px-2 py-1 rounded border border-gray-600 hover:border-gray-500" :disabled="jobs.length < pageSize">Next</button>
+        <button @click="page++;fetchJobs()" :disabled="jobs.length < pageSize"
+                class="px-2 py-1 rounded border border-gray-600 disabled:opacity-30" :class="jobs.length>=pageSize?'hover:border-gray-500':''">Next</button>
       </div>
     </div>
   </div>
@@ -1470,12 +1620,15 @@ function dashboard() {
     lastUpdate: '', interval: null,
     submitPath: '', submitArgs: '', submitting: false, submitResult: '', submitError: false,
     statCards: [
-      {key:'total',label:'Total',color:'text-gray-400'},
-      {key:'pending',label:'Pending',color:'text-yellow-400'},
-      {key:'running',label:'Running',color:'text-blue-400'},
-      {key:'completed',label:'Completed',color:'text-green-400'},
-      {key:'failed',label:'Failed',color:'text-red-400'},
+      {key:'total',    label:'Total',     color:'text-gray-400',  tip:'All jobs ever submitted'},
+      {key:'pending',  label:'Pending',   color:'text-yellow-400',tip:'Waiting to be picked up by a worker — click to filter'},
+      {key:'running',  label:'Running',   color:'text-blue-400',  tip:'Currently being converted — click to filter'},
+      {key:'completed',label:'Completed', color:'text-green-400', tip:'Successfully finished — click to filter'},
+      {key:'failed',   label:'Failed',    color:'text-red-400',   tip:'Ended with an error — click to filter'},
     ],
+    get activeWorkers() {
+      return Object.keys(this.health.active || {}).length;
+    },
     async init() {
       await this.refresh();
       this.interval = setInterval(() => this.refresh(), 5000);
@@ -1495,8 +1648,10 @@ function dashboard() {
     async fetchJobs() {
       const params = new URLSearchParams({limit: this.pageSize, offset: this.page * this.pageSize});
       if (this.filter !== 'all') params.set('status', this.filter);
-      const r = await fetch('/jobs?' + params).then(r=>r.json());
-      this.jobs = r.jobs || [];
+      try {
+        const r = await fetch('/jobs?' + params).then(r=>r.json());
+        this.jobs = r.jobs || [];
+      } catch(e) { this.jobs = []; }
     },
     async submitJob() {
       this.submitting = true; this.submitResult = ''; this.submitError = false;
@@ -1519,13 +1674,13 @@ function dashboard() {
     },
     fmtTime(t) {
       if (!t) return '-';
-      const d = new Date(t + 'Z');
+      const d = new Date(t.includes('Z') || t.includes('+') ? t : t + 'Z');
       return d.toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     },
     fmtDuration(j) {
       if (!j.started_at) return '-';
-      const start = new Date(j.started_at + 'Z');
-      const end = j.completed_at ? new Date(j.completed_at + 'Z') : new Date();
+      const start = new Date(j.started_at.includes('Z') || j.started_at.includes('+') ? j.started_at : j.started_at + 'Z');
+      const end = j.completed_at ? new Date(j.completed_at.includes('Z') || j.completed_at.includes('+') ? j.completed_at : j.completed_at + 'Z') : new Date();
       const s = Math.round((end - start) / 1000);
       if (s < 60) return s + 's';
       if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
@@ -1607,6 +1762,121 @@ class WebhookHandler(BaseHTTPRequestHandler):
         """Check if the endpoint is public (doesn't require auth)."""
         return path in self.PUBLIC_ENDPOINTS
 
+    def _read_json_paths(self):
+        """Read a JSON body of the form {"paths": [...]} and return the list.
+
+        Returns the paths list on success.  On parse failure, sends a 400
+        response and returns None — callers must check for None and return.
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length else b"{}"
+        try:
+            data = json.loads(body)
+            paths = data.get("paths", [])
+            if not isinstance(paths, list):
+                raise ValueError("paths must be a list")
+            return paths
+        except (json.JSONDecodeError, ValueError) as e:
+            self.send_json_response(400, {"error": str(e)})
+            return None
+
+    # ------------------------------------------------------------------
+    # GET route handlers
+    # ------------------------------------------------------------------
+
+    def _get_health(self):
+        lock_status = self.server.config_lock_manager.get_status()
+        stats = self.server.job_db.get_stats()
+        now = datetime.now(timezone.utc)
+        uptime = int((now - self.server.started_at).total_seconds())
+        self.send_json_response(
+            200,
+            {
+                "status": "ok",
+                "node": self.server.node_id,
+                "started_at": self.server.started_at.isoformat(),
+                "uptime_seconds": uptime,
+                "workers": self.server.worker_count,
+                "jobs": stats,
+                "active": lock_status["active"],
+                "waiting": lock_status["waiting"],
+            },
+        )
+
+    def _get_status(self):
+        # Cluster-wide status — only meaningful with PostgreSQL backend
+        if isinstance(self.server.job_db, PostgreSQLJobDatabase):
+            nodes = self.server.job_db.get_cluster_nodes()
+            stats = self.server.job_db.get_stats()
+            self.send_json_response(200, {"cluster": nodes, "jobs": stats})
+        else:
+            # SQLite single-node — return local health with explanatory note
+            lock_status = self.server.config_lock_manager.get_status()
+            stats = self.server.job_db.get_stats()
+            self.send_json_response(
+                200,
+                {
+                    "status": "ok",
+                    "node": self.server.node_id,
+                    "note": "Cluster status requires PostgreSQL backend (--db-url)",
+                    "workers": self.server.worker_count,
+                    "jobs": stats,
+                    "active": lock_status["active"],
+                    "waiting": lock_status["waiting"],
+                },
+            )
+
+    def _get_jobs(self, query):
+        status = query.get("status", [None])[0]
+        config = query.get("config", [None])[0]
+        limit = int(query.get("limit", [100])[0])
+        offset = int(query.get("offset", [0])[0])
+        jobs = self.server.job_db.get_jobs(status=status, config=config, limit=limit, offset=offset)
+        self.send_json_response(200, {"jobs": jobs, "count": len(jobs), "limit": limit, "offset": offset})
+
+    def _get_job(self, path):
+        try:
+            job_id = int(path.split("/")[-1])
+            job = self.server.job_db.get_job(job_id)
+            if job:
+                self.send_json_response(200, job)
+            else:
+                self.send_json_response(404, {"error": "Job not found"})
+        except ValueError:
+            self.send_json_response(400, {"error": "Invalid job ID"})
+
+    def _get_configs(self):
+        configs_with_status = [
+            {
+                "path": entry["path"],
+                "config": entry["config"],
+                "log_file": self.server.config_log_manager.get_log_file(entry["config"]),
+                "active_job": self.server.config_lock_manager.get_active_job(entry["config"]),
+                "pending_jobs": self.server.job_db.pending_count_for_config(entry["config"]),
+            }
+            for entry in self.server.path_config_manager.path_configs
+        ]
+        default_config = self.server.path_config_manager.default_config
+        self.send_json_response(
+            200,
+            {
+                "default_config": default_config,
+                "default_log": self.server.config_log_manager.get_log_file(default_config),
+                "default_active_job": self.server.config_lock_manager.get_active_job(default_config),
+                "default_pending_jobs": self.server.job_db.pending_count_for_config(default_config),
+                "path_configs": configs_with_status,
+                "logs_directory": self.server.config_log_manager.logs_dir,
+            },
+        )
+
+    def _get_scan(self, query):
+        # Filter a list of paths to those not yet recorded as scanned.
+        # Usage: GET /scan?path=/a/b.mkv&path=/c/d.mkv
+        # For large path lists use POST /scan/filter instead.
+        paths = query.get("path", [])
+        unscanned = self.server.job_db.filter_unscanned(paths)
+        self.send_json_response(200, {"unscanned": unscanned, "total": len(paths), "already_scanned": len(paths) - len(unscanned)})
+
     def do_GET(self):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -1617,123 +1887,79 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/" and self.wants_html():
             self.send_html_response(200, DASHBOARD_HTML)
-            return
-
-        if parsed.path == "/docs":
+        elif parsed.path == "/docs":
             try:
                 with open(DOCS_PATH, "r", encoding="utf-8") as f:
                     md_content = f.read()
-                rendered = _render_markdown_to_html(md_content)
-                self.send_html_response(200, DOCS_TEMPLATE % rendered)
+                self.send_html_response(200, DOCS_TEMPLATE % _render_markdown_to_html(md_content))
             except FileNotFoundError:
                 self.send_html_response(404, "<h1>Documentation not found</h1><p>docs/README.md missing</p>")
-            return
-
-        if parsed.path in ["/", "/health"]:
-            lock_status = self.server.config_lock_manager.get_status()
-            stats = self.server.job_db.get_stats()
-            now = datetime.now(timezone.utc)
-            uptime = int((now - self.server.started_at).total_seconds())
-            self.send_json_response(
-                200,
-                {
-                    "status": "ok",
-                    "node": self.server.node_id,
-                    "started_at": self.server.started_at.isoformat(),
-                    "uptime_seconds": uptime,
-                    "workers": self.server.worker_count,
-                    "jobs": stats,
-                    "active": lock_status["active"],
-                    "waiting": lock_status["waiting"],
-                },
-            )
-
+        elif parsed.path in ["/", "/health"]:
+            self._get_health()
         elif parsed.path == "/status":
-            # Cluster-wide status — only meaningful with PostgreSQL backend
-            if isinstance(self.server.job_db, PostgreSQLJobDatabase):
-                nodes = self.server.job_db.get_cluster_nodes()
-                stats = self.server.job_db.get_stats()
-                self.send_json_response(
-                    200,
-                    {
-                        "cluster": nodes,
-                        "jobs": stats,
-                    },
-                )
-            else:
-                # SQLite single-node — return local health
-                lock_status = self.server.config_lock_manager.get_status()
-                stats = self.server.job_db.get_stats()
-                self.send_json_response(
-                    200,
-                    {
-                        "status": "ok",
-                        "node": self.server.node_id,
-                        "note": "Cluster status requires PostgreSQL backend (--db-url)",
-                        "workers": self.server.worker_count,
-                        "jobs": stats,
-                        "active": lock_status["active"],
-                        "waiting": lock_status["waiting"],
-                    },
-                )
-
+            self._get_status()
         elif parsed.path == "/jobs":
-            # Get jobs with optional filtering
-            status = query.get("status", [None])[0]
-            config = query.get("config", [None])[0]
-            limit = int(query.get("limit", [100])[0])
-            offset = int(query.get("offset", [0])[0])
-
-            jobs = self.server.job_db.get_jobs(status=status, config=config, limit=limit, offset=offset)
-            self.send_json_response(200, {"jobs": jobs, "count": len(jobs), "limit": limit, "offset": offset})
-
+            self._get_jobs(query)
         elif parsed.path.startswith("/jobs/"):
-            # Get specific job
-            try:
-                job_id = int(parsed.path.split("/")[-1])
-                job = self.server.job_db.get_job(job_id)
-                if job:
-                    self.send_json_response(200, job)
-                else:
-                    self.send_json_response(404, {"error": "Job not found"})
-            except ValueError:
-                self.send_json_response(400, {"error": "Invalid job ID"})
-
+            self._get_job(parsed.path)
         elif parsed.path == "/configs":
-            configs_with_logs = []
-            for entry in self.server.path_config_manager.path_configs:
-                config_path = entry["config"]
-                active_job = self.server.config_lock_manager.get_active_job(config_path)
-                pending = self.server.job_db.pending_count_for_config(config_path)
-                configs_with_logs.append(
-                    {"path": entry["path"], "config": config_path, "log_file": self.server.config_log_manager.get_log_file(config_path), "active_job": active_job, "pending_jobs": pending}
-                )
-
-            default_config = self.server.path_config_manager.default_config
-            default_active = self.server.config_lock_manager.get_active_job(default_config)
-            default_pending = self.server.job_db.pending_count_for_config(default_config)
-
-            self.send_json_response(
-                200,
-                {
-                    "default_config": default_config,
-                    "default_log": self.server.config_log_manager.get_log_file(default_config),
-                    "default_active_job": default_active,
-                    "default_pending_jobs": default_pending,
-                    "path_configs": configs_with_logs,
-                    "logs_directory": self.server.config_log_manager.logs_dir,
-                },
-            )
-
+            self._get_configs()
         elif parsed.path == "/stats":
-            stats = self.server.job_db.get_stats()
-            self.send_json_response(200, stats)
-
+            self.send_json_response(200, self.server.job_db.get_stats())
+        elif parsed.path == "/scan":
+            self._get_scan(query)
         else:
             self.send_json_response(404, {"error": "Not found"})
 
+    # ------------------------------------------------------------------
+    # POST route handlers
+    # ------------------------------------------------------------------
+
+    def _post_cleanup(self, query):
+        days = int(query.get("days", [30])[0])
+        deleted = self.server.job_db.cleanup_old_jobs(days)
+        self.send_json_response(200, {"deleted": deleted, "days": days})
+
+    def _post_jobs_requeue_bulk(self, query):
+        config = query.get("config", [None])[0]
+        count = self.server.job_db.requeue_failed_jobs(config=config)
+        if count > 0:
+            self.server.job_event.set()
+        self.send_json_response(200, {"requeued": count})
+
+    def _post_job_requeue(self, path):
+        try:
+            job_id = int(path.split("/")[-2])
+            requeued = self.server.job_db.requeue_job(job_id)
+            if requeued:
+                self.server.job_event.set()
+                self.send_json_response(200, {"requeued": True, "job_id": job_id})
+            else:
+                job = self.server.job_db.get_job(job_id)
+                if job is None:
+                    self.send_json_response(404, {"error": "Job not found"})
+                else:
+                    self.send_json_response(409, {"error": "Job cannot be requeued", "status": job["status"], "note": "Only failed jobs can be requeued"})
+        except ValueError:
+            self.send_json_response(400, {"error": "Invalid job ID"})
+
+    def _post_scan_filter(self):
+        paths = self._read_json_paths()
+        if paths is None:
+            return
+        unscanned = self.server.job_db.filter_unscanned(paths)
+        self.send_json_response(200, {"unscanned": unscanned, "total": len(paths), "already_scanned": len(paths) - len(unscanned)})
+
+    def _post_scan_record(self):
+        paths = self._read_json_paths()
+        if paths is None:
+            return
+        self.server.job_db.record_scanned(paths)
+        self.send_json_response(200, {"recorded": len(paths)})
+
     def do_POST(self):
         parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
 
         # All POST endpoints require authentication
         if not self.check_auth():
@@ -1742,35 +1968,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if parsed.path in ["/", "/webhook", "/convert"]:
             self._handle_webhook()
         elif parsed.path == "/cleanup":
-            # Cleanup old completed/failed jobs
-            query = parse_qs(parsed.query)
-            days = int(query.get("days", [30])[0])
-            deleted = self.server.job_db.cleanup_old_jobs(days)
-            self.send_json_response(200, {"deleted": deleted, "days": days})
+            self._post_cleanup(query)
         elif parsed.path == "/jobs/requeue":
-            # Bulk requeue all failed jobs, optionally filtered by config
-            query = parse_qs(parsed.query)
-            config = query.get("config", [None])[0]
-            count = self.server.job_db.requeue_failed_jobs(config=config)
-            if count > 0:
-                self.server.job_event.set()
-            self.send_json_response(200, {"requeued": count})
+            self._post_jobs_requeue_bulk(query)
         elif parsed.path.startswith("/jobs/") and parsed.path.endswith("/requeue"):
-            # Requeue a single failed job: POST /jobs/<id>/requeue
-            try:
-                job_id = int(parsed.path.split("/")[-2])
-                requeued = self.server.job_db.requeue_job(job_id)
-                if requeued:
-                    self.server.job_event.set()
-                    self.send_json_response(200, {"requeued": True, "job_id": job_id})
-                else:
-                    job = self.server.job_db.get_job(job_id)
-                    if job is None:
-                        self.send_json_response(404, {"error": "Job not found"})
-                    else:
-                        self.send_json_response(409, {"error": "Job cannot be requeued", "status": job["status"], "note": "Only failed jobs can be requeued"})
-            except ValueError:
-                self.send_json_response(400, {"error": "Invalid job ID"})
+            self._post_job_requeue(parsed.path)
+        elif parsed.path == "/scan/filter":
+            self._post_scan_filter()
+        elif parsed.path == "/scan/record":
+            self._post_scan_record()
         else:
             self.send_json_response(404, {"error": "Not found"})
 
@@ -2079,6 +2285,9 @@ def main():
         log.info("  GET  /configs      - Show config mappings and status")
         log.info("  GET  /stats        - Job statistics")
         log.info("  POST /cleanup      - Remove old jobs (?days=30)")
+        log.info("  GET  /scan         - Check unscanned paths (?path=... for small lists)")
+        log.info("  POST /scan/filter  - Check unscanned paths (JSON body for large lists)")
+        log.info("  POST /scan/record  - Record paths as scanned")
         log.info("")
         log.info("Ready to accept connections.")
 

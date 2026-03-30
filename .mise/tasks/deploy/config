@@ -15,6 +15,22 @@ mk_ssh_opts() {
   [ -n "$key" ] && SSH_OPTS+=(-i "$(eval echo "$key")")
 }
 
+# Ensure a config file exists on the remote host, creating it from a sample if absent.
+# Args: <host> <remote-path> <sample-path> [extra-setup-commands]
+# The optional fourth argument is a shell snippet run after the copy (for e.g. GPU patching).
+ensure_remote_config() {
+  local host="$1" remote_path="$2" sample_path="$3" extra_setup="${4:-}"
+  if ssh "${SSH_OPTS[@]}" "$host" "test -f $remote_path" 2>/dev/null; then
+    echo "  exists: $(basename "$remote_path")"
+  else
+    echo "  creating: $(basename "$remote_path")"
+    ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}cp $sample_path $remote_path"
+    if [ -n "$extra_setup" ]; then
+      ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}bash -c '$extra_setup'"
+    fi
+  fi
+}
+
 # Detect GPU on a remote host; echoes one of: nvenc qsv vaapi videotoolbox software
 detect_remote_gpu() {
   local host="$1"
@@ -143,7 +159,7 @@ for host in $DEPLOY_HOSTS; do
 
   # ── create missing config files from samples ────────────────────────────
   echo "  checking for missing config files..."
-  # shellcheck disable=SC2087
+  # autoProcess.ini needs GPU-specific patching after creation
   if ssh "${SSH_OPTS[@]}" "$host" "test -f $dir/config/autoProcess.ini" 2>/dev/null; then
     echo "  exists: config/autoProcess.ini"
   else
@@ -157,24 +173,8 @@ for host in $DEPLOY_HOSTS; do
       fi
 REMOTE
   fi
-
-  # shellcheck disable=SC2087
-  if ssh "${SSH_OPTS[@]}" "$host" "test -f $dir/config/daemon.json" 2>/dev/null; then
-    echo "  exists: config/daemon.json"
-  else
-    echo "  creating: config/daemon.json"
-    # shellcheck disable=SC2087
-    ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}cp $dir/setup/daemon.json.sample $dir/config/daemon.json"
-  fi
-
-  # shellcheck disable=SC2087
-  if ssh "${SSH_OPTS[@]}" "$host" "test -f $dir/config/daemon.env" 2>/dev/null; then
-    echo "  exists: config/daemon.env"
-  else
-    echo "  creating: config/daemon.env"
-    # shellcheck disable=SC2087
-    ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}cp $dir/setup/daemon.env.sample $dir/config/daemon.env"
-  fi
+  ensure_remote_config "$host" "$dir/config/daemon.json" "$dir/setup/daemon.json.sample"
+  ensure_remote_config "$host" "$dir/config/daemon.env"  "$dir/setup/daemon.env.sample"
 
   # ── sync new INI keys from sample into each existing *.ini ──────────────
   echo "  checking for new keys in autoProcess.ini.sample..."

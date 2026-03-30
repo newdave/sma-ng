@@ -38,6 +38,15 @@ from resources.custom import *
 class MediaProcessor:
     default_channel_bitrate = 128
 
+    # Maps title keywords to disposition flags, used by titleDispositionCheck
+    _TITLE_DISPO_MAP = {
+        "comment": "comment",
+        "hearing": "hearing_impaired",
+        "sdh": "hearing_impaired",
+        "visual": "visual_impaired",
+        "forced": "forced",
+    }
+
     def __init__(self, settings, logger=None):
         self.log = logger or logging.getLogger(__name__)
         self.settings = settings
@@ -598,14 +607,12 @@ class MediaProcessor:
 
     # Check and see if clues about the disposition are in the title
     def titleDispositionCheck(self, info):
-        DISPO_MAP = {"comment": "comment", "hearing": "hearing_impaired", "sdh": "hearing_impaired", "visual": "visual_impaired", "forced": "forced"}
-
         for stream in info.streams:
             title = stream.metadata.get("title", "").lower()
-            for k in DISPO_MAP:
+            for k, flag in self._TITLE_DISPO_MAP.items():
                 if k in title:
-                    stream.disposition[DISPO_MAP[k]] = True
-                    self.log.debug("Found %s in stream title, setting %s disposition to True." % (k, DISPO_MAP[k]))
+                    stream.disposition[flag] = True
+                    self.log.debug("Found %s in stream title, setting %s disposition to True." % (k, flag))
 
     # Get source audio tracks that meet criteria for being the same based on codec combination, language, and dispostion
     def mapStreamCombinations(self, audiostreams):
@@ -1458,31 +1465,35 @@ class MediaProcessor:
             postopts.extend(["-tag:v", "hvc1"])
             self.log.info("Tagging copied video stream as hvc1")
 
-        # Encoder check
-        encoders = [item for sublist in [codecs[x]["encoders"] for x in codecs] for item in sublist]
-        for o in [video_settings] + audio_settings + subtitle_settings + attachments:
-            if "codec" in o and o["codec"] != "copy":
-                ffcodec = self.converter.codec_name_to_ffmpeg_codec_name(o["codec"])
-                if not ffcodec:
-                    self.log.warning("===========WARNING===========")
-                    self.log.warning(
-                        "The encoder you have chosen %s is not defined and is not supported by SMA-NG, conversion will likely fail. Please check that this is defined in ./converter/avcodecs.py and if not open a Github feature request to add support."
-                        % (o["codec"])
-                    )
-                    self.log.warning("===========WARNING===========")
-                elif ffcodec not in encoders and ffcodec != "copy":
-                    self.log.warning("===========WARNING===========")
-                    self.log.warning(
-                        "The encoder you have chosen %s (%s) is not listed as supported in your FFMPEG build, conversion will likely fail, please use a build of FFMPEG that supports %s or choose a different encoder."
-                        % (o["codec"], ffcodec, ffcodec)
-                    )
-                    ffpcodec = Converter.codec_name_to_ffprobe_codec_name(o["codec"])
-                    if ffpcodec and ffpcodec in codecs and codecs[ffpcodec]["encoders"]:
-                        self.log.warning("Other encoders your current FFMPEG build does support for codec %s:" % (ffpcodec))
-                        self.log.warning(codecs[ffpcodec]["encoders"])
-                    self.log.warning("===========WARNING===========")
+        self._warn_unsupported_encoders(codecs, [video_settings] + audio_settings + subtitle_settings + attachments)
 
         return options, preopts, postopts, ripsubopts, downloaded_subs
+
+    def _warn_unsupported_encoders(self, codecs, stream_options):
+        """Emit warnings for any chosen codec not supported by the current FFmpeg build."""
+        encoders = [item for sublist in [codecs[x]["encoders"] for x in codecs] for item in sublist]
+        for o in stream_options:
+            if "codec" not in o or o["codec"] == "copy":
+                continue
+            ffcodec = self.converter.codec_name_to_ffmpeg_codec_name(o["codec"])
+            if not ffcodec:
+                self.log.warning("===========WARNING===========")
+                self.log.warning(
+                    "The encoder you have chosen %s is not defined and is not supported by SMA-NG, conversion will likely fail. Please check that this is defined in ./converter/avcodecs.py and if not open a Github feature request to add support."
+                    % (o["codec"])
+                )
+                self.log.warning("===========WARNING===========")
+            elif ffcodec not in encoders:
+                self.log.warning("===========WARNING===========")
+                self.log.warning(
+                    "The encoder you have chosen %s (%s) is not listed as supported in your FFMPEG build, conversion will likely fail, please use a build of FFMPEG that supports %s or choose a different encoder."
+                    % (o["codec"], ffcodec, ffcodec)
+                )
+                ffpcodec = Converter.codec_name_to_ffprobe_codec_name(o["codec"])
+                if ffpcodec and ffpcodec in codecs and codecs[ffpcodec]["encoders"]:
+                    self.log.warning("Other encoders your current FFMPEG build does support for codec %s:" % (ffpcodec))
+                    self.log.warning(codecs[ffpcodec]["encoders"])
+                self.log.warning("===========WARNING===========")
 
     # Determine if a stream has a valid language for the main option generator
     def validLanguage(self, language, whitelist, blocked=[]):
