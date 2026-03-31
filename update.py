@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+"""Updates ``autoProcess.ini`` with FFmpeg paths and media manager settings read from ``config.xml``."""
 
 import configparser
 import logging
@@ -13,6 +14,13 @@ autoProcess = None
 
 
 def main():
+    """Read ``config.xml`` and patch ``autoProcess.ini`` with derived settings.
+
+    Sets FFmpeg/FFprobe paths from ``SMA_FFMPEG_PATH``/``SMA_FFPROBE_PATH``
+    environment variables (falling back to bare ``ffmpeg``/``ffprobe``). When
+    ``SMA_RS`` names a config section and ``config.xml`` is present, also
+    writes the media manager API key, SSL flag, port, webroot, and host.
+    """
     _autoProcess = autoProcess if autoProcess is not None else os.path.join(os.environ.get("SMA_PATH", "/usr/local/sma"), "config/autoProcess.ini")
     _xml = xml
 

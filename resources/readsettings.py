@@ -1,3 +1,5 @@
+"""Configuration file parser for SMA-NG. Reads autoProcess.ini (or the file at $SMA_CONFIG) using SMAConfigParser, a thin ConfigParser subclass, and exposes all settings as attributes on the ReadSettings instance."""
+
 import logging
 import os
 import shutil
@@ -8,7 +10,20 @@ from resources.extensions import *
 
 
 class SMAConfigParser(ConfigParser, object):
+    """ConfigParser subclass with additional typed helpers for SMA-NG config values.
+
+    Extends the standard :class:`configparser.ConfigParser` with methods that
+    parse comma-separated lists, key:value dictionaries, filesystem paths and
+    directories, and file extensions directly from INI values.
+    """
+
     def getlist(self, section, option, vars=None, separator=",", default=[], lower=True, replace=[" "]):
+        """Return an INI value as a list, splitting on ``separator`` (default ``","``).
+
+        Empty values return ``default``. Items are stripped of leading/trailing
+        whitespace; pass ``lower=True`` (the default) to also lowercase them.
+        Characters in ``replace`` are removed from every item before returning.
+        """
         value = self.get(section, option, vars=vars)
 
         if not isinstance(value, str) and isinstance(value, list):
@@ -28,6 +43,12 @@ class SMAConfigParser(ConfigParser, object):
         return value
 
     def getdict(self, section, option, vars=None, listseparator=",", dictseparator=":", default={}, lower=True, replace=[" "], valueModifier=None):
+        """Return an INI value as a dict, splitting items by ``listseparator`` then each item by ``dictseparator``.
+
+        Items without the ``dictseparator`` are ignored. ``valueModifier``, when
+        provided, is called on each value; entries that raise ``ValueError`` or
+        ``TypeError`` are skipped. The ``default`` dict is used as the base.
+        """
         l = self.getlist(section, option, vars, listseparator, [], lower, replace)
         output = dict(default)
         for listitem in l:
@@ -43,12 +64,14 @@ class SMAConfigParser(ConfigParser, object):
         return output
 
     def getpath(self, section, option, vars=None):
+        """Return an INI value as a normalised filesystem path, or ``None`` if the value is empty."""
         path = self.get(section, option, vars=vars).strip()
         if path == "":
             return None
         return os.path.normpath(path)
 
     def getdirectory(self, section, option, vars=None):
+        """Return an INI value as a path, creating the directory if it does not exist. Returns ``None`` for empty values."""
         directory = self.getpath(section, option, vars)
         try:
             os.makedirs(directory)
@@ -57,6 +80,7 @@ class SMAConfigParser(ConfigParser, object):
         return directory
 
     def getdirectories(self, section, option, vars=None, separator=",", default=[]):
+        """Return a list of paths from a comma-separated INI value, creating each directory if it does not exist."""
         directories = self.getlist(section, option, vars=vars, separator=separator, default=default, lower=False)
         directories = [os.path.normpath(x) for x in directories]
         for d in directories:
@@ -68,22 +92,33 @@ class SMAConfigParser(ConfigParser, object):
         return directories
 
     def getextension(self, section, option, vars=None):
+        """Return a single normalised file extension (lowercase, no leading dot/spaces), or ``None`` for empty values."""
         extension = self.get(section, option, vars=vars).lower().replace(" ", "").replace(".", "")
         if extension == "":
             return None
         return extension
 
     def getextensions(self, section, option, separator=",", vars=None):
+        """Return a list of normalised file extensions (dots and spaces stripped) from a comma-separated INI value."""
         return self.getlist(section, option, vars, separator, replace=[" ", "."])
 
     def getint(self, section, option, vars=None, fallback=0):
+        """Return an INI value as an integer, defaulting to ``0`` instead of raising when the key is absent."""
         return super(SMAConfigParser, self).getint(section, option, vars=vars, fallback=fallback)
 
     def getboolean(self, section, option, vars=None, fallback=False):
+        """Return an INI value as a boolean, defaulting to ``False`` instead of raising when the key is absent."""
         return super(SMAConfigParser, self).getboolean(section, option, vars=vars, fallback=fallback)
 
 
 class ReadSettings:
+    """Parses ``autoProcess.ini`` and exposes all settings as typed attributes.
+
+    On construction, reads the INI file (creating it from ``DEFAULTS`` if
+    absent), validates codec and hardware-acceleration options, and populates
+    attributes such as ``Video``, ``Audio``, ``Subtitle``, ``Plex``, etc.
+    """
+
     DEFAULTS = {
         "Converter": {
             "ffmpeg": "ffmpeg" if os.name != "nt" else "ffmpeg.exe",
@@ -353,6 +388,20 @@ class ReadSettings:
         return os.path.join(self.CONFIG_DIRECTORY, self.CONFIG_DEFAULT)
 
     def __init__(self, configFile=None, logger=None):
+        """Load and parse the SMA-NG configuration file.
+
+        Resolves the config path in priority order: explicit ``configFile``
+        argument, ``$SMA_CONFIG`` environment variable, then the default
+        ``config/autoProcess.ini`` relative to the SMA root. If the file does
+        not exist it is created with all ``DEFAULTS`` values. Missing keys in
+        an existing file are backfilled and written. After parsing, binary paths
+        are validated via ``_validate_binaries()``.
+
+        Args:
+            configFile: Path to an ``autoProcess.ini`` file, or a directory
+                containing one. Defaults to the standard location.
+            logger: Optional logger instance. Defaults to the module logger.
+        """
         self.log = logger or logging.getLogger(__name__)
 
         self.log.info(sys.executable)
@@ -523,6 +572,25 @@ class ReadSettings:
                 self.hdr["codec"] = hdr_mapped
 
     def readConfig(self, config):
+        """Parse all sections of ``config`` and populate instance attributes.
+
+        Reads the ``[Video]`` ``gpu`` key first because it affects both the
+        converter (hwaccel profile) and video codec (GPU encoder mapping). Then
+        delegates to private helpers in this order:
+
+        - ``_read_converter``  — ``[Converter]`` section
+        - ``_read_permissions`` — ``[Permissions]`` section
+        - ``_read_metadata``   — ``[Metadata]`` section
+        - ``_read_video``      — ``[Video]``, ``[HDR]``, and ``[Naming]`` sections
+        - ``_read_audio``      — ``[Audio]``, ``[Audio.Sorting]``, ``[Audio.ChannelFilters]``, and ``[Universal Audio]`` sections
+        - ``_read_subtitles``  — ``[Subtitle]`` and its sub-sections
+        - ``_read_sonarr_radarr`` — all ``[Sonarr*]`` and ``[Radarr*]`` sections
+        - ``_read_downloaders`` — ``[SABNZBD]``, ``[Deluge]``, ``[qBittorrent]``, and ``[uTorrent]`` sections
+        - ``_read_plex``       — ``[Plex]`` section
+
+        Args:
+            config: A populated ``SMAConfigParser`` instance.
+        """
         # GPU is in [Video] but affects both converter (hwaccel profile) and video (codec mapping)
         self.gpu = config.get("Video", "gpu").strip().lower() if config.has_option("Video", "gpu") else ""
 
@@ -537,6 +605,7 @@ class ReadSettings:
         self._read_plex(config)
 
     def _read_converter(self, config):
+        """Parse ``[Converter]`` and set FFmpeg paths, output format, threading, and file-disposition attributes."""
         section = "Converter"
         self.ffmpeg = config.getpath(section, "ffmpeg", vars=os.environ)
         self.ffprobe = config.getpath(section, "ffprobe", vars=os.environ)
@@ -575,6 +644,7 @@ class ReadSettings:
             self.log.warning("Force-convert is true, so process-same-extensions is being overridden to true as well")
 
     def _read_permissions(self, config):
+        """Parse ``[Permissions]`` and set the ``permissions`` dict (``chmod``, ``uid``, ``gid``)."""
         section = "Permissions"
         self.permissions = {}
         self.permissions["chmod"] = config.get(section, "chmod")
@@ -587,6 +657,7 @@ class ReadSettings:
         self.permissions["gid"] = config.getint(section, "gid", vars=os.environ)
 
     def _read_metadata(self, config):
+        """Parse ``[Metadata]`` and set tagging, artwork, moov-relocation, and disposition-sanitisation attributes."""
         section = "Metadata"
         self.relocate_moov = config.getboolean(section, "relocate-moov")
         self.fullpathguess = config.getboolean(section, "full-path-guess")
@@ -611,6 +682,7 @@ class ReadSettings:
         self.keep_titles = config.getboolean(section, "keep-titles")
 
     def _read_video(self, config):
+        """Parse ``[Video]``, ``[HDR]``, and ``[Naming]`` and set video codec, bitrate, CRF, HDR, and naming attributes."""
         section = "Video"
         self.vcodec = config.getlist(section, "codec")
         self.vmaxbitrate = config.getint(section, "max-bitrate")
@@ -665,6 +737,7 @@ class ReadSettings:
             self._apply_hwaccel_codec_map(self.gpu)
 
     def _read_audio(self, config):
+        """Parse ``[Audio]``, ``[Audio.Sorting]``, ``[Audio.ChannelFilters]``, and ``[Universal Audio]`` and set audio codec, language, bitrate, and sorting attributes."""
         section = "Audio"
         self.acodec = config.getlist(section, "codec")
         self.awl = config.getlist(section, "languages")
@@ -716,6 +789,7 @@ class ReadSettings:
         self.ua_forcefilter = config.getboolean(section, "force-filter")
 
     def _read_subtitles(self, config):
+        """Parse ``[Subtitle]`` and its sub-sections and set subtitle codec, language, embed, burn, and subliminal download attributes."""
         section = "Subtitle"
         self.scodec = config.getlist(section, "codec")
         self.scodec_image = config.getlist(section, "codec-image-based")
@@ -773,6 +847,7 @@ class ReadSettings:
                         continue
 
     def _read_sonarr_radarr(self, config):
+        """Parse all ``[Sonarr*]`` and ``[Radarr*]`` sections and populate ``sonarr_instances``, ``radarr_instances``, ``Sonarr``, and ``Radarr`` attributes."""
         self.sonarr_instances = []
         self.radarr_instances = []
         for section in config.sections():
@@ -818,6 +893,7 @@ class ReadSettings:
         }
 
     def _read_downloaders(self, config):
+        """Parse ``[SABNZBD]``, ``[Deluge]``, ``[qBittorrent]``, and ``[uTorrent]`` and set the ``SAB``, ``deluge``, ``qBittorrent``, and ``uTorrent`` dicts."""
         # SAB uses "category" instead of "label"
         section = "SABNZBD"
         self.SAB = self._read_downloader_labels(config, section, label_key="category")
@@ -855,6 +931,7 @@ class ReadSettings:
         self.uTorrent["password"] = config.get(section, "password")
 
     def _read_plex(self, config):
+        """Parse ``[Plex]`` and set the ``Plex`` connection dict and ``plexmatch_enabled`` flag."""
         section = "Plex"
         self.Plex = {}
         self.Plex["username"] = config.get(section, "username")

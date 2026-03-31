@@ -1,4 +1,12 @@
 #!/opt/sma/venv/bin/python3
+"""Command-line tool for manually converting and tagging media files with SMA-NG.
+
+Wraps ``MediaProcessor`` and ``Metadata`` to provide an interactive or fully
+automated (``-a``) workflow for single files and directories. Metadata can be
+supplied via TMDB/TVDB/IMDB IDs, inferred from filenames with guessit, or
+entered interactively at the prompt. Run ``python manual.py --help`` for the
+full list of options.
+"""
 
 import argparse
 import enum
@@ -33,6 +41,8 @@ log.info("Manual processor started.")
 
 
 class MediaTypes(enum.Enum):
+    """Interactive media-type selection options presented to the user at the CLI prompt."""
+
     @classmethod
     def descriptors(cls):
         return {
@@ -58,6 +68,11 @@ class MediaTypes(enum.Enum):
 
 
 def mediatype():
+    """Interactively prompt the user to select a media type from ``MediaTypes``.
+
+    Returns:
+        The selected ``MediaTypes`` enum value.
+    """
     try:
         print("Select media type:")
         for mt in MediaTypes:
@@ -76,6 +91,15 @@ def mediatype():
 
 
 def getValue(prompt, num=False):
+    """Prompt the user for a string (or numeric) value at the CLI.
+
+    Args:
+        prompt: Text to display before the input field.
+        num: If ``True``, only accept strings that are all digits.
+
+    Returns:
+        The entered string value (stripped of surrounding quotes/spaces).
+    """
     try:
         print(prompt + ":")
         value = input("#: ").strip(' "')
@@ -93,6 +117,11 @@ def getValue(prompt, num=False):
 
 
 def getYesNo():
+    """Interactively prompt the user for a yes/no answer.
+
+    Returns:
+        ``True`` for yes, ``False`` for no.
+    """
     yes = ["y", "yes", "true", "1"]
     no = ["n", "no", "false", "0"]
     try:
@@ -110,10 +139,37 @@ def getYesNo():
 
 
 class SkipFileException(Exception):
-    pass
+    """Raised when the user interactively selects "Skip file" for a given input."""
 
 
 def getInfo(fileName, settings, silent=False, tag=True, tvdbid=None, tmdbid=None, imdbid=None, season=None, episode=None, language=None, original=None, type_hint=None):
+    """Collect or guess TMDB metadata for an input file.
+
+    In silent mode, attempts to guess metadata from the filename and returns
+    it without prompting. In interactive mode, shows the guess (if any) and
+    lets the user confirm, override, or enter IDs manually.
+
+    Args:
+        fileName: Path to the input media file used for guessit inference.
+        settings: Parsed ``ReadSettings`` instance.
+        silent: If ``True``, skip all interactive prompts.
+        tag: If ``False``, skip metadata lookup and return ``None``.
+        tvdbid: Optional TVDB ID hint.
+        tmdbid: Optional TMDB ID hint.
+        imdbid: Optional IMDB ID hint.
+        season: Optional season number hint.
+        episode: Optional episode number hint.
+        language: Optional ISO 639 language code for tagging.
+        original: Optional original release filename used for guessing.
+        type_hint: ``"tv"`` or ``"movie"`` to bias guessit.
+
+    Returns:
+        A :class:`~resources.metadata.Metadata` instance, or ``None`` if
+        tagging is disabled or the user chose to convert without tagging.
+
+    Raises:
+        SkipFileException: If the user interactively selects "Skip file".
+    """
     if not tag:
         return None
 
@@ -163,6 +219,23 @@ def getInfo(fileName, settings, silent=False, tag=True, tvdbid=None, tmdbid=None
 
 
 def guessInfo(fileName, settings, tmdbid=None, tvdbid=None, imdbid=None, season=None, episode=None, language=None, original=None, type_hint=None):
+    """Use guessit to infer metadata from a filename and look it up on TMDB.
+
+    Args:
+        fileName: Path (or basename) to guess from.
+        settings: Parsed ``ReadSettings`` instance (controls ``fullpathguess``).
+        tmdbid: Optional TMDB ID override.
+        tvdbid: Optional TVDB ID override.
+        imdbid: Optional IMDB ID override.
+        season: Optional season number override.
+        episode: Optional episode number override.
+        language: Optional ISO 639 language code.
+        original: Optional original release filename preferred over ``fileName``.
+        type_hint: ``"tv"`` or ``"movie"`` to bias guessit.
+
+    Returns:
+        A :class:`~resources.metadata.Metadata` instance, or ``None`` on failure.
+    """
     if not settings.fullpathguess:
         fileName = os.path.basename(fileName)
     guessit_opts = {}
@@ -186,6 +259,20 @@ def guessInfo(fileName, settings, tmdbid=None, tvdbid=None, imdbid=None, season=
 
 
 def movieInfo(guessData, tmdbid=None, imdbid=None, language=None, original=None):
+    """Look up a movie on TMDB from guessit data or a known identifier.
+
+    Args:
+        guessData: dict returned by ``guessit.guessit()`` with at least ``title``
+            and optionally ``year``.
+        tmdbid: Optional TMDB movie ID (skips search when provided).
+        imdbid: Optional IMDB movie ID (skips search when provided).
+        language: Optional ISO 639 language code.
+        original: Optional original release filename for the ``Metadata`` object.
+
+    Returns:
+        A :class:`~resources.metadata.Metadata` instance, or ``None`` if no
+        match was found on TMDB.
+    """
     if not tmdbid and not imdbid:
         tmdb.API_KEY = tmdb_api_key
         search = tmdb.Search()
@@ -209,6 +296,23 @@ def movieInfo(guessData, tmdbid=None, imdbid=None, language=None, original=None)
 
 
 def tvInfo(guessData, tmdbid=None, tvdbid=None, imdbid=None, season=None, episode=None, language=None, original=None):
+    """Look up a TV episode on TMDB from guessit data or known identifiers.
+
+    Args:
+        guessData: dict returned by ``guessit.guessit()`` with at least ``title``
+            and optionally ``year``, ``season``, and ``episode``.
+        tmdbid: Optional TMDB series ID (skips search when provided).
+        tvdbid: Optional TVDB series ID.
+        imdbid: Optional IMDB series ID.
+        season: Season number override (falls back to guessData).
+        episode: Episode number override (falls back to guessData).
+        language: Optional ISO 639 language code.
+        original: Optional original release filename for the ``Metadata`` object.
+
+    Returns:
+        A :class:`~resources.metadata.Metadata` instance, or ``None`` if no
+        match was found on TMDB.
+    """
     season = season or guessData.get("season", 0)
     episode = episode or guessData.get("episode", 0)
 
@@ -286,6 +390,16 @@ def _triggerManagerRescan(instance, dirpath, manager_type, requests):
 
 
 def checkAlreadyProcessed(inputfile, processedList):
+    """Check whether a file has already been recorded in the processed archive.
+
+    Args:
+        inputfile: Absolute path to the input file.
+        processedList: List of previously processed paths, or ``None`` to skip
+            the check.
+
+    Returns:
+        ``True`` if the file is in the list, ``False`` otherwise.
+    """
     if processedList is None:
         return False
 
@@ -293,6 +407,14 @@ def checkAlreadyProcessed(inputfile, processedList):
 
 
 def addtoProcessedArchive(files, processedList, processedArchive):
+    """Append processed file paths to the in-memory list and persist to the JSON archive.
+
+    Args:
+        files: List of output file paths to record.
+        processedList: In-memory list of previously processed paths. Modified
+            in place.
+        processedArchive: Path to the JSON archive file. No-op when ``None``.
+    """
     if processedList is None or processedArchive is None:
         return
 
@@ -321,6 +443,36 @@ def processFile(
     processedArchive=None,
     type_hint=None,
 ):
+    """Process a single media file: convert, tag, copy/move, and post-process.
+
+    Skips files already in ``processedList``. When ``tagOnly`` is ``True``,
+    only rewrites tags on the existing file. When ``optionsOnly`` is ``True``,
+    prints the FFmpeg option preview without converting.
+
+    Args:
+        inputfile: Absolute path to the source media file.
+        mp: Initialised :class:`~resources.mediaprocessor.MediaProcessor`.
+        info: Pre-fetched FFprobe info; probed if not provided.
+        relativePath: Relative directory path used with copy-to/move-to to
+            preserve directory structure.
+        silent: Skip all interactive prompts; use guessit only.
+        tag: Fetch and embed TMDB metadata when ``True``.
+        tagOnly: Re-tag existing file without conversion.
+        optionsOnly: Display FFmpeg options without converting.
+        tmdbid: Optional TMDB ID hint.
+        tvdbid: Optional TVDB ID hint.
+        imdbid: Optional IMDB ID hint.
+        season: Season number (TV).
+        episode: Episode number (TV).
+        original: Original release filename for guessit/metadata.
+        processedList: In-memory list of already-processed paths.
+        processedArchive: Path to the JSON processed-archive file.
+        type_hint: ``"tv"`` or ``"movie"`` to bias guessit.
+
+    Returns:
+        ``True`` on success, ``False`` on conversion error, or ``None`` if the
+        file was skipped (already processed or invalid source).
+    """
     if checkAlreadyProcessed(inputfile, processedList):
         log.debug("%s is already processed and will be skipped based on archive %s." % (inputfile, processedArchive))
         return
@@ -456,6 +608,26 @@ def processFile(
 def walkDir(
     dir, settings, silent=False, preserveRelative=False, tmdbid=None, imdbid=None, tvdbid=None, tag=True, tagOnly=False, optionsOnly=False, processedList=None, processedArchive=None, type_hint=None
 ):
+    """Recursively walk a directory and process every valid media file found.
+
+    Args:
+        dir: Root directory path to walk.
+        settings: Parsed ``ReadSettings`` instance.
+        silent: Skip interactive prompts; use guessit only.
+        preserveRelative: Preserve subdirectory structure when copying/moving.
+        tmdbid: Optional TMDB ID hint applied to all files.
+        imdbid: Optional IMDB ID hint applied to all files.
+        tvdbid: Optional TVDB ID hint applied to all files.
+        tag: Fetch and embed TMDB metadata.
+        tagOnly: Re-tag existing files without conversion.
+        optionsOnly: Display FFmpeg options without converting.
+        processedList: In-memory list of already-processed paths.
+        processedArchive: Path to the JSON processed-archive file.
+        type_hint: ``"tv"`` or ``"movie"`` to bias guessit.
+
+    Returns:
+        ``True`` if all files processed successfully, ``False`` if any failed.
+    """
     files = []
     error = []
     failed = False
@@ -506,11 +678,19 @@ def walkDir(
 
 
 def displayOptions(path, settings, tagdata=None):
+    """Log the generated FFmpeg conversion options for a file without converting it.
+
+    Args:
+        path: Path to the input media file.
+        settings: Parsed ``ReadSettings`` instance.
+        tagdata: Optional pre-fetched ``Metadata`` instance.
+    """
     mp = MediaProcessor(settings)
     log.info(mp.jsonDump(path, tagdata=tagdata))
 
 
 def showCodecs():
+    """Print a formatted list of all supported SMA-NG codecs with their FFmpeg encoder names."""
     data = {"video": video_codec_list, "audio": audio_codec_list, "subtitle": subtitle_codec_list, "attachment": attachment_codec_list}
     print("List of supported codecs within SMA-NG")
     print("Format:")
@@ -524,6 +704,12 @@ def showCodecs():
 
 
 def main():
+    """Parse CLI arguments and drive the manual conversion/tagging workflow.
+
+    Handles single files and directories. Applies any settings overrides from
+    CLI flags before delegating to :func:`processFile` or :func:`walkDir`.
+    Exits with code 1 if processing fails.
+    """
     parser = argparse.ArgumentParser(description="SMA-NG manual conversion and tagging script")
     parser.add_argument("-i", "--input", help="The source that will be converted. May be a file or a directory")
     parser.add_argument("-c", "--config", help="Specify an alternate configuration file location")
