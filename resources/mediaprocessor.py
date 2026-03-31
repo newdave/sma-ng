@@ -1847,7 +1847,11 @@ class MediaProcessor:
         """
         if len(subtitle_settings) > 0 and self.settings.sdl:
             if len([x for x in subtitle_settings if "+default" in (x.get("disposition") or "")]) < 1 and self.settings.sforcedefault:
-                default_stream = [x for x in subtitle_settings if x.get("language") == self.settings.sdl][0]
+                matches = [x for x in subtitle_settings if x.get("language") == self.settings.sdl]
+                if not matches:
+                    self.log.debug("No subtitle stream found in default language %s, will not set a default subtitle stream.", self.settings.sdl)
+                    return
+                default_stream = matches[0]
 
                 if default_stream.get("disposition"):
                     default_stream["disposition"] = default_stream.get("disposition").replace("-default", "+default")
