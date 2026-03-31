@@ -139,7 +139,7 @@ curl -X POST http://localhost:8585/webhook \
   -d "/path/to/movie.mkv"
 ```
 
-Public endpoints (no auth required): `/`, `/health`, `/status`
+Public endpoints (no auth required): `/`, `/dashboard`, `/health`, `/status`, `/docs`
 
 ### Path-Based Configuration
 
@@ -269,8 +269,8 @@ The `/health` endpoint includes cluster-wide status when using PostgreSQL, showi
 ### Entry Points
 - `manual.py` - CLI tool for manual conversion/tagging
 - `daemon.py` - HTTP webhook server for triggering conversions via API
-- `postSonarr.py` / `postRadarr.py` - Post-processing scripts triggered by media managers
-- `*PostProcess.py` - Scripts for various downloaders (NZBGet, SAB, Deluge, qBittorrent, uTorrent)
+- `triggers/media_managers/sonarr.sh` / `radarr.sh` - Bash scripts triggered by Sonarr/Radarr
+- `triggers/usenet/` / `triggers/torrents/` - Bash scripts for download client integrations
 
 ### Core Modules
 
@@ -344,5 +344,5 @@ When adding new settings, modify:
 - `setup/autoProcess.ini.sample` - Add default value
 
 When adding new downloader/manager integration:
-- Create new `*PostProcess.py` entry point
-- Add settings section in `readsettings.py`
+- Create new bash script in `triggers/` (usenet/, torrents/, or media_managers/)
+- Add settings section in `readsettings.py` if config support is needed
