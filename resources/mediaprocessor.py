@@ -805,6 +805,7 @@ class MediaProcessor:
                         vcrf = profile["crf"]
                         vmaxrate = profile["maxrate"]
                         vbufsize = profile["bufsize"]
+                        vbitrate = None
                         self.log.info("Acceptable profile match found for VBR %s using CRF %d, maxrate %s, bufsize %s." % (vbitrate_estimate, vcrf, vmaxrate, vbufsize))
                         if vcodec == "copy":
                             self.log.debug("CRF profile match requires transcoding, overriding copy [video-crf-profiles].")
