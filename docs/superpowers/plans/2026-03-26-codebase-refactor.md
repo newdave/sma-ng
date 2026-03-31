@@ -1,6 +1,6 @@
 # SMA-NG Codebase Refactor Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Remove dead code, eliminate duplication across post-processing scripts / GPU codecs / downloader scripts, add missing test coverage, and decompose the oversized mediaprocessor.py.
 
@@ -57,23 +57,23 @@
 
 These modules define `processEpisode()` and `processMovie()` but are never imported anywhere. The project uses the webhook-based `postSonarr.py`/`postRadarr.py` flow instead.
 
-- [ ] **Step 1: Verify modules are truly unused**
+- [x] **Step 1: Verify modules are truly unused**
 
 Run: `grep -r 'autoprocess.sonarr\|autoprocess.radarr\|from autoprocess import sonarr\|from autoprocess import radarr' --include='*.py' .`
 Expected: No output (zero matches)
 
-- [ ] **Step 2: Delete the files**
+- [x] **Step 2: Delete the files**
 
 ```bash
 rm autoprocess/sonarr.py autoprocess/radarr.py
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run: `python -m pytest tests/ -v`
 Expected: All 278 tests pass
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
@@ -97,7 +97,7 @@ git commit -m "Remove unused autoprocess/sonarr.py and autoprocess/radarr.py"
 - Modify: `manual.py:88-91` (remove decode workaround)
 - Modify: `converter/ffmpeg.py:842` (remove unused decode statement)
 
-- [ ] **Step 1: Clean up resources/readsettings.py imports and Py2 checks**
+- [x] **Step 1: Clean up resources/readsettings.py imports and Py2 checks**
 
 Replace the try/except ConfigParser import (lines 6-9) with:
 ```python
@@ -123,14 +123,14 @@ if sys.version_info.major == 2:
 
 Remove the entire Python 2 encoding setup block (lines 411-432, the `if sys.version[0] == '2':` block with locale/setdefaultencoding).
 
-- [ ] **Step 2: Clean up resources/log.py**
+- [x] **Step 2: Clean up resources/log.py**
 
 Replace the try/except ConfigParser import (lines 7-10) with:
 ```python
 from configparser import RawConfigParser
 ```
 
-- [ ] **Step 3: Clean up resources/mediaprocessor.py**
+- [x] **Step 3: Clean up resources/mediaprocessor.py**
 
 Remove line 1: `from __future__ import unicode_literals`
 
@@ -142,7 +142,7 @@ Around line 2460 — simplify to: `outputfile = inputfile + TEMP_EXT`
 Around line 2506 — simplify to: `shutil.copy(inputfile, d)` (keep KeyboardInterrupt raise)
 Around line 2534 — remove `.decode(sys.getfilesystemencoding())` from the `shutil.move` call
 
-- [ ] **Step 4: Clean up manual.py**
+- [x] **Step 4: Clean up manual.py**
 
 Remove lines 22-23 (the `if sys.version[0] == "3": raw_input = input` block).
 
@@ -153,16 +153,16 @@ Replace all `raw_input(` calls with `input(`:
 
 Remove lines 88-91 (the `try: value = value.decode(...)` block).
 
-- [ ] **Step 5: Clean up converter/ffmpeg.py**
+- [x] **Step 5: Clean up converter/ffmpeg.py**
 
 Remove the unused standalone `stderr_data.decode(console_encoding)` line (~line 842) that doesn't assign its result.
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run: `python -m pytest tests/ -v`
 Expected: All tests pass
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -181,18 +181,18 @@ git commit -m "Remove Python 2 compatibility code (project requires 3.12+)"
 
 Keep `converter/__init__.py` (it exports the Converter class) and `tests/__init__.py`.
 
-- [ ] **Step 1: Delete empty init files**
+- [x] **Step 1: Delete empty init files**
 
 ```bash
 rm __init__.py resources/__init__.py autoprocess/__init__.py config/__init__.py
 ```
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 Run: `python -m pytest tests/ -v`
 Expected: All tests pass. If any import fails, the __init__.py was needed — restore it.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -A
@@ -209,7 +209,7 @@ git commit -m "Remove empty __init__.py files that serve no purpose"
 - Modify: `postRadarr.py`
 - Modify: `tests/test_integration_scripts.py`
 
-- [ ] **Step 1: Create resources/mediamanager.py with shared API helpers**
+- [x] **Step 1: Create resources/mediamanager.py with shared API helpers**
 
 ```python
 """Shared API helpers for Sonarr/Radarr post-processing scripts."""
@@ -270,7 +270,7 @@ def api_put(base_url, headers, endpoint, data, log):
     return r.json()
 ```
 
-- [ ] **Step 2: Rewrite postSonarr.py using shared helpers**
+- [x] **Step 2: Rewrite postSonarr.py using shared helpers**
 
 Replace the 7 inline API functions (rescanRequest, waitForCommand, renameRequest, getEpisode, updateEpisode, getEpisodeFile, updateEpisodeFile) with calls to the shared module. The main script logic stays but uses `mediamanager.api_command()`, `mediamanager.wait_for_command()`, `mediamanager.api_get()`, `mediamanager.api_put()`.
 
@@ -282,23 +282,23 @@ Key mappings:
 - `getEpisodeFile(...)` → `api_get(base_url, headers, 'episodefile/' + str(id), log)`
 - `updateEpisodeFile(...)` → `api_put(base_url, headers, 'episodefile/' + str(id), data, log)`
 
-- [ ] **Step 3: Rewrite postRadarr.py using shared helpers**
+- [x] **Step 3: Rewrite postRadarr.py using shared helpers**
 
 Same approach — replace inline functions with shared helper calls:
 - `rescanRequest` → `api_command(base_url, headers, {'name': 'RescanMovie', 'movieId': movieid}, log)`
 - `getMovie` → `api_get(base_url, headers, 'movie/' + str(movieid), log)`
 - etc.
 
-- [ ] **Step 4: Update test patches in test_integration_scripts.py**
+- [x] **Step 4: Update test patches in test_integration_scripts.py**
 
 The `@patch` decorators reference `resources.readsettings.ReadSettings._validate_binaries` and `resources.webhook_client.submit_and_wait`. These should still work since postSonarr/postRadarr still import from those modules. Verify patch targets still match.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `python -m pytest tests/test_integration_scripts.py -v`
 Expected: All integration tests pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
@@ -317,7 +317,7 @@ This is the highest-complexity refactor. The GPU codec classes (NVEnc, VAAPI, QS
 2. **Width/height→scale variable** conversion
 3. **Scale filter construction** with device initialization
 
-- [ ] **Step 1: Add HWAccelVideoCodec mixin before the first GPU codec class**
+- [x] **Step 1: Add HWAccelVideoCodec mixin before the first GPU codec class**
 
 Insert after the base H264Codec class (around line 1110). The mixin provides shared methods that GPU codec subclasses call:
 
@@ -401,7 +401,7 @@ class HWAccelVideoCodec:
         return []
 ```
 
-- [ ] **Step 2: Refactor NVEnc H264/H265 codecs to use the mixin**
+- [x] **Step 2: Refactor NVEnc H264/H265 codecs to use the mixin**
 
 Update `NVEncH264Codec` to inherit from both `H264Codec` and `HWAccelVideoCodec`:
 
@@ -440,12 +440,12 @@ Apply the same pattern to NVEncH265Codec, then verify H264VAAPICodec, H265VAAPIC
 
 Focus on extracting the common parts (parse_scale, parse_quality, device_opts) and let unique filter chains remain overridden.
 
-- [ ] **Step 3: Run codec tests**
+- [x] **Step 3: Run codec tests**
 
 Run: `python -m pytest tests/test_avcodecs.py -v`
 Expected: All codec tests pass. This is the critical gate — if any codec test breaks, the mixin logic diverges from the original behavior.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add converter/avcodecs.py
@@ -465,7 +465,7 @@ git commit -m "Extract HWAccelVideoCodec mixin, reduce GPU codec duplication"
 - Modify: `tests/test_webhook_client.py`
 - Modify: `tests/test_integration_scripts.py`
 
-- [ ] **Step 1: Write tests for new helpers in test_webhook_client.py**
+- [x] **Step 1: Write tests for new helpers in test_webhook_client.py**
 
 Add to the end of `tests/test_webhook_client.py`:
 
@@ -518,12 +518,12 @@ class TestSubmitPath:
         mock_submit.assert_not_called()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/test_webhook_client.py::TestCheckBypass -v`
 Expected: ImportError — function doesn't exist yet
 
-- [ ] **Step 3: Implement helpers in resources/webhook_client.py**
+- [x] **Step 3: Implement helpers in resources/webhook_client.py**
 
 Add to the end of `resources/webhook_client.py`:
 
@@ -553,12 +553,12 @@ def submit_path(path, logger=None):
     return count
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_webhook_client.py -v`
 Expected: All pass including new TestCheckBypass and TestSubmitPath
 
-- [ ] **Step 5: Refactor downloader scripts to use helpers**
+- [x] **Step 5: Refactor downloader scripts to use helpers**
 
 In each of SABPostProcess.py, delugePostProcess.py, qBittorrentPostProcess.py, uTorrentPostProcess.py:
 
@@ -576,12 +576,12 @@ count = webhook.submit_path(path, logger=log)
 
 Keep all pre/post action code (qBittorrent pause/resume, Deluge remove, uTorrent WebUI actions) — these are unique to each script.
 
-- [ ] **Step 6: Run integration tests**
+- [x] **Step 6: Run integration tests**
 
 Run: `python -m pytest tests/test_integration_scripts.py -v`
 Expected: All pass
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -597,7 +597,7 @@ git commit -m "Extract check_bypass() and submit_path() helpers, deduplicate dow
 
 Focus on testable logic that doesn't require real TMDB API calls.
 
-- [ ] **Step 1: Write tests for Metadata construction and MediaType enum**
+- [x] **Step 1: Write tests for Metadata construction and MediaType enum**
 
 ```python
 """Tests for resources/metadata.py."""
@@ -648,16 +648,16 @@ class TestMetadataConstruction:
         assert m.mediatype == MediaType.TV
 ```
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 Run: `python -m pytest tests/test_metadata.py -v`
 Expected: Tests pass (adjust mocks as needed based on actual Metadata.__init__ behavior)
 
-- [ ] **Step 3: Add tests for update_plexmatch**
+- [x] **Step 3: Add tests for update_plexmatch**
 
 These can reuse patterns from `tests/test_naming.py::TestPlexmatch` which already tests `update_plexmatch`. Verify that test file already covers the main paths — if so, skip adding duplicates.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/test_metadata.py
@@ -671,7 +671,7 @@ git commit -m "Add tests for Metadata construction and MediaType"
 **Files:**
 - Create: `tests/test_converter.py`
 
-- [ ] **Step 1: Write tests for Converter initialization and codec lookups**
+- [x] **Step 1: Write tests for Converter initialization and codec lookups**
 
 ```python
 """Tests for converter/__init__.py Converter class."""
@@ -727,12 +727,12 @@ class TestParseOptions:
             c.parse_options({'format': 'mp4', 'source': ['/dev/null']})
 ```
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 Run: `python -m pytest tests/test_converter.py -v`
 Expected: All pass
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/test_converter.py
@@ -746,7 +746,7 @@ git commit -m "Add tests for Converter class initialization and codec lookups"
 **Files:**
 - Create: `tests/test_postprocess.py`
 
-- [ ] **Step 1: Write tests for PostProcessor**
+- [x] **Step 1: Write tests for PostProcessor**
 
 ```python
 """Tests for resources/postprocess.py."""
@@ -777,12 +777,12 @@ class TestPostProcessor:
         assert "__init__.py" not in script_names
 ```
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 Run: `python -m pytest tests/test_postprocess.py -v`
 Expected: Pass (adjust based on actual PostProcessor.__init__ signature)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/test_postprocess.py
@@ -796,7 +796,7 @@ git commit -m "Add tests for PostProcessor script discovery"
 **Files:**
 - Modify: `tests/test_mediaprocessor.py`
 
-- [ ] **Step 1: Add tests for isValidSource behavior**
+- [x] **Step 1: Add tests for isValidSource behavior**
 
 ```python
 class TestIsValidSource:
@@ -828,12 +828,12 @@ class TestIsValidSource:
         assert result is None
 ```
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 Run: `python -m pytest tests/test_mediaprocessor.py -v`
 Expected: All pass
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/test_mediaprocessor.py
