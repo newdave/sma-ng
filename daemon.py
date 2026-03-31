@@ -30,6 +30,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -1050,6 +1051,7 @@ class PathConfigManager:
         self.db_url = None  # Can be set from daemon.json
         self.ffmpeg_dir = None  # Can be set from daemon.json
         self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
+        self.scan_paths = []  # Can be set from daemon.json
 
         if config_file and os.path.exists(config_file):
             self.load_config(config_file)
@@ -1081,6 +1083,9 @@ class PathConfigManager:
             raw_exts = config.get("media_extensions")
             if raw_exts is not None:
                 self.media_extensions = frozenset(("." + e.lower().lstrip(".")) for e in raw_exts if e)
+
+            # Load scheduled scan paths
+            self.scan_paths = config.get("scan_paths", [])
 
             raw_configs = config.get("path_configs", [])
 
@@ -2275,6 +2280,108 @@ class HeartbeatThread(threading.Thread):
             self._stop_event.wait(timeout=self.interval)
 
 
+class ScannerThread(threading.Thread):
+    """Periodically scans configured directories for new media files and queues them.
+
+    Each entry in scan_paths may specify:
+      - path       (required) directory to scan
+      - interval   seconds between scans (default: 3600)
+      - rewrite_from / rewrite_to   path prefix substitution applied before
+                   submitting jobs, e.g. scan /mnt/local/Media but submit
+                   paths as /mnt/unionfs/Media so config matching works.
+    """
+
+    def __init__(self, scan_paths, job_db, job_event, path_config_manager, logger):
+        super().__init__(daemon=True)
+        self.scan_paths = scan_paths  # list of dicts from daemon.json
+        self.job_db = job_db
+        self.job_event = job_event
+        self.path_config_manager = path_config_manager
+        self.log = logger
+        self.running = True
+        self._stop_event = threading.Event()
+        # Per-entry next-run timestamps so each path has its own schedule.
+        self._next_run = {}
+
+    def stop(self):
+        self.running = False
+        self._stop_event.set()
+
+    def run(self):
+        if not self.scan_paths:
+            return
+        self.log.info("Scanner started — %d path(s) configured" % len(self.scan_paths))
+        while self.running:
+            now = time.monotonic()
+            next_wake = now + 60  # re-evaluate at least every minute
+            for entry in self.scan_paths:
+                path = entry.get("path", "")
+                interval = int(entry.get("interval", 3600))
+                due = self._next_run.get(path, 0)
+                if now >= due:
+                    try:
+                        queued = self._scan(entry)
+                        if queued:
+                            self.job_event.set()
+                    except Exception:
+                        self.log.exception("Scanner error for path: %s" % path)
+                    self._next_run[path] = time.monotonic() + interval
+                next_wake = min(next_wake, self._next_run[path])
+            sleep_for = max(0, next_wake - time.monotonic())
+            self._stop_event.wait(timeout=sleep_for)
+
+    def _scan(self, entry):
+        scan_dir = entry.get("path", "")
+        rewrite_from = entry.get("rewrite_from", "")
+        rewrite_to = entry.get("rewrite_to", "")
+
+        if not scan_dir or not os.path.isdir(scan_dir):
+            self.log.warning("Scanner: path does not exist or is not a directory: %s" % scan_dir)
+            return 0
+
+        allowed = self.path_config_manager.media_extensions
+        candidates = []
+        for root, dirs, files in os.walk(scan_dir):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for fname in files:
+                if fname.startswith("."):
+                    continue
+                if os.path.splitext(fname)[1].lower() in allowed:
+                    candidates.append(os.path.join(root, fname))
+
+        if not candidates:
+            self.log.debug("Scanner: no media files found in %s" % scan_dir)
+            return 0
+
+        # Filter to only files not yet recorded as scanned
+        unscanned = self.job_db.filter_unscanned(candidates)
+        if not unscanned:
+            self.log.debug("Scanner: all %d file(s) in %s already scanned" % (len(candidates), scan_dir))
+            return 0
+
+        self.log.info("Scanner: found %d new file(s) in %s" % (len(unscanned), scan_dir))
+        queued = 0
+        for filepath in unscanned:
+            # Apply path rewrite before config resolution and job submission
+            submit_path = filepath
+            if rewrite_from and rewrite_to and filepath.startswith(rewrite_from):
+                submit_path = rewrite_to + filepath[len(rewrite_from) :]
+
+            resolved_config = self.path_config_manager.get_config_for_path(submit_path)
+            job_id = self.job_db.add_job(submit_path, resolved_config, [])
+            if job_id is not None:
+                self.log.info("Scanner queued job %d: %s" % (job_id, submit_path))
+                queued += 1
+
+        # Record all candidates (including already-queued ones) as scanned so
+        # we don't re-evaluate them on the next pass.
+        self.job_db.record_scanned(unscanned)
+
+        if queued:
+            self.log.info("Scanner: queued %d new job(s) from %s" % (queued, scan_dir))
+        return queued
+
+
 class DaemonServer(HTTPServer):
     """HTTP server with job queue and worker threads."""
 
@@ -2344,6 +2451,16 @@ class DaemonServer(HTTPServer):
         self.heartbeat_thread.start()
         logger.debug("Started heartbeat thread (interval: %ds, stale after: %ds)" % (heartbeat_interval, stale_seconds))
 
+        # Start scanner thread if scan_paths are configured
+        self.scanner_thread = ScannerThread(
+            scan_paths=path_config_manager.scan_paths,
+            job_db=job_db,
+            job_event=self.job_event,
+            path_config_manager=path_config_manager,
+            logger=logger,
+        )
+        self.scanner_thread.start()
+
     def shutdown(self):
         self.logger.info("Shutting down...")
 
@@ -2351,6 +2468,7 @@ class DaemonServer(HTTPServer):
         for worker in self.workers:
             worker.stop()
         self.heartbeat_thread.stop()
+        self.scanner_thread.stop()
 
         # Mark this node offline in the cluster table on clean shutdown
         if isinstance(self.job_db, PostgreSQLJobDatabase):
@@ -2363,6 +2481,7 @@ class DaemonServer(HTTPServer):
         for worker in self.workers:
             worker.join(timeout=5)
         self.heartbeat_thread.join(timeout=5)
+        self.scanner_thread.join(timeout=5)
 
         super().shutdown()
 
@@ -2452,6 +2571,13 @@ def main():
 
         log.info("Listening on http://%s:%d" % (args.host, args.port))
         log.info("Worker threads: %d" % args.workers)
+        if path_config_manager.scan_paths:
+            log.info("Scheduled scans: %d path(s)" % len(path_config_manager.scan_paths))
+            for sp in path_config_manager.scan_paths:
+                rw = (" -> " + sp["rewrite_to"]) if sp.get("rewrite_to") else ""
+                log.info("  %s (every %ds)%s" % (sp["path"], sp.get("interval", 3600), rw))
+        else:
+            log.info("Scheduled scans: none configured")
         log.info("Endpoints:")
         log.info("  POST /webhook      - Submit conversion job")
         log.info("  GET  /health       - Health check with job stats")

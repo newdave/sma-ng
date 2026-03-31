@@ -4,6 +4,14 @@
   "db_url": null,
   "ffmpeg_dir": null,
   "media_extensions": [".mp4", ".mkv", ".avi", ".mov", ".ts"],
+  "scan_paths": [
+    {
+      "path": "/mnt/local/Media",
+      "interval": 3600,
+      "rewrite_from": "/mnt/local/Media",
+      "rewrite_to": "/mnt/unionfs/Media"
+    }
+  ],
   "path_configs": [
     {
       "path": "/mnt/unionfs/Media/TV",
