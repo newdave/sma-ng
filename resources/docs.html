@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SMA-NG Documentation</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .copy-btn { position:absolute; top:0.5rem; right:0.5rem; opacity:0; transition:opacity 0.15s; }
+  pre:hover .copy-btn { opacity:1; }
+  pre { position:relative; }
+</style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+<div class="max-w-4xl mx-auto px-6 py-10">
+  <div class="mb-6">
+    <a href="/" class="text-blue-400 hover:underline text-sm">&larr; Back to Dashboard</a>
+  </div>
+  <article class="prose-invert">
+    %s
+  </article>
+  <div class="mt-16 mb-8 pt-8 border-t border-gray-700 text-center text-gray-500 text-xs">
+    SMA-NG Documentation &mdash; Generated from docs/README.md
+  </div>
+</div>
+<script>
+document.querySelectorAll('pre').forEach(pre => {
+  const btn = document.createElement('button');
+  btn.className = 'copy-btn bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white text-xs px-2 py-1 rounded';
+  btn.textContent = 'Copy';
+  btn.addEventListener('click', () => {
+    const code = pre.querySelector('code');
+    navigator.clipboard.writeText(code ? code.textContent : pre.textContent).then(() => {
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+    });
+  });
+  pre.appendChild(btn);
+});
+</script>
+</body>
+</html>

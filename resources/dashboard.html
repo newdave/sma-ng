@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SMA-NG Daemon</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+[x-cloak]{display:none!important}
+/* Tooltip */
+.tooltip { position:relative; display:inline-block; }
+.tooltip .tip {
+  visibility:hidden; opacity:0; transition:opacity 0.15s;
+  position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
+  background:#1f2937; border:1px solid #374151; color:#d1d5db;
+  font-size:0.7rem; line-height:1.4; white-space:nowrap; max-width:280px;
+  white-space:normal; text-align:center;
+  padding:0.35rem 0.6rem; border-radius:0.375rem; z-index:50; pointer-events:none;
+}
+.tooltip:hover .tip { visibility:visible; opacity:1; }
+</style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+<div x-data="dashboard()" x-init="init()" x-cloak class="max-w-7xl mx-auto px-4 py-6">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-2xl font-bold text-white">SMA-NG</h1>
+      <p class="text-gray-400 text-sm">Media Conversion Daemon</p>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href="/docs" class="text-xs text-blue-400 hover:underline">Docs</a>
+      <span class="tooltip text-xs text-gray-500" x-show="health.node" x-text="health.node">
+        <span class="tip">Hostname of this daemon node</span>
+      </span>
+      <span class="tooltip text-xs text-gray-500" x-show="health.uptime_seconds != null" x-text="'Up ' + fmtUptime(health.uptime_seconds)">
+        <span class="tip">Time since daemon started</span>
+      </span>
+      <span class="text-xs text-gray-500" x-text="'Updated ' + lastUpdate"></span>
+      <span class="tooltip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+            :class="health.status === 'ok' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'">
+        <span class="w-1.5 h-1.5 rounded-full" :class="health.status === 'ok' ? 'bg-green-400' : 'bg-red-400'"></span>
+        <span x-text="health.status === 'ok' ? 'Healthy' : 'Offline'"></span>
+        <span class="tip">Daemon health status — refreshes every 5 seconds</span>
+      </span>
+    </div>
+  </div>
+
+  <!-- Submit Job Form -->
+  <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
+    <h2 class="text-sm font-semibold text-green-400 uppercase tracking-wider mb-3">Submit Job</h2>
+    <form @submit.prevent="submitJob()" class="flex gap-3">
+      <input type="text" x-model="submitPath" placeholder="/path/to/file/or/directory"
+             title="Absolute path to the media file or directory to convert"
+             class="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono">
+      <input type="text" x-model="submitArgs" placeholder="extra args e.g. -tmdb 603"
+             title="Optional extra arguments passed to manual.py (e.g. -tmdb 603, -tvdb 73871 -s 3 -e 10)"
+             class="w-56 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono">
+      <button type="submit" :disabled="!submitPath.trim() || submitting"
+              title="Queue this path for conversion"
+              class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium text-white transition-colors whitespace-nowrap">
+        <span x-show="!submitting">Submit</span>
+        <span x-show="submitting">Queuing…</span>
+      </button>
+    </form>
+    <div x-show="submitResult" class="mt-3 text-sm px-3 py-2 rounded-lg"
+         :class="submitError ? 'bg-red-900/50 text-red-300' : 'bg-green-900/50 text-green-300'"
+         x-text="submitResult"></div>
+  </div>
+
+  <!-- Stats + Workers -->
+  <div class="grid md:grid-cols-3 gap-6 mb-8">
+
+    <!-- Stats Cards (span 2 cols) -->
+    <div class="md:col-span-2">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Job Statistics</h2>
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <template x-for="s in statCards" :key="s.key">
+          <div class="tooltip bg-gray-800 rounded-lg p-4 border border-gray-700 cursor-default"
+               @click="if(s.key!=='total'){filter=s.key;fetchJobs();document.getElementById('jobs-table').scrollIntoView({behavior:'smooth'})}">
+            <div class="text-xs font-medium uppercase tracking-wider" :class="s.color" x-text="s.label"></div>
+            <div class="text-2xl font-bold text-white mt-1" x-text="stats[s.key] ?? 0"></div>
+            <span class="tip" x-text="s.tip"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Workers -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700 p-5">
+      <h2 class="tooltip text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 cursor-default">
+        Workers
+        <span class="tip">Background threads that pick up and run conversion jobs. Each config can only run one job at a time.</span>
+      </h2>
+      <div class="flex items-baseline gap-2 mb-3">
+        <span class="text-3xl font-bold text-white" x-text="activeWorkers"></span>
+        <span class="text-gray-500 text-sm" x-text="'/ ' + (health.workers || 0) + ' busy'"></span>
+      </div>
+      <div class="space-y-1.5" x-show="Object.keys(health.active||{}).length">
+        <template x-for="(info, config) in (health.active||{})" :key="config">
+          <div class="bg-gray-700/50 rounded p-2">
+            <div class="flex items-center gap-2 mb-0.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
+              <span class="text-xs text-blue-300 font-medium truncate" x-text="config.split('/').pop()"></span>
+            </div>
+            <div class="tooltip text-xs text-gray-400 truncate pl-3.5 cursor-default" :title="info.path" x-text="info.path.split('/').pop()">
+              <span class="tip" x-text="info.path"></span>
+            </div>
+            <div class="text-xs text-gray-600 pl-3.5">Job #<span x-text="info.job_id"></span></div>
+          </div>
+        </template>
+      </div>
+      <p class="text-gray-600 text-xs" x-show="!Object.keys(health.active||{}).length">No active conversions</p>
+
+      <!-- Waiting queues -->
+      <div class="mt-3 space-y-1" x-show="Object.keys(health.waiting||{}).length">
+        <div class="text-xs text-gray-500 mb-1">Queued</div>
+        <template x-for="(count, config) in (health.waiting||{})" :key="config">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-400 truncate" x-text="config.split('/').pop()"></span>
+            <span class="tooltip text-xs bg-yellow-900/60 text-yellow-300 px-2 py-0.5 rounded-full ml-2 flex-shrink-0" x-text="count">
+              <span class="tip">Jobs waiting for this config's lock to be released</span>
+            </span>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config Mappings -->
+  <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
+    <h2 class="tooltip text-sm font-semibold text-purple-400 uppercase tracking-wider mb-3 cursor-default">
+      Config Mappings
+      <span class="tip">Path prefixes matched longest-first to determine which autoProcess.ini a job uses</span>
+    </h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
+          <th class="pb-2 pr-4 font-medium">Path Prefix</th>
+          <th class="pb-2 pr-4 font-medium">Config</th>
+          <th class="pb-2 pr-4 font-medium">
+            <span class="tooltip cursor-default">Status<span class="tip">Whether this config is currently running a job</span></span>
+          </th>
+          <th class="pb-2 pr-4 font-medium">
+            <span class="tooltip cursor-default">Pending<span class="tip">Jobs waiting in queue for this config</span></span>
+          </th>
+          <th class="pb-2 font-medium">Log</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-700/50 text-xs">
+          <!-- Default config row -->
+          <tr x-show="configs.default_config" class="opacity-70 hover:opacity-100 hover:bg-gray-700/20">
+            <td class="py-2 pr-4 text-gray-500 font-mono italic">default</td>
+            <td class="py-2 pr-4 text-gray-400 font-mono" x-text="(configs.default_config||'').split('/').pop()"></td>
+            <td class="py-2 pr-4">
+              <span x-show="configs.default_active_job" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">Running</span>
+              <span x-show="!configs.default_active_job" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
+            </td>
+            <td class="py-2 pr-4 text-gray-500" x-text="configs.default_pending_jobs || 0"></td>
+            <td class="py-2 text-gray-600 font-mono" x-text="(configs.default_log||'').split('/').pop()"></td>
+          </tr>
+          <template x-for="c in configs.path_configs || []" :key="c.path">
+            <tr class="hover:bg-gray-700/20">
+              <td class="py-2 pr-4 text-gray-300 font-mono" :title="c.path" x-text="c.path"></td>
+              <td class="py-2 pr-4 text-gray-400 font-mono" x-text="c.config.split('/').pop()"></td>
+              <td class="py-2 pr-4">
+                <span x-show="c.active_job" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">Running</span>
+                <span x-show="!c.active_job" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
+              </td>
+              <td class="py-2 pr-4 text-gray-400" x-text="c.pending_jobs || 0"></td>
+              <td class="py-2 text-gray-600 font-mono" x-text="c.log_file ? c.log_file.split('/').pop() : ''"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Jobs Table -->
+  <div id="jobs-table" class="bg-gray-800 rounded-lg border border-gray-700 p-5">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-3">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Recent Jobs</h2>
+        <button @click="requeueAllFailed()" :disabled="requeueingAll || (stats.failed||0) === 0"
+                class="text-xs px-2.5 py-1 rounded border border-red-700 text-red-400 hover:border-red-500 hover:text-red-300 disabled:opacity-30 transition-colors"
+                x-text="requeueingAll ? 'Requeueing…' : 'Requeue All Failed'">
+        </button>
+      </div>
+      <div class="flex gap-2">
+        <template x-for="f in ['all','pending','running','completed','failed']" :key="f">
+          <button @click="filter=f; page=0; fetchJobs()"
+                  class="text-xs px-2.5 py-1 rounded-full border transition-colors"
+                  :class="filter===f ? 'border-blue-500 bg-blue-500/20 text-blue-300' : 'border-gray-600 text-gray-400 hover:border-gray-500'"
+                  x-text="f.charAt(0).toUpperCase()+f.slice(1)">
+          </button>
+        </template>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
+          <th class="pb-2 pr-3 w-12 font-medium">ID</th>
+          <th class="pb-2 pr-3 font-medium">File</th>
+          <th class="pb-2 pr-3 font-medium">Config</th>
+          <th class="pb-2 pr-3 font-medium">Status</th>
+          <th class="pb-2 pr-3 font-medium">Created</th>
+          <th class="pb-2 pr-3 font-medium">Duration</th>
+          <th class="pb-2 font-medium"></th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-700/50">
+          <template x-for="j in jobs" :key="j.id">
+            <tr class="hover:bg-gray-700/30 group">
+              <td class="py-2 pr-3 text-gray-600 font-mono text-xs" x-text="j.id"></td>
+              <td class="py-2 pr-3 text-xs max-w-xs">
+                <div class="tooltip cursor-default">
+                  <span class="text-gray-300 font-mono" x-text="j.path.split('/').pop()"></span>
+                  <span class="tip" x-text="j.path"></span>
+                </div>
+                <div x-show="j.error" class="text-red-400 mt-0.5 truncate max-w-xs" :title="j.error" x-text="j.error"></div>
+              </td>
+              <td class="py-2 pr-3 text-gray-500 font-mono text-xs" x-text="j.config ? j.config.split('/').pop() : ''"></td>
+              <td class="py-2 pr-3">
+                <span class="text-xs px-2 py-0.5 rounded-full"
+                      :class="{'pending':'bg-gray-700 text-gray-300','running':'bg-blue-900 text-blue-300','completed':'bg-green-900 text-green-300','failed':'bg-red-900 text-red-300'}[j.status] || 'bg-gray-700 text-gray-400'"
+                      x-text="j.status"></span>
+              </td>
+              <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtTime(j.created_at)"></td>
+              <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtDuration(j)"></td>
+              <td class="py-2 text-xs">
+                <button x-show="j.status === 'failed'" @click="requeueJob(j.id)"
+                        class="opacity-0 group-hover:opacity-100 px-2 py-0.5 rounded border border-red-700 text-red-400 hover:border-red-500 hover:text-red-300 transition-all">
+                  Requeue
+                </button>
+              </td>
+            </tr>
+          </template>
+          <template x-if="jobs.length === 0">
+            <tr><td colspan="7" class="py-8 text-center text-gray-500 text-sm">No jobs found</td></tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <div class="flex justify-between items-center mt-3 text-xs text-gray-500" x-show="jobs.length > 0 || page > 0">
+      <span x-text="page === 0 ? 'Showing ' + jobs.length + ' jobs' : 'Page ' + (page+1) + ' · ' + jobs.length + ' jobs'"></span>
+      <div class="flex gap-2">
+        <button @click="if(page>0){page--;fetchJobs()}" :disabled="page===0"
+                class="px-2 py-1 rounded border border-gray-600 disabled:opacity-30" :class="page>0?'hover:border-gray-500':''">Prev</button>
+        <button @click="page++;fetchJobs()" :disabled="jobs.length < pageSize"
+                class="px-2 py-1 rounded border border-gray-600 disabled:opacity-30" :class="jobs.length>=pageSize?'hover:border-gray-500':''">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function dashboard() {
+  return {
+    health: {}, stats: {}, configs: {}, jobs: [],
+    filter: 'all', page: 0, pageSize: 50,
+    lastUpdate: '', interval: null,
+    submitPath: '', submitArgs: '', submitting: false, submitResult: '', submitError: false,
+    requeueingAll: false,
+    authHeaders(extra) {
+      const h = Object.assign({'Content-Type': 'application/json'}, extra || {});
+      if (window.SMA_API_KEY) h['X-API-Key'] = window.SMA_API_KEY;
+      return h;
+    },
+    statCards: [
+      {key:'total',    label:'Total',     color:'text-gray-400',  tip:'All jobs ever submitted'},
+      {key:'pending',  label:'Pending',   color:'text-yellow-400',tip:'Waiting to be picked up by a worker — click to filter'},
+      {key:'running',  label:'Running',   color:'text-blue-400',  tip:'Currently being converted — click to filter'},
+      {key:'completed',label:'Completed', color:'text-green-400', tip:'Successfully finished — click to filter'},
+      {key:'failed',   label:'Failed',    color:'text-red-400',   tip:'Ended with an error — click to filter'},
+    ],
+    get activeWorkers() {
+      return Object.keys(this.health.active || {}).length;
+    },
+    async init() {
+      await this.refresh();
+      this.interval = setInterval(() => this.refresh(), 5000);
+    },
+    async refresh() {
+      try {
+        const [h, s, c] = await Promise.all([
+          fetch('/health', {headers: this.authHeaders()}).then(r=>r.json()),
+          fetch('/stats', {headers: this.authHeaders()}).then(r=>r.json()),
+          fetch('/configs', {headers: this.authHeaders()}).then(r=>r.json()),
+        ]);
+        this.health = h; this.stats = s; this.configs = c;
+        await this.fetchJobs();
+        this.lastUpdate = new Date().toLocaleTimeString();
+      } catch(e) { this.health = {status:'error'}; }
+    },
+    async fetchJobs() {
+      const params = new URLSearchParams({limit: this.pageSize, offset: this.page * this.pageSize});
+      if (this.filter !== 'all') params.set('status', this.filter);
+      try {
+        const r = await fetch('/jobs?' + params, {headers: this.authHeaders()}).then(r=>r.json());
+        this.jobs = r.jobs || [];
+      } catch(e) { this.jobs = []; }
+    },
+    async submitJob() {
+      this.submitting = true; this.submitResult = ''; this.submitError = false;
+      try {
+        const body = {path: this.submitPath.trim()};
+        if (this.submitArgs.trim()) body.args = this.submitArgs.trim().split(/\\s+/);
+        const r = await fetch('/webhook', {method:'POST', headers: this.authHeaders(), body: JSON.stringify(body)});
+        const d = await r.json();
+        if (r.ok) {
+          this.submitResult = 'Job #' + d.job_id + ' queued for ' + d.path;
+          this.submitPath = ''; this.submitArgs = '';
+          setTimeout(() => this.refresh(), 500);
+        } else {
+          this.submitError = true;
+          this.submitResult = d.error || 'Failed to submit job';
+        }
+      } catch(e) { this.submitError = true; this.submitResult = 'Request failed: ' + e.message; }
+      this.submitting = false;
+      setTimeout(() => this.submitResult = '', 8000);
+    },
+    async requeueJob(id) {
+      try {
+        const r = await fetch('/jobs/' + id + '/requeue', {method: 'POST', headers: this.authHeaders()});
+        if (r.ok) {
+          const j = this.jobs.find(j => j.id === id);
+          if (j) j.status = 'pending';
+          setTimeout(() => this.refresh(), 500);
+        }
+      } catch(e) {}
+    },
+    async requeueAllFailed() {
+      this.requeueingAll = true;
+      try {
+        const r = await fetch('/jobs/requeue', {method: 'POST', headers: this.authHeaders()});
+        if (r.ok) {
+          const d = await r.json();
+          setTimeout(() => this.refresh(), 300);
+        }
+      } catch(e) {}
+      this.requeueingAll = false;
+    },
+    fmtTime(t) {
+      if (!t) return '-';
+      const d = new Date(t.includes('Z') || t.includes('+') ? t : t + 'Z');
+      return d.toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    },
+    fmtDuration(j) {
+      if (!j.started_at) return '-';
+      const start = new Date(j.started_at.includes('Z') || j.started_at.includes('+') ? j.started_at : j.started_at + 'Z');
+      const end = j.completed_at ? new Date(j.completed_at.includes('Z') || j.completed_at.includes('+') ? j.completed_at : j.completed_at + 'Z') : new Date();
+      const s = Math.round((end - start) / 1000);
+      if (s < 60) return s + 's';
+      if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+      return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+    },
+    fmtUptime(s) {
+      if (s == null) return '';
+      if (s < 60) return s + 's';
+      if (s < 3600) return Math.floor(s/60) + 'm';
+      if (s < 86400) return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+      return Math.floor(s/86400) + 'd ' + Math.floor((s%86400)/3600) + 'h';
+    }
+  };
+}
+</script>
+</body>
+</html>
