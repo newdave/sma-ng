@@ -1,3 +1,11 @@
+"""
+TMDB metadata lookup and MP4/MKV tag writing for SMA-NG.
+
+Provides the Metadata class which fetches movie/TV metadata from TMDB and
+writes tags (title, year, description, artwork, etc.) into the output file
+using mutagen. Also handles .plexmatch sidecar file generation.
+"""
+
 import enum
 import logging
 import os
@@ -14,15 +22,24 @@ from resources.lang import getAlpha2BCode, getAlpha3TCode
 
 
 class TMDBIDError(Exception):
-    pass
+    """Raised when a valid TMDB ID cannot be resolved from the provided identifiers."""
 
 
 class MediaType(enum.Enum):
+    """Media type discriminator used throughout SMA-NG to distinguish movies from TV episodes."""
+
     Movie = "movie"
     TV = "tv"
 
 
 class Metadata:
+    """Fetches metadata from TMDB and writes MP4 tags to converted media files.
+
+    Resolves a TMDB ID from any of TMDB ID, IMDB ID, or TVDB ID, queries the
+    appropriate TMDB endpoints for movie or TV data, and provides
+    :meth:`writeTags` to embed that data into an MP4 file via mutagen.
+    """
+
     __CONTENTRATINGS = {
         "TV-Y": "us-tv|TV-Y|100",
         "TV-Y7": "us-tv|TV-Y7|200",
@@ -40,6 +57,26 @@ class Metadata:
     HD = None
 
     def __init__(self, mediatype, tmdbid=None, imdbid=None, tvdbid=None, season=None, episode=None, original=None, language=None, logger=None):
+        """
+        Resolve a TMDB ID from any available identifier and fetch metadata.
+
+        Accepts a TMDB ID directly, or an IMDB ID / TVDB ID which are resolved
+        to a TMDB ID via the TMDB Find endpoint. Fetches movie or TV show data
+        (including season and episode detail for TV) from TMDB and stores it as
+        instance attributes for later use by writeTags.
+
+        mediatype  -- MediaType.Movie or MediaType.TV
+        tmdbid     -- TMDB numeric ID; used directly if provided
+        imdbid     -- IMDB ID (with or without leading 'tt'); used as fallback
+        tvdbid     -- TVDB numeric ID; used as fallback for TV when no imdbid
+        season     -- Season number (required for TV)
+        episode    -- Episode number or list of episode numbers (required for TV)
+        original   -- Path to the original source file, embedded in the encoder tag
+        language   -- BCP-47 language code for TMDB metadata queries (default 'en')
+        logger     -- Optional logger; defaults to the module logger
+
+        Raises TMDBIDError if no valid TMDB ID can be resolved.
+        """
         self.tmdbid = None
         self.tvdbid = None
         self.imdbid = None
@@ -164,6 +201,20 @@ class Metadata:
 
     @staticmethod
     def resolveTmdbID(mediatype, log, tmdbid=None, tvdbid=None, imdbid=None):
+        """
+        Resolve and return a numeric TMDB ID from any available identifier.
+
+        If tmdbid is provided it is returned immediately (converted to int).
+        Otherwise the TMDB Find endpoint is queried using imdbid (for both
+        movie and TV) or tvdbid (TV only, as a fallback when imdbid is absent).
+        Returns None if resolution fails.
+
+        mediatype -- MediaType.Movie or MediaType.TV
+        log       -- logger instance for debug/error output
+        tmdbid    -- TMDB numeric ID; returned as-is when present
+        tvdbid    -- TVDB numeric ID; used for TV lookup when imdbid is absent
+        imdbid    -- IMDB ID (with or without leading 'tt')
+        """
         find = None
 
         if tmdbid:
@@ -195,6 +246,16 @@ class Metadata:
 
     @staticmethod
     def getDefaultLanguage(tmdbid, mediatype):
+        """
+        Return the original language of a TMDB title as an ISO 639-2/T code.
+
+        Queries the TMDB movie or TV endpoint for the given tmdbid and converts
+        the two-letter original_language field to a three-letter bibliographic
+        code. Returns None if tmdbid is absent or mediatype is unrecognised.
+
+        tmdbid    -- TMDB numeric ID to query
+        mediatype -- MediaType.Movie or MediaType.TV
+        """
         if mediatype not in [MediaType.TV, MediaType.Movie]:
             return None
 
@@ -214,6 +275,32 @@ class Metadata:
         return None
 
     def writeTags(self, path, inputfile, converter, artwork=True, thumbnail=False, width=None, height=None, cues_to_front=False):
+        """
+        Write metadata tags to the converted media file.
+
+        Attempts to tag using mutagen (MP4 atoms). Falls back to an FFmpeg
+        metadata pass when mutagen cannot open the file (e.g. MKV containers).
+
+        Tags written for movies: title, tagline (short description), overview
+        (long description), release date, genre, HD flag, content rating,
+        iTunes XML (cast/crew), encoder string, and cover art.
+
+        Tags written for TV episodes: show title, episode title, short and long
+        description, network, air date, season number, episode number, genre,
+        HD flag, content rating, iTunes XML, encoder string, and cover art.
+
+        path          -- absolute path to the output file to be tagged
+        inputfile     -- path to the original source file (used for artwork lookup)
+        converter     -- FFmpeg converter instance (used for the fallback tag pass)
+        artwork       -- download and embed cover art when True (default True)
+        thumbnail     -- use the episode still image instead of the season poster
+                         when tagging TV content (default False)
+        width         -- video width in pixels; used to set the HD flag
+        height        -- video height in pixels; used to set the HD flag
+        cues_to_front -- pass cues-to-front flag to the FFmpeg fallback tagger
+
+        Returns True on success, False on failure.
+        """
         self.log.info("Tagging file: %s." % path)
         if width and height:
             try:
@@ -339,6 +426,18 @@ class Metadata:
         return False
 
     def setHD(self, width, height):
+        """
+        Set the HD flag based on video resolution.
+
+        Populates self.HD with the iTunes hdvd atom value:
+          3 -- 4K (width >= 3800 or height >= 2100)
+          2 -- 1080p (width >= 1900 or height >= 1060)
+          1 -- 720p (width >= 1260 or height >= 700)
+          0 -- SD
+
+        width  -- video width in pixels
+        height -- video height in pixels
+        """
         if width >= 3800 or height >= 2100:
             self.HD = [3]
         elif width >= 1900 or height >= 1060:
@@ -350,21 +449,61 @@ class Metadata:
 
     @property
     def shortDescription(self):
+        """
+        Return a truncated version of the episode description suitable for the
+        iTunes desc atom (255-character limit).
+
+        Delegates to getShortDescription. Returns an empty string when no
+        description is available.
+        """
         if self.description:
             return self.getShortDescription(self.description)
         return ""
 
     def getShortDescription(self, description, length=255, splitter=".", suffix="."):
+        """
+        Truncate a description to at most length characters, breaking on a
+        sentence boundary.
+
+        If the description fits within length it is returned unchanged.
+        Otherwise the text is split on periods and the last incomplete sentence
+        is discarded; suffix is appended to the result.
+
+        description -- the full text to shorten
+        length      -- maximum character count (default 255)
+        splitter    -- sentence boundary character (default '.')
+        suffix      -- string appended when truncation occurs (default '.')
+        """
         if len(description) <= length:
             return description
         else:
             return " ".join(description[: length + 1].split(".")[0:-1]) + suffix
 
     def getRating(self, rating):
+        """
+        Convert a certification string to an iTunes content-rating atom value.
+
+        Looks up the rating in the internal CONTENTRATINGS table (supports
+        US TV and MPAA ratings). Falls back to the appropriate 'Not Rated'
+        string for the current mediatype when the rating is not recognised.
+
+        rating -- certification string such as 'TV-MA' or 'PG-13'
+
+        Returns the iTunes-formatted rating string (e.g. 'mpaa|PG-13|300').
+        """
         return self.__CONTENTRATINGS.get(rating.upper(), self.__NOTRATED.get(self.mediatype))
 
     @property
     def xml(self):
+        """
+        Build the iTunes XML plist string embedded in the iTunMOVI atom.
+
+        Produces a PropertyList-1.0 XML document containing up to five entries
+        each for cast members, screenwriters, directors, and producers, drawn
+        from the TMDB credits fetched during initialisation.
+
+        Returns the XML as a string.
+        """
         # constants
         header = '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>\n'
         castheader = "<key>cast</key><array>\n"
@@ -408,11 +547,43 @@ class Metadata:
         return output.getvalue()
 
     def urlretrieve(self, url, fn):
+        """
+        Download a URL to a local file and return a (filename, file) tuple.
+
+        A thin wrapper around requests.get used for poster downloads. Follows
+        redirects and applies a 30-second timeout.
+
+        url -- the URL to fetch
+        fn  -- local filesystem path to write the response content to
+
+        Returns a tuple of (fn, file_object).
+        """
         with open(fn, "wb") as f:
             f.write(requests.get(url, allow_redirects=True, timeout=30).content)
         return (fn, f)
 
     def getArtwork(self, path, inputfile, thumbnail=False):
+        """
+        Locate or download artwork for the media file and return its local path.
+
+        Artwork is sourced in the following priority order:
+          1. A file with the same base name as inputfile or path, with a
+             recognised image extension (jpg, png, etc.).
+          2. A file named 'smaposter.<ext>' in the same directory as path.
+          3. The TMDB poster image for the title, downloaded to a temporary
+             file. For TV content, uses the episode still when thumbnail is
+             True, falling back to the season poster and then the show poster.
+
+        path      -- path to the converted output file (used for directory
+                     and base-name artwork lookup)
+        inputfile -- path to the original source file (checked first for
+                     a sidecar image with the same base name)
+        thumbnail -- when True, prefer the episode still image over the season
+                     poster for TV content (default False)
+
+        Returns the local path to the artwork file, or None if no artwork
+        could be found or downloaded.
+        """
         # Check for artwork in the same directory as the source
         poster = None
         base, _ = os.path.splitext(inputfile)
