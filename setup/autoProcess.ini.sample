@@ -12,7 +12,7 @@ ignored-extensions = nfo, ds_store
 copy-to =
 move-to =
 delete-original = True
-recycle-bin =
+recycle-bin = /mnt/local/recycle
 process-same-extensions = False
 bypass-if-copying-all = True
 force-convert = False
@@ -122,7 +122,6 @@ profile =
 force-filter = False
 
 [Audio.ChannelFilters]
-6-2 = pan=stereo|FL=0.5*FC+0.707*FL+0.707*BL+0.5*LFE|FR=0.5*FC+0.707*FR+0.707*BR+0.5*LFE
 
 [Subtitle]
 codec = mov_text

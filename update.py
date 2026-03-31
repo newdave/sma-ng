@@ -9,19 +9,22 @@ import xml.etree.ElementTree as ET
 from resources.readsettings import ReadSettings
 
 xml = "/config/config.xml"
-autoProcess = os.path.join(os.environ.get("SMA_PATH", "/usr/local/sma"), "config/autoProcess.ini")
+autoProcess = None
 
 
 def main():
+    _autoProcess = autoProcess if autoProcess is not None else os.path.join(os.environ.get("SMA_PATH", "/usr/local/sma"), "config/autoProcess.ini")
+    _xml = xml
+
     # Ensure a valid config file
     ReadSettings()
 
-    if not os.path.isfile(autoProcess):
+    if not os.path.isfile(_autoProcess):
         logging.error("autoProcess.ini does not exist")
         sys.exit(1)
 
     safeConfigParser = configparser.ConfigParser()
-    safeConfigParser.read(autoProcess)
+    safeConfigParser.read(_autoProcess)
 
     # Set FFMPEG/FFProbe Paths
     ffmpegpath = os.environ.get("SMA_FFMPEG_PATH") or "ffmpeg"
@@ -30,8 +33,8 @@ def main():
     safeConfigParser.set("Converter", "ffprobe", ffprobepath)
 
     section = os.environ.get("SMA_RS")
-    if section and os.path.isfile(xml):
-        tree = ET.parse(xml)
+    if section and os.path.isfile(_xml):
+        tree = ET.parse(_xml)
         root = tree.getroot()
         port = root.find("Port").text
         try:
@@ -46,7 +49,7 @@ def main():
 
         # Set values from config.xml
         safeConfigParser.set(section, "apikey", apikey)
-        safeConfigParser.set(section, "ssl", str(ssl))
+        safeConfigParser.set(section, "ssl", str(ssl).lower())
         safeConfigParser.set(section, "port", sslport if ssl else port)
         safeConfigParser.set(section, "webroot", webroot)
 
@@ -57,9 +60,8 @@ def main():
         else:
             safeConfigParser.set(section, "host", "127.0.0.1")
 
-    fp = open(autoProcess, "w")
-    safeConfigParser.write(fp)
-    fp.close()
+    with open(_autoProcess, "w") as fp:
+        safeConfigParser.write(fp)
 
 
 if __name__ == "__main__":

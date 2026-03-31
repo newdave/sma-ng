@@ -1,224 +1,221 @@
-"""Tests for post-processing integration scripts.
+"""Tests for post-processing integration scripts (bash).
 
-Tests that each script correctly parses its inputs and delegates
-to the webhook client. Uses mocking to avoid real daemon connections
-and real media manager API calls.
+Each script submits jobs to the SMA-NG daemon via curl. Tests run the
+scripts in a subprocess with a mock HTTP server standing in for the daemon.
 """
 
+import http.server
+import json
 import os
+import subprocess
 import sys
-from unittest.mock import MagicMock, patch
+import threading
 
 import pytest
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+SCRIPTS = {
+    "radarr": os.path.join(PROJECT_ROOT, "triggers", "media_managers", "radarr.sh"),
+    "sonarr": os.path.join(PROJECT_ROOT, "triggers", "media_managers", "sonarr.sh"),
+    "sabnzbd": os.path.join(PROJECT_ROOT, "triggers", "usenet", "sabnzbd.sh"),
+    "nzbget": os.path.join(PROJECT_ROOT, "triggers", "usenet", "nzbget.sh"),
+    "qbittorrent": os.path.join(PROJECT_ROOT, "triggers", "torrents", "qbittorrent.sh"),
+    "utorrent": os.path.join(PROJECT_ROOT, "triggers", "torrents", "utorrent.sh"),
+}
 
-def _script_path(name):
-    return os.path.join(PROJECT_ROOT, name)
+
+# ---------------------------------------------------------------------------
+# Mock HTTP daemon
+# ---------------------------------------------------------------------------
 
 
-def _read_script(name):
-    """Read a script file with a proper context manager."""
-    with open(_script_path(name)) as f:
-        return f.read()
+class _MockDaemonHandler(http.server.BaseHTTPRequestHandler):
+    """Captures POST /webhook requests and responds with a job_id."""
+
+    def log_message(self, format, *args):
+        pass  # silence request logs
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            self.server.received_bodies.append(json.loads(body))
+        except Exception:
+            self.server.received_bodies.append(body)
+        resp = json.dumps({"job_id": 1}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(resp)))
+        self.end_headers()
+        self.wfile.write(resp)
 
 
-def _run_script(script_name, mock_submit_return=None, expect_exit=None):
-    """Execute a script with webhook_client.submit_job and submit_and_wait mocked.
+class MockDaemon:
+    """Minimal HTTP server that records webhook submissions."""
 
-    Patches at the module attribute level so both `from X import Y` and `import X; X.Y()`
-    style imports see the mock.
+    def __init__(self):
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), _MockDaemonHandler)
+        self.server.received_bodies = []
+        self.port = self.server.server_address[1]
+        self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_):
+        self.server.shutdown()
+
+    @property
+    def submissions(self):
+        return self.server.received_bodies
+
+
+def _run(script_key, args=(), env_override=None, timeout=10):
+    """Run a trigger script against the mock daemon.
+
+    Returns (returncode, stdout+stderr, MockDaemon).
+    The MockDaemon is already shut down; read .submissions before calling.
     """
-    import resources.webhook_client as wc
+    with MockDaemon() as daemon:
+        env = {
+            **os.environ,
+            "SMA_DAEMON_HOST": "127.0.0.1",
+            "SMA_DAEMON_PORT": str(daemon.port),
+            # Prevent real polling — scripts exit after submit for most tests
+            "SMA_TIMEOUT": "1",
+            "SMA_POLL_INTERVAL": "1",
+        }
+        if env_override:
+            env.update(env_override)
 
-    original_submit = wc.submit_job
-    original_submit_and_wait = wc.submit_and_wait
-    mock_submit = MagicMock(return_value=mock_submit_return or {"job_id": 1})
-    mock_submit_and_wait = MagicMock(return_value={"id": 1, "status": "completed"})
-    wc.submit_job = mock_submit
-    wc.submit_and_wait = mock_submit_and_wait
-    exit_code = None
-    script_path = _script_path(script_name)
-    try:
-        with open(script_path) as f:
-            exec(compile(f.read(), script_path, "exec"))
-    except SystemExit as e:
-        exit_code = e.code
-    finally:
-        wc.submit_job = original_submit
-        wc.submit_and_wait = original_submit_and_wait
-    return mock_submit, mock_submit_and_wait
+        result = subprocess.run(
+            [SCRIPTS[script_key]] + list(args),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        submissions = list(daemon.submissions)
+
+    return result, submissions
+
+
+# ---------------------------------------------------------------------------
+# Radarr
+# ---------------------------------------------------------------------------
 
 
 class TestPostRadarr:
-    """Test postRadarr.py webhook integration."""
-
-    def _radarr_env(self, **overrides):
+    def _env(self, **overrides):
         env = {
             "radarr_eventtype": "Download",
             "radarr_moviefile_path": "/movies/The Matrix (1999)/The Matrix.mkv",
-            "radarr_moviefile_scenename": "The.Matrix.1999.BluRay",
-            "radarr_movie_imdbid": "tt0133093",
             "radarr_movie_tmdbid": "603",
+            "radarr_movie_imdbid": "tt0133093",
             "radarr_movie_id": "1",
             "radarr_moviefile_id": "1",
-            "radarr_moviefile_releasegroup": "FGT",
-            "radarr_moviefile_sourcefolder": "/downloads/The.Matrix.1999",
         }
         env.update(overrides)
         return env
 
-    @patch("resources.webhook_client.submit_and_wait")
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_test_event_exits(self, mock_validate, mock_submit):
-        with patch.dict(os.environ, {"radarr_eventtype": "Test"}, clear=False):
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("postRadarr.py"), "postRadarr.py", "exec"))
-            assert exc.value.code == 0
-        mock_submit.assert_not_called()
+    def test_test_event_exits_zero(self):
+        result, submissions = _run("radarr", env_override={"radarr_eventtype": "Test"})
+        assert result.returncode == 0
+        assert submissions == []
 
-    @patch("resources.webhook_client.submit_and_wait")
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_invalid_event_exits(self, mock_validate, mock_submit):
-        with patch.dict(os.environ, {"radarr_eventtype": "Rename"}, clear=False):
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("postRadarr.py"), "postRadarr.py", "exec"))
-            assert exc.value.code == 1
+    def test_invalid_event_exits_nonzero(self):
+        result, submissions = _run("radarr", env_override={"radarr_eventtype": "Rename"})
+        assert result.returncode != 0
+        assert submissions == []
 
-    @patch("requests.post")
-    @patch("requests.get")
-    @patch("resources.webhook_client.submit_and_wait")
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_submits_webhook_with_tmdb(self, mock_validate, mock_submit, mock_get, mock_post):
-        mock_submit.return_value = {"id": 1, "status": "completed"}
+    def test_submits_webhook_with_tmdb(self):
+        result, submissions = _run("radarr", env_override=self._env())
+        assert len(submissions) == 1
+        body = submissions[0]
+        assert body["path"] == "/movies/The Matrix (1999)/The Matrix.mkv"
+        assert "-tmdb" in body.get("args", [])
+        assert "603" in body.get("args", [])
 
-        # Mock Radarr API responses for rescan
-        mock_rescan_resp = MagicMock()
-        mock_rescan_resp.json.return_value = {"id": 100, "status": "completed"}
-        mock_post.return_value = mock_rescan_resp
 
-        mock_command_resp = MagicMock()
-        mock_command_resp.json.return_value = {"status": "completed"}
-        mock_movie_resp = MagicMock()
-        mock_movie_resp.json.return_value = {"hasFile": True, "title": "The Matrix", "monitored": False, "movieFile": {"id": 1}}
-        mock_get.side_effect = [mock_command_resp, mock_movie_resp, mock_movie_resp]
-
-        with patch.dict(os.environ, self._radarr_env(), clear=False):
-            try:
-                exec(compile(_read_script("postRadarr.py"), "postRadarr.py", "exec"))
-            except SystemExit:
-                pass
-
-        mock_submit.assert_called_once()
-        submit_args = mock_submit.call_args
-        assert submit_args[0][0] == "/movies/The Matrix (1999)/The Matrix.mkv"
-        # Should include -tmdb arg
-        extra_args = submit_args[1].get("args") or submit_args[0][1] if len(submit_args[0]) > 1 else None
-        if extra_args is None:
-            extra_args = submit_args[1].get("args", [])
-        assert "-tmdb" in extra_args
-        assert "603" in extra_args
+# ---------------------------------------------------------------------------
+# Sonarr
+# ---------------------------------------------------------------------------
 
 
 class TestPostSonarr:
-    """Test postSonarr.py webhook integration."""
-
-    def _sonarr_env(self, **overrides):
+    def _env(self, **overrides):
         env = {
             "sonarr_eventtype": "Download",
             "sonarr_episodefile_path": "/tv/Breaking Bad/Season 01/Breaking.Bad.S01E01.mkv",
-            "sonarr_episodefile_scenename": "Breaking.Bad.S01E01",
             "sonarr_series_tvdbid": "81189",
-            "sonarr_series_imdbid": "tt0903747",
             "sonarr_episodefile_seasonnumber": "1",
-            "sonarr_series_id": "5",
-            "sonarr_episodefile_releasegroup": "NTb",
-            "sonarr_episodefile_id": "10",
-            "sonarr_episodefile_sourcefolder": "/downloads/Breaking.Bad.S01E01",
             "sonarr_episodefile_episodenumbers": "1",
-            "sonarr_episodefile_episodeids": "100",
+            "sonarr_series_id": "5",
+            "sonarr_episodefile_id": "10",
         }
         env.update(overrides)
         return env
 
-    @patch("resources.webhook_client.submit_and_wait")
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_test_event_exits(self, mock_validate, mock_submit):
-        with patch.dict(os.environ, {"sonarr_eventtype": "Test"}, clear=False):
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("postSonarr.py"), "postSonarr.py", "exec"))
-            assert exc.value.code == 0
+    def test_test_event_exits_zero(self):
+        result, submissions = _run("sonarr", env_override={"sonarr_eventtype": "Test"})
+        assert result.returncode == 0
+        assert submissions == []
 
-    @patch("requests.post")
-    @patch("requests.get")
-    @patch("resources.webhook_client.submit_and_wait")
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_submits_with_tvdb_season_episode(self, mock_validate, mock_submit, mock_get, mock_post):
-        mock_submit.return_value = {"id": 1, "status": "completed"}
+    def test_submits_with_tvdb_season_episode(self):
+        result, submissions = _run("sonarr", env_override=self._env())
+        assert len(submissions) == 1
+        body = submissions[0]
+        args = body.get("args", [])
+        assert "-tvdb" in args
+        assert "81189" in args
+        assert "-s" in args
+        assert "1" in args
+        assert "-e" in args
 
-        mock_rescan_resp = MagicMock()
-        mock_rescan_resp.json.return_value = {"id": 100, "status": "completed"}
-        mock_post.return_value = mock_rescan_resp
 
-        mock_command_resp = MagicMock()
-        mock_command_resp.json.return_value = {"status": "completed"}
-        mock_episode_resp = MagicMock()
-        mock_episode_resp.json.return_value = {"hasFile": True, "title": "Pilot", "monitored": False, "episodeFileId": 10}
-        mock_get.side_effect = [mock_command_resp, mock_episode_resp, mock_episode_resp]
-
-        with patch.dict(os.environ, self._sonarr_env(), clear=False):
-            try:
-                exec(compile(_read_script("postSonarr.py"), "postSonarr.py", "exec"))
-            except SystemExit:
-                pass
-
-        mock_submit.assert_called_once()
-        extra_args = mock_submit.call_args[1].get("args", [])
-        assert "-tvdb" in extra_args
-        assert "81189" in extra_args
-        assert "-s" in extra_args
-        assert "1" in extra_args
-        assert "-e" in extra_args
+# ---------------------------------------------------------------------------
+# SABnzbd
+# ---------------------------------------------------------------------------
 
 
 class TestSABPostProcess:
-    """Test SABPostProcess.py webhook integration."""
-
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_submits_files_in_directory(self, mock_validate, tmp_path):
+    def test_submits_files_in_directory(self, tmp_path):
         (tmp_path / "movie.mkv").touch()
         (tmp_path / "movie.nfo").touch()
+        args = [str(tmp_path), "nzb", "clean", "0", "movies", "group", "0"]
+        result, submissions = _run("sabnzbd", args=args)
+        assert len(submissions) == 2
 
-        original_argv = sys.argv
-        sys.argv = ["SABPostProcess.py", str(tmp_path), "nzb", "clean", "0", "movies", "group", "0"]
-        try:
-            mock_submit, _ = _run_script("SABPostProcess.py")
-            assert mock_submit.call_count == 2
-        finally:
-            sys.argv = original_argv
+    def test_failed_status_skips(self, tmp_path):
+        (tmp_path / "movie.mkv").touch()
+        args = [str(tmp_path), "nzb", "clean", "0", "movies", "group", "1"]
+        result, submissions = _run("sabnzbd", args=args)
+        assert submissions == []
 
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_failed_status_exits(self, mock_validate):
-        original_argv = sys.argv
-        sys.argv = ["SABPostProcess.py", "/path", "nzb", "clean", "0", "movies", "group", "1"]
-        try:
-            mock_submit, _ = _run_script("SABPostProcess.py")
-            mock_submit.assert_not_called()
-        finally:
-            sys.argv = original_argv
+    def test_insufficient_args_exits(self):
+        result, submissions = _run("sabnzbd", args=["/path", "nzb"])
+        assert result.returncode != 0
+        assert submissions == []
+
+    def test_bypass_category_skips(self, tmp_path):
+        (tmp_path / "movie.mkv").touch()
+        args = [str(tmp_path), "nzb", "clean", "0", "bypass", "group", "0"]
+        result, submissions = _run("sabnzbd", args=args)
+        assert submissions == []
+
+
+# ---------------------------------------------------------------------------
+# NZBGet
+# ---------------------------------------------------------------------------
 
 
 class TestNZBGetPostProcess:
-    """Test NZBGetPostProcess.py webhook integration."""
-
-    def _nzbget_env(self, directory, **overrides):
+    def _env(self, directory, **overrides):
         env = {
             "NZBOP_VERSION": "21.0",
-            "NZBPO_MP4_FOLDER": os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."),
             "NZBPO_SHOULDCONVERT": "true",
-            "NZBPO_SONARR_CAT": "sonarr",
-            "NZBPO_RADARR_CAT": "radarr",
             "NZBPO_BYPASS_CAT": "bypass",
             "NZBPP_TOTALSTATUS": "SUCCESS",
             "NZBPP_DIRECTORY": directory,
@@ -228,259 +225,101 @@ class TestNZBGetPostProcess:
         env.update(overrides)
         return env
 
-    @patch("resources.webhook_client.submit_job")
-    def test_submits_files(self, mock_submit, tmp_path):
-        mock_submit.return_value = {"job_id": 1}
+    def test_submits_files(self, tmp_path):
         (tmp_path / "movie.mkv").touch()
+        result, submissions = _run("nzbget", env_override=self._env(str(tmp_path)))
+        assert result.returncode == 93  # POSTPROCESS_SUCCESS
+        assert len(submissions) == 1
 
-        with patch.dict(os.environ, self._nzbget_env(str(tmp_path)), clear=False):
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("NZBGetPostProcess.py"), "NZBGetPostProcess.py", "exec"))
-            assert exc.value.code == 93  # POSTPROCESS_SUCCESS
-
-        assert mock_submit.call_count == 1
-
-    @patch("resources.webhook_client.submit_job")
-    def test_bypass_category_skips(self, mock_submit, tmp_path):
+    def test_bypass_category_skips(self, tmp_path):
         (tmp_path / "movie.mkv").touch()
+        result, submissions = _run("nzbget", env_override=self._env(str(tmp_path), NZBPP_CATEGORY="bypass"))
+        assert result.returncode == 95  # POSTPROCESS_NONE
+        assert submissions == []
 
-        env = self._nzbget_env(str(tmp_path), NZBPP_CATEGORY="bypass")
-        with patch.dict(os.environ, env, clear=False):
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("NZBGetPostProcess.py"), "NZBGetPostProcess.py", "exec"))
-            assert exc.value.code == 95  # POSTPROCESS_NONE
-
-        mock_submit.assert_not_called()
-
-    @patch("resources.webhook_client.submit_job")
-    def test_convert_disabled_skips(self, mock_submit, tmp_path):
+    def test_convert_disabled_skips(self, tmp_path):
         (tmp_path / "movie.mkv").touch()
+        result, submissions = _run("nzbget", env_override=self._env(str(tmp_path), NZBPO_SHOULDCONVERT="false"))
+        assert result.returncode == 95
+        assert submissions == []
 
-        env = self._nzbget_env(str(tmp_path), NZBPO_SHOULDCONVERT="false")
-        with patch.dict(os.environ, env, clear=False):
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("NZBGetPostProcess.py"), "NZBGetPostProcess.py", "exec"))
-            assert exc.value.code == 95
+    def test_no_nzbget_env_exits_error(self):
+        # Run with a clean env that has no NZBOP_VERSION
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")}
+        result, submissions = _run("nzbget", env_override={**env, "NZBOP_VERSION": ""})
+        assert result.returncode == 94  # POSTPROCESS_ERROR
 
-        mock_submit.assert_not_called()
+    def test_failed_download_skips(self, tmp_path):
+        result, submissions = _run("nzbget", env_override=self._env(str(tmp_path), NZBPP_TOTALSTATUS="FAILURE"))
+        assert result.returncode == 95
+        assert submissions == []
 
-    def test_no_nzbget_env_exits(self):
-        with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("NZBGetPostProcess.py"), "NZBGetPostProcess.py", "exec"))
-            assert exc.value.code == 94  # POSTPROCESS_ERROR
+    def test_invalid_directory_exits_error(self):
+        result, submissions = _run("nzbget", env_override=self._env("/nonexistent/directory"))
+        assert result.returncode == 94
+
+    def test_no_files_submitted_exits_none(self, tmp_path):
+        # Empty directory
+        result, submissions = _run("nzbget", env_override=self._env(str(tmp_path)))
+        assert result.returncode == 95
+        assert submissions == []
+
+
+# ---------------------------------------------------------------------------
+# qBittorrent
+# ---------------------------------------------------------------------------
 
 
 class TestQBittorrentPostProcess:
-    """Test qBittorrentPostProcess.py webhook integration."""
-
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_submits_single_file(self, mock_validate, tmp_path):
+    def test_submits_single_file(self, tmp_path):
         filepath = tmp_path / "movie.mkv"
         filepath.touch()
+        # label tracker root_path content_path name hash
+        args = ["movies", "tracker", str(tmp_path), str(filepath), "Movie.Name", "abc123"]
+        result, submissions = _run("qbittorrent", args=args)
+        assert len(submissions) == 1
 
-        original_argv = sys.argv
-        sys.argv = ["qBittorrentPostProcess.py", "movies", "tracker", str(tmp_path), str(filepath), "Movie.Name", "abc123"]
-        try:
-            mock_submit, _ = _run_script("qBittorrentPostProcess.py")
-            mock_submit.assert_called_once()
-        finally:
-            sys.argv = original_argv
-
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_submits_directory_contents(self, mock_validate, tmp_path):
+    def test_submits_directory_contents(self, tmp_path):
         (tmp_path / "ep01.mkv").touch()
         (tmp_path / "ep02.mkv").touch()
+        args = ["tv", "tracker", str(tmp_path), str(tmp_path), "Show.S01", "def456"]
+        result, submissions = _run("qbittorrent", args=args)
+        assert len(submissions) == 2
 
-        original_argv = sys.argv
-        sys.argv = ["qBittorrentPostProcess.py", "tv", "tracker", str(tmp_path), str(tmp_path), "Show.S01", "def456"]
-        try:
-            mock_submit, _ = _run_script("qBittorrentPostProcess.py")
-            assert mock_submit.call_count == 2
-        finally:
-            sys.argv = original_argv
-
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_bypass_label_skips(self, mock_validate, tmp_path):
-        """Bypass label must match what the active config defines."""
+    def test_bypass_label_skips(self, tmp_path):
         (tmp_path / "file.mkv").touch()
+        args = ["bypass", "tracker", str(tmp_path), str(tmp_path), "Name", "hash"]
+        result, submissions = _run("qbittorrent", args=args)
+        assert submissions == []
 
-        # Determine the bypass label from the active config
-        from resources.readsettings import ReadSettings
 
-        with patch("resources.readsettings.ReadSettings._validate_binaries"):
-            s = ReadSettings()
-        bypass_list = s.qBittorrent.get("bypass", ["bypass"])
-        bypass_label = bypass_list[0] if bypass_list else "bypass"
-
-        original_argv = sys.argv
-        sys.argv = ["qBittorrentPostProcess.py", bypass_label, "tracker", str(tmp_path), str(tmp_path), "Name", "hash"]
-        try:
-            mock_submit, _ = _run_script("qBittorrentPostProcess.py")
-            mock_submit.assert_not_called()
-        finally:
-            sys.argv = original_argv
+# ---------------------------------------------------------------------------
+# uTorrent
+# ---------------------------------------------------------------------------
 
 
 class TestUTorrentPostProcess:
-    """Test uTorrentPostProcess.py webhook integration."""
-
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_submits_single_file(self, mock_validate, tmp_path):
+    def test_submits_single_file(self, tmp_path):
         filepath = tmp_path / "movie.mkv"
         filepath.touch()
+        # label tracker directory kind filename hash name
+        args = ["movies", "tracker", str(tmp_path), "single", "movie.mkv", "hash123", "Movie"]
+        result, submissions = _run("utorrent", args=args)
+        assert len(submissions) == 1
 
-        original_argv = sys.argv
-        sys.argv = ["uTorrentPostProcess.py", "movies", "tracker", str(tmp_path), "single", "movie.mkv", "hash123", "Movie"]
-        try:
-            mock_submit, _ = _run_script("uTorrentPostProcess.py")
-            mock_submit.assert_called_once()
-        finally:
-            sys.argv = original_argv
-
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_submits_multi_directory(self, mock_validate, tmp_path):
+    def test_submits_multi_directory(self, tmp_path):
         (tmp_path / "ep1.mkv").touch()
         (tmp_path / "ep2.mkv").touch()
+        args = ["tv", "tracker", str(tmp_path), "multi", "", "hash456", "Show"]
+        result, submissions = _run("utorrent", args=args)
+        assert len(submissions) == 2
 
-        original_argv = sys.argv
-        sys.argv = ["uTorrentPostProcess.py", "tv", "tracker", str(tmp_path), "multi", "", "hash456", "Show"]
-        try:
-            mock_submit, _ = _run_script("uTorrentPostProcess.py")
-            assert mock_submit.call_count == 2
-        finally:
-            sys.argv = original_argv
+    def test_bypass_skips(self, tmp_path):
+        args = ["bypass", "tracker", str(tmp_path), "single", "f.mkv", "hash", "Name"]
+        result, submissions = _run("utorrent", args=args)
+        assert submissions == []
 
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_bypass_skips(self, mock_validate, tmp_path):
-        original_argv = sys.argv
-        sys.argv = ["uTorrentPostProcess.py", "bypass", "tracker", str(tmp_path), "single", "f.mkv", "hash", "Name"]
-        try:
-            mock_submit, _ = _run_script("uTorrentPostProcess.py")
-            mock_submit.assert_not_called()
-        finally:
-            sys.argv = original_argv
-
-
-class TestNZBGetPostProcessExtended:
-    """Test additional NZBGetPostProcess.py branches."""
-
-    def _nzbget_env(self, directory, **overrides):
-        env = {
-            "NZBOP_VERSION": "21.0",
-            "NZBPO_MP4_FOLDER": os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."),
-            "NZBPO_SHOULDCONVERT": "true",
-            "NZBPO_SONARR_CAT": "sonarr",
-            "NZBPO_RADARR_CAT": "radarr",
-            "NZBPO_BYPASS_CAT": "bypass",
-            "NZBPP_TOTALSTATUS": "SUCCESS",
-            "NZBPP_DIRECTORY": directory,
-            "NZBPP_NZBFILENAME": "test.nzb",
-            "NZBPP_CATEGORY": "movies",
-        }
-        env.update(overrides)
-        return env
-
-    @patch("resources.webhook_client.submit_job")
-    def test_failed_download_skips(self, mock_submit, tmp_path):
-        env = self._nzbget_env(str(tmp_path), NZBPP_TOTALSTATUS="FAILURE")
-        with patch.dict(os.environ, env, clear=False):
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("NZBGetPostProcess.py"), "NZBGetPostProcess.py", "exec"))
-            assert exc.value.code == 95  # POSTPROCESS_NONE
-        mock_submit.assert_not_called()
-
-    @patch("resources.webhook_client.submit_job")
-    def test_invalid_directory_exits_error(self, mock_submit, tmp_path):
-        env = self._nzbget_env("/nonexistent/directory")
-        with patch.dict(os.environ, env, clear=False):
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("NZBGetPostProcess.py"), "NZBGetPostProcess.py", "exec"))
-            assert exc.value.code == 94  # POSTPROCESS_ERROR
-        mock_submit.assert_not_called()
-
-    @patch("resources.webhook_client.submit_job")
-    def test_no_files_submitted_exits_none(self, mock_submit, tmp_path):
-        # Empty directory — no files to submit
-        mock_submit.return_value = None
-        env = self._nzbget_env(str(tmp_path))
-        with patch.dict(os.environ, env, clear=False):
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("NZBGetPostProcess.py"), "NZBGetPostProcess.py", "exec"))
-            assert exc.value.code == 95  # POSTPROCESS_NONE
-
-
-class TestSABPostProcessExtended:
-    """Test additional SABPostProcess.py branches."""
-
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_insufficient_args_exits(self, mock_validate):
-        original_argv = sys.argv
-        sys.argv = ["SABPostProcess.py", "/path", "nzb"]  # too few args
-        try:
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("SABPostProcess.py"), "SABPostProcess.py", "exec"))
-            assert exc.value.code == 1
-        finally:
-            sys.argv = original_argv
-
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_bypass_category_skips(self, mock_validate, tmp_path):
-        original_argv = sys.argv
-        sys.argv = ["SABPostProcess.py", str(tmp_path), "nzb", "clean", "0", "bypass", "group", "0"]
-        try:
-            mock_submit, _ = _run_script("SABPostProcess.py")
-            mock_submit.assert_not_called()
-        finally:
-            sys.argv = original_argv
-
-
-class TestUTorrentPostProcessExtended:
-    """Test additional uTorrentPostProcess.py branches."""
-
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_insufficient_args_exits(self, mock_validate, tmp_path):
-        original_argv = sys.argv
-        sys.argv = ["uTorrentPostProcess.py", "label", "tracker"]  # too few args
-        try:
-            with pytest.raises(SystemExit) as exc:
-                exec(compile(_read_script("uTorrentPostProcess.py"), "uTorrentPostProcess.py", "exec"))
-            assert exc.value.code == 1
-        finally:
-            sys.argv = original_argv
-
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_webui_pre_action_called(self, mock_validate, tmp_path):
-        f = tmp_path / "movie.mkv"
-        f.touch()
-        original_argv = sys.argv
-        sys.argv = ["uTorrentPostProcess.py", "movies", "tracker", str(tmp_path), "single", "movie.mkv", "hash123", "Movie"]
-        try:
-            with patch("requests.get") as mock_get:
-                mock_token_resp = MagicMock()
-                mock_token_resp.text = "token='MYTOKEN'"
-                mock_get.return_value = mock_token_resp
-
-                with patch("resources.readsettings.ReadSettings.__init__", return_value=None) as mock_init:
-                    # Build a mock settings object with webui enabled
-                    def fake_init(self_inner, *a, **kw):
-                        self_inner.uTorrent = {
-                            "bypass": [],
-                            "webui": True,
-                            "actionbefore": "pause",
-                            "actionafter": "resume",
-                            "host": "localhost",
-                            "port": 8080,
-                            "ssl": False,
-                            "user": "",
-                            "pass": "",
-                        }
-
-                    mock_init.side_effect = fake_init
-                    mock_submit, _ = _run_script("uTorrentPostProcess.py")
-
-            # Two GET calls: one for pre-action token, one for pre-action itself
-            # (and similarly for post)
-            assert mock_get.call_count >= 2
-        finally:
-            sys.argv = original_argv
+    def test_insufficient_args_exits(self, tmp_path):
+        result, submissions = _run("utorrent", args=["label", "tracker"])
+        assert result.returncode != 0
+        assert submissions == []

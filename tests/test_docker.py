@@ -66,26 +66,26 @@ def _instructions_of(instr_type, instructions):
 
 @pytest.fixture(scope="module")
 def dockerfile():
-    return _parse_dockerfile(_read("Dockerfile"))
+    return _parse_dockerfile(_read("docker/Dockerfile"))
 
 
 @pytest.fixture(scope="module")
 def dockerfile_raw():
-    return _read("Dockerfile")
+    return _read("docker/Dockerfile")
 
 
 class TestDockerfileStages:
     def test_three_named_stages(self, dockerfile):
         assert _stages(dockerfile) == ["ffmpeg-builder", "python-builder", "runtime"]
 
-    def test_ffmpeg_builder_from_debian(self, dockerfile_raw):
-        assert "FROM debian:bookworm-slim AS ffmpeg-builder" in dockerfile_raw
+    def test_ffmpeg_builder_from_ubuntu(self, dockerfile_raw):
+        assert "FROM ubuntu:24.04 AS ffmpeg-builder" in dockerfile_raw
 
-    def test_python_builder_from_python312(self, dockerfile_raw):
-        assert "FROM python:3.12-slim-bookworm AS python-builder" in dockerfile_raw
+    def test_python_builder_from_ubuntu(self, dockerfile_raw):
+        assert "FROM ubuntu:24.04 AS python-builder" in dockerfile_raw
 
-    def test_runtime_from_python312(self, dockerfile_raw):
-        assert "FROM python:3.12-slim-bookworm AS runtime" in dockerfile_raw
+    def test_runtime_from_ubuntu(self, dockerfile_raw):
+        assert "FROM ubuntu:24.04 AS runtime" in dockerfile_raw
 
     def test_runtime_copies_ffmpeg_from_builder(self, dockerfile_raw):
         assert "--from=ffmpeg-builder" in dockerfile_raw
@@ -230,7 +230,7 @@ class TestDockerfileRuntime:
 
 @pytest.fixture(scope="module")
 def compose():
-    return _load_yaml("docker-compose.yml")
+    return _load_yaml("docker/docker-compose.yml")
 
 
 class TestComposeBaseService:
@@ -254,7 +254,7 @@ class TestComposeBaseService:
 
     def test_media_volume_mounted(self, compose):
         volumes = compose["services"]["sma"]["volumes"]
-        assert any("/media" in str(v) for v in volumes)
+        assert any("/mnt" in str(v) for v in volumes)
 
     def test_sma_config_env_set(self, compose):
         env = compose["services"]["sma"]["environment"]

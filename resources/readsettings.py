@@ -964,7 +964,7 @@ class ReadSettings:
             if config.has_option("Converter", "gpu"):
                 gpu_val = config.get("Converter", "gpu")
                 config.remove_option("Converter", "gpu")
-                if not config.has_option("Video", "gpu"):
+                if not config.has_option("Video", "gpu") or not config.get("Video", "gpu").strip():
                     config.set("Video", "gpu", gpu_val)
                 write = True
 
