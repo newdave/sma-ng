@@ -1482,7 +1482,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """HTTP request handler for webhook endpoints."""
 
     # Endpoints that don't require authentication
-    PUBLIC_ENDPOINTS = ["/", "/health", "/status", "/docs"]
+    PUBLIC_ENDPOINTS = ["/", "/dashboard", "/health", "/status", "/docs"]
 
     def log_message(self, format, *args):
         self.server.logger.debug("%s - %s" % (self.address_string(), format % args))
@@ -1671,7 +1671,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if not self.is_public_endpoint(parsed.path) and not self.check_auth():
             return
 
-        if parsed.path == "/" and self.wants_html():
+        if parsed.path == "/":
+            self.send_response(301)
+            self.send_header("Location", "/dashboard")
+            self.end_headers()
+        elif parsed.path == "/dashboard":
             api_key = self.server.api_key or ""
             key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
             self.send_html_response(200, DASHBOARD_HTML.replace("</head>", key_script + "</head>", 1))
@@ -1682,7 +1686,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self.send_html_response(200, DOCS_TEMPLATE % _render_markdown_to_html(md_content))
             except FileNotFoundError:
                 self.send_html_response(404, "<h1>Documentation not found</h1><p>docs/README.md missing</p>")
-        elif parsed.path in ["/", "/health"]:
+        elif parsed.path == "/health":
             self._get_health()
         elif parsed.path == "/status":
             self._get_status()
