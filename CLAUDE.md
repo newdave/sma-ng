@@ -61,10 +61,10 @@ python manual.py -i "/path/to/file.mkv" -oo
 python manual.py -cl
 
 # Start daemon (HTTP webhook server)
-python daemon.py --host 0.0.0.0 --port 8585
+python daemon.py --host 0.0.0.0 --port 8585 --workers 4
 
 # Start daemon with API key authentication
-python daemon.py --host 0.0.0.0 --port 8585 --api-key YOUR_SECRET_KEY
+python daemon.py --host 0.0.0.0 --port 8585 --workers 4 --api-key YOUR_SECRET_KEY
 ```
 
 ## Daemon Mode
@@ -72,11 +72,11 @@ python daemon.py --host 0.0.0.0 --port 8585 --api-key YOUR_SECRET_KEY
 The daemon runs an HTTP server that listens for webhook requests to trigger conversions.
 
 ```bash
-# Start with defaults (127.0.0.1:8585)
+# Start with defaults (127.0.0.1:8585, 1 worker)
 python daemon.py
 
-# Listen on all interfaces
-python daemon.py --host 0.0.0.0 --port 8585
+# Listen on all interfaces with multiple workers
+python daemon.py --host 0.0.0.0 --port 8585 --workers 4
 
 # With API key authentication
 python daemon.py --api-key YOUR_SECRET_KEY
@@ -84,7 +84,10 @@ python daemon.py --api-key YOUR_SECRET_KEY
 SMA_DAEMON_API_KEY=YOUR_SECRET_KEY python daemon.py
 
 # Custom daemon config (for path mappings)
-python daemon.py --daemon-config /path/to/daemon.json
+python daemon.py --daemon-config /path/to/daemon.json --workers 4
+
+# Graceful shutdown (waits for active conversions to finish)
+curl -X POST http://localhost:8585/shutdown -H "X-API-Key: YOUR_SECRET_KEY"
 ```
 
 **Endpoints:**
@@ -95,6 +98,7 @@ python daemon.py --daemon-config /path/to/daemon.json
 - `GET /configs` - Show path-to-config mappings and status
 - `GET /stats` - Job statistics by status
 - `POST /cleanup` - Remove old completed/failed jobs (`?days=30`)
+- `POST /shutdown` - Graceful shutdown (waits for active conversions to finish)
 
 **Request formats:**
 ```bash
@@ -185,23 +189,25 @@ Log files use rotation (10MB max, 5 backups). Use `--logs-dir` to change the log
 
 ### Concurrency Control
 
-Only one conversion process runs per config at a time. This prevents resource conflicts when multiple jobs target the same media library.
+Up to `--workers` jobs can run simultaneously. Concurrency is managed per-config using a semaphore: jobs for the same config run concurrently up to the worker limit, and jobs for different configs always run in parallel.
 
-- Jobs for the **same config** execute sequentially (queue up)
-- All jobs execute sequentially (single worker prevents hardware encoder contention)
+- Jobs for **different configs** run in parallel immediately
+- Jobs for the **same config** run concurrently up to the worker count, then queue
+- Use `--workers N` to set concurrency (default: 1)
 
-Example with 4 queued jobs:
+Example with `--workers 4` and 5 queued jobs:
 ```
-Job 1: /TV/show.mkv      -> autoProcess.tv.ini     [runs immediately]
-Job 2: /Movies/film.mkv  -> autoProcess.movies.ini [waits for Job 1]
-Job 3: /TV/other.mkv     -> autoProcess.tv.ini     [waits for Job 2]
-Job 4: /Movies/other.mkv -> autoProcess.movies.ini [waits for Job 3]
+Job 1: /TV/show1.mkv     -> autoProcess.tv.ini     [runs immediately]
+Job 2: /TV/show2.mkv     -> autoProcess.tv.ini     [runs immediately]
+Job 3: /Movies/film1.mkv -> autoProcess.movies.ini [runs immediately]
+Job 4: /Movies/film2.mkv -> autoProcess.movies.ini [runs immediately]
+Job 5: /TV/show3.mkv     -> autoProcess.tv.ini     [waits for slot]
 ```
 
 Check active/waiting jobs via the health endpoint:
 ```bash
 curl http://localhost:8585/health
-# Returns: {"active_jobs": {...}, "waiting_jobs": {...}, ...}
+# Returns: {"active": {...}, "waiting": {...}, ...}
 ```
 
 ### SQLite Persistence
@@ -326,6 +332,40 @@ recycle-bin = /mnt/recycle
 5. `qtfaststart` relocates moov atom for streaming optimization
 6. Files copied/moved to destination directories
 7. Post-process scripts run, Plex/media manager notified
+
+## CI / Release
+
+### Workflows
+
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `ci.yml` | PR / push to main | Runs tests |
+| `docker.yml` | PR / push to main (path-filtered) | PR: build-only + smoke test; main: build + push rolling `main` tag to GHCR |
+| `release.yml` | Push to main | Runs release-please (manages release PR + version bump); on release: builds wheel/sdist + Docker image with semver tags |
+
+### Release Flow
+
+Releases are driven by [release-please](https://github.com/googleapis/release-please). No manual tagging.
+
+1. Merge conventional commits to `main` — release-please opens/updates a Release PR
+2. Merge the Release PR — release-please creates the GitHub Release and `v*` tag
+3. The `publish` and `docker` jobs in `release.yml` run automatically:
+   - Python wheel + sdist built and attached to the GitHub Release
+   - Docker image pushed to GHCR with tags `1.2.3`, `1.2`, `1`, and `latest`
+
+### Version Source of Truth
+
+`pyproject.toml` → `[project] version` is the single version source. release-please bumps it when a release PR is merged. The Git tag and Docker image tags are derived from it.
+
+Do **not** manually create `v*` tags — this will cause a duplicate release.
+
+### Conventional Commits
+
+release-please determines the next version from commit messages:
+
+- `fix:` → patch bump (1.2.3 → 1.2.4)
+- `feat:` → minor bump (1.2.3 → 1.3.0)
+- `feat!:` or `BREAKING CHANGE:` → major bump (1.2.3 → 2.0.0)
 
 ## Claude Code Slash Commands
 
