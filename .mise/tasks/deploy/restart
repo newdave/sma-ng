@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#MISE description="Restart sma-daemon on all DEPLOY_HOSTS"
+#MISE depends=["deploy:check"]
+set -euo pipefail
+
+LOCAL="setup/.local.ini"
+CFG="scripts/local-config.sh"
+DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+
+failed=""
+for host in $DEPLOY_HOSTS; do
+  cfg="$CFG $LOCAL $host"
+  port=$($cfg SSH_PORT 22)
+  key=$($cfg SSH_KEY "")
+
+  ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+  [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
+
+  echo "==> [$host] restarting sma-daemon"
+  # shellcheck disable=SC2086
+  ssh $ssh_opts "$host" "sudo systemctl restart sma-daemon" || { failed="$failed $host"; continue; }
+  echo "==> [$host] sma-daemon restarted"
+done
+
+if [ -n "$failed" ]; then
+  echo ""
+  echo "ERROR: restart failed for:$failed" >&2
+  exit 1
+fi
+
+echo ""
+echo "sma-daemon restarted on: $DEPLOY_HOSTS"
