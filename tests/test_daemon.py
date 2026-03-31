@@ -1001,3 +1001,89 @@ class TestHTTPEndpoints:
     def test_post_not_found(self, live_server):
         data, status = self._post(live_server, "/nonexistent")
         assert status == 404
+
+    def test_webhook_rejects_recycle_bin_path(self, live_server, tmp_path):
+        recycle = tmp_path / "recycle"
+        recycle.mkdir()
+        ini = tmp_path / "autoProcess.ini"
+        ini.write_text("[Converter]\nrecycle-bin = %s\n" % recycle)
+        live_server.path_config_manager.default_config = str(ini)
+
+        f = recycle / "movie.mkv"
+        f.touch()
+        data, status = self._post(live_server, "/webhook", data={"path": str(f)})
+        assert status == 400
+        assert "recycle-bin" in data["error"]
+
+    def test_webhook_rejects_recycle_bin_subdirectory(self, live_server, tmp_path):
+        recycle = tmp_path / "recycle"
+        subdir = recycle / "Movies"
+        subdir.mkdir(parents=True)
+        ini = tmp_path / "autoProcess.ini"
+        ini.write_text("[Converter]\nrecycle-bin = %s\n" % recycle)
+        live_server.path_config_manager.default_config = str(ini)
+
+        f = subdir / "movie.mkv"
+        f.touch()
+        data, status = self._post(live_server, "/webhook", data={"path": str(f)})
+        assert status == 400
+        assert "recycle-bin" in data["error"]
+
+    def test_webhook_allows_path_outside_recycle_bin(self, live_server, tmp_path):
+        recycle = tmp_path / "recycle"
+        recycle.mkdir()
+        media = tmp_path / "media"
+        media.mkdir()
+        ini = tmp_path / "autoProcess.ini"
+        ini.write_text("[Converter]\nrecycle-bin = %s\n" % recycle)
+        live_server.path_config_manager.default_config = str(ini)
+
+        f = media / "movie.mkv"
+        f.touch()
+        data, status = self._post(live_server, "/webhook", data={"path": str(f)})
+        assert status == 202
+
+
+class TestRecycleBinDetection:
+    """Unit tests for PathConfigManager.is_recycle_bin_path."""
+
+    def _make_mgr(self, tmp_path, recycle_bin=None):
+        ini = tmp_path / "autoProcess.ini"
+        content = "[Converter]\n"
+        if recycle_bin:
+            content += "recycle-bin = %s\n" % recycle_bin
+        ini.write_text(content)
+        mgr = PathConfigManager()
+        mgr.default_config = str(ini)
+        return mgr
+
+    def test_path_inside_recycle_bin(self, tmp_path):
+        recycle = tmp_path / "recycle"
+        recycle.mkdir()
+        mgr = self._make_mgr(tmp_path, recycle_bin=str(recycle))
+        assert mgr.is_recycle_bin_path(str(recycle / "movie.mkv")) is True
+
+    def test_recycle_bin_root_itself(self, tmp_path):
+        recycle = tmp_path / "recycle"
+        recycle.mkdir()
+        mgr = self._make_mgr(tmp_path, recycle_bin=str(recycle))
+        assert mgr.is_recycle_bin_path(str(recycle)) is True
+
+    def test_path_outside_recycle_bin(self, tmp_path):
+        recycle = tmp_path / "recycle"
+        recycle.mkdir()
+        mgr = self._make_mgr(tmp_path, recycle_bin=str(recycle))
+        assert mgr.is_recycle_bin_path(str(tmp_path / "media" / "movie.mkv")) is False
+
+    def test_no_recycle_bin_configured(self, tmp_path):
+        mgr = self._make_mgr(tmp_path, recycle_bin=None)
+        assert mgr.is_recycle_bin_path(str(tmp_path / "anything.mkv")) is False
+
+    def test_prefix_match_does_not_false_positive(self, tmp_path):
+        # /tmp/recycle should not match /tmp/recycle-extra/movie.mkv
+        recycle = tmp_path / "recycle"
+        recycle.mkdir()
+        other = tmp_path / "recycle-extra"
+        other.mkdir()
+        mgr = self._make_mgr(tmp_path, recycle_bin=str(recycle))
+        assert mgr.is_recycle_bin_path(str(other / "movie.mkv")) is False
