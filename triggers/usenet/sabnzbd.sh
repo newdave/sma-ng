@@ -28,7 +28,7 @@ BYPASS_CATS="${SMA_BYPASS_CATS:-bypass}"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-log()  { echo "[sabnzbd_post_process] $*" >&2; }
+log()  { echo "[sabnzbd] $*" >&2; }
 info() { log "INFO: $*"; }
 err()  { log "ERROR: $*"; }
 

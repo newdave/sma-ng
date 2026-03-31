@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# SMA-NG qBittorrent Post-Processing Script
+# SMA-NG uTorrent Post-Processing Script
 #
 # Submits conversion jobs to the SMA-NG daemon webhook on torrent completion.
 #
-# Configure in qBittorrent: Tools → Options → Downloads → Run external program on torrent completion:
-#   /path/to/qBittorrentPostProcess.sh "%L" "%T" "%R" "%F" "%N" "%I"
-#   Where: %L = category/label, %T = tracker, %R = root path, %F = content path,
-#          %N = torrent name, %I = info hash
+# Configure in uTorrent: Preferences → Advanced → Run program → On torrent completion:
+#   /path/to/uTorrentPostProcess.sh "%L" "%T" "%D" "%K" "%F" "%I" "%N"
+#   Where: %L = label, %T = tracker, %D = directory, %K = single|multi,
+#          %F = filename (single-file torrents), %I = info hash, %N = torrent name
 #
 # Configure daemon connection via environment variables:
 #   SMA_DAEMON_HOST     Daemon host (default: 127.0.0.1)
@@ -23,7 +23,7 @@ BYPASS_LABELS="${SMA_BYPASS_LABELS:-bypass}"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-log()  { echo "[qbittorrent_post_process] $*" >&2; }
+log()  { echo "[utorrent] $*" >&2; }
 info() { log "INFO: $*"; }
 err()  { log "ERROR: $*"; }
 
@@ -73,32 +73,27 @@ is_bypassed() {
 }
 
 # ── argument parsing ──────────────────────────────────────────────────────────
-# Expected: label tracker root_path content_path torrent_name info_hash
+# Expected: label tracker directory kind filename info_hash [name]
 
-info "qBittorrent post-processing started."
+info "uTorrent post-processing started."
 
-if [[ $# -lt 5 ]]; then
-    err "Not enough arguments. Expected: label tracker root_path [content_path] torrent_name info_hash"
+if [[ $# -lt 6 ]]; then
+    err "Not enough arguments. Expected: label tracker directory kind filename info_hash [name]"
     exit 1
 fi
 
 LABEL="$1"
 # $2 = tracker (unused)
-if [[ $# -ge 6 ]]; then
-    ROOT_PATH="$3"
-    CONTENT_PATH="$4"
-    TORRENT_NAME="$5"
-    INFO_HASH="$6"
-else
-    ROOT_PATH="$3"
-    CONTENT_PATH="$3"
-    TORRENT_NAME="$4"
-    INFO_HASH="$5"
-fi
+DIRECTORY="$3"
+KIND="${4,,}"
+FILENAME="$5"
+INFO_HASH="$6"
+TORRENT_NAME="${7:-$INFO_HASH}"
 
-info "Label:        ${LABEL}"
-info "Content path: ${CONTENT_PATH}"
-info "Torrent:      ${TORRENT_NAME} (${INFO_HASH})"
+info "Label:   ${LABEL}"
+info "Path:    ${DIRECTORY}"
+info "Kind:    ${KIND}"
+info "Torrent: ${TORRENT_NAME} (${INFO_HASH})"
 
 # ── bypass check ──────────────────────────────────────────────────────────────
 
@@ -109,10 +104,17 @@ fi
 
 # ── submit path ───────────────────────────────────────────────────────────────
 
-COUNT=$(submit_path "$CONTENT_PATH")
+# Single-file torrents provide the filename directly; multi-file use the directory
+if [[ "$KIND" == "single" && -n "$FILENAME" ]]; then
+    TARGET="${DIRECTORY%/}/${FILENAME}"
+else
+    TARGET="$DIRECTORY"
+fi
+
+COUNT=$(submit_path "$TARGET")
 
 if [[ "$COUNT" -eq 0 ]]; then
-    err "No files submitted from: ${CONTENT_PATH}"
+    err "No files submitted from: ${TARGET}"
     exit 1
 fi
 
