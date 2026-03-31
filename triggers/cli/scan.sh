@@ -30,6 +30,23 @@
 
 set -euo pipefail
 
+# Auto-load daemon.env if SMA_DAEMON_API_KEY is not already set
+if [[ -z "${SMA_DAEMON_API_KEY:-}" ]]; then
+    for _env in \
+        "${SMA_INSTALL_DIR:-/opt/sma}/config/daemon.env" \
+        "$(dirname "$(dirname "$(dirname "$(realpath "$0")")")")/config/daemon.env"
+    do
+        if [[ -f "$_env" ]]; then
+            set +u
+            # shellcheck source=/dev/null
+            . "$_env"
+            set -u
+            break
+        fi
+    done
+    unset _env
+fi
+
 SMA_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
 SMA_PORT="${SMA_DAEMON_PORT:-8585}"
 SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
