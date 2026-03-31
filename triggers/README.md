@@ -8,6 +8,8 @@ the daemon webhook for conversion.
 
 ```text
 triggers/
+  cli/
+    scan.sh         — Manual CLI trigger for a single file or directory
   media_managers/
     sonarr.sh       — Sonarr On Import / On Upgrade
     radarr.sh       — Radarr On Import / On Upgrade
@@ -29,6 +31,51 @@ All scripts read daemon connection settings from environment variables:
 | `SMA_DAEMON_HOST` | `127.0.0.1` | Daemon hostname or IP |
 | `SMA_DAEMON_PORT` | `8585` | Daemon port |
 | `SMA_DAEMON_API_KEY` | _(none)_ | API key if authentication is enabled |
+
+---
+
+## CLI
+
+### `cli/scan.sh`
+
+Submit a file or directory for conversion from the command line.
+
+```bash
+# Submit and exit immediately (prints job_id to stdout)
+triggers/cli/scan.sh /media/movies/film.mkv
+
+# Submit and wait for completion
+triggers/cli/scan.sh --wait /media/movies/film.mkv
+
+# Provide TMDB ID
+triggers/cli/scan.sh --wait --tmdb 603 /media/movies/film.mkv
+
+# Provide TVDB ID with season/episode
+triggers/cli/scan.sh --wait --tvdb 73871 -s 3 -e 10 /media/tv/show/ep.mkv
+
+# Override config
+triggers/cli/scan.sh --wait --config /etc/sma/4k.ini /media/4k/film.mkv
+
+# Directory — queues all matching files in the tree
+triggers/cli/scan.sh --wait /media/tv/show/season1/
+```
+
+**Options:**
+
+| Flag | Description |
+| --- | --- |
+| `-w`, `--wait` | Block until the job completes (exit 0 on success, non-zero on failure) |
+| `-c`, `--config PATH` | Override autoProcess.ini for this job |
+| `-a`, `--args ARGS` | Pass arbitrary extra args to manual.py (quoted string) |
+| `--tmdb ID` | Shorthand for `--args "-tmdb ID"` |
+| `--tvdb ID` | Shorthand for `--args "-tvdb ID"` |
+| `-s`, `--season N` | Season number (used with `--tvdb`) |
+| `-e`, `--episode N` | Episode number (used with `--tvdb`) |
+| `-t`, `--timeout N` | Max seconds to wait (default: 0 = unlimited) |
+| `-i`, `--interval N` | Polling interval in seconds (default: 5) |
+
+Without `--wait`, the script prints the job ID and exits immediately, making it
+suitable for fire-and-forget or scripted batch submission.
 
 ---
 
