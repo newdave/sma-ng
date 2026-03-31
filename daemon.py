@@ -20,6 +20,7 @@ Usage:
 """
 
 import argparse
+import configparser
 import json
 import logging
 import os
@@ -1196,6 +1197,24 @@ class PathConfigManager:
             configs.add(entry["config"])
         return list(configs)
 
+    def get_recycle_bin(self, config_path):
+        """Return the recycle-bin path from an autoProcess.ini, or None."""
+        try:
+            cp = configparser.ConfigParser()
+            cp.read(config_path)
+            val = cp.get("Converter", "recycle-bin", fallback="").strip()
+            return os.path.abspath(val) if val else None
+        except Exception:
+            return None
+
+    def is_recycle_bin_path(self, path):
+        """Return True if path is inside any configured recycle-bin directory."""
+        for config_path in self.get_all_configs():
+            recycle_bin = self.get_recycle_bin(config_path)
+            if recycle_bin and (path == recycle_bin or path.startswith(recycle_bin + os.sep)):
+                return True
+        return False
+
 
 class ConversionWorker(threading.Thread):
     """Background worker thread that processes conversion jobs from the database."""
@@ -1860,6 +1879,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
             path = os.path.abspath(path)
             if not os.path.exists(path):
                 self.send_json_response(400, {"error": "Path does not exist", "path": path})
+                return
+
+            if self.server.path_config_manager.is_recycle_bin_path(path):
+                self.server.logger.warning("Rejected recycle-bin path: %s" % path)
+                self.send_json_response(400, {"error": "Path is inside a recycle-bin directory", "path": path})
                 return
 
             if os.path.isdir(path):
