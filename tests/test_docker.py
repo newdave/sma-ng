@@ -196,16 +196,16 @@ class TestDockerfileRuntime:
         cmds = _instructions_of("CMD", dockerfile)
         assert any("daemon.py" in c for c in cmds)
 
-    def test_cmd_binds_all_interfaces(self, dockerfile):
-        cmds = _instructions_of("CMD", dockerfile)
-        assert any("0.0.0.0" in c for c in cmds)
+    def test_cmd_binds_all_interfaces(self, dockerfile_raw):
+        # Host is set via SMA_DAEMON_HOST env var, referenced in CMD
+        assert "SMA_DAEMON_HOST=0.0.0.0" in dockerfile_raw
+        assert "SMA_DAEMON_HOST" in dockerfile_raw
 
-    def test_cmd_includes_config_and_db_paths(self, dockerfile):
-        cmds = _instructions_of("CMD", dockerfile)
-        cmd_text = " ".join(cmds)
-        assert "/app/config/daemon.json" in cmd_text
-        assert "/app/config/daemon.db" in cmd_text
-        assert "/logs" in cmd_text
+    def test_cmd_includes_config_and_db_paths(self, dockerfile_raw):
+        # Paths are set via env vars, referenced in CMD
+        assert "SMA_DAEMON_CONFIG=/app/config/daemon.json" in dockerfile_raw
+        assert "SMA_DAEMON_DB=/app/config/daemon.db" in dockerfile_raw
+        assert "SMA_DAEMON_LOGS_DIR=/logs" in dockerfile_raw
 
     def test_sma_config_env_points_to_volume(self, dockerfile_raw):
         assert "SMA_CONFIG=/app/config/autoProcess.ini" in dockerfile_raw

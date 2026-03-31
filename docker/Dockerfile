@@ -149,10 +149,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     VIRTUAL_ENV=/venv \
     PATH="/venv/bin:/usr/local/bin:$PATH" \
-    # Default SMA paths — override via environment or volume mounts
+    # SMA paths — override via environment or volume mounts
     SMA_CONFIG=/app/config/autoProcess.ini \
     SMA_FFMPEG=/usr/local/bin/ffmpeg \
-    SMA_FFPROBE=/usr/local/bin/ffprobe
+    SMA_FFPROBE=/usr/local/bin/ffprobe \
+    # Daemon runtime defaults — override any of these with -e / env_file
+    SMA_DAEMON_HOST=0.0.0.0 \
+    SMA_DAEMON_PORT=8585 \
+    SMA_DAEMON_WORKERS=4 \
+    SMA_DAEMON_CONFIG=/app/config/daemon.json \
+    SMA_DAEMON_DB=/app/config/daemon.db \
+    SMA_DAEMON_LOGS_DIR=/logs
 
 # GPU acceleration runtime libraries:
 #   libva2        — VAAPI dispatcher
@@ -224,11 +231,13 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8585/health')" || exit 1
 
 # tini as PID 1 → entrypoint seeds /app/config → daemon starts
+# All daemon options are driven by environment variables so they can be
+# overridden at runtime with -e / --env-file without rebuilding the image.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
-CMD ["python3", "daemon.py", \
-     "--host", "0.0.0.0", \
-     "--port", "8585", \
-     "--workers", "1", \
-     "--daemon-config", "/app/config/daemon.json", \
-     "--db", "/app/config/daemon.db", \
-     "--logs-dir", "/logs"]
+CMD python3 daemon.py \
+      --host      "${SMA_DAEMON_HOST}" \
+      --port      "${SMA_DAEMON_PORT}" \
+      --workers   "${SMA_DAEMON_WORKERS}" \
+      --daemon-config "${SMA_DAEMON_CONFIG}" \
+      --db        "${SMA_DAEMON_DB}" \
+      --logs-dir  "${SMA_DAEMON_LOGS_DIR}"

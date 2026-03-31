@@ -368,8 +368,10 @@ class Metadata:
 
         if self.mediatype == MediaType.Movie:
             video["\xa9nam"] = self.title  # Movie title
-            video["desc"] = self.tagline  # Short description
-            video["ldes"] = self.description  # Long description
+            if self.tagline:
+                video["desc"] = self.tagline  # Short description
+            if self.description:
+                video["ldes"] = self.description  # Long description
             if self.date is not None:
                 video["\xa9day"] = self.date  # Year
             video["stik"] = [9]  # Movie iTunes category
@@ -377,8 +379,10 @@ class Metadata:
             video["tvsh"] = self.showname  # TV show title
             video["\xa9nam"] = self.title  # Video title
             video["tven"] = self.title  # Episode title
-            video["desc"] = self.shortDescription  # Short description
-            video["ldes"] = self.description  # Long description
+            if self.shortDescription:
+                video["desc"] = self.shortDescription  # Short description
+            if self.description:
+                video["ldes"] = self.description  # Long description
             network = [x["name"] for x in self.network]
             video["tvnn"] = network  # Network
             if self.date is not None:
