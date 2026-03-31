@@ -1707,116 +1707,105 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     candidates.append(os.path.join(root, fname))
         return sorted(candidates)
 
+    def _parse_webhook_body(self):
+        """Parse request body into (path, extra_args, config_override).
+
+        Returns (None, [], None) with an error response already sent on failure.
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self.send_json_response(400, {"error": "Empty request body"})
+            return None, [], None
+
+        body = self.rfile.read(content_length).decode("utf-8").strip()
+        path = None
+        extra_args = []
+        config_override = None
+
+        if "application/json" in self.headers.get("Content-Type", ""):
+            try:
+                data = json.loads(body)
+                if isinstance(data, dict):
+                    path = data.get("path") or data.get("file") or data.get("input")
+                    extra_args = data.get("args", [])
+                    config_override = data.get("config")
+                    if isinstance(extra_args, str):
+                        extra_args = extra_args.split()
+                elif isinstance(data, str):
+                    path = data
+            except json.JSONDecodeError:
+                path = body
+        else:
+            path = body
+
+        if not path:
+            self.send_json_response(400, {"error": "No path provided"})
+            return None, [], None
+
+        return path, extra_args, config_override
+
+    def _resolve_config(self, path, config_override):
+        """Return the config file to use for path, respecting any override."""
+        if config_override and os.path.exists(config_override):
+            return config_override
+        return self.server.path_config_manager.get_config_for_path(path)
+
+    def _queue_directory(self, path, extra_args, config_override):
+        """Expand directory to media files, queue each, respond."""
+        files = self._collect_media_files(path)
+        if not files:
+            self.send_json_response(200, {"status": "empty", "path": path, "message": "No media files found in directory"})
+            return
+
+        queued, duplicates = [], []
+        for filepath in files:
+            resolved_config = self._resolve_config(filepath, config_override)
+            job_id = self.server.job_db.add_job(filepath, resolved_config, extra_args)
+            if job_id is None:
+                existing = self.server.job_db.find_active_job(filepath)
+                duplicates.append({"path": filepath, "job_id": existing["id"] if existing else None})
+            else:
+                queued.append({"job_id": job_id, "path": filepath, "config": resolved_config})
+
+        if queued:
+            self.server.notify_workers()
+            self.server.logger.info("Directory %s: queued %d files, %d duplicates" % (path, len(queued), len(duplicates)))
+
+        self.send_json_response(202, {"status": "queued", "directory": path, "queued": queued, "duplicates": duplicates, "queued_count": len(queued), "duplicate_count": len(duplicates)})
+
+    def _queue_file(self, path, extra_args, config_override):
+        """Queue a single file job and respond."""
+        resolved_config = self._resolve_config(path, config_override)
+        job_id = self.server.job_db.add_job(path, resolved_config, extra_args)
+
+        if job_id is None:
+            existing = self.server.job_db.find_active_job(path)
+            self.server.logger.info("Duplicate job submission for: %s" % path)
+            self.send_json_response(200, {"status": "duplicate", "job_id": existing["id"] if existing else None, "path": path, "config": resolved_config})
+            return
+
+        self.server.notify_workers()
+        log_file = self.server.config_log_manager.get_log_file(resolved_config)
+        config_busy = self.server.config_lock_manager.is_locked(resolved_config)
+        pending = self.server.job_db.pending_count_for_config(resolved_config)
+        self.server.logger.info("Queued job %d: %s (config: %s)" % (job_id, path, resolved_config))
+        self.send_json_response(202, {"status": "queued", "job_id": job_id, "path": path, "config": resolved_config, "log_file": log_file, "config_busy": config_busy, "pending_jobs": pending})
+
     def _handle_webhook(self):
         try:
-            content_length = int(self.headers.get("Content-Length", 0))
-            if content_length == 0:
-                self.send_json_response(400, {"error": "Empty request body"})
-                return
-
-            body = self.rfile.read(content_length).decode("utf-8").strip()
-
-            path = None
-            extra_args = []
-            config_override = None
-
-            content_type = self.headers.get("Content-Type", "")
-
-            if "application/json" in content_type:
-                try:
-                    data = json.loads(body)
-                    if isinstance(data, dict):
-                        path = data.get("path") or data.get("file") or data.get("input")
-                        extra_args = data.get("args", [])
-                        config_override = data.get("config")
-                        if isinstance(extra_args, str):
-                            extra_args = extra_args.split()
-                    elif isinstance(data, str):
-                        path = data
-                except json.JSONDecodeError:
-                    path = body
-            else:
-                path = body
-
-            if not path:
-                self.send_json_response(400, {"error": "No path provided"})
+            path, extra_args, config_override = self._parse_webhook_body()
+            if path is None:
                 return
 
             path = os.path.abspath(path)
-
             if not os.path.exists(path):
                 self.send_json_response(400, {"error": "Path does not exist", "path": path})
                 return
 
-            # --- Directory: expand to individual media files ---
             if os.path.isdir(path):
-                files = self._collect_media_files(path)
-                if not files:
-                    self.send_json_response(200, {"status": "empty", "path": path, "message": "No media files found in directory"})
-                    return
-
-                queued = []
-                duplicates = []
-                for filepath in files:
-                    resolved_config = config_override if (config_override and os.path.exists(config_override)) else self.server.path_config_manager.get_config_for_path(filepath)
-                    job_id = self.server.job_db.add_job(filepath, resolved_config, extra_args)
-                    if job_id is None:
-                        existing = self.server.job_db.find_active_job(filepath)
-                        duplicates.append({"path": filepath, "job_id": existing["id"] if existing else None})
-                    else:
-                        queued.append({"job_id": job_id, "path": filepath, "config": resolved_config})
-
-                if queued:
-                    self.server.notify_workers()
-                    self.server.logger.info("Directory %s: queued %d files, %d duplicates" % (path, len(queued), len(duplicates)))
-
-                self.send_json_response(
-                    202,
-                    {
-                        "status": "queued",
-                        "directory": path,
-                        "queued": queued,
-                        "duplicates": duplicates,
-                        "queued_count": len(queued),
-                        "duplicate_count": len(duplicates),
-                    },
-                )
-                return
-
-            # --- Single file ---
-            # Determine config
-            if config_override and os.path.exists(config_override):
-                resolved_config = config_override
+                self._queue_directory(path, extra_args, config_override)
             else:
-                resolved_config = self.server.path_config_manager.get_config_for_path(path)
-
-            # Add job to database (returns None if a duplicate is already pending/running)
-            job_id = self.server.job_db.add_job(path, resolved_config, extra_args)
-
-            if job_id is None:
-                existing = self.server.job_db.find_active_job(path)
-                self.server.logger.info("Duplicate job submission for: %s" % path)
-                self.send_json_response(
-                    200,
-                    {
-                        "status": "duplicate",
-                        "job_id": existing["id"] if existing else None,
-                        "path": path,
-                        "config": resolved_config,
-                    },
-                )
-                return
-
-            # Signal workers that a new job is available
-            self.server.notify_workers()
-
-            log_file = self.server.config_log_manager.get_log_file(resolved_config)
-            config_busy = self.server.config_lock_manager.is_locked(resolved_config)
-            pending = self.server.job_db.pending_count_for_config(resolved_config)
-
-            self.server.logger.info("Queued job %d: %s (config: %s)" % (job_id, path, resolved_config))
-
-            self.send_json_response(202, {"status": "queued", "job_id": job_id, "path": path, "config": resolved_config, "log_file": log_file, "config_busy": config_busy, "pending_jobs": pending})
+                self._queue_file(path, extra_args, config_override)
 
         except Exception as e:
             self.server.logger.exception("Error handling request: %s" % e)
