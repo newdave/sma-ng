@@ -198,12 +198,9 @@ COPY --from=ffmpeg-builder /usr/local/bin/ffprobe /usr/local/bin/ffprobe
 # Copy Python venv from builder
 COPY --from=python-builder /venv /venv
 
-# Create non-root user
-# groupadd -f: no error if GID already exists
-# userdel: remove any existing user claiming UID to avoid duplicate-UID conflicts
+# Ensure a user/group with the target UID/GID exists
 RUN groupadd -f -g ${GID} sma \
-    && (getent passwd ${UID} | cut -d: -f1 | xargs -r userdel) \
-    && useradd -u ${UID} -g ${GID} -s /bin/sh -m sma
+    && id -u ${UID} &>/dev/null || useradd -u ${UID} -g ${GID} -s /bin/sh -m sma
 
 # Copy application code
 WORKDIR /app
