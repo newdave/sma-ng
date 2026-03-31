@@ -1,3 +1,11 @@
+"""
+Core media processing pipeline for SMA-NG.
+
+Provides the MediaProcessor class which orchestrates the full conversion
+workflow: source validation, FFmpeg option generation, conversion, metadata
+tagging, file placement, and post-processing notifications.
+"""
+
 import json
 import logging
 import os
@@ -48,6 +56,12 @@ class MediaProcessor:
     }
 
     def __init__(self, settings, logger=None):
+        """
+        Initialize a MediaProcessor with the given settings.
+
+        Sets up the FFmpeg converter and prepares internal state. Does not
+        begin processing until process() or fullprocess() is called.
+        """
         self.log = logger or logging.getLogger(__name__)
         self.settings = settings
         self.converter = Converter(settings.ffmpeg, settings.ffprobe)
@@ -56,6 +70,15 @@ class MediaProcessor:
     def fullprocess(
         self, inputfile, mediatype, reportProgress=False, original=None, info=None, tmdbid=None, tvdbid=None, imdbid=None, season=None, episode=None, language=None, tagdata=None, post=True
     ):
+        """
+        Run the complete processing pipeline for a single input file.
+
+        Validates the source, fetches TMDB metadata, runs conversion, tags the
+        output, relocates the moov atom, renames the file, copies/moves to
+        destination directories, and triggers post-processing notifications.
+
+        Returns a list of output file paths on success, or False on failure.
+        """
         try:
             info = self.isValidSource(inputfile, tagdata=tagdata)
             if info:
@@ -140,6 +163,12 @@ class MediaProcessor:
         return False
 
     def post(self, output_files, mediatype, tvdbid=None, tmdbid=None, imdbid=None, season=None, episode=None):
+        """
+        Run post-processing steps after a successful conversion.
+
+        Executes any configured post-process scripts and triggers a Plex
+        library refresh if enabled in settings.
+        """
         if self.settings.postprocess:
             # Run any post process scripts
             postprocessor = PostProcessor(output_files, self.log, wait=self.settings.waitpostprocess)
@@ -157,6 +186,14 @@ class MediaProcessor:
 
     # Process a file from start to finish, with checking to make sure formats are compatible with selected settings
     def process(self, inputfile, reportProgress=False, original=None, info=None, progressOutput=None, tagdata=None):
+        """
+        Build FFmpeg options for the input file and run the conversion.
+
+        Generates stream options via generateOptions(), invokes FFmpeg, handles
+        recycle bin and original file deletion, and returns a dict containing
+        input/output paths, stream options, external subtitle paths, and video
+        dimensions. Returns None on failure.
+        """
         self.log.debug("Process started.")
 
         delete = self.settings.delete
@@ -294,6 +331,7 @@ class MediaProcessor:
 
     # Wipe disposition data based on settings
     def cleanDispositions(self, info):
+        """Remove dispositions listed in sanitize-disposition settings from all streams."""
         for stream in info.streams:
             for dispo in self.settings.sanitize_disposition:
                 self.log.debug("Setting %s to False for stream %d [sanitize-disposition]." % (dispo, stream.index))
@@ -301,6 +339,13 @@ class MediaProcessor:
 
     # Get title for video stream based on disposition
     def videoStreamTitle(self, stream, options, hdr=False, tagdata=None):
+        """
+        Return a human-readable title for a video stream.
+
+        Derives a label such as "4K HDR", "FHD", "HD", or "SD" from the
+        stream's resolution. Calls the custom streamTitle hook first if
+        defined, or preserves the original title if keep-titles is enabled.
+        """
         width = options.get("width", 0)
         height = options.get("height", 0)
         if not width and not height:
@@ -337,6 +382,13 @@ class MediaProcessor:
 
     # Get title for audio stream based on disposition
     def audioStreamTitle(self, stream, options, tagdata=None):
+        """
+        Return a human-readable title for an audio stream.
+
+        Derives a label such as "Stereo", "5.1 Channel Atmos", or "Mono" from
+        channel count and disposition. Calls the custom streamTitle hook first
+        if defined, or preserves the original title if keep-titles is enabled.
+        """
         if streamTitle:
             try:
                 customTitle = streamTitle(self, stream, options, tagdata=tagdata)
@@ -369,6 +421,14 @@ class MediaProcessor:
 
     # Get title for subtitle stream based on disposition
     def subtitleStreamTitle(self, stream, options, imageBased=False, path=None, tagdata=None):
+        """
+        Return a human-readable title for a subtitle stream.
+
+        Builds a label from the stream's disposition flags (e.g. "Forced",
+        "SDH", "Hearing Impaired") or falls back to "Full". Calls the custom
+        streamTitle hook first if defined, or preserves the original title if
+        keep-titles is enabled.
+        """
         if streamTitle:
             try:
                 customTitle = streamTitle(self, stream, options, imageBased=imageBased, path=path, tagdata=None)
@@ -391,6 +451,14 @@ class MediaProcessor:
 
     # Determine if a file can be read by FFPROBE
     def isValidSource(self, inputfile, tagdata=None):
+        """
+        Check whether the input file is a valid media source FFprobe can read.
+
+        Rejects files with blacklisted extensions, files below the minimum size
+        threshold, files with no video or audio streams, and files that fail the
+        custom validation hook. Returns a MediaInfo object on success, or None
+        on failure.
+        """
         try:
             extension = self.parseFile(inputfile)[2]
             if extension in self.settings.ignored_extensions:
@@ -427,10 +495,18 @@ class MediaProcessor:
 
     # Determine if a sub is an Atmos track
     def isAudioStreamAtmos(self, stream):
+        """Return True if the audio stream profile indicates Dolby Atmos."""
         return stream.profile and "atmos" in stream.profile.lower()
 
     # Determine if a file can be read by FFPROBE and is a subtitle only
     def isValidSubtitleSource(self, inputfile):
+        """
+        Check whether the input file is a valid standalone subtitle source.
+
+        Rejects files with bad subtitle extensions or ignored extensions, files
+        that contain video or audio, and files with no subtitle streams. Returns
+        a MediaInfo object on success, or None on failure.
+        """
         _, _, extension = self.parseFile(inputfile)
         if extension in bad_sub_extensions or extension in self.settings.ignored_extensions:
             return None
@@ -448,6 +524,13 @@ class MediaProcessor:
 
     # Parse filename of external subtitle file and set appropriate disposition and language information
     def processExternalSub(self, valid_external_sub, inputfile):
+        """
+        Parse the filename of an external subtitle and infer its language and dispositions.
+
+        Extracts language codes and disposition flags (e.g. forced, SDH) from
+        the filename suffix, updates the subtitle stream metadata, and returns
+        the updated MediaInfo object.
+        """
         if not valid_external_sub:
             return valid_external_sub
         _, filename, _ = self.parseFile(inputfile)
@@ -472,6 +555,12 @@ class MediaProcessor:
 
     # Default audio language based on encoder options
     def getDefaultAudioLanguage(self, options):
+        """
+        Return the language code of the default audio stream from the options dict.
+
+        Accepts either a dict (output of generateOptions) or a list of
+        MediaStreamInfo objects. Returns None if no default stream is found.
+        """
         if isinstance(options, dict):
             for a in options.get("audio", []):
                 if "+default" in a.get("disposition", "").lower():
@@ -486,6 +575,12 @@ class MediaProcessor:
 
     # Get values for width and height to be passed to the tagging classes for proper HD tags
     def getDimensions(self, inputfile):
+        """
+        Return the pixel width and height of the first video stream in the file.
+
+        Returns a dict with keys 'x' (width) and 'y' (height), defaulting to 0
+        if the file cannot be probed.
+        """
         info = self.converter.probe(inputfile)
 
         if info:
@@ -498,6 +593,12 @@ class MediaProcessor:
 
     # Estimate the video bitrate
     def estimateVideoBitrate(self, info, baserate=64000, tolerance=0.95):
+        """
+        Estimate the video bitrate in kbps by subtracting audio from total bitrate.
+
+        Falls back to the detected video stream bitrate if arithmetic fails.
+        Returns None if no bitrate data is available.
+        """
         # attempt to return the detected video bitrate, if applicable
         min_video_bitrate = (info.video.bitrate / 1000) if info.video and info.video.bitrate else None
 
@@ -521,6 +622,12 @@ class MediaProcessor:
 
     # Generate a JSON formatter dataset with the input and output information and ffmpeg command for a theoretical conversion
     def jsonDump(self, inputfile, original=None, tagdata=None):
+        """
+        Return a JSON string describing what a conversion would produce without running it.
+
+        Includes input stream data, generated FFmpeg options, and the full
+        FFmpeg command line. Used by the -oo (output-options) CLI flag.
+        """
         dump = {}
         dump["input"], info = self.generateSourceDict(inputfile, tagdata)
         dump["output"], dump["preopts"], dump["postopts"], dump["ripsubopts"], dump["downloadedsubs"] = self.generateOptions(inputfile, info=info, original=original, tagdata=tagdata)
@@ -552,6 +659,12 @@ class MediaProcessor:
 
     # Generate a dict of data about a source file
     def generateSourceDict(self, inputfile, tagdata=None):
+        """
+        Build a serializable dict describing the source file's streams and format.
+
+        Calls isValidSource() and returns a tuple of (source_dict, MediaInfo).
+        Used by jsonDump() to populate the input section of the options preview.
+        """
         output = {}
         _, _, input_extension = self.parseFile(inputfile)
         output["extension"] = input_extension
@@ -565,6 +678,14 @@ class MediaProcessor:
 
     # Pass over audio and subtitle streams to ensure the language properties are safe, return any adjustments made to SWL/AWL
     def safeLanguage(self, info, tagdata=None):
+        """
+        Normalize stream language codes and expand allowed language lists as needed.
+
+        Standardizes undefined language tags, optionally appends the original
+        content language from TMDB metadata, and relaxes audio/subtitle language
+        whitelists if no streams match. Returns the (possibly modified) awl and
+        swl lists.
+        """
         awl = self.settings.awl
         original_language = None
         if self.settings.audio_original_language and tagdata:
@@ -607,6 +728,12 @@ class MediaProcessor:
 
     # Check and see if clues about the disposition are in the title
     def titleDispositionCheck(self, info):
+        """
+        Set disposition flags on streams whose title metadata contains known keywords.
+
+        Maps title keywords like 'comment', 'hearing', 'sdh', and 'forced' to
+        their corresponding FFmpeg disposition flags on each stream.
+        """
         for stream in info.streams:
             title = stream.metadata.get("title", "").lower()
             for k, flag in self._TITLE_DISPO_MAP.items():
@@ -616,6 +743,14 @@ class MediaProcessor:
 
     # Get source audio tracks that meet criteria for being the same based on codec combination, language, and dispostion
     def mapStreamCombinations(self, audiostreams):
+        """
+        Identify groups of audio streams that are likely duplicates.
+
+        Checks stream-codec-combinations settings to find sequences of streams
+        with the same codec pattern, language, and dispositions. Returns a list
+        of index groups, where each group is a list of stream indexes that are
+        considered copies.
+        """
         combinations = []
         for combo in self.settings.stream_codec_combinations:
             indexes = self.sublistIndexes([x.codec for x in audiostreams], combo)
@@ -635,6 +770,13 @@ class MediaProcessor:
 
     # Iterate through generated options and remove potential duplicate streams based on mapped combinations
     def purgeDuplicateStreams(self, combinations, options, info, acodecs, uacodecs):
+        """
+        Remove duplicate audio streams from the options list.
+
+        For each stream combination identified by mapStreamCombinations(),
+        keeps the best stream (preferring copy, then highest bitrate, then
+        default) and removes the rest. Returns True if any streams were purged.
+        """
         purge = []
         for combo in combinations:
             filtered_options = [x for x in options if x["map"] in combo]
@@ -671,12 +813,14 @@ class MediaProcessor:
 
     # Sorter used by purgeDuplicateStreams
     def duplicateStreamSort(self, options, info):
+        """Sort stream options in-place: copy first, then by default, then by bitrate descending."""
         options.sort(key=lambda x: x["bitrate"], reverse=True)
         options.sort(key=lambda x: self.getSourceStream(x["map"], info).disposition["default"], reverse=True)
         options.sort(key=lambda x: x["codec"] == "copy", reverse=True)
 
     # Get indexes for sublists
     def sublistIndexes(self, x, y):
+        """Return all starting indexes at which sublist y appears within list x."""
         indexes = []
         occ = [i for i, a in enumerate(x) if a == y[0]]
         for b in occ:
@@ -686,6 +830,13 @@ class MediaProcessor:
 
     # Ensure ffprobe variant of codec is present
     def ffprobeSafeCodecs(self, codecs):
+        """
+        Ensure the FFprobe codec name is included alongside the FFmpeg encoder name.
+
+        Some codecs have different names in ffprobe vs ffmpeg (e.g. 'h264' vs
+        'libx264'). This adds the ffprobe name to the list so remux detection
+        works correctly. Returns the (possibly extended) codec list.
+        """
         if codecs:
             ffpcodec = Converter.codec_name_to_ffprobe_codec_name(codecs[0])
             if ffpcodec and ffpcodec not in codecs:
@@ -695,6 +846,16 @@ class MediaProcessor:
 
     # Generate a dict of options to be passed to FFMPEG based on selected settings and the source file parameters and streams
     def generateOptions(self, inputfile, info=None, original=None, tagdata=None):
+        """
+        Build the full FFmpeg options dict for converting the input file.
+
+        Analyses all video, audio, and subtitle streams against configured
+        settings (codecs, languages, bitrates, dispositions, HDR, hardware
+        acceleration) and returns a 5-tuple of:
+        (options, preopts, postopts, ripsubopts, downloaded_subs)
+
+        Returns (None, None, None, None, None) if the file cannot be probed.
+        """
         # Get path information from the input file
         sources = [inputfile]
         ripsubopts = []
@@ -1498,10 +1659,18 @@ class MediaProcessor:
 
     # Determine if a stream has a valid language for the main option generator
     def validLanguage(self, language, whitelist, blocked=[]):
+        """Return True if language passes the whitelist and is not in the blocked list."""
         return (len(whitelist) < 1 or language in whitelist) and language not in blocked
 
     # Complex valid disposition checker supporting unique dispositions, language combinations etc for the main option generator
     def validDisposition(self, stream, ignored, unique=False, language="", existing=[], append=True):
+        """
+        Check whether a stream's dispositions allow it to be included in the output.
+
+        Rejects the stream if any of its active dispositions are in the ignored list.
+        When unique=True, also rejects the stream if a stream with the same language
+        and disposition profile has already been seen (tracked via the existing list).
+        """
         truedispositions = [x for x in stream.disposition if stream.disposition[x]]
         for dispo in truedispositions:
             if BaseCodec.DISPO_ALTS.get(dispo, dispo) in ignored:
@@ -1520,6 +1689,7 @@ class MediaProcessor:
 
     # Help method to convert dispo string back into a dict
     def dispoStringToDict(self, dispostr):
+        """Parse a disposition string like '+default-forced' into a dict of {flag: bool}."""
         dispo = {}
         if dispostr:
             d = re.findall("([+-][a-zA-Z_]*)", dispostr)
@@ -1529,6 +1699,7 @@ class MediaProcessor:
 
     # Simple disposition filter
     def checkDisposition(self, allowed, source):
+        """Return True if all disposition flags in allowed are set in the source dict."""
         for a in allowed:
             if not source.get(a):
                 return False
@@ -1536,6 +1707,14 @@ class MediaProcessor:
 
     # Hardware acceleration options now with bit depth safety checks
     def setAcceleration(self, video_codec, pix_fmt, codecs=[], pix_fmts=[]):
+        """
+        Build FFmpeg pre-options for hardware-accelerated decoding.
+
+        Selects the first configured hwaccel platform available in the current
+        FFmpeg build, optionally with a matching hardware decoder. Verifies bit
+        depth support before enabling a decoder. Returns a list of FFmpeg
+        argument strings to prepend before the input file.
+        """
         opts = []
         pix_fmts = pix_fmts or self.converter.ffmpeg.pix_fmts
         bit_depth = pix_fmts.get(pix_fmt, 0)
@@ -1596,6 +1775,14 @@ class MediaProcessor:
 
     # Using sorting and filtering to determine which audio track should be flagged as default, only one track will be selected
     def setDefaultAudioStream(self, audio_streams):
+        """
+        Ensure exactly one audio stream has the default disposition.
+
+        Prefers streams in the configured default audio language (adl). If none
+        are marked default in that language, promotes the first preferred-language
+        stream. Clears default flags from other languages and from extra streams
+        in the preferred language.
+        """
         if audio_streams:
             self.log.debug("Sorting audio streams for default audio stream designation.")
             preferred_language_audio_streams = [x for x in audio_streams if x.get("language") == self.settings.adl] if self.settings.adl else audio_streams
@@ -1652,6 +1839,12 @@ class MediaProcessor:
 
     # Ensure that at least one subtitle stream is default based on language data
     def setDefaultSubtitleStream(self, subtitle_settings):
+        """
+        Set the default disposition on the first subtitle stream in the preferred language.
+
+        Only acts when sforcedefault is enabled and no default subtitle stream
+        already exists in the output options.
+        """
         if len(subtitle_settings) > 0 and self.settings.sdl:
             if len([x for x in subtitle_settings if "+default" in (x.get("disposition") or "")]) < 1 and self.settings.sforcedefault:
                 default_stream = [x for x in subtitle_settings if x.get("language") == self.settings.sdl][0]
@@ -1670,6 +1863,7 @@ class MediaProcessor:
 
     # Returns the sorted source index from a map value, adjusted for stream-codec-combinations
     def getSourceIndexFromMap(self, m, info, combinations):
+        """Return the source stream list index for map value m, resolving combination groups."""
         m = self.minResolvedMap(m, combinations)
         source = next((s for s in info.streams if s.index == m), None)
         if source:
@@ -1678,6 +1872,7 @@ class MediaProcessor:
 
     # Returns a modified map value based on stream-codec-combinations used for sorting
     def minResolvedMap(self, m, combinations):
+        """Return the lowest stream index in the combination group containing m, or m itself."""
         combination = next((c for c in combinations if m in c), None)
         if combination:
             return min(combination)
@@ -1685,6 +1880,14 @@ class MediaProcessor:
 
     # Sort streams
     def sortStreams(self, streams, keys, languages, codecs, info, combinations=[], tagdata=None):
+        """
+        Sort a list of streams or option dicts by the given key sequence.
+
+        Keys are applied in order and may include codec, channels, language,
+        original-language, bitrate, map, ua, original, and disposition prefixes
+        (e.g. 'd.default'). Append '.a' or '.d' to a key to force ascending or
+        descending order. Returns the sorted list without modifying the original.
+        """
         DISPO_PREFIX = "d."
         ASCENDING_SUFFIX = ".a"
         DESCENDING_SUFFIX = ".d"
@@ -1754,6 +1957,14 @@ class MediaProcessor:
 
     # Generate filter string to burn subtitles
     def burnSubtitleFilter(self, inputfile, info, swl, valid_external_subs=None, tagdata=None):
+        """
+        Generate the FFmpeg -vf filter string for burning subtitles into the video.
+
+        Searches embedded subtitle streams first, then external subtitle files if
+        embed-subs is enabled. Applies burn-dispositions and burn-sorting settings
+        to select the best candidate. Returns a filter string like
+        "subtitles='path':si=0", or None if no valid subtitle is found.
+        """
         if self.settings.burn_subtitles:
             subtitle_streams = info.subtitle
             filtered_subtitle_streams = [x for x in subtitle_streams if self.validLanguage(x.metadata.get("language"), swl) or (self.settings.force_subtitle_defaults and x.disposition.get("default"))]
@@ -1813,6 +2024,14 @@ class MediaProcessor:
 
     # Scan for external subtitle files
     def scanForExternalSubs(self, inputfile, swl, valid_external_subs=None):
+        """
+        Scan the input file's directory for external subtitle files.
+
+        Identifies subtitle files whose names start with the input filename,
+        validates them with isValidSubtitleSource(), parses language and
+        disposition from the filename, and filters by the subtitle whitelist.
+        Returns a list of MediaInfo objects sorted by language preference.
+        """
         valid_external_subs = valid_external_subs or []
         input_dir, filename, _ = self.parseFile(inputfile)
         for dirName, _, fileList in os.walk(input_dir):
@@ -1842,6 +2061,7 @@ class MediaProcessor:
 
     # Process external subtitle file with CleanIt library
     def cleanExternalSub(self, path):
+        """Clean an external subtitle file using the CleanIt library, if enabled."""
         if self.settings.cleanit and cleanit:
             self.log.debug("Cleaning subtitle with path %s [subtitles.cleanit]." % (path))
             sub = cleanit.Subtitle(path)
@@ -1852,6 +2072,7 @@ class MediaProcessor:
 
     # FFSubsync
     def syncExternalSub(self, path, inputfile):
+        """Synchronize an external subtitle file to the audio using ffsubsync, if enabled."""
         if self.settings.ffsubsync and ffsubsync:
             self.log.debug("Syncing subtitle with path %s [subtitles.ffsubsync]." % (path))
             syncedsub = path + ".sync.srt"
@@ -1872,6 +2093,13 @@ class MediaProcessor:
     # Custom method to allow additional video data to be passed to subliminal for better subtitle accuracy
     @staticmethod
     def custom_scan_video(path, tagdata=None):
+        """
+        Create a subliminal Video object enriched with metadata from tagdata.
+
+        Overrides guessit-derived fields (title, season, episode) with data from
+        the Metadata object so subliminal searches for the correct episode or
+        movie. Returns a subliminal Video instance.
+        """
         # check for non-existing path
         if not os.path.exists(path):
             raise ValueError("Path does not exist")
@@ -1904,6 +2132,15 @@ class MediaProcessor:
 
     # Download subtitles using subliminal
     def downloadSubtitles(self, inputfile, existing_subtitle_streams, swl, original=None, tagdata=None):
+        """
+        Download subtitles for inputfile using the subliminal library.
+
+        Builds a set of target languages from the subtitle whitelist and the
+        default subtitle language, optionally downloads forced subtitles and/or
+        the best available subtitles, saves them next to the input file, and
+        returns a list of saved subtitle file paths. Returns an empty list if
+        subliminal is not available or downloads are disabled.
+        """
         if (self.settings.downloadsubs or self.settings.downloadforcedsubs) and subliminal and guessit and Language:
             languages = set()
             for alpha3 in swl:
@@ -2008,6 +2245,13 @@ class MediaProcessor:
 
     # Scan for external chapters file
     def scanForExternalMetadata(self, inputfile, suffix="metadata.txt"):
+        """
+        Scan the input file's directory for a metadata sidecar file.
+
+        Looks for a file in the same directory whose name starts with the input
+        filename and ends with the given suffix (default 'metadata.txt'). Returns
+        the full path to the sidecar file if found, or None if none exists.
+        """
         input_dir, filename, _ = self.parseFile(inputfile)
         for dirName, _, fileList in os.walk(input_dir):
             for fname in fileList:
@@ -2018,6 +2262,13 @@ class MediaProcessor:
 
     # Generic permission setter
     def setPermissions(self, path):
+        """
+        Apply chmod and chown to a file using values from settings.
+
+        Uses the chmod, uid, and gid values in settings.permissions. On Windows
+        (os.name == 'nt') the chown call is skipped. Logs an exception if
+        permissions cannot be applied but does not raise.
+        """
         try:
             if os.path.exists(path):
                 os.chmod(path, self.settings.permissions.get("chmod", int("0664", 8)))
@@ -2030,6 +2281,14 @@ class MediaProcessor:
 
     # Undo output dir
     def restoreFromOutput(self, inputfile, outputfile):
+        """
+        Move outputfile back from output_dir to the original input directory.
+
+        When output_dir is set and move-to is not configured, and the outputfile
+        resides inside output_dir, this method moves the file back alongside the
+        original input. Returns the new output path, or the original outputfile
+        path if the move fails or is not applicable.
+        """
         if self.settings.output_dir and not self.settings.moveto and os.path.commonpath([self.settings.output_dir, outputfile]) == self.settings.output_dir:
             input_dir, _, _ = self.parseFile(inputfile)
             outputfilename = os.path.split(outputfile)[1]
@@ -2054,14 +2313,27 @@ class MediaProcessor:
 
     # Reverse map option back to source stream
     def getSourceStream(self, index, info):
+        """Return the stream at position index from info.streams."""
         return info.streams[index]
 
     # Safely get codec from options
     def getCodecFromOptions(self, x, info):
+        """
+        Resolve the effective codec name for an options dict entry.
+
+        If the options entry specifies 'copy', returns the source stream's codec
+        name from info; otherwise returns the codec value directly from options.
+        """
         return self.getSourceStream(x["map"], info).codec if x.get("codec") == "copy" else x.get("codec")
 
     # Get subtitle extension based on codec
     def getSubExtensionFromCodec(self, codec):
+        """
+        Return the file extension for a given subtitle codec name.
+
+        Looks up the codec in the subtitle_codec_extensions mapping. Falls back
+        to using the codec name itself as the extension if no mapping is found.
+        """
         try:
             return subtitle_codec_extensions[codec]
         except:
@@ -2070,11 +2342,26 @@ class MediaProcessor:
 
     # Get subtitle file name based on options
     def getSubOutputFileFromOptions(self, inputfile, options, extension, include_all=False):
+        """
+        Build the subtitle output file path from an options dict.
+
+        Extracts language and disposition from the options dict and delegates to
+        getSubOutputFile() to construct the final path.
+        """
         language = options["language"]
         return self.getSubOutputFile(inputfile, language, options["disposition"], extension, include_all)
 
     # Get subtitle file name based on language, disposition, and extension
     def getSubOutputFile(self, inputfile, language, disposition, extension, include_all):
+        """
+        Build the subtitle output file path from individual components.
+
+        Constructs a filename of the form '<name>.<lang>[.<dispo>].<ext>' in the
+        output_dir (or input directory). When include_all is True, all known
+        disposition flags are considered for the filename suffix; otherwise only
+        the dispositions listed in filename_dispositions settings are used.
+        Appends a numeric counter if the file already exists.
+        """
         disposition = self.dispoStringToDict(disposition)
         dispo = ""
         potentials = BaseCodec.DISPOSITIONS if include_all else self.settings.filename_dispositions
@@ -2099,12 +2386,26 @@ class MediaProcessor:
 
     # Generate options to rip a subtitle from a container file
     def generateRipSubOpts(self, inputfile, s, scodec):
+        """
+        Build an FFmpeg options dict to extract a subtitle track to an external file.
+
+        Returns an options dict suitable for passing to ripSubs(), describing the
+        source file, subtitle stream index, codec, language, disposition, and
+        output format.
+        """
         ripsub = [{"map": s.index, "codec": scodec, "language": s.metadata["language"], "debug": "subtitle"}]
         options = {"source": [inputfile], "subtitle": ripsub, "format": s.codec if scodec == "copy" else scodec, "disposition": s.dispostr, "language": s.metadata["language"], "index": s.index}
         return options
 
     # Rip subtitle from container
     def ripSubs(self, inputfile, ripsubopts, include_all=False):
+        """
+        Extract subtitle tracks to external files using FFmpeg.
+
+        Iterates over ripsubopts (each produced by generateRipSubOpts()), runs
+        FFmpeg for each track, cleans up on failure, and returns a list of paths
+        to the successfully created subtitle files.
+        """
         rips = []
         ripsubopts = ripsubopts if isinstance(ripsubopts, list) else [ripsubopts]
         for options in ripsubopts:
@@ -2134,6 +2435,15 @@ class MediaProcessor:
 
     # Get output file name
     def getOutputFile(self, input_dir, filename, input_extension, temp_extension=None, ignore_output_dir=False, number=0):
+        """
+        Build the output file path for a conversion.
+
+        Uses output_dir from settings unless ignore_output_dir is True, in which
+        case input_dir is used. Applies temp_extension if given, otherwise the
+        configured output extension. Appends a numeric suffix (e.g. '.2') when
+        number > 0. Creates the output directory if it does not exist. Returns a
+        tuple of (outputfile_path, output_dir).
+        """
         if ignore_output_dir:
             output_dir = input_dir
         else:
@@ -2160,6 +2470,13 @@ class MediaProcessor:
 
     # Framedata normalization
     def parseAndNormalize(self, inputstring, denominator, splitter="/"):
+        """
+        Parse a fraction string and normalize its numerator to a target denominator.
+
+        Splits inputstring on splitter (default '/') to get numerator and
+        denominator, then scales the numerator so the denominator equals the
+        target denominator. Returns the normalized integer numerator.
+        """
         n, d = [float(x) for x in inputstring.split(splitter)]
         if d == denominator:
             return n
@@ -2167,6 +2484,13 @@ class MediaProcessor:
 
     # Ensure framedata has minimum parameters
     def hasValidFrameData(self, framedata):
+        """
+        Check whether FFprobe framedata contains the required HDR side data.
+
+        Returns True only if both 'Mastering display metadata' and 'Content light
+        level metadata' entries are present in the side_data_list. Returns False
+        on any error or missing data.
+        """
         try:
             if "side_data_list" in framedata:
                 types = [x["side_data_type"] for x in framedata["side_data_list"] if "side_data_type" in x]
@@ -2177,6 +2501,12 @@ class MediaProcessor:
             return False
 
     def hasBitstreamVideoSubs(self, framedata):
+        """
+        Check whether framedata contains closed caption (bitstream subtitle) side data.
+
+        Returns True if any entry in the side_data_list has a side_data_type that
+        contains 'closed captions'. Returns False otherwise.
+        """
         if "side_data_list" in framedata:
             for side_data in framedata["side_data_list"]:
                 if "closed captions" in side_data.get("side_data_type", "").lower():
@@ -2185,6 +2515,15 @@ class MediaProcessor:
 
     # Framedata normalization
     def normalizeFramedata(self, framedata, hdr):
+        """
+        Normalize HDR mastering display values in FFprobe framedata.
+
+        Sets 'hdr' and 'repeat-headers' flags when hdr is True, then normalizes
+        all chromaticity and luminance fraction values in the 'Mastering display
+        metadata' side data entry to standard denominators (50000 for
+        chromaticity, 10000 for luminance). Returns the modified framedata dict,
+        or the original dict unchanged if an exception occurs.
+        """
         try:
             if hdr:
                 framedata["hdr"] = True
@@ -2208,6 +2547,12 @@ class MediaProcessor:
             return framedata
 
     def isDolbyVision(self, framedata):
+        """
+        Check whether framedata contains Dolby Vision metadata side data.
+
+        Returns True if a side_data_list entry with side_data_type 'dolby vision
+        metadata' (case-insensitive) is present. Returns False otherwise.
+        """
         try:
             if "side_data_list" in framedata:
                 for side_data in framedata["side_data_list"]:
@@ -2219,6 +2564,13 @@ class MediaProcessor:
 
     # Check if video stream meets criteria to be considered HDR
     def isHDRInput(self, videostream):
+        """
+        Check whether the video stream's colour properties match the configured HDR settings.
+
+        Compares the stream's color space, transfer, and primaries against the
+        hdr settings. Returns False immediately if no HDR screening parameters
+        are defined. Returns True if all defined parameters match.
+        """
         if len(self.settings.hdr["space"]) < 1 and len(self.settings.hdr["transfer"]) < 1 and len(self.settings.hdr["primaries"]) < 1:
             self.log.debug("No HDR screening parameters defined, returning false [hdr].")
             return False
@@ -2234,6 +2586,13 @@ class MediaProcessor:
 
     # Check if output pix_fmt is HDR
     def isHDROutput(self, pix_fmt, bit_depth):
+        """
+        Determine whether a pixel format and bit depth combination qualifies as HDR output.
+
+        When pix_fmt is provided, returns True only if it is in the known HDR
+        pixel format list and bit_depth is at least 10. When pix_fmt is None,
+        returns True if bit_depth is at least 10.
+        """
         if pix_fmt:
             hdr_pix_fmts = ["yuv420p10le", "yuv422p10le", "yuv444p10le", "yuv420p12le", "yuv422p12le", "yuv444p12le", "p010le"]
             return pix_fmt in hdr_pix_fmts and bit_depth >= 10
@@ -2242,6 +2601,13 @@ class MediaProcessor:
 
     # Run test conversion of subtitle to see if its image based, does not appear to be any other way to tell dynamically
     def isImageBasedSubtitle(self, inputfile, map):
+        """
+        Test whether a subtitle track is image-based by attempting a short SRT conversion.
+
+        Runs FFmpeg for up to 1 second attempting to convert the track to SRT.
+        Returns True (image-based) if FFmpeg raises an FFMpegConvertError, or
+        False if the conversion succeeds (text-based).
+        """
         ripsub = [{"map": map, "codec": "srt"}]
         options = {"source": [inputfile], "format": "srt", "subtitle": ripsub}
         postopts = ["-t", "00:00:01"]
@@ -2259,6 +2625,15 @@ class MediaProcessor:
 
     # Check if video file meets criteria to just bypass conversion
     def canBypassConvert(self, inputfile, info, options=None):
+        """
+        Check whether the input file can skip FFmpeg conversion entirely.
+
+        Returns True in three cases: the input and output extensions match and
+        process-same-extensions is disabled; the file was already processed by
+        SMA-NG and force-convert is off; or bypass-if-copying-all is enabled and
+        all streams would be copied without reducing stream counts. Returns False
+        otherwise.
+        """
         # Process same extensions
         if self.settings.output_extension == self.parseFile(inputfile)[2]:
             if not self.settings.force_convert and not self.settings.process_same_extensions:
@@ -2288,10 +2663,21 @@ class MediaProcessor:
 
     # Generate copy/paste friendly FFMPEG command
     def printableFFMPEGCommand(self, cmds):
+        """Format an FFmpeg command list as a human-readable string, quoting items that contain spaces or pipes."""
         return " ".join('"%s"' % item if (" " in item or "|" in item) and '"' not in item else item for item in cmds)
 
     # Encode a new file based on selected options, built in naming conflict resolution
     def convert(self, options, preopts, postopts, reportProgress=False, progressOutput=None):
+        """
+        Run the FFmpeg conversion and return the output and input file paths.
+
+        Resolves naming conflicts between input and output (renaming the input to
+        a .original suffix or numbering the output), runs FFmpeg with optional
+        progress reporting via displayProgressBar or a custom progressOutput
+        callback, applies permissions to the output, and renames any temp
+        extension to the final extension. Returns a tuple of (outputfile,
+        inputfile), or (None, inputfile) on failure.
+        """
         self.log.info("Starting conversion.")
         inputfile = options["source"][0]
         input_dir, filename, input_extension = self.parseFile(inputfile)
@@ -2419,6 +2805,14 @@ class MediaProcessor:
 
     # Generate progress bar
     def displayProgressBar(self, complete, debug="", width=20, newline=False):
+        """
+        Print a text progress bar to stdout showing conversion progress.
+
+        Renders a bar of the given width, the completion percentage, and
+        optionally the current FFmpeg debug line when detailedprogress is
+        enabled. Writes a newline at the end when newline is True. Falls back
+        to printing the completion value if an exception occurs.
+        """
         try:
             divider = 100 / width
 
@@ -2442,6 +2836,12 @@ class MediaProcessor:
 
     # Break apart a file path into the directory, filename, and extension
     def parseFile(self, path):
+        """
+        Split a file path into its directory, base filename, and lowercase extension.
+
+        Returns a tuple of (directory, filename_without_extension, extension)
+        where the extension has no leading dot and is lowercased.
+        """
         path = os.path.abspath(path)
         input_dir, filename = os.path.split(path)
         filename, input_extension = os.path.splitext(filename)
@@ -2450,6 +2850,14 @@ class MediaProcessor:
 
     # Process a file with QTFastStart, removing the original file
     def QTFS(self, inputfile):
+        """
+        Run qtfaststart to relocate the moov atom to the start of the file.
+
+        Writes output to a temporary file then replaces the original. Skips
+        processing for MKV output or when relocate_moov is disabled. Does
+        nothing and returns the inputfile path unchanged if the file does not
+        exist or qtfaststart raises a FastStartException.
+        """
         TEMP_EXT = ".QTFS"
         # Relocate MOOV atom to the very beginning. Can double the time it takes to convert a file but makes streaming faster
         if os.path.isfile(inputfile) and self.settings.relocate_moov and self.settings.output_format not in ["mkv"]:
@@ -2480,6 +2888,15 @@ class MediaProcessor:
 
     # Makes additional copies of the input file in each directory specified in the copy_to option
     def replicate(self, inputfile, relativePath=None):
+        """
+        Copy the output file to copy-to directories and/or move it to the move-to directory.
+
+        When copy-to is configured, atomically copies inputfile to each
+        destination and appends those paths to the returned list. When move-to is
+        configured, atomically moves inputfile to the destination and updates the
+        first entry in the returned list. Returns a list of all resulting file
+        paths, with the primary path at index 0.
+        """
         files = [inputfile]
 
         if self.settings.copyto:
@@ -2534,6 +2951,14 @@ class MediaProcessor:
         return files
 
     def outputDirHasFreeSpace(self, inputfile):
+        """
+        Check whether output_dir has enough free space to hold the converted file.
+
+        Compares the available space on output_dir against the input file size
+        multiplied by output_dir_ratio. Returns True when the check passes, when
+        output_dir or output_dir_ratio is not configured, or when the check
+        cannot be performed.
+        """
         if self.settings.output_dir and self.settings.output_dir_ratio:
             try:
                 needed = os.path.getsize(inputfile) * self.settings.output_dir_ratio
@@ -2548,6 +2973,13 @@ class MediaProcessor:
 
     # Copy src to dst atomically: write to a temp file then rename into place
     def _atomic_copy(self, src, dst):
+        """
+        Copy src to dst atomically by writing to a temp file then renaming it into place.
+
+        Uses shutil.copy2 to preserve metadata, applies permissions to the temp
+        file, then calls os.replace for an atomic rename. Cleans up the temp file
+        if any step fails before re-raising the exception.
+        """
         dst_tmp = dst + ".smatmp"
         try:
             shutil.copy2(src, dst_tmp)
@@ -2563,6 +2995,12 @@ class MediaProcessor:
 
     # Move src to dst atomically: rename if same filesystem, else atomic copy + delete
     def _atomic_move(self, src, dst):
+        """
+        Move src to dst atomically.
+
+        Attempts os.rename first (instant on the same filesystem). Falls back to
+        _atomic_copy followed by os.remove when a cross-device OSError is raised.
+        """
         try:
             os.rename(src, dst)
         except OSError:
@@ -2571,6 +3009,14 @@ class MediaProcessor:
 
     # Robust file removal function, with options to retry in the event the file is in use, and replace a deleted file
     def removeFile(self, filename, retries=2, delay=10, replacement=None):
+        """
+        Remove a file with retry logic, optionally replacing it with another file.
+
+        Attempts to delete filename up to retries + 1 times, sleeping delay
+        seconds between attempts. When replacement is provided, renames the
+        replacement to filename after deletion. Returns True if the file no
+        longer exists after the attempts, False if it still exists.
+        """
         for _ in range(retries + 1):
             try:
                 # Make sure file isn't read-only
@@ -2596,6 +3042,12 @@ class MediaProcessor:
 
     # Formatter needed for burn subtitle filter syntax
     def raw(self, text):
+        """
+        Escape special characters in a path string for use in FFmpeg subtitle filter syntax.
+
+        Replaces backslashes with double-backslashes and colons with escaped
+        colons so the path can be safely embedded in a subtitles= filter value.
+        """
         escape_dict = {"\\": r"\\", ":": "\\:"}
         output = ""
         for char in text:
