@@ -457,7 +457,7 @@ class TestHealthEndpoint:
 
     def test_dashboard_served_to_browser(self, live_server):
         host, port = live_server.server_address
-        url = "http://%s:%d/" % (host, port)
+        url = "http://%s:%d/dashboard" % (host, port)
         req = urllib.request.Request(url, headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"})
         with urllib.request.urlopen(req) as resp:
             body = resp.read().decode("utf-8")
@@ -465,9 +465,20 @@ class TestHealthEndpoint:
             assert "<!DOCTYPE html>" in body
             assert "SMA-NG" in body
 
-    def test_json_served_to_api_client(self, live_server):
+    def test_root_redirects_to_dashboard(self, live_server):
         host, port = live_server.server_address
         url = "http://%s:%d/" % (host, port)
+        req = urllib.request.Request(url)
+        # Do not follow redirects so we can assert the 301
+        opener = urllib.request.OpenerDirector()
+        opener.add_handler(urllib.request.UnknownHandler())
+        opener.add_handler(urllib.request.HTTPHandler())
+        with urllib.request.urlopen(req) as resp:
+            assert resp.url.endswith("/dashboard")
+
+    def test_json_served_to_api_client(self, live_server):
+        host, port = live_server.server_address
+        url = "http://%s:%d/health" % (host, port)
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req) as resp:
             assert resp.headers.get("Content-Type", "").startswith("application/json")
