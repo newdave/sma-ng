@@ -63,6 +63,6 @@ jobs:
       - name: Smoke-test image (PR only)
         if: github.event_name == 'pull_request'
         run: |
-          docker run --rm --entrypoint python \
+          docker run --rm --entrypoint python3 \
             ${{ fromJSON(steps.meta.outputs.json).tags[0] }} \
             -c "import daemon; print('daemon module OK')"
