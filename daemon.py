@@ -1856,6 +1856,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
     def _get_status(self):
         # Cluster-wide status — only meaningful with PostgreSQL backend
         if isinstance(self.server.job_db, PostgreSQLJobDatabase):
+            # Run staleness check on every status request so the response
+            # reflects current reality rather than waiting for the next
+            # heartbeat cycle.
+            recovered = self.server.job_db.recover_stale_nodes(self.server.stale_seconds)
+            for stale_id, job_count in recovered:
+                self.server.logger.warning("Status check: recovered %d jobs from stale node %s" % (job_count, stale_id))
+            if any(job_count > 0 for _, job_count in recovered):
+                self.server.job_event.set()
             nodes = self.server.job_db.get_cluster_nodes()
             stats = self.server.job_db.get_stats()
             self.send_json_response(200, {"cluster": nodes, "jobs": stats})
@@ -2179,6 +2187,7 @@ class DaemonServer(HTTPServer):
         self.logger = logger
         self.worker_count = worker_count
         self.api_key = api_key
+        self.stale_seconds = stale_seconds
         self.node_id = socket.gethostname()
         self.started_at = datetime.now(timezone.utc)
         self.workers = []
