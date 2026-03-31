@@ -2162,7 +2162,7 @@ def main():
     parser = argparse.ArgumentParser(description="SMA-NG Daemon - HTTP webhook server for media conversion")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8585, help="Port to listen on (default: 8585)")
-    parser.add_argument("--workers", type=int, default=2, help="Number of worker threads (default: 2)")
+    parser.add_argument("--workers", type=int, default=1, help=argparse.SUPPRESS)
     parser.add_argument("-d", "--daemon-config", help="Path to daemon.json config file (path mappings)")
     parser.add_argument("--logs-dir", default=LOGS_DIR, help="Directory for per-config log files (default: logs/)")
     parser.add_argument("--db", default=DATABASE_PATH, help="Path to SQLite database (default: config/daemon.db)")
@@ -2179,6 +2179,10 @@ def main():
     parser.add_argument("--api-key", help="API key for authentication (or set SMA_DAEMON_API_KEY env var)")
 
     args = parser.parse_args()
+
+    if args.workers != 1:
+        log.warning("--workers ignored: max-workers is always 1 to prevent hardware encoder contention")
+        args.workers = 1
 
     log.info("SMA-NG Daemon starting...")
     log.info("Python %s" % sys.version)

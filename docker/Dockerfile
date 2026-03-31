@@ -150,7 +150,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VIRTUAL_ENV=/venv \
     PATH="/venv/bin:/usr/local/bin:$PATH" \
     # Default SMA paths — override via environment or volume mounts
-    SMA_CONFIG=/config/autoProcess.ini \
+    SMA_CONFIG=/app/config/autoProcess.ini \
     SMA_FFMPEG=/usr/local/bin/ffmpeg \
     SMA_FFPROBE=/usr/local/bin/ffprobe
 
@@ -228,7 +228,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["python3", "daemon.py", \
      "--host", "0.0.0.0", \
      "--port", "8585", \
-     "--workers", "2", \
-     "--daemon-config", "/config/daemon.json", \
-     "--db", "/config/daemon.db", \
+     "--workers", "1", \
+     "--daemon-config", "/app/config/daemon.json", \
+     "--db", "/app/config/daemon.db", \
      "--logs-dir", "/logs"]

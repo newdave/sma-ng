@@ -203,12 +203,12 @@ class TestDockerfileRuntime:
     def test_cmd_includes_config_and_db_paths(self, dockerfile):
         cmds = _instructions_of("CMD", dockerfile)
         cmd_text = " ".join(cmds)
-        assert "/config/daemon.json" in cmd_text
-        assert "/config/daemon.db" in cmd_text
+        assert "/app/config/daemon.json" in cmd_text
+        assert "/app/config/daemon.db" in cmd_text
         assert "/logs" in cmd_text
 
     def test_sma_config_env_points_to_volume(self, dockerfile_raw):
-        assert "SMA_CONFIG=/config/autoProcess.ini" in dockerfile_raw
+        assert "SMA_CONFIG=/app/config/autoProcess.ini" in dockerfile_raw
 
     def test_uid_gid_args_defined(self, dockerfile):
         args = _instructions_of("ARG", dockerfile)
