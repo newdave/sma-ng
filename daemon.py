@@ -1664,6 +1664,11 @@ function dashboard() {
     filter: 'all', page: 0, pageSize: 50,
     lastUpdate: '', interval: null,
     submitPath: '', submitArgs: '', submitting: false, submitResult: '', submitError: false,
+    authHeaders(extra) {
+      const h = Object.assign({'Content-Type': 'application/json'}, extra || {});
+      if (window.SMA_API_KEY) h['X-API-Key'] = window.SMA_API_KEY;
+      return h;
+    },
     statCards: [
       {key:'total',    label:'Total',     color:'text-gray-400',  tip:'All jobs ever submitted'},
       {key:'pending',  label:'Pending',   color:'text-yellow-400',tip:'Waiting to be picked up by a worker — click to filter'},
@@ -1681,9 +1686,9 @@ function dashboard() {
     async refresh() {
       try {
         const [h, s, c] = await Promise.all([
-          fetch('/health').then(r=>r.json()),
-          fetch('/stats').then(r=>r.json()),
-          fetch('/configs').then(r=>r.json()),
+          fetch('/health', {headers: this.authHeaders()}).then(r=>r.json()),
+          fetch('/stats', {headers: this.authHeaders()}).then(r=>r.json()),
+          fetch('/configs', {headers: this.authHeaders()}).then(r=>r.json()),
         ]);
         this.health = h; this.stats = s; this.configs = c;
         await this.fetchJobs();
@@ -1694,7 +1699,7 @@ function dashboard() {
       const params = new URLSearchParams({limit: this.pageSize, offset: this.page * this.pageSize});
       if (this.filter !== 'all') params.set('status', this.filter);
       try {
-        const r = await fetch('/jobs?' + params).then(r=>r.json());
+        const r = await fetch('/jobs?' + params, {headers: this.authHeaders()}).then(r=>r.json());
         this.jobs = r.jobs || [];
       } catch(e) { this.jobs = []; }
     },
@@ -1703,7 +1708,7 @@ function dashboard() {
       try {
         const body = {path: this.submitPath.trim()};
         if (this.submitArgs.trim()) body.args = this.submitArgs.trim().split(/\\s+/);
-        const r = await fetch('/webhook', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        const r = await fetch('/webhook', {method:'POST', headers: this.authHeaders(), body: JSON.stringify(body)});
         const d = await r.json();
         if (r.ok) {
           this.submitResult = 'Job #' + d.job_id + ' queued for ' + d.path;
@@ -1931,7 +1936,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/" and self.wants_html():
-            self.send_html_response(200, DASHBOARD_HTML)
+            api_key = self.server.api_key or ""
+            key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
+            self.send_html_response(200, DASHBOARD_HTML.replace("</head>", key_script + "</head>", 1))
         elif parsed.path == "/docs":
             try:
                 with open(DOCS_PATH, "r", encoding="utf-8") as f:
