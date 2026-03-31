@@ -349,9 +349,9 @@ class TestDashboardHTML:
         assert "function dashboard()" in DASHBOARD_HTML
 
     def test_api_endpoints_referenced(self):
-        assert "fetch('/health')" in DASHBOARD_HTML
-        assert "fetch('/stats')" in DASHBOARD_HTML
-        assert "fetch('/configs')" in DASHBOARD_HTML
+        assert "fetch('/health'" in DASHBOARD_HTML
+        assert "fetch('/stats'" in DASHBOARD_HTML
+        assert "fetch('/configs'" in DASHBOARD_HTML
         assert "fetch('/jobs" in DASHBOARD_HTML
         assert "fetch('/webhook'" in DASHBOARD_HTML
 
