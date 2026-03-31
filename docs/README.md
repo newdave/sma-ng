@@ -61,10 +61,10 @@ python daemon.py --host 0.0.0.0 --port 8585
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Entry Points                            │
-├──────────┬──────────┬────────────┬──────────┬──────────────────┤
-│ manual.py│daemon.py │postSonarr  │postRadarr│ *PostProcess.py  │
-│ CLI tool │HTTP server│Sonarr hook│Radarr hook│NZB/torrent hooks│
-└────┬─────┴────┬─────┴─────┬──────┴────┬─────┴────────┬────────┘
+├──────────┬──────────┬──────────────────────────────────────────┤
+│ manual.py│daemon.py │         triggers/ (bash scripts)         │
+│ CLI tool │HTTP server│  sonarr.sh  radarr.sh  sabnzbd.sh  ...  │
+└────┬─────┴────┬─────┴──────────────────────┬───────────────────┘
      │          │           │           │              │
      ▼          ▼           ▼           ▼              ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -407,7 +407,7 @@ python daemon.py \
 
 ### Web Dashboard
 
-Open `http://localhost:8585/` in a browser to access the dashboard:
+Open `http://localhost:8585/dashboard` in a browser (or just `/` — it redirects). Features:
 - Real-time job statistics and status
 - Active/waiting job panels
 - Config mapping overview
@@ -418,8 +418,10 @@ Open `http://localhost:8585/` in a browser to access the dashboard:
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/` | No | Dashboard (browser) or health JSON (API) |
+| `GET` | `/` | No | Redirects to `/dashboard` |
+| `GET` | `/dashboard` | No | Web dashboard |
 | `GET` | `/health` | No | Health check with job stats |
+| `GET` | `/docs` | No | Rendered documentation |
 | `GET` | `/jobs` | Yes | List jobs. Query: `?status=pending&limit=50&offset=0` |
 | `GET` | `/jobs/<id>` | Yes | Get specific job |
 | `GET` | `/configs` | Yes | Config mappings and status |
@@ -463,7 +465,7 @@ API key can be set via (priority order):
 
 Send via header: `X-API-Key: SECRET` or `Authorization: Bearer SECRET`
 
-Public endpoints (no auth): `/`, `/health`, `/status`
+Public endpoints (no auth): `/`, `/dashboard`, `/health`, `/status`, `/docs`
 
 ### Path-Based Configuration (daemon.json)
 
@@ -508,8 +510,8 @@ Log rotation: 10MB max, 5 backups.
 1. Configure `[Sonarr]` section in `autoProcess.ini` with host, port, API key
 2. In Sonarr: Settings → Connect → Add Custom Script
    - On Download/Import: Yes, On Upgrade: Yes
-   - Path: Python executable
-   - Arguments: Full path to `postSonarr.py`
+   - Path: `/bin/bash`
+   - Arguments: Full path to `triggers/media_managers/sonarr.sh`
 3. Multiple instances: Add `[Sonarr-Kids]` etc. sections with unique `path` values
 
 ### Radarr
@@ -517,8 +519,8 @@ Log rotation: 10MB max, 5 backups.
 1. Configure `[Radarr]` section in `autoProcess.ini`
 2. In Radarr: Settings → Connect → Add Custom Script
    - On Download/Import: Yes, On Upgrade: Yes
-   - Path: Python executable
-   - Arguments: Full path to `postRadarr.py`
+   - Path: `/bin/bash`
+   - Arguments: Full path to `triggers/media_managers/radarr.sh`
 3. Multiple instances: Add `[Radarr-4K]`, `[Radarr-Kids]` etc.
 
 ### Multiple Instance Support
@@ -557,26 +559,31 @@ Configure `[Plex]` section. SMA-NG refreshes the matching library section after 
 
 ## Download Client Integration
 
+All download client integrations use bash scripts in `triggers/` that submit jobs to the daemon via webhook.
+
 ### NZBGet
-Copy `NZBGetPostProcess.py` to NZBGet's scripts folder. Configure categories in NZBGet WebUI under `NZBGETPOSTPROCESS`.
+In Settings → Extension Scripts, add `triggers/usenet/nzbget.sh`. Configure categories under the script settings. The script requires the daemon to be running.
 
 ### SABnzbd
-Point SABnzbd's script directory to the SMA-NG root. Set `SABPostProcess.py` as the category script. Configure `[SABNZBD]` section.
+In Settings → Folders → Scripts Folder, point to the `triggers/usenet/` directory. Set `sabnzbd.sh` as the category script. Configure `[SABNZBD]` section in `autoProcess.ini`.
 
 ### qBittorrent
-In Tools → Options → Run external program on torrent completion:
+In Tools → Options → Downloads → Run external program on torrent completion:
+
+```bash
+bash /path/to/triggers/torrents/qbittorrent.sh "%L" "%T" "%R" "%F" "%N" "%I"
 ```
-python /path/to/qBittorrentPostProcess.py "%L" "%T" "%R" "%F" "%N" "%I"
-```
+
 Configure `[qBittorrent]` section with host, credentials, and label mappings.
 
 ### Deluge
-Enable Execute plugin in Deluge WebUI. Set `delugePostProcess.py` as the Torrent Complete handler. Configure `[Deluge]` section with daemon host and credentials.
+Enable Execute plugin in Deluge WebUI. Set `triggers/torrents/deluge.sh` as the Torrent Complete handler. Configure `[Deluge]` section with daemon host and credentials.
 
 ### uTorrent
 In Options → Preferences → Advanced → Run Program, set:
-```
-python /path/to/uTorrentPostProcess.py %L %T %D %K %F %I %N
+
+```bash
+bash /path/to/triggers/torrents/utorrent.sh %L %T %D %K %F %I %N
 ```
 
 ---
@@ -829,10 +836,10 @@ See `setup/post_process/` for examples (Plex, Emby, Jellyfin, iTunes).
 
 | Variable | Description |
 |----------|-------------|
-| `SMA_CONFIG` | Override path to autoProcess.ini |
+| `SMA_CONFIG` | Override path to `autoProcess.ini` |
 | `SMA_DAEMON_API_KEY` | Daemon API key |
-| `SMA_FFMPEG_PATH` | Override FFmpeg path (used by update.py) |
-| `SMA_FFPROBE_PATH` | Override FFprobe path (used by update.py) |
+| `SMA_DAEMON_DB_URL` | PostgreSQL connection URL for distributed mode |
+| `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` (prepended to PATH for conversions) |
 
 ---
 
