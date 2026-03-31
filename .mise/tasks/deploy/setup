@@ -133,9 +133,11 @@ for host in $DEPLOY_HOSTS; do
 
   mk_ssh_opts "$port" "$key"
 
-  echo "==> [$host] installing and enabling sma-daemon service"
-  # shellcheck disable=SC2087  # $dir intentionally expands client-side
-  ssh "${SSH_OPTS[@]}" "$host" "cd $dir && make systemd-install"
+  remote_user=$(echo "$host" | cut -s -d@ -f1)
+  remote_user="${remote_user:-$(whoami)}"
+  echo "==> [$host] installing and enabling sma-daemon service (user: $remote_user)"
+  # shellcheck disable=SC2087  # $dir and $remote_user intentionally expand client-side
+  ssh "${SSH_OPTS[@]}" "$host" "cd $dir && make systemd-install SERVICE_USER=$remote_user"
 done
 
 # ── 7. verify ffmpeg/ffprobe in FFMPEG_DIR on each host ─────────────────────

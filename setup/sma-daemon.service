@@ -10,8 +10,8 @@ Wants=network.target
 
 [Service]
 Type=simple
-User=sma
-Group=sma
+User=nobody
+Group=nogroup
 
 WorkingDirectory=/opt/sma
 
