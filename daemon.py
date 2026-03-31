@@ -1156,22 +1156,29 @@ class ConversionWorker(threading.Thread):
 
     def run(self):
         while self.running:
-            # Wait for job notification or timeout
+            # Wait for a job notification or periodic timeout.
             self.job_event.wait(timeout=5.0)
 
             if not self.running:
                 break
 
-            # Atomically claim the next pending job, skipping configs already
-            # in use so this worker can pick up work for a different config
-            # rather than blocking behind an already-running job.
-            locked = self.config_lock_manager.get_locked_configs()
-            job = self.job_db.claim_next_job(self.worker_id, self.node_id, exclude_configs=locked or None)
-            if job:
-                self.process_job(job)
-            else:
-                # Clear event if no jobs (will be set again when new job arrives)
-                self.job_event.clear()
+            # Drain all available jobs before waiting again.  Without this
+            # inner loop, a worker that finishes a job goes back to waiting
+            # on the shared event — which may already be clear because the
+            # other worker cleared it while this one was busy — and pending
+            # jobs are never picked up until an external trigger fires.
+            while self.running:
+                locked = self.config_lock_manager.get_locked_configs()
+                job = self.job_db.claim_next_job(self.worker_id, self.node_id, exclude_configs=locked or None)
+                if job:
+                    self.process_job(job)
+                    # After finishing, signal the other worker in case more
+                    # jobs arrived while we were busy.
+                    self.job_event.set()
+                else:
+                    # No claimable job right now — go back to waiting.
+                    self.job_event.clear()
+                    break
 
     def process_job(self, job):
         job_id = job["id"]
