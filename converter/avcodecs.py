@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Codec class definitions mapping SMA-NG codec names to FFmpeg encoder/decoder identifiers."""
 
 
 class BaseCodec(object):
@@ -47,20 +48,46 @@ class BaseCodec(object):
     max_depth = 9999
 
     def supportsBitDepth(self, depth):
+        """Return True if the codec supports the given bit depth."""
         return depth <= self.max_depth
 
     def parse_options(self, opt):
+        """Validate that opt['codec'] matches this codec's codec_name.
+
+        Raises ValueError if the codec name is missing or does not match.
+        Subclasses call super().parse_options(opt) at the top of their own
+        parse_options implementations to perform this check before continuing.
+        """
         if "codec" not in opt or opt["codec"] != self.codec_name:
             raise ValueError("invalid codec name")
         return None
 
     def _codec_specific_parse_options(self, safe):
+        """Apply codec-specific validation and transformation to the safe options dict.
+
+        Called by parse_options after generic option sanitisation. Subclasses
+        override this to validate or mutate 'safe' (e.g. clamping quality
+        ranges, removing conflicting keys). Returns the (possibly modified) dict.
+        """
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
+        """Return additional FFmpeg command-line tokens for this codec.
+
+        Called at the end of parse_options after all common options have been
+        emitted. Subclasses override this to append codec-specific flags (e.g.
+        quality parameters, hardware device selectors). Returns a list of
+        strings that will be appended to the option list.
+        """
         return []
 
     def safe_disposition(self, dispo):
+        """Return a disposition string that explicitly negates all unset flags.
+
+        Takes an existing disposition string (e.g. '+default+forced') and
+        appends '-<flag>' for every known disposition flag not already present,
+        so that FFmpeg clears inherited flags rather than leaving them ambiguous.
+        """
         dispo = dispo or ""
         for d in self.DISPOSITIONS:
             if d not in dispo:
@@ -68,10 +95,18 @@ class BaseCodec(object):
         return dispo
 
     def safe_framedata(self, opts):
+        """Return a safe frame-data string (currently unused stub, returns empty string)."""
         safe = ""
         return safe
 
     def safe_options(self, opts):
+        """Filter and typecast raw options against this codec's encoder_options schema.
+
+        Iterates over opts and retains only keys declared in encoder_options,
+        casting each value to the declared type. Keys with a None value or
+        a value that cannot be cast are silently dropped. Returns the filtered
+        and cast dict.
+        """
         safe = {}
 
         # Only copy options that are expected and of correct type
@@ -132,6 +167,14 @@ class AudioCodec(BaseCodec):
     }
 
     def parse_options(self, opt, stream=0):
+        """Translate an audio option dict into a list of FFmpeg command-line arguments.
+
+        Validates opt via the base-class check, sanitises channels (1-12),
+        bitrate (8-1536 kbps), samplerate (1000-50000 Hz), and language (max
+        3 chars), then emits -c:a, -ac, -b:a, -ar, -filter, -profile, -metadata,
+        -disposition, and -map tokens for the given stream index. Delegates
+        codec-specific flags to _codec_specific_produce_ffmpeg_list.
+        """
         super(AudioCodec, self).parse_options(opt)
         safe = self.safe_options(opt)
         stream = str(stream)
@@ -239,6 +282,13 @@ class SubtitleCodec(BaseCodec):
     }
 
     def parse_options(self, opt, stream=0):
+        """Translate a subtitle option dict into a list of FFmpeg command-line arguments.
+
+        Validates opt via the base-class check, sanitises language (max 3 chars)
+        and disposition, then emits -c:s, -map, -metadata (title, handler_name,
+        language), and -disposition tokens for the given stream index.
+        Delegates codec-specific flags to _codec_specific_produce_ffmpeg_list.
+        """
         super(SubtitleCodec, self).parse_options(opt)
         stream = str(stream)
         safe = self.safe_options(opt)
@@ -398,6 +448,15 @@ class VideoCodec(BaseCodec):
         assert False, mode
 
     def parse_options(self, opt, stream=0):
+        """Translate a video option dict into a list of FFmpeg command-line arguments.
+
+        Validates opt via the base-class check, sanitises fps, bitrate, CRF,
+        field_order, and dimensions, then computes aspect-ratio corrections
+        (stretch/crop/pad) via _aspect_corrections. Emits -vcodec, -map, -r:v,
+        -pix_fmt, -field_order, -crf or -vb, -maxrate, -bufsize, -vf, -s,
+        -aspect, -bsf:v, and -metadata tokens. Multiple -vf arguments are
+        consolidated into a single comma-separated filter chain.
+        """
         super(VideoCodec, self).parse_options(opt)
 
         safe = self.safe_options(opt)
@@ -1407,6 +1466,8 @@ class H264V4l2m2mCodec(H264Codec):
 
 
 class H264V4l2m2mDecoder(BaseDecoder):
+    """H.264 hardware decoder using the V4L2 M2M (Video4Linux2 memory-to-memory) interface."""
+
     decoder_name = "h264_v4l2m2m"
     max_depth = 8
 
@@ -1688,6 +1749,8 @@ class H265V4l2m2mCodec(H265Codec):
 
 
 class H265V4l2m2mDecoder(BaseDecoder):
+    """H.265/HEVC hardware decoder using the V4L2 M2M (Video4Linux2 memory-to-memory) interface."""
+
     decoder_name = "hevc_v4l2m2m"
     max_depth = 10
 
@@ -1814,11 +1877,15 @@ class NVEncH265CodecPatched(NVEncH265Codec):
 
 
 class H264CuvidDecoder(BaseDecoder):
+    """H.264 hardware decoder using NVIDIA CUVID (CUDA Video Decode)."""
+
     decoder_name = "h264_cuvid"
     max_depth = 8
 
 
 class H265CuvidDecoder(BaseDecoder):
+    """H.265/HEVC hardware decoder using NVIDIA CUVID (CUDA Video Decode)."""
+
     decoder_name = "hevc_cuvid"
     max_depth = 10
 
