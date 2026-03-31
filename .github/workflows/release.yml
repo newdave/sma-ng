@@ -7,20 +7,24 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   # ── Step 1: Run release-please on every push to main ────────────────────────
   # Creates or updates a "Release PR" that bumps pyproject.toml and the
   # release-please manifest. When that PR is merged, release-please creates
   # the GitHub Release and the v* tag, then sets release_created=true so
-  # the publish job below runs.
+  # the publish and docker jobs below run.
   release-please:
     name: Release Please
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
-      upload_url: ${{ steps.rp.outputs.upload_url }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: rp
@@ -28,7 +32,7 @@ jobs:
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  # ── Step 2: Build & attach dist artifacts to the GitHub Release ─────────────
+  # ── Step 2a: Build & attach dist artifacts to the GitHub Release ─────────────
   # Runs only when release-please actually created a release (not on every push).
   # The version in pyproject.toml is the single source of truth — release-please
   # has already bumped it before this job runs.
@@ -40,7 +44,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Check out the release commit (the tag), not the PR merge commit
           ref: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Set up Python
@@ -60,3 +63,51 @@ jobs:
         with:
           tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: dist/*
+
+  # ── Step 2b: Build & push Docker image to GHCR ───────────────────────────────
+  # Runs only on release. Produces semver tags (e.g. 1.2.3, 1.2) derived from
+  # the release tag, which is always in sync with pyproject.toml.
+  docker:
+    name: Build & push Docker image
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.release-please.outputs.tag_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.release-please.outputs.tag_name }}
+            type=semver,pattern={{major}},value=${{ needs.release-please.outputs.tag_name }}
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          build-args: |
+            FFMPEG_VERSION=8.0
