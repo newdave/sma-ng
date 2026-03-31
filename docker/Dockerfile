@@ -198,8 +198,8 @@ COPY --from=ffmpeg-builder /usr/local/bin/ffprobe /usr/local/bin/ffprobe
 # Copy Python venv from builder
 COPY --from=python-builder /venv /venv
 
-# Create non-root user
-RUN groupadd -g ${GID} sma && useradd -u ${UID} -g sma -s /bin/sh -m sma
+# Create non-root user (-f: no error if GID already exists)
+RUN groupadd -f -g ${GID} sma && useradd -u ${UID} -g ${GID} -s /bin/sh -m sma
 
 # Copy application code
 WORKDIR /app
