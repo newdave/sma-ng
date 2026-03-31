@@ -6,26 +6,28 @@ Wants=network.target
 
 [Service]
 Type=simple
-User=iadmin
-Group=iadmin
+User=sma
+Group=sma
 
-# Path to SMA-NG installation
 WorkingDirectory=/opt/sma
 
-# Python interpreter and daemon script
-ExecStart=/opt/sma/venv/bin/python /opt/sma/daemon.py --host 0.0.0.0 --port 8585 --workers 2
+# Load site-local environment overrides (optional — missing file is not an error)
+EnvironmentFile=-/opt/sma/config/daemon.env
 
-# Health check: verify the HTTP server is responding after startup
-ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5 6; do sleep 2; curl -sf http://127.0.0.1:8585/health > /dev/null && exit 0; done; echo "SMA-NG daemon health check failed after 12s"; exit 1'
+# Defaults — override any of these in config/daemon.env
+Environment="SMA_DAEMON_HOST=0.0.0.0"
+Environment="SMA_DAEMON_PORT=8585"
+Environment="SMA_DAEMON_WORKERS=2"
+Environment="SMA_CONFIG=/opt/sma/config/autoProcess.ini"
 
-# Environment variables (uncomment and modify as needed)
-#Environment="SMA_DAEMON_API_KEY=your_secret_key_here"
-#Environment="SMA_CONFIG=/opt/sma/config/autoProcess.ini"
+ExecStart=/opt/sma/venv/bin/python /opt/sma/daemon.py \
+    --host ${SMA_DAEMON_HOST} \
+    --port ${SMA_DAEMON_PORT} \
+    --workers ${SMA_DAEMON_WORKERS} \
+    --daemon-config /opt/sma/config/daemon.json \
+    --db /opt/sma/config/daemon.db \
+    --logs-dir /opt/sma/logs
 
-# Or load from environment file
-EnvironmentFile=/opt/sma/config/daemon.env
-
-# Restart behavior
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=30
@@ -33,14 +35,12 @@ TimeoutStopSec=30
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
-#ProtectSystem=strict
-#ProtectHome=read-only
-#ReadWritePaths=/opt/sma/logs /opt/sma/config
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/sma/config /opt/sma/logs
 
-# Resource limits (adjust based on your needs)
+# Resource limits
 LimitNOFILE=65536
-#MemoryMax=2G
-#CPUQuota=200%
 
 # Logging
 StandardOutput=journal
