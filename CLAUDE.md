@@ -61,7 +61,7 @@ python manual.py -i "/path/to/file.mkv" -oo
 python manual.py -cl
 
 # Start daemon (HTTP webhook server)
-python daemon.py --host 0.0.0.0 --port 8585 --workers 2
+python daemon.py --host 0.0.0.0 --port 8585
 
 # Start daemon with API key authentication
 python daemon.py --host 0.0.0.0 --port 8585 --api-key YOUR_SECRET_KEY
@@ -72,7 +72,7 @@ python daemon.py --host 0.0.0.0 --port 8585 --api-key YOUR_SECRET_KEY
 The daemon runs an HTTP server that listens for webhook requests to trigger conversions.
 
 ```bash
-# Start with defaults (127.0.0.1:8585, 2 workers)
+# Start with defaults (127.0.0.1:8585)
 python daemon.py
 
 # Listen on all interfaces
@@ -84,7 +84,7 @@ python daemon.py --api-key YOUR_SECRET_KEY
 SMA_DAEMON_API_KEY=YOUR_SECRET_KEY python daemon.py
 
 # Custom daemon config (for path mappings)
-python daemon.py --daemon-config /path/to/daemon.json --workers 4
+python daemon.py --daemon-config /path/to/daemon.json
 ```
 
 **Endpoints:**
@@ -188,14 +188,14 @@ Log files use rotation (10MB max, 5 backups). Use `--logs-dir` to change the log
 Only one conversion process runs per config at a time. This prevents resource conflicts when multiple jobs target the same media library.
 
 - Jobs for the **same config** execute sequentially (queue up)
-- Jobs for **different configs** can run in parallel (up to `--workers` count)
+- All jobs execute sequentially (single worker prevents hardware encoder contention)
 
-Example with 2 workers and 4 jobs:
+Example with 4 queued jobs:
 ```
 Job 1: /TV/show.mkv      -> autoProcess.tv.ini     [runs immediately]
-Job 2: /Movies/film.mkv  -> autoProcess.movies.ini [runs immediately]
-Job 3: /TV/other.mkv     -> autoProcess.tv.ini     [waits for Job 1]
-Job 4: /Movies/other.mkv -> autoProcess.movies.ini [waits for Job 2]
+Job 2: /Movies/film.mkv  -> autoProcess.movies.ini [waits for Job 1]
+Job 3: /TV/other.mkv     -> autoProcess.tv.ini     [waits for Job 2]
+Job 4: /Movies/other.mkv -> autoProcess.movies.ini [waits for Job 3]
 ```
 
 Check active/waiting jobs via the health endpoint:

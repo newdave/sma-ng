@@ -13,7 +13,7 @@ if [ -n "${SMA_DAEMON_DB_URL:-}" ]; then
     exec "${PYTHON}" "${DAEMON}" \
         --host "${SMA_DAEMON_HOST:-0.0.0.0}" \
         --port "${SMA_DAEMON_PORT:-8585}" \
-        --workers "${SMA_DAEMON_WORKERS:-2}" \
+        --workers "${SMA_DAEMON_WORKERS:-1}" \
         --daemon-config "${INSTALL_DIR}/config/daemon.json" \
         --logs-dir "${INSTALL_DIR}/logs" \
         --db-url "${SMA_DAEMON_DB_URL}"
@@ -21,7 +21,7 @@ else
     exec "${PYTHON}" "${DAEMON}" \
         --host "${SMA_DAEMON_HOST:-0.0.0.0}" \
         --port "${SMA_DAEMON_PORT:-8585}" \
-        --workers "${SMA_DAEMON_WORKERS:-2}" \
+        --workers "${SMA_DAEMON_WORKERS:-1}" \
         --daemon-config "${INSTALL_DIR}/config/daemon.json" \
         --logs-dir "${INSTALL_DIR}/logs"
 fi
