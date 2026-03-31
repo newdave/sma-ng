@@ -2052,6 +2052,63 @@ class WebhookHandler(BaseHTTPRequestHandler):
         else:
             self.send_json_response(404, {"error": "Not found"})
 
+    # Extensions that are never media files — skip without queuing.
+    # Everything else is passed to manual.py which runs ffprobe to validate.
+    _SKIP_EXTENSIONS = frozenset(
+        [
+            ".nfo",
+            ".txt",
+            ".log",
+            ".md",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".bmp",
+            ".tbn",
+            ".nzb",
+            ".torrent",
+            ".url",
+            ".html",
+            ".htm",
+            ".xml",
+            ".sfv",
+            ".srr",
+            ".srs",
+            ".par2",
+            ".py",
+            ".pyc",
+            ".db",
+            ".srt",
+            ".vtt",
+            ".ass",
+            ".ssa",
+            ".sub",
+            ".idx",
+            ".sup",
+        ]
+    )
+
+    def _collect_media_files(self, directory):
+        """Recursively collect candidate media files from a directory.
+
+        Returns a sorted list of absolute file paths, skipping dotfiles and
+        files with extensions in _SKIP_EXTENSIONS. ffprobe validation happens
+        later inside manual.py when each job is processed.
+        """
+        candidates = []
+        for root, dirs, files in os.walk(directory):
+            # Skip hidden directories in-place so os.walk doesn't descend into them
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for fname in files:
+                if fname.startswith("."):
+                    continue
+                ext = os.path.splitext(fname)[1].lower()
+                if ext in self._SKIP_EXTENSIONS:
+                    continue
+                candidates.append(os.path.join(root, fname))
+        return sorted(candidates)
+
     def _handle_webhook(self):
         try:
             content_length = int(self.headers.get("Content-Length", 0))
@@ -2093,6 +2150,42 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self.send_json_response(400, {"error": "Path does not exist", "path": path})
                 return
 
+            # --- Directory: expand to individual media files ---
+            if os.path.isdir(path):
+                files = self._collect_media_files(path)
+                if not files:
+                    self.send_json_response(200, {"status": "empty", "path": path, "message": "No media files found in directory"})
+                    return
+
+                queued = []
+                duplicates = []
+                for filepath in files:
+                    resolved_config = config_override if (config_override and os.path.exists(config_override)) else self.server.path_config_manager.get_config_for_path(filepath)
+                    job_id = self.server.job_db.add_job(filepath, resolved_config, extra_args)
+                    if job_id is None:
+                        existing = self.server.job_db.find_active_job(filepath)
+                        duplicates.append({"path": filepath, "job_id": existing["id"] if existing else None})
+                    else:
+                        queued.append({"job_id": job_id, "path": filepath, "config": resolved_config})
+
+                if queued:
+                    self.server.job_event.set()
+                    self.server.logger.info("Directory %s: queued %d files, %d duplicates" % (path, len(queued), len(duplicates)))
+
+                self.send_json_response(
+                    202,
+                    {
+                        "status": "queued",
+                        "directory": path,
+                        "queued": queued,
+                        "duplicates": duplicates,
+                        "queued_count": len(queued),
+                        "duplicate_count": len(duplicates),
+                    },
+                )
+                return
+
+            # --- Single file ---
             # Determine config
             if config_override and os.path.exists(config_override):
                 resolved_config = config_override
