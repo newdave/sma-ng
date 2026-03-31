@@ -1140,12 +1140,12 @@ class PathConfigManager:
 class ConversionWorker(threading.Thread):
     """Background worker thread that processes conversion jobs from the database."""
 
-    def __init__(self, worker_id, job_db, job_event, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None):
+    def __init__(self, worker_id, job_db, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None):
         super().__init__(daemon=True)
         self.worker_id = worker_id
         self.node_id = socket.gethostname()
         self.job_db = job_db
-        self.job_event = job_event  # Event to signal new jobs
+        self.job_event = threading.Event()  # per-worker event; set by notify_workers()
         self.path_config_manager = path_config_manager
         self.config_log_manager = config_log_manager
         self.config_lock_manager = config_lock_manager
@@ -1161,28 +1161,20 @@ class ConversionWorker(threading.Thread):
 
     def run(self):
         while self.running:
-            # Wait for a job notification or periodic timeout.
+            # Wait for a wakeup on this worker's own event or periodic timeout.
             self.job_event.wait(timeout=5.0)
+            self.job_event.clear()
 
             if not self.running:
                 break
 
-            # Drain all available jobs before waiting again.  Without this
-            # inner loop, a worker that finishes a job goes back to waiting
-            # on the shared event — which may already be clear because the
-            # other worker cleared it while this one was busy — and pending
-            # jobs are never picked up until an external trigger fires.
+            # Drain all available jobs before going back to sleep.
             while self.running:
                 locked = self.config_lock_manager.get_locked_configs()
                 job = self.job_db.claim_next_job(self.worker_id, self.node_id, exclude_configs=locked or None)
                 if job:
                     self.process_job(job)
-                    # After finishing, signal the other worker in case more
-                    # jobs arrived while we were busy.
-                    self.job_event.set()
                 else:
-                    # No claimable job right now — go back to waiting.
-                    self.job_event.clear()
                     break
 
     def process_job(self, job):
@@ -1928,7 +1920,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             for stale_id, job_count in recovered:
                 self.server.logger.warning("Status check: recovered %d jobs from stale node %s" % (job_count, stale_id))
             if any(job_count > 0 for _, job_count in recovered):
-                self.server.job_event.set()
+                self.server.notify_workers()
             nodes = self.server.job_db.get_cluster_nodes()
             stats = self.server.job_db.get_stats()
             self.send_json_response(200, {"cluster": nodes, "jobs": stats})
@@ -2049,7 +2041,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         config = query.get("config", [None])[0]
         count = self.server.job_db.requeue_failed_jobs(config=config)
         if count > 0:
-            self.server.job_event.set()
+            self.server.notify_workers()
         self.send_json_response(200, {"requeued": count})
 
     def _post_job_requeue(self, path):
@@ -2057,7 +2049,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             job_id = int(path.split("/")[-2])
             requeued = self.server.job_db.requeue_job(job_id)
             if requeued:
-                self.server.job_event.set()
+                self.server.notify_workers()
                 self.send_json_response(200, {"requeued": True, "job_id": job_id})
             else:
                 job = self.server.job_db.get_job(job_id)
@@ -2183,7 +2175,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                         queued.append({"job_id": job_id, "path": filepath, "config": resolved_config})
 
                 if queued:
-                    self.server.job_event.set()
+                    self.server.notify_workers()
                     self.server.logger.info("Directory %s: queued %d files, %d duplicates" % (path, len(queued), len(duplicates)))
 
                 self.send_json_response(
@@ -2224,7 +2216,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 return
 
             # Signal workers that a new job is available
-            self.server.job_event.set()
+            self.server.notify_workers()
 
             log_file = self.server.config_log_manager.get_log_file(resolved_config)
             config_busy = self.server.config_lock_manager.is_locked(resolved_config)
@@ -2246,13 +2238,13 @@ class HeartbeatThread(threading.Thread):
     Only active when using PostgreSQLJobDatabase (no-op for SQLite).
     """
 
-    def __init__(self, job_db, node_id, host, worker_count, job_event, interval, stale_seconds, logger, started_at):
+    def __init__(self, job_db, node_id, host, worker_count, server, interval, stale_seconds, logger, started_at):
         super().__init__(daemon=True)
         self.job_db = job_db
         self.node_id = node_id
         self.host = host
         self.worker_count = worker_count
-        self.job_event = job_event
+        self.server = server
         self.interval = interval
         self.stale_seconds = stale_seconds
         self.log = logger
@@ -2274,7 +2266,7 @@ class HeartbeatThread(threading.Thread):
                 for stale_id, job_count in recovered:
                     self.log.warning("Recovered %d jobs from stale node %s" % (job_count, stale_id))
                 if any(job_count > 0 for _, job_count in recovered):
-                    self.job_event.set()  # Wake workers to pick up requeued jobs
+                    self.server.notify_workers()  # Wake workers to pick up requeued jobs
             except Exception:
                 self.log.exception("Heartbeat error")
             self._stop_event.wait(timeout=self.interval)
@@ -2291,11 +2283,11 @@ class ScannerThread(threading.Thread):
                    paths as /mnt/unionfs/Media so config matching works.
     """
 
-    def __init__(self, scan_paths, job_db, job_event, path_config_manager, logger):
+    def __init__(self, scan_paths, job_db, server, path_config_manager, logger):
         super().__init__(daemon=True)
         self.scan_paths = scan_paths  # list of dicts from daemon.json
         self.job_db = job_db
-        self.job_event = job_event
+        self.server = server
         self.path_config_manager = path_config_manager
         self.log = logger
         self.running = True
@@ -2322,7 +2314,7 @@ class ScannerThread(threading.Thread):
                     try:
                         queued = self._scan(entry)
                         if queued:
-                            self.job_event.set()
+                            self.server.notify_workers()
                     except Exception:
                         self.log.exception("Scanner error for path: %s" % path)
                     self._next_run[path] = time.monotonic() + interval
@@ -2412,20 +2404,13 @@ class DaemonServer(HTTPServer):
         self.node_id = socket.gethostname()
         self.started_at = datetime.now(timezone.utc)
         self.workers = []
-        self.job_event = threading.Event()
 
-        # Check for pending jobs from previous run
-        pending = job_db.pending_count()
-        if pending > 0:
-            logger.info("Found %d pending jobs from previous run" % pending)
-            self.job_event.set()
-
-        # Start worker threads
+        # Start worker threads — each gets its own Event so workers never
+        # race to clear a shared flag.  notify_workers() sets all of them.
         for i in range(worker_count):
             worker = ConversionWorker(
                 worker_id=i + 1,
                 job_db=job_db,
-                job_event=self.job_event,
                 path_config_manager=path_config_manager,
                 config_log_manager=config_log_manager,
                 config_lock_manager=config_lock_manager,
@@ -2436,13 +2421,19 @@ class DaemonServer(HTTPServer):
             self.workers.append(worker)
             logger.debug("Started worker thread %d" % (i + 1))
 
+        # Wake all workers if there are jobs waiting from a previous run.
+        pending = job_db.pending_count()
+        if pending > 0:
+            logger.info("Found %d pending jobs from previous run" % pending)
+            self.notify_workers()
+
         # Start heartbeat thread (only does real work with PostgreSQL backend)
         self.heartbeat_thread = HeartbeatThread(
             job_db=job_db,
             node_id=self.node_id,
             host=server_address[0],
             worker_count=worker_count,
-            job_event=self.job_event,
+            server=self,
             interval=heartbeat_interval,
             stale_seconds=stale_seconds,
             logger=logger,
@@ -2455,11 +2446,16 @@ class DaemonServer(HTTPServer):
         self.scanner_thread = ScannerThread(
             scan_paths=path_config_manager.scan_paths,
             job_db=job_db,
-            job_event=self.job_event,
+            server=self,
             path_config_manager=path_config_manager,
             logger=logger,
         )
         self.scanner_thread.start()
+
+    def notify_workers(self):
+        """Wake all worker threads by setting each worker's individual event."""
+        for worker in self.workers:
+            worker.job_event.set()
 
     def shutdown(self):
         self.logger.info("Shutting down...")
