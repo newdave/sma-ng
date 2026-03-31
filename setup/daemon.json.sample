@@ -3,6 +3,7 @@
   "api_key": null,
   "db_url": null,
   "ffmpeg_dir": null,
+  "media_extensions": [".mp4", ".mkv", ".avi", ".mov", ".ts"],
   "path_configs": [
     {
       "path": "/mnt/unionfs/Media/TV",

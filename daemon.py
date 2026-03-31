@@ -1049,6 +1049,7 @@ class PathConfigManager:
         self.api_key = None  # Can be set from daemon.json
         self.db_url = None  # Can be set from daemon.json
         self.ffmpeg_dir = None  # Can be set from daemon.json
+        self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
 
         if config_file and os.path.exists(config_file):
             self.load_config(config_file)
@@ -1075,6 +1076,11 @@ class PathConfigManager:
 
             # Load FFmpeg directory from config (can be overridden by CLI/env)
             self.ffmpeg_dir = config.get("ffmpeg_dir")
+
+            # Load media extensions inclusion list for directory scanning
+            raw_exts = config.get("media_extensions")
+            if raw_exts is not None:
+                self.media_extensions = frozenset(("." + e.lower().lstrip(".")) for e in raw_exts if e)
 
             raw_configs = config.get("path_configs", [])
 
@@ -2052,61 +2058,22 @@ class WebhookHandler(BaseHTTPRequestHandler):
         else:
             self.send_json_response(404, {"error": "Not found"})
 
-    # Extensions that are never media files — skip without queuing.
-    # Everything else is passed to manual.py which runs ffprobe to validate.
-    _SKIP_EXTENSIONS = frozenset(
-        [
-            ".nfo",
-            ".txt",
-            ".log",
-            ".md",
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".gif",
-            ".bmp",
-            ".tbn",
-            ".nzb",
-            ".torrent",
-            ".url",
-            ".html",
-            ".htm",
-            ".xml",
-            ".sfv",
-            ".srr",
-            ".srs",
-            ".par2",
-            ".py",
-            ".pyc",
-            ".db",
-            ".srt",
-            ".vtt",
-            ".ass",
-            ".ssa",
-            ".sub",
-            ".idx",
-            ".sup",
-        ]
-    )
-
     def _collect_media_files(self, directory):
-        """Recursively collect candidate media files from a directory.
+        """Recursively collect media files from a directory.
 
-        Returns a sorted list of absolute file paths, skipping dotfiles and
-        files with extensions in _SKIP_EXTENSIONS. ffprobe validation happens
-        later inside manual.py when each job is processed.
+        Only files whose extension is in path_config_manager.media_extensions
+        are included. Hidden directories and dotfiles are skipped.
+        ffprobe validation happens later inside manual.py when each job runs.
         """
+        allowed = self.server.path_config_manager.media_extensions
         candidates = []
         for root, dirs, files in os.walk(directory):
-            # Skip hidden directories in-place so os.walk doesn't descend into them
             dirs[:] = [d for d in dirs if not d.startswith(".")]
             for fname in files:
                 if fname.startswith("."):
                     continue
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in self._SKIP_EXTENSIONS:
-                    continue
-                candidates.append(os.path.join(root, fname))
+                if os.path.splitext(fname)[1].lower() in allowed:
+                    candidates.append(os.path.join(root, fname))
         return sorted(candidates)
 
     def _handle_webhook(self):
