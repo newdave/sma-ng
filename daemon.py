@@ -1615,7 +1615,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <!-- Jobs Table -->
   <div id="jobs-table" class="bg-gray-800 rounded-lg border border-gray-700 p-5">
     <div class="flex items-center justify-between mb-3">
-      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Recent Jobs</h2>
+      <div class="flex items-center gap-3">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Recent Jobs</h2>
+        <button @click="requeueAllFailed()" :disabled="requeueingAll || (stats.failed||0) === 0"
+                class="text-xs px-2.5 py-1 rounded border border-red-700 text-red-400 hover:border-red-500 hover:text-red-300 disabled:opacity-30 transition-colors"
+                x-text="requeueingAll ? 'Requeueing…' : 'Requeue All Failed'">
+        </button>
+      </div>
       <div class="flex gap-2">
         <template x-for="f in ['all','pending','running','completed','failed']" :key="f">
           <button @click="filter=f; page=0; fetchJobs()"
@@ -1634,7 +1640,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <th class="pb-2 pr-3 font-medium">Config</th>
           <th class="pb-2 pr-3 font-medium">Status</th>
           <th class="pb-2 pr-3 font-medium">Created</th>
-          <th class="pb-2 font-medium">Duration</th>
+          <th class="pb-2 pr-3 font-medium">Duration</th>
+          <th class="pb-2 font-medium"></th>
         </tr></thead>
         <tbody class="divide-y divide-gray-700/50">
           <template x-for="j in jobs" :key="j.id">
@@ -1654,11 +1661,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                       x-text="j.status"></span>
               </td>
               <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtTime(j.created_at)"></td>
-              <td class="py-2 text-gray-500 text-xs" x-text="fmtDuration(j)"></td>
+              <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtDuration(j)"></td>
+              <td class="py-2 text-xs">
+                <button x-show="j.status === 'failed'" @click="requeueJob(j.id)"
+                        class="opacity-0 group-hover:opacity-100 px-2 py-0.5 rounded border border-red-700 text-red-400 hover:border-red-500 hover:text-red-300 transition-all">
+                  Requeue
+                </button>
+              </td>
             </tr>
           </template>
           <template x-if="jobs.length === 0">
-            <tr><td colspan="6" class="py-8 text-center text-gray-500 text-sm">No jobs found</td></tr>
+            <tr><td colspan="7" class="py-8 text-center text-gray-500 text-sm">No jobs found</td></tr>
           </template>
         </tbody>
       </table>
@@ -1682,6 +1695,7 @@ function dashboard() {
     filter: 'all', page: 0, pageSize: 50,
     lastUpdate: '', interval: null,
     submitPath: '', submitArgs: '', submitting: false, submitResult: '', submitError: false,
+    requeueingAll: false,
     authHeaders(extra) {
       const h = Object.assign({'Content-Type': 'application/json'}, extra || {});
       if (window.SMA_API_KEY) h['X-API-Key'] = window.SMA_API_KEY;
@@ -1739,6 +1753,27 @@ function dashboard() {
       } catch(e) { this.submitError = true; this.submitResult = 'Request failed: ' + e.message; }
       this.submitting = false;
       setTimeout(() => this.submitResult = '', 8000);
+    },
+    async requeueJob(id) {
+      try {
+        const r = await fetch('/jobs/' + id + '/requeue', {method: 'POST', headers: this.authHeaders()});
+        if (r.ok) {
+          const j = this.jobs.find(j => j.id === id);
+          if (j) j.status = 'pending';
+          setTimeout(() => this.refresh(), 500);
+        }
+      } catch(e) {}
+    },
+    async requeueAllFailed() {
+      this.requeueingAll = true;
+      try {
+        const r = await fetch('/jobs/requeue', {method: 'POST', headers: this.authHeaders()});
+        if (r.ok) {
+          const d = await r.json();
+          setTimeout(() => this.refresh(), 300);
+        }
+      } catch(e) {}
+      this.requeueingAll = false;
     },
     fmtTime(t) {
       if (!t) return '-';
