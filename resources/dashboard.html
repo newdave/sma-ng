@@ -92,27 +92,29 @@
     <div class="bg-gray-800 rounded-lg border border-gray-700 p-5">
       <h2 class="tooltip text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 cursor-default">
         Workers
-        <span class="tip">Background threads that pick up and run conversion jobs. Each config can only run one job at a time.</span>
+        <span class="tip">Background threads that pick up and run conversion jobs.</span>
       </h2>
       <div class="flex items-baseline gap-2 mb-3">
         <span class="text-3xl font-bold text-white" x-text="activeWorkers"></span>
         <span class="text-gray-500 text-sm" x-text="'/ ' + (health.workers || 0) + ' busy'"></span>
       </div>
-      <div class="space-y-1.5" x-show="Object.keys(health.active||{}).length">
-        <template x-for="(info, config) in (health.active||{})" :key="config">
-          <div class="bg-gray-700/50 rounded p-2">
-            <div class="flex items-center gap-2 mb-0.5">
-              <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
-              <span class="text-xs text-blue-300 font-medium truncate" x-text="config.split('/').pop()"></span>
+      <div class="space-y-1.5" x-show="activeWorkers > 0">
+        <template x-for="(jobs, config) in (health.active||{})" :key="config">
+          <template x-for="info in jobs" :key="info.job_id">
+            <div class="bg-gray-700/50 rounded p-2">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
+                <span class="text-xs text-blue-300 font-medium truncate" x-text="config.split('/').pop()"></span>
+              </div>
+              <div class="tooltip text-xs text-gray-400 truncate pl-3.5 cursor-default" :title="info.path" x-text="info.path.split('/').pop()">
+                <span class="tip" x-text="info.path"></span>
+              </div>
+              <div class="text-xs text-gray-600 pl-3.5">Job #<span x-text="info.job_id"></span></div>
             </div>
-            <div class="tooltip text-xs text-gray-400 truncate pl-3.5 cursor-default" :title="info.path" x-text="info.path.split('/').pop()">
-              <span class="tip" x-text="info.path"></span>
-            </div>
-            <div class="text-xs text-gray-600 pl-3.5">Job #<span x-text="info.job_id"></span></div>
-          </div>
+          </template>
         </template>
       </div>
-      <p class="text-gray-600 text-xs" x-show="!Object.keys(health.active||{}).length">No active conversions</p>
+      <p class="text-gray-600 text-xs" x-show="activeWorkers === 0">No active conversions</p>
 
       <!-- Waiting queues -->
       <div class="mt-3 space-y-1" x-show="Object.keys(health.waiting||{}).length">
@@ -121,7 +123,7 @@
           <div class="flex items-center justify-between">
             <span class="text-xs text-gray-400 truncate" x-text="config.split('/').pop()"></span>
             <span class="tooltip text-xs bg-yellow-900/60 text-yellow-300 px-2 py-0.5 rounded-full ml-2 flex-shrink-0" x-text="count">
-              <span class="tip">Jobs waiting for this config's lock to be released</span>
+              <span class="tip">Jobs waiting for this config's slot to become available</span>
             </span>
           </div>
         </template>
@@ -154,8 +156,8 @@
             <td class="py-2 pr-4 text-gray-500 font-mono italic">default</td>
             <td class="py-2 pr-4 text-gray-400 font-mono" x-text="(configs.default_config||'').split('/').pop()"></td>
             <td class="py-2 pr-4">
-              <span x-show="configs.default_active_job" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">Running</span>
-              <span x-show="!configs.default_active_job" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
+              <span x-show="configs.default_active_jobs && configs.default_active_jobs.length" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full" x-text="'Running (' + configs.default_active_jobs.length + ')'"></span>
+              <span x-show="!configs.default_active_jobs || !configs.default_active_jobs.length" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
             </td>
             <td class="py-2 pr-4 text-gray-500" x-text="configs.default_pending_jobs || 0"></td>
             <td class="py-2 text-gray-600 font-mono" x-text="(configs.default_log||'').split('/').pop()"></td>
@@ -165,8 +167,8 @@
               <td class="py-2 pr-4 text-gray-300 font-mono" :title="c.path" x-text="c.path"></td>
               <td class="py-2 pr-4 text-gray-400 font-mono" x-text="c.config.split('/').pop()"></td>
               <td class="py-2 pr-4">
-                <span x-show="c.active_job" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">Running</span>
-                <span x-show="!c.active_job" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
+                <span x-show="c.active_jobs && c.active_jobs.length" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full" x-text="'Running (' + c.active_jobs.length + ')'"></span>
+                <span x-show="!c.active_jobs || !c.active_jobs.length" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
               </td>
               <td class="py-2 pr-4 text-gray-400" x-text="c.pending_jobs || 0"></td>
               <td class="py-2 text-gray-600 font-mono" x-text="c.log_file ? c.log_file.split('/').pop() : ''"></td>
@@ -274,7 +276,7 @@ function dashboard() {
       {key:'failed',   label:'Failed',    color:'text-red-400',   tip:'Ended with an error — click to filter'},
     ],
     get activeWorkers() {
-      return Object.keys(this.health.active || {}).length;
+      return Object.values(this.health.active || {}).reduce((sum, jobs) => sum + jobs.length, 0);
     },
     async init() {
       await this.refresh();

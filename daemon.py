@@ -971,88 +971,85 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
 
 class ConfigLockManager:
     """
-    Manages per-config locks to ensure only one process runs per config at a time.
+    Manages per-config concurrency using semaphores.
 
-    Jobs for the same config will queue and execute sequentially.
-    Jobs for different configs can run in parallel.
+    Up to `max_per_config` jobs for the same config can run simultaneously.
+    Jobs for different configs can always run in parallel (up to worker count).
     """
 
-    def __init__(self, logger=None):
+    def __init__(self, max_per_config=1, logger=None):
         self.log = logger or log
+        self.max_per_config = max_per_config
         self._master_lock = threading.Lock()
-        self._config_locks = {}  # config_path -> Lock
-        self._active_configs = {}  # config_path -> (job_id, job_path)
+        self._config_sems = {}  # config_path -> Semaphore
+        self._active_configs = {}  # config_path -> list of (job_id, job_path)
         self._waiting_counts = {}  # config_path -> number of waiting jobs
 
-    def _get_lock(self, config_path):
-        """Get or create a lock for a config (thread-safe)."""
+    def _get_sem(self, config_path):
+        """Get or create a semaphore for a config (thread-safe)."""
         with self._master_lock:
-            if config_path not in self._config_locks:
-                self._config_locks[config_path] = threading.Lock()
+            if config_path not in self._config_sems:
+                self._config_sems[config_path] = threading.Semaphore(self.max_per_config)
                 self._waiting_counts[config_path] = 0
-            return self._config_locks[config_path]
+                self._active_configs[config_path] = []
+            return self._config_sems[config_path]
 
     def acquire(self, config_path, job_id, job_path):
         """
-        Acquire lock for a config. Blocks until the lock is available.
-        Returns True when lock is acquired.
+        Acquire a slot for a config. Blocks until a slot is available.
+        Returns True when acquired.
         """
-        lock = self._get_lock(config_path)
+        sem = self._get_sem(config_path)
 
-        # Increment waiting count
         with self._master_lock:
             self._waiting_counts[config_path] = self._waiting_counts.get(config_path, 0) + 1
-            if config_path in self._active_configs:
-                self.log.info("Job %d waiting for config lock: %s (current: job %d)" % (job_id, os.path.basename(config_path), self._active_configs[config_path][0]))
+            active = self._active_configs.get(config_path, [])
+            if active:
+                self.log.info("Job %d waiting for config slot: %s (%d/%d slots in use)" % (job_id, os.path.basename(config_path), len(active), self.max_per_config))
 
-        # Block until lock is available
-        lock.acquire()
+        sem.acquire()
 
-        # Update state
         with self._master_lock:
             self._waiting_counts[config_path] -= 1
-            self._active_configs[config_path] = (job_id, job_path)
+            self._active_configs.setdefault(config_path, []).append((job_id, job_path))
 
-        self.log.debug("Job %d acquired lock for config: %s" % (job_id, os.path.basename(config_path)))
+        self.log.debug("Job %d acquired slot for config: %s" % (job_id, os.path.basename(config_path)))
         return True
 
-    def release(self, config_path):
-        """Release lock for a config."""
-        lock = self._get_lock(config_path)
+    def release(self, config_path, job_id):
+        """Release a slot for a config."""
+        sem = self._get_sem(config_path)
 
         with self._master_lock:
-            if config_path in self._active_configs:
-                del self._active_configs[config_path]
+            active = self._active_configs.get(config_path, [])
+            self._active_configs[config_path] = [(jid, p) for jid, p in active if jid != job_id]
 
-        try:
-            lock.release()
-            self.log.debug("Released lock for config: %s" % os.path.basename(config_path))
-        except RuntimeError:
-            # Lock was not held
-            pass
+        sem.release()
+        self.log.debug("Job %d released slot for config: %s" % (job_id, os.path.basename(config_path)))
 
     def get_status(self):
         """Get current lock status for all configs."""
         with self._master_lock:
             active = {}
-            for config, (job_id, job_path) in self._active_configs.items():
-                active[config] = {"job_id": job_id, "path": job_path}
+            for config, jobs in self._active_configs.items():
+                if jobs:
+                    active[config] = [{"job_id": jid, "path": p} for jid, p in jobs]
             return {"active": active, "waiting": {k: v for k, v in self._waiting_counts.items() if v > 0}}
 
     def is_locked(self, config_path):
-        """Check if a config is currently locked."""
+        """Check if a config has any active jobs."""
         with self._master_lock:
-            return config_path in self._active_configs
+            return bool(self._active_configs.get(config_path))
 
     def get_locked_configs(self):
-        """Return the set of config paths that are currently locked."""
+        """Return config paths where all concurrency slots are full."""
         with self._master_lock:
-            return set(self._active_configs.keys())
+            return {c for c, jobs in self._active_configs.items() if len(jobs) >= self.max_per_config}
 
-    def get_active_job(self, config_path):
-        """Get the active job for a config, if any."""
+    def get_active_jobs(self, config_path):
+        """Get active jobs for a config as a list of dicts."""
         with self._master_lock:
-            return self._active_configs.get(config_path)
+            return [{"job_id": jid, "path": p} for jid, p in self._active_configs.get(config_path, [])]
 
 
 class ConfigLogManager:
@@ -1232,6 +1229,7 @@ class ConversionWorker(threading.Thread):
         self.script_path = os.path.join(SCRIPT_DIR, "manual.py")
         self.ffmpeg_dir = ffmpeg_dir
         self.running = True
+        self.current_job_id = None
 
     def stop(self):
         """Signal worker to stop."""
@@ -1258,6 +1256,7 @@ class ConversionWorker(threading.Thread):
 
     def process_job(self, job):
         job_id = job["id"]
+        self.current_job_id = job_id
         path = job["path"]
         args = json.loads(job["args"]) if job["args"] else []
         config_file = job["config"]
@@ -1283,7 +1282,8 @@ class ConversionWorker(threading.Thread):
             self.log.exception("Job %d failed: %s" % (job_id, e))
             self.job_db.fail_job(job_id, str(e))
         finally:
-            self.config_lock_manager.release(config_file)
+            self.config_lock_manager.release(config_file, job_id)
+            self.current_job_id = None
 
     def _run_conversion(self, job_id, path, config_file, extra_args):
         """Run the actual conversion process. Returns True on success."""
@@ -1637,7 +1637,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 "path": entry["path"],
                 "config": entry["config"],
                 "log_file": self.server.config_log_manager.get_log_file(entry["config"]),
-                "active_job": self.server.config_lock_manager.get_active_job(entry["config"]),
+                "active_jobs": self.server.config_lock_manager.get_active_jobs(entry["config"]),
                 "pending_jobs": self.server.job_db.pending_count_for_config(entry["config"]),
             }
             for entry in self.server.path_config_manager.path_configs
@@ -1648,7 +1648,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             {
                 "default_config": default_config,
                 "default_log": self.server.config_log_manager.get_log_file(default_config),
-                "default_active_job": self.server.config_lock_manager.get_active_job(default_config),
+                "default_active_jobs": self.server.config_lock_manager.get_active_jobs(default_config),
                 "default_pending_jobs": self.server.job_db.pending_count_for_config(default_config),
                 "path_configs": configs_with_status,
                 "logs_directory": self.server.config_log_manager.logs_dir,
@@ -1759,6 +1759,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         if parsed.path in ["/", "/webhook", "/convert"]:
             self._handle_webhook()
+        elif parsed.path == "/shutdown":
+            active = self.server.config_lock_manager.get_status()["active"]
+            count = sum(len(v) for v in active.values())
+            self.send_json_response(202, {"status": "shutting_down", "active_jobs": count})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
         elif parsed.path == "/cleanup":
             self._post_cleanup(query)
         elif parsed.path == "/jobs/requeue":
@@ -2127,13 +2132,25 @@ class DaemonServer(HTTPServer):
             worker.job_event.set()
 
     def shutdown(self):
-        self.logger.info("Shutting down...")
+        self.logger.info("Shutting down — waiting for active conversions to finish...")
 
-        # Stop workers
+        # Stop workers from picking up new jobs
         for worker in self.workers:
             worker.stop()
         self.heartbeat_thread.stop()
         self.scanner_thread.stop()
+
+        # Wait for in-progress conversions to complete
+        active = [w for w in self.workers if w.is_alive()]
+        while active:
+            names = [str(w.worker_id) for w in active if w.current_job_id]
+            if names:
+                self.logger.info("Waiting for worker(s) %s to finish..." % ", ".join(names))
+            for w in active:
+                w.join(timeout=10)
+            active = [w for w in active if w.is_alive()]
+
+        self.logger.info("All workers finished, shutting down.")
 
         # Mark this node offline in the cluster table on clean shutdown
         if self.job_db.is_distributed:
@@ -2142,9 +2159,6 @@ class DaemonServer(HTTPServer):
             except Exception:
                 pass
 
-        # Wait for workers
-        for worker in self.workers:
-            worker.join(timeout=5)
         self.heartbeat_thread.join(timeout=5)
         self.scanner_thread.join(timeout=5)
 
@@ -2162,7 +2176,7 @@ def main():
     parser = argparse.ArgumentParser(description="SMA-NG Daemon - HTTP webhook server for media conversion")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8585, help="Port to listen on (default: 8585)")
-    parser.add_argument("--workers", type=int, default=1, help=argparse.SUPPRESS)
+    parser.add_argument("--workers", type=int, default=1, help="Number of worker threads (default: 1)")
     parser.add_argument("-d", "--daemon-config", help="Path to daemon.json config file (path mappings)")
     parser.add_argument("--logs-dir", default=LOGS_DIR, help="Directory for per-config log files (default: logs/)")
     parser.add_argument("--db", default=DATABASE_PATH, help="Path to SQLite database (default: config/daemon.db)")
@@ -2180,16 +2194,12 @@ def main():
 
     args = parser.parse_args()
 
-    if args.workers != 1:
-        log.warning("--workers ignored: max-workers is always 1 to prevent hardware encoder contention")
-        args.workers = 1
-
     log.info("SMA-NG Daemon starting...")
     log.info("Python %s" % sys.version)
 
     # Initialize managers
     config_log_manager = ConfigLogManager(args.logs_dir)
-    config_lock_manager = ConfigLockManager(logger=log)
+    config_lock_manager = ConfigLockManager(max_per_config=args.workers, logger=log)
     path_config_manager = PathConfigManager(args.daemon_config, logger=log)
 
     # Determine API key (priority: CLI arg > env var > config file)

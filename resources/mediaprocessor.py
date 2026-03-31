@@ -583,7 +583,7 @@ class MediaProcessor:
         """
         info = self.converter.probe(inputfile)
 
-        if info:
+        if info and info.video:
             self.log.debug("Height: %s" % info.video.video_height)
             self.log.debug("Width: %s" % info.video.video_width)
 
@@ -2589,6 +2589,10 @@ class MediaProcessor:
 
         self.log.info("HDR video stream detected for %d." % videostream.index)
         return True
+
+    def isHDR(self, videostream):
+        """Alias for isHDRInput for backwards compatibility."""
+        return self.isHDRInput(videostream)
 
     # Check if output pix_fmt is HDR
     def isHDROutput(self, pix_fmt, bit_depth):
