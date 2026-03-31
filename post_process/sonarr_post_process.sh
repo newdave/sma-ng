@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SMA-NG Radarr Post-Processing Script
+# SMA-NG Sonarr Post-Processing Script
 #
 # Submits a conversion job to the SMA-NG daemon webhook and waits for completion.
 # Configure via environment variables:
@@ -10,8 +10,8 @@
 #   SMA_POLL_INTERVAL   Seconds between status checks (default: 5)
 #   SMA_TIMEOUT         Max seconds to wait for completion (default: 0 = unlimited)
 #
-# Radarr environment variables are provided automatically when the script is
-# called as a Radarr Custom Script connection.
+# Sonarr environment variables are provided automatically when the script is
+# called as a Sonarr Custom Script connection.
 
 set -euo pipefail
 
@@ -23,7 +23,7 @@ TIMEOUT="${SMA_TIMEOUT:-0}"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-log() { echo "[postRadarr] $*" >&2; }
+log() { echo "[sonarr_post_process] $*" >&2; }
 
 auth_header() {
     if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
@@ -94,10 +94,10 @@ wait_for_job() {
 
 # ── event handling ─────────────────────────────────────────────────────────────
 
-EVENT="${radarr_eventtype:-}"
+EVENT="${sonarr_eventtype:-}"
 
 if [[ "$EVENT" == "Test" ]]; then
-    log "Successful postRadarr.sh SMA-NG test, exiting."
+    log "Successful postSonarr.sh SMA-NG test, exiting."
     exit 0
 fi
 
@@ -108,25 +108,31 @@ fi
 
 # ── build webhook payload ──────────────────────────────────────────────────────
 
-INPUTFILE="${radarr_moviefile_path:-}"
-TMDB_ID="${radarr_movie_tmdbid:-}"
-IMDB_ID="${radarr_movie_imdbid:-}"
+INPUTFILE="${sonarr_episodefile_path:-}"
+TVDB_ID="${sonarr_series_tvdbid:-}"
+IMDB_ID="${sonarr_series_imdbid:-}"
+SEASON="${sonarr_episodefile_seasonnumber:-}"
+EPISODE_NUMBERS="${sonarr_episodefile_episodenumbers:-}"
 
 if [[ -z "$INPUTFILE" ]]; then
-    log "ERROR: radarr_moviefile_path is not set."
+    log "ERROR: sonarr_episodefile_path is not set."
     exit 1
 fi
 
 log "Input file: ${INPUTFILE}"
-log "TMDB ID: ${TMDB_ID}, IMDB ID: ${IMDB_ID}"
+log "TVDB ID: ${TVDB_ID}, S$(printf '%02d' "$SEASON")E$(echo "$EPISODE_NUMBERS" | cut -d, -f1 | xargs printf '%02d')"
 
-# Build args array: [-tmdb <id>] [-imdb <id>]
+# Build args array: -tvdb <id> -s <season> -e <ep1> [-e <ep2> ...]
 ARGS="[]"
-if [[ -n "$TMDB_ID" ]]; then
+if [[ -n "$TVDB_ID" ]]; then
     ARGS=$(echo "$ARGS" | python3 -c "
 import sys, json
 a = json.load(sys.stdin)
-a += ['-tmdb', '${TMDB_ID}']
+a += ['-tvdb', '${TVDB_ID}', '-s', '${SEASON}']
+for ep in '${EPISODE_NUMBERS}'.split(','):
+    ep = ep.strip()
+    if ep:
+        a += ['-e', ep]
 print(json.dumps(a))
 ")
 fi
@@ -168,4 +174,4 @@ log "Job ${JOB_ID} queued."
 
 wait_for_job "$JOB_ID" || exit 1
 
-log "Radarr post-processing complete."
+log "Sonarr post-processing complete."

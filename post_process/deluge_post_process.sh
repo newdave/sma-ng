@@ -22,7 +22,7 @@ BYPASS_LABELS="${SMA_BYPASS_LABELS:-bypass}"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-log()  { echo "[delugePostProcess] $*" >&2; }
+log()  { echo "[deluge_post_process] $*" >&2; }
 info() { log "INFO: $*"; }
 err()  { log "ERROR: $*"; }
 
