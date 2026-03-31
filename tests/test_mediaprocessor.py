@@ -1699,3 +1699,515 @@ class TestSetAcceleration:
         opts, device = mp.setAcceleration("h264", "yuv420p")
         assert opts == []
         assert device is None
+
+
+# ---------------------------------------------------------------------------
+# setDefaultAudioStream
+# ---------------------------------------------------------------------------
+
+
+class TestSetDefaultAudioStream:
+    def _make_stream(self, language="eng", disposition="+default", channels=2, codec="aac"):
+        return {"language": language, "disposition": disposition, "channels": channels, "codec": codec, "bitrate": 128}
+
+    def _make_mp(self, adl="eng"):
+        mp = _make_mp()
+        mp.settings.adl = adl
+        mp.settings.audio_sorting_default = "channels.d"
+        return mp
+
+    def test_single_stream_gets_default(self):
+        mp = self._make_mp()
+        streams = [self._make_stream(disposition="-default")]
+        mp.setDefaultAudioStream(streams)
+        assert "+default" in streams[0]["disposition"]
+
+    def test_preferred_language_wins_over_other(self):
+        mp = self._make_mp(adl="eng")
+        streams = [
+            self._make_stream(language="fra", disposition="+default"),
+            self._make_stream(language="eng", disposition="-default"),
+        ]
+        mp.setDefaultAudioStream(streams)
+        # eng stream should now have +default
+        eng = next(s for s in streams if s["language"] == "eng")
+        assert "+default" in eng["disposition"]
+
+    def test_non_preferred_language_default_cleared(self):
+        mp = self._make_mp(adl="eng")
+        streams = [
+            self._make_stream(language="fra", disposition="+default"),
+            self._make_stream(language="eng", disposition="-default"),
+        ]
+        mp.setDefaultAudioStream(streams)
+        fra = next(s for s in streams if s["language"] == "fra")
+        assert "+default" not in fra["disposition"]
+
+    def test_no_preferred_language_streams_uses_first(self):
+        mp = self._make_mp(adl="eng")
+        streams = [
+            self._make_stream(language="fra", disposition="-default"),
+            self._make_stream(language="deu", disposition="-default"),
+        ]
+        mp.setDefaultAudioStream(streams)
+        assert "+default" in streams[0]["disposition"]
+
+    def test_multiple_preferred_defaults_keeps_first_clears_rest(self):
+        mp = self._make_mp(adl="eng")
+        streams = [
+            self._make_stream(language="eng", disposition="+default"),
+            self._make_stream(language="eng", disposition="+default"),
+        ]
+        mp.setDefaultAudioStream(streams)
+        defaults = [s for s in streams if "+default" in s["disposition"]]
+        assert len(defaults) == 1
+
+    def test_empty_streams_does_not_raise(self):
+        mp = self._make_mp()
+        mp.setDefaultAudioStream([])  # should not raise
+
+    def test_no_preferred_language_set_uses_first_stream(self):
+        mp = self._make_mp(adl=None)
+        streams = [self._make_stream(language="fra", disposition="-default")]
+        mp.setDefaultAudioStream(streams)
+        assert "+default" in streams[0]["disposition"]
+
+
+# ---------------------------------------------------------------------------
+# setDefaultSubtitleStream
+# ---------------------------------------------------------------------------
+
+
+class TestSetDefaultSubtitleStream:
+    def _make_sub(self, language="eng", disposition="-default"):
+        return {"language": language, "disposition": disposition}
+
+    def _make_mp(self, sdl="eng", sforcedefault=True):
+        mp = _make_mp()
+        mp.settings.sdl = sdl
+        mp.settings.sforcedefault = sforcedefault
+        return mp
+
+    def test_sets_default_when_none_present(self):
+        mp = self._make_mp()
+        subs = [self._make_sub(language="eng", disposition="-default")]
+        mp.setDefaultSubtitleStream(subs)
+        assert "+default" in subs[0]["disposition"]
+
+    def test_already_has_default_no_change(self):
+        mp = self._make_mp()
+        subs = [self._make_sub(language="eng", disposition="+default")]
+        mp.setDefaultSubtitleStream(subs)
+        assert "+default" in subs[0]["disposition"]
+
+    def test_empty_list_does_not_raise(self):
+        mp = self._make_mp()
+        mp.setDefaultSubtitleStream([])
+
+    def test_no_sdl_does_not_set_default(self):
+        mp = self._make_mp(sdl=None)
+        subs = [self._make_sub(language="eng", disposition="-default")]
+        mp.setDefaultSubtitleStream(subs)
+        assert "+default" not in subs[0]["disposition"]
+
+    def test_force_default_false_does_not_override(self):
+        mp = self._make_mp(sforcedefault=False)
+        subs = [self._make_sub(language="eng", disposition="-default")]
+        mp.setDefaultSubtitleStream(subs)
+        assert "+default" not in subs[0]["disposition"]
+
+
+# ---------------------------------------------------------------------------
+# sortStreams
+# ---------------------------------------------------------------------------
+
+
+class TestSortStreams:
+    def _make_mp(self):
+        mp = _make_mp()
+        mp.settings = MagicMock()
+        return mp
+
+    def _stream(self, language="eng", channels=2, codec="aac", map_idx=0, disposition=""):
+        return {"language": language, "channels": channels, "codec": codec, "map": map_idx, "disposition": disposition, "bitrate": 128}
+
+    def test_single_stream_unchanged(self):
+        mp = self._make_mp()
+        streams = [self._stream()]
+        result = mp.sortStreams(streams, ["language"], ["eng"], ["aac"], MagicMock(), tagdata=None)
+        assert result == streams
+
+    def test_sort_by_language(self):
+        mp = self._make_mp()
+        streams = [self._stream(language="fra"), self._stream(language="eng")]
+        result = mp.sortStreams(streams, ["language"], ["eng", "fra"], ["aac"], MagicMock(), tagdata=None)
+        assert result[0]["language"] == "eng"
+
+    def test_sort_by_channels_descending(self):
+        mp = self._make_mp()
+        streams = [self._stream(channels=2), self._stream(channels=6)]
+        result = mp.sortStreams(streams, ["channels.d"], ["eng"], ["aac"], MagicMock(), tagdata=None)
+        assert result[0]["channels"] == 6
+
+    def test_sort_by_channels_ascending(self):
+        mp = self._make_mp()
+        streams = [self._stream(channels=6), self._stream(channels=2)]
+        result = mp.sortStreams(streams, ["channels.a"], ["eng"], ["aac"], MagicMock(), tagdata=None)
+        assert result[0]["channels"] == 2
+
+    def test_sort_by_codec_preference(self):
+        mp = self._make_mp()
+        mp.getCodecFromOptions = lambda x, info: x["codec"]
+        streams = [self._stream(codec="mp3"), self._stream(codec="aac")]
+        result = mp.sortStreams(streams, ["codec"], ["eng"], ["aac", "mp3"], MagicMock(), tagdata=None)
+        assert result[0]["codec"] == "aac"
+
+    def test_unknown_sort_key_skipped(self):
+        mp = self._make_mp()
+        streams = [self._stream(language="fra"), self._stream(language="eng")]
+        # Should not raise, just skip the unknown key
+        result = mp.sortStreams(streams, ["nonexistent_key"], ["eng"], ["aac"], MagicMock(), tagdata=None)
+        assert len(result) == 2
+
+    def test_sort_by_disposition_descending(self):
+        mp = self._make_mp()
+        streams = [self._stream(disposition="-default"), self._stream(disposition="+default")]
+        result = mp.sortStreams(streams, ["d.default.d"], ["eng"], ["aac"], MagicMock(), tagdata=None)
+        assert "+default" in result[0]["disposition"]
+
+    def test_empty_streams_returns_empty(self):
+        mp = self._make_mp()
+        result = mp.sortStreams([], ["language"], ["eng"], ["aac"], MagicMock(), tagdata=None)
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# safeLanguage
+# ---------------------------------------------------------------------------
+
+
+class TestSafeLanguage:
+    def _make_mp(self, awl=None, swl=None, adl="eng", sdl="eng", audio_original_language=False, subtitle_original_language=False):
+        mp = _make_mp()
+        mp.settings.awl = awl if awl is not None else []
+        mp.settings.swl = swl if swl is not None else []
+        mp.settings.adl = adl
+        mp.settings.sdl = sdl
+        mp.settings.audio_original_language = audio_original_language
+        mp.settings.subtitle_original_language = subtitle_original_language
+        mp.settings.ignored_audio_dispositions = []
+        return mp
+
+    def _make_info(self, audio_langs=("eng",), sub_langs=("eng",)):
+        info = MagicMock()
+        audio = []
+        for lang in audio_langs:
+            s = MagicMock()
+            s.metadata = {"language": lang}
+            s.disposition = {}
+            audio.append(s)
+        subs = []
+        for lang in sub_langs:
+            s = MagicMock()
+            s.metadata = {"language": lang}
+            subs.append(s)
+        info.audio = audio
+        info.subtitle = subs
+        return info
+
+    def test_returns_awl_and_swl(self):
+        mp = self._make_mp(awl=["eng"], swl=["eng"])
+        info = self._make_info()
+        awl, swl = mp.safeLanguage(info)
+        assert awl == ["eng"]
+        assert swl == ["eng"]
+
+    def test_awl_relaxed_when_no_valid_audio(self):
+        mp = self._make_mp(awl=["jpn"], adl="jpn")
+        info = self._make_info(audio_langs=["eng"])  # eng not in awl
+        awl, _ = mp.safeLanguage(info)
+        assert awl == []
+
+    def test_original_language_appended_to_awl(self):
+        mp = self._make_mp(awl=["eng"], audio_original_language=True)
+        tagdata = MagicMock()
+        tagdata.original_language = "jpn"
+        info = self._make_info(audio_langs=["eng", "jpn"])
+        awl, _ = mp.safeLanguage(info, tagdata=tagdata)
+        assert "jpn" in awl
+
+    def test_original_language_appended_to_swl(self):
+        mp = self._make_mp(swl=["eng"], subtitle_original_language=True)
+        tagdata = MagicMock()
+        tagdata.original_language = "jpn"
+        info = self._make_info()
+        _, swl = mp.safeLanguage(info, tagdata=tagdata)
+        assert "jpn" in swl
+
+    def test_no_tagdata_original_language_not_appended(self):
+        mp = self._make_mp(awl=["eng"], audio_original_language=True)
+        info = self._make_info()
+        awl, _ = mp.safeLanguage(info, tagdata=None)
+        assert "jpn" not in awl
+
+
+# ---------------------------------------------------------------------------
+# isValidSubtitleSource
+# ---------------------------------------------------------------------------
+
+
+class TestIsValidSubtitleSource:
+    def _make_mp(self, ignored_extensions=None):
+        mp = _make_mp()
+        mp.settings.ignored_extensions = ignored_extensions or ["nfo", "ds_store"]
+        mp.converter = MagicMock()
+        return mp
+
+    def test_ignored_extension_returns_none(self):
+        mp = self._make_mp()
+        assert mp.isValidSubtitleSource("/path/to/file.nfo") is None
+
+    def test_bad_sub_extension_returns_none(self):
+        mp = self._make_mp()
+        # .idx is in bad_sub_extensions
+        assert mp.isValidSubtitleSource("/path/to/file.idx") is None
+
+    def test_valid_sub_with_subtitle_streams(self):
+        mp = self._make_mp()
+        info = MagicMock()
+        info.subtitle = [MagicMock()]
+        info.video = None
+        info.audio = []
+        mp.converter.probe.return_value = info
+        result = mp.isValidSubtitleSource("/path/to/file.srt")
+        assert result is info
+
+    def test_file_with_video_stream_returns_none(self):
+        mp = self._make_mp()
+        info = MagicMock()
+        info.subtitle = [MagicMock()]
+        info.video = MagicMock()
+        info.audio = []
+        mp.converter.probe.return_value = info
+        assert mp.isValidSubtitleSource("/path/to/file.srt") is None
+
+    def test_file_with_audio_streams_returns_none(self):
+        mp = self._make_mp()
+        info = MagicMock()
+        info.subtitle = [MagicMock()]
+        info.video = None
+        info.audio = [MagicMock()]
+        mp.converter.probe.return_value = info
+        assert mp.isValidSubtitleSource("/path/to/file.srt") is None
+
+    def test_probe_exception_returns_none(self):
+        mp = self._make_mp()
+        mp.converter.probe.side_effect = Exception("ffprobe failed")
+        assert mp.isValidSubtitleSource("/path/to/file.srt") is None
+
+
+# ---------------------------------------------------------------------------
+# isHDRInput
+# ---------------------------------------------------------------------------
+
+
+class TestIsHDRInput:
+    def _make_mp(self, hdr_params=None):
+        mp = _make_mp()
+        mp.settings.hdr = hdr_params or {
+            "space": ["bt2020nc"],
+            "transfer": ["smpte2084"],
+            "primaries": ["bt2020"],
+        }
+        return mp
+
+    def _make_stream(self, space=None, transfer=None, primaries=None):
+        stream = MagicMock()
+        stream.index = 0
+        stream.color = {}
+        if space:
+            stream.color["space"] = space
+        if transfer:
+            stream.color["transfer"] = transfer
+        if primaries:
+            stream.color["primaries"] = primaries
+        return stream
+
+    def test_matching_hdr_params_returns_true(self):
+        mp = self._make_mp()
+        stream = self._make_stream(space="bt2020nc", transfer="smpte2084", primaries="bt2020")
+        assert mp.isHDRInput(stream) is True
+
+    def test_mismatched_space_returns_false(self):
+        mp = self._make_mp()
+        stream = self._make_stream(space="bt709", transfer="smpte2084", primaries="bt2020")
+        assert mp.isHDRInput(stream) is False
+
+    def test_no_hdr_params_configured_returns_false(self):
+        mp = self._make_mp(hdr_params={"space": [], "transfer": [], "primaries": []})
+        stream = self._make_stream(space="bt2020nc", transfer="smpte2084", primaries="bt2020")
+        assert mp.isHDRInput(stream) is False
+
+    def test_stream_missing_color_params_passes_if_hdr_not_configured(self):
+        mp = self._make_mp(hdr_params={"space": [], "transfer": [], "primaries": []})
+        stream = self._make_stream()
+        assert mp.isHDRInput(stream) is False
+
+
+# ---------------------------------------------------------------------------
+# isDolbyVision
+# ---------------------------------------------------------------------------
+
+
+class TestIsDolbyVision:
+    def _make_mp(self):
+        return _make_mp()
+
+    def test_dolby_vision_metadata_detected(self):
+        mp = self._make_mp()
+        framedata = {"side_data_list": [{"side_data_type": "Dolby Vision Metadata"}]}
+        assert mp.isDolbyVision(framedata) is True
+
+    def test_non_dv_side_data_returns_false(self):
+        mp = self._make_mp()
+        framedata = {"side_data_list": [{"side_data_type": "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}]}
+        assert mp.isDolbyVision(framedata) is False
+
+    def test_no_side_data_list_returns_false(self):
+        mp = self._make_mp()
+        assert mp.isDolbyVision({}) is False
+
+    def test_empty_side_data_list_returns_false(self):
+        mp = self._make_mp()
+        assert mp.isDolbyVision({"side_data_list": []}) is False
+
+    def test_invalid_framedata_returns_false(self):
+        mp = self._make_mp()
+        assert mp.isDolbyVision(None) is False
+
+
+# ---------------------------------------------------------------------------
+# getDimensions
+# ---------------------------------------------------------------------------
+
+
+class TestGetDimensions:
+    def _make_mp(self):
+        mp = _make_mp()
+        mp.converter = MagicMock()
+        return mp
+
+    def test_returns_width_and_height(self):
+        mp = self._make_mp()
+        info = MagicMock()
+        info.video.video_width = 1920
+        info.video.video_height = 1080
+        mp.converter.probe.return_value = info
+        result = mp.getDimensions("/path/to/file.mkv")
+        assert result == {"x": 1920, "y": 1080}
+
+    def test_probe_returns_none_gives_zeros(self):
+        mp = self._make_mp()
+        mp.converter.probe.return_value = None
+        result = mp.getDimensions("/path/to/file.mkv")
+        assert result == {"x": 0, "y": 0}
+
+
+# ---------------------------------------------------------------------------
+# mapStreamCombinations
+# ---------------------------------------------------------------------------
+
+
+class TestMapStreamCombinations:
+    def _make_mp(self, combinations=None):
+        mp = _make_mp()
+        mp.settings.stream_codec_combinations = combinations or []
+        return mp
+
+    def _make_stream(self, codec, language="eng", index=0, disposition=None):
+        s = MagicMock()
+        s.codec = codec
+        s.index = index
+        s.metadata = {"language": language}
+        s.disposition = disposition or {"default": False}
+        return s
+
+    def test_no_combinations_configured_returns_empty(self):
+        mp = self._make_mp(combinations=[])
+        streams = [self._make_stream("aac", index=0), self._make_stream("ac3", index=1)]
+        assert mp.mapStreamCombinations(streams) == []
+
+    def test_matching_combination_same_language_and_dispo(self):
+        mp = self._make_mp(combinations=[["aac", "ac3"]])
+        streams = [
+            self._make_stream("aac", language="eng", index=0),
+            self._make_stream("ac3", language="eng", index=1),
+        ]
+        result = mp.mapStreamCombinations(streams)
+        assert [0, 1] in result
+
+    def test_different_language_not_combined(self):
+        mp = self._make_mp(combinations=[["aac", "ac3"]])
+        streams = [
+            self._make_stream("aac", language="eng", index=0),
+            self._make_stream("ac3", language="fra", index=1),
+        ]
+        result = mp.mapStreamCombinations(streams)
+        assert result == []
+
+    def test_no_codec_match_returns_empty(self):
+        mp = self._make_mp(combinations=[["eac3", "ac3"]])
+        streams = [
+            self._make_stream("aac", language="eng", index=0),
+            self._make_stream("mp3", language="eng", index=1),
+        ]
+        assert mp.mapStreamCombinations(streams) == []
+
+
+# ---------------------------------------------------------------------------
+# processExternalSub
+# ---------------------------------------------------------------------------
+
+
+class TestProcessExternalSub:
+    def _make_mp(self, sdl="eng"):
+        mp = _make_mp()
+        mp.settings.sdl = sdl
+        return mp
+
+    def _make_sub_info(self, path):
+        from converter.ffmpeg import MediaInfo, MediaStreamInfo
+
+        sub_stream = MediaStreamInfo()
+        sub_stream.type = "subtitle"
+        sub_stream.codec = "srt"
+        sub_stream.index = 0
+        sub_stream.metadata = {"language": "und"}
+        sub_stream.disposition = {}
+
+        info = MediaInfo()
+        info.streams.append(sub_stream)
+        info.path = path
+        return info
+
+    def test_none_input_returns_none(self):
+        mp = self._make_mp()
+        assert mp.processExternalSub(None, "/path/movie.mkv") is None
+
+    def test_language_extracted_from_suffix(self):
+        mp = self._make_mp()
+        sub_info = self._make_sub_info("/path/movie.eng.srt")
+        result = mp.processExternalSub(sub_info, "/path/movie.mkv")
+        assert result.subtitle[0].metadata["language"] == "eng"
+
+    def test_sdl_used_when_no_language_in_filename(self):
+        mp = self._make_mp(sdl="fra")
+        sub_info = self._make_sub_info("/path/movie.srt")
+        result = mp.processExternalSub(sub_info, "/path/movie.mkv")
+        assert result.subtitle[0].metadata["language"] == "fra"
+
+    def test_forced_disposition_set_from_suffix(self):
+        mp = self._make_mp()
+        sub_info = self._make_sub_info("/path/movie.eng.forced.srt")
+        result = mp.processExternalSub(sub_info, "/path/movie.mkv")
+        assert result.subtitle[0].disposition.get("forced") is True
