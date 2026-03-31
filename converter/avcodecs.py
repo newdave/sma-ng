@@ -1157,7 +1157,7 @@ class H264Codec(VideoCodec):
             optlist.extend(["-profile:v", safe["profile"]])
         if "level" in safe:
             optlist.extend(["-level", "%0.1f" % safe["level"]])
-        if "params" in safe:
+        if "params" in safe and self.codec_params:
             optlist.extend(["-%s" % self.codec_params, safe["params"]])
         if "tune" in safe:
             optlist.extend(["-tune", safe["tune"]])
@@ -1288,6 +1288,7 @@ class NVEncH264Codec(HWAccelVideoCodec, H264Codec):
     max_depth = 8
     hw_prefix = "nvenc"
     hw_quality_default = 23
+    codec_params = None
     encoder_options = H264Codec.encoder_options.copy()
     encoder_options.update(
         {
@@ -1381,6 +1382,7 @@ class H264VAAPICodec(VAAPIVideoCodec, H264Codec):
     codec_name = "h264vaapi"
     ffmpeg_codec_name = "h264_vaapi"
     scale_filter = "scale_vaapi"
+    codec_params = None
     encoder_options = H264Codec.encoder_options.copy()
     encoder_options.update(
         {
@@ -1418,6 +1420,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
     hw_quality_default = 25
     hw_presets = ()
     hw_profiles = ("baseline", "main", "high", "high10")
+    codec_params = None
     encoder_options = H264Codec.encoder_options.copy()
     encoder_options.update(
         {
@@ -1577,7 +1580,7 @@ class H265Codec(VideoCodec):
             if params:
                 params = params + ":"
             params = params + self.safe_framedata(safe["framedata"])
-        if params:
+        if params and self.codec_params:
             optlist.extend(["-%s" % self.codec_params, params])
         if "tune" in safe:
             optlist.extend(["-tune", safe["tune"]])
@@ -1614,6 +1617,7 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
     hw_quality_default = 25
     hw_presets = ()
     hw_profiles = ("main", "main10", "main444")
+    codec_params = None
     encoder_options = H265Codec.encoder_options.copy()
     encoder_options.update(
         {
@@ -1720,6 +1724,7 @@ class H265VAAPICodec(VAAPIVideoCodec, H265Codec):
     codec_name = "h265vaapi"
     ffmpeg_codec_name = "hevc_vaapi"
     scale_filter = "scale_vaapi"
+    codec_params = None
     encoder_options = H265Codec.encoder_options.copy()
     encoder_options.update(
         {
@@ -1777,6 +1782,7 @@ class NVEncH265Codec(HWAccelVideoCodec, H265Codec):
     max_depth = 10
     hw_prefix = "nvenc"
     hw_quality_default = 23
+    codec_params = None
     encoder_options = H265Codec.encoder_options.copy()
     encoder_options.update(
         {
