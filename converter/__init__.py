@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""
+High-level converter interface for SMA-NG.
+
+Wraps FFMpeg and codec definitions into the Converter class, which translates
+structured option dicts into FFmpeg command-line arguments and runs conversions.
+"""
 
 import os
 
@@ -8,7 +14,7 @@ from converter.formats import format_list
 
 
 class ConverterError(Exception):
-    pass
+    """Raised when the Converter encounters a configuration or usage error."""
 
 
 class Converter(object):
@@ -71,8 +77,18 @@ class Converter(object):
         return next((x() for x in video_codec_list + audio_codec_list + subtitle_codec_list + attachment_codec_list if x.codec_name == encoder), None)
 
     def parse_options(self, opt, twopass=None, strip_metadata=False):
-        """
-        Parse format/codec options and prepare raw ffmpeg option list.
+        """Parse a structured options dict into a flat FFmpeg argument list.
+
+        Validates that opt contains 'source' and at least one of 'audio',
+        'video', or 'subtitle'. Resolves each stream's codec class from the
+        internal registry, calls its parse_options method, and concatenates the
+        results with format options and optional -map_metadata and -pass tokens.
+
+        The twopass argument (1 or 2) appends the appropriate -pass flag.
+        When strip_metadata is True, '-map_metadata -1' is prepended to clear
+        container metadata from the output.
+
+        Returns a flat list of strings suitable for passing to FFMpeg.convert().
         """
         format_options = None
         audio_options = []
@@ -210,8 +226,15 @@ class Converter(object):
         return optlist
 
     def tag(self, infile, metadata={}, coverpath=None, cues_to_front=False):
-        """
-        Tag media file (infile) with metadata dictionary and optional cover art
+        """Re-mux infile in-place, embedding metadata and optional cover art.
+
+        Renames infile to a temporary '.tag' path, then remuxes it back to the
+        original filename using stream-copy for all tracks. The metadata dict
+        entries are written as global container tags. If coverpath is given, the
+        image is attached as a cover art attachment stream (PNG or JPEG).
+
+        Yields (percent_complete, debug_string) tuples driven by FFMpeg.convert().
+        The temporary file is removed on completion.
         """
         outfile = infile
         infile = infile + ".tag"

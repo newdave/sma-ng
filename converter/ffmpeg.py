@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""
+FFprobe/FFmpeg wrapper for SMA-NG.
+
+Provides MediaFormatInfo, MediaStreamInfo, and MediaInfo data classes for
+parsing FFprobe output, and the FFMpeg class for invoking FFmpeg conversions
+with progress reporting.
+"""
 
 import json
 import locale
@@ -16,7 +23,7 @@ STRICT = {"very": 2, "strict": 1, "normal": 0, "unofficial": -1, "experimental":
 
 
 class FFMpegError(Exception):
-    pass
+    """Raised when FFmpeg or FFprobe cannot be located or executed."""
 
 
 class FFMpegConvertError(Exception):
@@ -139,6 +146,14 @@ class MediaStreamInfo(object):
 
     @property
     def json(self):
+        """Return a JSON-serialisable dict summarising the stream.
+
+        Common keys are 'index' and 'codec'. Audio streams additionally include
+        channels, samplerate, language, and disposition. Video streams include
+        pix_fmt, profile, fps, framedata, dimensions, level, and field_order.
+        Subtitle streams include disposition and language. Attachment streams
+        include filename and mimetype.
+        """
         language = self.metadata.get("language", "und")
         out = {"index": self.index, "codec": self.codec}
 
@@ -170,6 +185,12 @@ class MediaStreamInfo(object):
 
     @property
     def dispostr(self):
+        """Return the stream's disposition as a signed string (e.g. '+default-forced').
+
+        Iterates over known BaseCodec.DISPOSITIONS flags. Flags that are set
+        (truthy) contribute '+<flag>' and flags that are unset contribute
+        '-<flag>'. Flags absent from the parsed disposition dict are skipped.
+        """
         disposition = ""
         for k in self.disposition:
             if k in BaseCodec.DISPOSITIONS:
@@ -181,6 +202,7 @@ class MediaStreamInfo(object):
 
     @staticmethod
     def parse_float(val, default=0.0):
+        """Convert val to float, returning default on failure."""
         try:
             return float(val)
         except:
@@ -188,6 +210,7 @@ class MediaStreamInfo(object):
 
     @staticmethod
     def parse_int(val, default=0):
+        """Convert val to int, returning default on failure."""
         try:
             return int(val)
         except:
@@ -195,6 +218,7 @@ class MediaStreamInfo(object):
 
     @staticmethod
     def parse_bool(val, default=False):
+        """Convert val to bool, returning default on failure."""
         try:
             return bool(val)
         except:
@@ -337,6 +361,11 @@ class MediaInfo(object):
 
     @property
     def json(self):
+        """Return a JSON-serialisable dict summarising format and all streams.
+
+        Keys: 'format', 'format-fullname', 'video' (from the first video
+        stream), 'audio' (list), 'subtitle' (list), 'attachment' (list).
+        """
         return {
             "format": self.format.format,
             "format-fullname": self.format.fullname,
@@ -391,6 +420,7 @@ class MediaInfo(object):
 
     @property
     def posters(self):
+        """All streams flagged as attached pictures (poster images)."""
         return [s for s in self.streams if s.attached_pic]
 
     @property
@@ -477,6 +507,12 @@ class FFMpeg(object):
 
     @property
     def codecs(self):
+        """Return a dict mapping codec names to their encoder/decoder lists.
+
+        Queries ffprobe -codecs and parses the output into a dict of the form
+        {codec_name: {'encoders': [...], 'decoders': [...]}}. Where a codec is
+        its own encoder or decoder, its name appears in the respective list.
+        """
         codecs = self._get_stdout([self.ffprobe_path, "-hide_banner", "-codecs"])
         codecs = {line_match.group(2): (line_match.group(1), line_match.group(3)) for line_match in self.CODECS_LINE_RE.finditer(codecs)}
 
@@ -490,20 +526,28 @@ class FFMpeg(object):
 
     @property
     def hwaccels(self):
+        """Return a list of hardware acceleration method names supported by FFmpeg."""
         return [hwaccel.strip() for hwaccel in self._get_stdout([self.ffmpeg_path, "-hide_banner", "-hwaccels"]).split("\n")[1:] if hwaccel.strip()]
 
     @property
     def encoders(self):
+        """Return a list of all encoder names available in the FFmpeg build."""
         encoders = self._get_stdout([self.ffmpeg_path, "-hide_banner", "-encoders"])
         return [line_match.group(2) for line_match in self.CODECS_LINE_RE.finditer(encoders)]
 
     @property
     def decoders(self):
+        """Return a list of all decoder names available in the FFmpeg build."""
         decoders = self._get_stdout([self.ffmpeg_path, "-hide_banner", "-decoders"])
         return [line_match.group(2) for line_match in self.CODECS_LINE_RE.finditer(decoders)]
 
     @property
     def pix_fmts(self):
+        """Return a dict mapping pixel format names to their maximum bit depth.
+
+        Queries ffmpeg -pix_fmts and parses the bit-depth field (which may be
+        a hyphen-separated list of per-component depths) into the maximum value.
+        """
         formats = {}
         formatlines = [f.strip() for f in self._get_stdout([self.ffmpeg_path, "-hide_banner", "-pix_fmts"]).split("\n")[8:] if f.strip()]
         for f in formatlines:
@@ -514,16 +558,31 @@ class FFMpeg(object):
         return formats
 
     def hwaccel_decoder(self, video_codec, hwaccel):
+        """Return the FFmpeg decoder name for hardware-accelerated decoding.
+
+        Combines the codec name (mapped through DECODER_SYNONYMS if necessary)
+        with the hwaccel name, e.g. 'h264' + 'cuvid' -> 'h264_cuvid'.
+        """
         source_codec = self.DECODER_SYNONYMS.get(video_codec, video_codec)
         return "{0}_{1}".format(source_codec, hwaccel)
 
     def encoder_formats(self, encoder):
+        """Return the list of pixel formats supported by the named encoder.
+
+        Parses the 'Supported pixel formats:' line from ffmpeg -h encoder=<name>.
+        Returns an empty list if the encoder is not found or has no format list.
+        """
         prefix = "Supported pixel formats:"
         formatline = next((line.strip() for line in self._get_stdout([self.ffmpeg_path, "-hide_banner", "-h", "encoder=%s" % encoder]).split("\n")[1:] if line and line.strip().startswith(prefix)), "")
         formats = formatline.split(":")
         return formats[1].strip().split(" ") if formats and len(formats) > 1 else []
 
     def decoder_formats(self, decoder):
+        """Return the list of pixel formats supported by the named decoder.
+
+        Parses the 'Supported pixel formats:' line from ffmpeg -h decoder=<name>.
+        Returns an empty list if the decoder is not found or has no format list.
+        """
         prefix = "Supported pixel formats:"
         formatline = next((line.strip() for line in self._get_stdout([self.ffmpeg_path, "-hide_banner", "-h", "decoder=%s" % decoder]).split("\n")[1:] if line and line.strip().startswith(prefix)), "")
         formats = formatline.split(":")
@@ -551,6 +610,13 @@ class FFMpeg(object):
         return stdout_data.decode(console_encoding, errors="ignore")
 
     def framedata(self, fname):
+        """Return frame-level metadata for the first video frame of fname.
+
+        Uses ffprobe with -show_frames and -read_intervals %+#1 to extract
+        color_space, color_primaries, color_transfer, side_data_list, and
+        pix_fmt from the first video frame. Returns the parsed dict, or raises
+        FFMpegError if the frame data cannot be obtained.
+        """
         try:
             stdout_data = self._get_stdout(
                 [
@@ -628,6 +694,12 @@ class FFMpeg(object):
         return info
 
     def generateCommands(self, outfile, opts, preopts=None, postopts=None):
+        """Build and return the complete FFmpeg command list.
+
+        Assembles [ffmpeg_path] + preopts + opts + postopts, applies minstrict
+        deduplication, then appends ['-y', outfile] for a real output file or
+        ['-f', 'null', '-'] for a null sink (when outfile is falsy).
+        """
         print()
         cmds = [self.ffmpeg_path]
         if preopts:
