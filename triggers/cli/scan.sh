@@ -73,18 +73,26 @@ curl_get() {
 curl_post_json() {
     local url="$1"
     local body="$2"
+    local http_code response_body tmp
+    tmp=$(mktemp)
     if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
-        curl -sf -X POST \
+        http_code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST \
             -H "Content-Type: application/json" \
             -H "X-API-Key: ${SMA_DAEMON_API_KEY}" \
             -d "$body" \
-            "$url"
+            "$url" 2>/dev/null) || { rm -f "$tmp"; return 1; }
     else
-        curl -sf -X POST \
+        http_code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST \
             -H "Content-Type: application/json" \
             -d "$body" \
-            "$url"
+            "$url" 2>/dev/null) || { rm -f "$tmp"; return 1; }
     fi
+    response_body=$(cat "$tmp"); rm -f "$tmp"
+    if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+        log "Daemon returned HTTP ${http_code}: ${response_body}"
+        return 1
+    fi
+    echo "$response_body"
 }
 
 wait_for_job() {
@@ -186,7 +194,7 @@ log "Submitting: $TARGET"
 [[ -n "$CONFIG_OVERRIDE" ]] && log "Config:     $CONFIG_OVERRIDE"
 
 response=$(curl_post_json "${SMA_BASE}/webhook" "$payload") || {
-    die "Failed to reach daemon at ${SMA_BASE}. Is it running?"
+    die "Submission failed. Check daemon is running at ${SMA_BASE}."
 }
 
 job_id=$(echo "$response" | python3 -c \
