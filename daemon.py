@@ -185,18 +185,38 @@ class JobDatabase:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def claim_next_job(self, worker_id, node_id):
-        """Atomically claim the next pending job for this worker. Returns job dict or None."""
+    def claim_next_job(self, worker_id, node_id, exclude_configs=None):
+        """Atomically claim the next pending job for this worker.
+
+        exclude_configs: set of config paths already held by a running job —
+        jobs for those configs are skipped so a free worker can pick up work
+        for a different config rather than blocking on a locked one.
+
+        Returns job dict or None.
+        """
         with self._cursor() as cursor:
-            cursor.execute(
+            if exclude_configs:
+                placeholders = ",".join("?" * len(exclude_configs))
+                cursor.execute(
+                    """
+                    SELECT * FROM jobs
+                    WHERE status = ? AND config NOT IN (%s)
+                    ORDER BY created_at ASC
+                    LIMIT 1
                 """
-                SELECT * FROM jobs
-                WHERE status = ?
-                ORDER BY created_at ASC
-                LIMIT 1
-            """,
-                (STATUS_PENDING,),
-            )
+                    % placeholders,
+                    (STATUS_PENDING, *exclude_configs),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT * FROM jobs
+                    WHERE status = ?
+                    ORDER BY created_at ASC
+                    LIMIT 1
+                """,
+                    (STATUS_PENDING,),
+                )
             row = cursor.fetchone()
             if row is None:
                 return None
@@ -556,8 +576,12 @@ class PostgreSQLJobDatabase:
                 row = cur.fetchone()
                 return dict(row) if row else None
 
-    def claim_next_job(self, worker_id, node_id):
+    def claim_next_job(self, worker_id, node_id, exclude_configs=None):
         """Atomically claim the next pending job using SELECT FOR UPDATE SKIP LOCKED.
+
+        exclude_configs: set of config paths already held by a running job —
+        jobs for those configs are skipped so a free worker can pick up work
+        for a different config rather than blocking on a locked one.
 
         This is the key distributed-safe operation: the SELECT and UPDATE happen in
         a single transaction. Any other node/worker that tries to claim the same row
@@ -565,17 +589,30 @@ class PostgreSQLJobDatabase:
         """
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, path, config, args
-                    FROM jobs
-                    WHERE status = %s
-                    ORDER BY created_at ASC
-                    LIMIT 1
-                    FOR UPDATE SKIP LOCKED
-                """,
-                    (STATUS_PENDING,),
-                )
+                if exclude_configs:
+                    cur.execute(
+                        """
+                        SELECT id, path, config, args
+                        FROM jobs
+                        WHERE status = %s AND config != ALL(%s)
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    """,
+                        (STATUS_PENDING, list(exclude_configs)),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT id, path, config, args
+                        FROM jobs
+                        WHERE status = %s
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    """,
+                        (STATUS_PENDING,),
+                    )
                 row = cur.fetchone()
                 if row is None:
                     return None
@@ -933,6 +970,11 @@ class ConfigLockManager:
         with self._master_lock:
             return config_path in self._active_configs
 
+    def get_locked_configs(self):
+        """Return the set of config paths that are currently locked."""
+        with self._master_lock:
+            return set(self._active_configs.keys())
+
     def get_active_job(self, config_path):
         """Get the active job for a config, if any."""
         with self._master_lock:
@@ -1102,8 +1144,11 @@ class ConversionWorker(threading.Thread):
             if not self.running:
                 break
 
-            # Atomically claim the next pending job
-            job = self.job_db.claim_next_job(self.worker_id, self.node_id)
+            # Atomically claim the next pending job, skipping configs already
+            # in use so this worker can pick up work for a different config
+            # rather than blocking behind an already-running job.
+            locked = self.config_lock_manager.get_locked_configs()
+            job = self.job_db.claim_next_job(self.worker_id, self.node_id, exclude_configs=locked or None)
             if job:
                 self.process_job(job)
             else:
