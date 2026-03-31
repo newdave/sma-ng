@@ -2456,7 +2456,9 @@ class MediaProcessor:
             try:
                 os.makedirs(output_dir)
             except:
-                self.log.exception("Unable to make output directory %s." % (output_dir))
+                self.log.exception("Unable to create output directory %s." % output_dir)
+                return None, output_dir
+
         output_extension = temp_extension or self.settings.output_extension
 
         self.log.debug("Input directory: %s." % input_dir)
@@ -2688,6 +2690,10 @@ class MediaProcessor:
         originalinputfile = inputfile
         outputfile, output_dir = self.getOutputFile(input_dir, filename, input_extension, self.settings.temp_extension)
         finaloutputfile, _ = self.getOutputFile(input_dir, filename, input_extension)
+
+        if outputfile is None or finaloutputfile is None:
+            self.log.error("Unable to create output directory, aborting conversion.")
+            return None, inputfile
 
         self.log.debug("Final output file: %s." % finaloutputfile)
 
