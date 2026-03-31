@@ -23,19 +23,14 @@ Environment="SMA_DAEMON_HOST=0.0.0.0"
 Environment="SMA_DAEMON_PORT=8585"
 Environment="SMA_DAEMON_WORKERS=2"
 Environment="SMA_CONFIG=/opt/sma/config/autoProcess.ini"
-# PostgreSQL connection URL for distributed multi-node operation.
-# When set, --db (SQLite) is ignored and all nodes share this database.
+# Set this to use PostgreSQL instead of SQLite.
+# When set, --db (SQLite) is automatically skipped.
 # Format: postgresql://user:password@host:port/dbname
-# Can also be set in config/daemon.env as SMA_DAEMON_DB_URL=...
 #Environment="SMA_DAEMON_DB_URL=postgresql://sma:password@localhost:5432/sma"
 
-ExecStart=/opt/sma/venv/bin/python /opt/sma/daemon.py \
-    --host ${SMA_DAEMON_HOST} \
-    --port ${SMA_DAEMON_PORT} \
-    --workers ${SMA_DAEMON_WORKERS} \
-    --daemon-config /opt/sma/config/daemon.json \
-    --db /opt/sma/config/daemon.db \
-    --logs-dir /opt/sma/logs
+# Wrapper script selects --db-url (PostgreSQL) or --db (SQLite) based on
+# whether SMA_DAEMON_DB_URL is set in the environment.
+ExecStart=/opt/sma/setup/sma-daemon-start.sh
 
 Restart=on-failure
 RestartSec=10
