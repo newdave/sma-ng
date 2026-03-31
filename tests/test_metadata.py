@@ -1270,3 +1270,183 @@ class TestWriteMoviePlexmatch:
         _write_movie_plexmatch(filepath, self._make_tagdata(tmdbid=None), MagicMock())
         content = (movie_dir / ".plexmatch").read_text()
         assert "guid" not in content
+
+
+# ---------------------------------------------------------------------------
+# writeTags — FFmpeg fallback path
+# ---------------------------------------------------------------------------
+
+
+class TestWriteTagsFFmpegFallback:
+    """Tests for the FFmpeg fallback tagging path triggered by MP4StreamInfoError."""
+
+    def _make_metadata(self, mediatype=MediaType.Movie):
+        m = Metadata.__new__(Metadata)
+        m.log = MagicMock()
+        m.mediatype = mediatype
+        m.title = "Test Title"
+        m.description = "A description"
+        m.date = "2024-01-01"
+        m.tagline = "Short tagline"
+        m.showname = "Test Show"
+        m.season = 1
+        m.episode = 1
+        m.genre = [{"name": "Action"}]
+        m.HD = None
+        return m
+
+    def _make_converter(self):
+        converter = MagicMock()
+        # converter.tag returns an iterator: first yields (None, cmds), then done
+        converter.tag.return_value = iter([(None, ["ffmpeg", "-i", "in.mp4"]), (None, None)])
+        return converter
+
+    @patch("resources.metadata.MP4", side_effect=KeyError("not an mp4"))
+    def test_movie_ffmpeg_fallback_calls_converter_tag(self, mock_mp4, tmp_path):
+        m = self._make_metadata(MediaType.Movie)
+        converter = self._make_converter()
+        path = str(tmp_path / "movie.mp4")
+        open(path, "w").close()
+
+        with patch.object(m, "getArtwork", return_value=None):
+            m.writeTags(path, path, converter, artwork=False)
+
+        converter.tag.assert_called_once()
+        call_kwargs = converter.tag.call_args
+        metadata_arg = call_kwargs[0][1]
+        assert metadata_arg["TITLE"] == "Test Title"
+        assert metadata_arg["ENCODER"] == "SMA-NG"
+
+    @patch("resources.metadata.MP4", side_effect=KeyError("not an mp4"))
+    def test_tv_ffmpeg_fallback_includes_album(self, mock_mp4, tmp_path):
+        m = self._make_metadata(MediaType.TV)
+        converter = self._make_converter()
+        path = str(tmp_path / "episode.mp4")
+        open(path, "w").close()
+
+        with patch.object(m, "getArtwork", return_value=None):
+            m.writeTags(path, path, converter, artwork=False)
+
+        metadata_arg = converter.tag.call_args[0][1]
+        assert "ALBUM" in metadata_arg
+        assert "Season 1" in metadata_arg["ALBUM"]
+
+    @patch("resources.metadata.MP4", side_effect=KeyError("not an mp4"))
+    def test_ffmpeg_fallback_returns_true_on_success(self, mock_mp4, tmp_path):
+        m = self._make_metadata()
+        converter = self._make_converter()
+        path = str(tmp_path / "movie.mp4")
+        open(path, "w").close()
+
+        with patch.object(m, "getArtwork", return_value=None):
+            result = m.writeTags(path, path, converter, artwork=False)
+
+        assert result is True
+
+    @patch("resources.metadata.MP4", side_effect=KeyError("not an mp4"))
+    def test_ffmpeg_fallback_returns_false_on_converter_error(self, mock_mp4, tmp_path):
+        from converter.ffmpeg import FFMpegConvertError
+
+        m = self._make_metadata()
+        converter = MagicMock()
+        converter.tag.side_effect = FFMpegConvertError("ffmpeg", [], "error output", 1)
+        path = str(tmp_path / "movie.mp4")
+        open(path, "w").close()
+
+        with patch.object(m, "getArtwork", return_value=None):
+            result = m.writeTags(path, path, converter, artwork=False)
+
+        assert result is False
+
+    @patch("resources.metadata.MP4", side_effect=KeyError("not an mp4"))
+    def test_ffmpeg_fallback_uses_genre_name(self, mock_mp4, tmp_path):
+        m = self._make_metadata()
+        converter = self._make_converter()
+        path = str(tmp_path / "movie.mp4")
+        open(path, "w").close()
+
+        with patch.object(m, "getArtwork", return_value=None):
+            m.writeTags(path, path, converter, artwork=False)
+
+        metadata_arg = converter.tag.call_args[0][1]
+        assert metadata_arg.get("GENRE") == "Action"
+
+
+# ---------------------------------------------------------------------------
+# getArtwork edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestGetArtworkEdgeCases:
+    def _make_metadata(self, poster_path="/poster.jpg"):
+        m = Metadata.__new__(Metadata)
+        m.log = MagicMock()
+        m.mediatype = MediaType.Movie
+        m.tmdbid = 603
+        m.moviedata = {"poster_path": poster_path}
+        return m
+
+    def test_returns_none_when_no_poster_and_no_local(self, tmp_path):
+        m = self._make_metadata(poster_path=None)
+        path = str(tmp_path / "movie.mp4")
+        result = m.getArtwork(path, path, thumbnail=False)
+        assert result is None
+
+    def test_local_jpg_takes_priority(self, tmp_path):
+        m = self._make_metadata()
+        path = str(tmp_path / "movie.mp4")
+        poster = tmp_path / "movie.jpg"
+        poster.write_bytes(b"fake jpeg")
+        result = m.getArtwork(path, path, thumbnail=False)
+        assert result == str(poster)
+
+    def test_smaposter_used_when_no_basename_match(self, tmp_path):
+        m = self._make_metadata()
+        path = str(tmp_path / "movie.mp4")
+        # No movie.jpg — smaposter.jpg should be found as fallback
+        smaposter = tmp_path / "smaposter.jpg"
+        smaposter.write_bytes(b"sma poster")
+        result = m.getArtwork(path, path, thumbnail=False)
+        assert result == str(smaposter)
+
+
+# ---------------------------------------------------------------------------
+# resolveTmdbID — error / edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestResolveTmdbIDEdgeCases:
+    @patch("resources.metadata.tmdb.Find")
+    def test_empty_movie_results_returns_none(self, mock_find_cls):
+        log = MagicMock()
+        mock_find = MagicMock()
+        mock_find.movie_results = []
+        mock_find_cls.return_value = mock_find
+        result = Metadata.resolveTmdbID(MediaType.Movie, log, imdbid="tt9999999")
+        assert result is None
+
+    @patch("resources.metadata.tmdb.Find")
+    def test_empty_tv_results_returns_none(self, mock_find_cls):
+        log = MagicMock()
+        mock_find = MagicMock()
+        mock_find.tv_results = []
+        mock_find_cls.return_value = mock_find
+        result = Metadata.resolveTmdbID(MediaType.TV, log, tvdbid=99999)
+        assert result is None
+
+    @patch("resources.metadata.tmdb.Find")
+    def test_network_exception_propagates(self, mock_find_cls):
+        # resolveTmdbID has no try/except — network errors propagate to the caller
+        log = MagicMock()
+        mock_find = MagicMock()
+        mock_find.info.side_effect = Exception("network error")
+        mock_find_cls.return_value = mock_find
+        import pytest
+
+        with pytest.raises(Exception, match="network error"):
+            Metadata.resolveTmdbID(MediaType.Movie, log, imdbid="tt0000001")
+
+    def test_no_ids_provided_returns_none(self):
+        log = MagicMock()
+        result = Metadata.resolveTmdbID(MediaType.Movie, log)
+        assert result is None
