@@ -1195,12 +1195,19 @@ class HWAccelVideoCodec:
     hw_quality_range = (0, 52)
     hw_quality_default = None
     hw_presets = None
+    hw_profiles = None
 
     def _hw_parse_preset(self, safe):
         """Validate preset against hw_presets whitelist, remove if unsupported."""
         if self.hw_presets is not None and "preset" in safe:
             if safe["preset"] not in self.hw_presets:
                 del safe["preset"]
+
+    def _hw_parse_profile(self, safe):
+        """Validate profile against hw_profiles whitelist, remove if unsupported."""
+        if self.hw_profiles is not None and "profile" in safe:
+            if safe["profile"] not in self.hw_profiles:
+                del safe["profile"]
 
     def _hw_parse_scale(self, safe):
         """Convert width/height to hw-prefixed scale variables."""
@@ -1410,6 +1417,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
     hw_quality_range = (1, 51)
     hw_quality_default = 25
     hw_presets = ()
+    hw_profiles = ("baseline", "main", "high", "high10")
     encoder_options = H264Codec.encoder_options.copy()
     encoder_options.update(
         {
@@ -1424,6 +1432,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
         self._hw_parse_quality(safe)
         self._hw_parse_pix_fmt(safe)
         self._hw_parse_preset(safe)
+        self._hw_parse_profile(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
@@ -1604,6 +1613,7 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
     hw_quality_range = (1, 51)
     hw_quality_default = 25
     hw_presets = ()
+    hw_profiles = ("main", "main10", "main444")
     encoder_options = H265Codec.encoder_options.copy()
     encoder_options.update(
         {
@@ -1618,6 +1628,7 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
         self._hw_parse_quality(safe)
         self._hw_parse_pix_fmt(safe)
         self._hw_parse_preset(safe)
+        self._hw_parse_profile(safe)
         return safe
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
