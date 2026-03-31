@@ -2,16 +2,46 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
-  build:
-    name: Build distribution
+  # ── Step 1: Run release-please on every push to main ────────────────────────
+  # Creates or updates a "Release PR" that bumps pyproject.toml and the
+  # release-please manifest. When that PR is merged, release-please creates
+  # the GitHub Release and the v* tag, then sets release_created=true so
+  # the publish job below runs.
+  release-please:
+    name: Release Please
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+      upload_url: ${{ steps.rp.outputs.upload_url }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
 
+  # ── Step 2: Build & attach dist artifacts to the GitHub Release ─────────────
+  # Runs only when release-please actually created a release (not on every push).
+  # The version in pyproject.toml is the single source of truth — release-please
+  # has already bumped it before this job runs.
+  publish:
+    name: Build & publish release artifacts
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Check out the release commit (the tag), not the PR merge commit
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -25,30 +55,8 @@ jobs:
       - name: Build wheel and sdist
         run: python -m build
 
-      - name: Upload dist artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-  release:
-    name: Create GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download dist artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-      - name: Create release
+      - name: Upload dist to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: dist/*
-          generate_release_notes: true
