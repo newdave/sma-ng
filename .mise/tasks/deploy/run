@@ -71,6 +71,18 @@ for host in $DEPLOY_HOSTS; do
     fi
   fi
 
+  remote_user=$(echo "$host" | cut -s -d@ -f1)
+  remote_user="${remote_user:-$(whoami)}"
+  echo "==> [$host] updating systemd unit user to $remote_user"
+  # shellcheck disable=SC2086
+  ssh $ssh_opts "$host" "
+    if [ -f /etc/systemd/system/sma-daemon.service ]; then
+      sed 's/^User=.*/User=$remote_user/; s/^Group=.*/Group=$remote_user/' \
+        $dir/setup/sma-daemon.service \
+        | sudo tee /etc/systemd/system/sma-daemon.service > /dev/null
+    fi
+  " || { failed="$failed $host"; continue; }
+
   echo "==> [$host] reloading systemd unit"
   # shellcheck disable=SC2086
   ssh $ssh_opts "$host" "sudo systemctl daemon-reload" || { failed="$failed $host"; continue; }
