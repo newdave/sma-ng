@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re as _re
+import signal
 import socket
 import sqlite3
 import subprocess
@@ -2352,11 +2353,16 @@ def main():
         log.info("")
         log.info("Ready to accept connections.")
 
+        def _shutdown(signum, frame):
+            log.info("Received signal %d, shutting down..." % signum)
+            # shutdown() is blocking — run in a thread so the signal handler returns
+            threading.Thread(target=server.shutdown, daemon=True).start()
+
+        signal.signal(signal.SIGTERM, _shutdown)
+        signal.signal(signal.SIGINT, _shutdown)
+
         server.serve_forever()
 
-    except KeyboardInterrupt:
-        log.info("Received interrupt signal")
-        server.shutdown()
     except Exception as e:
         log.exception("Server error: %s" % e)
         sys.exit(1)
