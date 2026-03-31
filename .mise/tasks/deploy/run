@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Sync code to all DEPLOY_HOSTS and run REMOTE_MAKE on each"
+#MISE description="Sync code to all DEPLOY_HOSTS, install dependencies, and reload systemd"
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
@@ -16,7 +16,6 @@ for host in $DEPLOY_HOSTS; do
   port=$($cfg SSH_PORT 22)
   key=$($cfg SSH_KEY "")
   branch=$($cfg DEPLOY_BRANCH "")
-  remote_make=$($cfg REMOTE_MAKE install)
   rsync_extra=$($cfg RSYNC_EXTRA "")
   ffmpeg_dir=$($cfg FFMPEG_DIR "")
 
@@ -48,37 +47,33 @@ for host in $DEPLOY_HOSTS; do
     ssh $ssh_opts "$host" "cd $dir && git checkout $branch"
   fi
 
-  # Ensure venv exists before running any make target (including restart-only deploys).
-  echo "==> [$host] ensuring venv"
-  # shellcheck disable=SC2086
-  ssh $ssh_opts "$host" "cd $dir && PATH=\$PATH:/usr/bin:/usr/local/bin make install"
+  echo "==> [$host] installing dependencies"
 
-  label=""
-  [ -n "$ffmpeg_dir" ] && label=" (FFMPEG_DIR=$ffmpeg_dir)"
-  echo "==> [$host] make $remote_make$label"
-
-  _run_make() {
+  _run_install() {
     # shellcheck disable=SC2086
-    ssh $ssh_opts "$host" "cd $dir && PATH=\$PATH:/usr/bin:/usr/local/bin $make_env make $remote_make"
+    ssh $ssh_opts "$host" "cd $dir && PATH=\$PATH:/usr/bin:/usr/local/bin $make_env make install"
   }
 
   errfile=$(mktemp)
   trap 'rm -f "$errfile"' EXIT
 
-  if _run_make 2> >(tee "$errfile" >&2); then
-    continue
+  if ! _run_install 2> >(tee "$errfile" >&2); then
+    if grep -qE "$_missing_prereq_pattern" "$errfile"; then
+      echo ""
+      echo "  WARNING: [$host] pre-req missing — running deploy:setup then retrying"
+      HOST="$host" mise run deploy:setup
+      echo ""
+      echo "==> [$host] retrying: make install"
+      _run_install || { failed="$failed $host"; continue; }
+    else
+      failed="$failed $host"
+      continue
+    fi
   fi
 
-  if grep -qE "$_missing_prereq_pattern" "$errfile"; then
-    echo ""
-    echo "  WARNING: [$host] pre-req missing — running deploy:setup then retrying"
-    HOST="$host" mise run deploy:setup
-    echo ""
-    echo "==> [$host] retrying: make $remote_make$label"
-    _run_make || failed="$failed $host"
-  else
-    failed="$failed $host"
-  fi
+  echo "==> [$host] reloading systemd unit"
+  # shellcheck disable=SC2086
+  ssh $ssh_opts "$host" "sudo systemctl daemon-reload" || { failed="$failed $host"; continue; }
 done
 
 if [ -n "$failed" ]; then
@@ -89,3 +84,4 @@ fi
 
 echo ""
 echo "Deployment complete: $DEPLOY_HOSTS"
+echo "Run 'mise run deploy:restart' to restart sma-daemon on all hosts."
