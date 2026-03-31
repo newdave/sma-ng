@@ -828,10 +828,21 @@ class PostgreSQLJobDatabase:
         return recovered
 
     def mark_node_offline(self, node_id):
-        """Mark this node as offline (called on clean shutdown)."""
+        """Mark this node as offline and requeue any jobs it was running."""
         with self._conn() as conn:
             with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET status = %s, worker_id = NULL, node_id = NULL, started_at = NULL
+                    WHERE status = %s AND node_id = %s
+                """,
+                    (STATUS_PENDING, STATUS_RUNNING, node_id),
+                )
+                requeued = cur.rowcount
                 cur.execute("UPDATE cluster_nodes SET status = 'offline' WHERE node_id = %s", (node_id,))
+        if requeued:
+            self.log.info("Requeued %d running jobs on shutdown" % requeued)
 
     def requeue_job(self, job_id):
         """Reset a failed job back to pending. Returns True if the job was requeued."""
