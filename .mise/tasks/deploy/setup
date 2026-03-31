@@ -124,14 +124,30 @@ for host in $DEPLOY_HOSTS; do
   fi
 done
 
-# ── 6. install and enable systemd service on each host ─────────────────────
+# ── 6. sync code and install/enable systemd service on each host ───────────
 for host in $DEPLOY_HOSTS; do
   cfg="$CFG $LOCAL $host"
   dir=$($cfg DEPLOY_DIR ~/sma)
   port=$($cfg SSH_PORT 22)
   key=$($cfg SSH_KEY "")
+  rsync_extra=$($cfg RSYNC_EXTRA "")
 
   mk_ssh_opts "$port" "$key"
+
+  echo "==> [$host] syncing code to $dir"
+  # shellcheck disable=SC2086
+  rsync -az --delete \
+    -e "ssh ${SSH_OPTS[*]}" \
+    --exclude='.git/' \
+    --exclude='venv/' \
+    --exclude='config/' \
+    --exclude='logs/' \
+    --exclude='__pycache__/' \
+    --exclude='*.pyc' \
+    --exclude='.local' \
+    --exclude='*.egg-info/' \
+    $rsync_extra \
+    . "$host:$dir"
 
   echo "==> [$host] installing and enabling sma-daemon service"
   # shellcheck disable=SC2087  # $dir intentionally expands client-side
