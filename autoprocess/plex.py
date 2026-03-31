@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Plex Media Server library refresh integration."""
+
 import logging
 import os
 from typing import List, Tuple
@@ -13,6 +15,19 @@ from resources.readsettings import ReadSettings
 
 
 def refreshPlex(settings: ReadSettings, path: str = None, logger: logging.Logger = None):
+    """Trigger a targeted Plex library section refresh for a converted file's directory.
+
+    Applies any configured path mappings before looking up which library
+    section contains the file, then calls ``section.update(path=...)`` to
+    refresh only that directory.
+
+    Args:
+        settings: Parsed SMA settings, used to read Plex connection details and
+            path mappings.
+        path: Absolute path to the converted output file. The parent directory
+            is used as the refresh target.
+        logger: Optional logger instance. Defaults to the module logger.
+    """
     log = logger or getLogger(__name__)
 
     log.info("Starting Plex refresh.")
@@ -49,6 +64,23 @@ def refreshPlex(settings: ReadSettings, path: str = None, logger: logging.Logger
 
 
 def getPlexServer(settings: ReadSettings, logger: logging.Logger = None) -> Tuple[PlexServer, dict]:
+    """Establish a connection to a Plex Media Server.
+
+    Tries two strategies in order:
+    1. plex.tv account lookup (using token or username/password) — for servers
+       connected to a Plex account.
+    2. Direct server connection via host/port/token — for local or unmanaged
+       servers.
+
+    Args:
+        settings: Parsed SMA settings containing Plex connection details
+            (``host``, ``port``, ``token``, ``username``, ``password``,
+            ``servername``, ``ssl``, ``ignore_certs``).
+        logger: Optional logger instance. Defaults to the module logger.
+
+    Returns:
+        A connected ``PlexServer`` instance, or ``None`` if connection fails.
+    """
     log = logger or getLogger(__name__)
 
     if not settings.Plex.get("username") and not settings.Plex.get("host"):

@@ -1,3 +1,5 @@
+"""Logging setup with rotating file handlers and optional INI-based configuration."""
+
 import logging
 import os
 import shutil
@@ -84,6 +86,14 @@ LOG_NAME = "sma.log"
 
 
 def checkLoggingConfig(configfile):
+    """Ensure a logging INI file exists with all required sections and keys.
+
+    Creates the file if it does not exist, and adds any missing sections or
+    options from ``defaults``. Strips the ``sysLogHandler`` entry on Windows.
+
+    Args:
+        configfile: Path to the logging configuration file to create or update.
+    """
     write = True
     config = RawConfigParser()
     if os.path.exists(configfile):
@@ -111,6 +121,22 @@ def checkLoggingConfig(configfile):
 
 
 def getLogger(name=None, custompath=None):
+    """Return a configured logger, initialising rotating-file logging if needed.
+
+    Locates the config and log directories relative to the SMA root (or
+    ``custompath`` when provided), ensures ``logging.ini`` is present and
+    up-to-date, applies it, and attaches the custom ``rotator`` to any
+    ``BaseRotatingHandler`` instances on the returned logger.
+
+    Args:
+        name: Logger name passed to ``logging.getLogger()``. Defaults to the
+            root logger when ``None``.
+        custompath: Optional override for the SMA root directory. Useful when
+            calling from a non-standard working directory.
+
+    Returns:
+        A ``logging.Logger`` instance configured with file and console handlers.
+    """
     if custompath:
         custompath = os.path.realpath(custompath)
         if not os.path.isdir(custompath):
@@ -145,6 +171,16 @@ def getLogger(name=None, custompath=None):
 
 
 def rotator(source, dest):
+    """Rotate a log file by renaming it, falling back to copy-and-truncate.
+
+    Assigned as the ``rotator`` callable on ``BaseRotatingHandler`` instances
+    so that log rotation works correctly across filesystems (e.g. when the log
+    file and its destination are on different mount points).
+
+    Args:
+        source: Path to the current log file that should be rotated out.
+        dest: Destination path for the rotated log file.
+    """
     if os.path.exists(source):
         try:
             os.rename(source, dest)
