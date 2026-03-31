@@ -53,7 +53,8 @@ systemd-install: ## Install and enable the sma-daemon systemd service (SERVICE_U
 	sudo chown -R $(SERVICE_USER): /opt/sma/config /opt/sma/logs
 	@test -f /opt/sma/config/daemon.env || sudo install -o $(SERVICE_USER) -m 640 setup/daemon.env.sample /opt/sma/config/daemon.env
 	sudo chmod 755 setup/sma-daemon-start.sh
-	sed 's/^User=.*/User=$(SERVICE_USER)/; s/^Group=.*/Group=$(SERVICE_USER)/' setup/sma-daemon.service | sudo tee /etc/systemd/system/sma-daemon.service > /dev/null
+	sed 's/^User=.*/User=$(SERVICE_USER)/; s/^Group=.*/Group=$(SERVICE_USER)/' setup/sma-daemon.service \
+	  | sudo tee /etc/systemd/system/sma-daemon.service > /dev/null
 	sudo systemctl daemon-reload
 	sudo systemctl enable --now sma-daemon
 
