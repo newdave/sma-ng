@@ -42,7 +42,7 @@ SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-log()  { echo "[nzbget_post_process] $*" >&2; }
+log()  { echo "[nzbget] $*" >&2; }
 info() { log "INFO: $*"; }
 warn() { log "WARNING: $*"; }
 err()  { log "ERROR: $*"; }
