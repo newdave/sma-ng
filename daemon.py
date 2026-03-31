@@ -31,6 +31,7 @@ import subprocess
 import sys
 import threading
 import time
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -56,7 +57,66 @@ STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 
 
-class JobDatabase:
+class BaseJobDatabase(ABC):
+    """Abstract interface shared by JobDatabase (SQLite) and PostgreSQLJobDatabase."""
+
+    #: True for the PostgreSQL backend; False for SQLite.
+    #: Use this instead of isinstance(db, PostgreSQLJobDatabase) at call sites.
+    is_distributed: bool = False
+
+    @abstractmethod
+    def close(self): ...
+
+    @abstractmethod
+    def add_job(self, path, config, args=None): ...
+
+    @abstractmethod
+    def find_active_job(self, path): ...
+
+    @abstractmethod
+    def claim_next_job(self, worker_id, node_id, exclude_configs=None): ...
+
+    @abstractmethod
+    def complete_job(self, job_id): ...
+
+    @abstractmethod
+    def fail_job(self, job_id, error=None): ...
+
+    @abstractmethod
+    def get_job(self, job_id): ...
+
+    @abstractmethod
+    def get_jobs(self, status=None, config=None, limit=100, offset=0): ...
+
+    @abstractmethod
+    def get_stats(self): ...
+
+    @abstractmethod
+    def get_running_jobs(self): ...
+
+    @abstractmethod
+    def cleanup_old_jobs(self, days=30): ...
+
+    @abstractmethod
+    def pending_count(self): ...
+
+    @abstractmethod
+    def pending_count_for_config(self, config): ...
+
+    @abstractmethod
+    def requeue_job(self, job_id): ...
+
+    @abstractmethod
+    def requeue_failed_jobs(self, config=None): ...
+
+    @abstractmethod
+    def filter_unscanned(self, paths): ...
+
+    @abstractmethod
+    def record_scanned(self, paths): ...
+
+
+class JobDatabase(BaseJobDatabase):
     """SQLite database for persistent job queue storage."""
 
     def __init__(self, db_path=DATABASE_PATH, logger=None):
@@ -445,7 +505,7 @@ class JobDatabase:
             )
 
 
-class PostgreSQLJobDatabase:
+class PostgreSQLJobDatabase(BaseJobDatabase):
     """PostgreSQL-backed job queue for distributed multi-node operation.
 
     Uses SELECT FOR UPDATE SKIP LOCKED to atomically claim jobs, ensuring
@@ -1504,7 +1564,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     def _get_status(self):
         # Cluster-wide status — only meaningful with PostgreSQL backend
-        if isinstance(self.server.job_db, PostgreSQLJobDatabase):
+        if self.server.job_db.is_distributed:
             # Run staleness check on every status request so the response
             # reflects current reality rather than waiting for the next
             # heartbeat cycle.
@@ -1838,7 +1898,7 @@ class HeartbeatThread(threading.Thread):
         self._stop_event.set()
 
     def run(self):
-        if not isinstance(self.job_db, PostgreSQLJobDatabase):
+        if not self.job_db.is_distributed:
             return  # Heartbeat only meaningful for the shared PG backend
         while self.running:
             try:
@@ -2048,7 +2108,7 @@ class DaemonServer(HTTPServer):
         self.scanner_thread.stop()
 
         # Mark this node offline in the cluster table on clean shutdown
-        if isinstance(self.job_db, PostgreSQLJobDatabase):
+        if self.job_db.is_distributed:
             try:
                 self.job_db.mark_node_offline(self.node_id)
             except Exception:
