@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Container format definitions mapping SMA-NG names to FFmpeg muxer identifiers."""
 
 
 class BaseFormat(object):

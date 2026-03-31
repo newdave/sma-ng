@@ -2152,6 +2152,13 @@ class DaemonServer(HTTPServer):
 
 
 def main():
+    """Parse CLI arguments, configure the daemon, and start the HTTP server.
+
+    Resolves configuration from CLI flags, environment variables, and
+    ``daemon.json`` (in that priority order). Initialises the job database
+    (SQLite or PostgreSQL), sets up per-config logging and concurrency locks,
+    and then serves requests until interrupted.
+    """
     parser = argparse.ArgumentParser(description="SMA-NG Daemon - HTTP webhook server for media conversion")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8585, help="Port to listen on (default: 8585)")
