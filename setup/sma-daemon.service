@@ -3,6 +3,10 @@ Description=SMA-NG Daemon - Media Conversion Webhook Server
 Documentation=https://github.com/newdave/sma-ng
 After=network.target
 Wants=network.target
+# When using a local PostgreSQL instance, uncomment the following two lines
+# so the daemon starts after the database is ready:
+#After=network.target postgresql.service
+#Wants=postgresql.service
 
 [Service]
 Type=simple
@@ -19,6 +23,11 @@ Environment="SMA_DAEMON_HOST=0.0.0.0"
 Environment="SMA_DAEMON_PORT=8585"
 Environment="SMA_DAEMON_WORKERS=2"
 Environment="SMA_CONFIG=/opt/sma/config/autoProcess.ini"
+# PostgreSQL connection URL for distributed multi-node operation.
+# When set, --db (SQLite) is ignored and all nodes share this database.
+# Format: postgresql://user:password@host:port/dbname
+# Can also be set in config/daemon.env as SMA_DAEMON_DB_URL=...
+#Environment="SMA_DAEMON_DB_URL=postgresql://sma:password@localhost:5432/sma"
 
 ExecStart=/opt/sma/venv/bin/python /opt/sma/daemon.py \
     --host ${SMA_DAEMON_HOST} \
