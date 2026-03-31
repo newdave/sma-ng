@@ -1,13 +1,4 @@
 repos:
-  - repo: local
-    hooks:
-      - id: bump-version
-        name: Auto-increment patch version
-        entry: python scripts/bump-version.py
-        language: system
-        pass_filenames: false
-        stages: [pre-commit]
-
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
