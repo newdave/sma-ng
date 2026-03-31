@@ -14,7 +14,7 @@ import tempfile
 import pytest
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ENTRYPOINT = os.path.join(PROJECT_ROOT, "docker-entrypoint.sh")
+ENTRYPOINT = os.path.join(PROJECT_ROOT, "docker", "docker-entrypoint.sh")
 SETUP_DIR = os.path.join(PROJECT_ROOT, "setup")
 
 # Sample files the entrypoint is expected to seed
@@ -264,12 +264,6 @@ class TestFFmpegPatching:
         _run(empty_config, env_extra={"SMA_FFPROBE": "/opt/bin/ffprobe"})
         ini = open(os.path.join(empty_config, "autoProcess.ini")).read()
         assert "ffprobe = /opt/bin/ffprobe" in ini
-
-    def test_ffmpeg_dir_env_expands_to_paths(self, empty_config):
-        _run(empty_config, env_extra={"SMA_DAEMON_FFMPEG_DIR": "/custom/ffmpeg"})
-        ini = open(os.path.join(empty_config, "autoProcess.ini")).read()
-        assert "/custom/ffmpeg/ffmpeg" in ini
-        assert "/custom/ffmpeg/ffprobe" in ini
 
     def test_user_custom_ffmpeg_path_preserved(self, populated_config):
         """If the user has already set a custom path, the patch must not change it."""

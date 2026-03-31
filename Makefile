@@ -176,7 +176,7 @@ FFMPEG_VERSION ?= 8.0
 
 docker-build: ## Build the Docker image locally (TAG=sma-ng:local FFMPEG_VERSION=8.0 to override)
 	$(call MISE_OR_DIRECT,docker:build, \
-	  docker build --target runtime --build-arg FFMPEG_VERSION=$(FFMPEG_VERSION) --tag $(TAG) .)
+	  docker build --file docker/Dockerfile --target runtime --build-arg FFMPEG_VERSION=$(FFMPEG_VERSION) --tag $(TAG) .)
 
 docker-run: ## Run the locally-built image (TAG=sma-ng:local to override)
 	$(call MISE_OR_DIRECT,docker:run, \
@@ -190,6 +190,6 @@ docker-shell: ## Open a shell in the locally-built image
 
 docker-smoke: ## Smoke-test the locally-built image (imports + ffmpeg)
 	$(call MISE_OR_DIRECT,docker:smoke, \
-	  docker run --rm --entrypoint python $(TAG) \
+	  docker run --rm --entrypoint python3 $(TAG) \
 	    -c "import daemon, resources.readsettings, converter; print('imports OK')" && \
 	  docker run --rm --entrypoint ffmpeg $(TAG) -version | head -2)

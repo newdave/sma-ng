@@ -147,6 +147,7 @@ TAG="${TAG:-sma-ng:local}"
 FFMPEG_VERSION="${FFMPEG_VERSION:-8.0}"
 echo "Building $TAG (FFmpeg ${FFMPEG_VERSION})..."
 docker build \
+  --file docker/Dockerfile \
   --target runtime \
   --build-arg FFMPEG_VERSION="${FFMPEG_VERSION}" \
   --tag "$TAG" \
@@ -184,7 +185,7 @@ description = "Smoke-test the locally-built image: verify Python imports and ffm
 run = """
 TAG="${TAG:-sma-ng:local}"
 echo "--- import checks ---"
-docker run --rm --entrypoint python "$TAG" \
+docker run --rm --entrypoint python3 "$TAG" \
   -c "import daemon, resources.readsettings, converter; print('imports OK')"
 echo "--- ffmpeg version ---"
 docker run --rm --entrypoint ffmpeg "$TAG" -version | head -2

@@ -1,5 +1,5 @@
 #!/bin/sh
-# docker-entrypoint.sh — seed /config on first run, then exec the daemon.
+# docker-entrypoint.sh — seed /app/config on first run, then exec the daemon.
 #
 # Behaviour
 # ─────────
@@ -60,10 +60,8 @@ log "defaults/ refreshed with latest samples"
 # Only patch lines that still hold the bare default ("ffmpeg" / "ffprobe").
 # User-defined absolute paths are left alone.
 
-FFMPEG="${SMA_FFMPEG:-${SMA_DAEMON_FFMPEG_DIR:+${SMA_DAEMON_FFMPEG_DIR}/ffmpeg}}"
-FFMPEG="${FFMPEG:-/usr/local/bin/ffmpeg}"
-FFPROBE="${SMA_FFPROBE:-${SMA_DAEMON_FFMPEG_DIR:+${SMA_DAEMON_FFMPEG_DIR}/ffprobe}}"
-FFPROBE="${FFPROBE:-/usr/local/bin/ffprobe}"
+FFMPEG="${SMA_FFMPEG:-/usr/local/bin/ffmpeg}"
+FFPROBE="${SMA_FFPROBE:-/usr/local/bin/ffprobe}"
 
 INI="$CONFIG_DIR/autoProcess.ini"
 

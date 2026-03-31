@@ -17,12 +17,13 @@ def _run_update(env, ini_path, xml_path=None):
 
     with (
         patch.dict(os.environ, env, clear=True),
-        patch("update.autoProcess", ini_path),
-        patch("update.xml", xml_path or "/nonexistent/config.xml"),
         patch("resources.readsettings.ReadSettings._validate_binaries"),
     ):
         try:
             spec.loader.exec_module(module)
+            # Override module-level paths so main() uses the test-provided values
+            module.autoProcess = ini_path
+            module.xml = xml_path or "/nonexistent/config.xml"
             module.main()
         except SystemExit as e:
             return e.code

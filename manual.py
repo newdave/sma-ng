@@ -447,8 +447,10 @@ def processFile(
 
         # Trigger rescan on matching Sonarr/Radarr instance
         triggerRescan(output["output"], mp.settings)
+        return True
     else:
         log.error("There was an error processing file %s, no output data received" % inputfile)
+        return False
 
 
 def walkDir(
@@ -456,6 +458,7 @@ def walkDir(
 ):
     files = []
     error = []
+    failed = False
     mp = MediaProcessor(settings, logger=log)
     for r, _, f in os.walk(dir):
         for file in f:
@@ -469,7 +472,7 @@ def walkDir(
                 displayOptions(filepath, settings)
                 continue
             try:
-                processFile(
+                result = processFile(
                     filepath,
                     mp,
                     info=info,
@@ -485,6 +488,8 @@ def walkDir(
                     processedArchive=processedArchive,
                     type_hint=type_hint,
                 )
+                if result is False:
+                    failed = True
             except SkipFileException:
                 log.debug("Skipping file %s." % filepath)
             except KeyboardInterrupt:
@@ -492,10 +497,12 @@ def walkDir(
             except:
                 log.exception("Error processing file %s." % filepath)
                 error.append(filepath)
+                failed = True
     if error:
         log.error("Script failed to process the following files:")
         for e in error:
             log.error(e)
+    return not failed
 
 
 def displayOptions(path, settings, tagdata=None):
@@ -646,7 +653,7 @@ def main():
         path = getValue("Enter path to file")
 
     if os.path.isdir(path):
-        walkDir(
+        success = walkDir(
             path,
             settings,
             silent=silent,
@@ -661,12 +668,14 @@ def main():
             processedArchive=processedArchive,
             type_hint=type_hint,
         )
+        if not success:
+            sys.exit(1)
     elif os.path.isfile(path):
         mp = MediaProcessor(settings, logger=log)
         info = mp.isValidSource(path)
         if info:
             try:
-                processFile(
+                result = processFile(
                     path,
                     mp,
                     info=info,
@@ -684,6 +693,8 @@ def main():
                     processedArchive=processedArchive,
                     type_hint=type_hint,
                 )
+                if result is False:
+                    sys.exit(1)
             except SkipFileException:
                 log.debug("Skipping file %s" % path)
 

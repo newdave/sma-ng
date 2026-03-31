@@ -39,7 +39,8 @@ services:
   # ────────────────────────────────────────────────────────────────────
   sma:
     build:
-      context: .
+      context: ..
+      dockerfile: docker/Dockerfile
       target: runtime
     image: sma-ng:latest
     container_name: sma-ng
@@ -47,15 +48,17 @@ services:
     ports:
       - "${SMA_PORT:-8585}:8585"
     volumes:
-      - ./config:/config
-      - ./logs:/logs
-      - ${MEDIA_PATH:-/mnt/media}:/media
+      - /opt/sma/config:/config
+      - /opt/sma/logs:/logs
+      - /mnt:/mnt
+      - /mnt/unionfs/downloads:/downloads
+      - /transcode:/transcode
     environment:
       - SMA_CONFIG=/config/autoProcess.ini
       - SMA_DAEMON_API_KEY=${SMA_DAEMON_API_KEY:-}
       - SMA_DAEMON_DB_URL=${SMA_DAEMON_DB_URL:-}
     env_file:
-      - path: ./config/daemon.env
+      - path: /opt/sma/config/daemon.env
         required: false
     depends_on:
       postgres:

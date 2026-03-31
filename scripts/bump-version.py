@@ -53,9 +53,6 @@ EXCLUDED_EXTENSIONS = {
 # Top-level files (not in subdirs) that never trigger a bump
 EXCLUDED_TOP_LEVEL = {
     "Makefile",
-    "Dockerfile",
-    "docker-entrypoint.sh",
-    "docker-compose.yml",
     "mise.toml",
     ".pre-commit-config.yaml",
     ".gitignore",
