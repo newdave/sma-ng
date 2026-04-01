@@ -514,7 +514,7 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
 
     Usage:
         db = PostgreSQLJobDatabase("postgresql://user:pass@host/sma")
-        python daemon.py --db-url postgresql://user:pass@host/sma
+        SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma python daemon.py
     """
 
     def __init__(self, db_url, logger=None, max_connections=10):
@@ -1472,17 +1472,25 @@ def _inline(text):
     return text
 
 
-DOCS_TEMPLATE = open(os.path.join(SCRIPT_DIR, "resources", "docs.html")).read()
+DOCS_TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "resources", "docs.html")
+DASHBOARD_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "dashboard.html")
 
 
-DASHBOARD_HTML = open(os.path.join(SCRIPT_DIR, "resources", "dashboard.html")).read()
+def _load_dashboard_html():
+    with open(DASHBOARD_HTML_PATH, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _load_docs_template():
+    with open(DOCS_TEMPLATE_PATH, "r", encoding="utf-8") as f:
+        return f.read()
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
     """HTTP request handler for webhook endpoints."""
 
     # Endpoints that don't require authentication
-    PUBLIC_ENDPOINTS = ["/", "/dashboard", "/health", "/status", "/docs"]
+    PUBLIC_ENDPOINTS = ["/", "/dashboard", "/health", "/status", "/docs", "/favicon.png"]
 
     def log_message(self, format, *args):
         self.server.logger.debug("%s - %s" % (self.address_string(), format % args))
@@ -1604,7 +1612,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 {
                     "status": "ok",
                     "node": self.server.node_id,
-                    "note": "Cluster status requires PostgreSQL backend (--db-url)",
+                    "note": "Cluster status requires PostgreSQL backend (set SMA_DAEMON_DB_URL)",
                     "workers": self.server.worker_count,
                     "jobs": stats,
                     "active": lock_status["active"],
@@ -1630,6 +1638,59 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self.send_json_response(404, {"error": "Job not found"})
         except ValueError:
             self.send_json_response(400, {"error": "Invalid job ID"})
+
+    def _get_browse(self, query):
+        """List directories and media files under a path, constrained to configured roots."""
+        path = query.get("path", [""])[0].strip()
+        pcm = self.server.path_config_manager
+
+        # Collect valid root prefixes: the configured path_config paths themselves,
+        # plus every ancestor directory of each, so navigation down from "/" works.
+        allowed_roots = set()
+        for entry in pcm.path_configs:
+            p = entry["path"]
+            allowed_roots.add(p)
+            # Add all parent directories so the user can navigate into the root
+            parts = p.rstrip("/").split("/")
+            for i in range(1, len(parts)):
+                allowed_roots.add("/".join(parts[:i]) or "/")
+
+        def is_allowed(check_path):
+            check_path = os.path.normpath(check_path)
+            for root in allowed_roots:
+                root_norm = os.path.normpath(root)
+                if check_path == root_norm or check_path.startswith(root_norm + os.sep):
+                    return True
+            return False
+
+        if not path:
+            # Return the top-level configured path prefixes as starting points
+            dirs = sorted(set(os.path.normpath(e["path"]) for e in pcm.path_configs if os.path.isdir(e["path"])))
+            return self.send_json_response(200, {"dirs": dirs, "files": []})
+
+        path = os.path.normpath(path)
+
+        if not is_allowed(path):
+            return self.send_json_response(403, {"error": "Path is outside configured media roots"})
+
+        if not os.path.isdir(path):
+            return self.send_json_response(404, {"error": "Directory not found"})
+
+        try:
+            dirs, files = [], []
+            with os.scandir(path) as it:
+                for entry in sorted(it, key=lambda e: (not e.is_dir(follow_symlinks=False), e.name.lower())):
+                    if entry.name.startswith("."):
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        dirs.append(os.path.join(path, entry.name))
+                    elif entry.is_file(follow_symlinks=False):
+                        ext = os.path.splitext(entry.name)[1].lower()
+                        if ext in pcm.media_extensions:
+                            files.append(os.path.join(path, entry.name))
+            self.send_json_response(200, {"dirs": dirs, "files": files})
+        except PermissionError:
+            self.send_json_response(403, {"error": "Permission denied"})
 
     def _get_configs(self):
         configs_with_status = [
@@ -1663,6 +1724,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
         unscanned = self.server.job_db.filter_unscanned(paths)
         self.send_json_response(200, {"unscanned": unscanned, "total": len(paths), "already_scanned": len(paths) - len(unscanned)})
 
+    def do_HEAD(self):
+        """Respond to HEAD requests (used by browsers and health-check tools)."""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -1678,12 +1745,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/dashboard":
             api_key = self.server.api_key or ""
             key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
-            self.send_html_response(200, DASHBOARD_HTML.replace("</head>", key_script + "</head>", 1))
+            self.send_html_response(200, _load_dashboard_html().replace("</head>", key_script + "</head>", 1))
         elif parsed.path == "/docs":
             try:
                 with open(DOCS_PATH, "r", encoding="utf-8") as f:
                     md_content = f.read()
-                self.send_html_response(200, DOCS_TEMPLATE % _render_markdown_to_html(md_content))
+                self.send_html_response(200, _load_docs_template() % _render_markdown_to_html(md_content))
             except FileNotFoundError:
                 self.send_html_response(404, "<h1>Documentation not found</h1><p>docs/README.md missing</p>")
         elif parsed.path == "/health":
@@ -1700,6 +1767,21 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.send_json_response(200, self.server.job_db.get_stats())
         elif parsed.path == "/scan":
             self._get_scan(query)
+        elif parsed.path == "/browse":
+            self._get_browse(query)
+        elif parsed.path == "/favicon.png":
+            favicon = os.path.join(SCRIPT_DIR, "logo.png")
+            try:
+                with open(favicon, "rb") as f:
+                    data = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(data)
+            except FileNotFoundError:
+                self.send_json_response(404, {"error": "favicon not found"})
         else:
             self.send_json_response(404, {"error": "Not found"})
 
@@ -2181,14 +2263,14 @@ def main():
     parser.add_argument("--logs-dir", default=LOGS_DIR, help="Directory for per-config log files (default: logs/)")
     parser.add_argument("--db", default=DATABASE_PATH, help="Path to SQLite database (default: config/daemon.db)")
     parser.add_argument(
-        "--db-url", help="PostgreSQL connection URL for distributed multi-node operation (e.g. postgresql://user:pass@host/sma). When set, --db is ignored and all nodes share this database."
-    )
-    parser.add_argument(
         "--ffmpeg-dir", help="Directory containing ffmpeg and ffprobe binaries. Prepended to PATH for each conversion subprocess. If omitted, relies on PATH already containing the binaries."
     )
-    parser.add_argument("--heartbeat-interval", type=int, default=30, help="Seconds between cluster heartbeat updates (default: 30). Only used with --db-url.")
+    parser.add_argument("--heartbeat-interval", type=int, default=30, help="Seconds between cluster heartbeat updates (default: 30). Only used with PostgreSQL backend.")
     parser.add_argument(
-        "--stale-seconds", type=int, default=120, help="Seconds without a heartbeat before a node is declared stale and its running jobs are requeued (default: 120). Only used with --db-url."
+        "--stale-seconds",
+        type=int,
+        default=120,
+        help="Seconds without a heartbeat before a node is declared stale and its running jobs are requeued (default: 120). Only used with PostgreSQL backend.",
     )
     parser.add_argument("--api-key", help="API key for authentication (or set SMA_DAEMON_API_KEY env var)")
 
@@ -2205,8 +2287,9 @@ def main():
     # Determine API key (priority: CLI arg > env var > config file)
     api_key = args.api_key or os.environ.get("SMA_DAEMON_API_KEY") or path_config_manager.api_key
 
-    # Determine database (priority: CLI --db-url > env var > config file > SQLite fallback)
-    db_url = args.db_url or os.environ.get("SMA_DAEMON_DB_URL") or path_config_manager.db_url
+    # Determine database (priority: env var > config file > SQLite fallback)
+    # Note: PostgreSQL URL is not accepted on the CLI to prevent credentials appearing in ps output.
+    db_url = os.environ.get("SMA_DAEMON_DB_URL") or path_config_manager.db_url
 
     # Determine FFmpeg directory (priority: CLI --ffmpeg-dir > env var > config file)
     ffmpeg_dir = args.ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or path_config_manager.ffmpeg_dir
