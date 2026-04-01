@@ -91,6 +91,7 @@ curl -X POST http://localhost:8585/shutdown -H "X-API-Key: YOUR_SECRET_KEY"
 ```
 
 **Endpoints:**
+
 - `POST /webhook` - Submit conversion job (returns job_id)
 - `GET /health` - Health check with job statistics
 - `GET /jobs` - List jobs (`?status=pending&limit=50&offset=0`)
@@ -101,6 +102,7 @@ curl -X POST http://localhost:8585/shutdown -H "X-API-Key: YOUR_SECRET_KEY"
 - `POST /shutdown` - Graceful shutdown (waits for active conversions to finish)
 
 **Request formats:**
+
 ```bash
 # Plain text body (just the path)
 curl -X POST http://localhost:8585/webhook -d "/path/to/movie.mkv"
@@ -126,11 +128,13 @@ curl -X POST http://localhost:8585/webhook \
 The daemon supports API key authentication. When enabled, all endpoints except `/health` require a valid API key.
 
 **Configure API key (priority order):**
+
 1. Command line: `--api-key YOUR_SECRET_KEY`
 2. Environment variable: `SMA_DAEMON_API_KEY=YOUR_SECRET_KEY`
 3. Config file: `"api_key": "YOUR_SECRET_KEY"` in daemon.json
 
 **Send authenticated requests:**
+
 ```bash
 # Using X-API-Key header (recommended)
 curl -X POST http://localhost:8585/webhook \
@@ -152,6 +156,18 @@ The daemon can use different `autoProcess.ini` files based on the input file pat
 ```json
 {
   "default_config": "config/autoProcess.ini",
+  "api_key": "your_secret_key",
+  "db_url": null,
+  "ffmpeg_dir": null,
+  "media_extensions": [".mp4", ".mkv", ".avi", ".mov", ".ts"],
+  "scan_paths": [
+    {
+      "path": "/mnt/local/Media",
+      "interval": 3600,
+      "rewrite_from": "/mnt/local/Media",
+      "rewrite_to": "/mnt/unionfs/Media"
+    }
+  ],
   "path_configs": [
     {
       "path": "/mnt/unionfs/Media/TV",
@@ -170,6 +186,7 @@ The daemon can use different `autoProcess.ini` files based on the input file pat
 ```
 
 **Matching rules:**
+
 - Paths are matched using longest-prefix-first (more specific paths take priority)
 - `/mnt/unionfs/Media/Movies/4K/film.mkv` matches `Movies/4K` config, not `Movies`
 - Paths not matching any prefix use `default_config`
@@ -180,7 +197,7 @@ The daemon can use different `autoProcess.ini` files based on the input file pat
 The daemon logs output to separate files in the `logs/` directory based on which config is used:
 
 | Config File | Log File |
-|-------------|----------|
+| --- | --- |
 | `config/autoProcess.ini` | `logs/autoProcess.log` |
 | `config/autoProcess.tv.ini` | `logs/autoProcess.tv.log` |
 | `config/autoProcess.movies-4k.ini` | `logs/autoProcess.movies-4k.log` |
@@ -196,7 +213,8 @@ Up to `--workers` jobs can run simultaneously. Concurrency is managed per-config
 - Use `--workers N` to set concurrency (default: 1)
 
 Example with `--workers 4` and 5 queued jobs:
-```
+
+```text
 Job 1: /TV/show1.mkv     -> autoProcess.tv.ini     [runs immediately]
 Job 2: /TV/show2.mkv     -> autoProcess.tv.ini     [runs immediately]
 Job 3: /Movies/film1.mkv -> autoProcess.movies.ini [runs immediately]
@@ -205,6 +223,7 @@ Job 5: /TV/show3.mkv     -> autoProcess.tv.ini     [waits for slot]
 ```
 
 Check active/waiting jobs via the health endpoint:
+
 ```bash
 curl http://localhost:8585/health
 # Returns: {"active": {...}, "waiting": {...}, ...}
@@ -213,6 +232,7 @@ curl http://localhost:8585/health
 ### SQLite Persistence
 
 Jobs are stored in `config/daemon.db` (SQLite). This provides:
+
 - **Restart recovery**: Pending/interrupted jobs resume automatically
 - **Job history**: View completed/failed jobs with timestamps
 - **Filtering**: Query jobs by status, config, with pagination
@@ -233,6 +253,7 @@ curl -X POST "http://localhost:8585/cleanup?days=7"
 ```
 
 **Database schema:**
+
 ```sql
 jobs(id, path, config, args, status, worker_id, error, created_at, started_at, completed_at)
 ```
@@ -244,13 +265,16 @@ Use `--db /path/to/daemon.db` to customize database location.
 For multi-node deployments, the daemon can use a shared PostgreSQL database instead of SQLite. This enables distributed job coordination — no two nodes will ever process the same file.
 
 **Configure PostgreSQL (priority order):**
-1. Command line: `--db-url postgresql://user:pass@host/sma`
-2. Environment variable: `SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma`
-3. Config file: `"db_url": "postgresql://user:pass@host/sma"` in daemon.json
+
+1. Environment variable: `SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma`
+2. Config file: `"db_url": "postgresql://user:pass@host/sma"` in daemon.json
+
+The `--db-url` CLI flag was intentionally removed — passing credentials on the command line exposes them in `ps` output. Use the env var or config file instead.
 
 When `db_url` is set, `--db` (SQLite path) is ignored.
 
 **daemon.json example:**
+
 ```json
 {
   "default_config": "config/autoProcess.ini",
@@ -260,11 +284,13 @@ When `db_url` is set, `--db` (SQLite path) is ignored.
 ```
 
 **daemon.env example:**
+
 ```bash
 SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
 ```
 
 **Cluster-specific options:**
+
 - `--heartbeat-interval N` — seconds between node heartbeat updates (default: 30)
 - `--stale-seconds N` — seconds without a heartbeat before a node's running jobs are requeued (default: 120)
 
@@ -273,6 +299,7 @@ The `/health` endpoint includes cluster-wide status when using PostgreSQL, showi
 ## Architecture
 
 ### Entry Points
+
 - `manual.py` - CLI tool for manual conversion/tagging
 - `daemon.py` - HTTP webhook server for triggering conversions via API
 - `triggers/media_managers/sonarr.sh` / `radarr.sh` - Bash scripts triggered by Sonarr/Radarr
@@ -280,27 +307,34 @@ The `/health` endpoint includes cluster-wide status when using PostgreSQL, showi
 
 ### Core Modules
 
-**resources/**
+#### `resources/`
+
 - `mediaprocessor.py` - Central class `MediaProcessor` handling the full conversion pipeline: validation, FFmpeg conversion, tagging, file operations, and post-processing
 - `readsettings.py` - `ReadSettings` class parses `autoProcess.ini`, defines all defaults in `DEFAULTS` dict
 - `metadata.py` - `Metadata` class fetches and writes tags from TMDB using `tmdbsimple` and `mutagen`
 - `postprocess.py` - Runs custom post-process scripts from `post_process/` directory
 - `extensions.py` - Contains TMDB API key and file extension definitions
 
-**converter/**
+#### `converter/`
+
 - `ffmpeg.py` - FFmpeg/FFprobe wrapper with `MediaFormatInfo`, `MediaStreamInfo`, progress parsing
 - `avcodecs.py` - Codec definitions with FFmpeg encoder mappings
 - `formats.py` - Container format definitions
 
-**autoprocess/**
-- `sonarr.py` / `radarr.py` - API integrations for triggering rescans/renames
+#### `autoprocess/`
+
 - `plex.py` - Plex library refresh integration
+
+#### Additional `resources/`
+
+- `mediamanager.py` - Shared Sonarr/Radarr API helpers used by trigger scripts
 
 ### Configuration
 
 The main config file is `config/autoProcess.ini` (copy from `setup/autoProcess.ini.sample`). Override location via `SMA_CONFIG` environment variable.
 
 Key sections:
+
 - `[Converter]` - FFmpeg paths, output format, threading, file disposition (`delete-original`, `copy-to`, `move-to`, `recycle-bin`)
 - `[Video]` - Codec preferences, bitrate, CRF profiles
 - `[Audio]` - Codec, languages, channel handling
@@ -377,12 +411,15 @@ release-please determines the next version from commit messages:
 ## Key Files for Modifications
 
 When adding new codec support, modify:
+
 - `converter/avcodecs.py` - Add codec class with FFmpeg encoder mapping
 
 When adding new settings, modify:
+
 - `resources/readsettings.py` - Add to `DEFAULTS` dict and `readConfig()` method
 - `setup/autoProcess.ini.sample` - Add default value
 
 When adding new downloader/manager integration:
+
 - Create new bash script in `triggers/` (usenet/, torrents/, or media_managers/)
 - Add settings section in `readsettings.py` if config support is needed
