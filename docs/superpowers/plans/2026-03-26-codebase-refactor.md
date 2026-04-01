@@ -13,6 +13,7 @@
 ## File Map
 
 ### Phase 1: Dead Code Removal
+
 - Delete: `autoprocess/sonarr.py`, `autoprocess/radarr.py`
 - Modify: `resources/mediaprocessor.py` (remove `__future__`, decode workarounds)
 - Modify: `resources/readsettings.py` (remove Py2 compat imports/checks)
@@ -22,27 +23,32 @@
 - Delete: `__init__.py` (root), `resources/__init__.py`, `autoprocess/__init__.py`, `config/__init__.py`
 
 ### Phase 2: Media Manager Deduplication
+
 - Create: `resources/mediamanager.py` (~80 lines — shared API helpers)
 - Modify: `postSonarr.py` (use shared helpers, ~60 lines down from ~200)
 - Modify: `postRadarr.py` (use shared helpers, ~60 lines down from ~200)
 - Modify: `tests/test_integration_scripts.py` (update patches)
 
 ### Phase 3: GPU Codec Base Class
+
 - Modify: `converter/avcodecs.py` (extract `HWAccelVideoCodec` mixin, reduce ~400 lines)
 
 ### Phase 4: Downloader Helpers
+
 - Modify: `resources/webhook_client.py` (add `check_bypass()`, `submit_path()`)
 - Modify: `SABPostProcess.py`, `delugePostProcess.py`, `qBittorrentPostProcess.py`, `uTorrentPostProcess.py`
 - Modify: `tests/test_webhook_client.py` (test new helpers)
 - Modify: `tests/test_integration_scripts.py` (update patches)
 
 ### Phase 5: New Tests
+
 - Create: `tests/test_metadata.py`
 - Create: `tests/test_converter.py`
 - Create: `tests/test_postprocess.py`
 - Modify: `tests/test_mediaprocessor.py` (add generateOptions, isValidSource tests)
 
 ### Phase 6: MediaProcessor Decomposition
+
 - Create: `resources/subtitles.py` (~200 lines — SubtitleProcessor class)
 - Modify: `resources/mediaprocessor.py` (delegate to SubtitleProcessor, ~400 lines removed)
 - Create: `tests/test_subtitles.py`
@@ -100,22 +106,26 @@ git commit -m "Remove unused autoprocess/sonarr.py and autoprocess/radarr.py"
 - [x] **Step 1: Clean up resources/readsettings.py imports and Py2 checks**
 
 Replace the try/except ConfigParser import (lines 6-9) with:
+
 ```python
 from configparser import ConfigParser
 ```
 
 Replace the try/except importlib.reload (lines 10-13) with:
+
 ```python
 from importlib import reload
 ```
 
 Simplify `getint()` (lines 87-90) — remove the `sys.version[0] == '2'` branch, keep only:
+
 ```python
 def getint(self, section, option, vars=None, fallback=0):
     return super(SMAConfigParser, self).getint(section, option, vars=vars, fallback=fallback)
 ```
 
 Remove the Python 2 warning (lines 374-375):
+
 ```python
 if sys.version_info.major == 2:
     self.log.warning("Python 2 is no longer officially supported. Use with caution.")
@@ -126,6 +136,7 @@ Remove the entire Python 2 encoding setup block (lines 411-432, the `if sys.vers
 - [x] **Step 2: Clean up resources/log.py**
 
 Replace the try/except ConfigParser import (lines 7-10) with:
+
 ```python
 from configparser import RawConfigParser
 ```
@@ -563,6 +574,7 @@ Expected: All pass including new TestCheckBypass and TestSubmitPath
 In each of SABPostProcess.py, delugePostProcess.py, qBittorrentPostProcess.py, uTorrentPostProcess.py:
 
 Replace the bypass check block (~10 lines) with:
+
 ```python
 if webhook.check_bypass(settings.DOWNLOADER.get('bypass', []), label):
     log.info("Bypass label matched, skipping.")
@@ -570,6 +582,7 @@ if webhook.check_bypass(settings.DOWNLOADER.get('bypass', []), label):
 ```
 
 Replace the file walk/submit block (~8 lines) with:
+
 ```python
 count = webhook.submit_path(path, logger=log)
 ```
@@ -851,7 +864,7 @@ git commit -m "Add isValidSource tests for mediaprocessor"
 
 This extracts 6 subtitle-related methods into a focused class while keeping the same interface for callers within mediaprocessor.py.
 
-- [ ] **Step 1: Create resources/subtitles.py**
+- [x] **Step 1: Create resources/subtitles.py**
 
 Extract these methods from MediaProcessor into a new SubtitleProcessor class:
 - `scanForExternalSubs()`
@@ -894,7 +907,7 @@ class SubtitleProcessor:
         self.log = media_processor.log
 ```
 
-- [ ] **Step 2: Wire SubtitleProcessor into MediaProcessor**
+- [x] **Step 2: Wire SubtitleProcessor into MediaProcessor**
 
 In `resources/mediaprocessor.py`:
 
@@ -917,7 +930,7 @@ Then replace all internal calls:
 
 Keep the original methods as thin delegators if external code calls them directly, or remove them if they're only called internally.
 
-- [ ] **Step 3: Write basic tests for SubtitleProcessor**
+- [x] **Step 3: Write basic tests for SubtitleProcessor**
 
 Create `tests/test_subtitles.py`:
 
@@ -961,12 +974,12 @@ class TestProcessExternalSub:
         assert result is not None
 ```
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `python -m pytest tests/ -v`
 Expected: All tests pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
