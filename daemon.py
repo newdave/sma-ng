@@ -1104,17 +1104,22 @@ class PathConfigManager:
     def __init__(self, config_file=None, logger=None):
         self.log = logger or log
         self.path_configs = []
+        self.path_rewrites = []  # Can be set from daemon.json
         self.default_config = DEFAULT_PROCESS_CONFIG
+        self.default_args = []  # Top-level default args for the default config
         self.api_key = None  # Can be set from daemon.json
         self.db_url = None  # Can be set from daemon.json
         self.ffmpeg_dir = None  # Can be set from daemon.json
         self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
         self.scan_paths = []  # Can be set from daemon.json
+        self._config_file = None  # Resolved path of loaded config file
 
         if config_file and os.path.exists(config_file):
+            self._config_file = config_file
             self.load_config(config_file)
         elif os.path.exists(DEFAULT_DAEMON_CONFIG):
-            self.load_config(DEFAULT_DAEMON_CONFIG)
+            self._config_file = DEFAULT_DAEMON_CONFIG
+            self.load_config(self._config_file)
         else:
             self.log.info("No daemon config found, using default autoProcess.ini for all paths")
 
@@ -1142,6 +1147,20 @@ class PathConfigManager:
             if raw_exts is not None:
                 self.media_extensions = frozenset(("." + e.lower().lstrip(".")) for e in raw_exts if e)
 
+            # Load top-level default args (applied when no path_config matches)
+            raw_default_args = config.get("default_args", [])
+            if isinstance(raw_default_args, str):
+                raw_default_args = raw_default_args.split()
+            self.default_args = raw_default_args
+
+            # Load webhook path rewrites (prefix substitutions applied to incoming webhook paths)
+            raw_rewrites = config.get("path_rewrites", [])
+            self.path_rewrites = [{"from": r["from"].rstrip("/"), "to": r["to"].rstrip("/")} for r in raw_rewrites if r.get("from") and r.get("to")]
+            if self.path_rewrites:
+                self.log.info("Path rewrites (%d):" % len(self.path_rewrites))
+                for r in self.path_rewrites:
+                    self.log.info("  %s -> %s" % (r["from"], r["to"]))
+
             # Load scheduled scan paths
             self.scan_paths = config.get("scan_paths", [])
 
@@ -1157,7 +1176,11 @@ class PathConfigManager:
                 if not os.path.isabs(config_path):
                     config_path = os.path.join(SCRIPT_DIR, config_path)
 
-                self.path_configs.append({"path": path, "config": config_path})
+                default_args = entry.get("default_args", [])
+                if isinstance(default_args, str):
+                    default_args = default_args.split()
+
+                self.path_configs.append({"path": path, "config": config_path, "default_args": default_args})
 
             # Sort by path length descending (longest prefix match first)
             self.path_configs.sort(key=lambda x: len(x["path"]), reverse=True)
@@ -1186,6 +1209,25 @@ class PathConfigManager:
 
         self.log.debug("Path %s using default config: %s" % (file_path, self.default_config))
         return self.default_config
+
+    def get_args_for_path(self, file_path):
+        """Get the default args list for a given file path based on path_configs."""
+        file_path = os.path.abspath(file_path)
+
+        for entry in self.path_configs:
+            if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
+                if os.path.exists(entry["config"]):
+                    return list(entry.get("default_args", []))
+
+        return list(self.default_args)
+
+    def rewrite_path(self, path):
+        """Apply the first matching path_rewrites prefix substitution, or return path unchanged."""
+        for r in self.path_rewrites:
+            prefix = r["from"]
+            if path == prefix or path.startswith(prefix + "/"):
+                return r["to"] + path[len(prefix) :]
+        return path
 
     def get_all_configs(self):
         """Return list of all unique config files."""
@@ -1697,17 +1739,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
             {
                 "path": entry["path"],
                 "config": entry["config"],
+                "default_args": entry.get("default_args", []),
                 "log_file": self.server.config_log_manager.get_log_file(entry["config"]),
                 "active_jobs": self.server.config_lock_manager.get_active_jobs(entry["config"]),
                 "pending_jobs": self.server.job_db.pending_count_for_config(entry["config"]),
             }
             for entry in self.server.path_config_manager.path_configs
         ]
-        default_config = self.server.path_config_manager.default_config
+        pcm = self.server.path_config_manager
+        default_config = pcm.default_config
         self.send_json_response(
             200,
             {
                 "default_config": default_config,
+                "default_args": pcm.default_args,
                 "default_log": self.server.config_log_manager.get_log_file(default_config),
                 "default_active_jobs": self.server.config_lock_manager.get_active_jobs(default_config),
                 "default_pending_jobs": self.server.job_db.pending_count_for_config(default_config),
@@ -1846,6 +1891,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
             count = sum(len(v) for v in active.values())
             self.send_json_response(202, {"status": "shutting_down", "active_jobs": count})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
+        elif parsed.path == "/restart":
+            active = self.server.config_lock_manager.get_status()["active"]
+            count = sum(len(v) for v in active.values())
+            self.send_json_response(202, {"status": "restarting", "active_jobs": count})
+            threading.Thread(target=self.server.graceful_restart, daemon=True).start()
+        elif parsed.path == "/reload":
+            threading.Thread(target=self.server.reload_config, daemon=True).start()
+            self.send_json_response(200, {"status": "reloading"})
         elif parsed.path == "/cleanup":
             self._post_cleanup(query)
         elif parsed.path == "/jobs/requeue":
@@ -1920,6 +1973,25 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return config_override
         return self.server.path_config_manager.get_config_for_path(path)
 
+    def _merge_args(self, path, extra_args):
+        """Merge per-path default_args with request args.
+
+        Default args are prepended; request args are appended. If a flag
+        appears in both, the request arg takes precedence (default is dropped).
+        This also handles the --tv/--movie mutual exclusivity.
+        """
+        default_args = self.server.path_config_manager.get_args_for_path(path)
+        if not default_args:
+            return list(extra_args)
+
+        # Flags the caller explicitly provided — strip leading dashes for comparison
+        caller_flags = {a.lstrip("-") for a in extra_args if a.startswith("-")}
+
+        # Filter out any default flags already covered by the caller
+        filtered_defaults = [a for a in default_args if not a.startswith("-") or a.lstrip("-") not in caller_flags]
+
+        return filtered_defaults + list(extra_args)
+
     def _queue_directory(self, path, extra_args, config_override):
         """Expand directory to media files, queue each, respond."""
         files = self._collect_media_files(path)
@@ -1930,7 +2002,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         queued, duplicates = [], []
         for filepath in files:
             resolved_config = self._resolve_config(filepath, config_override)
-            job_id = self.server.job_db.add_job(filepath, resolved_config, extra_args)
+            job_id = self.server.job_db.add_job(filepath, resolved_config, self._merge_args(filepath, extra_args))
             if job_id is None:
                 existing = self.server.job_db.find_active_job(filepath)
                 duplicates.append({"path": filepath, "job_id": existing["id"] if existing else None})
@@ -1946,7 +2018,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     def _queue_file(self, path, extra_args, config_override):
         """Queue a single file job and respond."""
         resolved_config = self._resolve_config(path, config_override)
-        job_id = self.server.job_db.add_job(path, resolved_config, extra_args)
+        job_id = self.server.job_db.add_job(path, resolved_config, self._merge_args(path, extra_args))
 
         if job_id is None:
             existing = self.server.job_db.find_active_job(path)
@@ -1968,6 +2040,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 return
 
             path = os.path.abspath(path)
+            path = self.server.path_config_manager.rewrite_path(path)
             if not os.path.exists(path):
                 self.send_json_response(400, {"error": "Path does not exist", "path": path})
                 return
@@ -2147,6 +2220,8 @@ class DaemonServer(HTTPServer):
         heartbeat_interval=30,
         stale_seconds=120,
         ffmpeg_dir=None,
+        cli_api_key=None,
+        cli_ffmpeg_dir=None,
     ):
         super().__init__(server_address, handler_class)
         self.job_db = job_db
@@ -2160,6 +2235,8 @@ class DaemonServer(HTTPServer):
         self.node_id = socket.gethostname()
         self.started_at = datetime.now(timezone.utc)
         self.workers = []
+        self._cli_api_key = cli_api_key
+        self._cli_ffmpeg_dir = cli_ffmpeg_dir
 
         # Start worker threads — each gets its own Event so workers never
         # race to clear a shared flag.  notify_workers() sets all of them.
@@ -2212,6 +2289,75 @@ class DaemonServer(HTTPServer):
         """Wake all worker threads by setting each worker's individual event."""
         for worker in self.workers:
             worker.job_event.set()
+
+    def reload_config(self):
+        """Reload daemon.json in-place without stopping workers or active conversions."""
+        if not self.path_config_manager._config_file:
+            self.logger.warning("No daemon config file to reload.")
+            return
+
+        self.logger.info("Reloading configuration from %s..." % self.path_config_manager._config_file)
+
+        # Reset mutable collections before re-loading so stale entries are cleared
+        self.path_config_manager.path_configs = []
+        self.path_config_manager.path_rewrites = []
+        self.path_config_manager.scan_paths = []
+        self.path_config_manager.load_config(self.path_config_manager._config_file)
+
+        # Re-apply api_key priority: CLI arg > env var > config file
+        self.api_key = self._cli_api_key or os.environ.get("SMA_DAEMON_API_KEY") or self.path_config_manager.api_key
+
+        # Re-apply ffmpeg_dir priority: CLI arg > env var > config file
+        new_ffmpeg_dir = self._cli_ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or self.path_config_manager.ffmpeg_dir
+        for worker in self.workers:
+            worker.ffmpeg_dir = new_ffmpeg_dir
+
+        # Restart scanner thread with updated scan_paths
+        self.scanner_thread.stop()
+        self.scanner_thread.join(timeout=5)
+        self.scanner_thread = ScannerThread(
+            scan_paths=self.path_config_manager.scan_paths,
+            job_db=self.job_db,
+            server=self,
+            path_config_manager=self.path_config_manager,
+            logger=self.logger,
+        )
+        self.scanner_thread.start()
+
+        self.logger.info("Configuration reloaded.")
+
+    def graceful_restart(self):
+        """Drain active conversions then re-exec the daemon process."""
+        self.logger.info("Graceful restart — waiting for active conversions to finish...")
+
+        for worker in self.workers:
+            worker.stop()
+        self.heartbeat_thread.stop()
+        self.scanner_thread.stop()
+
+        active = [w for w in self.workers if w.is_alive()]
+        while active:
+            names = [str(w.worker_id) for w in active if w.current_job_id]
+            if names:
+                self.logger.info("Waiting for worker(s) %s to finish..." % ", ".join(names))
+            for w in active:
+                w.join(timeout=10)
+            active = [w for w in active if w.is_alive()]
+
+        self.logger.info("All workers finished, restarting...")
+
+        if self.job_db.is_distributed:
+            try:
+                self.job_db.mark_node_offline(self.node_id)
+            except Exception:
+                pass
+
+        self.heartbeat_thread.join(timeout=5)
+        self.scanner_thread.join(timeout=5)
+
+        super().shutdown()
+
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     def shutdown(self):
         self.logger.info("Shutting down — waiting for active conversions to finish...")
@@ -2336,6 +2482,8 @@ def main():
             heartbeat_interval=args.heartbeat_interval,
             stale_seconds=args.stale_seconds,
             ffmpeg_dir=ffmpeg_dir,
+            cli_api_key=args.api_key,
+            cli_ffmpeg_dir=args.ffmpeg_dir,
         )
 
         log.info("Listening on http://%s:%d" % (args.host, args.port))
@@ -2358,6 +2506,9 @@ def main():
         log.info("  GET  /scan         - Check unscanned paths (?path=... for small lists)")
         log.info("  POST /scan/filter  - Check unscanned paths (JSON body for large lists)")
         log.info("  POST /scan/record  - Record paths as scanned")
+        log.info("  POST /reload       - Reload daemon.json config without stopping workers")
+        log.info("  POST /shutdown     - Graceful shutdown (waits for active conversions)")
+        log.info("  POST /restart      - Graceful restart (drains workers, then re-execs)")
         log.info("")
         log.info("Ready to accept connections.")
 
@@ -2368,6 +2519,12 @@ def main():
 
         signal.signal(signal.SIGTERM, _shutdown)
         signal.signal(signal.SIGINT, _shutdown)
+
+        def _restart(signum, frame):
+            log.info("Received SIGHUP, initiating graceful restart...")
+            threading.Thread(target=server.graceful_restart, daemon=True).start()
+
+        signal.signal(signal.SIGHUP, _restart)
 
         server.serve_forever()
 

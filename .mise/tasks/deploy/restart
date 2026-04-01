@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Restart sma-daemon on all DEPLOY_HOSTS"
+#MISE description="Gracefully shut down sma-daemon on all DEPLOY_HOSTS, then restart via systemctl"
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
@@ -7,14 +7,50 @@ LOCAL="setup/.local.ini"
 CFG="scripts/local-config.sh"
 DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 
+SHUTDOWN_TIMEOUT=${SHUTDOWN_TIMEOUT:-120}  # seconds to wait for graceful shutdown
+
 failed=""
 for host in $DEPLOY_HOSTS; do
   cfg="$CFG $LOCAL $host"
   port=$($cfg SSH_PORT 22)
   key=$($cfg SSH_KEY "")
+  daemon_port=$($cfg DAEMON_PORT 8585)
+  daemon_api_key=$($cfg DAEMON_API_KEY "")
 
   ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
   [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
+
+  echo "==> [$host] sending shutdown webhook"
+
+  # Build the remote curl commands locally so all variables expand here,
+  # then pass the fully-formed strings to ssh (intentional client-side expansion).
+  daemon_url="http://127.0.0.1:${daemon_port}"
+  if [ -n "$daemon_api_key" ]; then
+    remote_shutdown="curl -sf -X POST ${daemon_url}/shutdown -H 'X-API-Key: ${daemon_api_key}'"
+    remote_health="curl -sf ${daemon_url}/health"
+  else
+    remote_shutdown="curl -sf -X POST ${daemon_url}/shutdown"
+    remote_health="curl -sf ${daemon_url}/health"
+  fi
+
+  # shellcheck disable=SC2086,SC2029
+  if ! ssh $ssh_opts "$host" "$remote_shutdown" > /dev/null 2>&1; then
+    echo "  [$host] shutdown webhook failed (daemon may already be stopped), proceeding to restart"
+  else
+    echo "==> [$host] waiting for sma-daemon to stop (timeout: ${SHUTDOWN_TIMEOUT}s)"
+    # Poll /health until the daemon stops responding
+    elapsed=0
+    # shellcheck disable=SC2086,SC2029
+    while ssh $ssh_opts "$host" "$remote_health" > /dev/null 2>&1; do
+      if [ "$elapsed" -ge "$SHUTDOWN_TIMEOUT" ]; then
+        echo "  WARNING: [$host] daemon did not stop within ${SHUTDOWN_TIMEOUT}s, forcing restart anyway"
+        break
+      fi
+      sleep 2
+      elapsed=$((elapsed + 2))
+    done
+    echo "==> [$host] daemon stopped (${elapsed}s)"
+  fi
 
   echo "==> [$host] restarting sma-daemon"
   # shellcheck disable=SC2086

@@ -88,7 +88,22 @@
 
       <input type="text" x-model="submitArgs" placeholder="extra args e.g. -tmdb 603"
              title="Optional extra arguments passed to manual.py (e.g. -tmdb 603, -tvdb 73871 -s 3 -e 10)"
-             class="w-56 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono">
+             class="w-48 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono">
+
+      <!-- Flag toggle buttons -->
+      <div class="flex gap-1.5 flex-shrink-0">
+        <template x-for="fd in flagDefs" :key="fd.flag">
+          <button type="button"
+                  :title="fd.title"
+                  @click="toggleFlag(fd.flag)"
+                  :class="submitFlags.includes(fd.flag)
+                    ? 'bg-indigo-600 border-indigo-500 text-white'
+                    : 'bg-gray-900 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200'"
+                  class="px-2.5 py-2 border rounded-lg text-xs font-mono transition-colors whitespace-nowrap"
+                  x-text="fd.label"></button>
+        </template>
+      </div>
+
       <button type="submit" :disabled="!submitPath.trim() || submitting"
               title="Queue this path for conversion"
               class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium text-white transition-colors whitespace-nowrap">
@@ -174,6 +189,9 @@
           <th class="pb-2 pr-4 font-medium">Path Prefix</th>
           <th class="pb-2 pr-4 font-medium">Config</th>
           <th class="pb-2 pr-4 font-medium">
+            <span class="tooltip cursor-default">Default Flags<span class="tip">Args automatically prepended to every job submitted for this path</span></span>
+          </th>
+          <th class="pb-2 pr-4 font-medium">
             <span class="tooltip cursor-default">Status<span class="tip">Whether this config is currently running a job</span></span>
           </th>
           <th class="pb-2 pr-4 font-medium">
@@ -187,6 +205,16 @@
             <td class="py-2 pr-4 text-gray-500 font-mono italic">default</td>
             <td class="py-2 pr-4 text-gray-400 font-mono" x-text="(configs.default_config||'').split('/').pop()"></td>
             <td class="py-2 pr-4">
+              <template x-if="configs.default_args && configs.default_args.length">
+                <span class="flex gap-1 flex-wrap">
+                  <template x-for="a in configs.default_args" :key="a">
+                    <span class="bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded font-mono" x-text="a"></span>
+                  </template>
+                </span>
+              </template>
+              <span x-show="!configs.default_args || !configs.default_args.length" class="text-gray-600">—</span>
+            </td>
+            <td class="py-2 pr-4">
               <span x-show="configs.default_active_jobs?.length" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full" x-text="'Running (' + (configs.default_active_jobs?.length ?? 0) + ')'"></span>
               <span x-show="!configs.default_active_jobs?.length" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
             </td>
@@ -197,6 +225,16 @@
             <tr class="hover:bg-gray-700/20">
               <td class="py-2 pr-4 text-gray-300 font-mono" :title="c.path" x-text="c.path"></td>
               <td class="py-2 pr-4 text-gray-400 font-mono" x-text="c.config.split('/').pop()"></td>
+              <td class="py-2 pr-4">
+                <template x-if="c.default_args && c.default_args.length">
+                  <span class="flex gap-1 flex-wrap">
+                    <template x-for="a in c.default_args" :key="a">
+                      <span class="bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded font-mono" x-text="a"></span>
+                    </template>
+                  </span>
+                </template>
+                <span x-show="!c.default_args || !c.default_args.length" class="text-gray-600">—</span>
+              </td>
               <td class="py-2 pr-4">
                 <span x-show="c.active_jobs && c.active_jobs.length" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full" x-text="'Running (' + c.active_jobs.length + ')'"></span>
                 <span x-show="!c.active_jobs || !c.active_jobs.length" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
@@ -292,7 +330,23 @@ function dashboard() {
     health: {}, stats: {}, configs: {}, jobs: [],
     filter: 'all', page: 0, pageSize: 50,
     lastUpdate: '', interval: null,
-    submitPath: '', submitArgs: '', submitting: false, submitResult: '', submitError: false,
+    submitPath: '', submitArgs: '', submitFlags: [], submitting: false, submitResult: '', submitError: false,
+    flagDefs: [
+      {flag: '-fc',      label: 'Force Convert', title: 'Force conversion even if file already has the target extension or matches force-convert=false'},
+      {flag: '-pse',     label: 'Same Ext',      title: 'Allow reprocessing files that already have the target extension'},
+      {flag: '--tv',     label: 'TV',             title: 'Force guessit to treat input as a TV episode (mutually exclusive with Movie)'},
+      {flag: '--movie',  label: 'Movie',          title: 'Force guessit to treat input as a movie (mutually exclusive with TV)'},
+    ],
+    toggleFlag(flag) {
+      const exclusive = ['--tv', '--movie'];
+      if (exclusive.includes(flag)) {
+        // deselect the other exclusive flag first
+        this.submitFlags = this.submitFlags.filter(f => !exclusive.includes(f));
+      }
+      const i = this.submitFlags.indexOf(flag);
+      if (i === -1) this.submitFlags.push(flag);
+      else this.submitFlags.splice(i, 1);
+    },
     requeueingAll: false,
     authHeaders(extra) {
       const h = Object.assign({'Content-Type': 'application/json'}, extra || {});
@@ -337,12 +391,14 @@ function dashboard() {
       this.submitting = true; this.submitResult = ''; this.submitError = false;
       try {
         const body = {path: this.submitPath.trim()};
-        if (this.submitArgs.trim()) body.args = this.submitArgs.trim().split(/\\s+/);
+        const extraArgs = [...this.submitFlags];
+        if (this.submitArgs.trim()) extraArgs.push(...this.submitArgs.trim().split(/\s+/));
+        if (extraArgs.length) body.args = extraArgs;
         const r = await fetch('/webhook', {method:'POST', headers: this.authHeaders(), body: JSON.stringify(body)});
         const d = await r.json();
         if (r.ok) {
           this.submitResult = 'Job #' + d.job_id + ' queued for ' + d.path;
-          this.submitPath = ''; this.submitArgs = '';
+          this.submitPath = ''; this.submitArgs = ''; this.submitFlags = [];
           setTimeout(() => this.refresh(), 500);
         } else {
           this.submitError = true;
