@@ -1,41 +1,39 @@
-"""Logging setup with rotating file handlers and optional INI-based configuration."""
+"""Logging setup with optional INI-based configuration."""
 
 import logging
 import os
-import shutil
 from configparser import RawConfigParser
 from logging.config import fileConfig
-from logging.handlers import BaseRotatingHandler
 
 defaults = {
     "loggers": {
         "keys": "root, manual, nzbget, daemon",
     },
     "handlers": {
-        "keys": "consoleHandler, nzbgetHandler, fileHandler, manualHandler, daemonHandler",
+        "keys": "consoleHandler, nzbgetHandler, manualHandler, daemonHandler",
     },
     "formatters": {
         "keys": "simpleFormatter, minimalFormatter, nzbgetFormatter, daemonFormatter",
     },
     "logger_root": {
         "level": "DEBUG",
-        "handlers": "consoleHandler, fileHandler",
+        "handlers": "consoleHandler",
     },
     "logger_nzbget": {
         "level": "DEBUG",
-        "handlers": "nzbgetHandler, fileHandler",
+        "handlers": "nzbgetHandler",
         "propagate": 0,
         "qualname": "NZBGetPostProcess",
     },
     "logger_manual": {
         "level": "DEBUG",
-        "handlers": "manualHandler, fileHandler",
+        "handlers": "manualHandler",
         "propagate": 0,
         "qualname": "MANUAL",
     },
     "logger_daemon": {
         "level": "DEBUG",
-        "handlers": "daemonHandler, fileHandler",
+        "handlers": "daemonHandler",
         "propagate": 0,
         "qualname": "DAEMON",
     },
@@ -63,12 +61,6 @@ defaults = {
         "formatter": "daemonFormatter",
         "args": "(sys.stdout,)",
     },
-    "handler_fileHandler": {
-        "class": "handlers.RotatingFileHandler",
-        "level": "INFO",
-        "formatter": "simpleFormatter",
-        "args": "('%(logfilename)s', 'a', 100000, 3, 'utf-8')",
-    },
     "formatter_simpleFormatter": {
         "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         "datefmt": "%Y-%m-%d %H:%M:%S",
@@ -82,14 +74,15 @@ CONFIG_DEFAULT = "logging.ini"
 CONFIG_DIRECTORY = "./config"
 RESOURCE_DIRECTORY = "./resources"
 RELATIVE_TO_ROOT = "../"
-LOG_NAME = "sma.log"
 
 
 def checkLoggingConfig(configfile):
     """Ensure a logging INI file exists with all required sections and keys.
 
     Creates the file if it does not exist, and adds any missing sections or
-    options from ``defaults``. Strips the ``sysLogHandler`` entry on Windows.
+    options from ``defaults``. Removes the legacy ``fileHandler`` and
+    ``sysLogHandler`` entries if present. Strips the ``sysLogHandler`` entry
+    on Windows.
 
     Args:
         configfile: Path to the logging configuration file to create or update.
@@ -107,6 +100,23 @@ def checkLoggingConfig(configfile):
             if not config.has_option(s, k):
                 config.set(s, k, str(defaults[s][k]))
 
+    # Remove legacy fileHandler from handlers list and delete its section
+    if config.has_option("handlers", "keys") and "fileHandler" in config.get("handlers", "keys"):
+        keys = [k.strip() for k in config.get("handlers", "keys").split(",") if k.strip() != "fileHandler"]
+        config.set("handlers", "keys", ", ".join(keys))
+        write = True
+    if config.has_section("handler_fileHandler"):
+        config.remove_section("handler_fileHandler")
+        write = True
+    # Remove fileHandler from any logger handler lists
+    for section in config.sections():
+        if section.startswith("logger_") and config.has_option(section, "handlers"):
+            handlers = [h.strip() for h in config.get(section, "handlers").split(",") if h.strip() != "fileHandler"]
+            new_val = ", ".join(handlers)
+            if new_val != config.get(section, "handlers"):
+                config.set(section, "handlers", new_val)
+                write = True
+
     # Remove sysLogHandler if you're on Windows
     if "sysLogHandler" in config.get("handlers", "keys"):
         config.set("handlers", "keys", config.get("handlers", "keys").replace("sysLogHandler", ""))
@@ -121,12 +131,11 @@ def checkLoggingConfig(configfile):
 
 
 def getLogger(name=None, custompath=None):
-    """Return a configured logger, initialising rotating-file logging if needed.
+    """Return a configured logger, initialising logging if needed.
 
-    Locates the config and log directories relative to the SMA root (or
-    ``custompath`` when provided), ensures ``logging.ini`` is present and
-    up-to-date, applies it, and attaches the custom ``rotator`` to any
-    ``BaseRotatingHandler`` instances on the returned logger.
+    Locates the config directory relative to the SMA root (or ``custompath``
+    when provided), ensures ``logging.ini`` is present and up-to-date, and
+    applies it.
 
     Args:
         name: Logger name passed to ``logging.getLogger()``. Defaults to the
@@ -135,23 +144,17 @@ def getLogger(name=None, custompath=None):
             calling from a non-standard working directory.
 
     Returns:
-        A ``logging.Logger`` instance configured with file and console handlers.
+        A ``logging.Logger`` instance configured with console handlers.
     """
     if custompath:
         custompath = os.path.realpath(custompath)
         if not os.path.isdir(custompath):
             custompath = os.path.dirname(custompath)
         rootpath = os.path.abspath(custompath)
-        resourcepath = os.path.normpath(os.path.join(rootpath, RESOURCE_DIRECTORY))
         configpath = os.path.normpath(os.path.join(rootpath, CONFIG_DIRECTORY))
     else:
         rootpath = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), RELATIVE_TO_ROOT))
-        resourcepath = os.path.normpath(os.path.join(rootpath, RESOURCE_DIRECTORY))
         configpath = os.path.normpath(os.path.join(rootpath, CONFIG_DIRECTORY))
-
-    logpath = configpath
-    if not os.path.isdir(logpath):
-        os.makedirs(logpath)
 
     if not os.path.isdir(configpath):
         os.makedirs(configpath)
@@ -159,34 +162,6 @@ def getLogger(name=None, custompath=None):
     configfile = os.path.abspath(os.path.join(configpath, CONFIG_DEFAULT)).replace("\\", "\\\\")
     checkLoggingConfig(configfile)
 
-    logfile = os.path.abspath(os.path.join(logpath, LOG_NAME)).replace("\\", "\\\\")
-    fileConfig(configfile, defaults={"logfilename": logfile})
-
-    logger = logging.getLogger(name)
-    rotatingFileHandlers = [x for x in logger.handlers if isinstance(x, BaseRotatingHandler)]
-    for rh in rotatingFileHandlers:
-        rh.rotator = rotator
+    fileConfig(configfile)
 
     return logging.getLogger(name)
-
-
-def rotator(source, dest):
-    """Rotate a log file by renaming it, falling back to copy-and-truncate.
-
-    Assigned as the ``rotator`` callable on ``BaseRotatingHandler`` instances
-    so that log rotation works correctly across filesystems (e.g. when the log
-    file and its destination are on different mount points).
-
-    Args:
-        source: Path to the current log file that should be rotated out.
-        dest: Destination path for the rotated log file.
-    """
-    if os.path.exists(source):
-        try:
-            os.rename(source, dest)
-        except:
-            try:
-                shutil.copyfile(source, dest)
-                open(source, "w").close()
-            except Exception as e:
-                print("Error rotating logfiles: %s." % (e))

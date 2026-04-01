@@ -2,9 +2,8 @@
 
 import os
 from configparser import RawConfigParser
-from unittest.mock import patch
 
-from resources.log import checkLoggingConfig, defaults, rotator
+from resources.log import checkLoggingConfig, defaults
 
 
 class TestCheckLoggingConfig:
@@ -22,7 +21,6 @@ class TestCheckLoggingConfig:
 
     def test_updates_existing_config_with_missing_sections(self, tmp_path):
         configfile = str(tmp_path / "logging.ini")
-        # Write a partial config
         config = RawConfigParser()
         config.add_section("loggers")
         config.set("loggers", "keys", "root, manual, nzbget, daemon")
@@ -36,19 +34,48 @@ class TestCheckLoggingConfig:
 
     def test_removes_syslog_handler(self, tmp_path):
         configfile = str(tmp_path / "logging.ini")
-        # Create config with sysLogHandler
         config = RawConfigParser()
         for s in defaults:
             config.add_section(s)
             for k in defaults[s]:
                 config.set(s, k, str(defaults[s][k]))
-        config.set("handlers", "keys", "consoleHandler, sysLogHandler, fileHandler")
+        config.set("handlers", "keys", "consoleHandler, sysLogHandler")
         with open(configfile, "w") as f:
             config.write(f)
         checkLoggingConfig(configfile)
         config2 = RawConfigParser()
         config2.read(configfile)
         assert "sysLogHandler" not in config2.get("handlers", "keys")
+
+    def test_removes_legacy_file_handler(self, tmp_path):
+        configfile = str(tmp_path / "logging.ini")
+        config = RawConfigParser()
+        for s in defaults:
+            config.add_section(s)
+            for k in defaults[s]:
+                config.set(s, k, str(defaults[s][k]))
+        # Simulate a legacy config with fileHandler wired in
+        config.set("handlers", "keys", "consoleHandler, fileHandler")
+        config.add_section("handler_fileHandler")
+        config.set("handler_fileHandler", "class", "handlers.RotatingFileHandler")
+        config.set("handler_fileHandler", "args", "('sma.log', 'a', 100000, 3)")
+        config.set("logger_root", "handlers", "consoleHandler, fileHandler")
+        with open(configfile, "w") as f:
+            config.write(f)
+        checkLoggingConfig(configfile)
+        config2 = RawConfigParser()
+        config2.read(configfile)
+        assert "fileHandler" not in config2.get("handlers", "keys")
+        assert not config2.has_section("handler_fileHandler")
+        assert "fileHandler" not in config2.get("logger_root", "handlers")
+
+    def test_no_file_handler_in_fresh_config(self, tmp_path):
+        configfile = str(tmp_path / "logging.ini")
+        checkLoggingConfig(configfile)
+        config = RawConfigParser()
+        config.read(configfile)
+        assert "fileHandler" not in config.get("handlers", "keys")
+        assert not config.has_section("handler_fileHandler")
 
     def test_strips_trailing_commas(self, tmp_path):
         configfile = str(tmp_path / "logging.ini")
@@ -57,7 +84,7 @@ class TestCheckLoggingConfig:
             config.add_section(s)
             for k in defaults[s]:
                 config.set(s, k, str(defaults[s][k]))
-        config.set("handlers", "keys", "consoleHandler, fileHandler, ")
+        config.set("handlers", "keys", "consoleHandler, ")
         with open(configfile, "w") as f:
             config.write(f)
         checkLoggingConfig(configfile)
@@ -70,51 +97,7 @@ class TestCheckLoggingConfig:
     def test_idempotent_on_complete_config(self, tmp_path):
         configfile = str(tmp_path / "logging.ini")
         checkLoggingConfig(configfile)
-        mtime1 = os.path.getmtime(configfile)
-        # Second call shouldn't write if config is already complete
         checkLoggingConfig(configfile)
-
-
-class TestRotator:
-    def test_rename_success(self, tmp_path):
-        source = str(tmp_path / "sma.log")
-        dest = str(tmp_path / "sma.log.1")
-        with open(source, "w") as f:
-            f.write("log data")
-        rotator(source, dest)
-        assert os.path.exists(dest)
-        assert not os.path.exists(source)
-
-    def test_rename_fails_falls_back_to_copy(self, tmp_path):
-        source = str(tmp_path / "sma.log")
-        dest = str(tmp_path / "sma.log.1")
-        with open(source, "w") as f:
-            f.write("log data")
-        with patch("os.rename", side_effect=OSError("cross-device")):
-            rotator(source, dest)
-        assert os.path.exists(dest)
-        assert os.path.exists(source)
-        # Source should be truncated
-        assert os.path.getsize(source) == 0
-        with open(dest) as f:
-            assert f.read() == "log data"
-
-    def test_nonexistent_source_does_nothing(self, tmp_path):
-        source = str(tmp_path / "nonexistent.log")
-        dest = str(tmp_path / "nonexistent.log.1")
-        rotator(source, dest)
-        assert not os.path.exists(dest)
-
-    def test_both_rename_and_copy_fail(self, tmp_path, capsys):
-        source = str(tmp_path / "sma.log")
-        dest = str(tmp_path / "sma.log.1")
-        with open(source, "w") as f:
-            f.write("data")
-        with patch("os.rename", side_effect=OSError("fail")):
-            with patch("shutil.copyfile", side_effect=OSError("fail too")):
-                rotator(source, dest)
-        captured = capsys.readouterr()
-        assert "Error rotating logfiles" in captured.out
 
 
 class TestGetLogger:
@@ -124,14 +107,12 @@ class TestGetLogger:
         logger = getLogger("test", custompath=str(tmp_path))
         assert logger is not None
         assert logger.name == "test"
-        # Verify config directory and logging.ini were created
         configpath = os.path.join(str(tmp_path), "config")
         assert os.path.isdir(configpath)
 
     def test_returns_logger_with_file_custom_path(self, tmp_path):
         from resources.log import getLogger
 
-        # If custompath is a file, it should use its directory
         fakefile = str(tmp_path / "somefile.txt")
         logger = getLogger("test2", custompath=fakefile)
         assert logger is not None
