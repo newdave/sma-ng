@@ -691,6 +691,11 @@ class MediaProcessor:
         # Prep subtitle streams by cleaning up languages and setting SDL
         for s in info.subtitle:
             s.metadata["language"] = getAlpha3TCode(s.metadata.get("language"), self.settings.sdl)
+
+        if len(swl) > 0 and not any(s.metadata.get("language") in swl and self.validDisposition(s, self.settings.ignored_subtitle_dispositions) for s in info.subtitle):
+            self.log.debug("No valid subtitle tracks found, relaxing subtitle language restrictions.")
+            swl = []
+
         return awl, swl
 
     # Check and see if clues about the disposition are in the title
@@ -1494,7 +1499,7 @@ class MediaProcessor:
 
             self.deletesubs.add(external_sub.path)
 
-            if self.settings.sub_first_language_stream:
+            if self.settings.sub_first_language_stream and not external_sub.subtitle[0].disposition["forced"]:
                 blocked_subtitle_languages.append(external_sub.subtitle[0].metadata["language"])
 
         # Set Default Subtitle Stream
@@ -1630,7 +1635,9 @@ class MediaProcessor:
         return (len(whitelist) < 1 or language in whitelist) and language not in blocked
 
     # Complex valid disposition checker supporting unique dispositions, language combinations etc for the main option generator
-    def validDisposition(self, stream, ignored, unique=False, language="", existing=[], append=True):
+    def validDisposition(self, stream, ignored, unique=False, language="", existing=None, append=True):
+        if existing is None:
+            existing = []
         """
         Check whether a stream's dispositions allow it to be included in the output.
 

@@ -21,7 +21,7 @@ EnvironmentFile=-/opt/sma/config/daemon.env
 # Defaults — override any of these in config/daemon.env
 Environment="SMA_DAEMON_HOST=0.0.0.0"
 Environment="SMA_DAEMON_PORT=8585"
-Environment="SMA_DAEMON_WORKERS=1"
+Environment="SMA_DAEMON_WORKERS=2"
 Environment="SMA_CONFIG=/opt/sma/config/autoProcess.ini"
 # Set this to use PostgreSQL instead of SQLite.
 # When set, --db (SQLite) is automatically skipped.

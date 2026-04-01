@@ -100,6 +100,8 @@ curl -X POST http://localhost:8585/shutdown -H "X-API-Key: YOUR_SECRET_KEY"
 - `GET /stats` - Job statistics by status
 - `POST /cleanup` - Remove old completed/failed jobs (`?days=30`)
 - `POST /shutdown` - Graceful shutdown (waits for active conversions to finish)
+- `POST /reload` - Reload daemon.json config in-place (no restart, workers unaffected)
+- `POST /restart` - Graceful restart (drains active conversions, then re-execs the process)
 
 **Request formats:**
 
@@ -160,6 +162,12 @@ The daemon can use different `autoProcess.ini` files based on the input file pat
   "db_url": null,
   "ffmpeg_dir": null,
   "media_extensions": [".mp4", ".mkv", ".avi", ".mov", ".ts"],
+  "path_rewrites": [
+    {
+      "from": "/mnt/local/Media",
+      "to": "/mnt/unionfs/Media"
+    }
+  ],
   "scan_paths": [
     {
       "path": "/mnt/local/Media",
@@ -191,6 +199,13 @@ The daemon can use different `autoProcess.ini` files based on the input file pat
 - `/mnt/unionfs/Media/Movies/4K/film.mkv` matches `Movies/4K` config, not `Movies`
 - Paths not matching any prefix use `default_config`
 - Config paths can be relative (to SMA-NG root) or absolute
+
+**Webhook path rewriting:**
+
+- `path_rewrites` applies prefix substitutions to paths submitted via webhook before config matching or job creation
+- Useful when the caller (e.g. Sonarr/Radarr) sends paths on a local mount that differ from the paths the daemon resolves files at
+- Rules are matched in order; first match wins
+- `/mnt/local/Media/TV/show.mkv` → `/mnt/unionfs/Media/TV/show.mkv`
 
 ### Per-Config Logging
 

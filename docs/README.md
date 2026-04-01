@@ -692,6 +692,24 @@ SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma python daemon.py
 
 When `db_url` is set, `--db` (SQLite path) is ignored. The `/health` endpoint shows cluster-wide status.
 
+### Config Reload
+
+Send `POST /reload` to reload `daemon.json` without restarting the daemon or interrupting active conversions:
+
+```bash
+curl -X POST http://localhost:8585/reload -H "X-API-Key: SECRET"
+```
+
+The following are reloaded immediately:
+
+- Path configs (`path_configs`, `path_rewrites`)
+- Scan paths (scanner thread is restarted with the new config)
+- `api_key`, `media_extensions`, `default_args`
+
+The following are **not** reloaded (require a full restart):
+
+- `--host`, `--port`, `--workers`, `--db` / `--db-url` — these are fixed at startup
+
 ### Graceful Shutdown
 
 Send `POST /shutdown` to drain in-progress conversions before stopping:
@@ -701,6 +719,20 @@ curl -X POST http://localhost:8585/shutdown -H "X-API-Key: SECRET"
 ```
 
 The daemon stops accepting new jobs immediately, waits for all active conversions to finish, then exits. The systemd unit uses `KillMode=mixed` and `TimeoutStopSec=infinity` so SIGTERM triggers the same graceful drain.
+
+### Graceful Restart
+
+Send `POST /restart` (or `kill -HUP <pid>`) to reload the daemon without interrupting active conversions:
+
+```bash
+# Via HTTP
+curl -X POST http://localhost:8585/restart -H "X-API-Key: SECRET"
+
+# Via signal
+kill -HUP $(pgrep -f "python daemon.py")
+```
+
+The daemon drains active conversions exactly like a graceful shutdown, then re-execs itself with the same command-line arguments. All CLI flags (`--host`, `--port`, `--workers`, `--db`, etc.) are preserved across the restart. Because jobs are drained cleanly before re-exec, no running jobs are reset to pending on startup.
 
 ---
 
@@ -1243,7 +1275,7 @@ The daemon also writes per-config rotating log files in `logs/`:
 | `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` (prepended to PATH for conversions) |
 | `SMA_DAEMON_HOST` | Daemon bind host (Docker default: empty = 0.0.0.0) |
 | `SMA_DAEMON_PORT` | Daemon port (Docker default: 8585) |
-| `SMA_DAEMON_WORKERS` | Number of concurrent workers (Docker default: 4) |
+| `SMA_DAEMON_WORKERS` | Number of concurrent workers (Docker default: 2) |
 | `SMA_DAEMON_CONFIG` | Path to daemon.json config file |
 | `SMA_DAEMON_DB` | Path to SQLite database file |
 | `SMA_DAEMON_LOGS_DIR` | Directory for per-config log files |

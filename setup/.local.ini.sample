@@ -31,6 +31,14 @@ DEPLOY_USE_SUDO = false
 # make target(s) to run on the host after each sync.
 REMOTE_MAKE  = install
 
+# Port the sma-daemon HTTP server listens on (used by deploy:restart to send
+# the graceful shutdown webhook before restarting the systemd unit).
+DAEMON_PORT  = 8585
+
+# API key for the sma-daemon (used by deploy:restart when sending the
+# shutdown webhook). Must match the api_key in daemon.json / SMA_DAEMON_API_KEY.
+# DAEMON_API_KEY = your_secret_key
+
 # Directory containing the ffmpeg and ffprobe binaries on the remote host.
 # Passed as SMA_DAEMON_FFMPEG_DIR so the daemon (or entrypoint) can pick up
 # the correct paths without editing autoProcess.ini by hand.
