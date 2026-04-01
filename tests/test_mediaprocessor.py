@@ -1057,6 +1057,9 @@ class TestCrfProfileOverridesCopy:
         mp.converter = mock_converter
         mp.log = MagicMock()
         mp.deletesubs = set()
+        from resources.subtitles import SubtitleProcessor
+
+        mp.subtitles = SubtitleProcessor(mp)
 
         # 7 Mbit source: total=7128kbps, audio=128kbps → video estimate ≈ 6650kbps > 5000 threshold
         info = make_media_info(
@@ -1099,6 +1102,9 @@ class TestCrfProfileOverridesCopy:
         mp.converter = mock_converter
         mp.log = MagicMock()
         mp.deletesubs = set()
+        from resources.subtitles import SubtitleProcessor
+
+        mp.subtitles = SubtitleProcessor(mp)
 
         info = make_media_info(
             video_codec="h264",
@@ -1119,10 +1125,13 @@ def _make_mp():
     with patch("resources.mediaprocessor.Converter"):
         with patch("resources.readsettings.ReadSettings._validate_binaries"):
             from resources.mediaprocessor import MediaProcessor
+            from resources.subtitles import SubtitleProcessor
 
             mp = MediaProcessor.__new__(MediaProcessor)
             mp.settings = MagicMock()
             mp.log = MagicMock()
+            mp.converter = MagicMock()
+            mp.subtitles = SubtitleProcessor(mp)
             return mp
 
 
