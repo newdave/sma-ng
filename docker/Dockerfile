@@ -211,7 +211,7 @@ RUN getent group ${GID} || groupadd -g ${GID} sma \
 
 # Copy application code
 WORKDIR /app
-COPY --chown=sma:sma . .
+COPY --chown=${UID}:${GID} . .
 
 # Install entrypoint script (root-owned, world-executable)
 COPY docker/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -219,7 +219,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Runtime directories (seeded at startup via entrypoint; override with volume mounts)
 RUN mkdir -p /config /logs /mnt /downloads /transcode \
-    && chown -R sma:sma /config /logs /app
+    && chown -R ${UID}:${GID} /config /logs /app
 
 VOLUME ["/config", "/logs", "/mnt", "/downloads", "/transcode"]
 
