@@ -1,5 +1,7 @@
 # Triggers
 
+![SMA-NG](../logo.png)
+
 Trigger scripts bridge 3rd-party download clients and media managers to the SMA-NG daemon.
 When a download completes or a file is imported, the relevant trigger script submits it to
 the daemon webhook for conversion.
