@@ -12,7 +12,10 @@
 #   sma-webhook.sh job 42                             Get specific job details
 #   sma-webhook.sh stats                              Show job statistics
 #   sma-webhook.sh configs                            Show path-to-config mappings
-#   sma-webhook.sh cleanup [days]                     Remove old completed/failed jobs
+#   sma-webhook.sh cleanup [days]                     Remove old completed/failed jobs (default: 30)
+#   sma-webhook.sh requeue                            Requeue all failed/interrupted jobs
+#   sma-webhook.sh requeue 42                         Requeue a specific job by ID
+#   sma-webhook.sh shutdown                           Gracefully shut down the daemon
 #
 # Environment variables:
 #   SMA_DAEMON_URL    Base URL (default: http://127.0.0.1:8585)
@@ -36,7 +39,7 @@ if [[ -n "$SMA_API_KEY" ]]; then
 fi
 
 usage() {
-    sed -n '3,17s/^# \?//p' "$0"
+    sed -n '3,22s/^# \?//p' "$0"
     exit 1
 }
 
@@ -109,18 +112,33 @@ cmd_cleanup() {
     curl -s -X POST "$SMA_DAEMON_URL/cleanup?days=$days" "${auth_headers[@]}" | jq .
 }
 
+cmd_requeue() {
+    if [[ $# -ge 1 ]]; then
+        local job_id="$1"
+        curl -s -X POST "$SMA_DAEMON_URL/jobs/$job_id/requeue" "${auth_headers[@]}" | jq .
+    else
+        curl -s -X POST "$SMA_DAEMON_URL/jobs/requeue" "${auth_headers[@]}" | jq .
+    fi
+}
+
+cmd_shutdown() {
+    curl -s -X POST "$SMA_DAEMON_URL/shutdown" "${auth_headers[@]}" | jq .
+}
+
 # --- Main ---
 [[ $# -ge 1 ]] || usage
 command="$1"; shift
 
 case "$command" in
-    submit)  cmd_submit "$@" ;;
-    health)  cmd_health ;;
-    jobs)    cmd_jobs "$@" ;;
-    job)     cmd_job "$@" ;;
-    stats)   cmd_stats ;;
-    configs) cmd_configs ;;
-    cleanup) cmd_cleanup "$@" ;;
+    submit)   cmd_submit "$@" ;;
+    health)   cmd_health ;;
+    jobs)     cmd_jobs "$@" ;;
+    job)      cmd_job "$@" ;;
+    stats)    cmd_stats ;;
+    configs)  cmd_configs ;;
+    cleanup)  cmd_cleanup "$@" ;;
+    requeue)  cmd_requeue "$@" ;;
+    shutdown) cmd_shutdown ;;
     help|-h|--help) usage ;;
-    *)       die "Unknown command: $command" ;;
+    *)        die "Unknown command: $command" ;;
 esac

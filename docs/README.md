@@ -1,5 +1,7 @@
 # SMA-NG — Next-Generation Media Automator
 
+![SMA-NG](../logo.png)
+
 Automated media conversion, tagging, and integration pipeline. Converts media files to MP4/MKV using FFmpeg with hardware acceleration, tags them with TMDB metadata, and integrates with media managers and download clients.
 
 ## Table of Contents
@@ -10,47 +12,82 @@ Automated media conversion, tagging, and integration pipeline. Converts media fi
 - [Configuration Reference](#configuration-reference)
 - [CLI Usage (manual.py)](#cli-usage)
 - [Daemon Mode](#daemon-mode)
+  - [Starting](#starting)
+  - [Concurrency](#concurrency)
+  - [Web Dashboard](#web-dashboard)
+  - [API Endpoints](#api-endpoints)
+  - [Webhook Request Formats](#webhook-request-formats)
+  - [Authentication](#authentication)
+  - [Path-Based Configuration (daemon.json)](#path-based-configuration-daemonjson)
+  - [Per-Config Logging](#per-config-logging)
+  - [Scheduled Directory Scanning](#scheduled-directory-scanning)
+  - [SQLite Persistence](#sqlite-persistence)
+  - [PostgreSQL (Distributed / Multi-Node)](#postgresql-distributed--multi-node)
+  - [Graceful Shutdown](#graceful-shutdown)
 - [Media Manager Integration](#media-manager-integration)
 - [Download Client Integration](#download-client-integration)
 - [Hardware Acceleration](#hardware-acceleration)
 - [Processing Pipeline](#processing-pipeline)
 - [Module Reference](#module-reference)
 - [Post-Process Scripts](#post-process-scripts)
+- [Deployment (mise)](#deployment-mise)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Requirements
 
-- **Python 3.12+**
-- **FFmpeg** (system install or custom path)
+- Python 3.12+
+- FFmpeg (system install or custom path)
 - Python packages: `pip install -r setup/requirements.txt`
 
 Optional:
+
 - qBittorrent integration: `pip install -r setup/requirements-qbittorrent.txt`
 - Deluge integration: `pip install -r setup/requirements-deluge.txt`
 
 ## Quick Start
 
+### With mise (recommended)
+
+[mise](https://mise.jdx.dev/) is a dev-tool manager. Install it once, then:
+
 ```bash
 # Clone and set up
+git clone <repo> && cd sma
+
+# Install Python 3.12, create venv, install dependencies
+mise install
+mise run install
+
+# Generate config (auto-detects GPU)
+mise run config
+
+# Test a conversion
+mise run convert -- /path/to/file.mkv
+
+# Start the daemon
+mise run daemon
+```
+
+### Without mise
+
+```bash
 git clone <repo> && cd sma
 python3 -m venv venv && source venv/bin/activate
 pip install -r setup/requirements.txt
 
-# Create config from sample
-cp setup/autoProcess.ini.sample config/autoProcess.ini
+# Generate config with auto GPU detection
+make config
 
-# Edit config (set FFmpeg paths, codec preferences, API keys)
+# Or copy sample and edit manually
+cp setup/autoProcess.ini.sample config/autoProcess.ini
 $EDITOR config/autoProcess.ini
 
 # Test a conversion
 python manual.py -i /path/to/file.mkv -a
 
-# Preview conversion without running it
-python manual.py -i /path/to/file.mkv -oo
-
-# Start the daemon for webhook-driven conversions
+# Start the daemon
 python daemon.py --host 0.0.0.0 --port 8585
 ```
 
@@ -58,7 +95,7 @@ python daemon.py --host 0.0.0.0 --port 8585
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Entry Points                            │
 ├──────────┬──────────┬──────────────────────────────────────────┤
@@ -73,17 +110,18 @@ python daemon.py --host 0.0.0.0 --port 8585
 │  isValidSource → generateOptions → convert → tag → replicate    │
 ├─────────────────────┬───────────────────┬───────────────────────┤
 │ resources/          │ converter/        │ autoprocess/           │
-│  readsettings.py    │  __init__.py      │  sonarr.py            │
-│  metadata.py        │  ffmpeg.py        │  radarr.py            │
-│  postprocess.py     │  avcodecs.py      │  plex.py              │
-│  extensions.py      │  formats.py       │                       │
+│  readsettings.py    │  __init__.py      │  plex.py              │
+│  mediamanager.py    │  ffmpeg.py        │                       │
+│  metadata.py        │  avcodecs.py      │                       │
+│  postprocess.py     │  formats.py       │                       │
+│  extensions.py      │                   │                       │
 │  log.py / lang.py   │                   │                       │
 └─────────────────────┴───────────────────┴───────────────────────┘
 ```
 
 ### Data Flow
 
-```
+```text
 Input File
   → FFprobe validation (isValidSource)
   → Stream analysis & option generation (generateOptions)
@@ -106,7 +144,7 @@ Override path via `SMA_CONFIG` environment variable.
 ### [Converter]
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `ffmpeg` | path | `ffmpeg` | Path to FFmpeg binary |
 | `ffprobe` | path | `ffprobe` | Path to FFprobe binary |
 | `threads` | int | `0` | FFmpeg threads (0 = auto) |
@@ -124,6 +162,7 @@ Override path via `SMA_CONFIG` environment variable.
 | `copy-to` | path(s) | | Copy output to additional directories (pipe-separated) |
 | `move-to` | path | | Move output to final destination |
 | `delete-original` | bool | `true` | Delete source file after successful conversion |
+| `recycle-bin` | path | | Copy original here before deleting (only when `delete-original = True`) |
 | `process-same-extensions` | bool | `false` | Reprocess files already in output format |
 | `bypass-if-copying-all` | bool | `false` | Skip conversion if all streams can be copied |
 | `force-convert` | bool | `false` | Force conversion even if codec matches |
@@ -136,7 +175,7 @@ Override path via `SMA_CONFIG` environment variable.
 ### [Video]
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `codec` | list | `h264` | Video codecs in priority order. First is used for encoding, rest are copy-eligible. See [Supported Codecs](#supported-codecs) |
 | `max-bitrate` | int | `0` | Maximum video bitrate in kbps (0 = unlimited). Source exceeding this is re-encoded |
 | `bitrate-ratio` | dict | | Scale source bitrate per codec: `hevc:1.0, h264:0.65, mpeg2video:0.45` |
@@ -158,7 +197,7 @@ Override path via `SMA_CONFIG` environment variable.
 Override video settings for HDR content (detected automatically).
 
 | Option | Type | Description |
-|--------|------|-------------|
+| --- | --- | --- |
 | `codec` | list | Video codec for HDR content |
 | `pix-fmt` | list | Pixel format for HDR (e.g., `p010le`) |
 | `space` | list | Color space: `bt2020nc` |
@@ -173,7 +212,7 @@ Override video settings for HDR content (detected automatically).
 ### [Audio]
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `codec` | list | `aac` | Audio codecs in priority order. Streams matching any are copied; others re-encoded to first |
 | `languages` | list | | Language whitelist (ISO 639-3, e.g., `eng`). Empty = all languages |
 | `default-language` | string | `eng` | Default language for unlabeled streams |
@@ -197,7 +236,7 @@ Override video settings for HDR content (detected automatically).
 ### [Audio.Sorting]
 
 | Option | Type | Description |
-|--------|------|-------------|
+| --- | --- | --- |
 | `sorting` | list | Sort order for audio streams: `language, channels.d, map, d.comment` |
 | `default-sorting` | list | Sort order for default stream selection |
 | `codecs` | list | Codec priority for sorting |
@@ -207,7 +246,7 @@ Override video settings for HDR content (detected automatically).
 Generates an additional audio stream (usually stereo AAC) for maximum device compatibility.
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `codec` | list | | UA codec (e.g., `aac`). Empty = disabled |
 | `channel-bitrate` | int | `128` | Bitrate per channel |
 | `first-stream-only` | bool | `true` | Only add UA for first audio stream |
@@ -215,7 +254,7 @@ Generates an additional audio stream (usually stereo AAC) for maximum device com
 ### [Subtitle]
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `codec` | list | `mov_text` | Subtitle codec for text-based subs |
 | `codec-image-based` | list | | Codec for image-based subs (PGS, VobSub) |
 | `languages` | list | | Language whitelist (ISO 639-3) |
@@ -233,7 +272,7 @@ Generates an additional audio stream (usually stereo AAC) for maximum device com
 ### [Subtitle.CleanIt]
 
 | Option | Type | Description |
-|--------|------|-------------|
+| --- | --- | --- |
 | `enabled` | bool | Enable subtitle cleaning via cleanit library |
 | `config-path` | path | Custom cleanit config |
 | `tags` | list | Cleanit tag sets: `default, no-style` |
@@ -241,13 +280,13 @@ Generates an additional audio stream (usually stereo AAC) for maximum device com
 ### [Subtitle.FFSubsync]
 
 | Option | Type | Description |
-|--------|------|-------------|
+| --- | --- | --- |
 | `enabled` | bool | Enable subtitle sync via ffsubsync |
 
 ### [Subtitle.Subliminal]
 
 | Option | Type | Description |
-|--------|------|-------------|
+| --- | --- | --- |
 | `download-subs` | bool | Download missing subtitles |
 | `providers` | list | Subtitle providers: `opensubtitles` |
 | `download-forced-subs` | bool | Download forced subtitle variants |
@@ -256,7 +295,7 @@ Generates an additional audio stream (usually stereo AAC) for maximum device com
 ### [Metadata]
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `relocate-moov` | bool | `true` | Move moov atom to file start (streaming optimization) |
 | `full-path-guess` | bool | `true` | Use full file path for guessit metadata matching |
 | `tag` | bool | `true` | Enable TMDB metadata tagging |
@@ -268,7 +307,7 @@ Generates an additional audio stream (usually stereo AAC) for maximum device com
 ### [Permissions]
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `chmod` | octal | `0664` | File permissions for output |
 | `uid` | int | `-1` | Owner UID (-1 = no change) |
 | `gid` | int | `-1` | Group GID (-1 = no change) |
@@ -278,7 +317,7 @@ Generates an additional audio stream (usually stereo AAC) for maximum device com
 Multiple instances supported. Any section starting with `Sonarr` or `Radarr` is loaded.
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `host` | string | `localhost` | API hostname |
 | `port` | int | `8989`/`7878` | API port |
 | `apikey` | string | | API key |
@@ -295,7 +334,7 @@ Instances are matched by `path` using longest-prefix matching. When `manual.py` 
 ### [Plex]
 
 | Option | Type | Description |
-|--------|------|-------------|
+| --- | --- | --- |
 | `host` | string | Plex server hostname |
 | `port` | int | Plex server port (default 32400) |
 | `refresh` | bool | Trigger library refresh after processing |
@@ -357,7 +396,7 @@ After conversion, `manual.py` automatically triggers a rescan on the matching So
 ### All Options
 
 | Flag | Long | Description |
-|------|------|-------------|
+| --- | --- | --- |
 | `-i` | `--input` | Input file or directory |
 | `-c` | `--config` | Alternate config file |
 | `-a` | `--auto` | Auto mode (no prompts, guesses metadata) |
@@ -391,10 +430,10 @@ The daemon runs an HTTP server that accepts webhook requests to queue conversion
 ### Starting
 
 ```bash
-# Basic
+# Basic (binds to 127.0.0.1:8585, 1 worker)
 python daemon.py
 
-# Full options
+# Production: listen on all interfaces, multiple workers
 python daemon.py \
   --host 0.0.0.0 \
   --port 8585 \
@@ -402,32 +441,63 @@ python daemon.py \
   --api-key YOUR_SECRET_KEY \
   --daemon-config config/daemon.json \
   --logs-dir logs/ \
-  --db config/daemon.db
+  --db config/daemon.db \
+  --ffmpeg-dir /usr/local/bin
+```
+
+### Concurrency
+
+`--workers` controls how many conversions run at the same time. The daemon also enforces per-config concurrency: up to `--workers` jobs can run against the same config simultaneously, preventing hardware encoder contention.
+
+- Jobs targeting the **same config** run up to `--workers` at a time; excess jobs queue
+- Jobs targeting **different configs** run in parallel (up to `--workers` total)
+
+Example with `--workers 2`:
+
+```text
+Job 1: /TV/show.mkv      -> autoProcess.tv.ini     [starts immediately]
+Job 2: /Movies/film.mkv  -> autoProcess.movies.ini [starts immediately]
+Job 3: /TV/other.mkv     -> autoProcess.tv.ini     [waits for Job 1 or 2 to finish]
+```
+
+Check active/waiting jobs:
+
+```bash
+curl http://localhost:8585/health
 ```
 
 ### Web Dashboard
 
-Open `http://localhost:8585/dashboard` in a browser (or just `/` — it redirects). Features:
+Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features:
+
 - Real-time job statistics and status
 - Active/waiting job panels
 - Config mapping overview
 - Filterable job history table
-- Submit Job form for triggering conversions via the web
+- Submit Job form for triggering conversions via the web, with path autocomplete (config prefixes, recent jobs, and live filesystem browsing)
 
 ### API Endpoints
 
 | Method | Path | Auth | Description |
-|--------|------|------|-------------|
+| --- | --- | --- | --- |
 | `GET` | `/` | No | Redirects to `/dashboard` |
 | `GET` | `/dashboard` | No | Web dashboard |
-| `GET` | `/health` | No | Health check with job stats |
+| `GET` | `/health` | No | Health check with job stats (local node) |
+| `GET` | `/status` | No | Cluster-wide status (PostgreSQL) or local health (SQLite) |
 | `GET` | `/docs` | No | Rendered documentation |
 | `GET` | `/jobs` | Yes | List jobs. Query: `?status=pending&limit=50&offset=0` |
 | `GET` | `/jobs/<id>` | Yes | Get specific job |
 | `GET` | `/configs` | Yes | Config mappings and status |
 | `GET` | `/stats` | Yes | Job statistics by status |
-| `POST` | `/webhook` | Yes | Submit conversion job |
+| `GET` | `/scan` | Yes | Filter paths not yet scanned. Query: `?path=/a.mkv&path=/b.mkv` |
+| `GET` | `/browse` | Yes | List filesystem dirs/files within configured paths. Query: `?path=/dir` |
+| `POST` | `/webhook` | Yes | Submit conversion job (file or directory path) |
 | `POST` | `/cleanup` | Yes | Remove old jobs. Query: `?days=30` |
+| `POST` | `/shutdown` | Yes | Graceful shutdown (drains in-progress jobs) |
+| `POST` | `/jobs/<id>/requeue` | Yes | Requeue a specific failed job |
+| `POST` | `/jobs/requeue` | Yes | Requeue all failed jobs. Query: `?config=...` to filter |
+| `POST` | `/scan/filter` | Yes | Filter unscanned paths. Body: `{"paths": [...]}` |
+| `POST` | `/scan/record` | Yes | Mark paths as scanned. Body: `{"paths": [...]}` |
 
 ### Webhook Request Formats
 
@@ -459,13 +529,14 @@ curl -X POST http://localhost:8585/webhook \
 ### Authentication
 
 API key can be set via (priority order):
+
 1. `--api-key` CLI argument
 2. `SMA_DAEMON_API_KEY` environment variable
 3. `api_key` field in `daemon.json`
 
 Send via header: `X-API-Key: SECRET` or `Authorization: Bearer SECRET`
 
-Public endpoints (no auth): `/`, `/dashboard`, `/health`, `/status`, `/docs`
+Public endpoints (no auth): `/`, `/dashboard`, `/health`, `/status`, `/docs`, `/favicon.png`
 
 ### Path-Based Configuration (daemon.json)
 
@@ -473,33 +544,163 @@ Public endpoints (no auth): `/`, `/dashboard`, `/health`, `/status`, `/docs`
 {
   "default_config": "config/autoProcess.ini",
   "api_key": "your_secret_key",
+  "db_url": null,
+  "ffmpeg_dir": null,
+  "media_extensions": [".mp4", ".mkv", ".avi", ".mov", ".ts"],
+  "scan_paths": [
+    {
+      "path": "/mnt/local/Media",
+      "interval": 3600,
+      "rewrite_from": "/mnt/local/Media",
+      "rewrite_to": "/mnt/unionfs/Media"
+    }
+  ],
   "path_configs": [
-    {"path": "/mnt/media/TV", "config": "config/autoProcess.ini-tv"},
-    {"path": "/mnt/media/Movies/4K", "config": "config/autoProcess.ini-movies4k"},
-    {"path": "/mnt/media/Movies", "config": "config/autoProcess.ini-movies"}
+    {"path": "/mnt/media/TV", "config": "config/autoProcess.tv.ini"},
+    {"path": "/mnt/media/Movies/4K", "config": "config/autoProcess.movies-4k.ini"},
+    {"path": "/mnt/media/Movies", "config": "config/autoProcess.movies-1080p.ini"}
   ]
 }
 ```
 
+**Top-level keys:**
+
+| Key | Description |
+| --- | --- |
+| `default_config` | Config file used when no `path_configs` prefix matches |
+| `api_key` | API authentication key (overridable via `--api-key` or `SMA_DAEMON_API_KEY`) |
+| `db_url` | PostgreSQL URL for distributed mode (overridable via `--db-url` or `SMA_DAEMON_DB_URL`) |
+| `ffmpeg_dir` | Directory containing `ffmpeg`/`ffprobe` binaries. Prepended to PATH for each conversion. Overridable via `--ffmpeg-dir` or `SMA_DAEMON_FFMPEG_DIR` |
+| `media_extensions` | File extensions considered media files for directory scanning and `/browse` (default: `.mp4 .mkv .avi .mov .ts`) |
+| `scan_paths` | Directories for scheduled background scanning. See [Scheduled Directory Scanning](#scheduled-directory-scanning) |
+| `path_configs` | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection |
+
 Matching is longest-prefix-first. `/mnt/media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`.
-
-### Concurrency
-
-- One conversion per config at a time (prevents resource conflicts)
-- Different configs run in parallel up to `--workers` count
-- Jobs for the same config queue and execute sequentially
-- SQLite database (`config/daemon.db`) persists jobs across restarts
 
 ### Per-Config Logging
 
-Each config gets a separate log file in `logs/`:
+Each config gets a separate log file in `logs/`. The log filename is derived from the config file stem (filename without extension):
 
 | Config | Log File |
-|--------|----------|
+| --- | --- |
 | `config/autoProcess.ini` | `logs/autoProcess.log` |
-| `config/autoProcess.ini-tv` | `logs/autoProcess.ini-tv.log` |
+| `config/autoProcess.tv.ini` | `logs/autoProcess.tv.log` |
+| `config/autoProcess.movies-4k.ini` | `logs/autoProcess.movies-4k.log` |
 
 Log rotation: 10MB max, 5 backups.
+
+### Scheduled Directory Scanning
+
+The daemon can periodically scan directories for new media files and queue them automatically. Configure `scan_paths` in `daemon.json`:
+
+```json
+{
+  "scan_paths": [
+    {
+      "path": "/mnt/local/Media",
+      "interval": 3600,
+      "rewrite_from": "/mnt/local/Media",
+      "rewrite_to": "/mnt/unionfs/Media"
+    }
+  ]
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `path` | Directory to scan for media files |
+| `interval` | Scan interval in seconds (e.g., `3600` = every hour) |
+| `rewrite_from` | Path prefix to replace before submitting the job (optional) |
+| `rewrite_to` | Replacement prefix (optional; use when the scanner sees files at a different mount point than the converter) |
+
+The daemon tracks which files have been submitted in the `scanned_files` database table. Files already in that table are skipped on subsequent scans. Only files whose extension matches `media_extensions` are submitted.
+
+**Manual batch scan (script):** Use `scripts/sma-scan.sh` to walk a directory and submit each media file via webhook, with the same deduplication logic:
+
+```bash
+# Submit all unscanned media files in a directory
+bash scripts/sma-scan.sh /mnt/media/Movies
+
+# Force resubmit everything (ignore scan history)
+bash scripts/sma-scan.sh /mnt/media/Movies --reset
+
+# Dry-run: show what would be submitted
+bash scripts/sma-scan.sh /mnt/media/Movies --dry-run
+
+# Use a specific config for all files
+bash scripts/sma-scan.sh /mnt/media/Movies --config config/autoProcess.movies.ini
+```
+
+**Scan API endpoints:**
+
+```bash
+# Check which paths have NOT been scanned yet (small list)
+curl "http://localhost:8585/scan?path=/mnt/media/film1.mkv&path=/mnt/media/film2.mkv"
+# Returns: {"unscanned": ["/mnt/media/film2.mkv"], "total": 2, "already_scanned": 1}
+
+# Same check for large lists (POST)
+curl -X POST http://localhost:8585/scan/filter \
+  -H 'Content-Type: application/json' \
+  -d '{"paths": ["/mnt/media/film1.mkv", "/mnt/media/film2.mkv"]}'
+
+# Record paths as scanned (mark without submitting a job)
+curl -X POST http://localhost:8585/scan/record \
+  -H 'Content-Type: application/json' \
+  -d '{"paths": ["/mnt/media/film1.mkv"]}'
+```
+
+### SQLite Persistence
+
+Jobs are stored in `config/daemon.db` (SQLite). This provides restart recovery, job history, and filtering.
+
+```bash
+# View statistics
+curl http://localhost:8585/stats
+
+# List pending jobs
+curl "http://localhost:8585/jobs?status=pending"
+
+# Cleanup old jobs (default: 30 days)
+curl -X POST "http://localhost:8585/cleanup?days=7"
+```
+
+Use `--db /path/to/daemon.db` to customize database location.
+
+**Database schema:**
+
+```sql
+jobs(id, path, config, args, status, worker_id, node_id, error, created_at, started_at, completed_at)
+scanned_files(path, scanned_at)
+```
+
+The `scanned_files` table tracks paths submitted by directory scanning to prevent duplicate submissions on re-scan. The `node_id` column records which daemon node claimed a job (relevant in distributed mode).
+
+### PostgreSQL (Distributed / Multi-Node)
+
+For multi-node deployments, configure a shared PostgreSQL database:
+
+```bash
+# CLI
+python daemon.py --db-url postgresql://user:pass@host/sma
+
+# Environment variable
+SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma python daemon.py
+
+# daemon.json
+{ "db_url": "postgresql://user:pass@host/sma" }
+```
+
+When `db_url` is set, `--db` (SQLite path) is ignored. The `/health` endpoint shows cluster-wide status.
+
+### Graceful Shutdown
+
+Send `POST /shutdown` to drain in-progress conversions before stopping:
+
+```bash
+curl -X POST http://localhost:8585/shutdown -H "X-API-Key: SECRET"
+```
+
+The daemon stops accepting new jobs immediately, waits for all active conversions to finish, then exits. The systemd unit uses `KillMode=mixed` and `TimeoutStopSec=infinity` so SIGTERM triggers the same graceful drain.
 
 ---
 
@@ -514,6 +715,14 @@ Log rotation: 10MB max, 5 backups.
    - Arguments: Full path to `triggers/media_managers/sonarr.sh`
 3. Multiple instances: Add `[Sonarr-Kids]` etc. sections with unique `path` values
 
+**Per-instance config override:** Set `SMA_CONFIG` in Sonarr's environment (Settings → General → Environment Variables) to force a specific `autoProcess.ini` for that Sonarr instance:
+
+```bash
+SMA_CONFIG=/opt/sma/config/autoProcess.tv.ini
+```
+
+This is useful when Sonarr imports files to a staging/download path that doesn't match the `path_configs` prefixes in `daemon.json`.
+
 ### Radarr
 
 1. Configure `[Radarr]` section in `autoProcess.ini`
@@ -522,6 +731,8 @@ Log rotation: 10MB max, 5 backups.
    - Path: `/bin/bash`
    - Arguments: Full path to `triggers/media_managers/radarr.sh`
 3. Multiple instances: Add `[Radarr-4K]`, `[Radarr-Kids]` etc.
+
+**Per-instance config override:** Set `SMA_CONFIG` in Radarr's environment to force a specific config, same as Sonarr above.
 
 ### Multiple Instance Support
 
@@ -562,12 +773,15 @@ Configure `[Plex]` section. SMA-NG refreshes the matching library section after 
 All download client integrations use bash scripts in `triggers/` that submit jobs to the daemon via webhook.
 
 ### NZBGet
+
 In Settings → Extension Scripts, add `triggers/usenet/nzbget.sh`. Configure categories under the script settings. The script requires the daemon to be running.
 
 ### SABnzbd
+
 In Settings → Folders → Scripts Folder, point to the `triggers/usenet/` directory. Set `sabnzbd.sh` as the category script. Configure `[SABNZBD]` section in `autoProcess.ini`.
 
 ### qBittorrent
+
 In Tools → Options → Downloads → Run external program on torrent completion:
 
 ```bash
@@ -577,9 +791,11 @@ bash /path/to/triggers/torrents/qbittorrent.sh "%L" "%T" "%R" "%F" "%N" "%I"
 Configure `[qBittorrent]` section with host, credentials, and label mappings.
 
 ### Deluge
+
 Enable Execute plugin in Deluge WebUI. Set `triggers/torrents/deluge.sh` as the Torrent Complete handler. Configure `[Deluge]` section with daemon host and credentials.
 
 ### uTorrent
+
 In Options → Preferences → Advanced → Run Program, set:
 
 ```bash
@@ -589,6 +805,24 @@ bash /path/to/triggers/torrents/utorrent.sh %L %T %D %K %F %I %N
 ---
 
 ## Hardware Acceleration
+
+The `gpu` key in `[Converter]` sets the hardware acceleration profile used at runtime. You can also set each hwaccel option manually.
+
+### GPU Config Option
+
+The `gpu` key is a runtime setting in `autoProcess.ini` that selects which hardware acceleration backend SMA-NG uses during conversion. `make config` / `mise run config` auto-detects the GPU and writes the correct value, but you can also set or change it manually at any time. The runtime settings driven by `gpu` are `hwaccels`, `hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`, and `[Video] codec`.
+
+Valid values for `gpu`:
+
+| Value | Platform | Notes |
+| --- | --- | --- |
+| `qsv` | Intel Quick Sync Video | Requires `/dev/dri/renderD128` and i915 kernel module |
+| `vaapi` | Intel/AMD VAAPI | Requires `/dev/dri/renderD128` and `vainfo` |
+| `nvenc` | NVIDIA NVENC | Requires NVIDIA driver and `nvidia-smi` |
+| `videotoolbox` | Apple Silicon / macOS | Built into macOS; no device path needed |
+| `software` | CPU only | No hardware acceleration |
+
+Auto-detection runs `mise run detect-gpu` (or `make detect-gpu`) which checks for each platform in order: NVIDIA → Intel QSV → VAAPI → VideoToolbox → software.
 
 ### Intel QSV
 
@@ -731,7 +965,7 @@ Container format definitions (MP4, MKV, AVI, WebM, etc.) mapping to FFmpeg muxer
 
 ### resources/log.py
 
-Logging setup with rotating file handlers and config-driven format.
+Logging setup with INI-based configuration. All output goes to stdout/stderr — no log files are written by the core library. The daemon writes per-config log files in `logs/` using rotating file handlers.
 
 ### resources/lang.py
 
@@ -741,13 +975,13 @@ Language code conversion (ISO 639 alpha2/alpha3) via babelfish.
 
 Optional hook points loaded from `config/custom.py`: `validation()`, `blockVideoCopy()`, `blockAudioCopy()`, `skipStream()`, `streamTitle()`.
 
-### autoprocess/sonarr.py & radarr.py
-
-API clients for triggering `DownloadedEpisodesScan` / `DownloadedMoviesScan` commands.
-
 ### autoprocess/plex.py
 
 Plex library refresh via PlexAPI with path mapping support.
+
+### resources/mediamanager.py
+
+Shared Sonarr/Radarr API helpers used by trigger scripts to post `DownloadedEpisodesScan` / `DownloadedMoviesScan` commands.
 
 ---
 
@@ -756,8 +990,9 @@ Plex library refresh via PlexAPI with path mapping support.
 Run `python manual.py -cl` for the full list. Key codecs:
 
 ### Video
+
 | SMA-NG Name | FFmpeg Encoder | Notes |
-|----------|---------------|-------|
+| --- | --- | --- |
 | `h264` | libx264 | Software H.264 |
 | `h265` / `hevc` | libx265 | Software HEVC |
 | `h264qsv` | h264_qsv | Intel QSV H.264 |
@@ -772,8 +1007,9 @@ Run `python manual.py -cl` for the full list. Key codecs:
 | `vp9` | libvpx-vp9 | Software VP9 |
 
 ### Audio
+
 | SMA-NG Name | FFmpeg Encoder |
-|----------|---------------|
+| --- | --- |
 | `aac` | aac / libfdk_aac |
 | `ac3` | ac3 |
 | `eac3` | eac3 |
@@ -790,7 +1026,7 @@ Run `python manual.py -cl` for the full list. Key codecs:
 Place executable scripts in the `post_process/` directory. They receive environment variables:
 
 | Variable | Description |
-|----------|-------------|
+| --- | --- |
 | `SMA_FILES` | JSON array of output file paths |
 | `SMA_TMDBID` | TMDB ID |
 | `SMA_SEASON` | Season number (TV only) |
@@ -800,46 +1036,217 @@ See `setup/post_process/` for examples (Plex, Emby, Jellyfin, iTunes).
 
 ---
 
+## Deployment (mise)
+
+SMA-NG uses [mise](https://mise.jdx.dev/) as a task runner for both local development and remote deployments. All tasks are defined in `mise.toml` (local dev) and `.mise/tasks/deploy/` (deployment).
+
+### Local Development Tasks
+
+```bash
+mise run install          # Create venv and install dependencies
+mise run install-dev      # Install dev + test dependencies
+mise run test             # Run test suite
+mise run lint             # Run ruff linter
+mise run lint-fix         # Auto-fix lint issues
+mise run detect-gpu       # Detect available GPU acceleration
+mise run config           # Generate config with auto-detected GPU
+mise run daemon           # Start daemon on 0.0.0.0:8585
+mise run convert -- /path/to/file.mkv  # Convert a file
+mise run preview -- /path/to/file.mkv  # Preview options only
+mise run codecs           # List supported codecs
+```
+
+#### Docker tasks
+
+```bash
+mise run docker:build     # Build image locally (TAG=sma-ng:local to override)
+mise run docker:run       # Run locally-built image
+mise run docker:shell     # Open shell in locally-built image
+mise run docker:smoke     # Smoke-test imports and ffmpeg
+```
+
+### Deployment System
+
+The deploy tasks push code to remote hosts via SSH/rsync and manage the systemd service.
+
+#### Initial setup
+
+1. Copy `setup/.local.ini.sample` to `setup/.local.ini` and configure it (this file is gitignored):
+
+```ini
+[deploy]
+DEPLOY_HOSTS = user@server1.example.com user@server2.example.com
+DEPLOY_DIR   = ~/sma
+SSH_KEY      = ~/.ssh/id_ed25519_sma
+FFMPEG_DIR   = /usr/local/bin
+
+[daemon]
+api_key = your_secret_key
+db_url  =                          # leave blank for SQLite
+
+[Sonarr]
+host        = sonarr.example.com
+port        = 443
+ssl         = true
+apikey      = abc123...
+media_path  = /mnt/media/TV
+config_file = config/autoProcess.sonarr.ini
+
+[Radarr]
+host        = radarr.example.com
+apikey      = def456...
+media_path  = /mnt/media/Movies
+config_file = config/autoProcess.radarr.ini
+```
+
+1. Run first-time setup (generates SSH key, installs apt dependencies, creates deploy directory, installs systemd service):
+
+```bash
+mise run deploy:setup
+```
+
+#### Deploying code
+
+```bash
+# Sync code, install dependencies, reload systemd unit
+mise run deploy:run
+
+# Then restart the service
+mise run deploy:restart
+```
+
+`deploy:run` does the following on each host in `DEPLOY_HOSTS`:
+
+- rsync the repo (excluding `venv/`, `config/`, `logs/`, `__pycache__/`)
+- `make install` on the remote host (creates venv, installs Python deps)
+- Updates `User=` and `Group=` in the systemd unit file to match the SSH user
+- Runs `systemctl daemon-reload`
+
+If `make install` fails due to missing prerequisites (Python, make, rsync), it automatically runs `deploy:setup` for that host and retries.
+
+#### Rolling config to remote hosts
+
+```bash
+mise run deploy:config
+```
+
+This task manages config files on remote hosts without overwriting customizations:
+
+- **Creates missing configs** from samples (auto-detects GPU for `autoProcess.ini`)
+- **Merges new keys** from `autoProcess.ini.sample` into existing `*.ini` configs — new settings added to the sample are propagated without touching existing values
+- **Stamps service credentials** from `[Sonarr]`, `[Radarr]`, `[Plex]` etc. sections in `.local.ini` into all `*.ini` configs
+- **Updates `daemon.json`** with `api_key`, `db_url`, and `path_configs` entries built from `media_path` + `config_file` fields in each service section
+- **Updates `daemon.env`** with `SMA_DAEMON_*` environment variables
+- **Stamps ffmpeg/ffprobe paths** from `FFMPEG_DIR` into all `*.ini` configs
+- **Deploys post-process scripts** from `setup/post_process/` to `post_process/`, stamping in credentials (Plex token, Jellyfin URL, etc.) and updating shebangs to the venv Python
+
+#### Per-host overrides
+
+Any key from `[deploy]` can be overridden for a specific host:
+
+```ini
+[user@server1.example.com]
+DEPLOY_DIR  = /opt/sma
+SSH_PORT    = 2222
+FFMPEG_DIR  = /opt/ffmpeg/bin
+```
+
+#### Restarting without deploying
+
+```bash
+mise run deploy:restart
+```
+
+Runs `sudo systemctl restart sma-daemon` on each host.
+
+#### Running arbitrary make targets remotely
+
+```bash
+REMOTE_MAKE=test mise run deploy:remote-make
+```
+
+Runs the specified make target on each host without syncing code first.
+
+#### Summary of deploy tasks
+
+| Task | Description |
+| --- | --- |
+| `deploy:check` | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set |
+| `deploy:setup` | First-time host prep: SSH key, apt deps, deploy dir, systemd install |
+| `deploy:run` | Sync code + install deps + reload systemd on all hosts |
+| `deploy:config` | Roll configs: create missing, merge new keys, stamp credentials |
+| `deploy:restart` | Restart `sma-daemon` on all hosts |
+| `deploy:remote-make` | Run an arbitrary make target on all hosts |
+
+---
+
 ## Troubleshooting
 
 ### Logs
 
-- Main log: `config/sma.log` (rotating, 100KB × 3)
-- Daemon per-config logs: `logs/<config-name>.log` (rotating, 10MB × 5)
+All SMA-NG output goes to stdout/stderr. When running as a systemd service, use `journalctl`:
+
+```bash
+journalctl -u sma-daemon -f
+```
+
+The daemon also writes per-config rotating log files in `logs/`:
+
+| Config | Log File |
+| --- | --- |
+| `config/autoProcess.ini` | `logs/autoProcess.log` |
+| `config/autoProcess.ini-tv` | `logs/autoProcess.ini-tv.log` |
 
 ### Common Issues
 
-**"Invalid source, no video stream detected"**
+#### "Invalid source, no video stream detected"
+
 - File may be corrupt or not a media file
 - Check FFprobe path in config
 
-**Hardware acceleration not working**
+#### Hardware acceleration not working
+
 - Verify `hwdevices` key matches encoder codec name (e.g., `qsv` for `h265qsv`)
 - Verify `hwaccel-output-format` uses dict format: `qsv:qsv` not just `qsv`
 - Check FFmpeg build supports the hwaccel: `ffmpeg -hwaccels`
 - Check device exists: `ls /dev/dri/renderD128`
+- On Linux, ensure the service user is in the `render` or `video` group
 
-**Conversion produces larger file**
+#### Conversion produces larger file
+
 - Lower `crf` value or add `max-bitrate` cap
 - Use `bitrate-ratio` to scale based on source codec
 - Use `crf-profiles` for tiered quality
 
-**Subtitles show as "English (MOV_TEXT)" in Plex**
+#### Subtitles show as "English (MOV_TEXT)" in Plex
+
 - This is Plex reading the raw codec name. SMA-NG sets a title on subtitle streams to improve display.
 
-**Sonarr/Radarr not rescanning after manual.py**
+#### Sonarr/Radarr not rescanning after `manual.py`
+
 - Verify `path` field is set in the `[Sonarr]`/`[Radarr]` config section
 - Verify `apikey` is set and `rescan = true`
 - Check the file path starts with the configured `path` prefix
 
+#### `systemd`: "Read-only file system" errors
+
+- Check `ReadWritePaths` in the systemd unit includes all paths FFmpeg writes to (temp dir, output dir, media mounts)
+- Default unit includes `/opt/sma/config /opt/sma/logs /transcodes /mnt` — add any additional paths
+
 ### Environment Variables
 
 | Variable | Description |
-|----------|-------------|
+| --- | --- |
 | `SMA_CONFIG` | Override path to `autoProcess.ini` |
 | `SMA_DAEMON_API_KEY` | Daemon API key |
 | `SMA_DAEMON_DB_URL` | PostgreSQL connection URL for distributed mode |
 | `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` (prepended to PATH for conversions) |
+| `SMA_DAEMON_HOST` | Daemon bind host (Docker default: empty = 0.0.0.0) |
+| `SMA_DAEMON_PORT` | Daemon port (Docker default: 8585) |
+| `SMA_DAEMON_WORKERS` | Number of concurrent workers (Docker default: 4) |
+| `SMA_DAEMON_CONFIG` | Path to daemon.json config file |
+| `SMA_DAEMON_DB` | Path to SQLite database file |
+| `SMA_DAEMON_LOGS_DIR` | Directory for per-config log files |
 
 ---
 

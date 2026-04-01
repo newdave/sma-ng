@@ -1,5 +1,7 @@
 # Custom Post-Process Scripts
 
+![SMA-NG](../logo.png)
+
 SMA-NG runs scripts in this directory automatically after each conversion completes.
 Set `post-process = True` in `autoProcess.ini` to enable. Scripts in the `resources/`
 subdirectory are excluded from auto-execution.

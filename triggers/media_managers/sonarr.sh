@@ -4,9 +4,14 @@
 # Submits a conversion job to the SMA-NG daemon webhook and waits for completion.
 # Configure via environment variables:
 #
-#   SMA_DAEMON_HOST   Daemon host (default: 127.0.0.1)
-#   SMA_DAEMON_PORT   Daemon port (default: 8585)
+#   SMA_DAEMON_HOST     Daemon host (default: 127.0.0.1)
+#   SMA_DAEMON_PORT     Daemon port (default: 8585)
 #   SMA_DAEMON_API_KEY  API key if authentication is enabled
+#   SMA_CONFIG          Path to autoProcess.ini to use for this Sonarr instance.
+#                       When set, overrides daemon path-based config selection.
+#                       Use this when you have multiple Sonarr instances each
+#                       with a different autoProcess.ini (e.g. TV vs Kids).
+#                       Leave unset to let the daemon select config by file path.
 #   SMA_POLL_INTERVAL   Seconds between status checks (default: 5)
 #   SMA_TIMEOUT         Max seconds to wait for completion (default: 0 = unlimited)
 #
@@ -147,8 +152,12 @@ print(json.dumps(a))
 fi
 
 PAYLOAD=$(python3 -c "
-import json
-print(json.dumps({'path': '${INPUTFILE}', 'args': $(echo "$ARGS")}))
+import json, os
+obj = {'path': '${INPUTFILE}', 'args': ${ARGS}}
+config = os.environ.get('SMA_CONFIG', '').strip()
+if config:
+    obj['config'] = config
+print(json.dumps(obj))
 ")
 
 # ── submit job ─────────────────────────────────────────────────────────────────
