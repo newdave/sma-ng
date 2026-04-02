@@ -192,7 +192,8 @@
           <th class="pb-2 pr-4 font-medium">Running</th>
           <th class="pb-2 pr-4 font-medium">Pending</th>
           <th class="pb-2 pr-4 font-medium">Uptime</th>
-          <th class="pb-2 font-medium">Last Seen</th>
+          <th class="pb-2 pr-4 font-medium">Last Seen</th>
+          <th class="pb-2 font-medium">Actions</th>
         </tr></thead>
         <tbody class="divide-y divide-gray-700/50 text-xs">
           <template x-for="node in (cluster && cluster.cluster || [])" :key="node.node_id">
@@ -224,7 +225,22 @@
               </td>
               <td class="py-2 pr-4 text-gray-400" x-text="node.pending_jobs || 0"></td>
               <td class="py-2 pr-4 text-gray-400" x-text="node.uptime_seconds != null ? fmtUptime(node.uptime_seconds) : '—'"></td>
-              <td class="py-2 text-gray-500" x-text="fmtTime(node.last_seen)"></td>
+              <td class="py-2 pr-4 text-gray-500" x-text="fmtTime(node.last_seen)"></td>
+              <td class="py-2">
+                <div x-show="node.status === 'online'" class="flex gap-1.5">
+                  <button @click="nodeRestart(node)"
+                          :disabled="node._pending"
+                          class="px-2 py-0.5 rounded border border-blue-700 text-blue-400 hover:border-blue-500 hover:text-blue-300 disabled:opacity-30 transition-colors"
+                          x-text="node._pending === 'restart' ? 'Sending…' : 'Restart'">
+                  </button>
+                  <button @click="nodeShutdown(node)"
+                          :disabled="node._pending"
+                          class="px-2 py-0.5 rounded border border-red-800 text-red-500 hover:border-red-600 hover:text-red-400 disabled:opacity-30 transition-colors"
+                          x-text="node._pending === 'shutdown' ? 'Sending…' : 'Shutdown'">
+                  </button>
+                </div>
+                <span x-show="node.status !== 'online'" class="text-gray-600">—</span>
+              </td>
             </tr>
           </template>
         </tbody>
@@ -504,6 +520,22 @@ function dashboard() {
           job.priority = newPriority;
         }
       } catch(e) {}
+    },
+    async nodeRestart(node) {
+      node._pending = 'restart';
+      try {
+        await fetch('/restart?node=' + encodeURIComponent(node.node_id), {method: 'POST', headers: this.authHeaders()});
+        setTimeout(() => this.refresh(), 1000);
+      } catch(e) {}
+      node._pending = null;
+    },
+    async nodeShutdown(node) {
+      node._pending = 'shutdown';
+      try {
+        await fetch('/shutdown?node=' + encodeURIComponent(node.node_id), {method: 'POST', headers: this.authHeaders()});
+        setTimeout(() => this.refresh(), 1000);
+      } catch(e) {}
+      node._pending = null;
     },
     async requeueAllFailed() {
       this.requeueingAll = true;

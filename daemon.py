@@ -652,6 +652,10 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
                     ALTER TABLE cluster_nodes
                     ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 """)
+                cur.execute("""
+                    ALTER TABLE cluster_nodes
+                    ADD COLUMN IF NOT EXISTS pending_command TEXT
+                """)
                 for col_sql in [
                     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0",
                     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_retries INTEGER DEFAULT 0",
@@ -898,6 +902,9 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
         started_at is set on INSERT and never overwritten on UPDATE, so it
         always reflects when this daemon process started. A change in
         started_at between heartbeats indicates the node was restarted.
+
+        Returns any pending_command that was set for this node (and clears it),
+        or None if there is no pending command.
         """
         with self._conn() as conn:
             with conn.cursor() as cur:
@@ -910,16 +917,25 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
                         (SELECT COUNT(*) FROM jobs WHERE status = 'pending')
                     )
                     ON CONFLICT (node_id) DO UPDATE SET
-                        host         = EXCLUDED.host,
-                        workers      = EXCLUDED.workers,
-                        last_seen    = NOW(),
-                        started_at   = EXCLUDED.started_at,
-                        status       = 'online',
-                        running_jobs = EXCLUDED.running_jobs,
-                        pending_jobs = EXCLUDED.pending_jobs
+                        host            = EXCLUDED.host,
+                        workers         = EXCLUDED.workers,
+                        last_seen       = NOW(),
+                        started_at      = EXCLUDED.started_at,
+                        status          = 'online',
+                        running_jobs    = EXCLUDED.running_jobs,
+                        pending_jobs    = EXCLUDED.pending_jobs
+                    RETURNING pending_command
                 """,
                     (node_id, host, workers, started_at, node_id),
                 )
+                row = cur.fetchone()
+                command = row["pending_command"] if row else None
+                if command:
+                    cur.execute(
+                        "UPDATE cluster_nodes SET pending_command = NULL WHERE node_id = %s",
+                        (node_id,),
+                    )
+                return command
 
     def get_cluster_nodes(self):
         """Return all rows from cluster_nodes ordered by last_seen descending.
@@ -1011,6 +1027,27 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
                 cur.execute("UPDATE cluster_nodes SET status = 'offline' WHERE node_id = %s", (node_id,))
         if requeued:
             self.log.info("Requeued %d running jobs on shutdown" % requeued)
+
+    def send_node_command(self, node_id, command):
+        """Set pending_command on one or all online nodes.
+
+        node_id may be a specific node ID string, or None to broadcast to all
+        online nodes. command should be 'restart' or 'shutdown'.
+        Returns the list of node_ids that were targeted.
+        """
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                if node_id:
+                    cur.execute(
+                        "UPDATE cluster_nodes SET pending_command = %s WHERE node_id = %s RETURNING node_id",
+                        (command, node_id),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE cluster_nodes SET pending_command = %s WHERE status = 'online' RETURNING node_id",
+                        (command,),
+                    )
+                return [r["node_id"] for r in cur.fetchall()]
 
     def requeue_job(self, job_id):
         """Reset a failed job back to pending. Returns True if the job was requeued."""
@@ -2124,14 +2161,38 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.server.job_db.record_scanned(paths)
         self.send_json_response(200, {"recorded": len(paths)})
 
-    def _post_shutdown(self, _path, _query):
+    def _post_shutdown(self, _path, query):
+        node_id = query.get("node", [None])[0]
+        if node_id and self.server.job_db.is_distributed:
+            # Remote: write command to DB; target node acts on next heartbeat
+            targeted = self.server.job_db.send_node_command(node_id, "shutdown")
+            self.send_json_response(202, {"status": "shutdown_requested", "nodes": targeted})
+            return
+        if not node_id and self.server.job_db.is_distributed:
+            # Broadcast to all online nodes (including self)
+            targeted = self.server.job_db.send_node_command(None, "shutdown")
+            self.send_json_response(202, {"status": "shutdown_requested", "nodes": targeted})
+            return
+        # Local shutdown
         active = self.server.config_lock_manager.get_status()["active"]
         count = sum(len(v) for v in active.values())
         self.send_json_response(202, {"status": "shutting_down", "active_jobs": count})
         self.wfile.flush()
         threading.Thread(target=self.server.shutdown, daemon=True).start()
 
-    def _post_restart(self, _path, _query):
+    def _post_restart(self, _path, query):
+        node_id = query.get("node", [None])[0]
+        if node_id and self.server.job_db.is_distributed:
+            # Remote: write command to DB; target node acts on next heartbeat
+            targeted = self.server.job_db.send_node_command(node_id, "restart")
+            self.send_json_response(202, {"status": "restart_requested", "nodes": targeted})
+            return
+        if not node_id and self.server.job_db.is_distributed:
+            # Broadcast to all online nodes (including self)
+            targeted = self.server.job_db.send_node_command(None, "restart")
+            self.send_json_response(202, {"status": "restart_requested", "nodes": targeted})
+            return
+        # Local restart
         active = self.server.config_lock_manager.get_status()["active"]
         count = sum(len(v) for v in active.values())
         self.send_json_response(202, {"status": "restarting", "active_jobs": count})
@@ -2365,7 +2426,15 @@ class HeartbeatThread(_StoppableThread):
             return  # Heartbeat only meaningful for the shared PG backend
         while self.running:
             try:
-                self.job_db.heartbeat(self.node_id, self.host, self.worker_count, self.started_at)
+                command = self.job_db.heartbeat(self.node_id, self.host, self.worker_count, self.started_at)
+                if command == "restart":
+                    self.log.info("Received remote restart command via cluster DB")
+                    threading.Thread(target=self.server.graceful_restart, daemon=True).start()
+                    return
+                elif command == "shutdown":
+                    self.log.info("Received remote shutdown command via cluster DB")
+                    threading.Thread(target=self.server.shutdown, daemon=True).start()
+                    return
                 recovered = self.job_db.recover_stale_nodes(self.stale_seconds)
                 for stale_id, job_count in recovered:
                     self.log.warning("Recovered %d jobs from stale node %s" % (job_count, stale_id))
