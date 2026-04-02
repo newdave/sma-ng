@@ -69,7 +69,7 @@ class BaseJobDatabase(ABC):
     def close(self): ...
 
     @abstractmethod
-    def add_job(self, path, config, args=None): ...
+    def add_job(self, path, config, args=None, max_retries=0): ...
 
     @abstractmethod
     def find_active_job(self, path): ...
@@ -109,6 +109,9 @@ class BaseJobDatabase(ABC):
 
     @abstractmethod
     def requeue_failed_jobs(self, config=None): ...
+
+    @abstractmethod
+    def cancel_job(self, job_id): ...
 
     @abstractmethod
     def filter_unscanned(self, paths): ...
@@ -171,11 +174,17 @@ class JobDatabase(BaseJobDatabase):
                     completed_at TIMESTAMP
                 )
             """)
-            # Migrate existing databases that lack node_id
-            try:
-                cursor.execute("ALTER TABLE jobs ADD COLUMN node_id TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+            # Migrate existing databases that lack columns added in later versions
+            for col_sql in [
+                "ALTER TABLE jobs ADD COLUMN node_id TEXT",
+                "ALTER TABLE jobs ADD COLUMN retry_count INTEGER DEFAULT 0",
+                "ALTER TABLE jobs ADD COLUMN max_retries INTEGER DEFAULT 0",
+                "ALTER TABLE jobs ADD COLUMN next_attempt_at TIMESTAMP",
+            ]:
+                try:
+                    cursor.execute(col_sql)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)
             """)
@@ -211,7 +220,7 @@ class JobDatabase(BaseJobDatabase):
             if cursor.rowcount > 0:
                 self.log.info("Reset %d interrupted jobs to pending" % cursor.rowcount)
 
-    def add_job(self, path, config, args=None):
+    def add_job(self, path, config, args=None, max_retries=0):
         """Add a new job to the queue. Returns job ID, or None if a duplicate is already pending/running."""
         args_json = json.dumps(args or [])
         with self._cursor() as cursor:
@@ -227,10 +236,10 @@ class JobDatabase(BaseJobDatabase):
                 return None
             cursor.execute(
                 """
-                INSERT INTO jobs (path, config, args, status)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO jobs (path, config, args, status, max_retries)
+                VALUES (?, ?, ?, ?, ?)
             """,
-                (path, config, args_json, STATUS_PENDING),
+                (path, config, args_json, STATUS_PENDING, max_retries),
             )
             job_id = cursor.lastrowid
         self.log.debug("Added job %d: %s" % (job_id, path))
@@ -264,6 +273,7 @@ class JobDatabase(BaseJobDatabase):
                     """
                     SELECT * FROM jobs
                     WHERE status = ? AND config NOT IN (%s)
+                      AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
                     ORDER BY created_at ASC
                     LIMIT 1
                 """
@@ -275,6 +285,7 @@ class JobDatabase(BaseJobDatabase):
                     """
                     SELECT * FROM jobs
                     WHERE status = ?
+                      AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
                     ORDER BY created_at ASC
                     LIMIT 1
                 """,
@@ -353,17 +364,34 @@ class JobDatabase(BaseJobDatabase):
         self.log.debug("Job %d completed" % job_id)
 
     def fail_job(self, job_id, error=None):
-        """Mark a job as failed."""
+        """Mark a job as failed, or requeue with exponential backoff if retries remain."""
         with self._cursor() as cursor:
-            cursor.execute(
-                """
-                UPDATE jobs
-                SET status = ?, error = ?, completed_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """,
-                (STATUS_FAILED, error, job_id),
-            )
-        self.log.debug("Job %d failed: %s" % (job_id, error))
+            cursor.execute("SELECT retry_count, max_retries FROM jobs WHERE id = ?", (job_id,))
+            row = cursor.fetchone()
+            if row and row["retry_count"] < row["max_retries"]:
+                retry_count = row["retry_count"] + 1
+                delay = 2**retry_count * 60  # 2m, 4m, 8m, 16m, ...
+                cursor.execute(
+                    """
+                    UPDATE jobs
+                    SET status = ?, retry_count = ?, error = ?,
+                        next_attempt_at = datetime('now', '+' || ? || ' seconds'),
+                        started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
+                    WHERE id = ?
+                """,
+                    (STATUS_PENDING, retry_count, error, delay, job_id),
+                )
+                self.log.debug("Job %d failed (attempt %d/%d), retrying in %ds" % (job_id, retry_count, row["max_retries"], delay))
+            else:
+                cursor.execute(
+                    """
+                    UPDATE jobs
+                    SET status = ?, error = ?, completed_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """,
+                    (STATUS_FAILED, error, job_id),
+                )
+                self.log.debug("Job %d failed: %s" % (job_id, error))
 
     def get_job(self, job_id):
         """Get a specific job by ID."""
@@ -482,6 +510,23 @@ class JobDatabase(BaseJobDatabase):
             self.log.info("Requeued %d failed jobs" % count)
         return count
 
+    def cancel_job(self, job_id):
+        """Cancel a pending or running job. Returns True if the job was updated."""
+        with self._cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE jobs
+                SET status = 'cancelled', error = 'Cancelled by user',
+                    completed_at = datetime('now')
+                WHERE id = ? AND status IN (?, ?)
+            """,
+                (job_id, STATUS_PENDING, STATUS_RUNNING),
+            )
+            cancelled = cursor.rowcount > 0
+        if cancelled:
+            self.log.info("Cancelled job %d" % job_id)
+        return cancelled
+
     def filter_unscanned(self, paths):
         """Return the subset of paths not yet recorded in scanned_files."""
         if not paths:
@@ -586,11 +631,17 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
                         pending_jobs INTEGER NOT NULL DEFAULT 0
                     )
                 """)
-                # Migration: add started_at to existing tables
+                # Migrations: add columns to existing tables
                 cur.execute("""
                     ALTER TABLE cluster_nodes
                     ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 """)
+                for col_sql in [
+                    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0",
+                    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_retries INTEGER DEFAULT 0",
+                    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ",
+                ]:
+                    cur.execute(col_sql)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS scanned_files (
                         path       TEXT PRIMARY KEY,
@@ -616,7 +667,7 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
         if count > 0:
             self.log.info("Reset %d interrupted jobs to pending (node: %s)" % (count, self._node_id))
 
-    def add_job(self, path, config, args=None):
+    def add_job(self, path, config, args=None, max_retries=0):
         """Add a job to the queue. Returns job ID, or None if a duplicate is already pending/running."""
         args_json = json.dumps(args or [])
         with self._conn() as conn:
@@ -626,7 +677,7 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
                 if existing:
                     self.log.debug("Duplicate job for path: %s (existing job %d)" % (path, existing["id"]))
                     return None
-                cur.execute("INSERT INTO jobs (path, config, args, status) VALUES (%s, %s, %s, %s) RETURNING id", (path, config, args_json, STATUS_PENDING))
+                cur.execute("INSERT INTO jobs (path, config, args, status, max_retries) VALUES (%s, %s, %s, %s, %s) RETURNING id", (path, config, args_json, STATUS_PENDING, max_retries))
                 job_id = cur.fetchone()["id"]
         self.log.debug("Added job %d: %s" % (job_id, path))
         return job_id
@@ -658,6 +709,7 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
                         SELECT id, path, config, args
                         FROM jobs
                         WHERE status = %s AND config != ALL(%s)
+                          AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
                         ORDER BY created_at ASC
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
@@ -670,6 +722,7 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
                         SELECT id, path, config, args
                         FROM jobs
                         WHERE status = %s
+                          AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
                         ORDER BY created_at ASC
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
@@ -726,11 +779,28 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
         self.log.debug("Job %d completed" % job_id)
 
     def fail_job(self, job_id, error=None):
-        """Mark a job as failed."""
+        """Mark a job as failed, or requeue with exponential backoff if retries remain."""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("UPDATE jobs SET status = %s, error = %s, completed_at = NOW() WHERE id = %s", (STATUS_FAILED, error, job_id))
-        self.log.debug("Job %d failed: %s" % (job_id, error))
+                cur.execute("SELECT retry_count, max_retries FROM jobs WHERE id = %s", (job_id,))
+                row = cur.fetchone()
+                if row and row["retry_count"] < row["max_retries"]:
+                    retry_count = row["retry_count"] + 1
+                    delay = 2**retry_count * 60
+                    cur.execute(
+                        """
+                        UPDATE jobs
+                        SET status = %s, retry_count = %s, error = %s,
+                            next_attempt_at = NOW() + interval '%s seconds',
+                            started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
+                        WHERE id = %s
+                    """,
+                        (STATUS_PENDING, retry_count, error, delay, job_id),
+                    )
+                    self.log.debug("Job %d failed (attempt %d/%d), retrying in %ds" % (job_id, retry_count, row["max_retries"], delay))
+                else:
+                    cur.execute("UPDATE jobs SET status = %s, error = %s, completed_at = NOW() WHERE id = %s", (STATUS_FAILED, error, job_id))
+                    self.log.debug("Job %d failed: %s" % (job_id, error))
 
     def get_job(self, job_id):
         """Get a specific job by ID."""
@@ -944,6 +1014,25 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
             self.log.info("Requeued %d failed jobs" % count)
         return count
 
+    def cancel_job(self, job_id):
+        """Cancel a pending or running job. Returns True if the job was updated."""
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'cancelled', error = 'Cancelled by user',
+                        completed_at = NOW()
+                    WHERE id = %s AND status IN (%s, %s)
+                    RETURNING id
+                """,
+                    (job_id, STATUS_PENDING, STATUS_RUNNING),
+                )
+                cancelled = cur.fetchone() is not None
+        if cancelled:
+            self.log.info("Cancelled job %d" % job_id)
+        return cancelled
+
     def filter_unscanned(self, paths):
         """Return the subset of paths not yet recorded in scanned_files."""
         if not paths:
@@ -975,6 +1064,12 @@ class ConfigLockManager:
 
     Up to `max_per_config` jobs for the same config can run simultaneously.
     Jobs for different configs can always run in parallel (up to worker count).
+
+    Locking strategy:
+    - `_master_lock` protects `_config_sems` and `_active_configs` dict mutations.
+    - Semaphore acquisition happens *outside* `_master_lock` to avoid deadlock;
+      the waiting count is therefore advisory (used only for logging).
+    - `_active_configs[config_path]` is a dict keyed by job_id for O(1) insert/remove.
     """
 
     def __init__(self, max_per_config=1, logger=None):
@@ -982,8 +1077,8 @@ class ConfigLockManager:
         self.max_per_config = max_per_config
         self._master_lock = threading.Lock()
         self._config_sems = {}  # config_path -> Semaphore
-        self._active_configs = {}  # config_path -> list of (job_id, job_path)
-        self._waiting_counts = {}  # config_path -> number of waiting jobs
+        self._active_configs = {}  # config_path -> {job_id: job_path}
+        self._waiting_counts = {}  # config_path -> advisory waiting count (for logging)
 
     def _get_sem(self, config_path):
         """Get or create a semaphore for a config (thread-safe)."""
@@ -991,7 +1086,7 @@ class ConfigLockManager:
             if config_path not in self._config_sems:
                 self._config_sems[config_path] = threading.Semaphore(self.max_per_config)
                 self._waiting_counts[config_path] = 0
-                self._active_configs[config_path] = []
+                self._active_configs[config_path] = {}
             return self._config_sems[config_path]
 
     def acquire(self, config_path, job_id, job_path):
@@ -1003,7 +1098,7 @@ class ConfigLockManager:
 
         with self._master_lock:
             self._waiting_counts[config_path] = self._waiting_counts.get(config_path, 0) + 1
-            active = self._active_configs.get(config_path, [])
+            active = self._active_configs.get(config_path, {})
             if active:
                 self.log.info("Job %d waiting for config slot: %s (%d/%d slots in use)" % (job_id, os.path.basename(config_path), len(active), self.max_per_config))
 
@@ -1011,7 +1106,7 @@ class ConfigLockManager:
 
         with self._master_lock:
             self._waiting_counts[config_path] -= 1
-            self._active_configs.setdefault(config_path, []).append((job_id, job_path))
+            self._active_configs.setdefault(config_path, {})[job_id] = job_path
 
         self.log.debug("Job %d acquired slot for config: %s" % (job_id, os.path.basename(config_path)))
         return True
@@ -1021,8 +1116,7 @@ class ConfigLockManager:
         sem = self._get_sem(config_path)
 
         with self._master_lock:
-            active = self._active_configs.get(config_path, [])
-            self._active_configs[config_path] = [(jid, p) for jid, p in active if jid != job_id]
+            self._active_configs.get(config_path, {}).pop(job_id, None)
 
         sem.release()
         self.log.debug("Job %d released slot for config: %s" % (job_id, os.path.basename(config_path)))
@@ -1033,7 +1127,7 @@ class ConfigLockManager:
             active = {}
             for config, jobs in self._active_configs.items():
                 if jobs:
-                    active[config] = [{"job_id": jid, "path": p} for jid, p in jobs]
+                    active[config] = [{"job_id": jid, "path": p} for jid, p in jobs.items()]
             return {"active": active, "waiting": {k: v for k, v in self._waiting_counts.items() if v > 0}}
 
     def is_locked(self, config_path):
@@ -1049,7 +1143,7 @@ class ConfigLockManager:
     def get_active_jobs(self, config_path):
         """Get active jobs for a config as a list of dicts."""
         with self._master_lock:
-            return [{"job_id": jid, "path": p} for jid, p in self._active_configs.get(config_path, [])]
+            return [{"job_id": jid, "path": p} for jid, p in self._active_configs.get(config_path, {}).items()]
 
 
 class ConfigLogManager:
@@ -1110,6 +1204,7 @@ class PathConfigManager:
         self.api_key = None  # Can be set from daemon.json
         self.db_url = None  # Can be set from daemon.json
         self.ffmpeg_dir = None  # Can be set from daemon.json
+        self.job_timeout_seconds = 0  # Can be set from daemon.json (0 = no timeout)
         self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
         self.scan_paths = []  # Can be set from daemon.json
         self._config_file = None  # Resolved path of loaded config file
@@ -1141,6 +1236,9 @@ class PathConfigManager:
 
             # Load FFmpeg directory from config (can be overridden by CLI/env)
             self.ffmpeg_dir = config.get("ffmpeg_dir")
+
+            # Load job timeout in seconds (0 means no timeout)
+            self.job_timeout_seconds = int(config.get("job_timeout_seconds", 0) or 0)
 
             # Load media extensions inclusion list for directory scanning
             raw_exts = config.get("media_extensions")
@@ -1180,7 +1278,7 @@ class PathConfigManager:
                 if isinstance(default_args, str):
                     default_args = default_args.split()
 
-                self.path_configs.append({"path": path, "config": config_path, "default_args": default_args})
+                self.path_configs.append({"path": os.path.normpath(path), "config": config_path, "default_args": default_args})
 
             # Sort by path length descending (longest prefix match first)
             self.path_configs.sort(key=lambda x: len(x["path"]), reverse=True)
@@ -1248,6 +1346,7 @@ class PathConfigManager:
 
     def is_recycle_bin_path(self, path):
         """Return True if path is inside any configured recycle-bin directory."""
+        path = os.path.normpath(os.path.abspath(path))
         for config_path in self.get_all_configs():
             recycle_bin = self.get_recycle_bin(config_path)
             if recycle_bin and (path == recycle_bin or path.startswith(recycle_bin + os.sep)):
@@ -1258,7 +1357,7 @@ class PathConfigManager:
 class ConversionWorker(threading.Thread):
     """Background worker thread that processes conversion jobs from the database."""
 
-    def __init__(self, worker_id, job_db, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None):
+    def __init__(self, worker_id, job_db, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None, job_timeout_seconds=0, job_processes=None, job_progress=None):
         super().__init__(daemon=True)
         self.worker_id = worker_id
         self.node_id = socket.gethostname()
@@ -1270,8 +1369,11 @@ class ConversionWorker(threading.Thread):
         self.log = logger
         self.script_path = os.path.join(SCRIPT_DIR, "manual.py")
         self.ffmpeg_dir = ffmpeg_dir
+        self.job_timeout_seconds = job_timeout_seconds  # 0 means no timeout
         self.running = True
         self.current_job_id = None
+        self._job_processes = job_processes if job_processes is not None else {}
+        self._job_progress = job_progress if job_progress is not None else {}
 
     def stop(self):
         """Signal worker to stop."""
@@ -1310,19 +1412,39 @@ class ConversionWorker(threading.Thread):
 
         # Job is already marked running by claim_next_job()
 
+        # Check if job was cancelled before we even start (e.g. cancelled while pending)
+        current = self.job_db.get_job(job_id)
+        if current and current.get("status") == "cancelled":
+            self.log.info("Job %d was cancelled before processing started" % job_id)
+            self.current_job_id = None
+            return
+
         # Acquire lock for this config (blocks if another job is using it)
         self.log.info("Worker %d acquiring lock for job %d: %s" % (self.worker_id, job_id, os.path.basename(config_file)))
         self.config_lock_manager.acquire(config_file, job_id, path)
+
+        # Check again after acquiring lock (may have been cancelled while waiting)
+        current = self.job_db.get_job(job_id)
+        if current and current.get("status") == "cancelled":
+            self.log.info("Job %d was cancelled while waiting for lock" % job_id)
+            self.config_lock_manager.release(config_file, job_id)
+            self.current_job_id = None
+            return
 
         try:
             success = self._run_conversion(job_id, path, config_file, args)
             if success:
                 self.job_db.complete_job(job_id)
             else:
-                self.job_db.fail_job(job_id, "Conversion process failed")
+                # Don't overwrite a cancelled status set during conversion
+                current = self.job_db.get_job(job_id)
+                if current and current.get("status") != "cancelled":
+                    self.job_db.fail_job(job_id, "Conversion process failed")
         except Exception as e:
             self.log.exception("Job %d failed: %s" % (job_id, e))
-            self.job_db.fail_job(job_id, str(e))
+            current = self.job_db.get_job(job_id)
+            if current and current.get("status") != "cancelled":
+                self.job_db.fail_job(job_id, str(e))
         finally:
             self.config_lock_manager.release(config_file, job_id)
             self.current_job_id = None
@@ -1348,6 +1470,8 @@ class ConversionWorker(threading.Thread):
         if self.ffmpeg_dir:
             env["PATH"] = self.ffmpeg_dir + os.pathsep + env.get("PATH", "")
 
+        _ffmpeg_time_re = _re.compile(r"time=(\d+:\d+:\d+)")
+
         try:
             process = subprocess.Popen(
                 cmd,
@@ -1356,14 +1480,27 @@ class ConversionWorker(threading.Thread):
                 text=True,
                 env=env,
             )
+            self._job_processes[job_id] = process
 
             for line in process.stdout:
                 line = line.strip()
                 if line:
                     config_logger.info(line)
                     self.log.info("[%s] %s" % (os.path.basename(config_file), line))
+                    m = _ffmpeg_time_re.search(line)
+                    if m:
+                        self._job_progress[job_id] = m.group(1)
 
-            process.wait()
+            try:
+                timeout = self.job_timeout_seconds if self.job_timeout_seconds > 0 else None
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+                msg = "Job %d timed out after %ds: %s" % (job_id, self.job_timeout_seconds, path)
+                self.log.error(msg)
+                config_logger.error(msg)
+                return False
 
             if process.returncode == 0:
                 msg = "Job %d completed successfully: %s" % (job_id, path)
@@ -1382,6 +1519,8 @@ class ConversionWorker(threading.Thread):
             config_logger.exception(msg)
             return False
         finally:
+            self._job_processes.pop(job_id, None)
+            self._job_progress.pop(job_id, None)
             config_logger.info("Job %d finished: %s" % (job_id, path))
             config_logger.info("")
 
@@ -1675,6 +1814,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             job_id = int(path.split("/")[-1])
             job = self.server.job_db.get_job(job_id)
             if job:
+                if job.get("status") == STATUS_RUNNING:
+                    job["progress"] = self.server._job_progress.get(job_id)
                 self.send_json_response(200, job)
             else:
                 self.send_json_response(404, {"error": "Job not found"})
@@ -1775,6 +1916,55 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.end_headers()
 
+    def _get_root(self, _path, _query):
+        self.send_response(301)
+        self.send_header("Location", "/dashboard")
+        self.end_headers()
+
+    def _get_dashboard(self, _path, _query):
+        api_key = self.server.api_key or ""
+        key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
+        self.send_html_response(200, _load_dashboard_html().replace("</head>", key_script + "</head>", 1))
+
+    def _get_docs(self, _path, _query):
+        try:
+            with open(DOCS_PATH, "r", encoding="utf-8") as f:
+                md_content = f.read()
+            self.send_html_response(200, _load_docs_template() % _render_markdown_to_html(md_content))
+        except FileNotFoundError:
+            self.send_html_response(404, "<h1>Documentation not found</h1><p>docs/README.md missing</p>")
+
+    def _get_stats(self, _path, _query):
+        self.send_json_response(200, self.server.job_db.get_stats())
+
+    def _get_favicon(self, _path, _query):
+        favicon = os.path.join(SCRIPT_DIR, "logo.png")
+        try:
+            with open(favicon, "rb") as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(data)
+        except FileNotFoundError:
+            self.send_json_response(404, {"error": "favicon not found"})
+
+    _GET_ROUTES = {
+        "/": "_get_root",
+        "/dashboard": "_get_dashboard",
+        "/docs": "_get_docs",
+        "/health": lambda self, p, q: self._get_health(),
+        "/status": lambda self, p, q: self._get_status(),
+        "/jobs": lambda self, p, q: self._get_jobs(q),
+        "/configs": lambda self, p, q: self._get_configs(),
+        "/stats": "_get_stats",
+        "/scan": lambda self, p, q: self._get_scan(q),
+        "/browse": lambda self, p, q: self._get_browse(q),
+        "/favicon.png": "_get_favicon",
+    }
+
     def do_GET(self):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -1783,50 +1973,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if not self.is_public_endpoint(parsed.path) and not self.check_auth():
             return
 
-        if parsed.path == "/":
-            self.send_response(301)
-            self.send_header("Location", "/dashboard")
-            self.end_headers()
-        elif parsed.path == "/dashboard":
-            api_key = self.server.api_key or ""
-            key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
-            self.send_html_response(200, _load_dashboard_html().replace("</head>", key_script + "</head>", 1))
-        elif parsed.path == "/docs":
-            try:
-                with open(DOCS_PATH, "r", encoding="utf-8") as f:
-                    md_content = f.read()
-                self.send_html_response(200, _load_docs_template() % _render_markdown_to_html(md_content))
-            except FileNotFoundError:
-                self.send_html_response(404, "<h1>Documentation not found</h1><p>docs/README.md missing</p>")
-        elif parsed.path == "/health":
-            self._get_health()
-        elif parsed.path == "/status":
-            self._get_status()
-        elif parsed.path == "/jobs":
-            self._get_jobs(query)
+        handler = self._GET_ROUTES.get(parsed.path)
+        if handler is not None:
+            if isinstance(handler, str):
+                getattr(self, handler)(parsed.path, query)
+            else:
+                handler(self, parsed.path, query)
         elif parsed.path.startswith("/jobs/"):
             self._get_job(parsed.path)
-        elif parsed.path == "/configs":
-            self._get_configs()
-        elif parsed.path == "/stats":
-            self.send_json_response(200, self.server.job_db.get_stats())
-        elif parsed.path == "/scan":
-            self._get_scan(query)
-        elif parsed.path == "/browse":
-            self._get_browse(query)
-        elif parsed.path == "/favicon.png":
-            favicon = os.path.join(SCRIPT_DIR, "logo.png")
-            try:
-                with open(favicon, "rb") as f:
-                    data = f.read()
-                self.send_response(200)
-                self.send_header("Content-Type", "image/png")
-                self.send_header("Content-Length", str(len(data)))
-                self.send_header("Cache-Control", "public, max-age=86400")
-                self.end_headers()
-                self.wfile.write(data)
-            except FileNotFoundError:
-                self.send_json_response(404, {"error": "favicon not found"})
         else:
             self.send_json_response(404, {"error": "Not found"})
 
@@ -1862,6 +2016,21 @@ class WebhookHandler(BaseHTTPRequestHandler):
         except ValueError:
             self.send_json_response(400, {"error": "Invalid job ID"})
 
+    def _post_job_cancel(self, path):
+        try:
+            job_id = int(path.split("/")[-2])
+            cancelled = self.server.cancel_job(job_id)
+            if cancelled:
+                self.send_json_response(200, {"cancelled": True, "job_id": job_id})
+            else:
+                job = self.server.job_db.get_job(job_id)
+                if job is None:
+                    self.send_json_response(404, {"error": "Job not found"})
+                else:
+                    self.send_json_response(409, {"error": "Job cannot be cancelled", "status": job["status"], "note": "Only pending or running jobs can be cancelled"})
+        except ValueError:
+            self.send_json_response(400, {"error": "Invalid job ID"})
+
     def _post_scan_filter(self):
         paths = self._read_json_paths()
         if paths is None:
@@ -1876,6 +2045,35 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.server.job_db.record_scanned(paths)
         self.send_json_response(200, {"recorded": len(paths)})
 
+    def _post_shutdown(self, _path, _query):
+        active = self.server.config_lock_manager.get_status()["active"]
+        count = sum(len(v) for v in active.values())
+        self.send_json_response(202, {"status": "shutting_down", "active_jobs": count})
+        threading.Thread(target=self.server.shutdown, daemon=True).start()
+
+    def _post_restart(self, _path, _query):
+        active = self.server.config_lock_manager.get_status()["active"]
+        count = sum(len(v) for v in active.values())
+        self.send_json_response(202, {"status": "restarting", "active_jobs": count})
+        threading.Thread(target=self.server.graceful_restart, daemon=True).start()
+
+    def _post_reload(self, _path, _query):
+        threading.Thread(target=self.server.reload_config, daemon=True).start()
+        self.send_json_response(200, {"status": "reloading"})
+
+    _POST_ROUTES = {
+        "/": lambda self, p, q: self._handle_webhook(),
+        "/webhook": lambda self, p, q: self._handle_webhook(),
+        "/convert": lambda self, p, q: self._handle_webhook(),
+        "/shutdown": "_post_shutdown",
+        "/restart": "_post_restart",
+        "/reload": "_post_reload",
+        "/cleanup": lambda self, p, q: self._post_cleanup(q),
+        "/jobs/requeue": lambda self, p, q: self._post_jobs_requeue_bulk(q),
+        "/scan/filter": lambda self, p, q: self._post_scan_filter(),
+        "/scan/record": lambda self, p, q: self._post_scan_record(),
+    }
+
     def do_POST(self):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -1884,31 +2082,16 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if not self.check_auth():
             return
 
-        if parsed.path in ["/", "/webhook", "/convert"]:
-            self._handle_webhook()
-        elif parsed.path == "/shutdown":
-            active = self.server.config_lock_manager.get_status()["active"]
-            count = sum(len(v) for v in active.values())
-            self.send_json_response(202, {"status": "shutting_down", "active_jobs": count})
-            threading.Thread(target=self.server.shutdown, daemon=True).start()
-        elif parsed.path == "/restart":
-            active = self.server.config_lock_manager.get_status()["active"]
-            count = sum(len(v) for v in active.values())
-            self.send_json_response(202, {"status": "restarting", "active_jobs": count})
-            threading.Thread(target=self.server.graceful_restart, daemon=True).start()
-        elif parsed.path == "/reload":
-            threading.Thread(target=self.server.reload_config, daemon=True).start()
-            self.send_json_response(200, {"status": "reloading"})
-        elif parsed.path == "/cleanup":
-            self._post_cleanup(query)
-        elif parsed.path == "/jobs/requeue":
-            self._post_jobs_requeue_bulk(query)
+        handler = self._POST_ROUTES.get(parsed.path)
+        if handler is not None:
+            if isinstance(handler, str):
+                getattr(self, handler)(parsed.path, query)
+            else:
+                handler(self, parsed.path, query)
         elif parsed.path.startswith("/jobs/") and parsed.path.endswith("/requeue"):
             self._post_job_requeue(parsed.path)
-        elif parsed.path == "/scan/filter":
-            self._post_scan_filter()
-        elif parsed.path == "/scan/record":
-            self._post_scan_record()
+        elif parsed.path.startswith("/jobs/") and parsed.path.endswith("/cancel"):
+            self._post_job_cancel(parsed.path)
         else:
             self.send_json_response(404, {"error": "Not found"})
 
@@ -1931,19 +2114,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
         return sorted(candidates)
 
     def _parse_webhook_body(self):
-        """Parse request body into (path, extra_args, config_override).
+        """Parse request body into (path, extra_args, config_override, max_retries).
 
-        Returns (None, [], None) with an error response already sent on failure.
+        Returns (None, [], None, 0) with an error response already sent on failure.
         """
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length == 0:
             self.send_json_response(400, {"error": "Empty request body"})
-            return None, [], None
+            return None, [], None, 0
 
         body = self.rfile.read(content_length).decode("utf-8").strip()
         path = None
         extra_args = []
         config_override = None
+        max_retries = 0
 
         if "application/json" in self.headers.get("Content-Type", ""):
             try:
@@ -1952,20 +2136,21 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     path = data.get("path") or data.get("file") or data.get("input")
                     extra_args = data.get("args", [])
                     config_override = data.get("config")
+                    max_retries = int(data.get("max_retries", 0))
                     if isinstance(extra_args, str):
                         extra_args = extra_args.split()
                 elif isinstance(data, str):
                     path = data
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, ValueError, TypeError):
                 path = body
         else:
             path = body
 
         if not path:
             self.send_json_response(400, {"error": "No path provided"})
-            return None, [], None
+            return None, [], None, 0
 
-        return path, extra_args, config_override
+        return path, extra_args, config_override, max_retries
 
     def _resolve_config(self, path, config_override):
         """Return the config file to use for path, respecting any override."""
@@ -1992,7 +2177,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         return filtered_defaults + list(extra_args)
 
-    def _queue_directory(self, path, extra_args, config_override):
+    def _queue_directory(self, path, extra_args, config_override, max_retries=0):
         """Expand directory to media files, queue each, respond."""
         files = self._collect_media_files(path)
         if not files:
@@ -2002,7 +2187,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         queued, duplicates = [], []
         for filepath in files:
             resolved_config = self._resolve_config(filepath, config_override)
-            job_id = self.server.job_db.add_job(filepath, resolved_config, self._merge_args(filepath, extra_args))
+            job_id = self.server.job_db.add_job(filepath, resolved_config, self._merge_args(filepath, extra_args), max_retries=max_retries)
             if job_id is None:
                 existing = self.server.job_db.find_active_job(filepath)
                 duplicates.append({"path": filepath, "job_id": existing["id"] if existing else None})
@@ -2015,10 +2200,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         self.send_json_response(202, {"status": "queued", "directory": path, "queued": queued, "duplicates": duplicates, "queued_count": len(queued), "duplicate_count": len(duplicates)})
 
-    def _queue_file(self, path, extra_args, config_override):
+    def _queue_file(self, path, extra_args, config_override, max_retries=0):
         """Queue a single file job and respond."""
         resolved_config = self._resolve_config(path, config_override)
-        job_id = self.server.job_db.add_job(path, resolved_config, self._merge_args(path, extra_args))
+        job_id = self.server.job_db.add_job(path, resolved_config, self._merge_args(path, extra_args), max_retries=max_retries)
 
         if job_id is None:
             existing = self.server.job_db.find_active_job(path)
@@ -2035,7 +2220,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     def _handle_webhook(self):
         try:
-            path, extra_args, config_override = self._parse_webhook_body()
+            path, extra_args, config_override, max_retries = self._parse_webhook_body()
             if path is None:
                 return
 
@@ -2051,16 +2236,29 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 return
 
             if os.path.isdir(path):
-                self._queue_directory(path, extra_args, config_override)
+                self._queue_directory(path, extra_args, config_override, max_retries)
             else:
-                self._queue_file(path, extra_args, config_override)
+                self._queue_file(path, extra_args, config_override, max_retries)
 
         except Exception as e:
             self.server.logger.exception("Error handling request: %s" % e)
             self.send_json_response(500, {"error": str(e)})
 
 
-class HeartbeatThread(threading.Thread):
+class _StoppableThread(threading.Thread):
+    """Base class for daemon threads that support a cooperative stop() method."""
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.running = True
+        self._stop_event = threading.Event()
+
+    def stop(self):
+        self.running = False
+        self._stop_event.set()
+
+
+class HeartbeatThread(_StoppableThread):
     """Periodically updates this node's heartbeat in the cluster_nodes table
     and recovers jobs from nodes that have gone stale.
 
@@ -2068,7 +2266,7 @@ class HeartbeatThread(threading.Thread):
     """
 
     def __init__(self, job_db, node_id, host, worker_count, server, interval, stale_seconds, logger, started_at):
-        super().__init__(daemon=True)
+        super().__init__()
         self.job_db = job_db
         self.node_id = node_id
         self.host = host
@@ -2078,12 +2276,6 @@ class HeartbeatThread(threading.Thread):
         self.stale_seconds = stale_seconds
         self.log = logger
         self.started_at = started_at
-        self.running = True
-        self._stop_event = threading.Event()
-
-    def stop(self):
-        self.running = False
-        self._stop_event.set()
 
     def run(self):
         if not self.job_db.is_distributed:
@@ -2101,7 +2293,7 @@ class HeartbeatThread(threading.Thread):
             self._stop_event.wait(timeout=self.interval)
 
 
-class ScannerThread(threading.Thread):
+class ScannerThread(_StoppableThread):
     """Periodically scans configured directories for new media files and queues them.
 
     Each entry in scan_paths may specify:
@@ -2113,20 +2305,14 @@ class ScannerThread(threading.Thread):
     """
 
     def __init__(self, scan_paths, job_db, server, path_config_manager, logger):
-        super().__init__(daemon=True)
+        super().__init__()
         self.scan_paths = scan_paths  # list of dicts from daemon.json
         self.job_db = job_db
         self.server = server
         self.path_config_manager = path_config_manager
         self.log = logger
-        self.running = True
-        self._stop_event = threading.Event()
         # Per-entry next-run timestamps so each path has its own schedule.
         self._next_run = {}
-
-    def stop(self):
-        self.running = False
-        self._stop_event.set()
 
     def run(self):
         if not self.scan_paths:
@@ -2203,6 +2389,67 @@ class ScannerThread(threading.Thread):
         return queued
 
 
+class WorkerPool:
+    """Manages a pool of ConversionWorker threads."""
+
+    def __init__(self, worker_count, job_db, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None, job_timeout_seconds=0, job_processes=None, job_progress=None):
+        self._workers = []
+        self._worker_count = worker_count
+        self._job_db = job_db
+        self._path_config_manager = path_config_manager
+        self._config_log_manager = config_log_manager
+        self._config_lock_manager = config_lock_manager
+        self._logger = logger
+        self._ffmpeg_dir = ffmpeg_dir
+        self._job_timeout_seconds = job_timeout_seconds
+        self._job_processes = job_processes if job_processes is not None else {}
+        self._job_progress = job_progress if job_progress is not None else {}
+        self._start_workers()
+
+    def _start_workers(self):
+        for i in range(self._worker_count):
+            worker = ConversionWorker(
+                worker_id=i + 1,
+                job_db=self._job_db,
+                path_config_manager=self._path_config_manager,
+                config_log_manager=self._config_log_manager,
+                config_lock_manager=self._config_lock_manager,
+                logger=self._logger,
+                ffmpeg_dir=self._ffmpeg_dir,
+                job_timeout_seconds=self._job_timeout_seconds,
+                job_processes=self._job_processes,
+                job_progress=self._job_progress,
+            )
+            worker.start()
+            self._workers.append(worker)
+            self._logger.debug("Started worker thread %d" % (i + 1))
+
+    def notify(self):
+        """Wake all workers."""
+        for worker in self._workers:
+            worker.job_event.set()
+
+    def stop(self):
+        """Signal all workers to stop."""
+        for worker in self._workers:
+            worker.stop()
+
+    def drain(self, timeout=None):
+        """Wait for all workers to finish (used during shutdown/restart)."""
+        for worker in self._workers:
+            worker.join(timeout=timeout)
+
+    def restart(self, ffmpeg_dir=None, job_timeout_seconds=None):
+        """Stop all workers and start fresh ones."""
+        if ffmpeg_dir is not None:
+            self._ffmpeg_dir = ffmpeg_dir
+        if job_timeout_seconds is not None:
+            self._job_timeout_seconds = job_timeout_seconds
+        self.stop()
+        self._workers = []
+        self._start_workers()
+
+
 class DaemonServer(HTTPServer):
     """HTTP server with job queue and worker threads."""
 
@@ -2222,6 +2469,7 @@ class DaemonServer(HTTPServer):
         ffmpeg_dir=None,
         cli_api_key=None,
         cli_ffmpeg_dir=None,
+        job_timeout_seconds=0,
     ):
         super().__init__(server_address, handler_class)
         self.job_db = job_db
@@ -2234,25 +2482,25 @@ class DaemonServer(HTTPServer):
         self.stale_seconds = stale_seconds
         self.node_id = socket.gethostname()
         self.started_at = datetime.now(timezone.utc)
-        self.workers = []
         self._cli_api_key = cli_api_key
         self._cli_ffmpeg_dir = cli_ffmpeg_dir
+        self._job_processes = {}  # job_id -> Popen, for cancel support
+        self._job_progress = {}  # job_id -> timecode string (e.g. "00:01:23")
 
-        # Start worker threads — each gets its own Event so workers never
-        # race to clear a shared flag.  notify_workers() sets all of them.
-        for i in range(worker_count):
-            worker = ConversionWorker(
-                worker_id=i + 1,
-                job_db=job_db,
-                path_config_manager=path_config_manager,
-                config_log_manager=config_log_manager,
-                config_lock_manager=config_lock_manager,
-                logger=logger,
-                ffmpeg_dir=ffmpeg_dir,
-            )
-            worker.start()
-            self.workers.append(worker)
-            logger.debug("Started worker thread %d" % (i + 1))
+        # Start worker threads via WorkerPool — each worker gets its own Event
+        # so workers never race to clear a shared flag.
+        self.worker_pool = WorkerPool(
+            worker_count=worker_count,
+            job_db=job_db,
+            path_config_manager=path_config_manager,
+            config_log_manager=config_log_manager,
+            config_lock_manager=config_lock_manager,
+            logger=logger,
+            ffmpeg_dir=ffmpeg_dir,
+            job_timeout_seconds=job_timeout_seconds,
+            job_processes=self._job_processes,
+            job_progress=self._job_progress,
+        )
 
         # Wake all workers if there are jobs waiting from a previous run.
         pending = job_db.pending_count()
@@ -2287,8 +2535,26 @@ class DaemonServer(HTTPServer):
 
     def notify_workers(self):
         """Wake all worker threads by setting each worker's individual event."""
-        for worker in self.workers:
-            worker.job_event.set()
+        self.worker_pool.notify()
+
+    def cancel_job(self, job_id):
+        """Cancel a job by terminating its process (if running) and updating the DB.
+
+        Returns True if the job was cancelled (either by killing a running process
+        or by marking a pending job as cancelled in the database).
+        """
+        # Terminate the subprocess if it is currently running
+        process = self._job_processes.get(job_id)
+        if process is not None:
+            try:
+                process.terminate()
+            except Exception:
+                pass
+            # Also update DB status; the worker's finally block will clean up
+            self.job_db.cancel_job(job_id)
+            return True
+        # Job is not actively running — mark it cancelled in DB if still pending
+        return self.job_db.cancel_job(job_id)
 
     def reload_config(self):
         """Reload daemon.json in-place without stopping workers or active conversions."""
@@ -2309,7 +2575,7 @@ class DaemonServer(HTTPServer):
 
         # Re-apply ffmpeg_dir priority: CLI arg > env var > config file
         new_ffmpeg_dir = self._cli_ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or self.path_config_manager.ffmpeg_dir
-        for worker in self.workers:
+        for worker in self.worker_pool._workers:
             worker.ffmpeg_dir = new_ffmpeg_dir
 
         # Restart scanner thread with updated scan_paths
@@ -2330,12 +2596,11 @@ class DaemonServer(HTTPServer):
         """Drain active conversions then re-exec the daemon process."""
         self.logger.info("Graceful restart — waiting for active conversions to finish...")
 
-        for worker in self.workers:
-            worker.stop()
+        self.worker_pool.stop()
         self.heartbeat_thread.stop()
         self.scanner_thread.stop()
 
-        active = [w for w in self.workers if w.is_alive()]
+        active = [w for w in self.worker_pool._workers if w.is_alive()]
         while active:
             names = [str(w.worker_id) for w in active if w.current_job_id]
             if names:
@@ -2363,13 +2628,12 @@ class DaemonServer(HTTPServer):
         self.logger.info("Shutting down — waiting for active conversions to finish...")
 
         # Stop workers from picking up new jobs
-        for worker in self.workers:
-            worker.stop()
+        self.worker_pool.stop()
         self.heartbeat_thread.stop()
         self.scanner_thread.stop()
 
         # Wait for in-progress conversions to complete
-        active = [w for w in self.workers if w.is_alive()]
+        active = [w for w in self.worker_pool._workers if w.is_alive()]
         while active:
             names = [str(w.worker_id) for w in active if w.current_job_id]
             if names:
@@ -2391,6 +2655,59 @@ class DaemonServer(HTTPServer):
         self.scanner_thread.join(timeout=5)
 
         super().shutdown()
+
+
+def _validate_hwaccel(path_config_manager, ffmpeg_dir, logger):
+    """Probe hardware encoder availability for each unique config at startup.
+
+    For each config that requests an hwaccel codec (nvenc, qsv, vaapi,
+    videotoolbox), runs a quick ffmpeg null-encode and logs a warning if the
+    encoder is not available. Does not block server startup.
+    """
+    _hwaccel_map = {
+        "nvenc": "h264_nvenc",
+        "qsv": "h264_qsv",
+        "vaapi": "h264_vaapi",
+        "videotoolbox": "h264_videotoolbox",
+    }
+
+    env = os.environ.copy()
+    if ffmpeg_dir:
+        env["PATH"] = ffmpeg_dir + os.pathsep + env.get("PATH", "")
+
+    seen = set()
+    for config_path in path_config_manager.get_all_configs():
+        if not os.path.exists(config_path):
+            continue
+        try:
+            cp = configparser.ConfigParser()
+            cp.read(config_path)
+            codec_val = cp.get("Video", "video-codec", fallback="").strip().lower()
+        except Exception:
+            continue
+
+        for keyword, encoder in _hwaccel_map.items():
+            if keyword in codec_val and encoder not in seen:
+                seen.add(encoder)
+                try:
+                    result = subprocess.run(
+                        ["ffmpeg", "-f", "lavfi", "-i", "nullsrc", "-t", "0.1", "-c:v", encoder, "-f", "null", "-", "-loglevel", "error"],
+                        capture_output=True,
+                        env=env,
+                        timeout=15,
+                    )
+                    if result.returncode != 0:
+                        logger.warning(
+                            "Hardware encoder '%s' (from config %s) does not appear to be available. Conversions may fail. Check driver/SDK installation." % (encoder, os.path.basename(config_path))
+                        )
+                    else:
+                        logger.info("Hardware encoder '%s' validated OK" % encoder)
+                except FileNotFoundError:
+                    logger.warning("ffmpeg not found in PATH — cannot validate hardware encoder '%s'" % encoder)
+                except subprocess.TimeoutExpired:
+                    logger.warning("Hardware encoder probe for '%s' timed out" % encoder)
+                except Exception as exc:
+                    logger.warning("Hardware encoder probe for '%s' failed: %s" % (encoder, exc))
 
 
 def main():
@@ -2419,6 +2736,13 @@ def main():
         help="Seconds without a heartbeat before a node is declared stale and its running jobs are requeued (default: 120). Only used with PostgreSQL backend.",
     )
     parser.add_argument("--api-key", help="API key for authentication (or set SMA_DAEMON_API_KEY env var)")
+    parser.add_argument(
+        "--job-timeout",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        help="Maximum seconds a conversion job may run before being killed (default: 0, no timeout). Can also be set via daemon.json job_timeout_seconds.",
+    )
 
     args = parser.parse_args()
 
@@ -2439,6 +2763,9 @@ def main():
 
     # Determine FFmpeg directory (priority: CLI --ffmpeg-dir > env var > config file)
     ffmpeg_dir = args.ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or path_config_manager.ffmpeg_dir
+
+    # Determine job timeout (priority: CLI --job-timeout > daemon.json; 0 means no timeout)
+    job_timeout_seconds = args.job_timeout or path_config_manager.job_timeout_seconds
     if db_url:
         job_db = PostgreSQLJobDatabase(db_url, logger=log)
         db_label = "PostgreSQL: %s" % db_url
@@ -2454,6 +2781,10 @@ def main():
         log.info("Heartbeat interval: %ds (stale after %ds)" % (args.heartbeat_interval, args.stale_seconds))
     log.info("Logs directory: %s" % config_log_manager.logs_dir)
     log.info("Concurrency: One process per config (jobs for same config queue)")
+    if job_timeout_seconds:
+        log.info("Job timeout: %ds" % job_timeout_seconds)
+    else:
+        log.info("Job timeout: disabled")
     if api_key:
         log.info("Authentication: ENABLED (API key required)")
     else:
@@ -2484,6 +2815,7 @@ def main():
             ffmpeg_dir=ffmpeg_dir,
             cli_api_key=args.api_key,
             cli_ffmpeg_dir=args.ffmpeg_dir,
+            job_timeout_seconds=job_timeout_seconds,
         )
 
         log.info("Listening on http://%s:%d" % (args.host, args.port))
@@ -2499,7 +2831,8 @@ def main():
         log.info("  POST /webhook      - Submit conversion job")
         log.info("  GET  /health       - Health check with job stats")
         log.info("  GET  /jobs         - List jobs (?status=pending&limit=50)")
-        log.info("  GET  /jobs/<id>    - Get specific job")
+        log.info("  GET  /jobs/<id>    - Get specific job (includes progress when running)")
+        log.info("  POST /jobs/<id>/cancel  - Cancel a pending or running job")
         log.info("  GET  /configs      - Show config mappings and status")
         log.info("  GET  /stats        - Job statistics")
         log.info("  POST /cleanup      - Remove old jobs (?days=30)")
@@ -2511,6 +2844,8 @@ def main():
         log.info("  POST /restart      - Graceful restart (drains workers, then re-execs)")
         log.info("")
         log.info("Ready to accept connections.")
+
+        _validate_hwaccel(path_config_manager, ffmpeg_dir, log)
 
         def _shutdown(signum, frame):
             log.info("Received signal %d, shutting down..." % signum)

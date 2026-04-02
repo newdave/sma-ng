@@ -120,6 +120,46 @@ class BaseCodec(object):
                     pass
         return safe
 
+    @staticmethod
+    def _sanitize_stream_metadata(safe):
+        """Validate and remove malformed language/title/disposition keys from *safe* in place.
+
+        - ``language``: removed when longer than 3 characters.
+        - ``title``: removed when empty.
+        - ``disposition``: removed when blank.
+
+        Returns the modified ``safe`` dict.
+        """
+        if "language" in safe and len(safe["language"]) > 3:
+            del safe["language"]
+        if "title" in safe and len(safe["title"]) < 1:
+            del safe["title"]
+        if "disposition" in safe and len(safe["disposition"].strip()) < 1:
+            del safe["disposition"]
+        return safe
+
+    @staticmethod
+    def _build_stream_metadata(safe, stream_type, stream):
+        """Emit ``-metadata:s:<stream_type>:<stream>`` flags for title/handler/language.
+
+        Args:
+            safe: Validated options dict (after ``_sanitize_stream_metadata``).
+            stream_type: Single-letter stream specifier (``"a"``, ``"s"``, ``"v"``).
+            stream: Stream index (int or str).
+
+        Returns:
+            List of FFmpeg argument tokens.
+        """
+        prefix = "-metadata:s:%s:%s" % (stream_type, stream)
+        optlist = []
+        if "title" in safe:
+            optlist += [prefix, "title=" + str(safe["title"]), prefix, "handler_name=" + str(safe["title"])]
+        else:
+            optlist += [prefix, "title=", prefix, "handler_name="]
+        lang = str(safe["language"]) if "language" in safe else BaseCodec.UNDEFINED
+        optlist += [prefix, "language=" + lang]
+        return optlist
+
 
 class BaseDecoder(object):
     """
@@ -629,43 +669,17 @@ class AudioCopyCodec(BaseCodec):
 
     def parse_options(self, opt, stream=0):
         safe = self.safe_options(opt)
-
-        if "disposition" in safe:
-            if len(safe["disposition"].strip()) < 1:
-                del safe["disposition"]
-
-        if "language" in safe:
-            l = safe["language"]
-            if len(l) > 3:
-                del safe["language"]
-
-        if "title" in safe:
-            if len(safe["title"]) < 1:
-                del safe["title"]
+        self._sanitize_stream_metadata(safe)
 
         stream = str(stream)
-        optlist = []
-        optlist.extend(["-c:a:" + stream, "copy"])
-        if "source" in safe:
-            s = safe["source"]
-        else:
-            s = 0
+        s = safe.get("source", 0)
+        optlist = ["-c:a:" + stream, "copy"]
         if "map" in safe:
-            optlist.extend(["-map", str(s) + ":" + str(safe["map"])])
+            optlist += ["-map", str(s) + ":" + str(safe["map"])]
         if "bsf" in safe:
-            optlist.extend(["-bsf:a:" + stream, str(safe["bsf"])])
-        if "title" in safe:
-            optlist.extend(["-metadata:s:a:" + stream, "title=" + str(safe["title"])])
-            optlist.extend(["-metadata:s:a:" + stream, "handler_name=" + str(safe["title"])])
-        else:
-            optlist.extend(["-metadata:s:a:" + stream, "title="])
-            optlist.extend(["-metadata:s:a:" + stream, "handler_name="])
-        if "language" in safe:
-            lang = str(safe["language"])
-        else:
-            lang = BaseCodec.UNDEFINED
-        optlist.extend(["-metadata:s:a:" + stream, "language=" + lang])
-        optlist.extend(["-disposition:a:" + stream, self.safe_disposition(safe.get("disposition"))])
+            optlist += ["-bsf:a:" + stream, str(safe["bsf"])]
+        optlist += self._build_stream_metadata(safe, "a", stream)
+        optlist += ["-disposition:a:" + stream, self.safe_disposition(safe.get("disposition"))]
         return optlist
 
 
@@ -679,34 +693,20 @@ class VideoCopyCodec(BaseCodec):
 
     def parse_options(self, opt, stream=0):
         safe = self.safe_options(opt)
-        optlist = []
-        optlist.extend(["-vcodec", "copy"])
+        if "fps" in safe and safe["fps"] < 1:
+            del safe["fps"]
+        if "title" in safe and len(safe["title"]) < 1:
+            del safe["title"]
 
-        if "fps" in safe:
-            f = safe["fps"]
-            if f < 1:
-                del safe["fps"]
-
-        if "title" in safe:
-            if len(safe["title"]) < 1:
-                del safe["title"]
-
-        if "source" in safe:
-            s = safe["source"]
-        else:
-            s = 0
+        s = safe.get("source", 0)
+        optlist = ["-vcodec", "copy"]
         if "map" in safe:
-            optlist.extend(["-map", str(s) + ":" + str(safe["map"])])
+            optlist += ["-map", str(s) + ":" + str(safe["map"])]
         if "fps" in safe:
-            optlist.extend(["-r:v", str(safe["fps"])])
+            optlist += ["-r:v", str(safe["fps"])]
         if "bsf" in safe:
-            optlist.extend(["-bsf:v", safe["bsf"]])
-        if "title" in safe:
-            optlist.extend(["-metadata:s:v", "title=" + str(safe["title"])])
-            optlist.extend(["-metadata:s:v", "handler_name=" + str(safe["title"])])
-        else:
-            optlist.extend(["-metadata:s:v", "title="])
-            optlist.extend(["-metadata:s:v", "handler_name="])
+            optlist += ["-bsf:v", safe["bsf"]]
+        optlist += self._build_stream_metadata(safe, "v", "")
         return optlist
 
 
@@ -718,46 +718,17 @@ class SubtitleCopyCodec(BaseCodec):
     codec_name = "copy"
     encoder_options = {"map": int, "source": str, "disposition": str, "language": str, "title": str}
 
-    optlist = []
-
     def parse_options(self, opt, stream=0):
         safe = self.safe_options(opt)
-
-        if "disposition" in safe:
-            if len(safe["disposition"].strip()) < 1:
-                del safe["disposition"]
-
-        if "language" in safe:
-            l = safe["language"]
-            if len(l) > 3:
-                del safe["language"]
-
-        if "title" in safe:
-            if len(safe["title"]) < 1:
-                del safe["title"]
+        self._sanitize_stream_metadata(safe)
 
         stream = str(stream)
-        optlist = []
-        optlist.extend(["-c:s:" + stream, "copy"])
-        if "source" in safe:
-            s = safe["source"]
-        else:
-            s = 0
+        s = safe.get("source", 0)
+        optlist = ["-c:s:" + stream, "copy"]
         if "map" in safe:
-            optlist.extend(["-map", str(s) + ":" + str(safe["map"])])
-        if "title" in safe:
-            optlist.extend(["-metadata:s:s:" + stream, "title=" + str(safe["title"])])
-            optlist.extend(["-metadata:s:s:" + stream, "handler_name=" + str(safe["title"])])
-        else:
-            optlist.extend(["-metadata:s:s:" + stream, "title="])
-            optlist.extend(["-metadata:s:s:" + stream, "handler_name="])
-        if "language" in safe:
-            lang = str(safe["language"])
-        else:
-            lang = BaseCodec.UNDEFINED
-        optlist.extend(["-metadata:s:s:" + stream, "language=" + lang])
-        optlist.extend(["-disposition:s:" + stream, self.safe_disposition(safe.get("disposition"))])
-
+            optlist += ["-map", str(s) + ":" + str(safe["map"])]
+        optlist += self._build_stream_metadata(safe, "s", stream)
+        optlist += ["-disposition:s:" + stream, self.safe_disposition(safe.get("disposition"))]
         return optlist
 
 
@@ -769,24 +740,18 @@ class AttachmentCopyCodec(BaseCodec):
     codec_name = "copy"
     encoder_options = {"map": int, "source": str, "filename": str, "mimetype": str}
 
-    optlist = []
-
     def parse_options(self, opt, stream=0):
         safe = self.safe_options(opt)
 
         stream = str(stream)
-        optlist = []
-        optlist.extend(["-c:t:" + stream, "copy"])
+        s = safe.get("source", 0)
+        optlist = ["-c:t:" + stream, "copy"]
         if "filename" in safe:
-            optlist.extend(["-metadata:s:t:" + stream, "filename=" + str(safe["filename"])])
+            optlist += ["-metadata:s:t:" + stream, "filename=" + str(safe["filename"])]
         if "mimetype" in safe:
-            optlist.extend(["-metadata:s:t:" + stream, "mimetype=" + str(safe["mimetype"])])
-        if "source" in safe:
-            s = safe["source"]
-        else:
-            s = 0
+            optlist += ["-metadata:s:t:" + stream, "mimetype=" + str(safe["mimetype"])]
         if "map" in safe:
-            optlist.extend(["-map", str(s) + ":" + str(safe["map"])])
+            optlist += ["-map", str(s) + ":" + str(safe["map"])]
         return optlist
 
 
