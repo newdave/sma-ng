@@ -2338,6 +2338,10 @@ class ScannerThread(_StoppableThread):
             self._stop_event.wait(timeout=sleep_for)
 
     def _scan(self, entry):
+        if not entry.get("enabled", True):
+            self.log.debug("Scanner: skipping disabled path %s" % entry.get("path", ""))
+            return 0
+
         scan_dir = entry.get("path", "")
         rewrite_from = entry.get("rewrite_from", "")
         rewrite_to = entry.get("rewrite_to", "")
@@ -2347,13 +2351,18 @@ class ScannerThread(_StoppableThread):
             return 0
 
         allowed = self.path_config_manager.media_extensions
+        # Skip already-converted files; scanning .mp4 files serves no purpose since
+        # SMA converts *to* mp4 — any .mp4 present is either already processed or
+        # a non-SMA file that would just be re-queued on every scan.
+        skip_extensions = frozenset([".mp4"])
         candidates = []
         for root, dirs, files in os.walk(scan_dir):
             dirs[:] = [d for d in dirs if not d.startswith(".")]
             for fname in files:
                 if fname.startswith("."):
                     continue
-                if os.path.splitext(fname)[1].lower() in allowed:
+                ext = os.path.splitext(fname)[1].lower()
+                if ext in allowed and ext not in skip_extensions:
                     candidates.append(os.path.join(root, fname))
 
         if not candidates:
