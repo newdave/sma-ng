@@ -173,7 +173,8 @@ The daemon can use different `autoProcess.ini` files based on the input file pat
       "path": "/mnt/local/Media",
       "interval": 3600,
       "rewrite_from": "/mnt/local/Media",
-      "rewrite_to": "/mnt/unionfs/Media"
+      "rewrite_to": "/mnt/unionfs/Media",
+      "enabled": true
     }
   ],
   "path_configs": [
