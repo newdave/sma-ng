@@ -2049,12 +2049,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
         active = self.server.config_lock_manager.get_status()["active"]
         count = sum(len(v) for v in active.values())
         self.send_json_response(202, {"status": "shutting_down", "active_jobs": count})
+        self.wfile.flush()
         threading.Thread(target=self.server.shutdown, daemon=True).start()
 
     def _post_restart(self, _path, _query):
         active = self.server.config_lock_manager.get_status()["active"]
         count = sum(len(v) for v in active.values())
         self.send_json_response(202, {"status": "restarting", "active_jobs": count})
+        self.wfile.flush()
         threading.Thread(target=self.server.graceful_restart, daemon=True).start()
 
     def _post_reload(self, _path, _query):
