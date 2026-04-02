@@ -1391,6 +1391,9 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
         {
             "decode_device": str,
             "device": str,
+            "look_ahead_depth": int,
+            "b_frames": int,
+            "ref_frames": int,
         }
     )
 
@@ -1425,7 +1428,15 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
         elif fmtstr:
             optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
         optlist.extend(super(H264QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
-        optlist.extend(["-look_ahead", "0"])
+        look_ahead_depth = safe.get("look_ahead_depth", 0)
+        if look_ahead_depth and look_ahead_depth > 0:
+            optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth), "-extra_hw_frames", str(look_ahead_depth + 4)])
+        else:
+            optlist.extend(["-look_ahead", "0"])
+        if "b_frames" in safe and safe["b_frames"] >= 0:
+            optlist.extend(["-bf", str(safe["b_frames"])])
+        if "ref_frames" in safe and safe["ref_frames"] >= 0:
+            optlist.extend(["-refs", str(safe["ref_frames"])])
         return optlist
 
 
@@ -1588,6 +1599,9 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
         {
             "decode_device": str,
             "device": str,
+            "look_ahead_depth": int,
+            "b_frames": int,
+            "ref_frames": int,
         }
     )
 
@@ -1622,6 +1636,15 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
         elif fmtstr:
             optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
         optlist.extend(super(H265QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
+        look_ahead_depth = safe.get("look_ahead_depth", 0)
+        if look_ahead_depth and look_ahead_depth > 0:
+            optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth), "-extra_hw_frames", str(look_ahead_depth + 4)])
+        else:
+            optlist.extend(["-look_ahead", "0"])
+        if "b_frames" in safe and safe["b_frames"] >= 0:
+            optlist.extend(["-bf", str(safe["b_frames"])])
+        if "ref_frames" in safe and safe["ref_frames"] >= 0:
+            optlist.extend(["-refs", str(safe["ref_frames"])])
         return optlist
 
 
@@ -2024,6 +2047,9 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
         {
             "decode_device": str,
             "device": str,
+            "look_ahead_depth": int,
+            "b_frames": int,
+            "ref_frames": int,
         }
     )
 
@@ -2047,7 +2073,15 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
             optlist.extend(scale)
         elif fmtstr:
             optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
-        optlist.extend(["-look_ahead", "0"])
+        look_ahead_depth = safe.get("look_ahead_depth", 0)
+        if look_ahead_depth and look_ahead_depth > 0:
+            optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth), "-extra_hw_frames", str(look_ahead_depth + 4)])
+        else:
+            optlist.extend(["-look_ahead", "0"])
+        if "b_frames" in safe and safe["b_frames"] >= 0:
+            optlist.extend(["-bf", str(safe["b_frames"])])
+        if "ref_frames" in safe and safe["ref_frames"] >= 0:
+            optlist.extend(["-refs", str(safe["ref_frames"])])
         return optlist
 
 
@@ -2113,6 +2147,9 @@ class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
         {
             "decode_device": str,
             "device": str,
+            "look_ahead_depth": int,
+            "b_frames": int,
+            "ref_frames": int,
         }
     )
 
@@ -2135,7 +2172,15 @@ class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
             optlist.extend(scale)
         elif fmtstr:
             optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
-        optlist.extend(["-look_ahead", "0"])
+        look_ahead_depth = safe.get("look_ahead_depth", 0)
+        if look_ahead_depth and look_ahead_depth > 0:
+            optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth), "-extra_hw_frames", str(look_ahead_depth + 4)])
+        else:
+            optlist.extend(["-look_ahead", "0"])
+        if "b_frames" in safe and safe["b_frames"] >= 0:
+            optlist.extend(["-bf", str(safe["b_frames"])])
+        if "ref_frames" in safe and safe["ref_frames"] >= 0:
+            optlist.extend(["-refs", str(safe["ref_frames"])])
         return optlist
 
 

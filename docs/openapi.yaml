@@ -1,0 +1,677 @@
+openapi: "3.1.0"
+info:
+  title: SMA-NG Daemon API
+  description: |
+    HTTP webhook server for media conversion automation.
+    Authentication is optional; when an API key is configured all endpoints
+    except `/health`, `/status`, `/`, `/dashboard`, and `/docs` require it.
+  version: "1.0.0"
+
+servers:
+  - url: http://127.0.0.1:8585
+    description: Default local daemon
+
+security:
+  - apiKey: []
+  - bearerToken: []
+
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    bearerToken:
+      type: http
+      scheme: bearer
+
+  schemas:
+    Job:
+      type: object
+      properties:
+        id:
+          type: integer
+        path:
+          type: string
+        config:
+          type: string
+        args:
+          type: string
+          description: JSON-encoded list of extra arguments
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        worker_id:
+          type: integer
+          nullable: true
+        node_id:
+          type: string
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        retry_count:
+          type: integer
+          default: 0
+        max_retries:
+          type: integer
+          default: 0
+        next_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        progress:
+          type: string
+          nullable: true
+          description: Current timecode (e.g. "00:12:34") when status is running
+
+    JobStats:
+      type: object
+      additionalProperties:
+        type: integer
+      example:
+        pending: 3
+        running: 1
+        completed: 150
+        failed: 2
+        total: 156
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+paths:
+  /health:
+    get:
+      summary: Daemon health check
+      description: Returns node status, uptime, worker count, and job statistics. No authentication required.
+      security: []
+      operationId: getHealth
+      tags: [monitoring]
+      responses:
+        "200":
+          description: Daemon is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  node:
+                    type: string
+                  started_at:
+                    type: string
+                    format: date-time
+                  uptime_seconds:
+                    type: integer
+                  workers:
+                    type: integer
+                  jobs:
+                    $ref: "#/components/schemas/JobStats"
+                  active:
+                    type: object
+                    description: Map of config path → list of active job objects
+                  waiting:
+                    type: object
+                    description: Map of config path → waiting job count
+
+  /status:
+    get:
+      summary: Cluster status
+      description: Returns cluster-wide node and job status (PostgreSQL only). Falls back to local health on SQLite. No authentication required.
+      security: []
+      operationId: getStatus
+      tags: [monitoring]
+      responses:
+        "200":
+          description: Cluster or local status
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /stats:
+    get:
+      summary: Job statistics
+      operationId: getStats
+      tags: [jobs]
+      responses:
+        "200":
+          description: Job counts by status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStats"
+
+  /jobs:
+    get:
+      summary: List jobs
+      operationId: listJobs
+      tags: [jobs]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, completed, failed, cancelled]
+        - name: config
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated job list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Job"
+                  count:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /jobs/{id}:
+    get:
+      summary: Get a specific job
+      operationId: getJob
+      tags: [jobs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Job details (includes progress field when running)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          description: Invalid job ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /jobs/{id}/requeue:
+    post:
+      summary: Requeue a specific failed job
+      operationId: requeueJob
+      tags: [jobs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Job requeued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requeued:
+                    type: boolean
+                  job_id:
+                    type: integer
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Job cannot be requeued (not in failed state)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /jobs/{id}/cancel:
+    post:
+      summary: Cancel a running or pending job
+      description: Terminates the conversion subprocess if active; marks pending jobs as cancelled.
+      operationId: cancelJob
+      tags: [jobs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Job cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cancelled:
+                    type: boolean
+                  job_id:
+                    type: integer
+        "400":
+          description: Invalid job ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /jobs/requeue:
+    post:
+      summary: Requeue all failed jobs
+      operationId: requeueAllJobs
+      tags: [jobs]
+      parameters:
+        - name: config
+          in: query
+          description: Limit requeue to jobs for a specific config file
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Jobs requeued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requeued:
+                    type: integer
+
+  /webhook:
+    post:
+      summary: Submit a file or directory for conversion
+      description: |
+        Accepts plain-text body (just the path) or JSON.
+        JSON body supports `path`, `args`, `config`, and `max_retries` fields.
+      operationId: submitWebhook
+      tags: [conversion]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+                  description: Absolute path to media file or directory
+                args:
+                  oneOf:
+                    - type: array
+                      items:
+                        type: string
+                    - type: string
+                  description: Extra manual.py arguments (e.g. ["-tmdb", "603"])
+                config:
+                  type: string
+                  description: Override the autoProcess.ini config file path
+                max_retries:
+                  type: integer
+                  default: 0
+                  description: Number of times to retry on failure (exponential backoff)
+            example:
+              path: /mnt/media/Movies/film.mkv
+              args: ["-tmdb", "603"]
+              max_retries: 2
+          text/plain:
+            schema:
+              type: string
+              description: Raw file path
+      responses:
+        "202":
+          description: Job queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: queued
+                  job_id:
+                    type: integer
+                  path:
+                    type: string
+                  config:
+                    type: string
+                  log_file:
+                    type: string
+                  config_busy:
+                    type: boolean
+                  pending_jobs:
+                    type: integer
+        "200":
+          description: Duplicate — job already queued or running for this path
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: duplicate
+                  job_id:
+                    type: integer
+                    nullable: true
+        "400":
+          description: Bad request (missing path, path does not exist, recycle-bin path)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /configs:
+    get:
+      summary: Show path-to-config mappings
+      operationId: getConfigs
+      tags: [configuration]
+      responses:
+        "200":
+          description: Current path mappings and per-config status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  default_config:
+                    type: string
+                  default_args:
+                    type: array
+                    items:
+                      type: string
+                  default_log:
+                    type: string
+                  default_active_jobs:
+                    type: array
+                  default_pending_jobs:
+                    type: integer
+                  path_configs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                        config:
+                          type: string
+                        default_args:
+                          type: array
+                          items:
+                            type: string
+                        log_file:
+                          type: string
+                        active_jobs:
+                          type: array
+                        pending_jobs:
+                          type: integer
+                  logs_directory:
+                    type: string
+
+  /cleanup:
+    post:
+      summary: Remove old completed and failed jobs
+      operationId: cleanup
+      tags: [jobs]
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+      responses:
+        "200":
+          description: Cleanup result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+                  days:
+                    type: integer
+
+  /reload:
+    post:
+      summary: Reload daemon.json configuration in-place
+      description: Re-reads daemon.json without restarting workers or active conversions.
+      operationId: reload
+      tags: [management]
+      responses:
+        "200":
+          description: Reload initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: reloading
+
+  /restart:
+    post:
+      summary: Gracefully restart the daemon
+      description: Waits for active conversions to finish, then re-execs the process.
+      operationId: restart
+      tags: [management]
+      responses:
+        "202":
+          description: Restart initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: restarting
+                  active_jobs:
+                    type: integer
+
+  /shutdown:
+    post:
+      summary: Gracefully shut down the daemon
+      description: Waits for active conversions to finish, then exits.
+      operationId: shutdown
+      tags: [management]
+      responses:
+        "202":
+          description: Shutdown initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: shutting_down
+                  active_jobs:
+                    type: integer
+
+  /scan:
+    get:
+      summary: Filter a list of paths to those not yet scanned
+      description: Useful for incremental directory scans. For large lists use POST /scan/filter.
+      operationId: getScan
+      tags: [scanning]
+      parameters:
+        - name: path
+          in: query
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        "200":
+          description: Unscanned paths
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unscanned:
+                    type: array
+                    items:
+                      type: string
+                  total:
+                    type: integer
+                  already_scanned:
+                    type: integer
+
+  /scan/filter:
+    post:
+      summary: Filter a list of paths to those not yet scanned (bulk)
+      operationId: scanFilter
+      tags: [scanning]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paths]
+              properties:
+                paths:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Unscanned paths
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unscanned:
+                    type: array
+                    items:
+                      type: string
+                  total:
+                    type: integer
+                  already_scanned:
+                    type: integer
+
+  /scan/record:
+    post:
+      summary: Record paths as scanned
+      operationId: scanRecord
+      tags: [scanning]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paths]
+              properties:
+                paths:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Paths recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recorded:
+                    type: integer
+
+  /browse:
+    get:
+      summary: Browse directories and media files
+      description: Lists directories and media files under a configured path. Returns top-level roots if no path is given.
+      operationId: browse
+      tags: [files]
+      parameters:
+        - name: path
+          in: query
+          schema:
+            type: string
+          description: Absolute path to browse (must be under a configured media root)
+      responses:
+        "200":
+          description: Directory listing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dirs:
+                    type: array
+                    items:
+                      type: string
+                  files:
+                    type: array
+                    items:
+                      type: string
+        "403":
+          description: Path is outside configured roots or permission denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Directory not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"

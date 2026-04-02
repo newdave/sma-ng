@@ -68,6 +68,12 @@ pix-fmt =
 prioritize-source-pix-fmt = true
 filter =
 force-filter = False
+; QSV look-ahead depth for rate control (0 = disabled, 8-16 recommended for batch). Requires QSV encoder and -look_ahead support.
+look-ahead-depth = 0
+; QSV B-frame count (-1 = encoder default, 7 = aggressive for HEVC). Requires QSV encoder.
+b-frames = -1
+; QSV reference frame count (-1 = encoder default, 4 = good balance for HEVC). Requires QSV encoder.
+ref-frames = -1
 
 [HDR]
 codec =
@@ -80,6 +86,9 @@ codec-parameters =
 filter =
 force-filter = False
 profile =
+look-ahead-depth = 0
+b-frames = -1
+ref-frames = -1
 
 [Audio]
 codec = aac, eac3, ac3

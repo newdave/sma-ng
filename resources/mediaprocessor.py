@@ -1152,6 +1152,10 @@ class MediaProcessor:
         if hdrInput and self.settings.hdr.get("codec_params"):
             vparams = self.settings.hdr.get("codec_params")
 
+        vlook_ahead_depth = self.settings.hdr.get("look_ahead_depth", 0) if hdrInput else self.settings.look_ahead_depth
+        vb_frames = self.settings.hdr.get("b_frames", -1) if hdrInput else self.settings.b_frames
+        vref_frames = self.settings.hdr.get("ref_frames", -1) if hdrInput else self.settings.ref_frames
+
         vpix_fmt = None
         if hdrInput and len(self.settings.hdr.get("pix_fmt")) > 0:
             if info.video.pix_fmt in self.settings.hdr.get("pix_fmt"):
@@ -1243,6 +1247,9 @@ class MediaProcessor:
             "framedata": vframedata,
             "bsf": vbsf,
             "debug": vdebug,
+            "look_ahead_depth": vlook_ahead_depth,
+            "b_frames": vb_frames,
+            "ref_frames": vref_frames,
         }
         video_settings["title"] = self.videoStreamTitle(info.video, video_settings, hdr=hdrOutput, tagdata=tagdata)
 
