@@ -35,7 +35,7 @@ for host in $DEPLOY_HOSTS; do
 
   # shellcheck disable=SC2086,SC2029
   if ! ssh $ssh_opts "$host" "$remote_shutdown" > /dev/null 2>&1; then
-    echo "  [$host] shutdown webhook failed (daemon may already be stopped), proceeding to restart"
+    echo "  [$host] daemon not responding to shutdown webhook (already stopped or not yet started), proceeding"
   else
     echo "==> [$host] waiting for sma-daemon to stop (timeout: ${SHUTDOWN_TIMEOUT}s)"
     # Poll /health until the daemon stops responding
