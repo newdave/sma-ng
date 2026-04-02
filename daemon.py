@@ -924,7 +924,8 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
     def get_cluster_nodes(self):
         """Return all rows from cluster_nodes ordered by last_seen descending.
 
-        Includes uptime_seconds (seconds since daemon start) derived from started_at.
+        Includes uptime_seconds (seconds since daemon start) derived from started_at,
+        and an active_jobs list of {job_id, path, config} for each running job on the node.
         """
         with self._conn() as conn:
             with conn.cursor() as cur:
@@ -934,7 +935,25 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
                     FROM cluster_nodes
                     ORDER BY last_seen DESC
                 """)
-                return [dict(r) for r in cur.fetchall()]
+                nodes = [dict(r) for r in cur.fetchall()]
+                if not nodes:
+                    return nodes
+                node_ids = [n["node_id"] for n in nodes]
+                cur.execute(
+                    """
+                    SELECT node_id, id AS job_id, path, config
+                    FROM jobs
+                    WHERE status = 'running' AND node_id = ANY(%s)
+                    ORDER BY started_at
+                    """,
+                    (node_ids,),
+                )
+                jobs_by_node = {}
+                for row in cur.fetchall():
+                    jobs_by_node.setdefault(row["node_id"], []).append({"job_id": row["job_id"], "path": row["path"], "config": row["config"]})
+                for node in nodes:
+                    node["active_jobs"] = jobs_by_node.get(node["node_id"], [])
+                return nodes
 
     def recover_stale_nodes(self, stale_seconds=120):
         """Mark nodes that haven't sent a heartbeat as offline and requeue their jobs.
