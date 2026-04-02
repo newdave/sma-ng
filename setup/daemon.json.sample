@@ -3,6 +3,7 @@
   "api_key": null,
   "db_url": null,
   "ffmpeg_dir": null,
+  "job_timeout_seconds": 0,
   "media_extensions": [".mp4", ".mkv", ".avi", ".mov", ".ts"],
   "path_rewrites": [
     {

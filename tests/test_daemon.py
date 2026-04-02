@@ -8,7 +8,6 @@ import urllib.request
 import pytest
 
 from daemon import (
-    DASHBOARD_HTML,
     STATUS_COMPLETED,
     STATUS_FAILED,
     STATUS_PENDING,
@@ -20,8 +19,11 @@ from daemon import (
     PathConfigManager,
     WebhookHandler,
     _inline,
+    _load_dashboard_html,
     _render_markdown_to_html,
 )
+
+DASHBOARD_HTML = _load_dashboard_html()
 
 
 class TestJobDatabase:
@@ -217,7 +219,7 @@ class TestConfigLockManager:
         clm.acquire("/config.ini", 1, "/path.mkv")
         status = clm.get_status()
         assert "/config.ini" in status["active"]
-        clm.release("/config.ini")
+        clm.release("/config.ini", 1)
         status = clm.get_status()
         assert "/config.ini" not in status["active"]
 
@@ -226,15 +228,17 @@ class TestConfigLockManager:
         assert clm.is_locked("/config.ini") is False
         clm.acquire("/config.ini", 1, "/path.mkv")
         assert clm.is_locked("/config.ini") is True
-        clm.release("/config.ini")
+        clm.release("/config.ini", 1)
         assert clm.is_locked("/config.ini") is False
 
     def test_get_active_job(self):
         clm = ConfigLockManager()
         clm.acquire("/config.ini", 42, "/movie.mkv")
-        active = clm.get_active_job("/config.ini")
-        assert active == (42, "/movie.mkv")
-        clm.release("/config.ini")
+        active = clm.get_active_jobs("/config.ini")
+        assert len(active) == 1
+        assert active[0]["job_id"] == 42
+        assert active[0]["path"] == "/movie.mkv"
+        clm.release("/config.ini", 42)
 
 
 class TestMarkdownRendering:
@@ -667,12 +671,12 @@ class TestConfigLockManagerExtended:
     def test_is_locked_false_after_release(self):
         mgr = ConfigLockManager()
         mgr.acquire("/cfg/autoProcess.ini", job_id=1, job_path="/a.mkv")
-        mgr.release("/cfg/autoProcess.ini")
+        mgr.release("/cfg/autoProcess.ini", job_id=1)
         assert mgr.is_locked("/cfg/autoProcess.ini") is False
 
     def test_release_unheld_lock_does_not_raise(self):
         mgr = ConfigLockManager()
-        mgr.release("/cfg/autoProcess.ini")  # Should not raise
+        mgr.release("/cfg/autoProcess.ini", job_id=99)  # Should not raise
 
     def test_get_status_empty(self):
         mgr = ConfigLockManager()
@@ -685,18 +689,21 @@ class TestConfigLockManagerExtended:
         mgr.acquire("/cfg/autoProcess.ini", job_id=42, job_path="/movie.mkv")
         status = mgr.get_status()
         assert "/cfg/autoProcess.ini" in status["active"]
-        assert status["active"]["/cfg/autoProcess.ini"]["job_id"] == 42
-        assert status["active"]["/cfg/autoProcess.ini"]["path"] == "/movie.mkv"
+        # get_status returns a list of active job dicts
+        active_jobs = status["active"]["/cfg/autoProcess.ini"]
+        assert any(j["job_id"] == 42 and j["path"] == "/movie.mkv" for j in active_jobs)
 
-    def test_get_active_job_returns_none_when_idle(self):
+    def test_get_active_job_returns_empty_when_idle(self):
         mgr = ConfigLockManager()
-        assert mgr.get_active_job("/cfg/autoProcess.ini") is None
+        assert mgr.get_active_jobs("/cfg/autoProcess.ini") == []
 
     def test_get_active_job_returns_info_when_locked(self):
         mgr = ConfigLockManager()
         mgr.acquire("/cfg/autoProcess.ini", job_id=7, job_path="/show.mkv")
-        info = mgr.get_active_job("/cfg/autoProcess.ini")
-        assert info == (7, "/show.mkv")
+        jobs = mgr.get_active_jobs("/cfg/autoProcess.ini")
+        assert len(jobs) == 1
+        assert jobs[0]["job_id"] == 7
+        assert jobs[0]["path"] == "/show.mkv"
 
     def test_separate_configs_independent(self):
         mgr = ConfigLockManager()

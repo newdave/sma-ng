@@ -205,7 +205,7 @@ class MediaStreamInfo(object):
         """Convert val to float, returning default on failure."""
         try:
             return float(val)
-        except:
+        except Exception:
             return default
 
     @staticmethod
@@ -213,7 +213,7 @@ class MediaStreamInfo(object):
         """Convert val to int, returning default on failure."""
         try:
             return int(val)
-        except:
+        except Exception:
             return default
 
     @staticmethod
@@ -221,7 +221,7 @@ class MediaStreamInfo(object):
         """Convert val to bool, returning default on failure."""
         try:
             return bool(val)
-        except:
+        except Exception:
             return default
 
     def parse_ffprobe(self, key, val):
@@ -302,7 +302,7 @@ class MediaStreamInfo(object):
                 try:
                     codec_class = next(x for x in video_codec_list if x.ffprobe_codec_name == self.codec)
                     self.video_level = codec_class.codec_specific_level_conversion(self.video_level)
-                except:
+                except Exception:
                     pass
             elif key == "pix_fmt":
                 self.pix_fmt = val.lower()
@@ -597,7 +597,7 @@ class FFMpeg(object):
             cmds = clean_cmds
         except KeyboardInterrupt:
             raise
-        except:
+        except Exception:
             raise FFMpegError("There was an error making all command line parameters a string")
         return Popen(cmds, shell=False, stdin=PIPE, stdout=PIPE, stderr=PIPE, close_fds=(os.name != "nt"), startupinfo=None)
 
@@ -644,7 +644,7 @@ class FFMpeg(object):
             return json.loads(stdout_data)["frames"][0]
         except KeyboardInterrupt:
             raise
-        except:
+        except Exception:
             raise FFMpegError("Unable to obtain FFMPEG framedata")
 
     def probe(self, fname, posters_as_video=True):
@@ -688,7 +688,7 @@ class FFMpeg(object):
             info.video.framedata = self.framedata(fname)
         except KeyboardInterrupt:
             raise
-        except:
+        except Exception:
             pass
 
         return info
@@ -730,7 +730,7 @@ class FFMpeg(object):
                     svalue = cmds[index + 1]
                     try:
                         svalue = int(svalue)
-                    except:
+                    except Exception:
                         svalue = STRICT.get(svalue, strictmin)
                     strictmin = min((svalue, strictmin))
                     indices.extend([index, index + 1])
@@ -813,7 +813,7 @@ class FFMpeg(object):
             except UnicodeDecodeError:
                 try:
                     ret = ret.decode(console_encoding, errors="ignore")
-                except:
+                except Exception:
                     pass
 
             total_output += ret
@@ -844,21 +844,10 @@ class FFMpeg(object):
             raise FFMpegError("Error while calling ffmpeg binary")
 
         cmd = " ".join(cmds)
-        if "\n" in total_output:
-            line = total_output.split("\n")[-2]
-
-            if line.startswith("Received signal"):
-                # Received signal 15: terminating.
-                raise FFMpegConvertError(line.split(":")[0], cmd, total_output, pid=p.pid)
-            if line.startswith(infile + ": "):
-                err = line[len(infile) + 2 :]
-                raise FFMpegConvertError("Encoding error", cmd, total_output, err, pid=p.pid)
-            if line.startswith("Error while "):
-                raise FFMpegConvertError("Encoding error", cmd, total_output, line, pid=p.pid)
-            if not yielded:
-                raise FFMpegConvertError("Unknown ffmpeg error", cmd, total_output, line, pid=p.pid)
         if p.returncode != 0:
-            raise FFMpegConvertError("Exited with code %d" % p.returncode, cmd, total_output, pid=p.pid)
+            # Use the last non-empty line of output as the error detail.
+            last_line = next((l for l in reversed(total_output.split("\n")) if l.strip()), "")
+            raise FFMpegConvertError("Exited with code %d" % p.returncode, cmd, total_output, last_line, pid=p.pid)
 
     def thumbnail(self, fname, time, outfile, size=None, quality=DEFAULT_JPEG_QUALITY):
         """

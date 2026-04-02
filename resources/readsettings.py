@@ -63,21 +63,25 @@ class SMAConfigParser(ConfigParser, object):
                 output[split[0]] = split[1]
         return output
 
-    def getpath(self, section, option, vars=None):
-        """Return an INI value as a normalised filesystem path, or ``None`` if the value is empty."""
+    def getpath(self, section, option, vars=None, create=False):
+        """Return an INI value as a normalised filesystem path, or ``None`` if the value is empty.
+
+        When ``create=True`` the directory is created if it does not already exist (equivalent to the old ``getdirectory`` method).
+        """
         path = self.get(section, option, vars=vars).strip()
         if path == "":
             return None
-        return os.path.normpath(path)
+        path = os.path.normpath(path)
+        if create:
+            try:
+                os.makedirs(path)
+            except (OSError, TypeError):
+                pass
+        return path
 
     def getdirectory(self, section, option, vars=None):
         """Return an INI value as a path, creating the directory if it does not exist. Returns ``None`` for empty values."""
-        directory = self.getpath(section, option, vars)
-        try:
-            os.makedirs(directory)
-        except (OSError, TypeError):
-            pass
-        return directory
+        return self.getpath(section, option, vars=vars, create=True)
 
     def getdirectories(self, section, option, vars=None, separator=",", default=[]):
         """Return a list of paths from a comma-separated INI value, creating each directory if it does not exist."""

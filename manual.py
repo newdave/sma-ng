@@ -73,21 +73,17 @@ def mediatype():
     Returns:
         The selected ``MediaTypes`` enum value.
     """
-    try:
-        print("Select media type:")
-        for mt in MediaTypes:
-            print(str(mt))
-        result = input("#: ")
+    while True:
         try:
+            print("Select media type:")
+            for mt in MediaTypes:
+                print(str(mt))
+            result = input("#: ")
             return MediaTypes(int(result))
         except KeyboardInterrupt:
             raise
-        except:
+        except (EOFError, ValueError):
             print("Invalid selection")
-            return mediatype()
-    except EOFError:
-        print("Invalid selection")
-        return mediatype()
 
 
 def getValue(prompt, num=False):
@@ -100,20 +96,19 @@ def getValue(prompt, num=False):
     Returns:
         The entered string value (stripped of surrounding quotes/spaces).
     """
-    try:
-        print(prompt + ":")
-        value = input("#: ").strip(' "')
-        # Remove escape characters in non-windows environments
-        if os.name != "nt":
-            value = value.replace("\\", "")
-        if num is True and value.isdigit() is False:
-            print("Must be a numerical value")
-            return getValue(prompt, num)
-        else:
+    while True:
+        try:
+            print(prompt + ":")
+            value = input("#: ").strip(' "')
+            # Remove escape characters in non-windows environments
+            if os.name != "nt":
+                value = value.replace("\\", "")
+            if num is True and not value.isdigit():
+                print("Must be a numerical value")
+                continue
             return value
-    except EOFError:
-        print("Must be a numerical value")
-        return getValue(prompt, num)
+        except EOFError:
+            print("Must be a numerical value")
 
 
 def getYesNo():
@@ -124,18 +119,17 @@ def getYesNo():
     """
     yes = ["y", "yes", "true", "1"]
     no = ["n", "no", "false", "0"]
-    try:
-        data = input("# [y/n]: ")
-        if data.lower() in yes:
-            return True
-        elif data.lower() in no:
-            return False
-        else:
+    while True:
+        try:
+            data = input("# [y/n]: ")
+            if data.lower() in yes:
+                return True
+            elif data.lower() in no:
+                return False
+            else:
+                print("Invalid selection")
+        except EOFError:
             print("Invalid selection")
-            return getYesNo()
-    except EOFError:
-        print("Invalid selection")
-        return getYesNo()
 
 
 class SkipFileException(Exception):
@@ -253,9 +247,39 @@ def guessInfo(fileName, settings, tmdbid=None, tvdbid=None, imdbid=None, season=
             return None
     except KeyboardInterrupt:
         raise
-    except:
+    except Exception:
         log.exception("Unable to guess movie information")
         return None
+
+
+def _tmdb_search(media_type, title, year):
+    """Search TMDB for *title*, falling back to a year-less query when needed.
+
+    Args:
+        media_type: ``"movie"`` or ``"tv"``.
+        title: Title string to search for.
+        year: Optional release/air year; ``None`` means no year filter.
+
+    Returns:
+        The first result dict from the TMDB API, or ``None`` if nothing matched.
+    """
+    tmdb.API_KEY = tmdb_api_key
+    search = tmdb.Search()
+    if media_type == "movie":
+        if year:
+            search.movie(query=title, year=year)
+            if not search.results:
+                search.movie(query=title)
+        else:
+            search.movie(query=title)
+    else:
+        if year:
+            search.tv(query=title, first_air_date_year=year)
+            if not search.results:
+                search.tv(query=title)
+        else:
+            search.tv(query=title)
+    return search.results[0] if search.results else None
 
 
 def movieInfo(guessData, tmdbid=None, imdbid=None, language=None, original=None):
@@ -274,19 +298,9 @@ def movieInfo(guessData, tmdbid=None, imdbid=None, language=None, original=None)
         match was found on TMDB.
     """
     if not tmdbid and not imdbid:
-        tmdb.API_KEY = tmdb_api_key
-        search = tmdb.Search()
-        title = guessData["title"]
-        if "year" in guessData:
-            _ = search.movie(query=title, year=guessData["year"])
-            if len(search.results) < 1:
-                _ = search.movie(query=title, year=guessData["year"])
-        else:
-            _ = search.movie(query=title)
-        if len(search.results) < 1:
+        result = _tmdb_search("movie", guessData["title"], guessData.get("year"))
+        if result is None:
             return None
-        result = search.results[0]
-        # release = result['release_date']
         tmdbid = result["id"]
         log.debug("Guessed filename resulted in TMDB ID %s" % tmdbid)
 
@@ -317,18 +331,9 @@ def tvInfo(guessData, tmdbid=None, tvdbid=None, imdbid=None, season=None, episod
     episode = episode or guessData.get("episode", 0)
 
     if not tmdbid and not tvdbid and not imdbid:
-        tmdb.API_KEY = tmdb_api_key
-        search = tmdb.Search()
-        series = guessData["title"]
-        if "year" in guessData:
-            _ = search.tv(query=series, first_air_date_year=guessData["year"])
-            if len(search.results) < 1:
-                _ = search.tv(query=series)
-        else:
-            _ = search.tv(query=series)
-        if search and len(search.results) < 1:
+        result = _tmdb_search("tv", guessData["title"], guessData.get("year"))
+        if result is None:
             return None
-        result = search.results[0]
         tmdbid = result["id"]
 
     metadata = Metadata(MediaType.TV, tmdbid=tmdbid, imdbid=imdbid, tvdbid=tvdbid, season=season, episode=episode, language=language, logger=log, original=original)
@@ -522,7 +527,7 @@ def processFile(
                     mp.QTFS(inputfile)
             except KeyboardInterrupt:
                 raise
-            except:
+            except Exception:
                 log.exception("There was an error tagging the file")
         return
 
@@ -549,7 +554,7 @@ def processFile(
                 tagdata.writeTags(output["output"], inputfile, mp.converter, mp.settings.artwork, mp.settings.thumbnail, width=output["x"], height=output["y"], cues_to_front=output["cues_to_front"])
             except KeyboardInterrupt:
                 raise
-            except:
+            except Exception:
                 log.exception("There was an error tagging the file")
                 tagfailed = True
         if mp.settings.relocate_moov and not tagfailed:
@@ -566,7 +571,7 @@ def processFile(
                 new_name = generate_name(output["output"], info, tagdata, mp.settings, guess_data=guess_data, log=log)
                 if new_name:
                     output["output"] = rename_file(output["output"], new_name, log=log)
-            except:
+            except Exception:
                 log.exception("Error during file rename")
 
         # Reverse Ouput
@@ -587,7 +592,7 @@ def processFile(
                 from resources.metadata import update_plexmatch
 
                 update_plexmatch(output["output"], tagdata, mp.settings, log=log)
-            except:
+            except Exception:
                 log.exception("Error updating .plexmatch")
 
         if mp.settings.postprocess:
@@ -666,7 +671,7 @@ def walkDir(
                 log.debug("Skipping file %s." % filepath)
             except KeyboardInterrupt:
                 break
-            except:
+            except Exception:
                 log.exception("Error processing file %s." % filepath)
                 error.append(filepath)
                 failed = True
@@ -703,6 +708,65 @@ def showCodecs():
             print("%s: %s" % (codec.codec_name, codec.ffmpeg_codec_name))
 
 
+def apply_cli_overrides(args, settings):
+    """Apply CLI argument overrides to a ReadSettings instance.
+
+    Args:
+        args: Parsed argument dict from ``vars(parser.parse_args())``.
+        settings: A :class:`ReadSettings` instance to mutate in place.
+
+    Returns:
+        ``type_hint`` string (``"tv"``, ``"movie"``, or ``None``).
+    """
+    if args["nomove"]:
+        settings.output_dir = None
+        settings.moveto = None
+        log.info("No-move enabled")
+    elif args["moveto"]:
+        settings.moveto = args["moveto"]
+        log.info("Overriden move-to to " + args["moveto"])
+    if args["nocopy"]:
+        settings.copyto = None
+        log.info("No-copy enabled")
+    if args["nodelete"]:
+        settings.delete = False
+        log.info("No-delete enabled")
+    if args["processsameextensions"]:
+        settings.process_same_extensions = True
+        log.info("Reprocessing of same extensions enabled")
+    if args["forceconvert"]:
+        settings.process_same_extensions = True
+        settings.force_convert = True
+        log.info("Force conversion of files enabled. As a result conversion of mp4 files is also enabled")
+    if args["tagonly"]:
+        log.info("Tag only enabled")
+    elif args["notag"]:
+        settings.tagfile = False
+        log.info("No-tagging enabled")
+    if args["nopost"]:
+        settings.postprocess = False
+        log.info("No post processing enabled")
+    if args["optionsonly"]:
+        logging.getLogger("resources.mediaprocessor").setLevel(logging.CRITICAL)
+        log.info("Options only mode enabled")
+    if args["minsize"]:
+        try:
+            settings.minimum_size = int(args["minsize"])
+            log.info("Minimum size set to %d mb" % (int(args["minsize"])))
+        except TypeError:
+            log.error("Invalid minsize")
+
+    type_hint = None
+    if args.get("tv"):
+        type_hint = "tv"
+        log.info("Forcing media type detection to: TV")
+    elif args.get("movie"):
+        type_hint = "movie"
+        log.info("Forcing media type detection to: Movie")
+
+    return type_hint
+
+
 def main():
     """Parse CLI arguments and drive the manual conversion/tagging workflow.
 
@@ -721,23 +785,27 @@ def main():
     parser.add_argument("-tvdb", "--tvdbid", help="Specify the TVDB ID for media")
     parser.add_argument("-imdb", "--imdbid", help="Specify the IMDB ID for media")
     parser.add_argument("-tmdb", "--tmdbid", help="Specify the TMDB ID for media")
-    parser.add_argument("-nm", "--nomove", action="store_true", help="Overrides and disables the custom moving of file options that come from output_dir and move-to")
     parser.add_argument("-nc", "--nocopy", action="store_true", help="Overrides and disables the custom copying of file options that come from output_dir and move-to")
     parser.add_argument("-nd", "--nodelete", action="store_true", help="Overrides and disables deleting of original files")
-    parser.add_argument("-nt", "--notag", action="store_true", help="Overrides and disables tagging when using the automated option")
-    parser.add_argument("-to", "--tagonly", action="store_true", help="Only tag without conversion")
     parser.add_argument("-np", "--nopost", action="store_true", help="Overrides and disables the execution of additional post processing scripts")
     parser.add_argument("-pr", "--preserverelative", action="store_true", help="Preserves relative directories when processing multiple files using the copy-to or move-to functionality")
     parser.add_argument("-pse", "--processsameextensions", action="store_true", help="Overrides process-same-extensions setting in autoProcess.ini enabling the reprocessing of files")
     parser.add_argument(
         "-fc", "--forceconvert", action="store_true", help="Overrides force-convert setting in autoProcess.ini and also enables process-same-extenions if true forcing the conversion of files"
     )
-    parser.add_argument("-m", "--moveto", help="Override move-to value setting in autoProcess.ini changing the final destination of the file")
     parser.add_argument("-oo", "--optionsonly", action="store_true", help="Display generated conversion options only, do not perform conversion")
     parser.add_argument("-cl", "--codeclist", action="store_true", help="Print a list of supported codecs and their paired FFMPEG encoders")
     parser.add_argument("-o", "--original", help="Specify the original source/release filename")
     parser.add_argument("-ms", "--minsize", help="Specify the minimum file size")
     parser.add_argument("-pa", "--processedarchive", help="Specify a processed list/archive so already processed files are skipped", nargs="?", const="archive.json")
+
+    move_group = parser.add_mutually_exclusive_group()
+    move_group.add_argument("-nm", "--nomove", action="store_true", help="Overrides and disables the custom moving of file options that come from output_dir and move-to")
+    move_group.add_argument("-m", "--moveto", help="Override move-to value setting in autoProcess.ini changing the final destination of the file")
+
+    tag_group = parser.add_mutually_exclusive_group()
+    tag_group.add_argument("-nt", "--notag", action="store_true", help="Overrides and disables tagging when using the automated option")
+    tag_group.add_argument("-to", "--tagonly", action="store_true", help="Only tag without conversion")
 
     mediatype_group = parser.add_mutually_exclusive_group()
     mediatype_group.add_argument("--tv", action="store_true", help="Force guessit to treat input as a TV episode")
@@ -781,59 +849,14 @@ def main():
         processedList = json.load(pa)
         log.info("Loaded archive list containing %d files" % (len(processedList)))
 
-    if args["nomove"]:
-        settings.output_dir = None
-        settings.moveto = None
-        log.info("No-move enabled")
-    elif args["moveto"]:
-        settings.moveto = args["moveto"]
-        log.info("Overriden move-to to " + args["moveto"])
-    if args["nocopy"]:
-        settings.copyto = None
-        log.info("No-copy enabled")
-    if args["nodelete"]:
-        settings.delete = False
-        log.info("No-delete enabled")
-    if args["processsameextensions"]:
-        settings.process_same_extensions = True
-        log.info("Reprocessing of same extensions enabled")
-    if args["forceconvert"]:
-        settings.process_same_extensions = True
-        settings.force_convert = True
-        log.info("Force conversion of files enabled. As a result conversion of mp4 files is also enabled")
-    if args["tagonly"]:
-        log.info("Tag only enabled")
-    elif args["notag"]:
-        settings.tagfile = False
-        log.info("No-tagging enabled")
-    if args["nopost"]:
-        settings.postprocess = False
-        log.info("No post processing enabled")
-    if args["optionsonly"]:
-        logging.getLogger("resources.mediaprocessor").setLevel(logging.CRITICAL)
-        log.info("Options only mode enabled")
-    if args["minsize"]:
-        try:
-            settings.minimum_size = int(args["minsize"])
-            log.info("Minimum size set to %d mb" % (int(args["minsize"])))
-        except TypeError:
-            log.error("Invalid minsize")
-
-    # Determine media type hint from CLI flags
-    type_hint = None
-    if args.get("tv"):
-        type_hint = "tv"
-        log.info("Forcing media type detection to: TV")
-    elif args.get("movie"):
-        type_hint = "movie"
-        log.info("Forcing media type detection to: Movie")
+    type_hint = apply_cli_overrides(args, settings)
 
     # Establish the path we will be working with
     if args["input"]:
         path = str(args["input"])
         try:
             path = glob.glob(path)[0]
-        except:
+        except Exception:
             pass
     else:
         path = getValue("Enter path to file")
