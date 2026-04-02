@@ -295,14 +295,31 @@
                 <span class="text-xs px-2 py-0.5 rounded-full"
                       :class="{'pending':'bg-gray-700 text-gray-300','running':'bg-blue-900 text-blue-300','completed':'bg-green-900 text-green-300','failed':'bg-red-900 text-red-300'}[j.status] || 'bg-gray-700 text-gray-400'"
                       x-text="j.status"></span>
+                <span x-show="j.status === 'pending' && (j.priority || 0) !== 0"
+                      class="ml-1 text-xs px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 font-mono"
+                      :title="'Priority: ' + j.priority"
+                      x-text="(j.priority > 0 ? '+' : '') + j.priority"></span>
               </td>
               <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtTime(j.created_at)"></td>
               <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtDuration(j)"></td>
               <td class="py-2 text-xs">
-                <button x-show="j.status === 'failed'" @click="requeueJob(j.id)"
-                        class="opacity-0 group-hover:opacity-100 px-2 py-0.5 rounded border border-red-700 text-red-400 hover:border-red-500 hover:text-red-300 transition-all">
-                  Requeue
-                </button>
+                <div class="flex items-center gap-1">
+                  <!-- Priority controls — pending jobs only -->
+                  <template x-if="j.status === 'pending'">
+                    <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button @click="adjustPriority(j, 1)"
+                              title="Run sooner (increase priority)"
+                              class="w-6 h-6 flex items-center justify-center rounded border border-gray-600 text-gray-400 hover:border-indigo-500 hover:text-indigo-300 transition-colors text-xs leading-none">▲</button>
+                      <button @click="adjustPriority(j, -1)"
+                              title="Run later (decrease priority)"
+                              class="w-6 h-6 flex items-center justify-center rounded border border-gray-600 text-gray-400 hover:border-indigo-500 hover:text-indigo-300 transition-colors text-xs leading-none">▼</button>
+                    </div>
+                  </template>
+                  <button x-show="j.status === 'failed'" @click="requeueJob(j.id)"
+                          class="opacity-0 group-hover:opacity-100 px-2 py-0.5 rounded border border-red-700 text-red-400 hover:border-red-500 hover:text-red-300 transition-all">
+                    Requeue
+                  </button>
+                </div>
               </td>
             </tr>
           </template>
@@ -415,6 +432,19 @@ function dashboard() {
           const j = this.jobs.find(j => j.id === id);
           if (j) j.status = 'pending';
           setTimeout(() => this.refresh(), 500);
+        }
+      } catch(e) {}
+    },
+    async adjustPriority(job, delta) {
+      const newPriority = (job.priority || 0) + delta;
+      try {
+        const r = await fetch('/jobs/' + job.id + '/priority', {
+          method: 'POST',
+          headers: this.authHeaders(),
+          body: JSON.stringify({priority: newPriority}),
+        });
+        if (r.ok) {
+          job.priority = newPriority;
         }
       } catch(e) {}
     },
