@@ -186,6 +186,9 @@ class ReadSettings:
             "prioritize-source-pix-fmt": True,
             "filter": "",
             "force-filter": False,
+            "look-ahead-depth": 0,
+            "b-frames": -1,
+            "ref-frames": -1,
         },
         "HDR": {
             "codec": "",
@@ -198,6 +201,9 @@ class ReadSettings:
             "filter": "",
             "force-filter": False,
             "profile": "",
+            "look-ahead-depth": 0,
+            "b-frames": -1,
+            "ref-frames": -1,
         },
         "Naming": {
             "enabled": False,
@@ -716,6 +722,9 @@ class ReadSettings:
         self.vprofile = config.getlist(section, "profile")
         self.pix_fmt = config.getlist(section, "pix-fmt")
         self.keep_source_pix_fmt = config.getboolean(section, "prioritize-source-pix-fmt")
+        self.look_ahead_depth = config.getint(section, "look-ahead-depth")
+        self.b_frames = config.getint(section, "b-frames")
+        self.ref_frames = config.getint(section, "ref-frames")
 
         # HDR
         section = "HDR"
@@ -730,6 +739,9 @@ class ReadSettings:
         self.hdr["filter"] = config.get(section, "filter")
         self.hdr["forcefilter"] = config.getboolean(section, "force-filter")
         self.hdr["profile"] = config.getlist(section, "profile")
+        self.hdr["look_ahead_depth"] = config.getint(section, "look-ahead-depth")
+        self.hdr["b_frames"] = config.getint(section, "b-frames")
+        self.hdr["ref_frames"] = config.getint(section, "ref-frames")
 
         # Naming
         section = "Naming"
