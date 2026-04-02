@@ -75,6 +75,10 @@ components:
           type: string
           nullable: true
           description: Current timecode (e.g. "00:12:34") when status is running
+        priority:
+          type: integer
+          default: 0
+          description: Scheduling priority — higher values run first among pending jobs (FIFO within same priority)
 
     JobStats:
       type: object
@@ -302,6 +306,60 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /jobs/{id}/priority:
+    post:
+      summary: Set the priority of a pending job
+      description: Higher priority jobs are picked up first. Only works on pending jobs.
+      operationId: setJobPriority
+      tags: [jobs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [priority]
+              properties:
+                priority:
+                  type: integer
+                  description: New priority value (higher = runs sooner, default 0)
+      responses:
+        "200":
+          description: Priority updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: integer
+                  priority:
+                    type: integer
+        "400":
+          description: Invalid job ID or body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Job is not in pending state
           content:
             application/json:
               schema:

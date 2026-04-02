@@ -114,6 +114,9 @@ class BaseJobDatabase(ABC):
     def cancel_job(self, job_id): ...
 
     @abstractmethod
+    def set_job_priority(self, job_id, priority): ...
+
+    @abstractmethod
     def filter_unscanned(self, paths): ...
 
     @abstractmethod
@@ -180,6 +183,7 @@ class JobDatabase(BaseJobDatabase):
                 "ALTER TABLE jobs ADD COLUMN retry_count INTEGER DEFAULT 0",
                 "ALTER TABLE jobs ADD COLUMN max_retries INTEGER DEFAULT 0",
                 "ALTER TABLE jobs ADD COLUMN next_attempt_at TIMESTAMP",
+                "ALTER TABLE jobs ADD COLUMN priority INTEGER DEFAULT 0",
             ]:
                 try:
                     cursor.execute(col_sql)
@@ -274,7 +278,7 @@ class JobDatabase(BaseJobDatabase):
                     SELECT * FROM jobs
                     WHERE status = ? AND config NOT IN (%s)
                       AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
-                    ORDER BY created_at ASC
+                    ORDER BY priority DESC, created_at ASC
                     LIMIT 1
                 """
                     % placeholders,
@@ -286,7 +290,7 @@ class JobDatabase(BaseJobDatabase):
                     SELECT * FROM jobs
                     WHERE status = ?
                       AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
-                    ORDER BY created_at ASC
+                    ORDER BY priority DESC, created_at ASC
                     LIMIT 1
                 """,
                     (STATUS_PENDING,),
@@ -527,6 +531,18 @@ class JobDatabase(BaseJobDatabase):
             self.log.info("Cancelled job %d" % job_id)
         return cancelled
 
+    def set_job_priority(self, job_id, priority):
+        """Set the priority of a pending job. Returns True if the job was updated."""
+        with self._cursor() as cursor:
+            cursor.execute(
+                "UPDATE jobs SET priority = ? WHERE id = ? AND status = ?",
+                (priority, job_id, STATUS_PENDING),
+            )
+            updated = cursor.rowcount > 0
+        if updated:
+            self.log.info("Set priority %d for job %d" % (priority, job_id))
+        return updated
+
     def filter_unscanned(self, paths):
         """Return the subset of paths not yet recorded in scanned_files."""
         if not paths:
@@ -640,6 +656,7 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
                     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0",
                     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_retries INTEGER DEFAULT 0",
                     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ",
+                    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 0",
                 ]:
                     cur.execute(col_sql)
                 cur.execute("""
@@ -710,7 +727,7 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
                         FROM jobs
                         WHERE status = %s AND config != ALL(%s)
                           AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
-                        ORDER BY created_at ASC
+                        ORDER BY priority DESC, created_at ASC
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
                     """,
@@ -723,7 +740,7 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
                         FROM jobs
                         WHERE status = %s
                           AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
-                        ORDER BY created_at ASC
+                        ORDER BY priority DESC, created_at ASC
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
                     """,
@@ -1032,6 +1049,19 @@ class PostgreSQLJobDatabase(BaseJobDatabase):
         if cancelled:
             self.log.info("Cancelled job %d" % job_id)
         return cancelled
+
+    def set_job_priority(self, job_id, priority):
+        """Set the priority of a pending job. Returns True if the job was updated."""
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE jobs SET priority = %s WHERE id = %s AND status = %s RETURNING id",
+                    (priority, job_id, STATUS_PENDING),
+                )
+                updated = cur.fetchone() is not None
+        if updated:
+            self.log.info("Set priority %d for job %d" % (priority, job_id))
+        return updated
 
     def filter_unscanned(self, paths):
         """Return the subset of paths not yet recorded in scanned_files."""
@@ -2031,6 +2061,36 @@ class WebhookHandler(BaseHTTPRequestHandler):
         except ValueError:
             self.send_json_response(400, {"error": "Invalid job ID"})
 
+    def _post_job_priority(self, path):
+        try:
+            job_id = int(path.split("/")[-2])
+        except ValueError:
+            self.send_json_response(400, {"error": "Invalid job ID"})
+            return
+        content_length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(content_length) if content_length else b"{}")
+        except (json.JSONDecodeError, ValueError):
+            self.send_json_response(400, {"error": "Invalid JSON body"})
+            return
+        if "priority" not in body:
+            self.send_json_response(400, {"error": "Missing 'priority' field"})
+            return
+        try:
+            priority = int(body["priority"])
+        except (TypeError, ValueError):
+            self.send_json_response(400, {"error": "'priority' must be an integer"})
+            return
+        updated = self.server.job_db.set_job_priority(job_id, priority)
+        if updated:
+            self.send_json_response(200, {"job_id": job_id, "priority": priority})
+        else:
+            job = self.server.job_db.get_job(job_id)
+            if job is None:
+                self.send_json_response(404, {"error": "Job not found"})
+            else:
+                self.send_json_response(409, {"error": "Priority can only be set on pending jobs", "status": job["status"]})
+
     def _post_scan_filter(self):
         paths = self._read_json_paths()
         if paths is None:
@@ -2094,6 +2154,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._post_job_requeue(parsed.path)
         elif parsed.path.startswith("/jobs/") and parsed.path.endswith("/cancel"):
             self._post_job_cancel(parsed.path)
+        elif parsed.path.startswith("/jobs/") and parsed.path.endswith("/priority"):
+            self._post_job_priority(parsed.path)
         else:
             self.send_json_response(404, {"error": "Not found"})
 
