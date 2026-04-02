@@ -6,15 +6,19 @@
 #   sma-webhook.sh submit /path/to/file.mkv          Submit a file for conversion
 #   sma-webhook.sh submit /path/to/file.mkv -tmdb 603  Submit with extra args
 #   sma-webhook.sh submit /path/to/file.mkv --config /path/to/autoProcess.ini
+#   sma-webhook.sh submit /path/to/file.mkv --retries 3  Submit with retry-on-failure
 #   sma-webhook.sh health                             Check daemon health
 #   sma-webhook.sh jobs                               List all jobs
 #   sma-webhook.sh jobs pending                       List jobs by status
 #   sma-webhook.sh job 42                             Get specific job details
+#   sma-webhook.sh cancel 42                          Cancel a running or pending job
 #   sma-webhook.sh stats                              Show job statistics
 #   sma-webhook.sh configs                            Show path-to-config mappings
 #   sma-webhook.sh cleanup [days]                     Remove old completed/failed jobs (default: 30)
 #   sma-webhook.sh requeue                            Requeue all failed/interrupted jobs
 #   sma-webhook.sh requeue 42                         Requeue a specific job by ID
+#   sma-webhook.sh reload                             Reload daemon.json config without restart
+#   sma-webhook.sh restart                            Gracefully restart the daemon
 #   sma-webhook.sh shutdown                           Gracefully shut down the daemon
 #
 # Environment variables:
@@ -50,6 +54,7 @@ cmd_submit() {
     local filepath="$1"; shift
 
     local config=""
+    local retries=0
     local extra_args=()
 
     while [[ $# -gt 0 ]]; do
@@ -57,23 +62,33 @@ cmd_submit() {
             --config)
                 [[ $# -ge 2 ]] || die "--config requires a value"
                 config="$2"; shift 2 ;;
+            --retries)
+                [[ $# -ge 2 ]] || die "--retries requires a value"
+                retries="$2"; shift 2 ;;
             *)
                 extra_args+=("$1"); shift ;;
         esac
     done
 
-    local json
-    if [[ -n "$config" && ${#extra_args[@]} -gt 0 ]]; then
-        json=$(jq -n --arg p "$filepath" --arg c "$config" --argjson a "$(printf '%s\n' "${extra_args[@]}" | jq -R . | jq -s .)" \
-            '{path: $p, config: $c, args: $a}')
-    elif [[ -n "$config" ]]; then
-        json=$(jq -n --arg p "$filepath" --arg c "$config" '{path: $p, config: $c}')
-    elif [[ ${#extra_args[@]} -gt 0 ]]; then
-        json=$(jq -n --arg p "$filepath" --argjson a "$(printf '%s\n' "${extra_args[@]}" | jq -R . | jq -s .)" \
-            '{path: $p, args: $a}')
-    else
-        json=$(jq -n --arg p "$filepath" '{path: $p}')
+    local payload=()
+    payload+=(--arg p "$filepath")
+    local jq_expr='{path: $p'
+    if [[ -n "$config" ]]; then
+        payload+=(--arg c "$config")
+        jq_expr+=', config: $c'
     fi
+    if [[ ${#extra_args[@]} -gt 0 ]]; then
+        payload+=(--argjson a "$(printf '%s\n' "${extra_args[@]}" | jq -R . | jq -s .)")
+        jq_expr+=', args: $a'
+    fi
+    if [[ "$retries" -gt 0 ]]; then
+        payload+=(--argjson r "$retries")
+        jq_expr+=', max_retries: $r'
+    fi
+    jq_expr+='}'
+
+    local json
+    json=$(jq -n "${payload[@]}" "$jq_expr")
 
     curl -s -X POST "$SMA_DAEMON_URL/webhook" \
         -H "Content-Type: application/json" \
@@ -121,6 +136,19 @@ cmd_requeue() {
     fi
 }
 
+cmd_cancel() {
+    [[ $# -ge 1 ]] || die "cancel requires a job ID"
+    curl -s -X POST "$SMA_DAEMON_URL/jobs/$1/cancel" "${auth_headers[@]}" | jq .
+}
+
+cmd_reload() {
+    curl -s -X POST "$SMA_DAEMON_URL/reload" "${auth_headers[@]}" | jq .
+}
+
+cmd_restart() {
+    curl -s -X POST "$SMA_DAEMON_URL/restart" "${auth_headers[@]}" | jq .
+}
+
 cmd_shutdown() {
     curl -s -X POST "$SMA_DAEMON_URL/shutdown" "${auth_headers[@]}" | jq .
 }
@@ -134,10 +162,13 @@ case "$command" in
     health)   cmd_health ;;
     jobs)     cmd_jobs "$@" ;;
     job)      cmd_job "$@" ;;
+    cancel)   cmd_cancel "$@" ;;
     stats)    cmd_stats ;;
     configs)  cmd_configs ;;
     cleanup)  cmd_cleanup "$@" ;;
     requeue)  cmd_requeue "$@" ;;
+    reload)   cmd_reload ;;
+    restart)  cmd_restart ;;
     shutdown) cmd_shutdown ;;
     help|-h|--help) usage ;;
     *)        die "Unknown command: $command" ;;
