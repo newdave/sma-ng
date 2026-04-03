@@ -1,0 +1,279 @@
+# Configuration Reference
+
+Configuration lives in `config/autoProcess.ini` (INI format). Copy from `setup/autoProcess.ini.sample` or generate with `make config`.
+
+Override path via `SMA_CONFIG` environment variable.
+
+---
+
+## [Converter]
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `ffmpeg` | path | `ffmpeg` | Path to FFmpeg binary |
+| `ffprobe` | path | `ffprobe` | Path to FFprobe binary |
+| `threads` | int | `0` | FFmpeg threads (0 = auto) |
+| `output-directory` | path | | Temporary output location (files moved back after) |
+| `output-format` | string | `mp4` | Container format: `mp4`, `mkv`, `mov` |
+| `output-extension` | string | `mp4` | Output file extension |
+| `temp-extension` | string | | Temporary file extension during conversion |
+| `temp-output` | bool | `true` | Use temporary output file during conversion |
+| `minimum-size` | int | `0` | Minimum source file size in MB (0 = disabled) |
+| `ignored-extensions` | list | `nfo, ds_store` | Extensions to skip |
+| `copy-to` | path(s) | | Copy output to additional directories (pipe-separated) |
+| `move-to` | path | | Move output to final destination |
+| `delete-original` | bool | `true` | Delete source file after successful conversion |
+| `recycle-bin` | path | | Copy original here before deleting (only when `delete-original = True`) |
+| `process-same-extensions` | bool | `false` | Reprocess files already in output format |
+| `bypass-if-copying-all` | bool | `false` | Skip conversion if all streams can be copied |
+| `force-convert` | bool | `false` | Force conversion even if codec matches |
+| `post-process` | bool | `false` | Run post-process scripts |
+| `wait-post-process` | bool | `false` | Wait for post-process scripts to finish |
+| `preopts` | list | | Extra FFmpeg options before input |
+| `postopts` | list | | Extra FFmpeg options after codec options |
+| `opts-separator` | string | `,` | Separator for preopts/postopts lists |
+
+---
+
+## [Video]
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `codec` | list | `h265` | Video codecs in priority order. First is used for encoding, rest are copy-eligible |
+| `gpu` | string | | Hardware acceleration backend: `qsv`, `vaapi`, `nvenc`, `videotoolbox`, or empty for software |
+| `max-bitrate` | int | `0` | Maximum video bitrate in kbps (0 = unlimited) |
+| `bitrate-ratio` | dict | | Scale source bitrate per codec: `hevc:1.0, h264:0.65` |
+| `crf` | int | `24` | Constant Rate Factor (quality). Lower = better quality |
+| `crf-profiles` | list | | Tiered CRF by source bitrate: `20000:20:5000k:10000k` (format: `source_kbps:crf:maxrate:bufsize`) |
+| `preset` | string | | Encoder preset: `ultrafast` to `veryslow` |
+| `profile` | list | | Video profile: `main`, `high`, `main10` |
+| `max-level` | float | | Maximum H.264/H.265 level (e.g., `5.2`) |
+| `max-width` | int | `0` | Maximum output width (0 = no limit) |
+| `pix-fmt` | list | | Pixel format whitelist |
+| `dynamic-parameters` | bool | `false` | Pass HDR/color metadata to encoder |
+| `prioritize-source-pix-fmt` | bool | `true` | Keep source pix_fmt if in whitelist |
+| `filter` | string | | Custom FFmpeg video filter |
+| `force-filter` | bool | `false` | Force re-encode when filter is set |
+| `codec-parameters` | string | | Extra codec params (e.g., `x265-params`) |
+| `look-ahead` | int | | Look-ahead frames (QSV: `la_depth`) |
+| `b-frames` | int | | Number of B-frames |
+| `ref-frames` | int | | Number of reference frames |
+
+---
+
+## [HDR]
+
+Override video settings for HDR content (detected automatically).
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `codec` | list | Video codec for HDR content |
+| `pix-fmt` | list | Pixel format for HDR (e.g., `p010le`) |
+| `space` | list | Color space: `bt2020nc` |
+| `transfer` | list | Transfer function: `smpte2084` |
+| `primaries` | list | Color primaries: `bt2020` |
+| `preset` | string | Encoder preset override for HDR |
+| `profile` | string | Profile override for HDR |
+| `codec-parameters` | string | Extra params for HDR encoding |
+| `filter` | string | Video filter for HDR content |
+| `force-filter` | bool | Force re-encode for HDR filter |
+
+---
+
+## [Audio]
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `codec` | list | `aac` | Audio codecs in priority order. Matching streams are copied; others re-encoded to first |
+| `languages` | list | | Language whitelist (ISO 639-3, e.g., `eng`). Empty = all |
+| `default-language` | string | `eng` | Default language for unlabeled streams |
+| `first-stream-of-language` | bool | `false` | Keep only first stream per language |
+| `allow-language-relax` | bool | `true` | If no whitelisted language found, keep all audio |
+| `include-original-language` | bool | `false` | Include original media language even if not in whitelist |
+| `channel-bitrate` | int | `128` | Bitrate per channel in kbps (0 = auto) |
+| `variable-bitrate` | int | `0` | VBR quality level (0 = disabled/CBR) |
+| `max-bitrate` | int | `0` | Maximum audio bitrate in kbps |
+| `max-channels` | int | `0` | Maximum audio channels (0 = unlimited, 6 = 5.1) |
+| `copy-original` | bool | `false` | Copy original audio stream in addition to transcoded |
+| `aac-adtstoasc` | bool | `true` | Apply AAC ADTS to ASC bitstream filter |
+| `ignored-dispositions` | list | | Skip streams with these dispositions: `comment`, `hearing_impaired` |
+| `unique-dispositions` | bool | `false` | One stream per disposition per language |
+| `stream-codec-combinations` | list | | Identify duplicate streams by codec combo |
+| `ignore-trudhd` | bool | `true` | Ignore TrueHD streams |
+| `atmos-force-copy` | bool | `false` | Always copy Atmos tracks |
+| `force-default` | bool | `false` | Override source default stream |
+| `relax-to-default` | bool | `false` | If preferred language absent, default to any |
+
+### [Audio.Sorting]
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `sorting` | list | Sort order: `language, channels.d, map, d.comment` |
+| `default-sorting` | list | Sort order for default stream selection |
+| `codecs` | list | Codec priority for sorting |
+
+### [Universal Audio]
+
+Generates an additional stereo AAC stream for device compatibility.
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `codec` | list | | UA codec (e.g., `aac`). Empty = disabled |
+| `channel-bitrate` | int | `128` | Bitrate per channel |
+| `first-stream-only` | bool | `true` | Only add UA for first audio stream |
+
+---
+
+## [Subtitle]
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `codec` | list | `mov_text` | Subtitle codec for text-based subs |
+| `codec-image-based` | list | | Codec for image-based subs (PGS, VobSub) |
+| `languages` | list | | Language whitelist (ISO 639-3) |
+| `default-language` | string | `eng` | Default for unlabeled subs |
+| `first-stream-of-language` | bool | `false` | One subtitle per language |
+| `burn-subtitles` | bool | `false` | Burn subtitles into video |
+| `burn-dispositions` | list | `forced` | Only burn subs with these dispositions |
+| `embed-subs` | bool | `true` | Embed subtitle streams in output |
+| `embed-image-subs` | bool | `false` | Embed image-based subs |
+| `embed-only-internal-subs` | bool | `false` | Only embed subs from source (no external files) |
+| `ignored-dispositions` | list | | Skip subs with these dispositions |
+| `remove-bitstream-subs` | list | `true` | Remove bitstream subtitle formats |
+| `include-original-language` | bool | `false` | Include original language subs |
+
+### [Subtitle.CleanIt]
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `enabled` | bool | Enable subtitle cleaning via cleanit |
+| `config-path` | path | Custom cleanit config |
+| `tags` | list | Cleanit tag sets: `default, no-style` |
+
+### [Subtitle.FFSubsync]
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `enabled` | bool | Enable subtitle sync via ffsubsync |
+
+### [Subtitle.Subliminal]
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `download-subs` | bool | Download missing subtitles |
+| `providers` | list | Subtitle providers: `opensubtitles` |
+| `download-forced-subs` | bool | Download forced subtitle variants |
+| `download-hearing-impaired-subs` | bool | Include HI subs in downloads |
+
+---
+
+## [Metadata]
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `relocate-moov` | bool | `true` | Move moov atom to file start (streaming optimization) |
+| `full-path-guess` | bool | `true` | Use full file path for guessit metadata matching |
+| `tag` | bool | `true` | Enable TMDB metadata tagging |
+| `tag-language` | string | `eng` | Language for TMDB metadata |
+| `download-artwork` | bool | `false` | Embed cover art from TMDB |
+| `strip-metadata` | bool | `true` | Remove existing metadata before tagging |
+| `keep-titles` | bool | `false` | Preserve original stream titles |
+
+---
+
+## [Permissions]
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `chmod` | octal | `0664` | File permissions for output |
+| `uid` | int | `-1` | Owner UID (-1 = no change) |
+| `gid` | int | `-1` | Group GID (-1 = no change) |
+
+---
+
+## [Sonarr] / [Radarr] / Multi-Instance
+
+Multiple instances supported. Any section starting with `Sonarr` or `Radarr` is loaded (e.g., `[Sonarr-Kids]`, `[Radarr-4K]`).
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `host` | string | `localhost` | API hostname |
+| `port` | int | `8989`/`7878` | API port |
+| `apikey` | string | | API key |
+| `ssl` | bool | `false` | Use HTTPS |
+| `webroot` | string | | URL base path |
+| `path` | string | | Media root path for instance matching |
+| `force-rename` | bool | `false` | Trigger rename after processing |
+| `rescan` | bool | `true` | Trigger library rescan after processing |
+| `block-reprocess` | bool | `false` | Prevent reprocessing same-extension files |
+| `in-progress-check` | bool | `true` | Wait for in-progress scans before rescanning |
+
+Instances are matched by `path` using longest-prefix matching.
+
+```ini
+[Sonarr]
+path = /mnt/media/TV
+host = sonarr.example.com
+apikey = abc123
+
+[Sonarr-Kids]
+path = /mnt/media/TV-Kids
+host = sonarr-kids.example.com
+apikey = def456
+
+[Radarr-4K]
+path = /mnt/media/Movies/4K
+host = radarr-4k.example.com
+apikey = jkl012
+```
+
+---
+
+## [Plex]
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `host` | string | Plex server hostname |
+| `port` | int | Plex server port (default 32400) |
+| `refresh` | bool | Trigger library refresh after processing |
+| `token` | string | Plex authentication token |
+| `ssl` | bool | Use HTTPS |
+| `ignore-certs` | bool | Skip SSL certificate verification |
+| `path-mapping` | dict | Map SMA-NG paths to Plex library paths (`=` delimited) |
+
+---
+
+## [SABNZBD] / [Deluge] / [qBittorrent] / [uTorrent]
+
+Download client integration settings. Each has category/label mappings for routing downloads to the correct media manager. See [Integrations](integrations.md) for setup instructions.
+
+---
+
+## Processing Pipeline
+
+### Video Decision Tree
+
+1. Source codec in allowed list → **copy** (unless overridden by bitrate/width/level/profile/filter)
+2. Bitrate exceeds `max-bitrate` (after `bitrate-ratio` scaling) → **re-encode**
+3. Width exceeds `max-width` → **re-encode + downscale**
+4. Level exceeds `max-level` → **re-encode**
+5. Profile not in whitelist → **re-encode**
+6. Burn subtitles enabled → **re-encode**
+7. Otherwise → **copy**
+
+### Bitrate Calculation
+
+1. `estimateVideoBitrate()` computes source video bitrate from container total minus audio
+2. `bitrate-ratio` scales the estimate per source codec (e.g., H.264 at 0.65x for HEVC target)
+3. `crf-profiles` selects CRF/maxrate/bufsize tier based on scaled bitrate
+4. `max-bitrate` caps the final result
+
+### Audio Decision Tree
+
+1. Filter by `languages` whitelist + `include-original-language`
+2. Filter by `ignored-dispositions`
+3. Source codec in allowed list → **copy**; otherwise → **re-encode** to first codec
+4. Apply channel limits (`max-channels`), bitrate limits (`max-bitrate`)
+5. Sort by `[Audio.Sorting]` rules
+6. Select default stream
+7. Optionally generate Universal Audio stream (stereo compatibility)

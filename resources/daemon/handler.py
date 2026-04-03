@@ -9,9 +9,22 @@ from urllib.parse import parse_qs, urlparse
 from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.db import STATUS_RUNNING
 
-DOCS_PATH = os.path.join(SCRIPT_DIR, "docs", "README.md")
+DOCS_DIR = os.path.join(SCRIPT_DIR, "docs")
 DOCS_TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "resources", "docs.html")
 DASHBOARD_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "dashboard.html")
+
+# Ordered list of doc pages: (slug, title).  The slug maps to docs/<slug>.md.
+# "index" maps to docs/README.md.
+DOC_PAGES = [
+    ("index", "Overview"),
+    ("getting-started", "Getting Started"),
+    ("configuration", "Configuration"),
+    ("daemon", "Daemon Mode"),
+    ("integrations", "Integrations"),
+    ("hardware-acceleration", "Hardware Acceleration"),
+    ("deployment", "Deployment"),
+    ("troubleshooting", "Troubleshooting"),
+]
 
 
 def _render_markdown_to_html(md_text):
@@ -144,15 +157,23 @@ def _load_dashboard_html():
         return f.read()
 
 
-def _load_docs_template():
+def _load_docs_template(active_slug="index"):
     with open(DOCS_TEMPLATE_PATH, "r", encoding="utf-8") as f:
-        return f.read()
+        tmpl = f.read()
+    # Build sidebar nav HTML and inject as %NAV% placeholder
+    nav_items = []
+    for slug, title in DOC_PAGES:
+        href = "/docs" if slug == "index" else "/docs/" + slug
+        active = ' class="bg-gray-700 text-white"' if slug == active_slug else ' class="text-gray-300 hover:text-white"'
+        nav_items.append('<a href="%s"%s>%s</a>' % (href, active, title))
+    nav_html = "\n".join(nav_items)
+    return tmpl.replace("%NAV%", nav_html)
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
     """HTTP request handler for webhook endpoints."""
 
-    # Endpoints that don't require authentication
+    # Endpoints that don't require authentication (prefix-matched for /docs/*)
     PUBLIC_ENDPOINTS = ["/", "/dashboard", "/health", "/status", "/docs", "/favicon.png"]
 
     def log_message(self, format, *args):
@@ -209,7 +230,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     def is_public_endpoint(self, path):
         """Check if the endpoint is public (doesn't require auth)."""
-        return path in self.PUBLIC_ENDPOINTS
+        return path in self.PUBLIC_ENDPOINTS or path.startswith("/docs/")
 
     def _read_json_paths(self):
         """Read a JSON body of the form {"paths": [...]} and return the list.
@@ -408,13 +429,16 @@ class WebhookHandler(BaseHTTPRequestHandler):
         key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
         self.send_html_response(200, _load_dashboard_html().replace("</head>", key_script + "</head>", 1))
 
-    def _get_docs(self, _path, _query):
+    def _get_docs(self, path, _query):
+        # Resolve slug: /docs → index, /docs/daemon → daemon
+        slug = path[len("/docs") :].lstrip("/") or "index"
+        md_file = os.path.join(DOCS_DIR, "README.md" if slug == "index" else slug + ".md")
         try:
-            with open(DOCS_PATH, "r", encoding="utf-8") as f:
+            with open(md_file, "r", encoding="utf-8") as f:
                 md_content = f.read()
-            self.send_html_response(200, _load_docs_template() % _render_markdown_to_html(md_content))
+            self.send_html_response(200, _load_docs_template(slug) % _render_markdown_to_html(md_content))
         except FileNotFoundError:
-            self.send_html_response(404, "<h1>Documentation not found</h1><p>docs/README.md missing</p>")
+            self.send_html_response(404, "<h1>Page not found</h1><p>%s</p>" % md_file)
 
     def _get_stats(self, _path, _query):
         self.send_json_response(200, self.server.job_db.get_stats())
@@ -461,6 +485,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 getattr(self, handler)(parsed.path, query)
             else:
                 handler(self, parsed.path, query)
+        elif parsed.path.startswith("/docs/"):
+            self._get_docs(parsed.path, query)
         elif parsed.path.startswith("/jobs/"):
             self._get_job(parsed.path)
         else:
