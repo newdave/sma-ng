@@ -34,6 +34,7 @@ ExecStart=/opt/sma/setup/sma-daemon-start.sh
 
 Restart=on-failure
 RestartSec=10
+TimeoutStopSec=10
 KillMode=mixed
 
 # Security hardening
