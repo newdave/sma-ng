@@ -1,0 +1,316 @@
+import configparser
+import json
+import logging
+import os
+import threading
+from logging.handlers import RotatingFileHandler
+
+from resources.daemon.constants import DEFAULT_DAEMON_CONFIG, DEFAULT_PROCESS_CONFIG, LOGS_DIR, SCRIPT_DIR
+from resources.log import getLogger
+
+log = getLogger("DAEMON")
+
+
+class ConfigLockManager:
+    """
+    Manages per-config concurrency using semaphores.
+
+    Up to `max_per_config` jobs for the same config can run simultaneously.
+    Jobs for different configs can always run in parallel (up to worker count).
+
+    Locking strategy:
+    - `_master_lock` protects `_config_sems` and `_active_configs` dict mutations.
+    - Semaphore acquisition happens *outside* `_master_lock` to avoid deadlock;
+      the waiting count is therefore advisory (used only for logging).
+    - `_active_configs[config_path]` is a dict keyed by job_id for O(1) insert/remove.
+    """
+
+    def __init__(self, max_per_config=1, logger=None):
+        self.log = logger or log
+        self.max_per_config = max_per_config
+        self._master_lock = threading.Lock()
+        self._config_sems = {}  # config_path -> Semaphore
+        self._active_configs = {}  # config_path -> {job_id: job_path}
+        self._waiting_counts = {}  # config_path -> advisory waiting count (for logging)
+
+    def _get_sem(self, config_path):
+        """Get or create a semaphore for a config (thread-safe)."""
+        with self._master_lock:
+            if config_path not in self._config_sems:
+                self._config_sems[config_path] = threading.Semaphore(self.max_per_config)
+                self._waiting_counts[config_path] = 0
+                self._active_configs[config_path] = {}
+            return self._config_sems[config_path]
+
+    def acquire(self, config_path, job_id, job_path):
+        """
+        Acquire a slot for a config. Blocks until a slot is available.
+        Returns True when acquired.
+        """
+        sem = self._get_sem(config_path)
+
+        with self._master_lock:
+            self._waiting_counts[config_path] = self._waiting_counts.get(config_path, 0) + 1
+            active = self._active_configs.get(config_path, {})
+            if active:
+                self.log.info("Job %d waiting for config slot: %s (%d/%d slots in use)" % (job_id, os.path.basename(config_path), len(active), self.max_per_config))
+
+        sem.acquire()
+
+        with self._master_lock:
+            self._waiting_counts[config_path] -= 1
+            self._active_configs.setdefault(config_path, {})[job_id] = job_path
+
+        self.log.debug("Job %d acquired slot for config: %s" % (job_id, os.path.basename(config_path)))
+        return True
+
+    def release(self, config_path, job_id):
+        """Release a slot for a config."""
+        sem = self._get_sem(config_path)
+
+        with self._master_lock:
+            self._active_configs.get(config_path, {}).pop(job_id, None)
+
+        sem.release()
+        self.log.debug("Job %d released slot for config: %s" % (job_id, os.path.basename(config_path)))
+
+    def get_status(self):
+        """Get current lock status for all configs."""
+        with self._master_lock:
+            active = {}
+            for config, jobs in self._active_configs.items():
+                if jobs:
+                    active[config] = [{"job_id": jid, "path": p} for jid, p in jobs.items()]
+            return {"active": active, "waiting": {k: v for k, v in self._waiting_counts.items() if v > 0}}
+
+    def is_locked(self, config_path):
+        """Check if a config has any active jobs."""
+        with self._master_lock:
+            return bool(self._active_configs.get(config_path))
+
+    def get_locked_configs(self):
+        """Return config paths where all concurrency slots are full."""
+        with self._master_lock:
+            return {c for c, jobs in self._active_configs.items() if len(jobs) >= self.max_per_config}
+
+    def get_active_jobs(self, config_path):
+        """Get active jobs for a config as a list of dicts."""
+        with self._master_lock:
+            return [{"job_id": jid, "path": p} for jid, p in self._active_configs.get(config_path, {}).items()]
+
+
+class ConfigLogManager:
+    """Manages separate log files for each configuration."""
+
+    def __init__(self, logs_dir=LOGS_DIR):
+        self.logs_dir = logs_dir
+        self.loggers = {}
+        self.lock = threading.Lock()
+
+        # Ensure logs directory exists
+        if not os.path.isdir(self.logs_dir):
+            os.makedirs(self.logs_dir)
+
+    def _config_to_logname(self, config_path):
+        """Convert config path to log filename."""
+        basename = os.path.basename(config_path)
+        name, _ = os.path.splitext(basename)
+        return name
+
+    def get_logger(self, config_path):
+        """Get or create a logger for a specific config file."""
+        with self.lock:
+            if config_path in self.loggers:
+                return self.loggers[config_path]
+
+            log_name = self._config_to_logname(config_path)
+            log_file = os.path.join(self.logs_dir, f"{log_name}.log")
+
+            logger = logging.getLogger(f"sma.{log_name}")
+            logger.setLevel(logging.DEBUG)
+
+            if not logger.handlers:
+                file_handler = RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8")
+                file_handler.setLevel(logging.DEBUG)
+                formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+                file_handler.setFormatter(formatter)
+                logger.addHandler(file_handler)
+
+            self.loggers[config_path] = logger
+            return logger
+
+    def get_log_file(self, config_path):
+        """Get the log file path for a config."""
+        log_name = self._config_to_logname(config_path)
+        return os.path.join(self.logs_dir, f"{log_name}.log")
+
+
+class PathConfigManager:
+    """Manages path-to-config mappings for different media directories."""
+
+    def __init__(self, config_file=None, logger=None):
+        self.log = logger or log
+        self.path_configs = []
+        self.path_rewrites = []  # Can be set from daemon.json
+        self.default_config = DEFAULT_PROCESS_CONFIG
+        self.default_args = []  # Top-level default args for the default config
+        self.api_key = None  # Can be set from daemon.json
+        self.db_url = None  # Can be set from daemon.json
+        self.ffmpeg_dir = None  # Can be set from daemon.json
+        self.job_timeout_seconds = 0  # Can be set from daemon.json (0 = no timeout)
+        self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
+        self.scan_paths = []  # Can be set from daemon.json
+        self._config_file = None  # Resolved path of loaded config file
+
+        # Look up DEFAULT_DAEMON_CONFIG at call time from the daemon module so that
+        # tests patching daemon.DEFAULT_DAEMON_CONFIG take effect.
+        try:
+            import daemon as _daemon_mod
+
+            _default_daemon_cfg = _daemon_mod.DEFAULT_DAEMON_CONFIG
+        except (ImportError, AttributeError):
+            _default_daemon_cfg = DEFAULT_DAEMON_CONFIG
+
+        if config_file and os.path.exists(config_file):
+            self._config_file = config_file
+            self.load_config(config_file)
+        elif os.path.exists(_default_daemon_cfg):
+            self._config_file = _default_daemon_cfg
+            self.load_config(self._config_file)
+        else:
+            self.log.info("No daemon config found, using default autoProcess.ini for all paths")
+
+    def load_config(self, config_file):
+        """Load path mappings from daemon.json config file."""
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                config = json.load(f)
+
+            self.default_config = config.get("default_config", DEFAULT_PROCESS_CONFIG)
+            if not os.path.isabs(self.default_config):
+                self.default_config = os.path.join(SCRIPT_DIR, self.default_config)
+
+            # Load API key from config (can be overridden by CLI/env)
+            self.api_key = config.get("api_key")
+
+            # Load PostgreSQL URL from config (can be overridden by CLI/env)
+            self.db_url = config.get("db_url")
+
+            # Load FFmpeg directory from config (can be overridden by CLI/env)
+            self.ffmpeg_dir = config.get("ffmpeg_dir")
+
+            # Load job timeout in seconds (0 means no timeout)
+            self.job_timeout_seconds = int(config.get("job_timeout_seconds", 0) or 0)
+
+            # Load media extensions inclusion list for directory scanning
+            raw_exts = config.get("media_extensions")
+            if raw_exts is not None:
+                self.media_extensions = frozenset(("." + e.lower().lstrip(".")) for e in raw_exts if e)
+
+            # Load top-level default args (applied when no path_config matches)
+            raw_default_args = config.get("default_args", [])
+            if isinstance(raw_default_args, str):
+                raw_default_args = raw_default_args.split()
+            self.default_args = raw_default_args
+
+            # Load webhook path rewrites (prefix substitutions applied to incoming webhook paths)
+            raw_rewrites = config.get("path_rewrites", [])
+            self.path_rewrites = [{"from": r["from"].rstrip("/"), "to": r["to"].rstrip("/")} for r in raw_rewrites if r.get("from") and r.get("to")]
+            if self.path_rewrites:
+                self.log.info("Path rewrites (%d):" % len(self.path_rewrites))
+                for r in self.path_rewrites:
+                    self.log.info("  %s -> %s" % (r["from"], r["to"]))
+
+            # Load scheduled scan paths
+            self.scan_paths = config.get("scan_paths", [])
+
+            raw_configs = config.get("path_configs", [])
+
+            for entry in raw_configs:
+                path = entry.get("path", "").rstrip("/")
+                config_path = entry.get("config", "")
+
+                if not path or not config_path:
+                    continue
+
+                if not os.path.isabs(config_path):
+                    config_path = os.path.join(SCRIPT_DIR, config_path)
+
+                default_args = entry.get("default_args", [])
+                if isinstance(default_args, str):
+                    default_args = default_args.split()
+
+                self.path_configs.append({"path": os.path.normpath(path), "config": config_path, "default_args": default_args})
+
+            # Sort by path length descending (longest prefix match first)
+            self.path_configs.sort(key=lambda x: len(x["path"]), reverse=True)
+
+            self.log.info("Loaded daemon config from %s" % config_file)
+            self.log.info("Default config: %s" % self.default_config)
+            self.log.info("Path mappings (%d):" % len(self.path_configs))
+            for entry in self.path_configs:
+                self.log.info("  %s -> %s" % (entry["path"], entry["config"]))
+
+        except Exception as e:
+            self.log.exception("Error loading daemon config: %s" % e)
+
+    def get_config_for_path(self, file_path):
+        """Get the appropriate config file for a given file path."""
+        file_path = os.path.abspath(file_path)
+
+        for entry in self.path_configs:
+            if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
+                config_path = entry["config"]
+                if os.path.exists(config_path):
+                    self.log.debug("Path %s matched %s -> %s" % (file_path, entry["path"], config_path))
+                    return config_path
+                else:
+                    self.log.warning("Config file not found: %s, using default" % config_path)
+
+        self.log.debug("Path %s using default config: %s" % (file_path, self.default_config))
+        return self.default_config
+
+    def get_args_for_path(self, file_path):
+        """Get the default args list for a given file path based on path_configs."""
+        file_path = os.path.abspath(file_path)
+
+        for entry in self.path_configs:
+            if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
+                if os.path.exists(entry["config"]):
+                    return list(entry.get("default_args", []))
+
+        return list(self.default_args)
+
+    def rewrite_path(self, path):
+        """Apply the first matching path_rewrites prefix substitution, or return path unchanged."""
+        for r in self.path_rewrites:
+            prefix = r["from"]
+            if path == prefix or path.startswith(prefix + "/"):
+                return r["to"] + path[len(prefix) :]
+        return path
+
+    def get_all_configs(self):
+        """Return list of all unique config files."""
+        configs = {self.default_config}
+        for entry in self.path_configs:
+            configs.add(entry["config"])
+        return list(configs)
+
+    def get_recycle_bin(self, config_path):
+        """Return the recycle-bin path from an autoProcess.ini, or None."""
+        try:
+            cp = configparser.ConfigParser()
+            cp.read(config_path)
+            val = cp.get("Converter", "recycle-bin", fallback="").strip()
+            return os.path.abspath(val) if val else None
+        except Exception:
+            return None
+
+    def is_recycle_bin_path(self, path):
+        """Return True if path is inside any configured recycle-bin directory."""
+        path = os.path.normpath(os.path.abspath(path))
+        for config_path in self.get_all_configs():
+            recycle_bin = self.get_recycle_bin(config_path)
+            if recycle_bin and (path == recycle_bin or path.startswith(recycle_bin + os.sep)):
+                return True
+        return False
