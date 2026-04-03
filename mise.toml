@@ -131,7 +131,7 @@ test -f config/daemon.json || (cp setup/daemon.json.sample config/daemon.json &&
 [tasks."deploy:restart"]
 description = "Force-restart the sma-daemon systemd service immediately (skips graceful drain)"
 run = """
-sudo systemctl kill sma-daemon 2>/dev/null || true
+sudo systemctl kill --signal=SIGKILL sma-daemon 2>/dev/null || true
 sudo systemctl reset-failed sma-daemon 2>/dev/null || true
 sudo systemctl start sma-daemon
 sudo systemctl status sma-daemon --no-pager -l
