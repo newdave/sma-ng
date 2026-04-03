@@ -15,8 +15,8 @@ from daemon import (
     ConfigLockManager,
     ConfigLogManager,
     DaemonServer,
-    JobDatabase,
     PathConfigManager,
+    PostgreSQLJobDatabase,
     WebhookHandler,
     _inline,
     _load_dashboard_html,
@@ -24,131 +24,6 @@ from daemon import (
 )
 
 DASHBOARD_HTML = _load_dashboard_html()
-
-
-class TestJobDatabase:
-    """Test SQLite job database operations."""
-
-    def test_add_and_get_job(self, job_db):
-        job_id = job_db.add_job("/path/to/file.mkv", "/config/autoProcess.ini")
-        job = job_db.get_job(job_id)
-        assert job is not None
-        assert job["path"] == "/path/to/file.mkv"
-        assert job["config"] == "/config/autoProcess.ini"
-        assert job["status"] == STATUS_PENDING
-
-    def test_job_lifecycle(self, job_db):
-        job_id = job_db.add_job("/test.mkv", "/config.ini")
-
-        job_db.start_job(job_id, worker_id=1)
-        job = job_db.get_job(job_id)
-        assert job["status"] == STATUS_RUNNING
-        assert job["worker_id"] == 1
-        assert job["started_at"] is not None
-
-        job_db.complete_job(job_id)
-        job = job_db.get_job(job_id)
-        assert job["status"] == STATUS_COMPLETED
-        assert job["completed_at"] is not None
-
-    def test_fail_job(self, job_db):
-        job_id = job_db.add_job("/test.mkv", "/config.ini")
-        job_db.start_job(job_id, 1)
-        job_db.fail_job(job_id, "Conversion failed")
-        job = job_db.get_job(job_id)
-        assert job["status"] == STATUS_FAILED
-        assert job["error"] == "Conversion failed"
-
-    def test_get_pending_jobs(self, job_db):
-        job_db.add_job("/a.mkv", "/config.ini")
-        job_db.add_job("/b.mkv", "/config.ini")
-        job_id3 = job_db.add_job("/c.mkv", "/config.ini")
-        job_db.start_job(job_id3, 1)
-        pending = job_db.get_pending_jobs()
-        assert len(pending) == 2
-
-    def test_get_next_pending_fifo(self, job_db):
-        id1 = job_db.add_job("/first.mkv", "/config.ini")
-        job_db.add_job("/second.mkv", "/config.ini")
-        job = job_db.get_next_pending_job()
-        assert job["id"] == id1
-
-    def test_get_stats(self, job_db):
-        id1 = job_db.add_job("/a.mkv", "/c.ini")
-        id2 = job_db.add_job("/b.mkv", "/c.ini")
-        job_db.add_job("/c.mkv", "/c.ini")
-        job_db.start_job(id1, 1)
-        job_db.complete_job(id1)
-        job_db.start_job(id2, 1)
-        job_db.fail_job(id2, "error")
-        stats = job_db.get_stats()
-        assert stats.get(STATUS_COMPLETED, 0) == 1
-        assert stats.get(STATUS_FAILED, 0) == 1
-        assert stats.get(STATUS_PENDING, 0) == 1
-        assert stats["total"] == 3
-
-    def test_get_jobs_with_filter(self, job_db):
-        job_db.add_job("/a.mkv", "/tv.ini")
-        id2 = job_db.add_job("/b.mkv", "/movie.ini")
-        job_db.start_job(id2, 1)
-        job_db.complete_job(id2)
-        completed = job_db.get_jobs(status=STATUS_COMPLETED)
-        assert len(completed) == 1
-        assert completed[0]["path"] == "/b.mkv"
-
-    def test_get_jobs_pagination(self, job_db):
-        for i in range(10):
-            job_db.add_job("/file%d.mkv" % i, "/c.ini")
-        page1 = job_db.get_jobs(limit=3, offset=0)
-        page2 = job_db.get_jobs(limit=3, offset=3)
-        assert len(page1) == 3
-        assert len(page2) == 3
-        assert page1[0]["id"] != page2[0]["id"]
-
-    def test_pending_count(self, job_db):
-        job_db.add_job("/a.mkv", "/c.ini")
-        job_db.add_job("/b.mkv", "/c.ini")
-        assert job_db.pending_count() == 2
-
-    def test_pending_count_for_config(self, job_db):
-        job_db.add_job("/a.mkv", "/tv.ini")
-        job_db.add_job("/b.mkv", "/tv.ini")
-        job_db.add_job("/c.mkv", "/movie.ini")
-        assert job_db.pending_count_for_config("/tv.ini") == 2
-        assert job_db.pending_count_for_config("/movie.ini") == 1
-
-    def test_get_nonexistent_job(self, job_db):
-        assert job_db.get_job(9999) is None
-
-    def test_job_args_stored(self, job_db):
-        job_id = job_db.add_job("/test.mkv", "/c.ini", args=["-tmdb", "603"])
-        job = job_db.get_job(job_id)
-        args = json.loads(job["args"])
-        assert args == ["-tmdb", "603"]
-
-    def test_reset_running_jobs(self, tmp_db):
-        from daemon import JobDatabase
-
-        db = JobDatabase(tmp_db)
-        job_id = db.add_job("/test.mkv", "/c.ini")
-        db.start_job(job_id, 1)
-        assert db.get_job(job_id)["status"] == STATUS_RUNNING
-        db.close()
-        # Simulate daemon restart — second instance must also be closed
-        db2 = JobDatabase(tmp_db)
-        try:
-            job = db2.get_job(job_id)
-            assert job["status"] == STATUS_PENDING
-        finally:
-            db2.close()
-
-    def test_cleanup_old_jobs(self, job_db):
-        job_id = job_db.add_job("/old.mkv", "/c.ini")
-        job_db.start_job(job_id, 1)
-        job_db.complete_job(job_id)
-        # Cleanup with 0 days should remove it
-        deleted = job_db.cleanup_old_jobs(days=0)
-        assert deleted >= 0  # May be 0 if completed_at is "now"
 
 
 class TestPathConfigManager:
@@ -403,11 +278,16 @@ class TestWantsHtml:
 
 
 @pytest.fixture
-def live_server(tmp_db):
+def live_server():
     """Spin up a DaemonServer on a random port, yield it, then shut it down."""
+    import os
+
+    db_url = os.environ.get("TEST_DB_URL")
+    if not db_url:
+        pytest.skip("TEST_DB_URL not set")
     from resources.log import getLogger
 
-    job_db = JobDatabase(tmp_db)
+    job_db = PostgreSQLJobDatabase(db_url)
     server = DaemonServer(
         ("127.0.0.1", 0),
         WebhookHandler,
@@ -487,169 +367,6 @@ class TestHealthEndpoint:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req) as resp:
             assert resp.headers.get("Content-Type", "").startswith("application/json")
-
-
-# ---------------------------------------------------------------------------
-# Additional SQLite job database tests
-# ---------------------------------------------------------------------------
-
-
-class TestJobDatabaseExtended:
-    """Tests for SQLite job database operations not covered by TestJobDatabase."""
-
-    def test_get_running_jobs_empty(self, job_db):
-        assert job_db.get_running_jobs() == []
-
-    def test_get_running_jobs_returns_running(self, job_db):
-        jid = job_db.add_job("/a.mkv", "/cfg.ini")
-        job_db.start_job(jid, worker_id=1)
-        running = job_db.get_running_jobs()
-        assert len(running) == 1
-        assert running[0]["id"] == jid
-        assert running[0]["status"] == STATUS_RUNNING
-
-    def test_get_stats_empty(self, job_db):
-        stats = job_db.get_stats()
-        assert stats["total"] == 0
-
-    def test_get_stats_counts_by_status(self, job_db):
-        j1 = job_db.add_job("/a.mkv", "/cfg.ini")
-        j2 = job_db.add_job("/b.mkv", "/cfg.ini")
-        j3 = job_db.add_job("/c.mkv", "/cfg.ini")
-        job_db.start_job(j1, worker_id=1)
-        job_db.complete_job(j1)
-        job_db.start_job(j2, worker_id=1)
-        job_db.fail_job(j2, "error")
-        # j3 remains pending
-        stats = job_db.get_stats()
-        assert stats["total"] == 3
-        assert stats[STATUS_COMPLETED] == 1
-        assert stats[STATUS_FAILED] == 1
-        assert stats[STATUS_PENDING] == 1
-
-    def test_pending_count_for_config(self, job_db):
-        job_db.add_job("/a.mkv", "/cfg_a.ini")
-        job_db.add_job("/b.mkv", "/cfg_a.ini")
-        job_db.add_job("/c.mkv", "/cfg_b.ini")
-        assert job_db.pending_count_for_config("/cfg_a.ini") == 2
-        assert job_db.pending_count_for_config("/cfg_b.ini") == 1
-        assert job_db.pending_count_for_config("/cfg_c.ini") == 0
-
-    def test_requeue_failed_job(self, job_db):
-        jid = job_db.add_job("/a.mkv", "/cfg.ini")
-        job_db.start_job(jid, worker_id=1)
-        job_db.fail_job(jid, "oops")
-        assert job_db.get_job(jid)["status"] == STATUS_FAILED
-
-        result = job_db.requeue_job(jid)
-        assert result is True
-        job = job_db.get_job(jid)
-        assert job["status"] == STATUS_PENDING
-        assert job["error"] is None
-        assert job["started_at"] is None
-
-    def test_requeue_non_failed_job_returns_false(self, job_db):
-        jid = job_db.add_job("/a.mkv", "/cfg.ini")
-        # Pending — cannot requeue
-        assert job_db.requeue_job(jid) is False
-
-    def test_requeue_nonexistent_job_returns_false(self, job_db):
-        assert job_db.requeue_job(9999) is False
-
-    def test_requeue_failed_jobs_all(self, job_db):
-        for path in ("/a.mkv", "/b.mkv", "/c.mkv"):
-            jid = job_db.add_job(path, "/cfg.ini")
-            job_db.start_job(jid, worker_id=1)
-            job_db.fail_job(jid, "err")
-        count = job_db.requeue_failed_jobs()
-        assert count == 3
-        assert job_db.pending_count() == 3
-
-    def test_requeue_failed_jobs_by_config(self, job_db):
-        for path in ("/a.mkv", "/b.mkv"):
-            jid = job_db.add_job(path, "/cfg_a.ini")
-            job_db.start_job(jid, worker_id=1)
-            job_db.fail_job(jid, "err")
-        jid = job_db.add_job("/c.mkv", "/cfg_b.ini")
-        job_db.start_job(jid, worker_id=1)
-        job_db.fail_job(jid, "err")
-
-        count = job_db.requeue_failed_jobs(config="/cfg_a.ini")
-        assert count == 2
-        assert job_db.pending_count_for_config("/cfg_a.ini") == 2
-        assert job_db.pending_count_for_config("/cfg_b.ini") == 0
-
-    def test_requeue_failed_jobs_no_failures(self, job_db):
-        job_db.add_job("/a.mkv", "/cfg.ini")  # pending
-        assert job_db.requeue_failed_jobs() == 0
-
-    def test_cleanup_old_jobs(self, job_db):
-        jid = job_db.add_job("/old.mkv", "/cfg.ini")
-        job_db.start_job(jid, worker_id=1)
-        job_db.complete_job(jid)
-        # Backdate completed_at so it falls outside the 0-day window
-        with job_db._cursor() as cur:
-            cur.execute("UPDATE jobs SET completed_at = datetime('now', '-2 days') WHERE id = ?", (jid,))
-        deleted = job_db.cleanup_old_jobs(days=1)
-        assert deleted == 1
-        assert job_db.get_job(jid) is None
-
-    def test_cleanup_leaves_pending_and_running(self, job_db):
-        pending_id = job_db.add_job("/pending.mkv", "/cfg.ini")
-        running_id = job_db.add_job("/running.mkv", "/cfg.ini")
-        job_db.start_job(running_id, worker_id=1)
-        deleted = job_db.cleanup_old_jobs(days=0)
-        assert deleted == 0
-        assert job_db.get_job(pending_id) is not None
-        assert job_db.get_job(running_id) is not None
-
-    def test_cursor_rollback_on_exception(self, job_db):
-        """Verify _cursor context manager rolls back on error."""
-        try:
-            with job_db._cursor() as cursor:
-                cursor.execute("INSERT INTO jobs (path, config, args, status) VALUES (?, ?, ?, ?)", ("/tmp/x.mkv", "/cfg.ini", "[]", STATUS_PENDING))
-                raise ValueError("forced error")
-        except ValueError:
-            pass
-        # Row should not be committed due to rollback
-        with job_db._cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) as c FROM jobs WHERE path = ?", ("/tmp/x.mkv",))
-            assert cursor.fetchone()["c"] == 0
-
-    def test_find_active_job(self, job_db):
-        jid = job_db.add_job("/a.mkv", "/cfg.ini")
-        result = job_db.find_active_job("/a.mkv")
-        assert result is not None
-        assert result["id"] == jid
-
-    def test_find_active_job_not_found(self, job_db):
-        assert job_db.find_active_job("/nonexistent.mkv") is None
-
-    def test_find_active_job_excludes_completed(self, job_db):
-        jid = job_db.add_job("/a.mkv", "/cfg.ini")
-        job_db.start_job(jid, worker_id=1)
-        job_db.complete_job(jid)
-        assert job_db.find_active_job("/a.mkv") is None
-
-    def test_get_jobs_filter_by_status(self, job_db):
-        j1 = job_db.add_job("/a.mkv", "/cfg.ini")
-        j2 = job_db.add_job("/b.mkv", "/cfg.ini")
-        job_db.start_job(j1, worker_id=1)
-        job_db.complete_job(j1)
-        pending = job_db.get_jobs(status=STATUS_PENDING)
-        assert len(pending) == 1
-        assert pending[0]["id"] == j2
-
-    def test_get_jobs_pagination(self, job_db):
-        for i in range(5):
-            job_db.add_job("/file%d.mkv" % i, "/cfg.ini")
-        page1 = job_db.get_jobs(limit=3, offset=0)
-        page2 = job_db.get_jobs(limit=3, offset=3)
-        assert len(page1) == 3
-        assert len(page2) == 2
-        ids_p1 = {j["id"] for j in page1}
-        ids_p2 = {j["id"] for j in page2}
-        assert ids_p1.isdisjoint(ids_p2)
 
 
 # ---------------------------------------------------------------------------
@@ -1310,10 +1027,10 @@ class TestAuthentication:
         except urllib.error.HTTPError as e:
             return json.loads(e.read()), e.code
 
-    def _make_server(self, tmp_db, api_key=None):
+    def _make_server(self, db_url, api_key=None):
         from resources.log import getLogger
 
-        job_db = JobDatabase(tmp_db)
+        job_db = PostgreSQLJobDatabase(db_url)
         server = DaemonServer(
             ("127.0.0.1", 0),
             WebhookHandler,
@@ -1329,8 +1046,16 @@ class TestAuthentication:
         t.start()
         return server, job_db
 
-    def test_no_api_key_allows_all(self, tmp_db):
-        server, job_db = self._make_server(tmp_db, api_key=None)
+    def _get_db_url(self):
+        import os
+
+        db_url = os.environ.get("TEST_DB_URL")
+        if not db_url:
+            pytest.skip("TEST_DB_URL not set")
+        return db_url
+
+    def test_no_api_key_allows_all(self):
+        server, job_db = self._make_server(self._get_db_url(), api_key=None)
         try:
             data, status = self._get(server, "/health")
             assert status == 200
@@ -1341,8 +1066,8 @@ class TestAuthentication:
             server.server_close()
             job_db.close()
 
-    def test_api_key_required_when_set(self, tmp_db):
-        server, job_db = self._make_server(tmp_db, api_key="secret123")
+    def test_api_key_required_when_set(self):
+        server, job_db = self._make_server(self._get_db_url(), api_key="secret123")
         try:
             data, status = self._get(server, "/jobs")  # no key
             assert status == 401
@@ -1352,8 +1077,8 @@ class TestAuthentication:
             server.server_close()
             job_db.close()
 
-    def test_x_api_key_header_accepted(self, tmp_db):
-        server, job_db = self._make_server(tmp_db, api_key="secret123")
+    def test_x_api_key_header_accepted(self):
+        server, job_db = self._make_server(self._get_db_url(), api_key="secret123")
         try:
             data, status = self._get(server, "/jobs", api_key="secret123")
             assert status == 200
@@ -1362,8 +1087,8 @@ class TestAuthentication:
             server.server_close()
             job_db.close()
 
-    def test_bearer_token_accepted(self, tmp_db):
-        server, job_db = self._make_server(tmp_db, api_key="secret123")
+    def test_bearer_token_accepted(self):
+        server, job_db = self._make_server(self._get_db_url(), api_key="secret123")
         try:
             data, status = self._get(server, "/jobs")  # no key -> 401
             assert status == 401
@@ -1378,8 +1103,8 @@ class TestAuthentication:
             server.server_close()
             job_db.close()
 
-    def test_wrong_key_returns_401(self, tmp_db):
-        server, job_db = self._make_server(tmp_db, api_key="secret123")
+    def test_wrong_key_returns_401(self):
+        server, job_db = self._make_server(self._get_db_url(), api_key="secret123")
         try:
             data, status = self._get(server, "/jobs", api_key="wrongkey")
             assert status == 401
@@ -1388,8 +1113,8 @@ class TestAuthentication:
             server.server_close()
             job_db.close()
 
-    def test_public_endpoints_accessible_without_key(self, tmp_db):
-        server, job_db = self._make_server(tmp_db, api_key="secret123")
+    def test_public_endpoints_accessible_without_key(self):
+        server, job_db = self._make_server(self._get_db_url(), api_key="secret123")
         try:
             # /health is public
             data, status = self._get(server, "/health")
@@ -1399,8 +1124,8 @@ class TestAuthentication:
             server.server_close()
             job_db.close()
 
-    def test_post_requires_auth(self, tmp_db):
-        server, job_db = self._make_server(tmp_db, api_key="secret123")
+    def test_post_requires_auth(self):
+        server, job_db = self._make_server(self._get_db_url(), api_key="secret123")
         try:
             data, status = self._post(server, "/cleanup")
             assert status == 401

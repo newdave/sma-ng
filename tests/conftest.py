@@ -366,16 +366,15 @@ plexmatch = true
 
 
 @pytest.fixture
-def tmp_db(tmp_path):
-    """Create a temporary database path."""
-    return str(tmp_path / "test_daemon.db")
+def job_db():
+    """Yield an open PostgreSQLJobDatabase and close it after the test."""
+    import os
 
+    db_url = os.environ.get("TEST_DB_URL")
+    if not db_url:
+        pytest.skip("TEST_DB_URL not set")
+    from daemon import PostgreSQLJobDatabase
 
-@pytest.fixture
-def job_db(tmp_db):
-    """Yield an open JobDatabase and close it after the test."""
-    from daemon import JobDatabase
-
-    db = JobDatabase(tmp_db)
+    db = PostgreSQLJobDatabase(db_url)
     yield db
     db.close()

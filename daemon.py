@@ -9,7 +9,7 @@ Features:
 - Path-based configuration selection via config/daemon.json
 - Per-config logging to separate files in logs/ directory
 - Only one process per config runs at a time (others queue)
-- SQLite persistence for job queue (survives restarts)
+- PostgreSQL persistence for job queue (survives restarts)
 - API key authentication for webhook endpoints
 
 Usage:
@@ -26,19 +26,16 @@ import socket
 import sys
 import threading
 
-# Re-export for backward compatibility with tests and external callers
 from resources.daemon import (
     STATUS_COMPLETED,
     STATUS_FAILED,
     STATUS_PENDING,
     STATUS_RUNNING,
-    BaseJobDatabase,
     ConfigLockManager,
     ConfigLogManager,
     ConversionWorker,
     DaemonServer,
     HeartbeatThread,
-    JobDatabase,
     PathConfigManager,
     PostgreSQLJobDatabase,
     ScannerThread,
@@ -49,11 +46,8 @@ from resources.daemon import (
     _render_markdown_to_html,
     _StoppableThread,
 )
-from resources.daemon.config import ConfigLockManager, ConfigLogManager, PathConfigManager
-from resources.daemon.constants import DATABASE_PATH, DEFAULT_DAEMON_CONFIG, LOGS_DIR
-from resources.daemon.db import JobDatabase, PostgreSQLJobDatabase
-from resources.daemon.handler import WebhookHandler
-from resources.daemon.server import DaemonServer, _validate_hwaccel
+from resources.daemon.constants import DEFAULT_DAEMON_CONFIG, LOGS_DIR
+from resources.daemon.server import _validate_hwaccel
 from resources.log import getLogger
 
 # Main daemon logger
@@ -74,7 +68,6 @@ def main():
     parser.add_argument("--workers", type=int, default=1, help="Number of worker threads (default: 1)")
     parser.add_argument("-d", "--daemon-config", help="Path to daemon.json config file (path mappings)")
     parser.add_argument("--logs-dir", default=LOGS_DIR, help="Directory for per-config log files (default: logs/)")
-    parser.add_argument("--db", default=DATABASE_PATH, help="Path to SQLite database (default: config/daemon.db)")
     parser.add_argument(
         "--ffmpeg-dir", help="Directory containing ffmpeg and ffprobe binaries. Prepended to PATH for each conversion subprocess. If omitted, relies on PATH already containing the binaries."
     )
@@ -107,28 +100,26 @@ def main():
     # Determine API key (priority: CLI arg > env var > config file)
     api_key = args.api_key or os.environ.get("SMA_DAEMON_API_KEY") or path_config_manager.api_key
 
-    # Determine database (priority: env var > config file > SQLite fallback)
+    # Determine database (priority: env var > config file)
     # Note: PostgreSQL URL is not accepted on the CLI to prevent credentials appearing in ps output.
     db_url = os.environ.get("SMA_DAEMON_DB_URL") or path_config_manager.db_url
+    if not db_url:
+        log.error("No database URL configured. Set SMA_DAEMON_DB_URL or db_url in daemon.json")
+        sys.exit(1)
+    job_db = PostgreSQLJobDatabase(db_url, logger=log)
+    db_label = "PostgreSQL: %s" % db_url
 
     # Determine FFmpeg directory (priority: CLI --ffmpeg-dir > env var > config file)
     ffmpeg_dir = args.ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or path_config_manager.ffmpeg_dir
 
     # Determine job timeout (priority: CLI --job-timeout > daemon.json; 0 means no timeout)
     job_timeout_seconds = args.job_timeout or path_config_manager.job_timeout_seconds
-    if db_url:
-        job_db = PostgreSQLJobDatabase(db_url, logger=log)
-        db_label = "PostgreSQL: %s" % db_url
-    else:
-        job_db = JobDatabase(args.db, logger=log)
-        db_label = "SQLite: %s" % args.db
 
     log.info("Node: %s" % socket.gethostname())
     log.info("Database: %s" % db_label)
     if ffmpeg_dir:
         log.info("FFmpeg/FFprobe directory: %s" % ffmpeg_dir)
-    if db_url:
-        log.info("Heartbeat interval: %ds (stale after %ds)" % (args.heartbeat_interval, args.stale_seconds))
+    log.info("Heartbeat interval: %ds (stale after %ds)" % (args.heartbeat_interval, args.stale_seconds))
     log.info("Logs directory: %s" % config_log_manager.logs_dir)
     log.info("Concurrency: One process per config (jobs for same config queue)")
     if job_timeout_seconds:
