@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.0](https://github.com/newdave/sma-ng/compare/sma-ng-v0.2.0...sma-ng-v0.3.0) (2026-04-03)
+
+
+### Features
+
+* add /reload, /restart endpoints and SIGHUP graceful restart ([b939b12](https://github.com/newdave/sma-ng/commit/b939b1261de4fbdd1609ee756b79fb166cc2fce3))
+* add configurable QSV look-ahead, B-frames, ref-frames; add OpenAPI spec and CI validation ([3881bc3](https://github.com/newdave/sma-ng/commit/3881bc3b6e7a5d4c02ce416a7e865d233254dd78))
+* add job priority queue ordering via dashboard ([e19b59d](https://github.com/newdave/sma-ng/commit/e19b59d0fc924bb705edc13536bf47133c7f0c41))
+* remote restart/shutdown via PostgreSQL pending_command ([f785b3a](https://github.com/newdave/sma-ng/commit/f785b3ab24979e8c20fc21e86140159997d0a6e5))
+* show cluster node status on dashboard via PostgreSQL ([3c3cc65](https://github.com/newdave/sma-ng/commit/3c3cc65e3566dee5c1cd5bc28a7f9fd60c81cb61))
+* skip .mp4 files in filesystem scanner; add per-path enabled flag ([9a29bd1](https://github.com/newdave/sma-ng/commit/9a29bd16962c1e6b12a09eed30db73624192b690))
+* update sma-webhook.sh to cover all daemon endpoints ([742bed4](https://github.com/newdave/sma-ng/commit/742bed43ac7c7f1e354c230b7ebc36e8ab5f72ad))
+
+
+### Bug Fixes
+
+* add version tag trigger to docker workflow ([8732843](https://github.com/newdave/sma-ng/commit/8732843cad2d638147fe4226414cf1af3eaf5144))
+* flush response buffer before triggering shutdown/restart ([790ab9d](https://github.com/newdave/sma-ng/commit/790ab9d65e7f2c4c39917657015262bd6a6987c4))
+* update QSV defaults and clarify restart message ([8534d17](https://github.com/newdave/sma-ng/commit/8534d171794ab0503ae82178e4007ed05f1dc287))
+
 ## [0.2.0](https://github.com/newdave/sma-ng/compare/sma-ng-v0.1.2...sma-ng-v0.2.0) (2026-04-01)
 
 
