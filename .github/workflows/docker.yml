@@ -3,6 +3,7 @@ name: Docker
 on:
   push:
     branches: [main]
+    tags: ["v*"]
     paths:
       - "docker/Dockerfile"
       - "docker/docker-entrypoint.sh"
