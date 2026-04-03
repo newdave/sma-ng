@@ -422,6 +422,7 @@ def live_server(tmp_db):
     t.start()
     yield server
     server.shutdown()
+    server.server_close()
     job_db.close()
 
 
@@ -1105,3 +1106,534 @@ class TestRecycleBinDetection:
         other.mkdir()
         mgr = self._make_mgr(tmp_path, recycle_bin=str(recycle))
         assert mgr.is_recycle_bin_path(str(other / "movie.mkv")) is False
+
+
+# ---------------------------------------------------------------------------
+# Job cancel and priority (db-level)
+# ---------------------------------------------------------------------------
+
+
+class TestJobCancelAndPriority:
+    """Tests for cancel_job and set_job_priority on the SQLite backend."""
+
+    def test_cancel_pending_job(self, job_db):
+        jid = job_db.add_job("/a.mkv", "/cfg.ini")
+        result = job_db.cancel_job(jid)
+        assert result is True
+        job = job_db.get_job(jid)
+        assert job["status"] == "cancelled"
+        assert job["error"] == "Cancelled by user"
+
+    def test_cancel_running_job(self, job_db):
+        jid = job_db.add_job("/a.mkv", "/cfg.ini")
+        job_db.start_job(jid, worker_id=1)
+        result = job_db.cancel_job(jid)
+        assert result is True
+        assert job_db.get_job(jid)["status"] == "cancelled"
+
+    def test_cancel_completed_job_returns_false(self, job_db):
+        jid = job_db.add_job("/a.mkv", "/cfg.ini")
+        job_db.start_job(jid, worker_id=1)
+        job_db.complete_job(jid)
+        result = job_db.cancel_job(jid)
+        assert result is False
+        assert job_db.get_job(jid)["status"] == STATUS_COMPLETED
+
+    def test_cancel_nonexistent_job_returns_false(self, job_db):
+        assert job_db.cancel_job(9999) is False
+
+    def test_set_priority_pending_job(self, job_db):
+        jid = job_db.add_job("/a.mkv", "/cfg.ini")
+        result = job_db.set_job_priority(jid, 10)
+        assert result is True
+        job = job_db.get_job(jid)
+        assert job["priority"] == 10
+
+    def test_set_priority_running_job_returns_false(self, job_db):
+        jid = job_db.add_job("/a.mkv", "/cfg.ini")
+        job_db.start_job(jid, worker_id=1)
+        result = job_db.set_job_priority(jid, 5)
+        assert result is False
+
+    def test_set_priority_nonexistent_job_returns_false(self, job_db):
+        assert job_db.set_job_priority(9999, 1) is False
+
+    def test_priority_affects_claim_order(self, job_db):
+        """Higher priority jobs should be claimed before lower priority ones."""
+        jid_low = job_db.add_job("/low.mkv", "/cfg.ini")
+        jid_high = job_db.add_job("/high.mkv", "/cfg.ini")
+        job_db.set_job_priority(jid_high, 10)
+        claimed = job_db.claim_next_job(worker_id=1, node_id="node1")
+        assert claimed is not None
+        assert claimed["id"] == jid_high
+
+
+# ---------------------------------------------------------------------------
+# Scan operations (db-level)
+# ---------------------------------------------------------------------------
+
+
+class TestScanOperations:
+    """Tests for filter_unscanned and record_scanned."""
+
+    def test_filter_unscanned_empty_input(self, job_db):
+        assert job_db.filter_unscanned([]) == []
+
+    def test_filter_unscanned_all_new(self, job_db):
+        paths = ["/a.mkv", "/b.mkv"]
+        result = job_db.filter_unscanned(paths)
+        assert set(result) == set(paths)
+
+    def test_record_and_filter_scanned(self, job_db):
+        paths = ["/a.mkv", "/b.mkv", "/c.mkv"]
+        job_db.record_scanned(["/a.mkv", "/b.mkv"])
+        unscanned = job_db.filter_unscanned(paths)
+        assert unscanned == ["/c.mkv"]
+
+    def test_record_scanned_idempotent(self, job_db):
+        job_db.record_scanned(["/a.mkv"])
+        job_db.record_scanned(["/a.mkv"])  # Should not raise
+        assert job_db.filter_unscanned(["/a.mkv"]) == []
+
+    def test_record_scanned_empty_is_noop(self, job_db):
+        job_db.record_scanned([])  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# PathConfigManager path utilities
+# ---------------------------------------------------------------------------
+
+
+class TestPathConfigManagerUtils:
+    """Tests for get_args_for_path, rewrite_path."""
+
+    def _make_mgr(self, tmp_path):
+        cfg = tmp_path / "daemon.json"
+        import json as _json
+
+        cfg.write_text(
+            _json.dumps(
+                {
+                    "default_config": "config/autoProcess.ini",
+                    "default_args": ["-nt"],
+                    "path_configs": [
+                        {
+                            "path": str(tmp_path / "TV"),
+                            "config": "config/autoProcess.ini",
+                            "default_args": ["-tvdb", "1234"],
+                        },
+                        {
+                            "path": str(tmp_path / "Movies"),
+                            "config": "config/autoProcess.ini",
+                        },
+                    ],
+                    "path_rewrites": [
+                        {"from": "/mnt/local", "to": "/mnt/union"},
+                    ],
+                }
+            )
+        )
+        return PathConfigManager(str(cfg))
+
+    def test_get_args_for_matched_path(self, tmp_path):
+        mgr = self._make_mgr(tmp_path)
+        args = mgr.get_args_for_path(str(tmp_path / "TV" / "show.mkv"))
+        assert args == ["-tvdb", "1234"]
+
+    def test_get_args_for_unmatched_path_returns_default(self, tmp_path):
+        mgr = self._make_mgr(tmp_path)
+        args = mgr.get_args_for_path("/unrelated/movie.mkv")
+        assert args == ["-nt"]
+
+    def test_get_args_for_path_without_default_args(self, tmp_path):
+        mgr = self._make_mgr(tmp_path)
+        args = mgr.get_args_for_path(str(tmp_path / "Movies" / "film.mkv"))
+        assert args == []
+
+    def test_rewrite_path_matching_prefix(self, tmp_path):
+        mgr = self._make_mgr(tmp_path)
+        result = mgr.rewrite_path("/mnt/local/Media/show.mkv")
+        assert result == "/mnt/union/Media/show.mkv"
+
+    def test_rewrite_path_exact_prefix(self, tmp_path):
+        mgr = self._make_mgr(tmp_path)
+        result = mgr.rewrite_path("/mnt/local")
+        assert result == "/mnt/union"
+
+    def test_rewrite_path_no_match(self, tmp_path):
+        mgr = self._make_mgr(tmp_path)
+        result = mgr.rewrite_path("/other/path/file.mkv")
+        assert result == "/other/path/file.mkv"
+
+    def test_rewrite_path_no_false_partial_prefix_match(self, tmp_path):
+        mgr = self._make_mgr(tmp_path)
+        # /mnt/local2 should NOT match /mnt/local rewrite
+        result = mgr.rewrite_path("/mnt/local2/file.mkv")
+        assert result == "/mnt/local2/file.mkv"
+
+
+# ---------------------------------------------------------------------------
+# Authentication tests
+# ---------------------------------------------------------------------------
+
+
+class TestAuthentication:
+    """Tests for check_auth and API key enforcement."""
+
+    def _get(self, server, path, api_key=None):
+        host, port = server.server_address
+        url = "http://%s:%d%s" % (host, port, path)
+        req = urllib.request.Request(url)
+        if api_key:
+            req.add_header("X-API-Key", api_key)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return json.loads(resp.read()), resp.status
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read()), e.code
+
+    def _post(self, server, path, data=None, api_key=None, bearer=None):
+        host, port = server.server_address
+        url = "http://%s:%d%s" % (host, port, path)
+        body = json.dumps(data).encode() if data is not None else b""
+        req = urllib.request.Request(url, data=body, method="POST")
+        if body:
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Content-Length", str(len(body)))
+        if api_key:
+            req.add_header("X-API-Key", api_key)
+        if bearer:
+            req.add_header("Authorization", "Bearer %s" % bearer)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return json.loads(resp.read()), resp.status
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read()), e.code
+
+    def _make_server(self, tmp_db, api_key=None):
+        from resources.log import getLogger
+
+        job_db = JobDatabase(tmp_db)
+        server = DaemonServer(
+            ("127.0.0.1", 0),
+            WebhookHandler,
+            job_db,
+            PathConfigManager(),
+            ConfigLogManager("/tmp"),
+            ConfigLockManager(),
+            getLogger("TEST"),
+            worker_count=1,
+            api_key=api_key,
+        )
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        return server, job_db
+
+    def test_no_api_key_allows_all(self, tmp_db):
+        server, job_db = self._make_server(tmp_db, api_key=None)
+        try:
+            data, status = self._get(server, "/health")
+            assert status == 200
+            data, status = self._get(server, "/jobs")
+            assert status == 200
+        finally:
+            server.shutdown()
+            server.server_close()
+            job_db.close()
+
+    def test_api_key_required_when_set(self, tmp_db):
+        server, job_db = self._make_server(tmp_db, api_key="secret123")
+        try:
+            data, status = self._get(server, "/jobs")  # no key
+            assert status == 401
+            assert "Unauthorized" in data["error"]
+        finally:
+            server.shutdown()
+            server.server_close()
+            job_db.close()
+
+    def test_x_api_key_header_accepted(self, tmp_db):
+        server, job_db = self._make_server(tmp_db, api_key="secret123")
+        try:
+            data, status = self._get(server, "/jobs", api_key="secret123")
+            assert status == 200
+        finally:
+            server.shutdown()
+            server.server_close()
+            job_db.close()
+
+    def test_bearer_token_accepted(self, tmp_db):
+        server, job_db = self._make_server(tmp_db, api_key="secret123")
+        try:
+            data, status = self._get(server, "/jobs")  # no key -> 401
+            assert status == 401
+            # Now with bearer
+            host, port = server.server_address
+            url = "http://%s:%d/jobs" % (host, port)
+            req = urllib.request.Request(url, headers={"Authorization": "Bearer secret123"})
+            with urllib.request.urlopen(req) as resp:
+                assert resp.status == 200
+        finally:
+            server.shutdown()
+            server.server_close()
+            job_db.close()
+
+    def test_wrong_key_returns_401(self, tmp_db):
+        server, job_db = self._make_server(tmp_db, api_key="secret123")
+        try:
+            data, status = self._get(server, "/jobs", api_key="wrongkey")
+            assert status == 401
+        finally:
+            server.shutdown()
+            server.server_close()
+            job_db.close()
+
+    def test_public_endpoints_accessible_without_key(self, tmp_db):
+        server, job_db = self._make_server(tmp_db, api_key="secret123")
+        try:
+            # /health is public
+            data, status = self._get(server, "/health")
+            assert status == 200
+        finally:
+            server.shutdown()
+            server.server_close()
+            job_db.close()
+
+    def test_post_requires_auth(self, tmp_db):
+        server, job_db = self._make_server(tmp_db, api_key="secret123")
+        try:
+            data, status = self._post(server, "/cleanup")
+            assert status == 401
+        finally:
+            server.shutdown()
+            server.server_close()
+            job_db.close()
+
+
+# ---------------------------------------------------------------------------
+# Job cancel and priority HTTP endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestJobCancelPriorityHTTP:
+    """Test /jobs/<id>/cancel and /jobs/<id>/priority endpoints."""
+
+    def _post(self, server, path, data=None):
+        host, port = server.server_address
+        url = "http://%s:%d%s" % (host, port, path)
+        body = json.dumps(data).encode() if data is not None else b""
+        req = urllib.request.Request(url, data=body, method="POST")
+        if body:
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Content-Length", str(len(body)))
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return json.loads(resp.read()), resp.status
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read()), e.code
+
+    def test_cancel_pending_job(self, live_server):
+        jid = live_server.job_db.add_job("/movie.mkv", "/cfg.ini")
+        data, status = self._post(live_server, "/jobs/%d/cancel" % jid)
+        assert status == 200
+        assert data["cancelled"] is True
+        assert data["job_id"] == jid
+
+    def test_cancel_completed_job_returns_409(self, live_server):
+        jid = live_server.job_db.add_job("/movie.mkv", "/cfg.ini")
+        live_server.job_db.start_job(jid, worker_id=1)
+        live_server.job_db.complete_job(jid)
+        data, status = self._post(live_server, "/jobs/%d/cancel" % jid)
+        assert status == 409
+
+    def test_cancel_nonexistent_job_returns_404(self, live_server):
+        data, status = self._post(live_server, "/jobs/9999/cancel")
+        assert status == 404
+
+    def test_cancel_invalid_job_id_returns_400(self, live_server):
+        data, status = self._post(live_server, "/jobs/notanumber/cancel")
+        assert status == 400
+
+    def test_set_priority_pending_job(self, live_server):
+        jid = live_server.job_db.add_job("/movie.mkv", "/cfg.ini")
+        data, status = self._post(live_server, "/jobs/%d/priority" % jid, data={"priority": 5})
+        assert status == 200
+        assert data["job_id"] == jid
+        assert data["priority"] == 5
+
+    def test_set_priority_running_job_returns_409(self, live_server):
+        jid = live_server.job_db.add_job("/movie.mkv", "/cfg.ini")
+        live_server.job_db.start_job(jid, worker_id=1)
+        data, status = self._post(live_server, "/jobs/%d/priority" % jid, data={"priority": 5})
+        assert status == 409
+
+    def test_set_priority_nonexistent_job_returns_404(self, live_server):
+        data, status = self._post(live_server, "/jobs/9999/priority", data={"priority": 5})
+        assert status == 404
+
+    def test_set_priority_missing_field_returns_400(self, live_server):
+        jid = live_server.job_db.add_job("/movie.mkv", "/cfg.ini")
+        data, status = self._post(live_server, "/jobs/%d/priority" % jid, data={})
+        assert status == 400
+        assert "priority" in data["error"]
+
+    def test_set_priority_invalid_value_returns_400(self, live_server):
+        jid = live_server.job_db.add_job("/movie.mkv", "/cfg.ini")
+        data, status = self._post(live_server, "/jobs/%d/priority" % jid, data={"priority": "high"})
+        assert status == 400
+
+
+# ---------------------------------------------------------------------------
+# Scan filter/record HTTP endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestScanHTTPEndpoints:
+    """Test GET /scan, POST /scan/filter, POST /scan/record."""
+
+    def _get(self, server, path):
+        host, port = server.server_address
+        url = "http://%s:%d%s" % (host, port, path)
+        try:
+            with urllib.request.urlopen(url) as resp:
+                return json.loads(resp.read()), resp.status
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read()), e.code
+
+    def _post(self, server, path, data=None):
+        host, port = server.server_address
+        url = "http://%s:%d%s" % (host, port, path)
+        body = json.dumps(data).encode() if data is not None else b"{}"
+        req = urllib.request.Request(url, data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Content-Length", str(len(body)))
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return json.loads(resp.read()), resp.status
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read()), e.code
+
+    def test_get_scan_empty(self, live_server):
+        data, status = self._get(live_server, "/scan")
+        assert status == 200
+        assert data["unscanned"] == []
+        assert data["total"] == 0
+
+    def test_get_scan_with_paths(self, live_server):
+        data, status = self._get(live_server, "/scan?path=/a.mkv&path=/b.mkv")
+        assert status == 200
+        assert set(data["unscanned"]) == {"/a.mkv", "/b.mkv"}
+        assert data["total"] == 2
+
+    def test_post_scan_filter(self, live_server):
+        live_server.job_db.record_scanned(["/a.mkv"])
+        data, status = self._post(live_server, "/scan/filter", data={"paths": ["/a.mkv", "/b.mkv"]})
+        assert status == 200
+        assert data["unscanned"] == ["/b.mkv"]
+        assert data["total"] == 2
+        assert data["already_scanned"] == 1
+
+    def test_post_scan_record(self, live_server):
+        data, status = self._post(live_server, "/scan/record", data={"paths": ["/a.mkv", "/b.mkv"]})
+        assert status == 200
+        assert data["recorded"] == 2
+        # Verify they are now marked scanned
+        assert live_server.job_db.filter_unscanned(["/a.mkv", "/b.mkv"]) == []
+
+    def test_post_scan_filter_empty(self, live_server):
+        data, status = self._post(live_server, "/scan/filter", data={"paths": []})
+        assert status == 200
+        assert data["unscanned"] == []
+
+    def test_post_scan_record_empty(self, live_server):
+        data, status = self._post(live_server, "/scan/record", data={"paths": []})
+        assert status == 200
+        assert data["recorded"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Reload endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestReloadEndpoint:
+    """Test POST /reload."""
+
+    def _post(self, server, path):
+        host, port = server.server_address
+        url = "http://%s:%d%s" % (host, port, path)
+        req = urllib.request.Request(url, data=b"", method="POST")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return json.loads(resp.read()), resp.status
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read()), e.code
+
+    def test_reload_returns_200(self, live_server):
+        data, status = self._post(live_server, "/reload")
+        assert status == 200
+        assert data["status"] == "reloading"
+
+
+# ---------------------------------------------------------------------------
+# Docs endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestDocsEndpoint:
+    """Test GET /docs and /docs/<slug>."""
+
+    def _get_html(self, server, path):
+        host, port = server.server_address
+        url = "http://%s:%d%s" % (host, port, path)
+        req = urllib.request.Request(url, headers={"Accept": "text/html"})
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.read().decode(), resp.status
+        except urllib.error.HTTPError as e:
+            return e.read().decode(), e.code
+
+    def test_docs_index_returns_200(self, live_server):
+        html, status = self._get_html(live_server, "/docs")
+        assert status == 200
+        assert "<html" in html.lower()
+
+    def test_docs_subpage_returns_200(self, live_server):
+        html, status = self._get_html(live_server, "/docs/getting-started")
+        assert status == 200
+        assert "Getting Started" in html
+
+    def test_docs_nonexistent_page_returns_404(self, live_server):
+        html, status = self._get_html(live_server, "/docs/nonexistent-page")
+        assert status == 404
+
+    def test_docs_index_contains_nav(self, live_server):
+        html, status = self._get_html(live_server, "/docs")
+        assert status == 200
+        assert "Getting Started" in html  # Nav item from DOC_PAGES
+
+    def test_docs_is_public_endpoint(self, live_server):
+        """Docs endpoints should be accessible without auth even when API key is set."""
+        live_server.api_key = "secret"
+        try:
+            html, status = self._get_html(live_server, "/docs")
+            assert status == 200
+        finally:
+            live_server.api_key = None
+
+
+# ---------------------------------------------------------------------------
+# do_HEAD endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestHeadEndpoint:
+    """Test do_HEAD handler."""
+
+    def test_head_request_returns_200(self, live_server):
+        host, port = live_server.server_address
+        url = "http://%s:%d/health" % (host, port)
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req) as resp:
+            assert resp.status == 200
+            assert resp.headers.get("Content-Type", "").startswith("application/json")

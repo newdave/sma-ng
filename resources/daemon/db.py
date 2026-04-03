@@ -83,20 +83,31 @@ class JobDatabase(BaseJobDatabase):
         self.db_path = db_path
         self.log = logger or log
         self._local = threading.local()
+        self._all_connections = []  # track every connection across all threads
+        self._conn_lock = threading.Lock()
         self._init_db()
 
     def _get_connection(self):
         """Get thread-local database connection."""
         if not hasattr(self._local, "connection") or self._local.connection is None:
-            self._local.connection = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
-            self._local.connection.row_factory = sqlite3.Row
+            conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
+            conn.row_factory = sqlite3.Row
+            self._local.connection = conn
+            with self._conn_lock:
+                self._all_connections.append(conn)
         return self._local.connection
 
     def close(self):
-        """Close the thread-local database connection."""
-        if hasattr(self._local, "connection") and self._local.connection is not None:
-            self._local.connection.close()
-            self._local.connection = None
+        """Close all database connections (across all threads)."""
+        with self._conn_lock:
+            conns = list(self._all_connections)
+            self._all_connections.clear()
+        for conn in conns:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        self._local.connection = None
 
     @contextmanager
     def _cursor(self):
