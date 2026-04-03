@@ -53,12 +53,9 @@ keep-titles = False
 #   vaapi:          h264, h265, av1
 #   videotoolbox:   h264, h265
 gpu = qsv
-codec = h265
-max-bitrate = 0
 bitrate-ratio = hevc:1.0, h264:0.65, mpeg2video:0.45, vc1:0.50, vp9:0.85, av1:1.1, *:0.60
 crf = -1
 crf-profiles = 0:22:2M:4M,4000:22:3M:6M,8000:22:5M:10M,15000:22:15M:30M,25000:21:25M:50M
-preset =
 codec-parameters =
 dynamic-parameters = true
 max-width = 0
@@ -68,9 +65,12 @@ pix-fmt =
 prioritize-source-pix-fmt = true
 filter =
 force-filter = False
-look-ahead-depth = 8
+look-ahead-depth = 40
 b-frames = 4
 ref-frames = 4
+codec = hevc, h265
+max-bitrate = 0
+preset = fast
 
 [HDR]
 codec =
@@ -78,14 +78,15 @@ pix-fmt =
 space = bt2020nc
 transfer = smpte2084
 primaries = bt2020
-preset =
 codec-parameters =
 filter =
 force-filter = False
 profile =
-look-ahead-depth = 8
+look-ahead-depth = 40
 b-frames = 4
 ref-frames = 4
+codec = hevc, h265
+preset = fast
 
 [Audio]
 codec = aac, eac3, ac3
