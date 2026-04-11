@@ -34,6 +34,7 @@
       <p class="text-gray-400 text-sm">Media Conversion Daemon</p>
     </div>
     <div class="flex items-center gap-4">
+      <a href="/admin" class="text-xs text-red-400 hover:underline">Admin</a>
       <a href="/docs" class="text-xs text-blue-400 hover:underline">Docs</a>
       <span class="tooltip text-xs text-gray-500" x-show="health.node" x-text="health.node">
         <span class="tip">Hostname of this daemon node</span>
@@ -131,116 +132,125 @@
     </div>
   </div>
 
-  <!-- Workers -->
+  <!-- Local Threads / Cluster Threads (tabbed) -->
   <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
-    <h2 class="tooltip text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 cursor-default">
-      Workers
-      <span class="tip">Background threads that pick up and run conversion jobs.</span>
-    </h2>
-    <div class="flex items-baseline gap-2 mb-3">
-      <span class="text-3xl font-bold text-white" x-text="activeWorkers"></span>
-      <span class="text-gray-500 text-sm" x-text="'/ ' + (health.workers || 0) + ' busy'"></span>
+    <!-- Tab bar -->
+    <div class="flex gap-1 mb-4 border-b border-gray-700 -mx-5 px-5">
+      <button @click="threadsTab='local'"
+              class="pb-2 px-1 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors"
+              :class="threadsTab==='local' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300'">
+        Local Threads
+      </button>
+      <button @click="threadsTab='cluster'"
+              x-show="cluster && cluster.cluster && cluster.cluster.length > 0"
+              class="pb-2 px-1 ml-4 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors"
+              :class="threadsTab==='cluster' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300'">
+        Cluster Threads
+      </button>
     </div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2" x-show="activeWorkers > 0">
-      <template x-for="(jobs, config) in (health.active||{})" :key="config">
-        <template x-for="info in jobs" :key="info.job_id">
-          <div class="bg-gray-700/50 rounded p-2">
-            <div class="flex items-center gap-2 mb-0.5">
-              <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
-              <span class="text-xs text-blue-300 font-medium truncate" x-text="config.split('/').pop()"></span>
+
+    <!-- Local Threads pane -->
+    <div x-show="threadsTab==='local'">
+      <div class="flex items-baseline gap-2 mb-3">
+        <span class="text-3xl font-bold text-white" x-text="activeWorkers"></span>
+        <span class="text-gray-500 text-sm" x-text="'/ ' + (health.workers || 0) + ' busy'"></span>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2" x-show="activeWorkers > 0">
+        <template x-for="(jobs, config) in (health.active||{})" :key="config">
+          <template x-for="info in jobs" :key="info.job_id">
+            <div class="bg-gray-700/50 rounded p-2">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
+                <span class="text-xs text-blue-300 font-medium truncate" x-text="config.split('/').pop()"></span>
+              </div>
+              <div class="tooltip text-xs text-gray-400 truncate pl-3.5 cursor-default" :title="info.path" x-text="info.path.split('/').pop()">
+                <span class="tip" x-text="info.path"></span>
+              </div>
+              <div class="text-xs text-gray-600 pl-3.5">Job #<span x-text="info.job_id"></span></div>
             </div>
-            <div class="tooltip text-xs text-gray-400 truncate pl-3.5 cursor-default" :title="info.path" x-text="info.path.split('/').pop()">
-              <span class="tip" x-text="info.path"></span>
-            </div>
-            <div class="text-xs text-gray-600 pl-3.5">Job #<span x-text="info.job_id"></span></div>
+          </template>
+        </template>
+      </div>
+      <p class="text-gray-600 text-xs" x-show="activeWorkers === 0">No active conversions</p>
+      <!-- Waiting queues -->
+      <div class="mt-3 space-y-1" x-show="Object.keys(health.waiting||{}).length">
+        <div class="text-xs text-gray-500 mb-1">Queued</div>
+        <template x-for="(count, config) in (health.waiting||{})" :key="config">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-400 truncate" x-text="config.split('/').pop()"></span>
+            <span class="tooltip text-xs bg-yellow-900/60 text-yellow-300 px-2 py-0.5 rounded-full ml-2 flex-shrink-0" x-text="count">
+              <span class="tip">Jobs waiting for this config's slot to become available</span>
+            </span>
           </div>
         </template>
-      </template>
+      </div>
     </div>
-    <p class="text-gray-600 text-xs" x-show="activeWorkers === 0">No active conversions</p>
 
-    <!-- Waiting queues -->
-    <div class="mt-3 space-y-1" x-show="Object.keys(health.waiting||{}).length">
-      <div class="text-xs text-gray-500 mb-1">Queued</div>
-      <template x-for="(count, config) in (health.waiting||{})" :key="config">
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-gray-400 truncate" x-text="config.split('/').pop()"></span>
-          <span class="tooltip text-xs bg-yellow-900/60 text-yellow-300 px-2 py-0.5 rounded-full ml-2 flex-shrink-0" x-text="count">
-            <span class="tip">Jobs waiting for this config's slot to become available</span>
-          </span>
-        </div>
-      </template>
-    </div>
-  </div>
-
-  <!-- Cluster Nodes (PostgreSQL only) -->
-  <div x-show="cluster && cluster.cluster && cluster.cluster.length > 0" class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
-    <h2 class="tooltip text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 cursor-default">
-      Cluster Nodes
-      <span class="tip">All daemon nodes reporting via PostgreSQL. Heartbeat updates every 30s.</span>
-    </h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead><tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
-          <th class="pb-2 pr-4 font-medium">Node</th>
-          <th class="pb-2 pr-4 font-medium">Status</th>
-          <th class="pb-2 pr-4 font-medium">Workers</th>
-          <th class="pb-2 pr-4 font-medium">Running</th>
-          <th class="pb-2 pr-4 font-medium">Pending</th>
-          <th class="pb-2 pr-4 font-medium">Uptime</th>
-          <th class="pb-2 pr-4 font-medium">Last Seen</th>
-          <th class="pb-2 font-medium">Actions</th>
-        </tr></thead>
-        <tbody class="divide-y divide-gray-700/50 text-xs">
-          <template x-for="node in (cluster && cluster.cluster || [])" :key="node.node_id">
-            <tr class="hover:bg-gray-700/20">
-              <td class="py-2 pr-4">
-                <div class="font-mono text-gray-200" x-text="node.host"></div>
-                <div class="text-gray-600 font-mono" x-text="node.node_id !== node.host ? node.node_id : ''"></div>
-              </td>
-              <td class="py-2 pr-4">
-                <span class="px-2 py-0.5 rounded-full"
-                      :class="node.status === 'online' ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-500'"
-                      x-text="node.status"></span>
-              </td>
-              <td class="py-2 pr-4 text-gray-300" x-text="node.workers"></td>
-              <td class="py-2 pr-4">
-                <div x-show="node.active_jobs && node.active_jobs.length" class="space-y-1">
-                  <template x-for="job in (node.active_jobs || [])" :key="job.job_id">
-                    <div class="flex items-center gap-1.5">
-                      <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
-                      <span class="tooltip text-gray-300 truncate max-w-xs cursor-default" :title="job.path">
-                        <span x-text="job.path.split('/').pop()"></span>
-                        <span class="text-gray-600 ml-1">#<span x-text="job.job_id"></span></span>
-                        <span class="tip" x-text="job.path"></span>
-                      </span>
-                    </div>
-                  </template>
-                </div>
-                <span x-show="!node.active_jobs || !node.active_jobs.length" class="text-gray-600">—</span>
-              </td>
-              <td class="py-2 pr-4 text-gray-400" x-text="node.pending_jobs || 0"></td>
-              <td class="py-2 pr-4 text-gray-400" x-text="node.uptime_seconds != null ? fmtUptime(node.uptime_seconds) : '—'"></td>
-              <td class="py-2 pr-4 text-gray-500" x-text="fmtTime(node.last_seen)"></td>
-              <td class="py-2">
-                <div x-show="node.status === 'online'" class="flex gap-1.5">
-                  <button @click="nodeRestart(node)"
-                          :disabled="node._pending"
-                          class="px-2 py-0.5 rounded border border-blue-700 text-blue-400 hover:border-blue-500 hover:text-blue-300 disabled:opacity-30 transition-colors"
-                          x-text="node._pending === 'restart' ? 'Sending…' : 'Restart'">
-                  </button>
-                  <button @click="nodeShutdown(node)"
-                          :disabled="node._pending"
-                          class="px-2 py-0.5 rounded border border-red-800 text-red-500 hover:border-red-600 hover:text-red-400 disabled:opacity-30 transition-colors"
-                          x-text="node._pending === 'shutdown' ? 'Sending…' : 'Shutdown'">
-                  </button>
-                </div>
-                <span x-show="node.status !== 'online'" class="text-gray-600">—</span>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
+    <!-- Cluster Threads pane -->
+    <div x-show="threadsTab==='cluster' && cluster && cluster.cluster && cluster.cluster.length > 0">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
+            <th class="pb-2 pr-4 font-medium">Node</th>
+            <th class="pb-2 pr-4 font-medium">Status</th>
+            <th class="pb-2 pr-4 font-medium">Threads</th>
+            <th class="pb-2 pr-4 font-medium">Running</th>
+            <th class="pb-2 pr-4 font-medium">Pending</th>
+            <th class="pb-2 pr-4 font-medium">Uptime</th>
+            <th class="pb-2 pr-4 font-medium">Last Seen</th>
+            <th class="pb-2 font-medium">Actions</th>
+          </tr></thead>
+          <tbody class="divide-y divide-gray-700/50 text-xs">
+            <template x-for="node in (cluster && cluster.cluster || [])" :key="node.node_id">
+              <tr class="hover:bg-gray-700/20">
+                <td class="py-2 pr-4">
+                  <div class="font-mono text-gray-200" x-text="node.host"></div>
+                  <div class="text-gray-600 font-mono" x-text="node.node_id !== node.host ? node.node_id : ''"></div>
+                </td>
+                <td class="py-2 pr-4">
+                  <span class="px-2 py-0.5 rounded-full"
+                        :class="node.status === 'online' ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-500'"
+                        x-text="node.status"></span>
+                </td>
+                <td class="py-2 pr-4 text-gray-300" x-text="node.workers"></td>
+                <td class="py-2 pr-4">
+                  <div x-show="node.active_jobs && node.active_jobs.length" class="space-y-1">
+                    <template x-for="job in (node.active_jobs || [])" :key="job.job_id">
+                      <div class="flex items-center gap-1.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
+                        <span class="tooltip text-gray-300 truncate max-w-xs cursor-default" :title="job.path">
+                          <span x-text="job.path.split('/').pop()"></span>
+                          <span class="text-gray-600 ml-1">#<span x-text="job.job_id"></span></span>
+                          <span class="tip" x-text="job.path"></span>
+                        </span>
+                      </div>
+                    </template>
+                  </div>
+                  <span x-show="!node.active_jobs || !node.active_jobs.length" class="text-gray-600">—</span>
+                </td>
+                <td class="py-2 pr-4 text-gray-400" x-text="node.pending_jobs || 0"></td>
+                <td class="py-2 pr-4 text-gray-400" x-text="node.uptime_seconds != null ? fmtUptime(node.uptime_seconds) : '—'"></td>
+                <td class="py-2 pr-4 text-gray-500" x-text="fmtTime(node.last_seen)"></td>
+                <td class="py-2">
+                  <div x-show="node.status === 'online'" class="flex gap-1.5">
+                    <button @click="nodeRestart(node)"
+                            :disabled="node._pending"
+                            class="px-2 py-0.5 rounded border border-blue-700 text-blue-400 hover:border-blue-500 hover:text-blue-300 disabled:opacity-30 transition-colors"
+                            x-text="node._pending === 'restart' ? 'Sending…' : 'Restart'">
+                    </button>
+                    <button @click="nodeShutdown(node)"
+                            :disabled="node._pending"
+                            class="px-2 py-0.5 rounded border border-red-800 text-red-500 hover:border-red-600 hover:text-red-400 disabled:opacity-30 transition-colors"
+                            x-text="node._pending === 'shutdown' ? 'Sending…' : 'Shutdown'">
+                    </button>
+                  </div>
+                  <span x-show="node.status !== 'online'" class="text-gray-600">—</span>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -412,7 +422,7 @@
 function dashboard() {
   return {
     health: {}, stats: {}, configs: {}, jobs: [], cluster: null,
-    filter: 'all', page: 0, pageSize: 50,
+    filter: 'all', page: 0, pageSize: 50, threadsTab: 'local',
     lastUpdate: '', interval: null,
     submitPath: '', submitArgs: '', submitFlags: [], submitting: false, submitResult: '', submitError: false,
     flagDefs: [
@@ -460,7 +470,12 @@ function dashboard() {
           fetch('/status', {headers: this.authHeaders()}).then(r=>r.json()).catch(()=>null),
         ]);
         this.health = h; this.stats = s; this.configs = c;
+        const hadCluster = this.cluster && this.cluster.cluster && this.cluster.cluster.length > 0;
         this.cluster = (st && st.cluster) ? st : null;
+        // Auto-switch to cluster tab on first load if cluster data is present
+        if (!hadCluster && this.cluster && this.cluster.cluster && this.cluster.cluster.length > 0) {
+          this.threadsTab = 'cluster';
+        }
         await this.fetchJobs();
         this.lastUpdate = new Date().toLocaleTimeString();
       } catch(e) { this.health = {status:'error'}; }
