@@ -61,6 +61,24 @@ db_url   =
 # Overrides the [deploy] FFMPEG_DIR value if set.
 ffmpeg_dir =
 
+# ── managed keys ──────────────────────────────────────────────────────────────
+# Keys listed here are always overwritten from autoProcess.ini.sample on every
+# `mise run deploy:config`, even when the key already exists on the remote host.
+# Use this for tuning values you want to keep in sync across all workers.
+#
+# Format: Section = key1, key2, key3
+# Section names must match autoProcess.ini section headers exactly.
+# Keys not listed here are only added if absent (normal merge behaviour).
+
+# Quality flavours:
+#   Regular Quality (default): QUALITY=rq mise run config  (uses autoProcess.ini.sample)
+#   Lower Quality:             QUALITY=lq mise run config  (uses autoProcess.ini.sample-lq)
+# To push a different quality profile to workers, change the source sample in deploy:config.
+
+[managed_keys]
+Video = crf-profiles, crf-profiles-hd, look-ahead-depth, b-frames, ref-frames
+# HDR   = look-ahead-depth, b-frames, ref-frames
+
 # ── autoProcess.ini overrides ─────────────────────────────────────────────────
 # Section names mirror autoProcess.ini exactly.
 # `mise run deploy:config` stamps these into every *.ini on remote hosts.
