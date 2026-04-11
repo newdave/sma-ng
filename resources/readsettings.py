@@ -17,13 +17,17 @@ class SMAConfigParser(ConfigParser, object):
     directories, and file extensions directly from INI values.
     """
 
-    def getlist(self, section, option, vars=None, separator=",", default=[], lower=True, replace=[" "]):
+    def getlist(self, section, option, vars=None, separator=",", default=None, lower=True, replace=None):
         """Return an INI value as a list, splitting on ``separator`` (default ``","``).
 
         Empty values return ``default``. Items are stripped of leading/trailing
         whitespace; pass ``lower=True`` (the default) to also lowercase them.
         Characters in ``replace`` are removed from every item before returning.
         """
+        if default is None:
+            default = []
+        if replace is None:
+            replace = [" "]
         value = self.get(section, option, vars=vars)
 
         if not isinstance(value, str) and isinstance(value, list):
@@ -42,13 +46,15 @@ class SMAConfigParser(ConfigParser, object):
         value = [x.strip() for x in value]
         return value
 
-    def getdict(self, section, option, vars=None, listseparator=",", dictseparator=":", default={}, lower=True, replace=[" "], valueModifier=None):
+    def getdict(self, section, option, vars=None, listseparator=",", dictseparator=":", default=None, lower=True, replace=None, valueModifier=None):
         """Return an INI value as a dict, splitting items by ``listseparator`` then each item by ``dictseparator``.
 
         Items without the ``dictseparator`` are ignored. ``valueModifier``, when
         provided, is called on each value; entries that raise ``ValueError`` or
         ``TypeError`` are skipped. The ``default`` dict is used as the base.
         """
+        if default is None:
+            default = {}
         l = self.getlist(section, option, vars, listseparator, [], lower, replace)
         output = dict(default)
         for listitem in l:
@@ -83,7 +89,7 @@ class SMAConfigParser(ConfigParser, object):
         """Return an INI value as a path, creating the directory if it does not exist. Returns ``None`` for empty values."""
         return self.getpath(section, option, vars=vars, create=True)
 
-    def getdirectories(self, section, option, vars=None, separator=",", default=[]):
+    def getdirectories(self, section, option, vars=None, separator=",", default=None):
         """Return a list of paths from a comma-separated INI value, creating each directory if it does not exist."""
         directories = self.getlist(section, option, vars=vars, separator=separator, default=default, lower=False)
         directories = [os.path.normpath(x) for x in directories]
@@ -174,8 +180,8 @@ class ReadSettings:
             "codec": "h265",
             "max-bitrate": 0,
             "bitrate-ratio": "",
-            "crf": -1,
             "crf-profiles": "",
+            "crf-profiles-hd": "",
             "preset": "",
             "codec-parameters": "",
             "dynamic-parameters": False,
@@ -255,7 +261,7 @@ class ReadSettings:
             "codec-image-based": "",
             "languages": "",
             "default-language": "",
-            "force-default": True,
+            "force-default": False,
             "include-original-language": False,
             "first-stream-of-language": False,
             "encoding": "",
@@ -267,7 +273,6 @@ class ReadSettings:
             "filename-dispositions": "forced",
             "ignore-embedded-subs": False,
             "ignored-dispositions": "",
-            "force-default": False,
             "unique-dispositions": False,
             "attachment-codec": "",
             "remove-bitstream-subs": False,
@@ -451,7 +456,7 @@ class ReadSettings:
 
         write = False  # Will be changed to true if a value is missing from the config file and needs to be written
 
-        config = SMAConfigParser()
+        config = SMAConfigParser(strict=False)
         if os.path.isfile(configFile):
             try:
                 config.read(configFile)
@@ -692,26 +697,13 @@ class ReadSettings:
         self.keep_titles = config.getboolean(section, "keep-titles")
 
     def _read_video(self, config):
-        """Parse ``[Video]``, ``[HDR]``, and ``[Naming]`` and set video codec, bitrate, CRF, HDR, and naming attributes."""
+        """Parse ``[Video]``, ``[HDR]``, and ``[Naming]`` and set video codec, bitrate, HDR, and naming attributes."""
         section = "Video"
         self.vcodec = config.getlist(section, "codec")
         self.vmaxbitrate = config.getint(section, "max-bitrate")
         self.vbitrateratio = config.getdict(section, "bitrate-ratio", lower=True, valueModifier=float)
-        self.vcrf = config.getint(section, "crf")
-
-        self.vcrf_profiles = []
-        vcrf_profiles = config.getlist(section, "crf-profiles")
-        for vcrfp_raw in vcrf_profiles:
-            vcrfp = vcrfp_raw.split(":")
-            if len(vcrfp) == 4:
-                try:
-                    p = {"source_bitrate": int(vcrfp[0]), "crf": int(vcrfp[1]), "maxrate": vcrfp[2], "bufsize": vcrfp[3]}
-                    self.vcrf_profiles.append(p)
-                except (ValueError, TypeError):
-                    self.log.exception("Error parsing video-crf-profile '%s'." % vcrfp_raw)
-            else:
-                self.log.error("Invalid video-crf-profile length '%s'." % vcrfp_raw)
-        self.vcrf_profiles.sort(key=lambda x: x["source_bitrate"], reverse=True)
+        self.vbitrate_profiles = self._parse_bitrate_profiles(config.get(section, "crf-profiles"))
+        self.vbitrate_profiles_hd = self._parse_bitrate_profiles(config.get(section, "crf-profiles-hd"))
         self.preset = config.get(section, "preset")
         self.codec_params = config.get(section, "codec-parameters")
         self.dynamic_params = config.getboolean(section, "dynamic-parameters")
@@ -751,6 +743,58 @@ class ReadSettings:
 
         if self.gpu:
             self._apply_hwaccel_codec_map(self.gpu)
+
+        # codec-parameters may contain QSV-specific flags (e.g. -low_power, -extbrc).
+        # Clear them when not using QSV so they don't get passed to other encoders.
+        if self.codec_params and self.gpu != "qsv":
+            self.log.debug("Clearing codec-parameters (not QSV, gpu=%s)." % self.gpu)
+            self.codec_params = ""
+        if self.hdr.get("codec_params") and self.gpu != "qsv":
+            self.hdr["codec_params"] = ""
+
+    @staticmethod
+    def _parse_bitrate_profiles(raw):
+        """Parse a ``crf-profiles`` string into a sorted list of profile dicts.
+
+        Format: ``source_kbps:quality:target_bitrate:max_bitrate`` entries
+        separated by commas.  Bitrate values may use ``M`` (megabits) or ``k``
+        (kilobits) suffixes; bare numbers are treated as kilobits.
+
+        Example::
+
+            0:22:1M:3M, 3000:22:2M:4M, 8000:22:5M:10M
+
+        Returns a list sorted by ``source_kbps`` ascending so that the lookup
+        in :meth:`mediaprocessor.MediaProcessor._video_bitrate_profile` can use
+        a simple linear scan.  Returns an empty list when ``raw`` is blank.
+        """
+        profiles = []
+        for entry in raw.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            parts = entry.split(":")
+            if len(parts) != 4:
+                continue
+            try:
+                source_kbps = int(parts[0])
+                target = ReadSettings._parse_bitrate_value(parts[2])
+                maxrate = ReadSettings._parse_bitrate_value(parts[3])
+            except (ValueError, TypeError):
+                continue
+            profiles.append({"source_kbps": source_kbps, "target": target, "maxrate": maxrate})
+        profiles.sort(key=lambda p: p["source_kbps"])
+        return profiles
+
+    @staticmethod
+    def _parse_bitrate_value(s):
+        """Convert a bitrate string like ``5M``, ``3000k``, or ``3000`` to kbps int."""
+        s = s.strip().upper()
+        if s.endswith("M"):
+            return int(float(s[:-1]) * 1000)
+        if s.endswith("K"):
+            return int(float(s[:-1]))
+        return int(s)
 
     def _read_audio(self, config):
         """Parse ``[Audio]``, ``[Audio.Sorting]``, ``[Audio.ChannelFilters]``, and ``[Universal Audio]`` and set audio codec, language, bitrate, and sorting attributes."""
@@ -811,7 +855,6 @@ class ReadSettings:
         self.scodec_image = config.getlist(section, "codec-image-based")
         self.swl = config.getlist(section, "languages")
         self.sdl = config.get(section, "default-language").lower()
-        self.sforcedefault = config.getboolean(section, "force-default")
         self.subtitle_original_language = config.getboolean(section, "include-original-language")
         self.sub_first_language_stream = config.getboolean(section, "first-stream-of-language")
         self.subencoding = config.get(section, "encoding")

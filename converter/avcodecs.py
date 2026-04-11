@@ -206,6 +206,13 @@ class AudioCodec(BaseCodec):
         "bsf": str,
     }
 
+    max_channels = None  # subclasses set an int to cap channel count
+
+    def _codec_specific_parse_options(self, safe, stream=0):
+        if self.max_channels and "channels" in safe and safe["channels"] > self.max_channels:
+            safe["channels"] = self.max_channels
+        return safe
+
     def parse_options(self, opt, stream=0):
         """Translate an audio option dict into a list of FFmpeg command-line arguments.
 
@@ -406,14 +413,10 @@ class VideoCodec(BaseCodec):
     MPEG-1, MPEG-2.
     """
 
-    CRF_MIN = 0
-    CRF_MAX = 51
-
     encoder_options = {
         "codec": str,
         "title": str,
         "bitrate": int,
-        "crf": int,
         "maxrate": str,
         "bufsize": str,
         "fps": float,
@@ -511,11 +514,6 @@ class VideoCodec(BaseCodec):
             if bitrate < 1:
                 del safe["bitrate"]
 
-        if "crf" in safe:
-            crf = safe["crf"]
-            if crf < self.CRF_MIN or crf > self.CRF_MAX:
-                del safe["crf"]
-
         if "field_order" in safe:
             if safe["field_order"] not in ["progressive", "tt", "bb", "tb", "bt"]:
                 del safe["field_order"]
@@ -579,15 +577,12 @@ class VideoCodec(BaseCodec):
             optlist.extend(["-pix_fmt", str(safe["pix_fmt"])])
         if "field_order" in safe:
             optlist.extend(["-field_order", str(safe["field_order"])])
-        # CRF gets priority over bitrate, but if bitrate is present without maxrate, use bitrate as maxrate
-        if "crf" in safe:
-            optlist.extend(["-crf", str(safe["crf"])])
-            if "maxrate" in safe:
-                optlist.extend(["-maxrate:v", str(safe["maxrate"])])
-            if "bufsize" in safe:
-                optlist.extend(["-bufsize", str(safe["bufsize"])])
-        elif "bitrate" in safe:
+        if "bitrate" in safe:
             optlist.extend(["-vb", str(safe["bitrate"]) + "k"])
+        if "maxrate" in safe:
+            optlist.extend(["-maxrate:v", str(safe["maxrate"])])
+        if "bufsize" in safe:
+            optlist.extend(["-bufsize", str(safe["bufsize"])])
         if "bitrate" in safe:
             optlist.extend(["-metadata:s:v", "BPS=" + str(safe["bitrate"] * 1000)])
             optlist.extend(["-metadata:s:v", "BPS-eng=" + str(safe["bitrate"] * 1000)])
@@ -797,13 +792,7 @@ class AacCodec(AudioCodec):
     ffmpeg_codec_name = "aac"
     ffprobe_codec_name = "aac"
     aac_experimental_enable = ["-strict", "experimental"]
-
-    def _codec_specific_parse_options(self, safe, stream=0):
-        if "channels" in safe:
-            c = safe["channels"]
-            if c > 6:
-                safe["channels"] = 6
-        return safe
+    max_channels = 6
 
     def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
         return self.aac_experimental_enable
@@ -824,11 +813,10 @@ class FdkAacCodec(AudioCodec):
         }
     )
 
+    max_channels = 6
+
     def _codec_specific_parse_options(self, safe, stream=0):
-        if "channels" in safe:
-            c = safe["channels"]
-            if c > 6:
-                safe["channels"] = 6
+        safe = super()._codec_specific_parse_options(safe, stream)
         if "profile" in safe:
             p = safe["profile"]
             if "channels" in safe:
@@ -864,13 +852,7 @@ class FAacCodec(AudioCodec):
     codec_name = "libfaac"
     ffmpeg_codec_name = "libfaac"
     ffprobe_codec_name = "aac"
-
-    def _codec_specific_parse_options(self, safe, stream=0):
-        if "channels" in safe:
-            c = safe["channels"]
-            if c > 6:
-                safe["channels"] = 6
-        return safe
+    max_channels = 6
 
 
 class Ac3Codec(AudioCodec):
@@ -881,13 +863,7 @@ class Ac3Codec(AudioCodec):
     codec_name = "ac3"
     ffmpeg_codec_name = "ac3"
     ffprobe_codec_name = "ac3"
-
-    def _codec_specific_parse_options(self, safe, stream=0):
-        if "channels" in safe:
-            c = safe["channels"]
-            if c > 6:
-                safe["channels"] = 6
-        return safe
+    max_channels = 6
 
 
 class EAc3Codec(AudioCodec):
@@ -1161,6 +1137,7 @@ class HWAccelVideoCodec:
     hw_quality_default = None
     hw_presets = None
     hw_profiles = None
+    hw_extbrc = False
 
     def _hw_parse_preset(self, safe):
         """Validate preset against hw_presets whitelist, remove if unsupported."""
@@ -1187,16 +1164,7 @@ class HWAccelVideoCodec:
             del safe["height"]
 
     def _hw_parse_quality(self, safe):
-        """Convert CRF to hardware quality parameter."""
-        if "crf" in safe:
-            safe[self.hw_quality_key] = safe["crf"]
-            del safe["crf"]
-            q = safe[self.hw_quality_key]
-            qmin, qmax = self.hw_quality_range
-            if q < qmin or q > qmax:
-                del safe[self.hw_quality_key]
-            elif "bitrate" in safe:
-                del safe["bitrate"]
+        """Apply hw_quality_default when no explicit quality or bitrate is present."""
         if self.hw_quality_key not in safe and "bitrate" not in safe and self.hw_quality_default is not None:
             safe[self.hw_quality_key] = self.hw_quality_default
 
@@ -1216,6 +1184,8 @@ class HWAccelVideoCodec:
                     optlist.extend(["-maxrate:v", str(safe["maxrate"])])
                 if "bufsize" in safe:
                     optlist.extend(["-bufsize", str(safe["bufsize"])])
+        if self.hw_extbrc and "bitrate" in safe:
+            optlist.extend(["-extbrc", "1"])
         return optlist
 
     def _hw_device_opts(self, safe, hwdownload_filter="hwdownload,format=nv12,hwupload"):
@@ -1385,6 +1355,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
     hw_quality_default = 25
     hw_presets = ()
     hw_profiles = ("baseline", "main", "high", "high10")
+    hw_extbrc = True
     codec_params = None
     encoder_options = H264Codec.encoder_options.copy()
     encoder_options.update(
@@ -1430,7 +1401,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
         optlist.extend(super(H264QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
         look_ahead_depth = safe.get("look_ahead_depth", 0)
         if look_ahead_depth and look_ahead_depth > 0:
-            optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth), "-extra_hw_frames", str(look_ahead_depth + 4)])
+            optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth)])
         else:
             optlist.extend(["-look_ahead", "0"])
         if "b_frames" in safe and safe["b_frames"] >= 0:
@@ -1593,6 +1564,7 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
     hw_quality_default = 25
     hw_presets = ()
     hw_profiles = ("main", "main10", "main444")
+    hw_extbrc = True
     codec_params = None
     encoder_options = H265Codec.encoder_options.copy()
     encoder_options.update(
@@ -1638,7 +1610,7 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
         optlist.extend(super(H265QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
         look_ahead_depth = safe.get("look_ahead_depth", 0)
         if look_ahead_depth and look_ahead_depth > 0:
-            optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth), "-extra_hw_frames", str(look_ahead_depth + 4)])
+            optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth)])
         else:
             optlist.extend(["-look_ahead", "0"])
         if "b_frames" in safe and safe["b_frames"] >= 0:
@@ -1986,8 +1958,6 @@ class AV1Codec(VideoCodec):
         }
     )
 
-    CRF_MAX = 63
-
     def _codec_specific_parse_options(self, safe, stream=0):
         if "preset" in safe:
             p = safe["preset"]
@@ -2042,6 +2012,7 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
     hw_quality_range = (1, 51)
     hw_quality_default = 25
     hw_presets = ()
+    hw_extbrc = True
     encoder_options = AV1Codec.encoder_options.copy()
     encoder_options.update(
         {
@@ -2075,7 +2046,7 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
             optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
         look_ahead_depth = safe.get("look_ahead_depth", 0)
         if look_ahead_depth and look_ahead_depth > 0:
-            optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth), "-extra_hw_frames", str(look_ahead_depth + 4)])
+            optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth)])
         else:
             optlist.extend(["-look_ahead", "0"])
         if "b_frames" in safe and safe["b_frames"] >= 0:
@@ -2142,6 +2113,7 @@ class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
     hw_quality_range = (1, 255)
     hw_quality_default = 25
     hw_presets = ()
+    hw_extbrc = True
     encoder_options = Vp9Codec.encoder_options.copy()
     encoder_options.update(
         {

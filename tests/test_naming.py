@@ -471,6 +471,7 @@ class TestPlexmatch:
         tagdata.title = "The Matrix"
         tagdata.date = "1999-03-31"
         tagdata.tmdbid = "603"
+        tagdata.imdbid = None
         return tagdata
 
     def _settings(self, enabled=True):
@@ -490,10 +491,10 @@ class TestPlexmatch:
         plexmatch = show_dir / ".plexmatch"
         assert plexmatch.exists()
         content = plexmatch.read_text()
-        assert "title: Detectorists" in content
-        assert "year: 2014" in content
-        assert "TvdbId: 280847" in content
-        assert "ImdbId: tt4082744" in content
+        assert "Title: Detectorists" in content
+        assert "Year: 2014" in content
+        assert "tvdbid: 280847" in content
+        assert "imdbid: tt4082744" in content
         assert "Episode: S01E03:" in content
 
     def test_tv_accumulates_episodes(self, tmp_path):
@@ -547,9 +548,9 @@ class TestPlexmatch:
         plexmatch = movie_dir / ".plexmatch"
         assert plexmatch.exists()
         content = plexmatch.read_text()
-        assert "title: The Matrix" in content
-        assert "year: 1999" in content
-        assert "guid: tmdb://603" in content
+        assert "Title: The Matrix" in content
+        assert "Year: 1999" in content
+        assert "Guid: tmdb://603" in content
 
     def test_disabled_no_file(self, tmp_path):
         movie_dir = tmp_path / "Movie"

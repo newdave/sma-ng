@@ -81,14 +81,13 @@ class SubtitleProcessor:
                     self.log.debug("Already loaded %s, skipping." % (fname))
                     continue
                 if fname.startswith(filename):
-                    _, _, extension = self.mp.parseFile(filename)
                     valid_external_sub = self.mp.isValidSubtitleSource(os.path.join(dirName, fname))
                     if valid_external_sub:
                         self.log.debug("Potential subtitle candidate identified %s." % (fname))
                         valid_external_sub = self.processExternalSub(valid_external_sub, inputfile)
                         lang = valid_external_sub.subtitle[0].metadata["language"]
                         default = valid_external_sub.subtitle[0].disposition["default"]
-                        if (self.mp.validLanguage(lang, swl) or (self.settings.force_subtitle_defaults and default)) and valid_external_sub:
+                        if self.mp.validLanguage(lang, swl) or (self.settings.force_subtitle_defaults and default):
                             self.log.debug("Valid external %s subtitle file detected %s." % (lang, fname))
                             valid_external_subs.append(valid_external_sub)
                         else:
@@ -123,9 +122,7 @@ class SubtitleProcessor:
                     try:
                         if self.mp.isImageBasedSubtitle(inputfile, x.index):
                             sub_candidates.remove(x)
-                    except KeyboardInterrupt:
-                        raise
-                    except:
+                    except Exception:
                         self.log.error("Unknown error occurred while trying to determine if subtitle is text or image based. Probably corrupt, skipping.")
                         sub_candidates.remove(x)
 
@@ -136,7 +133,7 @@ class SubtitleProcessor:
                     )
                     burn_sub = sub_candidates[0]
                     relative_index = burn_sub.index - first_index
-                    self.log.info("Burning subtitle %d %s into video steram [burn-subtitles]." % (burn_sub.index, burn_sub.metadata["language"]))
+                    self.log.info("Burning subtitle %d %s into video stream [burn-subtitles]." % (burn_sub.index, burn_sub.metadata["language"]))
                     self.log.debug("Video codec cannot be copied because valid burn subtitle was found [burn-subtitle: %s]." % (self.settings.burn_subtitles))
                     return "subtitles='%s':si=%d" % (self.mp.raw(os.path.abspath(inputfile)), relative_index)
 
@@ -149,16 +146,14 @@ class SubtitleProcessor:
                     try:
                         if self.mp.isImageBasedSubtitle(x.path, 0):
                             sub_candidates.remove(x)
-                    except KeyboardInterrupt:
-                        raise
-                    except:
+                    except Exception:
                         self.log.error("Unknown error occurred while trying to determine if subtitle is text or image based. Probably corrupt, skipping.")
                         sub_candidates.remove(x)
 
                 if len(sub_candidates) > 0:
                     sub_candidates = self.mp.sortStreams(sub_candidates, self.settings.burn_sorting, swl, self.settings.sub_sorting_codecs or (self.settings.scodec + self.settings.scodec_image), info)
                     burn_sub = sub_candidates[0]
-                    self.log.info("Burning external subtitle %s %s into video steram [burn-subtitles, embed-subs]." % (os.path.basename(burn_sub.path), burn_sub.subtitle[0].metadata["language"]))
+                    self.log.info("Burning external subtitle %s %s into video stream [burn-subtitles, embed-subs]." % (os.path.basename(burn_sub.path), burn_sub.subtitle[0].metadata["language"]))
                     return "subtitles='%s'" % (self.mp.raw(os.path.abspath(burn_sub.path)))
             self.log.info("No valid subtitle stream candidates found to be burned into video stream [burn-subtitles].")
         return None

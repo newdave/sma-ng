@@ -676,14 +676,102 @@ def update_plexmatch(filepath, tagdata, settings, log=None):
         log.exception("Error updating .plexmatch file")
 
 
+def _parse_plexmatch(path):
+    """Read an existing .plexmatch file and return (header, episodes).
+
+    ``header`` is a dict of normalised lowercase keys → values, preserving all
+    non-episode hint lines so they survive a round-trip rewrite.
+    ``episodes`` is a dict of ``S##E##`` keys → relative path strings.
+    Episode lines with malformed keys (e.g. old range format ``S01E01-E04``)
+    are silently dropped.
+    """
+    import re as _re
+
+    header = {}
+    episodes = {}
+    _ep_key_re = _re.compile(r"^S\d+E\d+$")
+
+    if not os.path.exists(path):
+        return header, episodes
+
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.lower().startswith("episode:"):
+                parts = line.split(":", 2)
+                if len(parts) >= 3:
+                    ep_key = parts[1].strip()
+                    if _ep_key_re.match(ep_key):
+                        episodes[ep_key] = parts[2].strip()
+            elif ":" in line:
+                key, val = line.split(":", 1)
+                header[key.strip().lower()] = val.strip()
+
+    return header, episodes
+
+
+def _build_plexmatch_header(header, title, year, tmdbid, tvdbid=None, imdbid=None):
+    """Merge fresh metadata into a (possibly pre-existing) header dict.
+
+    Field name canonical forms follow the reference generator (sentence case
+    for display fields, lowercase for database IDs):
+        Title, Year, tvdbid, tmdbid, imdbid, Guid
+    """
+    if title:
+        header["title"] = title
+    if year:
+        header["year"] = year
+
+    # Database ID hints — Plex accepts these as direct match keys
+    if tvdbid:
+        header["tvdbid"] = str(tvdbid)
+    else:
+        header.pop("tvdbid", None)
+
+    if tmdbid:
+        header["tmdbid"] = str(tmdbid)
+        header["guid"] = "tmdb://%s" % tmdbid
+    else:
+        header.pop("tmdbid", None)
+        header.pop("guid", None)
+
+    if imdbid:
+        header["imdbid"] = str(imdbid)
+    else:
+        header.pop("imdbid", None)
+
+    return header
+
+
+# Ordered output keys — matches reference generator field order with IDs after
+# display fields and guid last (so Plex finds the strongest hint first).
+_HEADER_WRITE_ORDER = ["title", "year", "tvdbid", "tmdbid", "imdbid", "guid"]
+
+
+def _write_plexmatch(path, header, episodes=None):
+    """Serialise header + optional episode map to *path*."""
+    with open(path, "w", encoding="utf-8") as f:
+        for key in _HEADER_WRITE_ORDER:
+            if key in header:
+                # Capitalise display fields (Title, Year, Guid) to match the
+                # reference generator; leave database ID fields lowercase.
+                display_key = key.capitalize() if key in ("title", "year", "guid") else key
+                f.write("%s: %s\n" % (display_key, header[key]))
+        if episodes:
+            for ek in sorted(episodes.keys()):
+                f.write("Episode: %s: %s\n" % (ek, episodes[ek]))
+
+
 def _write_tv_plexmatch(filepath, tagdata, log):
-    """Write .plexmatch for a TV show directory."""
+    """Create or update the .plexmatch sidecar for a TV show."""
     import re as _re
 
     file_dir = os.path.dirname(filepath)
     dir_name = os.path.basename(file_dir).lower()
 
-    # Navigate up from "Season XX" to show root
+    # Navigate up from "Season XX" / "S01" directories to the show root
     if dir_name.startswith("season") or _re.match(r"s\d+", dir_name):
         show_root = os.path.dirname(file_dir)
     else:
@@ -693,69 +781,53 @@ def _write_tv_plexmatch(filepath, tagdata, log):
         return
 
     plexmatch_path = os.path.join(show_root, ".plexmatch")
+    header, episodes = _parse_plexmatch(plexmatch_path)
 
-    # Parse existing .plexmatch
-    header = {}
-    episodes = {}
-    if os.path.exists(plexmatch_path):
-        with open(plexmatch_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("Episode:"):
-                    parts = line.split(":", 2)
-                    if len(parts) >= 3:
-                        episodes[parts[1].strip()] = parts[2].strip()
-                elif ":" in line:
-                    key, val = line.split(":", 1)
-                    header[key.strip()] = val.strip()
-
-    # Update header
-    header["title"] = tagdata.showname
+    year = None
     if hasattr(tagdata, "showdata") and tagdata.showdata:
         first_air = tagdata.showdata.get("first_air_date", "")
         if first_air and len(first_air) >= 4:
-            header["year"] = first_air[:4]
-    if hasattr(tagdata, "tvdbid") and tagdata.tvdbid:
-        header["TvdbId"] = str(tagdata.tvdbid)
-    if hasattr(tagdata, "imdbid") and tagdata.imdbid:
-        header["ImdbId"] = str(tagdata.imdbid)
-    if tagdata.tmdbid:
-        header["guid"] = "tmdb://%s" % tagdata.tmdbid
+            year = first_air[:4]
+
+    _build_plexmatch_header(
+        header,
+        title=tagdata.showname,
+        year=year,
+        tmdbid=tagdata.tmdbid,
+        tvdbid=getattr(tagdata, "tvdbid", None),
+        imdbid=getattr(tagdata, "imdbid", None),
+    )
 
     # Add/update episode entries (supports multi-episode files)
     season = int(tagdata.season or 0)
     episode_list = getattr(tagdata, "episodes", None) or [int(tagdata.episode or 0)]
     rel_path = os.path.relpath(filepath, show_root)
-    for ep in episode_list:
-        ep_key = "S%02dE%02d" % (season, int(ep))
-        episodes[ep_key] = rel_path
+    for ep in sorted(set(int(e) for e in episode_list)):
+        episodes["S%02dE%02d" % (season, ep)] = rel_path
 
-    # Write file
-    with open(plexmatch_path, "w", encoding="utf-8") as f:
-        for key in ["title", "year", "TvdbId", "ImdbId", "guid"]:
-            if key in header:
-                f.write("%s: %s\n" % (key, header[key]))
-        for ek in sorted(episodes.keys()):
-            f.write("Episode: %s: %s\n" % (ek, episodes[ek]))
-
+    _write_plexmatch(plexmatch_path, header, episodes)
     log.info("Updated .plexmatch: %s (%d episodes)" % (plexmatch_path, len(episodes)))
 
 
 def _write_movie_plexmatch(filepath, tagdata, log):
-    """Write .plexmatch for a movie directory."""
+    """Create or update the .plexmatch sidecar for a movie."""
     movie_dir = os.path.dirname(filepath)
     if not os.path.isdir(movie_dir):
         return
 
     plexmatch_path = os.path.join(movie_dir, ".plexmatch")
-    lines = ["title: %s" % (tagdata.title or "")]
+    header, _ = _parse_plexmatch(plexmatch_path)
+
     date = getattr(tagdata, "date", "") or ""
-    if len(date) >= 4:
-        lines.append("year: %s" % date[:4])
-    if tagdata.tmdbid:
-        lines.append("guid: tmdb://%s" % tagdata.tmdbid)
+    year = date[:4] if len(date) >= 4 else None
 
-    with open(plexmatch_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    _build_plexmatch_header(
+        header,
+        title=tagdata.title,
+        year=year,
+        tmdbid=tagdata.tmdbid,
+        imdbid=getattr(tagdata, "imdbid", None),
+    )
 
+    _write_plexmatch(plexmatch_path, header)
     log.info("Updated .plexmatch: %s" % plexmatch_path)
