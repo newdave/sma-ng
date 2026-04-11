@@ -6,11 +6,8 @@ import sys
 from datetime import datetime, timezone
 from http.server import HTTPServer
 
-from resources.daemon.threads import HeartbeatThread, ScannerThread
+from resources.daemon.threads import HeartbeatThread, RecycleBinCleanerThread, ScannerThread
 from resources.daemon.worker import WorkerPool
-from resources.log import getLogger
-
-log = getLogger("DAEMON")
 
 
 class DaemonServer(HTTPServer):
@@ -96,6 +93,15 @@ class DaemonServer(HTTPServer):
         )
         self.scanner_thread.start()
 
+        # Start recycle-bin cleaner thread
+        self.recycle_cleaner_thread = RecycleBinCleanerThread(
+            path_config_manager=path_config_manager,
+            max_age_days=path_config_manager.recycle_bin_max_age_days,
+            min_free_gb=path_config_manager.recycle_bin_min_free_gb,
+            logger=logger,
+        )
+        self.recycle_cleaner_thread.start()
+
     def notify_workers(self):
         """Wake all worker threads by setting each worker's individual event."""
         self.worker_pool.notify()
@@ -153,6 +159,17 @@ class DaemonServer(HTTPServer):
         )
         self.scanner_thread.start()
 
+        # Restart recycle-bin cleaner with updated settings
+        self.recycle_cleaner_thread.stop()
+        self.recycle_cleaner_thread.join(timeout=5)
+        self.recycle_cleaner_thread = RecycleBinCleanerThread(
+            path_config_manager=self.path_config_manager,
+            max_age_days=self.path_config_manager.recycle_bin_max_age_days,
+            min_free_gb=self.path_config_manager.recycle_bin_min_free_gb,
+            logger=self.logger,
+        )
+        self.recycle_cleaner_thread.start()
+
         self.logger.info("Configuration reloaded.")
 
     def graceful_restart(self):
@@ -162,6 +179,7 @@ class DaemonServer(HTTPServer):
         self.worker_pool.stop()
         self.heartbeat_thread.stop()
         self.scanner_thread.stop()
+        self.recycle_cleaner_thread.stop()
 
         active = [w for w in self.worker_pool._workers if w.is_alive()]
         while active:
@@ -194,6 +212,7 @@ class DaemonServer(HTTPServer):
         self.worker_pool.stop()
         self.heartbeat_thread.stop()
         self.scanner_thread.stop()
+        self.recycle_cleaner_thread.stop()
 
         # Wait for in-progress conversions to complete
         active = [w for w in self.worker_pool._workers if w.is_alive()]

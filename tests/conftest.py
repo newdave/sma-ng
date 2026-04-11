@@ -1,5 +1,6 @@
 """Shared fixtures for SMA-NG test suite."""
 
+import logging
 import os
 import sys
 
@@ -148,13 +149,11 @@ preset = medium
 dynamic-parameters = false
 profile =
 prioritize-source-pix-fmt = true
-crf = 23
 max-width = 0
 pix-fmt =
 max-level = 0
 filter =
 force-filter = false
-crf-profiles =
 bitrate-ratio =
 codec-parameters =
 
@@ -363,6 +362,34 @@ plexmatch = true
         return ini_path
 
     return _make
+
+
+@pytest.fixture
+def daemon_log(caplog):
+    """Capture log records emitted by the DAEMON logger and its children.
+
+    The DAEMON logger has propagate=False (set by fileConfig), so caplog's
+    default root-level handler never sees its records.  This fixture injects
+    caplog's handler directly onto the DAEMON logger so records are captured
+    regardless of propagation settings.
+
+    Usage::
+
+        def test_something(daemon_log):
+            do_thing()
+            assert "expected message" in daemon_log.text
+            assert any(r.levelno == logging.ERROR for r in daemon_log.records)
+    """
+    daemon_logger = logging.getLogger("DAEMON")
+    original_level = daemon_logger.level
+    daemon_logger.setLevel(logging.DEBUG)
+    daemon_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="DAEMON"):
+            yield caplog
+    finally:
+        daemon_logger.removeHandler(caplog.handler)
+        daemon_logger.setLevel(original_level)
 
 
 @pytest.fixture
