@@ -6,6 +6,8 @@ from resources.log import getLogger
 
 log = getLogger("DAEMON")
 
+_MEDIA_EXTENSIONS = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts", ".m4v", ".m2ts", ".wmv", ".flv", ".webm"])
+
 
 class _StoppableThread(threading.Thread):
     """Base class for daemon threads that support a cooperative stop() method."""
@@ -166,3 +168,127 @@ class ScannerThread(_StoppableThread):
         if queued:
             self.log.info("Scanner: queued %d new job(s) from %s" % (queued, scan_dir))
         return queued
+
+
+class RecycleBinCleanerThread(_StoppableThread):
+    """Periodically purges old media files from recycle-bin directories.
+
+    Two eviction triggers (either condition removes a file):
+      1. Age: files older than ``max_age_days`` days are deleted.
+      2. Space pressure: when the free space on the recycle-bin mount point
+         drops below ``min_free_gb`` GiB, the oldest files are deleted first
+         until the threshold is satisfied or the directory is empty.
+
+    Only files with recognised media extensions are touched; other files (e.g.
+    NFO, artwork) are left in place so nothing important is silently removed.
+
+    ``recycle_bins`` is a list of directory paths to clean.  It is re-read from
+    ``path_config_manager`` on every wake cycle so hot-reloading daemon.json
+    picks up changes without a restart.
+    """
+
+    CHECK_INTERVAL = 3600  # seconds between sweeps
+
+    def __init__(self, path_config_manager, max_age_days, min_free_gb, logger):
+        super().__init__()
+        self.path_config_manager = path_config_manager
+        self.max_age_days = max_age_days
+        self.min_free_gb = min_free_gb
+        self.log = logger
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _free_gb(self, path):
+        """Return free space in GiB for the mount point that contains *path*."""
+        try:
+            st = os.statvfs(path)
+            return (st.f_bavail * st.f_frsize) / (1024**3)
+        except OSError:
+            return None
+
+    def _list_media_files(self, directory):
+        """Return a list of (mtime, path) tuples for media files in *directory*."""
+        results = []
+        try:
+            for fname in os.listdir(directory):
+                fpath = os.path.join(directory, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                if os.path.splitext(fname)[1].lower() not in _MEDIA_EXTENSIONS:
+                    continue
+                try:
+                    results.append((os.path.getmtime(fpath), fpath))
+                except OSError:
+                    pass
+        except OSError:
+            self.log.warning("RecycleCleaner: cannot list directory %s" % directory)
+        return results
+
+    def _delete(self, path):
+        try:
+            os.remove(path)
+            self.log.info("RecycleCleaner: deleted %s" % path)
+            return True
+        except OSError:
+            self.log.warning("RecycleCleaner: failed to delete %s" % path)
+            return False
+
+    def _clean_directory(self, directory):
+        """Run one eviction pass on *directory*. Returns count of deleted files."""
+        if not os.path.isdir(directory):
+            return 0
+
+        files = sorted(self._list_media_files(directory))  # oldest first
+        now = time.time()
+        deleted = 0
+
+        # Pass 1 — age eviction
+        if self.max_age_days > 0:
+            cutoff = now - self.max_age_days * 86400
+            for mtime, path in files:
+                if mtime < cutoff:
+                    if self._delete(path):
+                        deleted += 1
+
+        # Re-build list after age pass before checking free space
+        files = sorted(self._list_media_files(directory))  # oldest first
+
+        # Pass 2 — space-pressure eviction
+        if self.min_free_gb > 0:
+            free = self._free_gb(directory)
+            if free is None:
+                self.log.warning("RecycleCleaner: could not determine free space for %s, skipping space check" % directory)
+            else:
+                for mtime, path in files:
+                    if free >= self.min_free_gb:
+                        break
+                    if self._delete(path):
+                        deleted += 1
+                        # Re-query free space so we stop as soon as we've freed enough
+                        free = self._free_gb(directory) or 0.0
+
+        return deleted
+
+    # ------------------------------------------------------------------
+    # Thread entry point
+    # ------------------------------------------------------------------
+
+    def run(self):
+        if not self.max_age_days and not self.min_free_gb:
+            self.log.debug("RecycleCleaner: disabled (max_age_days=0, min_free_gb=0)")
+            return
+        self.log.info("RecycleCleaner started (max_age_days=%s, min_free_gb=%s)" % (self.max_age_days if self.max_age_days else "disabled", self.min_free_gb if self.min_free_gb else "disabled"))
+        while self.running:
+            recycle_bins = [b for b in (self.path_config_manager.get_recycle_bin(c) for c in self.path_config_manager.get_all_configs()) if b]
+            for directory in set(recycle_bins):
+                try:
+                    deleted = self._clean_directory(directory)
+                    if deleted:
+                        self.log.info("RecycleCleaner: removed %d file(s) from %s" % (deleted, directory))
+                    else:
+                        self.log.debug("RecycleCleaner: nothing to remove in %s" % directory)
+                except Exception:
+                    self.log.exception("RecycleCleaner: error cleaning %s" % directory)
+            self._stop_event.wait(timeout=self.CHECK_INTERVAL)
