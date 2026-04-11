@@ -35,39 +35,24 @@ make detect-gpu        # show detection result without writing config
 ## Intel QSV
 
 ```ini
-[Converter]
-hwaccels = qsv
-hwaccel-decoders = hevc_qsv, h264_qsv, vp9_qsv, av1_qsv
-hwdevices = qsv:/dev/dri/renderD128
-hwaccel-output-format = qsv:qsv
-
 [Video]
 gpu = qsv
 codec = h265qsv, h265
+codec-parameters = -low_power 1 -async_depth 1 -extbrc 1
+look-ahead-depth = 16
+b-frames = 3
+ref-frames = 4
 ```
 
 Supported QSV codecs: `h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`
 
-QSV-specific tuning options:
-
-```ini
-[Video]
-look-ahead = 20       # look-ahead frames (la_depth)
-b-frames = 4          # B-frames
-ref-frames = 4        # reference frames
-```
+`codec-parameters` accepts raw FFmpeg encoder flags. The defaults in `setup/autoProcess.ini.sample` enable QSV low-power mode and extended rate control (`-low_power 1 -async_depth 1 -extbrc 1`). These are automatically cleared at runtime when `gpu` is not `qsv`.
 
 ---
 
 ## Intel / AMD VAAPI
 
 ```ini
-[Converter]
-hwaccels = vaapi
-hwaccel-decoders = hevc_vaapi, h264_vaapi
-hwdevices = vaapi:/dev/dri/renderD128
-hwaccel-output-format = vaapi:vaapi
-
 [Video]
 gpu = vaapi
 codec = h265vaapi, h265
@@ -80,10 +65,6 @@ Supported VAAPI codecs: `h264vaapi`, `h265vaapi`, `av1vaapi`
 ## NVIDIA NVENC
 
 ```ini
-[Converter]
-hwaccels = cuda
-hwaccel-decoders = hevc_cuvid, h264_cuvid
-
 [Video]
 gpu = nvenc
 codec = h265_nvenc, h265
@@ -107,8 +88,6 @@ No `hwaccels` or `hwdevices` needed — VideoToolbox is built into macOS.
 
 ## Configuration Rules
 
-- `hwdevices` format: `type:device_path` where `type` must be a substring of the encoder codec name
-- `hwaccel-output-format` format: `hwaccel_name:output_format` (dict, not a bare value)
 - The codec list's first entry is used for encoding; subsequent entries allow stream copying without re-encoding
 - CRF is mapped to `-global_quality` for QSV and `-qp` for VAAPI automatically
 
@@ -124,3 +103,5 @@ At daemon startup, SMA-NG probes each unique config's hardware encoder to verify
 ```
 
 This runs in the background and does not delay accepting connections.
+
+Use `python daemon.py --smoke-test` to verify that all configured `autoProcess.ini` files load cleanly before starting the server.

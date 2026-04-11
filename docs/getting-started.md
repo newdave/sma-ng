@@ -10,6 +10,27 @@ Optional:
 - qBittorrent integration: `pip install -r setup/requirements-qbittorrent.txt`
 - Deluge integration: `pip install -r setup/requirements-deluge.txt`
 
+## Quality Profiles
+
+`mise run config` always generates three config files:
+
+| File | Profile | Video | Audio |
+| --- | --- | --- | --- |
+| `config/autoProcess.ini` | Regular Quality (default) | 3 Mbit/s 1080p · 20 Mbit/s 4K | EAC3, 128 kbps/ch |
+| `config/autoProcess.rq.ini` | Regular Quality (explicit) | same as above | same as above |
+| `config/autoProcess.lq.ini` | Lower Quality | 2 Mbit/s capped at 1080p (4K downscaled) | AAC, 96 kbps/ch |
+
+Use `config/autoProcess.lq.ini` for bandwidth-limited destinations (mobile devices, remote access). Route files to it via `path_configs` in `daemon.json`:
+
+```json
+{
+  "path_configs": [
+    {"path": "/mnt/media/TV", "config": "config/autoProcess.rq.ini"},
+    {"path": "/mnt/media/Mobile", "config": "config/autoProcess.lq.ini"}
+  ]
+}
+```
+
 ## Quick Start
 
 ### With mise (recommended)

@@ -43,8 +43,8 @@ Override path via `SMA_CONFIG` environment variable.
 | `gpu` | string | | Hardware acceleration backend: `qsv`, `vaapi`, `nvenc`, `videotoolbox`, or empty for software |
 | `max-bitrate` | int | `0` | Maximum video bitrate in kbps (0 = unlimited) |
 | `bitrate-ratio` | dict | | Scale source bitrate per codec: `hevc:1.0, h264:0.65` |
-| `crf` | int | `24` | Constant Rate Factor (quality). Lower = better quality |
-| `crf-profiles` | list | | Tiered CRF by source bitrate: `20000:20:5000k:10000k` (format: `source_kbps:crf:maxrate:bufsize`) |
+| `crf-profiles` | string | | Tiered bitrate targets by source bitrate. Format: `source_kbps:quality:target:maxrate` (comma-separated). Example: `0:22:3M:6M,8000:22:5M:10M`. Leave blank to use `bitrate-ratio` + `max-bitrate` instead. |
+| `crf-profiles-hd` | string | | Same format as `crf-profiles`, applied to sources above 1080p height. Falls back to `crf-profiles` when empty. |
 | `preset` | string | | Encoder preset: `ultrafast` to `veryslow` |
 | `profile` | list | | Video profile: `main`, `high`, `main10` |
 | `max-level` | float | | Maximum H.264/H.265 level (e.g., `5.2`) |
@@ -55,9 +55,11 @@ Override path via `SMA_CONFIG` environment variable.
 | `filter` | string | | Custom FFmpeg video filter |
 | `force-filter` | bool | `false` | Force re-encode when filter is set |
 | `codec-parameters` | string | | Extra codec params (e.g., `x265-params`) |
-| `look-ahead` | int | | Look-ahead frames (QSV: `la_depth`) |
-| `b-frames` | int | | Number of B-frames |
-| `ref-frames` | int | | Number of reference frames |
+| `look-ahead-depth` | int | `0` | Look-ahead frames for rate control (QSV: `la_depth`). `0` = encoder default. |
+| `b-frames` | int | `-1` | Number of B-frames. `-1` = encoder default. |
+| `ref-frames` | int | `-1` | Number of reference frames. `-1` = encoder default. |
+
+> **Note:** `codec-parameters` values are automatically cleared at runtime when `gpu` is not `qsv`. QSV-specific flags (e.g. `-low_power 1 -extbrc 1`) in the sample are silently ignored by other backends.
 
 ---
 
@@ -77,6 +79,9 @@ Override video settings for HDR content (detected automatically).
 | `codec-parameters` | string | Extra params for HDR encoding |
 | `filter` | string | Video filter for HDR content |
 | `force-filter` | bool | Force re-encode for HDR filter |
+| `look-ahead-depth` | int | Look-ahead depth override for HDR encoding (default: `0`) |
+| `b-frames` | int | B-frames override for HDR encoding (default: `-1` = encoder default) |
+| `ref-frames` | int | Reference frames override for HDR encoding (default: `-1` = encoder default) |
 
 ---
 
