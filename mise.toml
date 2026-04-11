@@ -110,18 +110,33 @@ description = "Create config with GPU auto-detection (GPU=<type> mise run config
 run = """
 GPU="${GPU:-$(mise run detect-gpu 2>/dev/null)}"
 mkdir -p config
-if [ -f config/autoProcess.ini ]; then
-  echo "config/autoProcess.ini already exists, skipping (delete it first to regenerate)"
-else
-  cp setup/autoProcess.ini.sample config/autoProcess.ini
-  if [ "$GPU" != "software" ]; then
-    sed -i.bak "s/^gpu *=.*/gpu = $GPU/" config/autoProcess.ini && rm -f config/autoProcess.ini.bak
-    echo "Created config/autoProcess.ini (gpu = $GPU)"
+
+create_ini() {
+  local dest="$1" sample="$2" label="$3"
+  if [ -f "$dest" ]; then
+    echo "$dest already exists, skipping (delete it first to regenerate)"
   else
-    echo "Created config/autoProcess.ini (software encoding)"
+    cp "$sample" "$dest"
+    if [ "$GPU" != "software" ]; then
+      sed -i.bak "s/^gpu *=.*/gpu = $GPU/" "$dest" && rm -f "${dest}.bak"
+      echo "Created $dest ($label, gpu = $GPU)"
+    else
+      echo "Created $dest ($label, software encoding)"
+    fi
   fi
-fi
+}
+
+create_ini config/autoProcess.ini    setup/autoProcess.ini.sample    "regular quality"
+create_ini config/autoProcess.rq.ini setup/autoProcess.ini.sample    "regular quality"
+create_ini config/autoProcess.lq.ini setup/autoProcess.ini.sample-lq "lower quality"
+
 test -f config/daemon.json || (cp setup/daemon.json.sample config/daemon.json && echo "Created config/daemon.json")
+
+# Create and populate per-service autoProcess files from setup/.local.ini
+if [ -f setup/.local.ini ]; then
+  echo "Populating per-service configs from setup/.local.ini..."
+  python3 scripts/populate-service-configs.py setup/.local.ini setup/autoProcess.ini.sample --gpu "$GPU"
+fi
 """
 
 # ---------------------------------------------------------------------------
