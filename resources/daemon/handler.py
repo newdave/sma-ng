@@ -7,11 +7,13 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from resources.daemon.constants import SCRIPT_DIR
+from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING
 
 DOCS_DIR = os.path.join(SCRIPT_DIR, "docs")
 DOCS_TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "resources", "docs.html")
 DASHBOARD_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "dashboard.html")
+ADMIN_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "admin.html")
 
 # Ordered list of doc pages: (slug, title).  The slug maps to docs/<slug>.md.
 # "index" maps to docs/README.md.
@@ -157,6 +159,11 @@ def _load_dashboard_html():
         return f.read()
 
 
+def _load_admin_html():
+    with open(ADMIN_HTML_PATH, "r", encoding="utf-8") as f:
+        return f.read()
+
+
 def _load_docs_template(active_slug="index"):
     with open(DOCS_TEMPLATE_PATH, "r", encoding="utf-8") as f:
         tmpl = f.read()
@@ -174,7 +181,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """HTTP request handler for webhook endpoints."""
 
     # Endpoints that don't require authentication (prefix-matched for /docs/*)
-    PUBLIC_ENDPOINTS = ["/", "/dashboard", "/health", "/status", "/docs", "/favicon.png"]
+    PUBLIC_ENDPOINTS = ["/", "/dashboard", "/admin", "/health", "/status", "/docs", "/favicon.png"]
 
     def log_message(self, format, *args):
         self.server.logger.debug("%s - %s" % (self.address_string(), format % args))
@@ -286,6 +293,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self.server.notify_workers()
             nodes = self.server.job_db.get_cluster_nodes()
             stats = self.server.job_db.get_stats()
+            # Replace 0.0.0.0 (bind-all address) with the IP the client actually
+            # connected to, so the UI can display a useful address.
+            local_ip = self.connection.getsockname()[0]
+            for node in nodes:
+                if node.get("host") == "0.0.0.0":
+                    node["host"] = local_ip
             self.send_json_response(200, {"cluster": nodes, "jobs": stats})
         else:
             # SQLite single-node — return local health with explanatory note
@@ -429,10 +442,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
         key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
         self.send_html_response(200, _load_dashboard_html().replace("</head>", key_script + "</head>", 1))
 
+    def _get_admin(self, _path, _query):
+        api_key = self.server.api_key or ""
+        key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
+        self.send_html_response(200, _load_admin_html().replace("</head>", key_script + "</head>", 1))
+
     def _get_docs(self, path, _query):
         # Resolve slug: /docs → index, /docs/daemon → daemon
-        slug = path[len("/docs") :].lstrip("/") or "index"
+        # Sanitise to word chars and hyphens only to prevent path traversal
+        raw_slug = path[len("/docs") :].lstrip("/") or "index"
+        slug = _re.sub(r"[^\w\-]", "", raw_slug) or "index"
         md_file = os.path.join(DOCS_DIR, "README.md" if slug == "index" else slug + ".md")
+        if not os.path.abspath(md_file).startswith(os.path.abspath(DOCS_DIR) + os.sep) and slug != "index":
+            self.send_json_response(404, {"error": "Not found"})
+            return
         try:
             with open(md_file, "r", encoding="utf-8") as f:
                 md_content = f.read()
@@ -458,18 +481,24 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.send_json_response(404, {"error": "favicon not found"})
 
     _GET_ROUTES = {
-        "/": "_get_root",
-        "/dashboard": "_get_dashboard",
-        "/docs": "_get_docs",
+        "/": lambda self, p, q: self._get_root(p, q),
+        "/dashboard": lambda self, p, q: self._get_dashboard(p, q),
+        "/admin": lambda self, p, q: self._get_admin(p, q),
+        "/docs": lambda self, p, q: self._get_docs(p, q),
         "/health": lambda self, p, q: self._get_health(),
         "/status": lambda self, p, q: self._get_status(),
         "/jobs": lambda self, p, q: self._get_jobs(q),
         "/configs": lambda self, p, q: self._get_configs(),
-        "/stats": "_get_stats",
+        "/stats": lambda self, p, q: self._get_stats(p, q),
         "/scan": lambda self, p, q: self._get_scan(q),
         "/browse": lambda self, p, q: self._get_browse(q),
-        "/favicon.png": "_get_favicon",
+        "/favicon.png": lambda self, p, q: self._get_favicon(p, q),
     }
+
+    _GET_PREFIX_ROUTES = [
+        ("/docs/", lambda self, p, q: self._get_docs(p, q)),
+        ("/jobs/", lambda self, p, q: self._get_job(p)),
+    ]
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -481,16 +510,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         handler = self._GET_ROUTES.get(parsed.path)
         if handler is not None:
-            if isinstance(handler, str):
-                getattr(self, handler)(parsed.path, query)
-            else:
+            handler(self, parsed.path, query)
+            return
+        for prefix, handler in self._GET_PREFIX_ROUTES:
+            if parsed.path.startswith(prefix):
                 handler(self, parsed.path, query)
-        elif parsed.path.startswith("/docs/"):
-            self._get_docs(parsed.path, query)
-        elif parsed.path.startswith("/jobs/"):
-            self._get_job(parsed.path)
-        else:
-            self.send_json_response(404, {"error": "Not found"})
+                return
+        self.send_json_response(404, {"error": "Not found"})
 
     # ------------------------------------------------------------------
     # POST route handlers
@@ -501,6 +527,30 @@ class WebhookHandler(BaseHTTPRequestHandler):
         deleted = self.server.job_db.cleanup_old_jobs(days)
         self.send_json_response(200, {"deleted": deleted, "days": days})
 
+    def _parse_job_id(self, path, segment=-2):
+        """Extract an integer job ID from a URL path segment.
+
+        Returns the job ID on success, or sends a 400 response and returns None.
+        segment=-2 extracts the ID from /jobs/<id>/action; segment=-1 from /jobs/<id>.
+        """
+        try:
+            return int(path.split("/")[segment])
+        except (ValueError, IndexError):
+            self.send_json_response(400, {"error": "Invalid job ID"})
+            return None
+
+    def _post_admin_delete_failed(self):
+        deleted = self.server.job_db.delete_failed_jobs()
+        self.send_json_response(200, {"deleted": deleted})
+
+    def _post_admin_delete_offline_nodes(self):
+        deleted = self.server.job_db.delete_offline_nodes()
+        self.send_json_response(200, {"deleted": deleted})
+
+    def _post_admin_delete_all_jobs(self):
+        deleted = self.server.job_db.delete_all_jobs()
+        self.send_json_response(200, {"deleted": deleted})
+
     def _post_jobs_requeue_bulk(self, query):
         config = query.get("config", [None])[0]
         count = self.server.job_db.requeue_failed_jobs(config=config)
@@ -509,41 +559,37 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.send_json_response(200, {"requeued": count})
 
     def _post_job_requeue(self, path):
-        try:
-            job_id = int(path.split("/")[-2])
-            requeued = self.server.job_db.requeue_job(job_id)
-            if requeued:
-                self.server.notify_workers()
-                self.send_json_response(200, {"requeued": True, "job_id": job_id})
+        job_id = self._parse_job_id(path)
+        if job_id is None:
+            return
+        requeued = self.server.job_db.requeue_job(job_id)
+        if requeued:
+            self.server.notify_workers()
+            self.send_json_response(200, {"requeued": True, "job_id": job_id})
+        else:
+            job = self.server.job_db.get_job(job_id)
+            if job is None:
+                self.send_json_response(404, {"error": "Job not found"})
             else:
-                job = self.server.job_db.get_job(job_id)
-                if job is None:
-                    self.send_json_response(404, {"error": "Job not found"})
-                else:
-                    self.send_json_response(409, {"error": "Job cannot be requeued", "status": job["status"], "note": "Only failed jobs can be requeued"})
-        except ValueError:
-            self.send_json_response(400, {"error": "Invalid job ID"})
+                self.send_json_response(409, {"error": "Job cannot be requeued", "status": job["status"], "note": "Only failed jobs can be requeued"})
 
     def _post_job_cancel(self, path):
-        try:
-            job_id = int(path.split("/")[-2])
-            cancelled = self.server.cancel_job(job_id)
-            if cancelled:
-                self.send_json_response(200, {"cancelled": True, "job_id": job_id})
+        job_id = self._parse_job_id(path)
+        if job_id is None:
+            return
+        cancelled = self.server.cancel_job(job_id)
+        if cancelled:
+            self.send_json_response(200, {"cancelled": True, "job_id": job_id})
+        else:
+            job = self.server.job_db.get_job(job_id)
+            if job is None:
+                self.send_json_response(404, {"error": "Job not found"})
             else:
-                job = self.server.job_db.get_job(job_id)
-                if job is None:
-                    self.send_json_response(404, {"error": "Job not found"})
-                else:
-                    self.send_json_response(409, {"error": "Job cannot be cancelled", "status": job["status"], "note": "Only pending or running jobs can be cancelled"})
-        except ValueError:
-            self.send_json_response(400, {"error": "Invalid job ID"})
+                self.send_json_response(409, {"error": "Job cannot be cancelled", "status": job["status"], "note": "Only pending or running jobs can be cancelled"})
 
     def _post_job_priority(self, path):
-        try:
-            job_id = int(path.split("/")[-2])
-        except ValueError:
-            self.send_json_response(400, {"error": "Invalid job ID"})
+        job_id = self._parse_job_id(path)
+        if job_id is None:
             return
         content_length = int(self.headers.get("Content-Length", 0))
         try:
@@ -629,14 +675,31 @@ class WebhookHandler(BaseHTTPRequestHandler):
         "/": lambda self, p, q: self._handle_webhook(),
         "/webhook": lambda self, p, q: self._handle_webhook(),
         "/convert": lambda self, p, q: self._handle_webhook(),
-        "/shutdown": "_post_shutdown",
-        "/restart": "_post_restart",
-        "/reload": "_post_reload",
+        "/admin/delete-failed": lambda self, p, q: self._post_admin_delete_failed(),
+        "/admin/delete-offline-nodes": lambda self, p, q: self._post_admin_delete_offline_nodes(),
+        "/admin/delete-all-jobs": lambda self, p, q: self._post_admin_delete_all_jobs(),
+        "/shutdown": lambda self, p, q: self._post_shutdown(p, q),
+        "/restart": lambda self, p, q: self._post_restart(p, q),
+        "/reload": lambda self, p, q: self._post_reload(),
         "/cleanup": lambda self, p, q: self._post_cleanup(q),
         "/jobs/requeue": lambda self, p, q: self._post_jobs_requeue_bulk(q),
         "/scan/filter": lambda self, p, q: self._post_scan_filter(),
         "/scan/record": lambda self, p, q: self._post_scan_record(),
     }
+
+    _POST_PREFIX_ROUTES = [
+        ("/jobs/", lambda self, p, q: self._post_job_action(p)),
+    ]
+
+    def _post_job_action(self, path):
+        if path.endswith("/requeue"):
+            self._post_job_requeue(path)
+        elif path.endswith("/cancel"):
+            self._post_job_cancel(path)
+        elif path.endswith("/priority"):
+            self._post_job_priority(path)
+        else:
+            self.send_json_response(404, {"error": "Not found"})
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -648,18 +711,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         handler = self._POST_ROUTES.get(parsed.path)
         if handler is not None:
-            if isinstance(handler, str):
-                getattr(self, handler)(parsed.path, query)
-            else:
+            handler(self, parsed.path, query)
+            return
+        for prefix, handler in self._POST_PREFIX_ROUTES:
+            if parsed.path.startswith(prefix):
                 handler(self, parsed.path, query)
-        elif parsed.path.startswith("/jobs/") and parsed.path.endswith("/requeue"):
-            self._post_job_requeue(parsed.path)
-        elif parsed.path.startswith("/jobs/") and parsed.path.endswith("/cancel"):
-            self._post_job_cancel(parsed.path)
-        elif parsed.path.startswith("/jobs/") and parsed.path.endswith("/priority"):
-            self._post_job_priority(parsed.path)
-        else:
-            self.send_json_response(404, {"error": "Not found"})
+                return
+        self.send_json_response(404, {"error": "Not found"})
 
     def _collect_media_files(self, directory):
         """Recursively collect media files from a directory.
@@ -781,7 +839,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
         log_file = self.server.config_log_manager.get_log_file(resolved_config)
         config_busy = self.server.config_lock_manager.is_locked(resolved_config)
         pending = self.server.job_db.pending_count_for_config(resolved_config)
-        self.server.logger.info("Queued job %d: %s (config: %s)" % (job_id, path, resolved_config))
+        token = set_job_id(job_id)
+        try:
+            self.server.logger.info(
+                "Queued job %d: %s (config: %s)" % (job_id, path, resolved_config),
+                extra={"job_id": job_id, "path": path, "config": os.path.basename(resolved_config)},
+            )
+        finally:
+            clear_job_id(token)
         self.send_json_response(202, {"status": "queued", "job_id": job_id, "path": path, "config": resolved_config, "log_file": log_file, "config_busy": config_busy, "pending_jobs": pending})
 
     def _handle_webhook(self):
