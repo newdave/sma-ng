@@ -97,3 +97,6 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+markers = [
+    "smoke: end-to-end transcode tests requiring ffmpeg and fixture media (deselect with '-m not smoke')",
+]
