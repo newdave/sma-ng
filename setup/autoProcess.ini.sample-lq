@@ -1,0 +1,266 @@
+[Converter]
+ffmpeg = ffmpeg
+ffprobe = ffprobe
+threads = 0
+output-directory = /transcodes/sma
+output-directory-space-ratio = 0.0
+output-format = mp4
+output-extension = mp4
+temp-extension = sma
+minimum-size = 0
+ignored-extensions = nfo, ds_store
+copy-to =
+move-to =
+delete-original = True
+recycle-bin = /mnt/local/recycle
+process-same-extensions = False
+bypass-if-copying-all = True
+force-convert = False
+post-process = False
+wait-post-process = False
+detailed-progress = False
+opts-separator = ,
+preopts =
+postopts =
+regex-directory-replace = [^\w\-_\. ]
+
+[Permissions]
+chmod = 0664
+uid = -1
+gid = -1
+
+[Metadata]
+relocate-moov = True
+full-path-guess = True
+tag = True
+tag-language = eng
+download-artwork = poster
+sanitize-disposition =
+strip-metadata = True
+keep-titles = False
+
+[Video]
+# Hardware acceleration: qsv, nvenc, vaapi, videotoolbox, or leave empty for software encoding.
+# The gpu type combined with codec determines the FFmpeg encoder:
+#   gpu = qsv,   codec = h265         -> h265qsv (+ h265 software fallback)
+#   gpu = nvenc,  codec = h265         -> h265_nvenc (+ h265 software fallback)
+#   gpu = vaapi,  codec = h264         -> h264vaapi (+ h264 software fallback)
+#   gpu = videotoolbox, codec = h265   -> h265_videotoolbox (+ h265 software fallback)
+#   gpu = ,       codec = h265         -> h265 (software only)
+# Supported GPU codecs:
+#   qsv:            h264, h265, av1, vp9
+#   nvenc:          h264, h265, av1
+#   vaapi:          h264, h265, av1
+#   videotoolbox:   h264, h265
+gpu = qsv
+bitrate-ratio = hevc:0.85, h264:0.65, mpeg2video:0.45, vc1:0.50, vp9:0.85, av1:1.1, *:0.60
+# crf-profiles: sliding scale of output bitrates keyed by source bitrate.
+# Format: source_kbps:quality:target_bitrate:max_bitrate (comma-separated tiers)
+# The highest tier whose source_kbps threshold the source meets is used.
+# Bitrate values support M (megabits) or k (kilobits) suffixes.
+# When a profile matches: overrides bitrate-ratio, forces transcode, sets -b:v/-maxrate/-bufsize.
+# Leave blank to disable (bitrate-ratio and max-bitrate apply instead).
+# Lower Quality: all sources capped at 2 Mbit/s target / 4 Mbit/s burst.
+# max-width = 1920 downscales 4K sources to 1080p before encoding.
+crf-profiles = 0:22:2M:4M,4000:22:2M:4M,8000:22:2M:4M
+crf-profiles-hd =
+codec-parameters = -low_power 1 -async_depth 1 -extbrc 1
+dynamic-parameters = true
+max-width = 1920
+profile =
+max-level = 5.2
+pix-fmt =
+prioritize-source-pix-fmt = true
+filter =
+force-filter = False
+look-ahead-depth = 16
+b-frames = 3
+ref-frames = 4
+codec = hevc, h265
+max-bitrate = 2000
+preset = fast
+
+[HDR]
+codec =
+pix-fmt =
+space = bt2020nc
+transfer = smpte2084
+primaries = bt2020
+codec-parameters = -low_power 1 -async_depth 1 -extbrc 1
+filter =
+force-filter = False
+profile =
+look-ahead-depth = 16
+b-frames = 3
+ref-frames = 4
+codec = hevc, h265
+preset = fast
+
+[Audio]
+codec = aac, ac3
+languages = eng
+default-language = eng
+first-stream-of-language = true
+allow-language-relax = true
+channel-bitrate = 96
+variable-bitrate = 0
+max-bitrate = 0
+max-channels = 0
+filter =
+profile =
+force-filter = false
+sample-rates =
+sample-format =
+copy-original = false
+aac-adtstoasc = true
+ignored-dispositions = comment
+unique-dispositions = false
+stream-codec-combinations =
+ignore-trudhd = true
+relax-to-default = false
+force-default = false
+include-original-language = true
+atmos-force-copy = true
+
+[Audio.Sorting]
+sorting = language, channels.d, map, d.comment
+default-sorting = channels.d, map, d.comment
+codecs =
+
+[Universal Audio]
+codec = aac
+channel-bitrate = 96
+variable-bitrate = 0
+first-stream-only = False
+filter =
+profile =
+force-filter = False
+
+[Audio.ChannelFilters]
+
+[Subtitle]
+codec = mov_text
+codec-image-based =
+languages =
+default-language = eng
+force-default = True
+include-original-language = False
+first-stream-of-language = False
+encoding =
+burn-subtitles = False
+burn-dispositions =
+embed-subs = True
+embed-image-subs = False
+embed-only-internal-subs = False
+filename-dispositions = forced
+ignore-embedded-subs = False
+ignored-dispositions =
+unique-dispositions = False
+attachment-codec =
+remove-bitstream-subs = False
+
+[Subtitle.Sorting]
+sorting = language, d.comment, d.default.d, d.forced.d
+burn-sorting = language, d.comment, d.default.d, d.forced.d
+codecs =
+
+[Subtitle.CleanIt]
+enabled = true
+config-path =
+tags =
+
+[Subtitle.FFSubsync]
+enabled = true
+
+[Subtitle.Subliminal]
+download-subs = False
+download-forced-subs = False
+include-hearing-impaired-subs = False
+providers =
+
+[Subtitle.Subliminal.Auth]
+opensubtitles =
+tvsubtitles =
+
+[Sonarr]
+host = localhost
+port = 8989
+apikey =
+ssl = False
+webroot =
+force-rename = True
+rescan = True
+in-progress-check = True
+block-reprocess = False
+
+[Radarr]
+host = localhost
+port = 7878
+apikey =
+ssl = False
+webroot =
+force-rename = True
+rescan = True
+in-progress-check = True
+block-reprocess = False
+
+[SABNZBD]
+convert = True
+sonarr-category = tv
+radarr-category = movies
+bypass-category = bypass
+output-directory =
+path-mapping =
+
+[Deluge]
+sonarr-label = sonarr
+radarr-label = radarr
+bypass-label = bypass
+convert = True
+host = localhost
+port = 58846
+username =
+password =
+output-directory =
+remove = False
+path-mapping =
+
+[qBittorrent]
+sonarr-label = tv
+radarr-label = movies
+bypass-label = bypass
+convert = True
+action-before =
+action-after =
+host = localhost
+port = 8080
+ssl = False
+username =
+password =
+output-directory =
+path-mapping =
+
+[uTorrent]
+sonarr-label = sonarr
+radarr-label = radarr
+bypass-label = bypass
+convert = True
+webui = False
+action-before =
+action-after =
+host = localhost
+ssl = False
+port = 8080
+username =
+password =
+output-directory =
+path-mapping =
+
+[Plex]
+host = localhost
+port = 32400
+refresh = True
+token =
+ssl = False
+ignore-certs = True
+path-mapping =

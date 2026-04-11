@@ -12,7 +12,7 @@ ignored-extensions = nfo, ds_store
 copy-to =
 move-to =
 delete-original = True
-recycle-bin = /mnt/unionfs/recycle
+recycle-bin = /mnt/local/recycle
 process-same-extensions = False
 bypass-if-copying-all = True
 force-convert = False
@@ -53,10 +53,27 @@ keep-titles = False
 #   vaapi:          h264, h265, av1
 #   videotoolbox:   h264, h265
 gpu = qsv
-bitrate-ratio = hevc:1.0, h264:0.65, mpeg2video:0.45, vc1:0.50, vp9:0.85, av1:1.1, *:0.60
-crf = -1
-crf-profiles = 0:22:2M:4M,4000:22:3M:6M,8000:22:5M:10M,15000:22:15M:30M,25000:21:25M:50M
-codec-parameters =
+# hwdevices: override the DRI device path for each hwaccel type.
+# Format: hwaccel:device (comma-separated for multiple).
+# Default for qsv/vaapi: qsv:/dev/dri/renderD128 (set automatically by gpu profile).
+# For SR-IOV or multi-GPU setups, specify the VF device explicitly, e.g.:
+#   hwdevices = qsv:/dev/dri/renderD129
+hwdevices =
+bitrate-ratio = hevc:0.85, h264:0.65, mpeg2video:0.45, vc1:0.50, vp9:0.85, av1:1.1, *:0.60
+
+# crf-profiles: sliding scale of output bitrates keyed by source bitrate.
+# Format: source_kbps:quality:target_bitrate:max_bitrate (comma-separated tiers)
+# The highest tier whose source_kbps threshold the source meets is used.
+# Bitrate values support M (megabits) or k (kilobits) suffixes.
+# When a profile matches: overrides bitrate-ratio, forces transcode, sets -b:v/-maxrate/-bufsize.
+# Leave blank to disable (bitrate-ratio and max-bitrate apply instead).
+
+# <= 1080P
+crf-profiles = 0:22:3M:6M,8000:22:5M:10M
+# >= 4K
+crf-profiles-hd = 0:22:20M:30M,15000:22:20M:30M,25000:21:25M:50M
+
+codec-parameters = -low_power 1 -async_depth 1 -extbrc 1
 dynamic-parameters = true
 max-width = 0
 profile =
@@ -65,8 +82,8 @@ pix-fmt =
 prioritize-source-pix-fmt = true
 filter =
 force-filter = False
-look-ahead-depth = 40
-b-frames = 4
+look-ahead-depth = 16
+b-frames = 3
 ref-frames = 4
 codec = hevc, h265
 max-bitrate = 0
@@ -78,18 +95,18 @@ pix-fmt =
 space = bt2020nc
 transfer = smpte2084
 primaries = bt2020
-codec-parameters =
+codec-parameters = -low_power 1 -async_depth 1 -extbrc 1
 filter =
 force-filter = False
 profile =
-look-ahead-depth = 40
-b-frames = 4
+look-ahead-depth = 16
+b-frames = 3
 ref-frames = 4
 codec = hevc, h265
 preset = fast
 
 [Audio]
-codec = aac, eac3, ac3
+codec = eac3, ac3
 languages = eng
 default-language = eng
 first-stream-of-language = true
@@ -121,7 +138,7 @@ codecs =
 
 [Universal Audio]
 codec = aac
-channel-bitrate = 128
+channel-bitrate = 96
 variable-bitrate = 0
 first-stream-only = False
 filter =
@@ -133,7 +150,7 @@ force-filter = False
 [Subtitle]
 codec = mov_text
 codec-image-based =
-languages =
+languages = eng
 default-language = eng
 force-default = True
 include-original-language = False
@@ -149,7 +166,7 @@ ignore-embedded-subs = False
 ignored-dispositions =
 unique-dispositions = False
 attachment-codec =
-remove-bitstream-subs = False
+remove-bitstream-subs = true
 
 [Subtitle.Sorting]
 sorting = language, d.comment, d.default.d, d.forced.d
@@ -191,7 +208,7 @@ port = 7878
 apikey =
 ssl = False
 webroot =
-force-rename = Truee
+force-rename = True
 rescan = True
 in-progress-check = True
 block-reprocess = False

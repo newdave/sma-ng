@@ -4,6 +4,9 @@
   "db_url": null,
   "ffmpeg_dir": null,
   "job_timeout_seconds": 0,
+  "smoke_test": false,
+  "recycle_bin_max_age_days": 3,
+  "recycle_bin_min_free_gb": 100,
   "media_extensions": [".mp4", ".mkv", ".avi", ".mov", ".ts"],
   "path_rewrites": [
     {
@@ -22,28 +25,33 @@
   ],
   "path_configs": [
     {
-      "path": "/mnt/unionfs/Media/TV",
-      "config": "config/autoProcess.tv.ini",
+      "path": "/mnt/unionfs/Media/TV/1080P",
+      "config": "config/autoProcess.rq.ini",
+      "default_args": ["--tv"]
+    },
+    {
+      "path": "/mnt/unionfs/Media/TV/4K",
+      "config": "config/autoProcess.rq.ini",
       "default_args": ["--tv"]
     },
     {
       "path": "/mnt/unionfs/Media/Movies/4K",
-      "config": "config/autoProcess.movies-4k.ini",
+      "config": "config/autoProcess.rq.ini",
       "default_args": ["--movie"]
     },
     {
       "path": "/mnt/unionfs/Media/Movies/1080P",
-      "config": "config/autoProcess.movies-1080p.ini",
+      "config": "config/autoProcess.rq.ini",
       "default_args": ["--movie"]
     },
     {
       "path": "/mnt/unionfs/Media/Kids",
-      "config": "config/autoProcess.tv-kids.ini",
-      "default_args": ["--tv", "-fc"]
+      "config": "config/autoProcess.lq.ini",
+      "default_args": ["--tv"]
     },
     {
       "path": "/mnt/unionfs/Media/Movies/Kids",
-      "config": "config/autoProcess.movies-kids.ini",
+      "config": "config/autoProcess.lq.ini",
       "default_args": ["--movie"]
     }
   ]
