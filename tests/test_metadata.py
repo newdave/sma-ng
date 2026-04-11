@@ -429,7 +429,7 @@ class TestWriteTvPlexmatch:
         plexmatch = show_root / ".plexmatch"
         assert plexmatch.exists()
         content = plexmatch.read_text()
-        assert "title: Show Name" in content
+        assert "Title: Show Name" in content
         assert "S01E03" in content
 
     def test_updates_existing_plexmatch(self, tmp_path):
@@ -469,15 +469,16 @@ class TestWriteMoviePlexmatch:
         tagdata.title = "The Movie"
         tagdata.date = "2020-05-15"
         tagdata.tmdbid = 603
+        tagdata.imdbid = None
 
         _write_movie_plexmatch(str(filepath), tagdata, MagicMock())
 
         plexmatch = movie_dir / ".plexmatch"
         assert plexmatch.exists()
         content = plexmatch.read_text()
-        assert "title: The Movie" in content
-        assert "year: 2020" in content
-        assert "guid: tmdb://603" in content
+        assert "Title: The Movie" in content
+        assert "Year: 2020" in content
+        assert "Guid: tmdb://603" in content
 
 
 class TestWriteTags:
@@ -1182,8 +1183,8 @@ class TestWriteTvPlexmatch:
         _write_tv_plexmatch(filepath, tagdata, MagicMock())
 
         content = (show_dir / ".plexmatch").read_text()
-        assert "title: Breaking Bad" in content
-        assert "year: 2008" in content
+        assert "Title: Breaking Bad" in content
+        assert "Year: 2008" in content
 
     def test_writes_episode_entry(self, tmp_path):
         show_dir = tmp_path / "Breaking Bad"
@@ -1223,15 +1224,16 @@ class TestWriteTvPlexmatch:
         _write_tv_plexmatch(filepath, tagdata, MagicMock())
 
         content = (show_dir / ".plexmatch").read_text()
-        assert "guid: tmdb://9999" in content
+        assert "Guid: tmdb://9999" in content
 
 
 class TestWriteMoviePlexmatch:
-    def _make_tagdata(self, title="The Matrix", date="1999-03-31", tmdbid=603):
+    def _make_tagdata(self, title="The Matrix", date="1999-03-31", tmdbid=603, imdbid=None):
         t = MagicMock()
         t.title = title
         t.date = date
         t.tmdbid = tmdbid
+        t.imdbid = imdbid
         return t
 
     def test_creates_plexmatch_in_movie_dir(self, tmp_path):
@@ -1249,9 +1251,9 @@ class TestWriteMoviePlexmatch:
 
         _write_movie_plexmatch(filepath, self._make_tagdata(), MagicMock())
         content = (movie_dir / ".plexmatch").read_text()
-        assert "title: The Matrix" in content
-        assert "year: 1999" in content
-        assert "guid: tmdb://603" in content
+        assert "Title: The Matrix" in content
+        assert "Year: 1999" in content
+        assert "Guid: tmdb://603" in content
 
     def test_missing_date_omits_year(self, tmp_path):
         movie_dir = tmp_path / "Movie"

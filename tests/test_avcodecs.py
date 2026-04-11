@@ -32,25 +32,30 @@ class TestBaseCodecSafeOptions:
 
     def test_filters_unknown_keys(self):
         codec = H264Codec()
-        safe = codec.safe_options({"codec": "h264", "unknown_key": "value", "crf": 23})
+        safe = codec.safe_options({"codec": "h264", "unknown_key": "value", "bitrate": 5000})
         assert "unknown_key" not in safe
-        assert safe["crf"] == 23
+        assert safe["bitrate"] == 5000
 
     def test_type_casts_values(self):
         codec = H264Codec()
-        safe = codec.safe_options({"codec": "h264", "crf": "23", "bitrate": "5000"})
-        assert safe["crf"] == 23
+        safe = codec.safe_options({"codec": "h264", "bitrate": "5000"})
         assert safe["bitrate"] == 5000
 
     def test_skips_none_values(self):
         codec = H264Codec()
-        safe = codec.safe_options({"codec": "h264", "crf": None})
-        assert "crf" not in safe
+        safe = codec.safe_options({"codec": "h264", "bitrate": None})
+        assert "bitrate" not in safe
 
     def test_invalid_type_cast_skipped(self):
         codec = H264Codec()
-        safe = codec.safe_options({"codec": "h264", "crf": "not_a_number"})
-        assert "crf" not in safe
+        safe = codec.safe_options({"codec": "h264", "bitrate": "not_a_number"})
+        assert "bitrate" not in safe
+
+    def test_crf_key_silently_ignored(self):
+        codec = H264Codec()
+        opts = codec.parse_options({"codec": "h264", "crf": 23, "bitrate": 5000})
+        assert "-crf" not in opts
+        assert "-vb" in opts
 
 
 class TestH264Codec:
@@ -58,7 +63,7 @@ class TestH264Codec:
 
     def test_parse_options_basic(self):
         codec = H264Codec()
-        opts = codec.parse_options({"codec": "h264", "crf": 23})
+        opts = codec.parse_options({"codec": "h264", "bitrate": 5000})
         assert "-vcodec" in opts
         assert "libx264" in opts
         assert "-tag:v" in opts
@@ -94,16 +99,16 @@ class TestH264QSVCodec:
 
     def test_device_passthrough(self):
         codec = H264QSVCodec()
-        opts = codec.parse_options({"codec": "h264qsv", "device": "sma", "crf": 25})
+        opts = codec.parse_options({"codec": "h264qsv", "device": "sma", "bitrate": 5000})
         assert "-filter_hw_device" in opts
         assert "sma" in opts
 
-    def test_crf_to_global_quality(self):
+    def test_bitrate_mode(self):
         codec = H264QSVCodec()
-        opts = codec.parse_options({"codec": "h264qsv", "crf": 25})
-        assert "-global_quality" in opts
-        assert "25" in opts
-        # CRF should not be in output (converted to global_quality)
+        opts = codec.parse_options({"codec": "h264qsv", "bitrate": 5000})
+        assert "-vb" in opts
+        assert "5000k" in opts
+        assert "-global_quality" not in opts
         assert "-crf" not in opts
 
     def test_look_ahead_appended(self):
@@ -119,9 +124,10 @@ class TestH264QSVCodec:
     def test_scale_filter_is_qsv(self):
         assert H264QSVCodec.scale_filter == "scale_qsv"
 
-    def test_invalid_crf_uses_default(self):
+    def test_no_bitrate_uses_hw_quality_default(self):
         codec = H264QSVCodec()
-        opts = codec.parse_options({"codec": "h264qsv", "crf": 0})
+        opts = codec.parse_options({"codec": "h264qsv"})
+        assert "-global_quality" in opts
         idx = opts.index("-global_quality")
         assert opts[idx + 1] == str(H264QSVCodec.hw_quality_default)
 
@@ -140,11 +146,11 @@ class TestH264QSVCodec:
 class TestH264VAAPICodec:
     """Test H.264 VAAPI hardware codec."""
 
-    def test_crf_to_qp(self):
+    def test_bitrate_mode_no_qp(self):
         codec = H264VAAPICodec()
-        opts = codec.parse_options({"codec": "h264vaapi", "crf": 30})
-        assert "-qp" in opts
-        assert "30" in opts
+        opts = codec.parse_options({"codec": "h264vaapi", "bitrate": 5000})
+        assert "-vb" in opts
+        assert "-qp" not in opts
 
     def test_fallback_init_hw_device(self):
         """When no device configured, should use -init_hw_device fallback."""
@@ -179,11 +185,11 @@ class TestH265QSVCodec:
         assert "device" in H265QSVCodec.encoder_options
         assert "decode_device" in H265QSVCodec.encoder_options
 
-    def test_crf_to_global_quality(self):
+    def test_bitrate_mode(self):
         codec = H265QSVCodec()
-        opts = codec.parse_options({"codec": "h265qsv", "crf": 22})
-        assert "-global_quality" in opts
-        assert "22" in opts
+        opts = codec.parse_options({"codec": "h265qsv", "bitrate": 5000})
+        assert "-vb" in opts
+        assert "-global_quality" not in opts
 
     def test_ffmpeg_codec_name(self):
         assert H265QSVCodec.ffmpeg_codec_name == "hevc_qsv"
@@ -215,11 +221,11 @@ class TestAV1QSVCodec:
     def test_scale_filter(self):
         assert AV1QSVCodec.scale_filter == "scale_qsv"
 
-    def test_crf_to_global_quality(self):
+    def test_bitrate_mode(self):
         codec = AV1QSVCodec()
-        opts = codec.parse_options({"codec": "av1qsv", "crf": 28})
-        assert "-global_quality" in opts
-        assert "28" in opts
+        opts = codec.parse_options({"codec": "av1qsv", "bitrate": 5000})
+        assert "-vb" in opts
+        assert "-global_quality" not in opts
 
     def test_look_ahead(self):
         codec = AV1QSVCodec()
@@ -240,10 +246,11 @@ class TestAV1VAAPICodec:
     def test_scale_filter(self):
         assert AV1VAAPICodec.scale_filter == "scale_vaapi"
 
-    def test_crf_to_qp(self):
+    def test_bitrate_mode_no_qp(self):
         codec = AV1VAAPICodec()
-        opts = codec.parse_options({"codec": "av1vaapi", "crf": 30})
-        assert "-qp" in opts
+        opts = codec.parse_options({"codec": "av1vaapi", "bitrate": 5000})
+        assert "-vb" in opts
+        assert "-qp" not in opts
 
     def test_init_hw_device_fallback(self):
         codec = AV1VAAPICodec()
@@ -258,15 +265,16 @@ class TestVp9QSVCodec:
     def test_has_device_options(self):
         assert "device" in Vp9QSVCodec.encoder_options
 
-    def test_crf_to_global_quality(self):
+    def test_bitrate_mode(self):
         codec = Vp9QSVCodec()
-        opts = codec.parse_options({"codec": "vp9qsv", "crf": 28})
-        assert "-global_quality" in opts
+        opts = codec.parse_options({"codec": "vp9qsv", "bitrate": 5000})
+        assert "-vb" in opts
+        assert "-global_quality" not in opts
 
     def test_works_without_framedata(self):
         """VP9 base class expects framedata; QSV should handle its absence."""
         codec = Vp9QSVCodec()
-        opts = codec.parse_options({"codec": "vp9qsv", "crf": 25})
+        opts = codec.parse_options({"codec": "vp9qsv", "bitrate": 5000})
         assert "-vcodec" in opts
 
 
@@ -357,7 +365,7 @@ class TestH265Codec:
 
     def test_basic(self):
         codec = H265Codec()
-        opts = codec.parse_options({"codec": "h265", "crf": 22})
+        opts = codec.parse_options({"codec": "h265", "bitrate": 5000})
         assert "-vcodec" in opts
         assert "libx265" in opts
 
@@ -379,13 +387,13 @@ class TestNVEncCodecs:
 
     def test_nvenc_h264_basic(self):
         codec = NVEncH264Codec()
-        opts = codec.parse_options({"codec": "h264_nvenc", "crf": 25})
+        opts = codec.parse_options({"codec": "h264_nvenc", "bitrate": 5000})
         assert "-vcodec" in opts
         assert "h264_nvenc" in opts
 
     def test_nvenc_h265_basic(self):
         codec = NVEncH265Codec()
-        opts = codec.parse_options({"codec": "h265_nvenc", "crf": 25})
+        opts = codec.parse_options({"codec": "h265_nvenc", "bitrate": 5000})
         assert "-vcodec" in opts
         assert "hevc_nvenc" in opts
 
@@ -670,7 +678,17 @@ class TestVideoCodecParsing:
         assert "-pix_fmt" in opts
         assert "yuv420p" in opts
 
-    def test_crf_out_of_range_removed(self):
+    def test_maxrate_and_bufsize_emitted_with_bitrate(self):
         codec = H264Codec()
-        opts = codec.parse_options({"codec": "h264", "crf": 99})
-        assert "-crf" not in opts
+        opts = codec.parse_options({"codec": "h264", "bitrate": 5000, "maxrate": "10000k", "bufsize": "20000k"})
+        assert "-vb" in opts
+        assert "-maxrate:v" in opts
+        assert "10000k" in opts
+        assert "-bufsize" in opts
+        assert "20000k" in opts
+
+    def test_maxrate_and_bufsize_emitted_without_bitrate(self):
+        codec = H264Codec()
+        opts = codec.parse_options({"codec": "h264", "maxrate": "10000k", "bufsize": "20000k"})
+        assert "-maxrate:v" in opts
+        assert "-bufsize" in opts

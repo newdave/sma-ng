@@ -167,13 +167,11 @@ preset = medium
 dynamic-parameters = false
 profile =
 prioritize-source-pix-fmt = true
-crf = 23
 max-width = 0
 pix-fmt =
 max-level = 0
 filter =
 force-filter = false
-crf-profiles =
 bitrate-ratio =
 codec-parameters =
 
@@ -639,32 +637,6 @@ class TestWriteConfig:
         assert os.path.exists(new_path)
 
 
-class TestCrfProfiles:
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_parses_crf_profiles(self, mock_validate, tmp_ini):
-        ini = tmp_ini()
-        with open(ini, "r") as f:
-            content = f.read()
-        content = content.replace("crf-profiles =", "crf-profiles = 20000:18:30M:40M, 10000:22:20M:30M")
-        with open(ini, "w") as f:
-            f.write(content)
-        settings = ReadSettings(ini)
-        assert len(settings.vcrf_profiles) == 2
-        assert settings.vcrf_profiles[0]["source_bitrate"] == 20000
-        assert settings.vcrf_profiles[0]["crf"] == 18
-
-    @patch("resources.readsettings.ReadSettings._validate_binaries")
-    def test_invalid_crf_profile_skipped(self, mock_validate, tmp_ini):
-        ini = tmp_ini()
-        with open(ini, "r") as f:
-            content = f.read()
-        content = content.replace("crf-profiles =", "crf-profiles = bad:format")
-        with open(ini, "w") as f:
-            f.write(content)
-        settings = ReadSettings(ini)
-        assert len(settings.vcrf_profiles) == 0
-
-
 class TestForceConvertOverride:
     @patch("resources.readsettings.ReadSettings._validate_binaries")
     def test_force_convert_sets_process_same(self, mock_validate, tmp_ini):
@@ -831,3 +803,80 @@ class TestMigrateFromOld:
         # Should not raise — deprecated option is silently removed
         settings = ReadSettings(ini)
         assert settings is not None
+
+
+class TestBitrateProfiles:
+    """Test _parse_bitrate_profiles static method and vbitrate_profiles attribute."""
+
+    def test_empty_string_returns_empty_list(self):
+        result = ReadSettings._parse_bitrate_profiles("")
+        assert result == []
+
+    def test_whitespace_only_returns_empty_list(self):
+        result = ReadSettings._parse_bitrate_profiles("   ")
+        assert result == []
+
+    def test_single_entry_m_suffix(self):
+        result = ReadSettings._parse_bitrate_profiles("0:22:2M:4M")
+        assert result == [{"source_kbps": 0, "target": 2000, "maxrate": 4000}]
+
+    def test_m_suffix_multiplies_by_1000(self):
+        result = ReadSettings._parse_bitrate_profiles("0:22:1M:3M")
+        assert result[0]["target"] == 1000
+        assert result[0]["maxrate"] == 3000
+
+    def test_k_suffix_keeps_value_as_is(self):
+        result = ReadSettings._parse_bitrate_profiles("0:22:3000k:6000k")
+        assert result[0]["target"] == 3000
+        assert result[0]["maxrate"] == 6000
+
+    def test_bare_number_treated_as_kbps(self):
+        result = ReadSettings._parse_bitrate_profiles("0:22:3000:6000")
+        assert result[0]["target"] == 3000
+        assert result[0]["maxrate"] == 6000
+
+    def test_multiple_entries_sorted_by_source_kbps_ascending(self):
+        result = ReadSettings._parse_bitrate_profiles("8000:22:5M:10M, 0:22:2M:4M, 4000:22:3M:6M")
+        assert [p["source_kbps"] for p in result] == [0, 4000, 8000]
+
+    def test_entry_with_wrong_field_count_is_skipped(self):
+        result = ReadSettings._parse_bitrate_profiles("0:22:2M, 4000:22:3M:6M")
+        assert len(result) == 1
+        assert result[0]["source_kbps"] == 4000
+
+    def test_entry_with_non_numeric_source_kbps_is_skipped(self):
+        result = ReadSettings._parse_bitrate_profiles("bad:22:2M:4M, 4000:22:3M:6M")
+        assert len(result) == 1
+        assert result[0]["source_kbps"] == 4000
+
+    def test_entry_with_non_numeric_target_is_skipped(self):
+        result = ReadSettings._parse_bitrate_profiles("0:22:bad:4M, 4000:22:3M:6M")
+        assert len(result) == 1
+        assert result[0]["source_kbps"] == 4000
+
+    def test_entry_with_non_numeric_maxrate_is_skipped(self):
+        result = ReadSettings._parse_bitrate_profiles("0:22:2M:bad, 4000:22:3M:6M")
+        assert len(result) == 1
+        assert result[0]["source_kbps"] == 4000
+
+    def test_all_bad_entries_returns_empty_list(self):
+        result = ReadSettings._parse_bitrate_profiles("bad:22:2M:4M, 0:22:bad:4M")
+        assert result == []
+
+    @patch("resources.readsettings.ReadSettings._validate_binaries")
+    def test_vbitrate_profiles_empty_when_not_configured(self, mock_validate, tmp_ini):
+        settings = ReadSettings(tmp_ini())
+        assert settings.vbitrate_profiles == []
+
+    @patch("resources.readsettings.ReadSettings._validate_binaries")
+    def test_vbitrate_profiles_parsed_when_configured(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, "r") as f:
+            content = f.read()
+        content = content.replace("codec-parameters =\n\n[HDR]", "codec-parameters =\ncrf-profiles = 0:22:2M:4M,4000:22:3M:6M\n\n[HDR]")
+        with open(ini, "w") as f:
+            f.write(content)
+        settings = ReadSettings(ini)
+        assert len(settings.vbitrate_profiles) == 2
+        assert settings.vbitrate_profiles[0] == {"source_kbps": 0, "target": 2000, "maxrate": 4000}
+        assert settings.vbitrate_profiles[1] == {"source_kbps": 4000, "target": 3000, "maxrate": 6000}

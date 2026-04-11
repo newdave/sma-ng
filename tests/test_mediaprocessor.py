@@ -1028,21 +1028,17 @@ class TestScanForExternalMetadata:
         assert result is None
 
 
-class TestCrfProfileOverridesCopy:
-    """Test that a CRF profile match forces transcoding even when codec could be copied."""
+class TestMaxBitrateVBV:
+    """Test that vmaxbitrate populates VBV maxrate/bufsize in video_settings."""
 
-    def test_crf_profile_match_forces_transcode(self, tmp_ini, make_media_info):
-        """When source bitrate exceeds a CRF profile threshold, the stream must be
-        transcoded (not copied) even if the source codec matches the desired codec."""
+    def _make_mp(self, tmp_ini, vmaxbitrate):
         with patch("resources.readsettings.ReadSettings._validate_binaries"):
             from resources.mediaprocessor import MediaProcessor
             from resources.readsettings import ReadSettings
 
             settings = ReadSettings(tmp_ini())
-            # Use single codec so source h264 matches and would normally be copied
             settings.vcodec = ["h264"]
-            # Profile: source > 5000 kbps → transcode with crf=18, 3M/6M rate control
-            settings.vcrf_profiles = [{"source_bitrate": 5000, "crf": 18, "maxrate": "3M", "bufsize": "6M"}]
+            settings.vmaxbitrate = vmaxbitrate
 
         mock_converter = MagicMock()
         mock_converter.ffmpeg.codecs = {
@@ -1060,64 +1056,23 @@ class TestCrfProfileOverridesCopy:
         from resources.subtitles import SubtitleProcessor
 
         mp.subtitles = SubtitleProcessor(mp)
+        return mp
 
-        # 7 Mbit source: total=7128kbps, audio=128kbps → video estimate ≈ 6650kbps > 5000 threshold
-        info = make_media_info(
-            video_codec="h264",
-            video_bitrate=7000000,
-            total_bitrate=7128000,
-            audio_bitrate=128000,
-        )
-
+    def test_vmaxbitrate_sets_maxrate_and_bufsize(self, tmp_ini, make_media_info):
+        mp = self._make_mp(tmp_ini, vmaxbitrate=8000)
+        info = make_media_info(video_codec="h264", video_bitrate=10000000, total_bitrate=10128000, audio_bitrate=128000)
         with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
             options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+        assert options["video"]["maxrate"] == "8000k"
+        assert options["video"]["bufsize"] == "16000k"
 
-        assert options is not None
-        assert options["video"]["codec"] == "h264", "CRF profile match must override copy and transcode"
-        assert options["video"]["crf"] == 18
-        assert options["video"]["maxrate"] == "3M"
-        assert options["video"]["bufsize"] == "6M"
-
-    def test_no_crf_profile_match_allows_copy(self, tmp_ini, make_media_info):
-        """When source bitrate is below the CRF profile threshold, copy is not overridden."""
-        with patch("resources.readsettings.ReadSettings._validate_binaries"):
-            from resources.mediaprocessor import MediaProcessor
-            from resources.readsettings import ReadSettings
-
-            settings = ReadSettings(tmp_ini())
-            settings.vcodec = ["h264"]
-            # Profile only triggers above 10000 kbps — our 7 Mbit source won't match
-            settings.vcrf_profiles = [{"source_bitrate": 10000, "crf": 18, "maxrate": "6M", "bufsize": "12M"}]
-
-        mock_converter = MagicMock()
-        mock_converter.ffmpeg.codecs = {
-            "h264": {"encoders": ["libx264"]},
-            "aac": {"encoders": ["aac"]},
-        }
-        mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8}
-        mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {"h264": "libx264", "aac": "aac"}.get(c, c)
-
-        mp = MediaProcessor.__new__(MediaProcessor)
-        mp.settings = settings
-        mp.converter = mock_converter
-        mp.log = MagicMock()
-        mp.deletesubs = set()
-        from resources.subtitles import SubtitleProcessor
-
-        mp.subtitles = SubtitleProcessor(mp)
-
-        info = make_media_info(
-            video_codec="h264",
-            video_bitrate=7000000,
-            total_bitrate=7128000,
-            audio_bitrate=128000,
-        )
-
+    def test_zero_vmaxbitrate_leaves_vbv_unset(self, tmp_ini, make_media_info):
+        mp = self._make_mp(tmp_ini, vmaxbitrate=0)
+        info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
         with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
             options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
-
-        assert options is not None
-        assert options["video"]["codec"] == "copy"
+        assert options["video"]["maxrate"] is None
+        assert options["video"]["bufsize"] is None
 
 
 def _make_mp():
@@ -2220,3 +2175,126 @@ class TestProcessExternalSub:
         sub_info = self._make_sub_info("/path/movie.eng.forced.srt")
         result = mp.processExternalSub(sub_info, "/path/movie.mkv")
         assert result.subtitle[0].disposition.get("forced") is True
+
+
+class TestMatchBitrateProfile:
+    """Test _match_bitrate_profile returns the correct profile or None."""
+
+    def _make_mp_with_profiles(self, profiles):
+        mp = _make_mp()
+        mp.settings.vbitrate_profiles = profiles
+        return mp
+
+    def test_empty_profiles_returns_none(self):
+        mp = self._make_mp_with_profiles([])
+        assert mp._match_bitrate_profile(5000) is None
+
+    def test_zero_source_kbps_returns_none(self):
+        mp = self._make_mp_with_profiles([{"source_kbps": 0, "target": 2000, "maxrate": 4000}])
+        assert mp._match_bitrate_profile(0) is None
+
+    def test_none_source_kbps_returns_none(self):
+        mp = self._make_mp_with_profiles([{"source_kbps": 0, "target": 2000, "maxrate": 4000}])
+        assert mp._match_bitrate_profile(None) is None
+
+    def test_source_below_all_tiers_returns_none(self):
+        profiles = [
+            {"source_kbps": 1000, "target": 2000, "maxrate": 4000},
+            {"source_kbps": 4000, "target": 3000, "maxrate": 6000},
+        ]
+        mp = self._make_mp_with_profiles(profiles)
+        assert mp._match_bitrate_profile(500) is None
+
+    def test_source_exactly_at_tier_threshold_matches_that_tier(self):
+        profiles = [
+            {"source_kbps": 1000, "target": 2000, "maxrate": 4000},
+            {"source_kbps": 4000, "target": 3000, "maxrate": 6000},
+        ]
+        mp = self._make_mp_with_profiles(profiles)
+        result = mp._match_bitrate_profile(4000)
+        assert result == {"source_kbps": 4000, "target": 3000, "maxrate": 6000}
+
+    def test_source_between_tiers_matches_lower_tier(self):
+        profiles = [
+            {"source_kbps": 1000, "target": 2000, "maxrate": 4000},
+            {"source_kbps": 4000, "target": 3000, "maxrate": 6000},
+        ]
+        mp = self._make_mp_with_profiles(profiles)
+        result = mp._match_bitrate_profile(2500)
+        assert result == {"source_kbps": 1000, "target": 2000, "maxrate": 4000}
+
+    def test_source_above_all_tiers_matches_highest_tier(self):
+        profiles = [
+            {"source_kbps": 1000, "target": 2000, "maxrate": 4000},
+            {"source_kbps": 4000, "target": 3000, "maxrate": 6000},
+            {"source_kbps": 8000, "target": 5000, "maxrate": 10000},
+        ]
+        mp = self._make_mp_with_profiles(profiles)
+        result = mp._match_bitrate_profile(20000)
+        assert result == {"source_kbps": 8000, "target": 5000, "maxrate": 10000}
+
+    def test_source_exactly_at_lowest_tier_matches_it(self):
+        profiles = [
+            {"source_kbps": 1000, "target": 2000, "maxrate": 4000},
+        ]
+        mp = self._make_mp_with_profiles(profiles)
+        result = mp._match_bitrate_profile(1000)
+        assert result == {"source_kbps": 1000, "target": 2000, "maxrate": 4000}
+
+
+class TestBitrateProfileIntegration:
+    """Test that a matching crf-profile forces transcode and sets vbitrate/maxrate/bufsize."""
+
+    def _make_mp(self, tmp_ini, vbitrate_profiles, vmaxbitrate=0):
+        with patch("resources.readsettings.ReadSettings._validate_binaries"):
+            from resources.mediaprocessor import MediaProcessor
+            from resources.readsettings import ReadSettings
+
+            settings = ReadSettings(tmp_ini())
+            settings.vcodec = ["h264"]
+            settings.vmaxbitrate = vmaxbitrate
+            settings.vbitrate_profiles = vbitrate_profiles
+
+        mock_converter = MagicMock()
+        mock_converter.ffmpeg.codecs = {
+            "h264": {"encoders": ["libx264"]},
+            "aac": {"encoders": ["aac"]},
+        }
+        mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8}
+        mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {"h264": "libx264", "aac": "aac"}.get(c, c)
+
+        mp = MediaProcessor.__new__(MediaProcessor)
+        mp.settings = settings
+        mp.converter = mock_converter
+        mp.log = MagicMock()
+        mp.deletesubs = set()
+        from resources.subtitles import SubtitleProcessor
+
+        mp.subtitles = SubtitleProcessor(mp)
+        return mp
+
+    def test_profile_match_sets_vbitrate_maxrate_bufsize(self, tmp_ini, make_media_info):
+        profiles = [{"source_kbps": 0, "target": 3000, "maxrate": 6000}]
+        mp = self._make_mp(tmp_ini, vbitrate_profiles=profiles)
+        info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
+        with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+            options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+        assert options["video"]["bitrate"] == 3000
+        assert options["video"]["maxrate"] == "6000k"
+        assert options["video"]["bufsize"] == "12000k"
+
+    def test_profile_match_forces_transcode(self, tmp_ini, make_media_info):
+        profiles = [{"source_kbps": 0, "target": 3000, "maxrate": 6000}]
+        mp = self._make_mp(tmp_ini, vbitrate_profiles=profiles)
+        info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
+        with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+            options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+        assert options["video"]["codec"] != "copy"
+
+    def test_no_profiles_leaves_vbv_unset_without_maxbitrate(self, tmp_ini, make_media_info):
+        mp = self._make_mp(tmp_ini, vbitrate_profiles=[], vmaxbitrate=0)
+        info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
+        with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+            options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+        assert options["video"]["maxrate"] is None
+        assert options["video"]["bufsize"] is None

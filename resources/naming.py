@@ -206,7 +206,7 @@ class NamingData:
             self.series_titleyear = "%s (%s)" % (self.series_title, year) if year else self.series_title
             self.season = int(tagdata.season or 0)
             self.episode = int(tagdata.episode or 0)
-            self.episodes = list(tagdata.episodes) if getattr(tagdata, "episodes", None) else [self.episode]
+            self.episodes = sorted(tagdata.episodes) if getattr(tagdata, "episodes", None) else [self.episode]
             self.episode_title = tagdata.title or ""
             self.episode_cleantitle = sanitize_filename(self.episode_title)
         elif tagdata.mediatype == MediaType.Movie:
@@ -268,7 +268,7 @@ class NamingData:
                 eps = data["episodes"]
                 self.season = eps[0].get("seasonNumber", self.season)
                 self.episode = eps[0].get("episodeNumber", self.episode)
-                self.episodes = [ep.get("episodeNumber") for ep in eps if ep.get("episodeNumber") is not None]
+                self.episodes = sorted(ep.get("episodeNumber") for ep in eps if ep.get("episodeNumber") is not None)
                 titles = [ep.get("title", "") for ep in eps if ep.get("title")]
                 self.episode_title = " / ".join(titles) if titles else self.episode_title
                 self.episode_cleantitle = sanitize_filename(self.episode_title)
@@ -358,12 +358,12 @@ def apply_template(template, data):
     def _apply_format(val, fmt):
         """Apply format spec to a value. :00 = pad to 2 digits, :000 = pad to 3, :90 = truncate to 90 chars."""
         if isinstance(val, list):
-            # Multi-episode list: format as first-last range
-            # e.g. [1, 2, 3] with :00 produces "01-E03"
-            first = _apply_format(val[0], fmt)
-            if len(val) == 1:
+            # Multi-episode range: first-last, e.g. [1,2,3,4] with :00 → "01-E04"
+            sorted_eps = sorted(val)
+            first = _apply_format(sorted_eps[0], fmt)
+            if len(sorted_eps) == 1:
                 return first
-            last = _apply_format(val[-1], fmt)
+            last = _apply_format(sorted_eps[-1], fmt)
             return "%s-E%s" % (first, last)
         if not fmt:
             return str(val)
