@@ -27,31 +27,86 @@ import sys
 import threading
 
 from resources.daemon import (
-    STATUS_COMPLETED,
-    STATUS_FAILED,
-    STATUS_PENDING,
-    STATUS_RUNNING,
+    STATUS_COMPLETED,  # pyright: ignore[reportUnusedImport]  # re-exported for tests
+    STATUS_FAILED,  # pyright: ignore[reportUnusedImport]
+    STATUS_PENDING,  # pyright: ignore[reportUnusedImport]
+    STATUS_RUNNING,  # pyright: ignore[reportUnusedImport]
     ConfigLockManager,
     ConfigLogManager,
-    ConversionWorker,
+    ConversionWorker,  # pyright: ignore[reportUnusedImport]
     DaemonServer,
-    HeartbeatThread,
+    HeartbeatThread,  # pyright: ignore[reportUnusedImport]
     PathConfigManager,
     PostgreSQLJobDatabase,
-    ScannerThread,
+    ScannerThread,  # pyright: ignore[reportUnusedImport]
     WebhookHandler,
-    WorkerPool,
-    _inline,
-    _load_dashboard_html,
-    _render_markdown_to_html,
-    _StoppableThread,
+    WorkerPool,  # pyright: ignore[reportUnusedImport]
+    _inline,  # pyright: ignore[reportUnusedImport]
+    _load_dashboard_html,  # pyright: ignore[reportUnusedImport]
+    _render_markdown_to_html,  # pyright: ignore[reportUnusedImport]
+    _StoppableThread,  # pyright: ignore[reportUnusedImport]
 )
-from resources.daemon.constants import DEFAULT_DAEMON_CONFIG, LOGS_DIR
+from resources.daemon.constants import DEFAULT_DAEMON_CONFIG, LOGS_DIR, SCRIPT_DIR  # pyright: ignore[reportUnusedImport]
 from resources.daemon.server import _validate_hwaccel
 from resources.log import getLogger
 
 # Main daemon logger
 log = getLogger("DAEMON")
+
+_SMOKE_TEST_FIXTURE = os.path.join(SCRIPT_DIR, "tests", "fixtures", "test1.mkv")
+
+
+def run_smoke_test(path_config_manager, ffmpeg_dir, logger):
+    """Run a dry-run option-generation check against every configured autoProcess.ini.
+
+    Uses MediaProcessor.jsonDump() which runs ffprobe on the fixture file and
+    builds the full FFmpeg command string, but does not execute FFmpeg.  Exits
+    with code 1 if any config fails so systemd can abort the start.
+
+    Args:
+        path_config_manager: PathConfigManager with the loaded daemon.json.
+        ffmpeg_dir: Optional directory to prepend to PATH for ffprobe.
+        logger: Logger instance.
+    """
+    fixture = _SMOKE_TEST_FIXTURE
+    if not os.path.exists(fixture):
+        logger.warning("Smoke test fixture not found, skipping: %s" % fixture)
+        return
+
+    if ffmpeg_dir:
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+
+    from resources.mediaprocessor import MediaProcessor
+    from resources.readsettings import ReadSettings
+
+    configs = path_config_manager.get_all_configs()
+    failed = []
+
+    logger.info("Running startup smoke test against %d config(s)..." % len(configs))
+    for config_path in sorted(configs):
+        label = os.path.basename(config_path)
+        if not os.path.exists(config_path):
+            logger.warning("  [SKIP] %s — config file not found" % label)
+            continue
+        try:
+            settings = ReadSettings(configFile=config_path)
+            mp = MediaProcessor(settings, logger=logger)
+            dump = mp.jsonDump(fixture)
+            import json as _json
+
+            parsed = _json.loads(dump)
+            output = parsed.get("output", {})
+            video_codec = output.get("video", {}).get("codec", "") if isinstance(output, dict) else ""
+            logger.info("  [OK]   %s  (video -> %s)" % (label, video_codec or "copy/bypass"))
+        except Exception:
+            logger.exception("  [FAIL] %s — smoke test raised an exception" % label)
+            failed.append(label)
+
+    if failed:
+        logger.error("Smoke test FAILED for %d config(s): %s" % (len(failed), ", ".join(failed)))
+        sys.exit(1)
+
+    logger.info("Smoke test passed.")
 
 
 def main():
@@ -80,6 +135,9 @@ def main():
     )
     parser.add_argument("--api-key", help="API key for authentication (or set SMA_DAEMON_API_KEY env var)")
     parser.add_argument(
+        "--smoke-test", action="store_true", help="Run a dry-run option-generation check against all configured autoProcess.ini files at startup, then exit with 0 on success or 1 on failure"
+    )
+    parser.add_argument(
         "--job-timeout",
         type=int,
         default=0,
@@ -100,6 +158,20 @@ def main():
     # Determine API key (priority: CLI arg > env var > config file)
     api_key = args.api_key or os.environ.get("SMA_DAEMON_API_KEY") or path_config_manager.api_key
 
+    # Determine FFmpeg directory (priority: CLI --ffmpeg-dir > env var > config file)
+    ffmpeg_dir = args.ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or path_config_manager.ffmpeg_dir
+
+    # Determine job timeout (priority: CLI --job-timeout > daemon.json; 0 means no timeout)
+    job_timeout_seconds = args.job_timeout or path_config_manager.job_timeout_seconds
+
+    # Run smoke test if requested via CLI or daemon.json.
+    # --smoke-test on CLI: run check and exit (no DB/server needed — safe pre-flight).
+    # smoke_test in daemon.json: run check then continue startup; exit 1 on failure.
+    if args.smoke_test or path_config_manager.smoke_test:
+        run_smoke_test(path_config_manager, ffmpeg_dir, log)
+        if args.smoke_test:
+            sys.exit(0)
+
     # Determine database (priority: env var > config file)
     # Note: PostgreSQL URL is not accepted on the CLI to prevent credentials appearing in ps output.
     db_url = os.environ.get("SMA_DAEMON_DB_URL") or path_config_manager.db_url
@@ -108,12 +180,6 @@ def main():
         sys.exit(1)
     job_db = PostgreSQLJobDatabase(db_url, logger=log)
     db_label = "PostgreSQL: %s" % db_url
-
-    # Determine FFmpeg directory (priority: CLI --ffmpeg-dir > env var > config file)
-    ffmpeg_dir = args.ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or path_config_manager.ffmpeg_dir
-
-    # Determine job timeout (priority: CLI --job-timeout > daemon.json; 0 means no timeout)
-    job_timeout_seconds = args.job_timeout or path_config_manager.job_timeout_seconds
 
     log.info("Node: %s" % socket.gethostname())
     log.info("Database: %s" % db_label)

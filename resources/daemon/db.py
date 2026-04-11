@@ -545,6 +545,35 @@ class PostgreSQLJobDatabase:
             self.log.info("Set priority %d for job %d" % (priority, job_id))
         return updated
 
+    def delete_failed_jobs(self):
+        """Delete all jobs with status 'failed'. Returns count deleted."""
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM jobs WHERE status = %s", (STATUS_FAILED,))
+                deleted = cur.rowcount
+        if deleted > 0:
+            self.log.info("Deleted %d failed jobs" % deleted)
+        return deleted
+
+    def delete_offline_nodes(self):
+        """Delete cluster_nodes rows where status is not 'online'. Returns count deleted."""
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM cluster_nodes WHERE status != 'online'")
+                deleted = cur.rowcount
+        if deleted > 0:
+            self.log.info("Deleted %d offline nodes" % deleted)
+        return deleted
+
+    def delete_all_jobs(self):
+        """Delete every row from the jobs table. Returns count deleted."""
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM jobs")
+                deleted = cur.rowcount
+        self.log.info("Deleted all jobs (%d rows)" % deleted)
+        return deleted
+
     def filter_unscanned(self, paths):
         """Return the subset of paths not yet recorded in scanned_files."""
         if not paths:
