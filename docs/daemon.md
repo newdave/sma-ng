@@ -1,6 +1,6 @@
 # Daemon Mode
 
-The daemon runs an HTTP server that accepts webhook requests to queue media conversions. Jobs are persisted to a database (SQLite or PostgreSQL), workers process them in the background, and a web dashboard provides real-time status.
+The daemon runs an HTTP server that accepts webhook requests to queue media conversions. Jobs are persisted to a PostgreSQL database, workers process them in the background, and a web dashboard provides real-time status.
 
 ## Starting
 
@@ -16,11 +16,19 @@ python daemon.py \
   --api-key YOUR_SECRET_KEY \
   --daemon-config config/daemon.json \
   --logs-dir logs/ \
-  --db config/daemon.db \
   --ffmpeg-dir /usr/local/bin
 ```
 
 All options can also be set via environment variables — see [Environment Variables](#environment-variables).
+
+**Additional flags:**
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--smoke-test` | | Run a dry-run option-generation check against all configs then exit. Safe pre-flight before systemd considers the unit started. |
+| `--job-timeout SECONDS` | `0` | Kill a conversion job after this many seconds (0 = no timeout). Also settable via `job_timeout_seconds` in `daemon.json`. |
+| `--heartbeat-interval N` | `30` | Seconds between PostgreSQL cluster heartbeat updates |
+| `--stale-seconds N` | `120` | Seconds without a heartbeat before a node's running jobs are requeued |
 
 ---
 
@@ -45,7 +53,7 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `GET` | `/` | No | Redirects to `/dashboard` |
 | `GET` | `/dashboard` | No | Web dashboard |
 | `GET` | `/health` | No | Health check with job stats (local node) |
-| `GET` | `/status` | No | Cluster-wide status (PostgreSQL) or local health (SQLite) |
+| `GET` | `/status` | No | Cluster-wide status across all nodes |
 | `GET` | `/docs` | No | Rendered documentation |
 | `GET` | `/jobs` | Yes | List jobs. Query: `?status=pending&limit=50&offset=0` |
 | `GET` | `/jobs/<id>` | Yes | Get specific job (includes `progress` when running) |
@@ -158,12 +166,16 @@ Create `config/daemon.json` (copy from `setup/daemon.json.sample`) to route file
 | --- | --- |
 | `default_config` | Config file used when no `path_configs` prefix matches |
 | `api_key` | API authentication key |
-| `db_url` | PostgreSQL URL for distributed mode (overrides `--db`) |
+| `db_url` | PostgreSQL URL for distributed mode |
 | `ffmpeg_dir` | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion |
 | `media_extensions` | File extensions considered media for directory scanning and `/browse` |
 | `path_rewrites` | Prefix substitutions applied to incoming webhook paths before config matching |
 | `scan_paths` | Directories for scheduled background scanning |
 | `path_configs` | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection |
+| `smoke_test` | Run option-generation dry-run against all configs at startup. Exits 1 on failure. |
+| `job_timeout_seconds` | Maximum seconds a conversion may run (0 = no timeout) |
+| `recycle_bin_max_age_days` | Delete recycle-bin media files older than this many days (default: `3`, `0` = disabled) |
+| `recycle_bin_min_free_gb` | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled) |
 
 Matching is longest-prefix-first: `/mnt/media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`.
 
@@ -266,9 +278,33 @@ bash scripts/sma-scan.sh /mnt/media/Movies --dry-run
 
 ---
 
-## SQLite Persistence
+## Recycle Bin Cleanup
 
-Jobs are stored in `config/daemon.db` (SQLite). This provides restart recovery, job history, and filtering.
+The daemon automatically purges old media files from every `recycle-bin` directory configured in any `autoProcess.ini`. Two independent eviction triggers run once per hour:
+
+| Trigger | Key | Default | Behaviour |
+| --- | --- | --- | --- |
+| Age | `recycle_bin_max_age_days` | `3` | Delete files whose last-modified time is older than N days |
+| Space pressure | `recycle_bin_min_free_gb` | `50` | Delete the oldest files first until free space on the mount point exceeds N GiB |
+
+Set either key to `0` to disable that trigger independently.
+
+```json
+{
+  "recycle_bin_max_age_days": 3,
+  "recycle_bin_min_free_gb": 50
+}
+```
+
+Only recognised media file extensions are deleted (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ts`, `.m4v`, `.m2ts`, `.wmv`, `.flv`, `.webm`). NFO files, artwork, and other non-media files are never touched.
+
+The free-space check uses `statvfs` and is mount-point-aware, so it works correctly with CephFS, NFS, and other network filesystems.
+
+---
+
+## Job Persistence
+
+Jobs are stored in a PostgreSQL database configured via `SMA_DAEMON_DB_URL` or `db_url` in `daemon.json`. The database provides restart recovery, job history, cluster coordination, and deduplication across nodes.
 
 ```bash
 curl http://localhost:8585/stats
@@ -277,8 +313,6 @@ curl http://localhost:8585/stats
 curl "http://localhost:8585/jobs?status=pending"
 curl -X POST "http://localhost:8585/cleanup?days=7"
 ```
-
-Use `--db /path/to/daemon.db` to customize the database location.
 
 **Database schema:**
 
@@ -297,8 +331,6 @@ For multi-node deployments, configure a shared PostgreSQL database so no two nod
 
 1. `SMA_DAEMON_DB_URL` environment variable
 2. `db_url` field in `daemon.json`
-
-When `db_url` is set, `--db` (SQLite path) is ignored.
 
 ```bash
 # daemon.json
@@ -337,7 +369,7 @@ curl -X POST http://localhost:8585/reload -H "X-API-Key: SECRET"
 
 Reloaded immediately: `path_configs`, `path_rewrites`, `scan_paths`, `api_key`, `media_extensions`, `default_args`, `ffmpeg_dir`.
 
-Not reloaded (require full restart): `--host`, `--port`, `--workers`, `--db` / `--db-url`.
+Not reloaded (require full restart): `--host`, `--port`, `--workers`.
 
 ---
 
@@ -356,7 +388,7 @@ curl -X POST http://localhost:8585/restart -H "X-API-Key: SECRET"
 kill -HUP $(pgrep -f "python daemon.py")
 ```
 
-All CLI flags (`--host`, `--port`, `--workers`, `--db`, etc.) are preserved across restart. No running jobs are reset to pending.
+All CLI flags (`--host`, `--port`, `--workers`, etc.) are preserved across restart. No running jobs are reset to pending.
 
 ---
 
@@ -371,5 +403,4 @@ All CLI flags (`--host`, `--port`, `--workers`, `--db`, etc.) are preserved acro
 | `SMA_DAEMON_PORT` | Port (Docker default: `8585`) |
 | `SMA_DAEMON_WORKERS` | Number of concurrent workers (Docker default: `2`) |
 | `SMA_DAEMON_CONFIG` | Path to `daemon.json` |
-| `SMA_DAEMON_DB` | Path to SQLite database file |
 | `SMA_DAEMON_LOGS_DIR` | Directory for per-config log files |

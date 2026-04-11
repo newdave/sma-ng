@@ -43,7 +43,7 @@ Full documentation is in [docs/](docs/) and served at `http://localhost:8585/doc
 
 - Container: MP4
 - Video: H265 (hardware-accelerated if detected)
-- Audio: AAC 2.0 + AC3 passthrough when source has >2 channels
+- Audio: EAC3 (regular quality) or AAC (lower quality), 128 kbps/channel
 - Subtitles: mov_text
 
 ## Docker

@@ -2,7 +2,7 @@
 
 ## Logs
 
-All SMA-NG output goes to stdout/stderr. When running as a systemd service:
+The daemon writes rotating log files to `logs/daemon.log` and per-config log files in `logs/`. When running as a systemd service, recent output is also available via journald:
 
 ```bash
 journalctl -u sma-daemon -f
@@ -61,6 +61,15 @@ The daemon also writes per-config rotating log files in `logs/`:
 - Verify `config/daemon.json` is valid JSON: `python -m json.tool config/daemon.json`
 - Verify `config/autoProcess.ini` exists
 
+### Smoke test fails at startup
+
+If `smoke_test: true` is set in `daemon.json` or `--smoke-test` is passed:
+
+- Check `logs/daemon.log` for `[FAIL]` lines showing which config raised an exception
+- Common cause: a boolean field with a typo (e.g. `force-rename = Truee`) — fix the value in the config
+- Run manually to see output: `python daemon.py --smoke-test`
+- Missing configs are skipped with `[SKIP]` — create them with `mise run config` or `mise run deploy:config`
+
 ---
 
 ## Environment Variables
@@ -75,5 +84,4 @@ The daemon also writes per-config rotating log files in `logs/`:
 | `SMA_DAEMON_PORT` | Daemon port (Docker default: `8585`) |
 | `SMA_DAEMON_WORKERS` | Number of concurrent workers (Docker default: `2`) |
 | `SMA_DAEMON_CONFIG` | Path to `daemon.json` config file |
-| `SMA_DAEMON_DB` | Path to SQLite database file |
 | `SMA_DAEMON_LOGS_DIR` | Directory for per-config log files |

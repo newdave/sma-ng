@@ -50,7 +50,7 @@ The daemon is structured as a package under `resources/daemon/`:
 | Module | Contents |
 | --- | --- |
 | `constants.py` | `SCRIPT_DIR`, `DEFAULT_*`, `STATUS_*` constants |
-| `db.py` | `BaseJobDatabase`, `JobDatabase` (SQLite), `PostgreSQLJobDatabase` |
+| `db.py` | `PostgreSQLJobDatabase` — PostgreSQL-backed job queue |
 | `config.py` | `ConfigLockManager`, `ConfigLogManager`, `PathConfigManager` |
 | `handler.py` | `WebhookHandler` + HTML helpers |
 | `threads.py` | `_StoppableThread`, `HeartbeatThread`, `ScannerThread` |

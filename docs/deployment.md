@@ -57,7 +57,7 @@ FFMPEG_DIR   = /usr/local/bin
 
 [daemon]
 api_key = your_secret_key
-db_url  =                    # leave blank for SQLite; postgresql://... for multi-node
+db_url  =                    # required for multi-node: postgresql://user:pass@host/db
 
 [Sonarr]
 host        = sonarr.example.com
@@ -138,7 +138,7 @@ Service unit: `setup/sma-daemon.service`
 Key settings:
 
 - Loads `config/daemon.env` for environment overrides
-- `TimeoutStopSec=infinity` — waits for active conversions to complete on SIGTERM
+- `TimeoutStopSec=10` — sends SIGKILL 10 seconds after SIGTERM if the process has not exited
 - `KillMode=mixed` — SIGTERM triggers graceful drain
 - Default `ReadWritePaths`: `/opt/sma/config /opt/sma/logs /transcodes /mnt` — add any additional paths your setup needs
 
@@ -178,7 +178,7 @@ make docker-run
 | `SMA_DAEMON_PORT` | `8585` | Port |
 | `SMA_DAEMON_WORKERS` | `2` | Worker count |
 | `SMA_DAEMON_API_KEY` | | API key |
-| `SMA_DAEMON_DB_URL` | | PostgreSQL URL (SQLite if unset) |
+| `SMA_DAEMON_DB_URL` | | PostgreSQL connection URL (required) |
 | `SMA_DAEMON_FFMPEG_DIR` | | Directory containing `ffmpeg`/`ffprobe` |
 | `SMA_CONFIG` | | Override `autoProcess.ini` path |
 
