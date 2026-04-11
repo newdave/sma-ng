@@ -6,7 +6,7 @@ import threading
 from logging.handlers import RotatingFileHandler
 
 from resources.daemon.constants import DEFAULT_DAEMON_CONFIG, DEFAULT_PROCESS_CONFIG, LOGS_DIR, SCRIPT_DIR
-from resources.log import getLogger
+from resources.log import LOG_BACKUP_COUNT, LOG_MAX_BYTES, JSONFormatter, getLogger
 
 log = getLogger("DAEMON")
 
@@ -126,15 +126,21 @@ class ConfigLogManager:
             log_name = self._config_to_logname(config_path)
             log_file = os.path.join(self.logs_dir, f"{log_name}.log")
 
-            logger = logging.getLogger(f"sma.{log_name}")
+            # Use DAEMON.{log_name} so Python's logger hierarchy propagates records
+            # up into the DAEMON logger (and its daemon.log handler) automatically.
+            logger = logging.getLogger(f"DAEMON.{log_name}")
             logger.setLevel(logging.DEBUG)
 
             if not logger.handlers:
-                file_handler = RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8")
+                file_handler = RotatingFileHandler(log_file, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8")
                 file_handler.setLevel(logging.DEBUG)
-                formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-                file_handler.setFormatter(formatter)
+                if JSONFormatter is not None:
+                    file_handler.setFormatter(JSONFormatter())
+                else:
+                    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+                    file_handler.setFormatter(formatter)
                 logger.addHandler(file_handler)
+            # propagate=True (Python default) — records also flow to the DAEMON handler
 
             self.loggers[config_path] = logger
             return logger
@@ -158,6 +164,9 @@ class PathConfigManager:
         self.db_url = None  # Can be set from daemon.json
         self.ffmpeg_dir = None  # Can be set from daemon.json
         self.job_timeout_seconds = 0  # Can be set from daemon.json (0 = no timeout)
+        self.smoke_test = False  # Run startup smoke test against all configs
+        self.recycle_bin_max_age_days = 3  # Delete recycle-bin files older than N days (0 = disabled)
+        self.recycle_bin_min_free_gb = 50  # Delete oldest files when free space < N GiB (0 = disabled)
         self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
         self.scan_paths = []  # Can be set from daemon.json
         self._config_file = None  # Resolved path of loaded config file
@@ -201,6 +210,13 @@ class PathConfigManager:
 
             # Load job timeout in seconds (0 means no timeout)
             self.job_timeout_seconds = int(config.get("job_timeout_seconds", 0) or 0)
+
+            # Run a startup smoke test against all configs before accepting jobs
+            self.smoke_test = bool(config.get("smoke_test", False))
+
+            # Recycle-bin eviction settings
+            self.recycle_bin_max_age_days = int(config.get("recycle_bin_max_age_days", 3) or 3)
+            self.recycle_bin_min_free_gb = float(config.get("recycle_bin_min_free_gb", 50) or 50)
 
             # Load media extensions inclusion list for directory scanning
             raw_exts = config.get("media_extensions")

@@ -5,9 +5,9 @@ import socket
 import subprocess
 import sys
 import threading
-from datetime import datetime
 
 from resources.daemon.constants import SCRIPT_DIR
+from resources.daemon.context import clear_job_id, set_job_id
 from resources.log import getLogger
 
 log = getLogger("DAEMON")
@@ -110,18 +110,27 @@ class ConversionWorker(threading.Thread):
 
     def _run_conversion(self, job_id, path, config_file, extra_args):
         """Run the actual conversion process. Returns True on success."""
+        token = set_job_id(job_id)
+        try:
+            return self._run_conversion_inner(job_id, path, config_file, extra_args)
+        finally:
+            clear_job_id(token)
+
+    def _run_conversion_inner(self, job_id, path, config_file, extra_args):
+        """Inner conversion logic — job_id context is already set by _run_conversion."""
         config_logger = self.config_log_manager.get_logger(config_file)
         log_file = self.config_log_manager.get_log_file(config_file)
 
-        self.log.info("Worker %d processing job %d: %s" % (self.worker_id, job_id, path))
+        self.log.info(
+            "Worker %d processing job %d: %s" % (self.worker_id, job_id, path),
+            extra={"worker_id": self.worker_id, "path": path, "config": os.path.basename(config_file)},
+        )
         self.log.info("Using config: %s (log: %s)" % (config_file, log_file))
 
-        config_logger.info("=" * 60)
-        config_logger.info("Job %d started: %s" % (job_id, path))
-        config_logger.info("Config: %s" % config_file)
-        config_logger.info("Worker: %d" % self.worker_id)
-        config_logger.info("Timestamp: %s" % datetime.now().isoformat())
-        config_logger.info("=" * 60)
+        config_logger.info(
+            "Job %d started" % job_id,
+            extra={"job_id": job_id, "path": path, "config": config_file, "worker_id": self.worker_id},
+        )
 
         cmd = [sys.executable, self.script_path, "-a", "-i", path, "-c", config_file] + extra_args
 
@@ -145,7 +154,6 @@ class ConversionWorker(threading.Thread):
                 line = line.strip()
                 if line:
                     config_logger.info(line)
-                    self.log.info("[%s] %s" % (os.path.basename(config_file), line))
                     m = _ffmpeg_time_re.search(line)
                     if m:
                         self._job_progress[job_id] = m.group(1)
@@ -156,26 +164,18 @@ class ConversionWorker(threading.Thread):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
-                msg = "Job %d timed out after %ds: %s" % (job_id, self.job_timeout_seconds, path)
-                self.log.error(msg)
-                config_logger.error(msg)
+                config_logger.error("Job %d timed out after %ds: %s" % (job_id, self.job_timeout_seconds, path))
                 return False
 
             if process.returncode == 0:
-                msg = "Job %d completed successfully: %s" % (job_id, path)
-                self.log.info(msg)
-                config_logger.info(msg)
+                config_logger.info("Job %d completed successfully: %s" % (job_id, path))
                 return True
             else:
-                msg = "Job %d exited with code %d: %s" % (job_id, process.returncode, path)
-                self.log.error(msg)
-                config_logger.error(msg)
+                config_logger.error("Job %d exited with code %d: %s" % (job_id, process.returncode, path))
                 return False
 
         except Exception as e:
-            msg = "Job %d failed: %s" % (job_id, e)
-            self.log.exception(msg)
-            config_logger.exception(msg)
+            config_logger.exception("Job %d failed: %s" % (job_id, e))
             return False
         finally:
             self._job_processes.pop(job_id, None)
