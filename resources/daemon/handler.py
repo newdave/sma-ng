@@ -10,6 +10,20 @@ from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING
 
+# Pre-compiled inline Markdown patterns (reused for every line of every page).
+_BOLD_RE = _re.compile(r"\*\*(.+?)\*\*")
+_ITALIC_RE = _re.compile(r"\*(.+?)\*")
+_CODE_RE = _re.compile(r"`([^`]+)`")
+_LINK_RE = _re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+# Pre-compiled block-level Markdown patterns for the line renderer.
+_HEADING_RE = _re.compile(r"^(#{1,6})\s+(.*)")
+_HR_RE = _re.compile(r"^-{3,}$")
+_UL_RE = _re.compile(r"^(\s*)[-*]\s+(.*)")
+_OL_RE = _re.compile(r"^(\s*)\d+\.\s+(.*)")
+_LIST_CONT_RE = _re.compile(r"^(\s*[-*]\s|^\s*\d+\.\s)")
+_TABLE_SEP_RE = _re.compile(r"^[-:]+$")
+_SLUG_STRIP_RE = _re.compile(r"[^\w-]")
+
 DOCS_DIR = os.path.join(SCRIPT_DIR, "docs")
 DOCS_TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "resources", "docs.html")
 DASHBOARD_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "dashboard.html")
@@ -59,7 +73,7 @@ def _render_markdown_to_html(md_text):
             in_table = False
 
         # Close list if line doesn't continue it
-        if in_list and line.strip() and not _re.match(r"^(\s*[-*]\s|^\s*\d+\.\s)", line):
+        if in_list and line.strip() and not _LIST_CONT_RE.match(line):
             html_parts.append("</%s>" % list_type)
             in_list = False
 
@@ -73,25 +87,25 @@ def _render_markdown_to_html(md_text):
             continue
 
         # Headings
-        hm = _re.match(r"^(#{1,6})\s+(.*)", stripped)
+        hm = _HEADING_RE.match(stripped)
         if hm:
             level = len(hm.group(1))
             text = _inline(hm.group(2))
-            slug = _re.sub(r"[^\w-]", "", hm.group(2).lower().replace(" ", "-"))
+            slug = _SLUG_STRIP_RE.sub("", hm.group(2).lower().replace(" ", "-"))
             sizes = {1: "text-3xl", 2: "text-2xl", 3: "text-xl", 4: "text-lg", 5: "text-base", 6: "text-sm"}
             mt = "mt-10" if level <= 2 else "mt-6"
             html_parts.append('<h%d id="%s" class="%s %s font-bold text-white mb-3">%s</h%d>' % (level, slug, sizes.get(level, "text-base"), mt, text, level))
             continue
 
         # Horizontal rule
-        if _re.match(r"^-{3,}$", stripped):
+        if _HR_RE.match(stripped):
             html_parts.append('<hr class="border-gray-700 my-8">')
             continue
 
         # Table
         if stripped.startswith("|"):
             cells = [c.strip() for c in stripped.split("|")[1:-1]]
-            if all(_re.match(r"^[-:]+$", c) for c in cells):
+            if all(_TABLE_SEP_RE.match(c) for c in cells):
                 continue  # separator row
             if not in_table:
                 in_table = True
@@ -107,7 +121,7 @@ def _render_markdown_to_html(md_text):
             continue
 
         # Unordered list
-        lm = _re.match(r"^(\s*)[-*]\s+(.*)", line)
+        lm = _UL_RE.match(line)
         if lm:
             if not in_list:
                 in_list = True
@@ -117,7 +131,7 @@ def _render_markdown_to_html(md_text):
             continue
 
         # Ordered list
-        lm = _re.match(r"^(\s*)\d+\.\s+(.*)", line)
+        lm = _OL_RE.match(line)
         if lm:
             if not in_list:
                 in_list = True
@@ -143,14 +157,10 @@ def _render_markdown_to_html(md_text):
 def _inline(text):
     """Process inline Markdown formatting."""
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    # Bold
-    text = _re.sub(r"\*\*(.+?)\*\*", r'<strong class="text-white">\1</strong>', text)
-    # Italic
-    text = _re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
-    # Inline code
-    text = _re.sub(r"`([^`]+)`", r'<code class="bg-gray-800 text-blue-300 px-1.5 py-0.5 rounded text-xs">\1</code>', text)
-    # Links
-    text = _re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2" class="text-blue-400 hover:underline">\1</a>', text)
+    text = _BOLD_RE.sub(r'<strong class="text-white">\1</strong>', text)  # Bold
+    text = _ITALIC_RE.sub(r"<em>\1</em>", text)  # Italic
+    text = _CODE_RE.sub(r'<code class="bg-gray-800 text-blue-300 px-1.5 py-0.5 rounded text-xs">\1</code>', text)  # Inline code
+    text = _LINK_RE.sub(r'<a href="\2" class="text-blue-400 hover:underline">\1</a>', text)  # Links
     return text
 
 
@@ -281,41 +291,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
         )
 
     def _get_status(self):
-        # Cluster-wide status — only meaningful with PostgreSQL backend
-        if self.server.job_db.is_distributed:
-            # Run staleness check on every status request so the response
-            # reflects current reality rather than waiting for the next
-            # heartbeat cycle.
-            recovered = self.server.job_db.recover_stale_nodes(self.server.stale_seconds)
-            for stale_id, job_count in recovered:
-                self.server.logger.warning("Status check: recovered %d jobs from stale node %s" % (job_count, stale_id))
-            if any(job_count > 0 for _, job_count in recovered):
-                self.server.notify_workers()
-            nodes = self.server.job_db.get_cluster_nodes()
-            stats = self.server.job_db.get_stats()
-            # Replace 0.0.0.0 (bind-all address) with the IP the client actually
-            # connected to, so the UI can display a useful address.
-            local_ip = self.connection.getsockname()[0]
-            for node in nodes:
-                if node.get("host") == "0.0.0.0":
-                    node["host"] = local_ip
-            self.send_json_response(200, {"cluster": nodes, "jobs": stats})
-        else:
-            # SQLite single-node — return local health with explanatory note
-            lock_status = self.server.config_lock_manager.get_status()
-            stats = self.server.job_db.get_stats()
-            self.send_json_response(
-                200,
-                {
-                    "status": "ok",
-                    "node": self.server.node_id,
-                    "note": "Cluster status requires PostgreSQL backend (set SMA_DAEMON_DB_URL)",
-                    "workers": self.server.worker_count,
-                    "jobs": stats,
-                    "active": lock_status["active"],
-                    "waiting": lock_status["waiting"],
-                },
-            )
+        recovered = self.server.job_db.recover_stale_nodes(self.server.stale_seconds)
+        for stale_id, job_count in recovered:
+            self.server.logger.warning("Status check: recovered %d jobs from stale node %s" % (job_count, stale_id))
+        if any(job_count > 0 for _, job_count in recovered):
+            self.server.notify_workers()
+        nodes = self.server.job_db.get_cluster_nodes()
+        stats = self.server.job_db.get_stats()
+        # Replace 0.0.0.0 (bind-all address) with the IP the client actually
+        # connected to, so the UI can display a useful address.
+        local_ip = self.connection.getsockname()[0]
+        for node in nodes:
+            if node.get("host") == "0.0.0.0":
+                node["host"] = local_ip
+        self.send_json_response(200, {"cluster": nodes, "jobs": stats})
 
     def _get_jobs(self, query):
         status = query.get("status", [None])[0]

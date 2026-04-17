@@ -23,13 +23,12 @@ Environment="SMA_DAEMON_HOST=0.0.0.0"
 Environment="SMA_DAEMON_PORT=8585"
 Environment="SMA_DAEMON_WORKERS=2"
 Environment="SMA_CONFIG=/opt/sma/config/autoProcess.ini"
-# Set this to use PostgreSQL instead of SQLite.
-# When set, --db (SQLite) is automatically skipped.
+# Set SMA_DAEMON_DB_URL to configure the PostgreSQL backend.
+# Required — the daemon will not start without it.
 # Format: postgresql://user:password@host:port/dbname
 #Environment="SMA_DAEMON_DB_URL=postgresql://sma:password@localhost:5432/sma"
 
-# Wrapper script selects --db-url (PostgreSQL) or --db (SQLite) based on
-# whether SMA_DAEMON_DB_URL is set in the environment.
+# startup script launches daemon.py with the correct arguments.
 ExecStart=/opt/sma/setup/sma-daemon-start.sh
 
 Restart=on-failure

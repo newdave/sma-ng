@@ -114,7 +114,7 @@ def main():
 
     Resolves configuration from CLI flags, environment variables, and
     ``daemon.json`` (in that priority order). Initialises the job database
-    (SQLite or PostgreSQL), sets up per-config logging and concurrency locks,
+    PostgreSQL, sets up per-config logging and concurrency locks,
     and then serves requests until interrupted.
     """
     parser = argparse.ArgumentParser(description="SMA-NG Daemon - HTTP webhook server for media conversion")

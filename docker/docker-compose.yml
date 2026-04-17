@@ -7,9 +7,7 @@ services:
   # Activate with the 'postgres' profile:
   #   docker compose --profile postgres up
   #
-  # SMA will automatically use it when SMA_DAEMON_DB_URL is unset and
-  # this service is running — set the variable in daemon.env or pass it
-  # directly:
+  # Configure SMA to use it by setting SMA_DAEMON_DB_URL in daemon.env:
   #   SMA_DAEMON_DB_URL=postgresql://sma:sma@postgres:5432/sma
   # ────────────────────────────────────────────────────────────────────
   postgres:

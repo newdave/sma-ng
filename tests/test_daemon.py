@@ -586,11 +586,11 @@ class TestHTTPEndpoints:
         except urllib.error.HTTPError as e:
             return json.loads(e.read()), e.code
 
-    def test_status_endpoint_sqlite(self, live_server):
+    def test_status_endpoint(self, live_server):
         data, status = self._get(live_server, "/status")
         assert status == 200
-        assert data["status"] == "ok"
-        assert "note" in data  # SQLite note about cluster requiring PG
+        assert "cluster" in data
+        assert "jobs" in data
 
     def test_jobs_endpoint_empty(self, live_server):
         data, status = self._get(live_server, "/jobs")
@@ -831,7 +831,7 @@ class TestRecycleBinDetection:
 
 
 class TestJobCancelAndPriority:
-    """Tests for cancel_job and set_job_priority on the SQLite backend."""
+    """Tests for cancel_job and set_job_priority."""
 
     def test_cancel_pending_job(self, job_db):
         jid = job_db.add_job("/a.mkv", "/cfg.ini")

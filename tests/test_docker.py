@@ -201,10 +201,9 @@ class TestDockerfileRuntime:
         assert "SMA_DAEMON_HOST=0.0.0.0" in dockerfile_raw
         assert "SMA_DAEMON_HOST" in dockerfile_raw
 
-    def test_cmd_includes_config_and_db_paths(self, dockerfile_raw):
+    def test_cmd_includes_config_and_logs_paths(self, dockerfile_raw):
         # Paths are set via env vars, referenced in CMD
         assert "SMA_DAEMON_CONFIG=/app/config/daemon.json" in dockerfile_raw
-        assert "SMA_DAEMON_DB=/app/config/daemon.db" in dockerfile_raw
         assert "SMA_DAEMON_LOGS_DIR=/logs" in dockerfile_raw
 
     def test_sma_config_env_points_to_volume(self, dockerfile_raw):

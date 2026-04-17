@@ -229,9 +229,9 @@ curl http://localhost:8585/health
 # Returns: {"active": {...}, "waiting": {...}, ...}
 ```
 
-### SQLite Persistence
+### Job Persistence
 
-Jobs are stored in `config/daemon.db` (SQLite). This provides:
+Jobs are stored in a PostgreSQL database. This provides:
 
 - **Restart recovery**: Pending/interrupted jobs resume automatically
 - **Job history**: View completed/failed jobs with timestamps
@@ -252,25 +252,14 @@ curl http://localhost:8585/stats
 curl -X POST "http://localhost:8585/cleanup?days=7"
 ```
 
-**Database schema:**
-
-```sql
-jobs(id, path, config, args, status, worker_id, error, created_at, started_at, completed_at)
-```
-
-Use `--db /path/to/daemon.db` to customize database location.
-
 ### PostgreSQL (Distributed / Multi-Node)
 
-For multi-node deployments, the daemon can use a shared PostgreSQL database instead of SQLite. This enables distributed job coordination — no two nodes will ever process the same file.
+PostgreSQL is the only supported database backend. It enables distributed job coordination — no two nodes will ever process the same file.
 
 **Configure PostgreSQL (priority order):**
 
-1. Command line: `--db-url postgresql://user:pass@host/sma`
-2. Environment variable: `SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma`
-3. Config file: `"db_url": "postgresql://user:pass@host/sma"` in daemon.json
-
-When `db_url` is set, `--db` (SQLite path) is ignored.
+1. Environment variable: `SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma`
+2. Config file: `"db_url": "postgresql://user:pass@host/sma"` in daemon.json
 
 **daemon.json example:**
 

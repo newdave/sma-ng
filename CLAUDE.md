@@ -83,7 +83,7 @@ The daemon is a package under `resources/daemon/`. `daemon.py` at project root i
 | Module | Contents |
 | --- | --- |
 | `constants.py` | `SCRIPT_DIR`, `DEFAULT_*`, `STATUS_*` constants |
-| `db.py` | `BaseJobDatabase`, `JobDatabase` (SQLite), `PostgreSQLJobDatabase` |
+| `db.py` | `PostgreSQLJobDatabase` |
 | `config.py` | `ConfigLockManager`, `ConfigLogManager`, `PathConfigManager` |
 | `handler.py` | `WebhookHandler` + HTML helpers, multi-page docs routing |
 | `threads.py` | `_StoppableThread`, `HeartbeatThread`, `ScannerThread` |

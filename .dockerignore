@@ -33,7 +33,6 @@ htmlcov/
 # Runtime state (injected via volume mounts)
 config/
 logs/
-config/daemon.db
 
 # Docs / plans
 docs/
