@@ -17,6 +17,23 @@ try:
 except ImportError:
     _requests = None
 
+# Single-pass token regex: matches all three token forms in one scan.
+#   {[Token]}          → bracket-optional (group 'bkey')
+#   {-Token:fmt}       → prefix-optional  (groups 'pfx', 'pkey', 'pfmt')
+#   { Token:fmt}       → space-prefix     (groups 'pfx', 'pkey', 'pfmt')
+#   {Token:fmt}        → standard         (groups 'skey', 'sfmt')
+_TOKEN_RE = re.compile(
+    r"\{"
+    r"(?:"
+    r"\[(?P<bkey>[^\]]+)\]"  # {[Token]}
+    r"|(?P<pfx>[-\s])(?P<pkey>[^}:]+)(?P<pfmt>:[^}]*)?"  # {-Token:fmt} / { Token:fmt}
+    r"|(?P<skey>[^}\[\]-][^}:]*)(?P<sfmt>:[^}]*)?"  # {Token:fmt}
+    r")"
+    r"\}"
+)
+_EMPTY_BRACKETS_RE = re.compile(r"\[\]")
+_MULTI_SPACE_RE = re.compile(r"\s{2,}")
+
 # Codec display names
 VIDEO_CODEC_DISPLAY = {
     "h264": "x264",
@@ -93,6 +110,7 @@ HDR_DISPLAY = {
 
 # Default naming templates
 DEFAULT_TV_TEMPLATE = "{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle} [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}"
+DEFAULT_TV_AIRDATE_TEMPLATE = "{Series TitleYear} - {Air-Date} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}"
 DEFAULT_MOVIE_TEMPLATE = "{Movie CleanTitle} ({Release Year}) [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}"
 
 # Characters unsafe for filenames
@@ -150,6 +168,7 @@ class NamingData:
         self.episodes = []
         self.episode_title = ""
         self.episode_cleantitle = ""
+        self.air_date = ""  # YYYY-MM-DD for airdate-based episodes
 
         # Movie
         self.movie_title = ""
@@ -224,22 +243,28 @@ class NamingData:
         return self._from_arr_api(instance, filepath, "radarr", log)
 
     def _from_arr_api(self, instance, filepath, arr_type, log):
-        """Query Sonarr/Radarr API for file info to get quality/codec data."""
+        """Query Sonarr/Radarr /api/v3/parse for naming and quality data."""
         if not _requests or not instance or not instance.get("apikey"):
             return False
-
         try:
             ssl = instance.get("ssl", False)
             protocol = "https://" if ssl else "http://"
             base_url = protocol + instance["host"] + ":" + str(instance["port"]) + instance.get("webroot", "")
             headers = {"X-Api-Key": instance["apikey"], "User-Agent": "SMA-NG naming"}
-
-            if arr_type == "sonarr":
-                return self._parse_sonarr_response(base_url, headers, filepath, log)
-            else:
-                return self._parse_radarr_response(base_url, headers, filepath, log)
+            r = _requests.get(base_url + "/api/v3/parse", headers=headers, params={"title": os.path.basename(filepath)}, timeout=10)
+            data = r.json()
         except Exception:
             log.debug("Failed to query %s API for naming data" % arr_type)
+            return False
+
+        try:
+            self._apply_arr_quality(data)
+            if arr_type == "sonarr":
+                self._apply_sonarr_data(data, log)
+            else:
+                self._apply_radarr_data(data, log)
+            return True
+        except Exception:
             return False
 
     def _apply_arr_quality(self, data):
@@ -252,53 +277,39 @@ class NamingData:
             self.release_group = data["releaseGroup"]
         self.quality_full = ("%s-%s" % (self.source, self.quality)) if self.source else self.quality
 
-    def _parse_sonarr_response(self, base_url, headers, filepath, log):
-        """Query Sonarr for episode file info and extract naming data."""
-        try:
-            r = _requests.get(base_url + "/api/v3/parse", headers=headers, params={"title": os.path.basename(filepath)}, timeout=10)
-            data = r.json()
+    def _apply_sonarr_data(self, data, log):
+        """Apply Sonarr parse response fields to this NamingData instance."""
+        if data.get("series"):
+            series = data["series"]
+            self.series_title = series.get("title", self.series_title)
+            self.series_year = str(series.get("year", self.series_year))
+            self.series_titleyear = "%s (%s)" % (self.series_title, self.series_year) if self.series_year else self.series_title
 
-            if data.get("series"):
-                series = data["series"]
-                self.series_title = series.get("title", self.series_title)
-                self.series_year = str(series.get("year", self.series_year))
-                self.series_titleyear = "%s (%s)" % (self.series_title, self.series_year) if self.series_year else self.series_title
+        if data.get("episodes"):
+            eps = data["episodes"]
+            self.season = eps[0].get("seasonNumber", self.season)
+            self.episode = eps[0].get("episodeNumber", self.episode)
+            self.episodes = sorted(ep.get("episodeNumber") for ep in eps if ep.get("episodeNumber") is not None)
+            titles = [ep.get("title", "") for ep in eps if ep.get("title")]
+            self.episode_title = " / ".join(titles) if titles else self.episode_title
+            self.episode_cleantitle = sanitize_filename(self.episode_title)
+            # Prefer Sonarr's airDate; fall back to what we already have
+            air = eps[0].get("airDate", "") or eps[0].get("air_date", "")
+            if air:
+                self.air_date = air
 
-            if data.get("episodes") and len(data["episodes"]) > 0:
-                eps = data["episodes"]
-                self.season = eps[0].get("seasonNumber", self.season)
-                self.episode = eps[0].get("episodeNumber", self.episode)
-                self.episodes = sorted(ep.get("episodeNumber") for ep in eps if ep.get("episodeNumber") is not None)
-                titles = [ep.get("title", "") for ep in eps if ep.get("title")]
-                self.episode_title = " / ".join(titles) if titles else self.episode_title
-                self.episode_cleantitle = sanitize_filename(self.episode_title)
+        ep_display = "-E".join("%02d" % e for e in self.episodes) if self.episodes else "%02d" % self.episode
+        log.debug("Got naming data from Sonarr: %s S%02dE%s" % (self.series_title, self.season, ep_display))
 
-            self._apply_arr_quality(data)
+    def _apply_radarr_data(self, data, log):
+        """Apply Radarr parse response fields to this NamingData instance."""
+        if data.get("movie"):
+            movie = data["movie"]
+            self.movie_title = movie.get("title", self.movie_title)
+            self.movie_cleantitle = sanitize_filename(self.movie_title)
+            self.movie_year = str(movie.get("year", self.movie_year))
 
-            ep_display = "-E".join("%02d" % e for e in self.episodes) if self.episodes else "%02d" % self.episode
-            log.debug("Got naming data from Sonarr: %s S%02dE%s" % (self.series_title, self.season, ep_display))
-            return True
-        except Exception:
-            return False
-
-    def _parse_radarr_response(self, base_url, headers, filepath, log):
-        """Query Radarr for movie file info and extract naming data."""
-        try:
-            r = _requests.get(base_url + "/api/v3/parse", headers=headers, params={"title": os.path.basename(filepath)}, timeout=10)
-            data = r.json()
-
-            if data.get("movie"):
-                movie = data["movie"]
-                self.movie_title = movie.get("title", self.movie_title)
-                self.movie_cleantitle = sanitize_filename(self.movie_title)
-                self.movie_year = str(movie.get("year", self.movie_year))
-
-            self._apply_arr_quality(data)
-
-            log.debug("Got naming data from Radarr: %s (%s)" % (self.movie_title, self.movie_year))
-            return True
-        except Exception:
-            return False
+        log.debug("Got naming data from Radarr: %s (%s)" % (self.movie_title, self.movie_year))
 
 
 def apply_template(template, data):
@@ -316,7 +327,7 @@ def apply_template(template, data):
     TV: Series TitleYear, season, episode, Episode CleanTitle, Episode Title
     Movie: Movie Title, Movie CleanTitle, Release Year
     Common: Quality, Quality Full, Source, VideoCodec, AudioCodec, AudioChannels,
-            VideoDynamicRangeType, ReleaseGroup, Custom Formats
+            VideoDynamicRangeType, ReleaseGroup, Custom Formats, Air-Date
     """
     token_map = {
         "series titleyear": data.series_titleyear,
@@ -343,22 +354,12 @@ def apply_template(template, data):
         "releasegroup": data.release_group,
         "release group": data.release_group,
         "custom formats": "",  # Not available without Sonarr/Radarr
+        "air-date": data.air_date,
+        "airdate": data.air_date,
     }
 
-    result = template
-
-    # Handle bracket-wrapped optional tokens: {[Token]}
-    def replace_bracket(m):
-        inner = m.group(1).strip().lower()
-        val = token_map.get(inner, "")
-        return "[%s]" % val if val else ""
-
-    result = re.sub(r"\{\[([^\]]+)\]\}", replace_bracket, result)
-
     def _apply_format(val, fmt):
-        """Apply format spec to a value. :00 = pad to 2 digits, :000 = pad to 3, :90 = truncate to 90 chars."""
         if isinstance(val, list):
-            # Multi-episode range: first-last, e.g. [1,2,3,4] with :00 → "01-E04"
             sorted_eps = sorted(val)
             first = _apply_format(sorted_eps[0], fmt)
             if len(sorted_eps) == 1:
@@ -369,41 +370,39 @@ def apply_template(template, data):
             return str(val)
         fmt_spec = fmt[1:]  # strip the ":"
         if all(c == "0" for c in fmt_spec) and len(fmt_spec) > 0:
-            # Zero-padding: :00 = 2 digits, :000 = 3 digits
             pad = len(fmt_spec)
             if isinstance(val, int):
                 return str(val).zfill(pad)
             elif isinstance(val, str) and val.isdigit():
                 return val.zfill(pad)
         elif fmt_spec.isdigit():
-            # Truncation: :90 = max 90 chars
             return str(val)[: int(fmt_spec)]
         return str(val)
 
-    # Handle prefix-optional tokens: {-Token} or { Token}
-    def replace_prefixed(m):
-        prefix = m.group(1)
-        key = m.group(2).strip().lower()
-        fmt = m.group(3)
-        val = token_map.get(key, "")
-        if not val and val != 0:
-            return ""
-        return prefix + _apply_format(val, fmt)
-
-    result = re.sub(r"\{([-\s])([^}:]+)(:[^}]*)?\}", replace_prefixed, result)
-
-    # Handle standard tokens: {Token} or {Token:00}
-    def replace_standard(m):
-        key = m.group(1).strip().lower()
-        fmt = m.group(2)
+    def _replace(m):
+        if m.group("bkey") is not None:
+            # {[Token]} — bracket-wrapped optional
+            key = m.group("bkey").strip().lower()
+            val = token_map.get(key, "")
+            return "[%s]" % _apply_format(val, None) if val else ""
+        if m.group("pfx") is not None:
+            # {-Token} or { Token} — prefix-optional
+            prefix = m.group("pfx")
+            key = m.group("pkey").strip().lower()
+            fmt = m.group("pfmt")
+            val = token_map.get(key, "")
+            if not val and val != 0:
+                return ""
+            return prefix + _apply_format(val, fmt)
+        # {Token} or {Token:fmt} — standard
+        key = m.group("skey").strip().lower()
+        fmt = m.group("sfmt")
         val = token_map.get(key, "")
         return _apply_format(val, fmt)
 
-    result = re.sub(r"\{([^}\[\]-][^}:]*)(:[^}]*)?\}", replace_standard, result)
-
-    # Clean up empty brackets and double spaces
-    result = re.sub(r"\[\]", "", result)
-    result = re.sub(r"\s{2,}", " ", result)
+    result = _TOKEN_RE.sub(_replace, template)
+    result = _EMPTY_BRACKETS_RE.sub("", result)
+    result = _MULTI_SPACE_RE.sub(" ", result)
     result = result.strip(" -")
 
     return sanitize_filename(result)
@@ -443,19 +442,23 @@ def rename_file(filepath, new_name, log=None):
         return filepath
 
 
-def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None):
+def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, lookup_path=None):
     """
     Generate a new filename using the naming template.
 
     Tries Sonarr/Radarr API first, falls back to local data.
 
     Args:
-        filepath: Current file path
+        filepath: Current file path (used for extension; may be a temp output path)
         info: MediaInfo from FFprobe
         tagdata: TMDB Metadata object (or None)
         settings: ReadSettings instance
         guess_data: Optional guessit result dict
         log: Optional logger
+        lookup_path: Path used for Sonarr/Radarr API path-prefix matching.  When
+            the output file is in a temp directory (e.g. output-directory), pass
+            the original *input* path here so the configured instance path
+            prefixes resolve correctly.
 
     Returns:
         New filename (without extension), or None if naming disabled
@@ -476,25 +479,55 @@ def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None):
     data.from_mediainfo(info, guess_data)
     data.from_tagdata(tagdata)
 
+    # Use lookup_path for API matching when the output file is in a temp dir
+    api_path = lookup_path or filepath
+
     # Try Sonarr/Radarr API for richer naming data
     api_success = False
-    if is_tv:
-        for instance in getattr(settings, "sonarr_instances", []):
-            ipath = instance.get("path", "")
-            if ipath and filepath.startswith(ipath):
-                api_success = data.from_sonarr(instance, filepath, log)
-                if api_success:
-                    break
-    else:
-        for instance in getattr(settings, "radarr_instances", []):
-            ipath = instance.get("path", "")
-            if ipath and filepath.startswith(ipath):
-                api_success = data.from_radarr(instance, filepath, log)
-                if api_success:
-                    break
+    arr_key = "sonarr_instances" if is_tv else "radarr_instances"
+    arr_method = data.from_sonarr if is_tv else data.from_radarr
+    for instance in getattr(settings, arr_key, []):
+        ipath = instance.get("path", "")
+        if ipath and api_path.startswith(ipath):
+            api_success = arr_method(instance, api_path, log)
+            if api_success:
+                break
 
     if not api_success:
         log.debug("Using local data for naming (no API match)")
+
+    # Guard: episode 0 must never use the standard SxxExx template.
+    # These are air-date-based episodes (e.g. late-night shows) where TMDB
+    # returns 404 / no real title.  Use the airdate template instead, sourcing
+    # the date from Sonarr data or from the filename.  If no date is available
+    # at all, skip the rename entirely rather than produce "S11E00 - Episode 0".
+    if is_tv and data.episode == 0:
+        # Air date may already be set from Sonarr; fall back to filename.
+        if not data.air_date:
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", os.path.basename(lookup_path or filepath))
+            if m:
+                data.air_date = m.group(1)
+        if not data.air_date:
+            log.warning(
+                "E00 episode with no air date — skipping rename for (%s)",
+                os.path.basename(lookup_path or filepath),
+            )
+            return None
+        # Clear placeholder titles so they don't appear in the output filename.
+        # TMDB and Sonarr both return "Episode 0" when they have no real title.
+        _placeholder = re.compile(r"^[Ee]pisode\s+0+$")
+        if not data.episode_title or _placeholder.match(data.episode_title):
+            data.episode_title = ""
+            data.episode_cleantitle = ""
+        airdate_template = getattr(settings, "naming_tv_airdate_template", DEFAULT_TV_AIRDATE_TEMPLATE)
+        new_name = apply_template(airdate_template, data)
+        if new_name:
+            return new_name
+        log.warning(
+            "E00 episode airdate template produced empty result for (%s), skipping rename",
+            os.path.basename(lookup_path or filepath),
+        )
+        return None
 
     new_name = apply_template(template, data)
     if not new_name:

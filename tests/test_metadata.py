@@ -166,6 +166,132 @@ class TestMultiEpisodeMetadata:
         assert m.description == "Desc"
 
 
+class TestAirDateEpisodeFallback:
+    """Test TMDB air-date fallback for shows like The Late Show that use air dates
+    instead of traditional episode numbers.  When a direct episode fetch (S11E0)
+    returns 404, the season episode list is searched by air date to resolve the
+    real episode number and title.
+    """
+
+    _SHOW_DATA = {
+        "name": "The Late Show with Stephen Colbert",
+        "genres": [],
+        "networks": [],
+        "original_language": "en",
+    }
+    # Season 11 episode list from /tv/63770/season/11 — one real episode and
+    # some neighbours to confirm we match on date, not position.
+    _SEASON_DATA = {
+        "episodes": [
+            {"episode_number": 46, "name": "Timothée Chalamet", "overview": "...", "air_date": "2025-11-10"},
+            {"episode_number": 47, "name": "Claire Danes Rep. James Clyburn", "overview": "A great show.", "air_date": "2025-11-11"},
+            {"episode_number": 48, "name": "Another Guest", "overview": "...", "air_date": "2025-11-12"},
+        ]
+    }
+    _SOURCE_FILE = "The Late Show with Stephen Colbert (2015) - 2025-11-11 - Claire Danes Rep. James Clyburn [HDTV-1080p]{[EAC3 2.0]}[x265]-Z-B.mkv"
+
+    def _setup_mocks(self, mock_tv, mock_seasons, mock_episodes_cls):
+        mock_tv.return_value.info.return_value = self._SHOW_DATA
+        mock_tv.return_value.external_ids.return_value = {"tvdb_id": 289574}
+        mock_tv.return_value.content_ratings.return_value = {"results": []}
+        mock_seasons.return_value.info.return_value = self._SEASON_DATA
+
+        # Episode 0 fetch raises 404; episode 47 fetch returns real data.
+        def ep_factory(tmdbid, season, ep_num):
+            inst = MagicMock()
+            if ep_num == 0:
+                inst.info.side_effect = Exception("404 Client Error: Not Found")
+                inst.credits.side_effect = Exception("404 Client Error: Not Found")
+            else:
+                inst.info.return_value = {
+                    "name": "Claire Danes Rep. James Clyburn",
+                    "overview": "A great show.",
+                    "air_date": "2025-11-11",
+                    "episode_number": 47,
+                }
+                inst.credits.return_value = {"cast": [], "crew": []}
+            return inst
+
+        mock_episodes_cls.side_effect = ep_factory
+
+    @patch("resources.metadata.tmdb.TV_Episodes")
+    @patch("resources.metadata.tmdb.TV_Seasons")
+    @patch("resources.metadata.tmdb.TV")
+    @patch("resources.metadata.Metadata.resolveTmdbID", return_value=63770)
+    def test_episode0_resolves_to_real_episode_via_air_date(self, mock_resolve, mock_tv, mock_seasons, mock_episodes_cls):
+        """When S11E0 returns 404, the season list is searched by the air date in
+        the filename and the real episode (S11E47) is used instead."""
+        self._setup_mocks(mock_tv, mock_seasons, mock_episodes_cls)
+
+        m = Metadata(
+            MediaType.TV,
+            tmdbid=63770,
+            season=11,
+            episode=0,
+            original=self._SOURCE_FILE,
+        )
+
+        assert m.episode == 47, "episode should be remapped from 0 to 47"
+        assert m.episodes == [47]
+        assert m.title == "Claire Danes Rep. James Clyburn"
+        assert m.date == "2025-11-11"
+        assert m.description == "A great show."
+
+    @patch("resources.metadata.tmdb.TV_Episodes")
+    @patch("resources.metadata.tmdb.TV_Seasons")
+    @patch("resources.metadata.tmdb.TV")
+    @patch("resources.metadata.Metadata.resolveTmdbID", return_value=63770)
+    def test_episode0_no_air_date_match_leaves_empty_title(self, mock_resolve, mock_tv, mock_seasons, mock_episodes_cls):
+        """When S11E0 returns 404 and no season episode matches the air date,
+        the title is left empty (not 'Episode 0') and air_date comes from the filename."""
+        mock_tv.return_value.info.return_value = self._SHOW_DATA
+        mock_tv.return_value.external_ids.return_value = {}
+        mock_tv.return_value.content_ratings.return_value = {"results": []}
+        # Season has no episode matching 2025-11-11
+        mock_seasons.return_value.info.return_value = {
+            "episodes": [
+                {"episode_number": 1, "name": "Pilot", "overview": "", "air_date": "2015-09-08"},
+            ]
+        }
+        ep_inst = MagicMock()
+        ep_inst.info.side_effect = Exception("404")
+        ep_inst.credits.side_effect = Exception("404")
+        mock_episodes_cls.return_value = ep_inst
+
+        m = Metadata(
+            MediaType.TV,
+            tmdbid=63770,
+            season=11,
+            episode=0,
+            original=self._SOURCE_FILE,
+        )
+
+        assert m.episode == 0, "episode stays 0 when no match found"
+        assert m.title == "", "title must be empty, not 'Episode 0'"
+        assert m.date == "2025-11-11", "air date extracted from filename"
+
+    @patch("resources.metadata.tmdb.TV_Episodes")
+    @patch("resources.metadata.tmdb.TV_Seasons")
+    @patch("resources.metadata.tmdb.TV")
+    @patch("resources.metadata.Metadata.resolveTmdbID", return_value=63770)
+    def test_episode0_no_original_no_filename_date(self, mock_resolve, mock_tv, mock_seasons, mock_episodes_cls):
+        """When no original path is provided and the episode 0 fetch fails,
+        the title and air_date are both empty — never 'Episode 0'."""
+        mock_tv.return_value.info.return_value = self._SHOW_DATA
+        mock_tv.return_value.external_ids.return_value = {}
+        mock_tv.return_value.content_ratings.return_value = {"results": []}
+        mock_seasons.return_value.info.return_value = {"episodes": []}
+        ep_inst = MagicMock()
+        ep_inst.info.side_effect = Exception("404")
+        ep_inst.credits.side_effect = Exception("404")
+        mock_episodes_cls.return_value = ep_inst
+
+        m = Metadata(MediaType.TV, tmdbid=63770, season=11, episode=0)
+
+        assert m.title == "", "title must be empty, never 'Episode 0'"
+        assert m.date is None
+
+
 class TestSetHD:
     def _make_metadata(self):
         """Create a Metadata instance without __init__ for testing helper methods."""
