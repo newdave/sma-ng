@@ -115,7 +115,7 @@ class MediaProcessor:
                         try:
                             from resources.naming import generate_name, rename_file
 
-                            new_name = generate_name(output["output"], info, tagdata, self.settings, log=self.log)
+                            new_name = generate_name(output["output"], info, tagdata, self.settings, log=self.log, lookup_path=inputfile)
                             if new_name:
                                 output["output"] = rename_file(output["output"], new_name, log=self.log)
                         except Exception:
@@ -190,137 +190,148 @@ class MediaProcessor:
         self.log.debug("Process started.")
 
         delete = self.settings.delete
-        deleted = False
-        options = None
-        preopts = None
-        postopts = None
-        outputfile = None
         ripped_subs = []
         downloaded_subs = []
 
         info = info or self.isValidSource(inputfile, tagdata=tagdata)
-
         self.settings.output_dir = self.settings.output_dir if self.outputDirHasFreeSpace(inputfile) else None
 
-        if info:
+        if not info:
+            return None
+
+        try:
+            options, preopts, postopts, ripsubopts, downloaded_subs = self.generateOptions(inputfile, info=info, original=original, tagdata=tagdata)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            self.log.exception("Unable to generate options, unexpected exception occurred.")
+            return None
+
+        if self.canBypassConvert(inputfile, info, options):
+            outputfile = inputfile
+            self.log.info("Bypassing conversion and setting outputfile to inputfile.")
+        else:
+            if not options:
+                self.log.error("Error converting, inputfile %s had a valid extension but returned no data. Either the file does not exist, was unreadable, or was an incorrect format." % inputfile)
+                return None
+            outputfile, inputfile, ripped_subs = self._run_ffmpeg(inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput)
+            if outputfile is None:
+                return None
+
+        self.log.debug("%s created from %s successfully." % (outputfile, inputfile))
+
+        if outputfile == inputfile:
+            if self.settings.output_dir:
+                try:
+                    outputfile = os.path.join(self.settings.output_dir, os.path.split(inputfile)[1])
+                    self.log.debug("Outputfile set to %s." % outputfile)
+                    shutil.copy(inputfile, outputfile)
+                except KeyboardInterrupt:
+                    raise
+                except Exception:
+                    self.log.exception("Error moving file to output directory.")
+                    delete = False
+            else:
+                delete = False
+
+        deleted = self._cleanup_input(inputfile, delete)
+
+        dim = self.getDimensions(outputfile)
+        input_extension = self.parseFile(inputfile)[2]
+        output_extension = self.parseFile(outputfile)[2]
+
+        return {
+            "input": inputfile,
+            "input_extension": input_extension,
+            "input_deleted": deleted,
+            "output": outputfile,
+            "output_extension": output_extension,
+            "options": options,
+            "preopts": preopts,
+            "postopts": postopts,
+            "external_subs": downloaded_subs + ripped_subs,
+            "x": dim["x"],
+            "y": dim["y"],
+            "cues_to_front": self.settings.output_format in ["mkv"] and self.settings.relocate_moov,
+        }
+
+    def _run_ffmpeg(self, inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput):
+        """Log options, rip external subs, run FFmpeg conversion.
+
+        Returns (outputfile, inputfile, ripped_subs) on success, or (None, inputfile, []) on failure.
+        Note: inputfile may change after convert() if FFmpeg renames it.
+        """
+        try:
+            self.log.info("Output Data: %s" % json.dumps(options, sort_keys=False))
+            self.log.info("Preopts: %s" % json.dumps(preopts, sort_keys=False))
+            self.log.info("Postopts: %s" % json.dumps(postopts, sort_keys=False))
+            if not self.settings.embedsubs:
+                self.log.info("Subtitle Extracts: %s" % json.dumps(ripsubopts, sort_keys=False))
+            if self.settings.downloadsubs:
+                self.log.info("Downloaded Subtitles: %s" % json.dumps(downloaded_subs, sort_keys=False))
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            self.log.exception("Unable to log options.")
+
+        ripped_subs = self.subtitles.ripSubs(inputfile, ripsubopts)
+        for rs in ripped_subs:
+            self.cleanExternalSub(rs)
+
+        try:
+            outputfile, inputfile = self.convert(options, preopts, postopts, reportProgress, progressOutput)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            self.log.exception("Unexpected exception encountered during conversion")
+            return None, inputfile, []
+
+        if not outputfile:
+            self.log.debug("Error converting, no outputfile generated for inputfile %s." % inputfile)
+            return None, inputfile, ripped_subs
+
+        return outputfile, inputfile, ripped_subs
+
+    def _cleanup_input(self, inputfile, delete):
+        """Recycle and/or delete the original input file and any staged subtitle files.
+
+        Returns True if the input file was deleted.
+        """
+        if delete and self.settings.recycle_bin and os.path.isfile(inputfile):
             try:
-                options, preopts, postopts, ripsubopts, downloaded_subs = self.generateOptions(inputfile, info=info, original=original, tagdata=tagdata)
+                os.makedirs(self.settings.recycle_bin, exist_ok=True)
+                recycle_dst = os.path.join(self.settings.recycle_bin, os.path.basename(inputfile))
+                if os.path.exists(recycle_dst):
+                    base, ext = os.path.splitext(os.path.basename(inputfile))
+                    i = 2
+                    while os.path.exists(recycle_dst):
+                        recycle_dst = os.path.join(self.settings.recycle_bin, "%s.%d%s" % (base, i, ext))
+                        i += 1
+                self._atomic_copy(inputfile, recycle_dst)
+                self.log.info("Original file recycled to %s." % recycle_dst)
             except KeyboardInterrupt:
                 raise
             except Exception:
-                self.log.exception("Unable to generate options, unexpected exception occurred.")
-                return None
-            if self.canBypassConvert(inputfile, info, options):
-                outputfile = inputfile
-                self.log.info("Bypassing conversion and setting outputfile to inputfile.")
+                self.log.exception("Failed to copy original to recycle bin %s." % self.settings.recycle_bin)
+
+        deleted = False
+        if delete:
+            self.log.debug("Attempting to remove %s." % inputfile)
+            if self.removeFile(inputfile):
+                self.log.debug("%s deleted." % inputfile)
+                deleted = True
             else:
-                if not options:
-                    self.log.error("Error converting, inputfile %s had a valid extension but returned no data. Either the file does not exist, was unreadable, or was an incorrect format." % inputfile)
-                    return None
+                self.log.error("Couldn't delete %s." % inputfile)
 
-                try:
-                    self.log.info("Output Data")
-                    self.log.info(json.dumps(options, sort_keys=False, indent=4))
-                    self.log.info("Preopts")
-                    self.log.info(json.dumps(preopts, sort_keys=False, indent=4))
-                    self.log.info("Postopts")
-                    self.log.info(json.dumps(postopts, sort_keys=False, indent=4))
-                    if not self.settings.embedsubs:
-                        self.log.info("Subtitle Extracts")
-                        self.log.info(json.dumps(ripsubopts, sort_keys=False, indent=4))
-                    if self.settings.downloadsubs:
-                        self.log.info("Downloaded Subtitles")
-                        self.log.info(json.dumps(downloaded_subs, sort_keys=False, indent=4))
-                except KeyboardInterrupt:
-                    raise
-                except Exception:
-                    self.log.exception("Unable to log options.")
-
-                ripped_subs = self.subtitles.ripSubs(inputfile, ripsubopts)
-                for rs in ripped_subs:
-                    self.cleanExternalSub(rs)
-                try:
-                    outputfile, inputfile = self.convert(options, preopts, postopts, reportProgress, progressOutput)
-                except KeyboardInterrupt:
-                    raise
-                except Exception:
-                    self.log.exception("Unexpected exception encountered during conversion")
-                    return None
-
-            if not outputfile:
-                self.log.debug("Error converting, no outputfile generated for inputfile %s." % inputfile)
-                return None
-
-            self.log.debug("%s created from %s successfully." % (outputfile, inputfile))
-
-            if outputfile == inputfile:
-                if self.settings.output_dir:
-                    try:
-                        outputfile = os.path.join(self.settings.output_dir, os.path.split(inputfile)[1])
-                        self.log.debug("Outputfile set to %s." % outputfile)
-                        shutil.copy(inputfile, outputfile)
-                    except KeyboardInterrupt:
-                        raise
-                    except Exception:
-                        self.log.exception("Error moving file to output directory.")
-                        delete = False
+            for subfile in self.deletesubs:
+                self.log.debug("Attempting to remove subtitle %s." % subfile)
+                if self.removeFile(subfile):
+                    self.log.debug("Subtitle %s deleted." % subfile)
                 else:
-                    delete = False
+                    self.log.debug("Unable to delete subtitle %s." % subfile)
+            self.deletesubs = set()
 
-            if delete and self.settings.recycle_bin and os.path.isfile(inputfile):
-                try:
-                    os.makedirs(self.settings.recycle_bin, exist_ok=True)
-                    recycle_dst = os.path.join(self.settings.recycle_bin, os.path.basename(inputfile))
-                    if os.path.exists(recycle_dst):
-                        base, ext = os.path.splitext(os.path.basename(inputfile))
-                        i = 2
-                        while os.path.exists(recycle_dst):
-                            recycle_dst = os.path.join(self.settings.recycle_bin, "%s.%d%s" % (base, i, ext))
-                            i += 1
-                    self._atomic_copy(inputfile, recycle_dst)
-                    self.log.info("Original file recycled to %s." % recycle_dst)
-                except KeyboardInterrupt:
-                    raise
-                except Exception:
-                    self.log.exception("Failed to copy original to recycle bin %s." % self.settings.recycle_bin)
-
-            if delete:
-                self.log.debug("Attempting to remove %s." % inputfile)
-                if self.removeFile(inputfile):
-                    self.log.debug("%s deleted." % inputfile)
-                    deleted = True
-                else:
-                    self.log.error("Couldn't delete %s." % inputfile)
-
-                for subfile in self.deletesubs:
-                    self.log.debug("Attempting to remove subtitle %s." % subfile)
-                    if self.removeFile(subfile):
-                        self.log.debug("Subtitle %s deleted." % subfile)
-                    else:
-                        self.log.debug("Unable to delete subtitle %s." % subfile)
-                self.deletesubs = set()
-
-            dim = self.getDimensions(outputfile)
-            input_extension = self.parseFile(inputfile)[2]
-            output_extension = self.parseFile(outputfile)[2]
-
-            cues_to_front = self.settings.output_format in ["mkv"] and self.settings.relocate_moov
-
-            return {
-                "input": inputfile,
-                "input_extension": input_extension,
-                "input_deleted": deleted,
-                "output": outputfile,
-                "output_extension": output_extension,
-                "options": options,
-                "preopts": preopts,
-                "postopts": postopts,
-                "external_subs": downloaded_subs + ripped_subs,
-                "x": dim["x"],
-                "y": dim["y"],
-                "cues_to_front": cues_to_front,
-            }
-        return None
+        return deleted
 
     # Wipe disposition data based on settings
     def cleanDispositions(self, info):
@@ -794,8 +805,7 @@ class MediaProcessor:
                                 # No remuxable streams but 2 streams of the output codec are being created
                                 self.duplicateStreamSort(same_codec_options, info)
                                 purge.extend(same_codec_options[1:])
-        self.log.debug("Purging the following streams:")
-        self.log.debug(json.dumps(purge, indent=4))
+        self.log.debug("Purging the following streams: %s" % json.dumps(purge))
         self.log.info("Found %d streams that can be removed from the output file since they will be duplicates [stream-codec-combinations]." % len(purge))
         for p in purge:
             try:
@@ -849,7 +859,6 @@ class MediaProcessor:
 
         Returns (None, None, None, None, None) if the file cannot be probed.
         """
-        # Get path information from the input file
         sources = [inputfile]
         ripsubopts = []
 
@@ -862,16 +871,13 @@ class MediaProcessor:
             self.log.error("FFPROBE returned no value for inputfile %s (exists: %s), either the file does not exist or is not a format FFPROBE can read." % (inputfile, os.path.exists(inputfile)))
             return None, None, None, None, None
 
-        # Update disposition information using titles
         self.titleDispositionCheck(info)
         self.cleanDispositions(info)
 
-        # Ensure we have adequate language tracks present, assigned undefined languages to default, relax language parameters if needed
         awl, swl = self.safeLanguage(info, tagdata)
 
         try:
-            self.log.info("Input Data")
-            self.log.info(json.dumps(info.json, sort_keys=False, indent=4))
+            self.log.info("Input Data: %s" % json.dumps(info.json, sort_keys=False))
         except Exception:
             self.log.exception("Unable to print input file data")
 
@@ -884,8 +890,52 @@ class MediaProcessor:
         # Audio streams
         ###############################################################
         self.log.info("Reading audio streams.")
+        audio_settings = self._build_audio_settings(inputfile, info, awl, tagdata)
 
-        # Iterate through audio streams
+        ###############################################################
+        # Subtitle streams
+        ###############################################################
+        self.log.info("Reading subtitle streams.")
+        subtitle_settings, downloaded_subs = self._build_subtitle_settings(inputfile, info, swl, original, tagdata, sources, ripsubopts, video_settings, vcodecs)
+
+        ###############################################################
+        # Attachments
+        ###############################################################
+        attachments = []
+        for f in info.attachment:
+            if f.codec in self.settings.attachmentcodec and "mimetype" in f.metadata and "filename" in f.metadata:
+                attachment = {"map": f.index, "codec": "copy", "filename": f.metadata["filename"], "mimetype": f.metadata["mimetype"]}
+                attachments.append(attachment)
+
+        ###############################################################
+        # Chapters / external metadata
+        ###############################################################
+        metadata_map = []
+        metadata_file = self.scanForExternalMetadata(inputfile)
+        if metadata_file:
+            self.log.info("Adding metadata file %s to sources and mapping metadata." % (metadata_file))
+            sources.append(metadata_file)
+            metadata_map = ["-map_chapters", str(sources.index(metadata_file)), "-map_metadata", str(sources.index(metadata_file))]
+            if self.settings.strip_metadata:
+                self.log.debug("Setting strip-metadata to False since metadata will be coming from external metadata file [strip-metadata].")
+                self.settings.strip_metadata = False
+
+        ###############################################################
+        # Assemble options and build FFmpeg flags
+        ###############################################################
+        options = {"source": sources, "format": self.settings.output_format, "video": video_settings, "audio": audio_settings, "subtitle": subtitle_settings, "attachment": attachments}
+
+        if self.settings.subencoding:
+            options["sub-encoding"] = self.settings.subencoding
+
+        preopts, postopts = self._build_preopts_postopts(vcodec, vcodecs, info, codecs, pix_fmts, options, metadata_map)
+
+        self._warn_unsupported_encoders(codecs, [video_settings] + audio_settings + subtitle_settings + attachments)
+
+        return options, preopts, postopts, ripsubopts, downloaded_subs
+
+    def _build_audio_settings(self, inputfile, info, awl, tagdata):
+        """Process all audio streams and return the audio_settings list."""
         audio_settings = []
         blocked_audio_languages = []
         blocked_audio_dispositions = []
@@ -902,25 +952,26 @@ class MediaProcessor:
             self.log.info("Audio detected for stream %s - %s %s %d channel." % (a.index, a.codec, a.metadata["language"], a.audio_channels))
             allowua = self._process_audio_stream(a, inputfile, info, awl, allowua, blocked_audio_languages, blocked_audio_dispositions, audio_settings, tagdata, acodecs=acodecs, ua_codecs=ua_codecs)
 
-        # Purge Duplicate Streams
         self.purgeDuplicateStreams(acombinations, audio_settings, info, acodecs, ua_codecs)
 
-        # Audio Sort
         try:
             self.log.debug("Triggering audio track sort [audio.sorting-sorting].")
             audio_settings = self.sortStreams(audio_settings, self.settings.audio_sorting, awl, self.settings.audio_sorting_codecs or acodecs, info, acombinations, tagdata)
         except Exception:
             self.log.exception("Error sorting output stream options [audio.sorting-default-sorting].")
 
-        # Set Default Audio Stream
         try:
             self.setDefaultAudioStream(self.sortStreams(audio_settings, self.settings.audio_sorting_default, awl, self.settings.audio_sorting_codecs or acodecs, info, acombinations, tagdata))
         except Exception:
             self.log.exception("Unable to set the default audio stream.")
 
-        ###############################################################
-        # Subtitle streams
-        ###############################################################
+        return audio_settings
+
+    def _build_subtitle_settings(self, inputfile, info, swl, original, tagdata, sources, ripsubopts, video_settings, vcodecs):
+        """Process all subtitle streams and return (subtitle_settings, downloaded_subs).
+
+        Mutates sources (external metadata), ripsubopts (rip opts), and video_settings (burn filter).
+        """
         subtitle_settings = []
         blocked_subtitle_languages = []
         blocked_subtitle_dispositions = []
@@ -932,7 +983,6 @@ class MediaProcessor:
         scodecs_image = self.ffprobeSafeCodecs(self.settings.scodec_image)
         self.log.debug("Pool of subtitle image based codecs is %s." % (scodecs_image))
 
-        self.log.info("Reading subtitle streams.")
         if not self.settings.ignore_embedded_subs:
             for s in info.subtitle:
                 self.log.info("Subtitle detected for stream %s - %s %s." % (s.index, s.codec, s.metadata["language"]))
@@ -951,7 +1001,6 @@ class MediaProcessor:
                     scodecs_image=scodecs_image,
                 )
 
-        # Attempt to download subtitles if they are missing using subliminal
         downloaded_subs = []
         try:
             downloaded_subs = self.subtitles.downloadSubtitles(inputfile, info.subtitle, swl, original, tagdata)
@@ -960,22 +1009,17 @@ class MediaProcessor:
         except Exception:
             self.log.exception("Unable to download subitltes [download-subs].")
 
-        ###############################################################
-        # External subtitles
-        ###############################################################
-        if not self.settings.embedonlyinternalsubs:  # Subittles extract just for cleaning will still be imported back
+        if not self.settings.embedonlyinternalsubs:
             valid_external_subs = self.subtitles.scanForExternalSubs(inputfile, swl, valid_external_subs)
 
         for external_sub in valid_external_subs:
             self._process_external_sub(external_sub, inputfile, swl, blocked_subtitle_languages, blocked_subtitle_dispositions, subtitle_settings, sources, tagdata)
 
-        # Set Default Subtitle Stream
         try:
             self.setDefaultSubtitleStream(subtitle_settings)
         except Exception:
             self.log.exception("Unable to set the default subtitle stream.")
 
-        # Burn subtitles
         try:
             burnfilter = self.subtitles.burnSubtitleFilter(inputfile, info, swl, valid_external_subs, tagdata)
         except Exception:
@@ -984,45 +1028,22 @@ class MediaProcessor:
         if burnfilter:
             self.log.debug("Found valid subtitle stream to burn into video, video cannot be copied [burn-subtitles].")
             video_settings["codec"] = vcodecs[0]
-            vcodec = vcodecs[0]
             video_settings["filter"] = video_settings["filter"] + "," + burnfilter if video_settings.get("filter") else burnfilter
             self.log.debug("Setting video filter to burn subtitle filter %s." % video_settings["filter"])
             video_settings["debug"] += ".burn-subtitles"
 
-        # Sort Options
         try:
             subtitle_settings = self.sortStreams(subtitle_settings, self.settings.sub_sorting, swl, self.settings.sub_sorting_codecs or (scodecs + scodecs_image), info, tagdata=tagdata)
         except Exception:
             self.log.exception("Error sorting output stream options [subtitle.sorting-sorting].")
 
-        # Attachments
-        attachments = []
-        for f in info.attachment:
-            if f.codec in self.settings.attachmentcodec and "mimetype" in f.metadata and "filename" in f.metadata:
-                attachment = {"map": f.index, "codec": "copy", "filename": f.metadata["filename"], "mimetype": f.metadata["mimetype"]}
-                attachments.append(attachment)
+        return subtitle_settings, downloaded_subs
 
-        # Chapters
-        metadata_map = []
-        metadata_file = self.scanForExternalMetadata(inputfile)
-        if metadata_file:
-            self.log.info("Adding metadata file %s to sources and mapping metadata." % (metadata_file))
-            sources.append(metadata_file)
-            metadata_map = ["-map_chapters", str(sources.index(metadata_file)), "-map_metadata", str(sources.index(metadata_file))]
-            if self.settings.strip_metadata:
-                self.log.debug("Setting strip-metadata to False since metadata will be coming from external metadata file [strip-metadata].")
-                self.settings.strip_metadata = False
-
-        # Collect all options
-        options = {"source": sources, "format": self.settings.output_format, "video": video_settings, "audio": audio_settings, "subtitle": subtitle_settings, "attachment": attachments}
-
-        if self.settings.subencoding:
-            options["sub-encoding"] = self.settings.subencoding
-
+    def _build_preopts_postopts(self, vcodec, vcodecs, info, codecs, pix_fmts, options, metadata_map):
+        """Build FFmpeg preopts and postopts lists, including hardware acceleration setup."""
         preopts = []
         postopts = ["-threads", str(self.settings.threads), "-metadata:g", "encoding_tool=SMA-NG"] + metadata_map
 
-        # FFMPEG allows TrueHD experimental
         if options.get("format") in ["mp4"] and any(a for a in options["audio"] if self.getCodecFromOptions(a, info) == "truehd"):
             self.log.debug("Adding experimental flag for mp4 with trueHD as a trueHD stream is being copied.")
             postopts.extend(["-strict", "experimental"])
@@ -1062,14 +1083,11 @@ class MediaProcessor:
         preopts.extend(self.settings.preopts)
         postopts.extend(self.settings.postopts)
 
-        # HEVC Tagging for copied streams
         if info.video.codec in ["x265", "h265", "hevc"] and vcodec == "copy":
             postopts.extend(["-tag:v", "hvc1"])
             self.log.info("Tagging copied video stream as hvc1")
 
-        self._warn_unsupported_encoders(codecs, [video_settings] + audio_settings + subtitle_settings + attachments)
-
-        return options, preopts, postopts, ripsubopts, downloaded_subs
+        return preopts, postopts
 
     def _select_video_codec(self, inputfile, info, codecs, pix_fmts, tagdata):
         """
@@ -2593,7 +2611,13 @@ class MediaProcessor:
         optionally the current FFmpeg debug line when detailedprogress is
         enabled. Writes a newline at the end when newline is True. Falls back
         to printing the completion value if an exception occurs.
+
+        Silently skips output when stdout is not connected to a TTY (e.g.
+        when invoked as a daemon subprocess) to prevent progress-bar escape
+        sequences from polluting log files.
         """
+        if not sys.stdout.isatty():
+            return
         try:
             divider = 100 / width
 
