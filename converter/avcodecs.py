@@ -586,10 +586,12 @@ class VideoCodec(BaseCodec):
         if "bitrate" in safe:
             optlist.extend(["-metadata:s:v", "BPS=" + str(safe["bitrate"] * 1000)])
             optlist.extend(["-metadata:s:v", "BPS-eng=" + str(safe["bitrate"] * 1000)])
+        # Collect -vf parts to emit as a single comma-joined filter chain
+        vf_parts = []
         if "filter" in safe:
-            optlist.extend(["-vf", str(safe["filter"])])
+            vf_parts.append(str(safe["filter"]))
         if filters:
-            optlist.extend(["-vf", filters])
+            vf_parts.append(filters)
         if w and h:
             optlist.extend(["-s", "%dx%d" % (w, h)])
             if ow and oh:
@@ -603,20 +605,19 @@ class VideoCodec(BaseCodec):
             optlist.extend(["-metadata:s:v", "title="])
             optlist.extend(["-metadata:s:v", "handler_name="])
 
-        optlist.extend(self._codec_specific_produce_ffmpeg_list(safe, stream))
+        # Extract any -vf tokens from codec-specific list so they join the filter chain
+        specific = self._codec_specific_produce_ffmpeg_list(safe, stream)
+        i = 0
+        while i < len(specific):
+            if specific[i] == "-vf" and i + 1 < len(specific):
+                vf_parts.append(specific[i + 1])
+                i += 2
+            else:
+                optlist.append(specific[i])
+                i += 1
 
-        # consolidate filters
-        if optlist.count("-vf") > 1:
-            vf = []
-            while optlist.count("-vf") > 0:
-                vf.append(optlist.pop(optlist.index("-vf") + 1))
-                del optlist[optlist.index("-vf")]
-
-            vfstring = ""
-            for line in vf:
-                vfstring = "%s,%s" % (vfstring, line)
-
-            optlist.extend(["-vf", vfstring[1:]])
+        if vf_parts:
+            optlist.extend(["-vf", ",".join(vf_parts)])
 
         return optlist
 
