@@ -7,6 +7,7 @@ scripts in a subprocess with a mock HTTP server standing in for the daemon.
 import http.server
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -31,10 +32,19 @@ SCRIPTS = {
 
 
 class _MockDaemonHandler(http.server.BaseHTTPRequestHandler):
-    """Captures POST /webhook requests and responds with a job_id."""
+    """Captures POST /webhook requests and responds with a job_id.
+    Handles GET /jobs/{id} for polling, always returning completed."""
 
     def log_message(self, format, *args):
         pass  # silence request logs
+
+    def do_GET(self):
+        resp = json.dumps({"status": "completed"}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(resp)))
+        self.end_headers()
+        self.wfile.write(resp)
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -43,8 +53,14 @@ class _MockDaemonHandler(http.server.BaseHTTPRequestHandler):
             self.server.received_bodies.append(json.loads(body))
         except Exception:
             self.server.received_bodies.append(body)
-        resp = json.dumps({"job_id": 1}).encode()
-        self.send_response(200)
+
+        status_code = self.server.response_status
+        if status_code == 200:
+            resp = json.dumps({"job_id": 1}).encode()
+        else:
+            resp = json.dumps({"error": self.server.response_error}).encode()
+
+        self.send_response(status_code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(resp)))
         self.end_headers()
@@ -54,9 +70,11 @@ class _MockDaemonHandler(http.server.BaseHTTPRequestHandler):
 class MockDaemon:
     """Minimal HTTP server that records webhook submissions."""
 
-    def __init__(self):
+    def __init__(self, response_status=200, response_error=""):
         self.server = http.server.HTTPServer(("127.0.0.1", 0), _MockDaemonHandler)
         self.server.received_bodies = []
+        self.server.response_status = response_status
+        self.server.response_error = response_error
         self.port = self.server.server_address[1]
         self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
@@ -72,13 +90,19 @@ class MockDaemon:
         return self.server.received_bodies
 
 
-def _run(script_key, args=(), env_override=None, timeout=10):
+def _free_port():
+    """Return a port number that is not currently in use."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _run(script_key, args=(), env_override=None, timeout=10, response_status=200, response_error=""):
     """Run a trigger script against the mock daemon.
 
-    Returns (returncode, stdout+stderr, MockDaemon).
-    The MockDaemon is already shut down; read .submissions before calling.
+    Returns (returncode, stdout+stderr, submissions).
     """
-    with MockDaemon() as daemon:
+    with MockDaemon(response_status=response_status, response_error=response_error) as daemon:
         env = {
             **os.environ,
             "SMA_DAEMON_HOST": "127.0.0.1",
@@ -100,6 +124,27 @@ def _run(script_key, args=(), env_override=None, timeout=10):
         submissions = list(daemon.submissions)
 
     return result, submissions
+
+
+def _run_no_daemon(script_key, args=(), env_override=None, timeout=10):
+    """Run a trigger script pointing at a port where nothing is listening."""
+    port = _free_port()
+    env = {
+        **os.environ,
+        "SMA_DAEMON_HOST": "127.0.0.1",
+        "SMA_DAEMON_PORT": str(port),
+        "SMA_TIMEOUT": "1",
+        "SMA_POLL_INTERVAL": "1",
+    }
+    if env_override:
+        env.update(env_override)
+    return subprocess.run(
+        [SCRIPTS[script_key]] + list(args),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -132,11 +177,81 @@ class TestPostRadarr:
 
     def test_submits_webhook_with_tmdb(self):
         result, submissions = _run("radarr", env_override=self._env())
+        assert result.returncode == 0
         assert len(submissions) == 1
         body = submissions[0]
         assert body["path"] == "/movies/The Matrix (1999)/The Matrix.mkv"
         assert "-tmdb" in body.get("args", [])
         assert "603" in body.get("args", [])
+
+    def test_submits_with_imdb_id(self):
+        result, submissions = _run("radarr", env_override=self._env(radarr_movie_tmdbid=""))
+        assert result.returncode == 0
+        args = submissions[0].get("args", [])
+        assert "-imdb" in args
+        assert "tt0133093" in args
+
+    def test_submits_both_tmdb_and_imdb(self):
+        result, submissions = _run("radarr", env_override=self._env())
+        args = submissions[0].get("args", [])
+        assert "-tmdb" in args
+        assert "-imdb" in args
+
+    def test_missing_path_exits_nonzero(self):
+        result, submissions = _run("radarr", env_override=self._env(radarr_moviefile_path=""))
+        assert result.returncode != 0
+        assert submissions == []
+
+    def test_sma_config_included_in_payload(self):
+        result, submissions = _run(
+            "radarr",
+            env_override={**self._env(), "SMA_CONFIG": "/config/autoProcess.movies.ini"},
+        )
+        assert result.returncode == 0
+        assert submissions[0].get("config") == "/config/autoProcess.movies.ini"
+
+    def test_no_sma_config_omits_config_key(self):
+        env = {**self._env()}
+        env.pop("SMA_CONFIG", None)
+        result, submissions = _run("radarr", env_override=env)
+        assert result.returncode == 0
+        assert "config" not in submissions[0]
+
+    def test_daemon_unreachable_exits_nonzero(self):
+        result = _run_no_daemon("radarr", env_override=self._env())
+        assert result.returncode != 0
+        assert "Failed to connect" in result.stderr
+
+    def test_daemon_returns_401_shows_api_key_hint(self):
+        result, submissions = _run("radarr", env_override=self._env(), response_status=401)
+        assert result.returncode != 0
+        assert "SMA_DAEMON_API_KEY" in result.stderr
+
+    def test_daemon_returns_403_shows_api_key_hint(self):
+        result, submissions = _run("radarr", env_override=self._env(), response_status=403)
+        assert result.returncode != 0
+        assert "SMA_DAEMON_API_KEY" in result.stderr
+
+    def test_daemon_returns_500_shows_error_body(self):
+        result, submissions = _run(
+            "radarr",
+            env_override=self._env(),
+            response_status=500,
+            response_error="internal server error",
+        )
+        assert result.returncode != 0
+        assert "500" in result.stderr
+
+    def test_api_key_sent_in_header(self):
+        """When SMA_DAEMON_API_KEY is set the daemon still receives the request
+        (the mock doesn't check auth; we just verify the script doesn't crash
+        and the job is submitted successfully)."""
+        result, submissions = _run(
+            "radarr",
+            env_override={**self._env(), "SMA_DAEMON_API_KEY": "secret123"},
+        )
+        assert result.returncode == 0
+        assert len(submissions) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -163,16 +278,113 @@ class TestPostSonarr:
         assert result.returncode == 0
         assert submissions == []
 
+    def test_invalid_event_exits_nonzero(self):
+        result, submissions = _run("sonarr", env_override={"sonarr_eventtype": "Rename"})
+        assert result.returncode != 0
+        assert submissions == []
+
     def test_submits_with_tvdb_season_episode(self):
         result, submissions = _run("sonarr", env_override=self._env())
+        assert result.returncode == 0
         assert len(submissions) == 1
         body = submissions[0]
         args = body.get("args", [])
+        assert body["path"] == "/tv/Breaking Bad/Season 01/Breaking.Bad.S01E01.mkv"
         assert "-tvdb" in args
         assert "81189" in args
         assert "-s" in args
         assert "1" in args
         assert "-e" in args
+
+    def test_multi_episode_all_in_args(self):
+        result, submissions = _run(
+            "sonarr",
+            env_override=self._env(sonarr_episodefile_episodenumbers="1,2,3"),
+        )
+        assert result.returncode == 0
+        args = submissions[0].get("args", [])
+        ep_values = [args[i + 1] for i, a in enumerate(args) if a == "-e"]
+        assert ep_values == ["1", "2", "3"]
+
+    def test_missing_path_exits_nonzero(self):
+        result, submissions = _run("sonarr", env_override=self._env(sonarr_episodefile_path=""))
+        assert result.returncode != 0
+        assert submissions == []
+
+    def test_sma_config_included_in_payload(self):
+        result, submissions = _run(
+            "sonarr",
+            env_override={**self._env(), "SMA_CONFIG": "/config/autoProcess.tv.ini"},
+        )
+        assert result.returncode == 0
+        assert submissions[0].get("config") == "/config/autoProcess.tv.ini"
+
+    def test_no_sma_config_omits_config_key(self):
+        env = {**self._env()}
+        env.pop("SMA_CONFIG", None)
+        result, submissions = _run("sonarr", env_override=env)
+        assert result.returncode == 0
+        assert "config" not in submissions[0]
+
+    def test_daemon_unreachable_exits_nonzero(self):
+        result = _run_no_daemon("sonarr", env_override=self._env())
+        assert result.returncode != 0
+        assert "Failed to connect" in result.stderr
+
+    def test_daemon_returns_401_shows_api_key_hint(self):
+        result, submissions = _run("sonarr", env_override=self._env(), response_status=401)
+        assert result.returncode != 0
+        assert "SMA_DAEMON_API_KEY" in result.stderr
+
+    def test_daemon_returns_403_shows_api_key_hint(self):
+        result, submissions = _run("sonarr", env_override=self._env(), response_status=403)
+        assert result.returncode != 0
+        assert "SMA_DAEMON_API_KEY" in result.stderr
+
+    def test_daemon_returns_500_shows_error_body(self):
+        result, submissions = _run(
+            "sonarr",
+            env_override=self._env(),
+            response_status=500,
+            response_error="internal server error",
+        )
+        assert result.returncode != 0
+        assert "500" in result.stderr
+
+    def test_api_key_sent_in_header(self):
+        result, submissions = _run(
+            "sonarr",
+            env_override={**self._env(), "SMA_DAEMON_API_KEY": "secret123"},
+        )
+        assert result.returncode == 0
+        assert len(submissions) == 1
+
+    def test_date_based_episode_path_submitted_verbatim(self):
+        """The Late Show scenario: date-based filename is passed through as-is."""
+        path = (
+            "/mnt/unionfs/Media/TV/1080P/The Late Show with Stephen Colbert (2015) {tvdb-289574}"
+            "/Season 11/The Late Show with Stephen Colbert (2015) - 2026-04-15 - "
+            "Anne Hathaway Josh Johnson [HDTV-1080p][EAC3 2.0][x265]-MeGusta.mkv"
+        )
+        result, submissions = _run(
+            "sonarr",
+            env_override=self._env(
+                sonarr_episodefile_path=path,
+                sonarr_series_tvdbid="289574",
+                sonarr_episodefile_seasonnumber="11",
+                sonarr_episodefile_episodenumbers="101",
+            ),
+        )
+        assert result.returncode == 0
+        body = submissions[0]
+        assert body["path"] == path
+        args = body.get("args", [])
+        assert "-tvdb" in args
+        assert "289574" in args
+        assert "-s" in args
+        assert "11" in args
+        assert "-e" in args
+        assert "101" in args
 
 
 # ---------------------------------------------------------------------------

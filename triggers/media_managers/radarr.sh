@@ -30,25 +30,15 @@ TIMEOUT="${SMA_TIMEOUT:-0}"
 
 log() { echo "[radarr] $*" >&2; }
 
-auth_header() {
-    if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
-        echo "-H" "X-API-Key: ${SMA_DAEMON_API_KEY}"
-    fi
-}
+# Build auth header args as an array so word-splitting doesn't corrupt the value.
+AUTH_ARGS=()
+if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
+    AUTH_ARGS=(-H "X-API-Key: ${SMA_DAEMON_API_KEY}")
+fi
 
 curl_get() {
     local url="$1"
-    curl -sf $(auth_header) "$url"
-}
-
-curl_post_json() {
-    local url="$1"
-    local body="$2"
-    curl -sf -X POST \
-        -H "Content-Type: application/json" \
-        $(auth_header) \
-        -d "$body" \
-        "$url"
+    curl -sf "${AUTH_ARGS[@]}" "$url"
 }
 
 wait_for_job() {
@@ -158,10 +148,25 @@ print(json.dumps(obj))
 
 log "Submitting job to ${SMA_BASE}/webhook..."
 
-RESPONSE=$(curl_post_json "${SMA_BASE}/webhook" "$PAYLOAD") || {
+HTTP_CODE=$(curl -s -o /tmp/sma_response.json -w "%{http_code}" -X POST \
+    -H "Content-Type: application/json" \
+    "${AUTH_ARGS[@]}" \
+    -d "$PAYLOAD" \
+    "${SMA_BASE}/webhook" 2>/dev/null) || HTTP_CODE="000"
+
+RESPONSE=$(cat /tmp/sma_response.json 2>/dev/null || true)
+
+if [[ "$HTTP_CODE" == "000" ]]; then
     log "ERROR: Failed to connect to SMA-NG daemon at ${SMA_BASE}. Is the daemon running?"
     exit 1
-}
+elif [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
+    log "ERROR: Daemon rejected request (HTTP ${HTTP_CODE}). Check SMA_DAEMON_API_KEY."
+    exit 1
+elif [[ "$HTTP_CODE" -ge 400 ]]; then
+    ERR=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error','unknown'))" 2>/dev/null || echo "$RESPONSE")
+    log "ERROR: Daemon returned HTTP ${HTTP_CODE}: ${ERR}"
+    exit 1
+fi
 
 JOB_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('job_id',''))" 2>/dev/null)
 
