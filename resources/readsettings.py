@@ -214,6 +214,7 @@ class ReadSettings:
         "Naming": {
             "enabled": False,
             "tv-template": "{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle} [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}",
+            "tv-airdate-template": "{Series TitleYear} - {Air-Date} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}",
             "movie-template": "{Movie CleanTitle} ({Release Year}) [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}",
         },
         "Audio": {
@@ -739,6 +740,7 @@ class ReadSettings:
         section = "Naming"
         self.naming_enabled = config.getboolean(section, "enabled")
         self.naming_tv_template = config.get(section, "tv-template")
+        self.naming_tv_airdate_template = config.get(section, "tv-airdate-template")
         self.naming_movie_template = config.get(section, "movie-template")
 
         if self.gpu:

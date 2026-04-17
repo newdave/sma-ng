@@ -372,6 +372,153 @@ class TestGenerateNameEdgeCases:
         assert result is not None
         assert "My Show" in result  # local data used
 
+    @patch("resources.naming._requests")
+    def test_lookup_path_used_for_api_match_when_output_in_temp_dir(self, mock_requests, make_media_info):
+        """When the output file is in a temp/output dir, lookup_path (the original
+        input path) is used for Sonarr path-prefix matching instead of filepath.
+
+        Regression test: without lookup_path the Sonarr API is never called when
+        output-directory is set, causing the renamer to fall back to TMDB data
+        which may return a placeholder name like 'Episode 0'.
+        """
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "series": {"title": "The Late Show with Stephen Colbert", "year": 2015},
+            "episodes": [{"seasonNumber": 11, "episodeNumber": 135, "title": "Anne Hathaway / Josh Johnson"}],
+            "quality": {"quality": {"resolution": "720p", "source": "HDTV"}},
+            "releaseGroup": "MeGusta",
+        }
+        mock_requests.get.return_value = mock_resp
+
+        settings = MagicMock()
+        settings.naming_enabled = True
+        settings.naming_tv_template = DEFAULT_TV_TEMPLATE
+        settings.sonarr_instances = [{"path": "/mnt/unionfs/Media/TV/", "host": "sonarr", "port": 8989, "apikey": "key", "ssl": False, "webroot": ""}]
+
+        # filepath is in the temp output-directory — does NOT start with instance path
+        temp_output = "/transcodes/sma/The Late Show with Stephen Colbert (2015) - S11E00.mp4"
+        # lookup_path is the original source file — DOES start with instance path
+        original_input = "/mnt/unionfs/Media/TV/1080P/The Late Show with Stephen Colbert (2015)/Season 11/episode.mkv"
+
+        result = generate_name(temp_output, make_media_info(), self._tv_tagdata(), settings, lookup_path=original_input)
+        assert result is not None
+        assert "Anne Hathaway" in result
+        assert "S11E135" in result or "E135" in result
+
+    @patch("resources.naming._requests")
+    def test_without_lookup_path_temp_dir_misses_api(self, mock_requests, make_media_info):
+        """Without lookup_path, a temp output path does not match the Sonarr
+        instance path and falls back to local TMDB data (the pre-fix behaviour).
+        """
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "series": {"title": "The Late Show with Stephen Colbert", "year": 2015},
+            "episodes": [{"seasonNumber": 11, "episodeNumber": 135, "title": "Anne Hathaway / Josh Johnson"}],
+        }
+        mock_requests.get.return_value = mock_resp
+
+        settings = MagicMock()
+        settings.naming_enabled = True
+        settings.naming_tv_template = "{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle}"
+        settings.sonarr_instances = [{"path": "/mnt/unionfs/Media/TV/", "host": "sonarr", "port": 8989, "apikey": "key", "ssl": False, "webroot": ""}]
+
+        temp_output = "/transcodes/sma/The Late Show with Stephen Colbert (2015) - S11E00.mp4"
+
+        # No lookup_path → API is never reached → local tagdata (episode 2, "Episode Two") used
+        result = generate_name(temp_output, make_media_info(), self._tv_tagdata(), settings)
+        assert result is not None
+        # Sonarr mock should NOT have been called (temp path doesn't match instance path)
+        mock_requests.get.assert_not_called()
+        assert "My Show" in result  # local tagdata used
+
+    def test_episode0_with_date_uses_airdate_template(self, make_media_info):
+        """Episode 0 with a date in the filename uses the airdate template.
+        The placeholder 'Episode 0' title must be stripped from the result.
+        """
+        from resources.metadata import MediaType
+
+        td = MagicMock()
+        td.mediatype = MediaType.TV
+        td.showname = "The Late Show with Stephen Colbert"
+        td.showdata = {"first_air_date": "2015-09-08"}
+        td.season = 11
+        td.episode = 0
+        td.episodes = [0]
+        td.title = "Episode 0"
+
+        settings = MagicMock()
+        settings.naming_enabled = True
+        settings.naming_tv_template = "{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle}"
+        settings.naming_tv_airdate_template = "{Series TitleYear} - {Air-Date} - {Episode CleanTitle}"
+        settings.sonarr_instances = []
+
+        date_based_path = (
+            "/mnt/unionfs/Media/TV/1080P/The Late Show with Stephen Colbert (2015) {tvdb-289574}"
+            "/Season 11/The Late Show with Stephen Colbert (2015) - 2026-04-15 - "
+            "Bette Midler Tim Meadows [HDTV-1080p][AAC 2.0][x265]-MeGusta.mkv"
+        )
+
+        result = generate_name(date_based_path, make_media_info(), td, settings)
+        assert result is not None
+        assert "2026-04-15" in result
+        assert "E00" not in result
+        assert "Episode 0" not in result
+
+    def test_date_based_guard_only_applies_to_episode0(self, make_media_info):
+        """The date-based guard must NOT fire when the episode number is non-zero,
+        even if the filename contains a date.  A valid episode should still be renamed.
+        """
+        from resources.metadata import MediaType
+
+        td = MagicMock()
+        td.mediatype = MediaType.TV
+        td.showname = "Some Show"
+        td.showdata = {"first_air_date": "2020-01-01"}
+        td.season = 3
+        td.episode = 5
+        td.episodes = [5]
+        td.title = "Good Episode"
+
+        settings = MagicMock()
+        settings.naming_enabled = True
+        settings.naming_tv_template = "{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle}"
+        settings.sonarr_instances = []
+
+        date_path = "/tv/Some Show/Season 03/Some Show - 2020-03-10 - Good Episode.mkv"
+
+        result = generate_name(date_path, make_media_info(), td, settings)
+        assert result is not None
+        assert "S03E05" in result
+
+    def test_episode0_without_date_skips_rename(self, make_media_info):
+        """Episode 0 with no air date anywhere (no Sonarr data, no date in
+        filename) must return None — there is nothing useful to name it.
+        A non-date title ('Unaired Pilot') is NOT a placeholder so it should
+        still be usable if an air date is found; without one, skip.
+        """
+        from resources.metadata import MediaType
+
+        td = MagicMock()
+        td.mediatype = MediaType.TV
+        td.showname = "Breaking Bad"
+        td.showdata = {"first_air_date": "2008-01-20"}
+        td.season = 0
+        td.episode = 0
+        td.episodes = [0]
+        td.title = "Unaired Pilot"
+
+        settings = MagicMock()
+        settings.naming_enabled = True
+        settings.naming_tv_template = "{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle}"
+        settings.naming_tv_airdate_template = "{Series TitleYear} - {Air-Date} - {Episode CleanTitle}"
+        settings.sonarr_instances = []
+
+        # No date in path at all
+        path = "/tv/Breaking Bad/Specials/Breaking.Bad.S00E00.Unaired.Pilot.mkv"
+
+        result = generate_name(path, make_media_info(), td, settings)
+        assert result is None
+
 
 class TestApplyFormatBranches:
     """Cover uncovered _apply_format branches inside apply_template."""

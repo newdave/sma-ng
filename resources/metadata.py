@@ -9,7 +9,9 @@ using mutagen. Also handles .plexmatch sidecar file generation.
 import enum
 import logging
 import os
+import re
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
 import requests
@@ -107,18 +109,22 @@ class Metadata:
         self.original = original
 
         if self.mediatype == MediaType.Movie:
-            query = tmdb.Movies(self.tmdbid)
-            self.moviedata = query.info(language=self.language)
-            self.externalids = query.external_ids(language=self.language)
-            self.credit = query.credits()
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                f_info = pool.submit(tmdb.Movies(self.tmdbid).info, language=self.language)
+                f_ext = pool.submit(tmdb.Movies(self.tmdbid).external_ids, language=self.language)
+                f_credits = pool.submit(tmdb.Movies(self.tmdbid).credits)
+                f_releases = pool.submit(tmdb.Movies(self.tmdbid).release_dates)
+            self.moviedata = f_info.result()
+            self.externalids = f_ext.result()
+            self.credit = f_credits.result()
             try:
-                releases = query.release_dates()
+                releases = f_releases.result()
                 release = next(x for x in releases["results"] if x["iso_3166_1"] == "US")
                 rating = release["release_dates"][0]["certification"]
                 self.rating = self.getRating(rating)
             except KeyboardInterrupt:
                 raise
-            except:
+            except Exception:
                 self.log.exception("Unable to retrieve rating.")
                 self.rating = None
 
@@ -138,41 +144,89 @@ class Metadata:
             self.season = int(season)
             self.episode = self.episodes[0]
 
-            seriesquery = tmdb.TV(self.tmdbid)
-            seasonquery = tmdb.TV_Seasons(self.tmdbid, season)
+            # Fetch series-level data in parallel
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                f_showdata = pool.submit(tmdb.TV(self.tmdbid).info, language=self.language)
+                f_seasondata = pool.submit(tmdb.TV_Seasons(self.tmdbid, season).info, language=self.language)
+                f_externalids = pool.submit(tmdb.TV(self.tmdbid).external_ids, language=self.language)
+                f_content_ratings = pool.submit(tmdb.TV(self.tmdbid).content_ratings)
+                # Episode-level fetches in parallel
+                ep_info_futures = {ep: pool.submit(tmdb.TV_Episodes(self.tmdbid, season, ep).info, language=self.language) for ep in self.episodes}
+                ep_credit_futures = {ep: pool.submit(tmdb.TV_Episodes(self.tmdbid, season, ep).credits) for ep in self.episodes}
 
-            self.showdata = seriesquery.info(language=self.language)
+            self.showdata = f_showdata.result()
             try:
-                self.seasondata = seasonquery.info(language=self.language)
+                self.seasondata = f_seasondata.result()
             except Exception as e:
                 self.log.warning("Unable to retrieve season %s data from TMDB (tmdbid %s): %s", season, self.tmdbid, e)
                 self.seasondata = {}
-            self.externalids = seriesquery.external_ids(language=self.language)
+            self.externalids = f_externalids.result()
 
-            # Fetch metadata for all episodes
+            # Build an air-date → episode index from season data for fallback lookups.
+            # TMDB returns 404 for episode 0 on air-date-based shows (e.g. late-night),
+            # so we try to match the air date from the source filename against the
+            # season episode list to recover the real episode number and title.
+            _season_episodes = (self.seasondata or {}).get("episodes") or []
+            _by_air_date = {ep["air_date"]: ep for ep in _season_episodes if ep.get("air_date")}
+
+            # Extract a candidate air date from the original source path once.
+            _filename_date = None
+            if self.original:
+                _m = re.search(r"(\d{4}-\d{2}-\d{2})", os.path.basename(self.original))
+                if _m:
+                    _filename_date = _m.group(1)
+
+            # Collect episode results in order
             self.episodedata_list = []
             credit_list = []
             for ep in self.episodes:
-                episodequery = tmdb.TV_Episodes(self.tmdbid, season, ep)
                 try:
-                    self.episodedata_list.append(episodequery.info(language=self.language))
-                    credit_list.append(episodequery.credits())
+                    self.episodedata_list.append(ep_info_futures[ep].result())
+                    credit_list.append(ep_credit_futures[ep].result())
                 except Exception as e:
                     self.log.warning("Unable to retrieve episode S%sE%s data from TMDB (tmdbid %s): %s", season, ep, self.tmdbid, e)
-                    self.episodedata_list.append({"name": None, "overview": None, "air_date": None})
-                    credit_list.append({"cast": [], "crew": []})
+                    # Try to resolve via air date → season episode list.
+                    matched = _by_air_date.get(_filename_date) if _filename_date else None
+                    if matched:
+                        real_ep = matched.get("episode_number", ep)
+                        self.log.info(
+                            "Resolved S%sE%s by air date %s → S%sE%s (%s) from season data",
+                            season,
+                            ep,
+                            _filename_date,
+                            season,
+                            real_ep,
+                            matched.get("name", ""),
+                        )
+                        # Fetch full episode detail for the matched episode number.
+                        try:
+                            matched_info = tmdb.TV_Episodes(self.tmdbid, season, real_ep).info(language=self.language)
+                            matched_credits = tmdb.TV_Episodes(self.tmdbid, season, real_ep).credits()
+                        except Exception:
+                            matched_info = matched
+                            matched_credits = {"cast": [], "crew": []}
+                        self.episodedata_list.append(matched_info)
+                        credit_list.append(matched_credits)
+                        # Remap episode number so callers see the real episode.
+                        idx = self.episodes.index(ep)
+                        self.episodes[idx] = real_ep
+                        if ep == self.episode:
+                            self.episode = real_ep
+                    else:
+                        self.episodedata_list.append({"name": None, "overview": None, "air_date": _filename_date})
+                        credit_list.append({"cast": [], "crew": []})
 
             # Primary episode data (first episode) for backwards compatibility
             self.episodedata = self.episodedata_list[0]
             self.credit = credit_list[0]
 
             try:
-                content_ratings = seriesquery.content_ratings()
+                content_ratings = f_content_ratings.result()
                 rating = next(x for x in content_ratings["results"] if x["iso_3166_1"] == "US")["rating"]
                 self.rating = self.getRating(rating)
             except KeyboardInterrupt:
                 raise
-            except:
+            except Exception:
                 self.log.error("Unable to retrieve rating.")
                 self.rating = None
 
@@ -186,13 +240,20 @@ class Metadata:
                 titles = []
                 descriptions = []
                 for epdata in self.episodedata_list:
-                    titles.append(epdata["name"] or "Episode %d" % epdata.get("episode_number", 0))
+                    ep_num = epdata.get("episode_number", 0)
+                    # Never use a numeric placeholder for episode 0 — TMDB has no
+                    # real data for these air-date-based specials.
+                    name = epdata["name"] or ("" if ep_num == 0 else "Episode %d" % ep_num)
+                    if name:
+                        titles.append(name)
                     if epdata.get("overview"):
                         descriptions.append(epdata["overview"])
                 self.title = " / ".join(titles)
                 self.description = " | ".join(descriptions) if descriptions else ""
             else:
-                self.title = self.episodedata["name"] or "Episode %d" % self.episode
+                # For episode 0, leave title empty rather than "Episode 0" — it
+                # is a TMDB placeholder with no useful meaning.
+                self.title = self.episodedata["name"] or ("" if self.episode == 0 else "Episode %d" % self.episode)
                 self.description = self.episodedata["overview"]
 
             self.date = self.episodedata["air_date"]
@@ -305,7 +366,7 @@ class Metadata:
         if width and height:
             try:
                 self.setHD(width, height)
-            except:
+            except Exception:
                 self.log.exception("Unable to set HD tag.")
 
         try:
@@ -339,7 +400,7 @@ class Metadata:
                     conv = converter.tag(path, metadata, coverpath, cues_to_front=cues_to_front)
                 except KeyboardInterrupt:
                     raise
-                except:
+                except Exception:
                     self.log.exception("FFMPEG Tag Error.")
                     return False
                 _, cmds = next(conv)
@@ -355,7 +416,7 @@ class Metadata:
                 self.log.exception("Error tagging file using FFMPEG fallback method, FFMPEG error.")
                 self.log.error(e.cmd)
                 self.log.error(e.output)
-            except:
+            except Exception:
                 self.log.exception("Unexpected tagging error using FFMPEG fallback method.")
                 return False
 
@@ -363,7 +424,7 @@ class Metadata:
             video.delete()
         except KeyboardInterrupt:
             raise
-        except:
+        except Exception:
             self.log.debug("Unable to clear original tags, will proceed.")
 
         if self.mediatype == MediaType.Movie:
@@ -425,7 +486,7 @@ class Metadata:
             return True
         except KeyboardInterrupt:
             raise
-        except:
+        except Exception:
             self.log.exception("There was an error writing the tags.")
         return False
 
@@ -637,7 +698,7 @@ class Metadata:
                     os.remove(savepath)
                 except KeyboardInterrupt:
                     raise
-                except:
+                except Exception:
                     i = 2
                     while os.path.exists(savepath):
                         savepath = os.path.join(tempfile.gettempdir(), "poster-%s.%d.jpg" % (self.tmdbid, i))
