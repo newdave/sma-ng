@@ -53,8 +53,7 @@ FFMPEG_DIR   = /usr/local/bin
 # API key for protecting daemon endpoints (SMA_DAEMON_API_KEY).
 api_key  =
 
-# PostgreSQL connection URL for multi-node deployments (SMA_DAEMON_DB_URL).
-# Leave blank to use SQLite (config/daemon.db).
+# PostgreSQL connection URL (SMA_DAEMON_DB_URL). Required — daemon will not start without it.
 db_url   =
 
 # Directory containing ffmpeg/ffprobe binaries (SMA_DAEMON_FFMPEG_DIR).

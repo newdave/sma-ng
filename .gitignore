@@ -40,8 +40,6 @@ config/autoProcess.ini-*
 config/autoProcess.ini.*
 config/autoProcess.*.ini
 config/daemon.json
-config/daemon.db
-config/daemon.db-*
 config/daemon.env
 config/sma.log*
 *.log
@@ -66,3 +64,4 @@ tests/fixtures/*.mp4
 
 # Local deployment overrides
 setup/.local.ini
+config/daemon.json.save

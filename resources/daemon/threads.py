@@ -25,8 +25,6 @@ class _StoppableThread(threading.Thread):
 class HeartbeatThread(_StoppableThread):
     """Periodically updates this node's heartbeat in the cluster_nodes table
     and recovers jobs from nodes that have gone stale.
-
-    Only active when using PostgreSQLJobDatabase (no-op for SQLite).
     """
 
     def __init__(self, job_db, node_id, host, worker_count, server, interval, stale_seconds, logger, started_at):

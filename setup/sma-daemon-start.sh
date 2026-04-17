@@ -1,7 +1,6 @@
 #!/bin/sh
 # Startup wrapper for sma-daemon systemd unit.
-# The daemon reads SMA_DAEMON_DB_URL from the environment directly;
-# no --db-url flag is needed or supported.
+# The daemon reads SMA_DAEMON_DB_URL from the environment directly.
 
 set -e
 

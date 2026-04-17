@@ -158,7 +158,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     SMA_DAEMON_PORT=8585 \
     SMA_DAEMON_WORKERS=2 \
     SMA_DAEMON_CONFIG=/app/config/daemon.json \
-    SMA_DAEMON_DB=/app/config/daemon.db \
     SMA_DAEMON_LOGS_DIR=/logs
 
 # GPU acceleration runtime libraries:
@@ -239,5 +238,4 @@ CMD python3 daemon.py \
       --port      "${SMA_DAEMON_PORT}" \
       --workers   "${SMA_DAEMON_WORKERS}" \
       --daemon-config "${SMA_DAEMON_CONFIG}" \
-      --db        "${SMA_DAEMON_DB}" \
       --logs-dir  "${SMA_DAEMON_LOGS_DIR}"

@@ -28,12 +28,11 @@ depends = ["install"]
 run = "$PIP install -e '.[dev]'"
 
 [tasks.install-all]
-description = "Install all optional dependencies"
-depends = ["install"]
+description = "Install all optional dependencies (qbittorrent, deluge, dev)"
+depends = ["install-dev"]
 run = """
 $PIP install -r setup/requirements-qbittorrent.txt
 $PIP install -r setup/requirements-deluge.txt
-$PIP install -e '.[dev]'
 """
 
 [tasks.lint]
@@ -45,12 +44,12 @@ description = "Run linter with auto-fix"
 run = "$PY -m ruff check --fix ."
 
 [tasks.test]
-description = "Run tests"
-run = "$PY -m pytest tests/"
+description = "Run tests (smoke tests auto-skip without fixture/ffmpeg; daemon tests skip without TEST_DB_URL)"
+run = "$PY -m pytest"
 
 [tasks.test-cov]
-description = "Run tests with coverage"
-run = "$PY -m pytest tests/ --cov=resources --cov=converter --cov-report=html"
+description = "Run tests with coverage (HTML + terminal summary)"
+run = "$PY -m pytest --cov=resources --cov=converter --cov-report=html --cov-report=term-missing:skip-covered"
 
 [tasks.clean]
 description = "Remove build artifacts and caches"
@@ -65,7 +64,7 @@ rm -rf build/ dist/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage .ruff_cache/
 # ---------------------------------------------------------------------------
 
 [tasks.daemon]
-description = "Start the daemon server"
+description = "Start the daemon server (requires SMA_DAEMON_DB_URL or db_url in config/daemon.json)"
 run = "$PY daemon.py --host 0.0.0.0 --port 8585"
 
 [tasks.convert]
@@ -186,12 +185,18 @@ echo "Run:   docker run --rm -p 8585:8585 -v $(pwd)/config:/config $TAG"
 """
 
 [tasks."docker:run"]
-description = "Run the locally-built Docker image (TAG=sma-ng:local to override)"
+description = "Run the locally-built Docker image (requires SMA_DAEMON_DB_URL; TAG=sma-ng:local to override)"
 run = """
 TAG="${TAG:-sma-ng:local}"
+if [ -z "${SMA_DAEMON_DB_URL:-}" ]; then
+  echo "Error: SMA_DAEMON_DB_URL is required (no SQLite fallback)" >&2
+  echo "  Example: SMA_DAEMON_DB_URL=postgresql://sma:pass@host:5432/sma mise run docker:run" >&2
+  exit 1
+fi
 mkdir -p config logs
 docker run --rm \
   -p 8585:8585 \
+  -e SMA_DAEMON_DB_URL="${SMA_DAEMON_DB_URL}" \
   -v "$(pwd)/config:/config" \
   -v "$(pwd)/logs:/logs" \
   "$TAG"

@@ -138,7 +138,7 @@ paths:
   /status:
     get:
       summary: Cluster status
-      description: Returns cluster-wide node and job status (PostgreSQL only). Falls back to local health on SQLite. No authentication required.
+      description: Returns cluster-wide node and job status. No authentication required.
       security: []
       operationId: getStatus
       tags: [monitoring]
