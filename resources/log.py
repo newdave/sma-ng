@@ -204,6 +204,11 @@ def checkLoggingConfig(configfile, logs_dir=None):
             value = defaults[s][k]
             if s == "handler_daemonHandler" and k == "args":
                 value = daemon_handler_args
+                # Always sync the daemon log path so stale production paths
+                # (e.g. /opt/sma/logs/daemon.log) don't break dev/test runs.
+                if config.has_option(s, k) and config.get(s, k) != value:
+                    config.set(s, k, value)
+                    write = True
             if not config.has_option(s, k):
                 config.set(s, k, str(value))
                 write = True
