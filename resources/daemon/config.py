@@ -52,7 +52,7 @@ class ConfigLockManager:
         with self._master_lock:
             self._waiting_counts[config_path] = self._waiting_counts.get(config_path, 0) + 1
             active = self._active_configs.get(config_path, {})
-            if active:
+            if len(active) >= self.max_per_config:
                 self.log.info("Job %d waiting for config slot: %s (%d/%d slots in use)" % (job_id, os.path.basename(config_path), len(active), self.max_per_config))
 
         sem.acquire()
