@@ -5,12 +5,18 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 
 from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.log import getLogger
 
 log = getLogger("DAEMON")
+
+# Compiled once at module load; reused for every line of every job's output.
+_FFMPEG_TIME_RE = _re.compile(r"time=(\d+:\d+:\d+)")
+_FFMPEG_PROGRESS_RE = _re.compile(r"\bframe=\s*\d+\b")
+_PROGRESS_LOG_INTERVAL = 60  # seconds between progress log entries
 
 
 class ConversionWorker(threading.Thread):
@@ -138,7 +144,7 @@ class ConversionWorker(threading.Thread):
         if self.ffmpeg_dir:
             env["PATH"] = self.ffmpeg_dir + os.pathsep + env.get("PATH", "")
 
-        _ffmpeg_time_re = _re.compile(r"time=(\d+:\d+:\d+)")
+        _last_progress_log: float = 0.0
 
         try:
             process = subprocess.Popen(
@@ -152,11 +158,19 @@ class ConversionWorker(threading.Thread):
 
             for line in process.stdout:
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                m = _FFMPEG_TIME_RE.search(line)
+                if m:
+                    self._job_progress[job_id] = m.group(1)
+                # Throttle FFmpeg progress lines; log all other output immediately.
+                if _FFMPEG_PROGRESS_RE.search(line):
+                    now = time.monotonic()
+                    if now - _last_progress_log >= _PROGRESS_LOG_INTERVAL:
+                        config_logger.info("[progress] %s" % line)
+                        _last_progress_log = now
+                else:
                     config_logger.info(line)
-                    m = _ffmpeg_time_re.search(line)
-                    if m:
-                        self._job_progress[job_id] = m.group(1)
 
             try:
                 timeout = self.job_timeout_seconds if self.job_timeout_seconds > 0 else None
