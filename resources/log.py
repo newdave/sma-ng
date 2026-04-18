@@ -304,7 +304,7 @@ def getLogger(name=None, custompath=None):
     configfile = os.path.abspath(os.path.join(configpath, CONFIG_DEFAULT)).replace("\\", "\\\\")
     checkLoggingConfig(configfile, logs_dir=logs_dir)
 
-    fileConfig(configfile)
+    fileConfig(configfile, disable_existing_loggers=False)
     _apply_color_formatters()
     _apply_job_context_filter()
     _apply_json_formatter()
