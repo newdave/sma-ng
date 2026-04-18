@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from resources.mediamanager import api_command, api_get, api_put, build_api, rename, rescan, wait_for_command
+from resources.mediamanager import api_command, api_get, api_put, build_api, rename, rename_via_arr, rescan, wait_for_command
 
 
 class TestBuildApi:
@@ -15,7 +15,7 @@ class TestBuildApi:
 
     def test_https_url(self):
         settings = {"ssl": True, "host": "sonarr.local", "port": 443, "webroot": "/sonarr", "apikey": "key"}
-        url, headers = build_api(settings, "SMA")
+        url, _ = build_api(settings, "SMA")
         assert url == "https://sonarr.local:443/sonarr"
 
     def test_webroot_included(self):
@@ -138,3 +138,100 @@ class TestRename:
         payload = mock_cmd.call_args[0][2]
         assert payload["name"] == "RenameSeries"
         assert payload["seriesIds"] == [123]
+
+
+def _make_response(data):
+    mock = MagicMock()
+    mock.json.return_value = data
+    return mock
+
+
+class TestRenameViaArr:
+    @patch("resources.mediamanager.wait_for_command")
+    @patch("resources.mediamanager.requests.post")
+    @patch("resources.mediamanager.requests.get")
+    def test_sonarr_success(self, mock_get, mock_post, mock_wait):
+        mock_get.side_effect = [
+            _make_response({"series": {"id": 10, "title": "Show"}, "episodes": [{"episodeNumber": 1}]}),
+            _make_response([{"id": 55, "path": "/tv/Show/S01E01.mp4"}]),
+            _make_response({"id": 55, "path": "/tv/Show/Show - S01E01.mp4"}),
+        ]
+        mock_post.return_value = _make_response({"id": 99, "status": "queued"})
+        mock_wait.return_value = True
+        log = MagicMock()
+        result = rename_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log)
+        assert result == "/tv/Show/Show - S01E01.mp4"
+
+    @patch("resources.mediamanager.wait_for_command")
+    @patch("resources.mediamanager.requests.post")
+    @patch("resources.mediamanager.requests.get")
+    def test_sonarr_no_series_found(self, mock_get, mock_post, mock_wait):
+        mock_get.side_effect = [
+            _make_response({"series": None}),
+        ]
+        log = MagicMock()
+        result = rename_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log)
+        assert result is None
+
+    @patch("resources.mediamanager.wait_for_command")
+    @patch("resources.mediamanager.requests.post")
+    @patch("resources.mediamanager.requests.get")
+    def test_sonarr_no_matching_file(self, mock_get, mock_post, mock_wait):
+        mock_get.side_effect = [
+            _make_response({"series": {"id": 10, "title": "Show"}, "episodes": [{"episodeNumber": 1}]}),
+            _make_response([{"id": 55, "path": "/tv/Show/OtherEpisode.mp4"}]),
+        ]
+        log = MagicMock()
+        result = rename_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log)
+        assert result is None
+
+    @patch("resources.mediamanager.wait_for_command")
+    @patch("resources.mediamanager.requests.post")
+    @patch("resources.mediamanager.requests.get")
+    def test_sonarr_command_fails(self, mock_get, mock_post, mock_wait):
+        mock_get.side_effect = [
+            _make_response({"series": {"id": 10, "title": "Show"}, "episodes": [{"episodeNumber": 1}]}),
+            _make_response([{"id": 55, "path": "/tv/Show/S01E01.mp4"}]),
+        ]
+        mock_post.return_value = _make_response({"id": 99, "status": "queued"})
+        mock_wait.return_value = False
+        log = MagicMock()
+        result = rename_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log)
+        assert result is None
+
+    @patch("resources.mediamanager.wait_for_command")
+    @patch("resources.mediamanager.requests.post")
+    @patch("resources.mediamanager.requests.get")
+    def test_radarr_success(self, mock_get, mock_post, mock_wait):
+        mock_get.side_effect = [
+            _make_response({"movie": {"id": 20, "title": "Film"}}),
+            _make_response([{"id": 77, "path": "/movies/Film.mp4"}]),
+            _make_response({"id": 77, "path": "/movies/Film (2020).mp4"}),
+        ]
+        mock_post.return_value = _make_response({"id": 88, "status": "queued"})
+        mock_wait.return_value = True
+        log = MagicMock()
+        result = rename_via_arr("http://localhost:8989", {}, "radarr", "/movies/Film.mp4", log)
+        assert result == "/movies/Film (2020).mp4"
+
+    @patch("resources.mediamanager.wait_for_command")
+    @patch("resources.mediamanager.requests.post")
+    @patch("resources.mediamanager.requests.get")
+    def test_radarr_moviefile_as_dict(self, mock_get, mock_post, mock_wait):
+        mock_get.side_effect = [
+            _make_response({"movie": {"id": 20, "title": "Film"}}),
+            _make_response({"id": 77, "path": "/movies/Film.mp4"}),
+            _make_response({"id": 77, "path": "/movies/Film (2020).mp4"}),
+        ]
+        mock_post.return_value = _make_response({"id": 88, "status": "queued"})
+        mock_wait.return_value = True
+        log = MagicMock()
+        result = rename_via_arr("http://localhost:8989", {}, "radarr", "/movies/Film.mp4", log)
+        assert result == "/movies/Film (2020).mp4"
+
+    @patch("resources.mediamanager.requests.get")
+    def test_exception_returns_none(self, mock_get):
+        mock_get.side_effect = Exception("network error")
+        log = MagicMock()
+        result = rename_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log)
+        assert result is None
