@@ -17,8 +17,9 @@ try:
 except ImportError:
     _requests = None
 
-# Single-pass token regex: matches all three token forms in one scan.
+# Single-pass token regex: matches all four token forms in one scan.
 #   {[Token]}          → bracket-optional (group 'bkey')
+#   {(Token)}          → paren-optional   (group 'pkey2') — Radarr year convention
 #   {-Token:fmt}       → prefix-optional  (groups 'pfx', 'pkey', 'pfmt')
 #   { Token:fmt}       → space-prefix     (groups 'pfx', 'pkey', 'pfmt')
 #   {Token:fmt}        → standard         (groups 'skey', 'sfmt')
@@ -26,12 +27,14 @@ _TOKEN_RE = re.compile(
     r"\{"
     r"(?:"
     r"\[(?P<bkey>[^\]]+)\]"  # {[Token]}
+    r"|\((?P<pkey2>[^)]+)\)"  # {(Token)} — paren-wrapped optional
     r"|(?P<pfx>[-\s])(?P<pkey>[^}:]+)(?P<pfmt>:[^}]*)?"  # {-Token:fmt} / { Token:fmt}
-    r"|(?P<skey>[^}\[\]-][^}:]*)(?P<sfmt>:[^}]*)?"  # {Token:fmt}
+    r"|(?P<skey>[^}\[\](-][^}:]*)(?P<sfmt>:[^}]*)?"  # {Token:fmt}
     r")"
     r"\}"
 )
 _EMPTY_BRACKETS_RE = re.compile(r"\[\]")
+_EMPTY_PARENS_RE = re.compile(r"\(\)")
 _MULTI_SPACE_RE = re.compile(r"\s{2,}")
 
 # Codec display names
@@ -140,9 +143,38 @@ def _get_source(guess_data):
     return ""
 
 
+# Words that guessit may mis-classify as a release group when they are
+# actually fragments of quality/source tags (e.g. 'Hybrid Resolution').
+_BOGUS_RELEASE_GROUPS = frozenset(
+    [
+        "resolution",
+        "hybrid",
+        "remux",
+        "repack",
+        "proper",
+        "remastered",
+        "extended",
+        "theatrical",
+        "bluray",
+        "blu-ray",
+        "web",
+        "webrip",
+        "web-dl",
+        "webdl",
+        "hdtv",
+        "pdtv",
+        "dvdrip",
+        "dvd",
+    ]
+)
+
+
 def _get_release_group(guess_data):
-    """Extract release group from guessit data."""
-    return guess_data.get("release_group", "")
+    """Extract release group from guessit data, filtering known false positives."""
+    rg = guess_data.get("release_group", "") or ""
+    if rg.lower() in _BOGUS_RELEASE_GROUPS:
+        return ""
+    return rg
 
 
 class NamingData:
@@ -158,6 +190,7 @@ class NamingData:
         self.audio_channels = ""  # e.g., '5.1'
         self.hdr = ""  # e.g., 'HDR'
         self.release_group = ""  # e.g., 'MeGusta'
+        self.tmdbid = ""  # e.g., '63770'
 
         # TV
         self.series_title = ""
@@ -234,6 +267,10 @@ class NamingData:
             date = getattr(tagdata, "date", "") or ""
             self.movie_year = date[:4] if len(date) >= 4 else ""
 
+        # Common to both TV and Movie
+        if getattr(tagdata, "tmdbid", None):
+            self.tmdbid = str(tagdata.tmdbid)
+
     def from_sonarr(self, instance, filepath, log):
         """Try to get naming data from Sonarr API. Returns True on success."""
         return self._from_arr_api(instance, filepath, "sonarr", log)
@@ -282,7 +319,9 @@ class NamingData:
         if data.get("series"):
             series = data["series"]
             self.series_title = series.get("title", self.series_title)
-            self.series_year = str(series.get("year", self.series_year))
+            year = series.get("year")
+            if year:  # don't overwrite a known year with 0 or None
+                self.series_year = str(year)
             self.series_titleyear = "%s (%s)" % (self.series_title, self.series_year) if self.series_year else self.series_title
 
         if data.get("episodes"):
@@ -307,7 +346,9 @@ class NamingData:
             movie = data["movie"]
             self.movie_title = movie.get("title", self.movie_title)
             self.movie_cleantitle = sanitize_filename(self.movie_title)
-            self.movie_year = str(movie.get("year", self.movie_year))
+            year = movie.get("year")
+            if year:  # don't overwrite a known year with 0 or None
+                self.movie_year = str(year)
 
         log.debug("Got naming data from Radarr: %s (%s)" % (self.movie_title, self.movie_year))
 
@@ -356,6 +397,8 @@ def apply_template(template, data):
         "custom formats": "",  # Not available without Sonarr/Radarr
         "air-date": data.air_date,
         "airdate": data.air_date,
+        "tmdbid": data.tmdbid,
+        "tmdb-id": ("tmdb-%s" % data.tmdbid) if data.tmdbid else "",
     }
 
     def _apply_format(val, fmt):
@@ -385,6 +428,11 @@ def apply_template(template, data):
             key = m.group("bkey").strip().lower()
             val = token_map.get(key, "")
             return "[%s]" % _apply_format(val, None) if val else ""
+        if m.group("pkey2") is not None:
+            # {(Token)} — paren-wrapped optional (Radarr year convention)
+            key = m.group("pkey2").strip().lower()
+            val = token_map.get(key, "")
+            return "(%s)" % _apply_format(val, None) if val else ""
         if m.group("pfx") is not None:
             # {-Token} or { Token} — prefix-optional
             prefix = m.group("pfx")
@@ -400,8 +448,19 @@ def apply_template(template, data):
         val = token_map.get(key, "")
         return _apply_format(val, fmt)
 
+    # Pre-process Radarr/Plex-style nested-brace tokens.
+    # {tmdb-{TmdbId}}  → {[tmdb-id]}  renders as [tmdb-NNNNN] or ""
+    # {edition-{...}}  → ""           no edition data
+    # {[...3D...]}     → ""           no 3D data
+    # other {x-{y}}    → ""           unknown nested token
+    template = re.sub(r"\{tmdb-\{[^}]+\}\}", "{[tmdb-id]}", template)
+    template = re.sub(r"\{edition-\{[^}]+\}\}", "", template)
+    template = re.sub(r"\{\[[^\]]*3[Dd][^\]]*\]\}", "", template)
+    template = re.sub(r"\{[^{}]+-\{[^}]+\}\}", "", template)
+
     result = _TOKEN_RE.sub(_replace, template)
     result = _EMPTY_BRACKETS_RE.sub("", result)
+    result = _EMPTY_PARENS_RE.sub("", result)
     result = _MULTI_SPACE_RE.sub(" ", result)
     result = result.strip(" -")
 
