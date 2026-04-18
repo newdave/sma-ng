@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/opt/sma/venv/bin/python3
 """
 SMA-NG Daemon - HTTP webhook server for triggering media conversions.
 
