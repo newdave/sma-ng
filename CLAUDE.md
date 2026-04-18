@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Do NOT add `Co-Authored-By` lines referencing Claude, Anthropic, or any AI to commit messages.**
 - Do not add any AI attribution to commits whatsoever.
+- Break large changesets into smaller, contextual commits — each commit should represent one logical change.
+- Write informative commit messages that describe what changed and why (use conventional commit prefixes: `fix:`, `feat:`, `refactor:`, etc.).
+- Commit regularly rather than accumulating large diffs.
+- After each commit, run `git pull --rebase` then `git push`.
 
 ## Development Environment
 
