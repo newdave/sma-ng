@@ -79,6 +79,10 @@ run = "$PY manual.py -cl"
 description = "Preview conversion options (usage: mise run preview -- /path/to/file.mkv)"
 run = '$PY manual.py -i "$1" -oo'
 
+[tasks.rename]
+description = "Rename media files using naming templates (usage: mise run rename -- /path/to/file-or-dir)"
+run = '$PY rename.py "$@"'
+
 # ---------------------------------------------------------------------------
 # GPU detection & config generation
 # ---------------------------------------------------------------------------

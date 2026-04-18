@@ -7,7 +7,7 @@
 # because remote hosts are reached via SSH and may not have mise installed.
 
 .PHONY: help install install-dev install-all clean config systemd-install restart install-mise \
-        lint lint-fix test test-cov detect-gpu daemon convert codecs preview \
+        lint lint-fix test test-cov detect-gpu daemon convert codecs preview rename \
         deploy-check deploy-setup deploy remote-make \
         docker-build docker-run docker-shell docker-smoke
 
@@ -154,6 +154,9 @@ codecs: ## List supported codecs
 
 preview: ## Preview conversion options (usage: make preview FILE=/path/to/file.mkv)
 	$(call MISE_OR_DIRECT,preview -- "$(FILE)",$(PY) manual.py -i "$(FILE)" -oo)
+
+rename: ## Rename media files using naming templates (usage: make rename FILE=/path/to/file-or-dir)
+	$(call MISE_OR_DIRECT,rename -- "$(FILE)",$(PY) rename.py "$(FILE)")
 
 deploy-check: ## Verify .local exists and DEPLOY_HOSTS is set
 	$(call MISE_OR_DIRECT,deploy:check,$(error mise is required for deployment tasks))
