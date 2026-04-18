@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/opt/sma/venv/bin/python3
 """Updates ``autoProcess.ini`` with FFmpeg paths and media manager settings read from ``config.xml``."""
 
 import configparser
