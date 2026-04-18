@@ -208,7 +208,7 @@ Multiple instances supported. Any section starting with `Sonarr` or `Radarr` is 
 | `ssl` | bool | `false` | Use HTTPS |
 | `webroot` | string | | URL base path |
 | `path` | string | | Media root path for instance matching |
-| `force-rename` | bool | `false` | Trigger rename after processing |
+| `force-rename` | bool | `false` | After import, trigger Sonarr/Radarr's own RenameFiles command. When enabled, SMA's naming templates are skipped and the arr instance applies its configured naming format instead. Requires `rescan = true`. |
 | `rescan` | bool | `true` | Trigger library rescan after processing |
 | `block-reprocess` | bool | `false` | Prevent reprocessing same-extension files |
 | `in-progress-check` | bool | `true` | Wait for in-progress scans before rescanning |

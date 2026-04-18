@@ -264,3 +264,12 @@ token =
 ssl = False
 ignore-certs = True
 path-mapping =
+
+[Naming]
+enabled = true
+tv-template = {Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle:90} {[Custom Formats]} {[Quality Full]} {[MediaInfo AudioCodec}{ MediaInfo AudioChannels]} {[MediaInfo
+VideoDynamicRangeType]} {[MediaInfo VideoCodec]}{-Release Group}
+tv-airdate-template = {Series TitleYear} - {Air-Date} - {Episode CleanTitle:90} {[Custom Formats]} {[Quality Full]} {[MediaInfo AudioCodec}{ MediaInfo AudioChannels]} {[MediaInfo
+VideoDynamicRangeType]} {[MediaInfo VideoCodec]}{-Release Group}
+movie-template = {Movie CleanTitle} ({Release Year}) {[Custom Formats]} {[Quality Full]} {[MediaInfo AudioCodec}{ MediaInfo AudioChannels]} {[MediaInfo
+VideoDynamicRangeType]} {[MediaInfo VideoCodec]}{-Release Group}
