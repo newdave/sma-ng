@@ -342,56 +342,74 @@ def tvInfo(guessData, tmdbid=None, tvdbid=None, imdbid=None, season=None, episod
     return metadata
 
 
-def triggerRescan(filepath, settings):
-    """Trigger a rescan on the matching Sonarr/Radarr instance based on file path."""
-    try:
-        import requests
-    except ImportError:
-        log.warning("Python module 'requests' not installed, skipping media manager rescan.")
-        return
-
+def _find_arr_instance(filepath, settings):
+    """Return (instance, arr_type) for the first Sonarr/Radarr instance whose
+    path prefix matches *filepath*, or (None, None) if none matches."""
     dirpath = os.path.dirname(filepath)
-
-    # Check Sonarr instances
     for instance in settings.sonarr_instances:
         ipath = instance.get("path", "")
-        if ipath and dirpath.startswith(ipath) and instance.get("apikey") and instance.get("rescan", True):
-            _triggerManagerRescan(instance, dirpath, "sonarr", requests)
-            return
-
-    # Check Radarr instances
+        if ipath and dirpath.startswith(ipath) and instance.get("apikey"):
+            return instance, "sonarr"
     for instance in settings.radarr_instances:
         ipath = instance.get("path", "")
-        if ipath and dirpath.startswith(ipath) and instance.get("apikey") and instance.get("rescan", True):
-            _triggerManagerRescan(instance, dirpath, "radarr", requests)
-            return
-
-    log.debug("No matching Sonarr/Radarr instance found for path %s, skipping rescan." % dirpath)
+        if ipath and dirpath.startswith(ipath) and instance.get("apikey"):
+            return instance, "radarr"
+    return None, None
 
 
-def _triggerManagerRescan(instance, dirpath, manager_type, requests):
-    """Send rescan API request to a Sonarr or Radarr instance."""
+def triggerRescan(filepath, settings):
+    """Trigger a rescan on the matching Sonarr/Radarr instance based on file path.
+
+    When the matched instance has ``force-rename = True``, waits for the import
+    command to complete, then calls Sonarr/Radarr's RenameFiles command.
+
+    Returns the new file path if arr renamed the file, otherwise None.
+    """
+    try:
+        import requests  # noqa: F401  # type: ignore[import-untyped]
+    except ImportError:
+        log.warning("Python module 'requests' not installed, skipping media manager rescan.")
+        return None
+
+    instance, arr_type = _find_arr_instance(filepath, settings)
+    if not instance:
+        log.debug("No matching Sonarr/Radarr instance found for path %s, skipping rescan." % os.path.dirname(filepath))
+        return None
+
+    if not instance.get("rescan", True):
+        return None
+
     protocol = "https://" if instance.get("ssl") else "http://"
     base_url = protocol + instance["host"] + ":" + str(instance["port"]) + instance["webroot"]
-    url = base_url + "/api/v3/command"
     headers = {"X-Api-Key": instance["apikey"], "User-Agent": "SMA-NG - manual"}
+    dirpath = os.path.dirname(filepath)
 
-    if manager_type == "sonarr":
+    if arr_type == "sonarr":
         payload = {"name": "DownloadedEpisodesScan", "path": dirpath}
     else:
         payload = {"name": "DownloadedMoviesScan", "path": dirpath}
 
     try:
-        log.info("Requesting %s [%s] to rescan '%s'." % (manager_type.title(), instance["section"], dirpath))
-        r = requests.post(url, json=payload, headers=headers)
-        rstate = r.json()
-        try:
-            rstate = rstate[0]
-        except (KeyError, IndexError, TypeError):
-            pass
-        log.info("%s response: ID %s %s." % (instance["section"], rstate.get("id", "?"), rstate.get("status", "?")))
+        from resources.mediamanager import api_command, rename_via_arr, wait_for_command
+
+        log.info("Requesting %s [%s] to rescan '%s'." % (arr_type.title(), instance["section"], dirpath))
+        cmd = api_command(base_url, headers, payload, log)
+        command_id = cmd.get("id")
+
+        if instance.get("rename") and command_id:
+            # Wait for the import to complete before triggering rename
+            completed = wait_for_command(base_url, headers, command_id, log)
+            if not completed:
+                log.warning("%s [%s] import command did not complete; skipping arr rename." % (arr_type.title(), instance["section"]))
+                return None
+            new_path = rename_via_arr(base_url, headers, arr_type, filepath, log)
+            if new_path:
+                log.info("%s renamed file to: %s" % (arr_type.title(), new_path))
+            return new_path
     except Exception:
-        log.exception("Failed to trigger rescan on %s [%s]." % (manager_type.title(), instance["section"]))
+        log.exception("Failed to trigger rescan on %s [%s]." % (arr_type.title(), instance["section"]))
+
+    return None
 
 
 def checkAlreadyProcessed(inputfile, processedList):
@@ -560,8 +578,10 @@ def processFile(
         if mp.settings.relocate_moov and not tagfailed:
             mp.QTFS(output["output"])
 
-        # File renaming
-        if mp.settings.naming_enabled and tagdata:
+        # File renaming — skip when arr will rename via force-rename
+        _arr_instance, _ = _find_arr_instance(output["output"], mp.settings)
+        _arr_will_rename = bool(_arr_instance and _arr_instance.get("rename") and _arr_instance.get("rescan", True))
+        if mp.settings.naming_enabled and tagdata and not _arr_will_rename:
             try:
                 import guessit as _guessit
 
@@ -602,8 +622,10 @@ def processFile(
                 mp.post(output_files, type_hint, tmdbid=tmdbid, season=season, episode=episode)
         addtoProcessedArchive(output_files + [output["input"]] if not output["input_deleted"] else output_files, processedList, processedArchive)
 
-        # Trigger rescan on matching Sonarr/Radarr instance
-        triggerRescan(output["output"], mp.settings)
+        # Trigger rescan on matching Sonarr/Radarr instance; may also rename
+        arr_renamed_path = triggerRescan(output["output"], mp.settings)
+        if arr_renamed_path:
+            output["output"] = arr_renamed_path
         return True
     else:
         log.error("There was an error processing file %s, no output data received" % inputfile)
