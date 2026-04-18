@@ -90,7 +90,6 @@ max-bitrate = 0
 preset = fast
 
 [HDR]
-codec =
 pix-fmt =
 space = bt2020nc
 transfer = smpte2084
@@ -106,13 +105,14 @@ codec = hevc, h265
 preset = fast
 
 [Naming]
-enabled = False
-tv-template = {Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle} [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}
-tv-airdate-template = {Series TitleYear} - {Air-Date} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}
-movie-template = {Movie CleanTitle} ({Release Year}) [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}
+enabled = true
+tv-template = {Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle:90} {[Custom Formats]} {[Quality Full]} {[MediaInfo AudioCodec}{ MediaInfo AudioChannels]} {[MediaInfo VideoDynamicRangeType]} {[MediaInfo VideoCodec]}{-Release Group}
+tv-airdate-template = {Series TitleYear} - {Air-Date} - {Episode CleanTitle:90} {[Custom Formats]} {[Quality Full]} {[MediaInfo AudioCodec}{ MediaInfo AudioChannels]} {[MediaInfo VideoDynamicRangeType]} {[MediaInfo VideoCodec]}{-Release Group}
+movie-template = {Movie CleanTitle} ({Release Year}) {[Custom Formats]} {[Quality Full]} {[MediaInfo AudioCodec}{ MediaInfo AudioChannels]} {[MediaInfo
+VideoDynamicRangeType]} {[MediaInfo VideoCodec]}{-Release Group}
 
 [Audio]
-codec = eac3, ac3
+codec = eac3, ac3, aac
 languages = eng
 default-language = eng
 first-stream-of-language = true
