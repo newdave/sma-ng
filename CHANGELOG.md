@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.2...sma-ng-v1.1.3) (2026-04-19)
+
+
+### Bug Fixes
+
+* suppress SC2016 for intentional jq variable refs in sma-webhook.sh ([1d941bc](https://github.com/newdave/sma-ng/commit/1d941bc596d01741456f002d0b2f9d3d8e210e5d))
+
 ## [1.1.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.1...sma-ng-v1.1.2) (2026-04-19)
 
 
