@@ -369,6 +369,114 @@ class TestHealthEndpoint:
             assert resp.headers.get("Content-Type", "").startswith("application/json")
 
 
+class TestLogEndpoints:
+    """Test /logs and /logs/<name> endpoints."""
+
+    def _get(self, server, path):
+        host, port = server.server_address
+        url = "http://%s:%d%s" % (host, port, path)
+        with urllib.request.urlopen(url) as resp:
+            return json.loads(resp.read()), resp.status
+
+    def _get_404(self, server, path):
+        host, port = server.server_address
+        url = "http://%s:%d%s" % (host, port, path)
+        try:
+            urllib.request.urlopen(url)
+            return None  # no error raised
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    def test_logs_list_returns_array(self, live_server):
+        data, status = self._get(live_server, "/logs")
+        assert status == 200
+        assert isinstance(data, list)
+
+    def test_logs_list_entries_have_required_fields(self, live_server):
+        # Register a config logger so the list is non-empty
+        live_server.config_log_manager.get_logger("/tmp/autoProcess.test.ini")
+        data, _ = self._get(live_server, "/logs")
+        for entry in data:
+            assert "name" in entry
+            assert "file" in entry
+            assert "size" in entry
+
+    def test_logs_unknown_name_returns_404(self, live_server):
+        code = self._get_404(live_server, "/logs/nonexistent-log-abc123")
+        assert code == 404
+
+    def test_logs_path_traversal_returns_404(self, live_server):
+        code = self._get_404(live_server, "/logs/../../etc/passwd")
+        assert code == 404
+
+    def test_logs_content_returns_entries_and_file_size(self, live_server, tmp_path):
+        import os
+
+        # Write a test log file in the manager's logs_dir
+        log_name = "autoProcess.testlog"
+        log_path = os.path.join(live_server.config_log_manager.logs_dir, log_name + ".log")
+        with open(log_path, "w") as f:
+            f.write('{"timestamp":"2026-01-01 00:00:00","level":"INFO","job_id":"1","message":"hello"}\n')
+            f.write('{"timestamp":"2026-01-01 00:00:01","level":"ERROR","job_id":"2","message":"oops"}\n')
+        # Register the logger so it appears in get_all_log_files
+        live_server.config_log_manager.get_logger("/tmp/" + log_name + ".ini")
+
+        data, status = self._get(live_server, "/logs/" + log_name + "?lines=100")
+        assert status == 200
+        assert "entries" in data
+        assert "file_size" in data
+        assert len(data["entries"]) == 2
+        assert data["file_size"] > 0
+
+    def test_logs_content_job_id_filter(self, live_server, tmp_path):
+        import os
+
+        log_name = "autoProcess.filterjob"
+        log_path = os.path.join(live_server.config_log_manager.logs_dir, log_name + ".log")
+        with open(log_path, "w") as f:
+            f.write('{"timestamp":"2026-01-01 00:00:00","level":"INFO","job_id":"10","message":"job10"}\n')
+            f.write('{"timestamp":"2026-01-01 00:00:01","level":"INFO","job_id":"20","message":"job20"}\n')
+        live_server.config_log_manager.get_logger("/tmp/" + log_name + ".ini")
+
+        data, _ = self._get(live_server, "/logs/" + log_name + "?job_id=10")
+        assert all(e["job_id"] == "10" for e in data["entries"])
+        assert len(data["entries"]) == 1
+
+    def test_logs_tail_requires_offset(self, live_server):
+        # Register a logger first
+        log_name = "autoProcess.tailtest"
+        live_server.config_log_manager.get_logger("/tmp/" + log_name + ".ini")
+        host, port = live_server.server_address
+        url = "http://%s:%d/logs/%s/tail" % (host, port, log_name)
+        try:
+            urllib.request.urlopen(url)
+            assert False, "Expected 400"
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+
+    def test_logs_tail_returns_new_content(self, live_server):
+        import os
+
+        log_name = "autoProcess.tailpoll"
+        log_path = os.path.join(live_server.config_log_manager.logs_dir, log_name + ".log")
+        with open(log_path, "w") as f:
+            f.write('{"timestamp":"2026-01-01 00:00:00","level":"INFO","job_id":"5","message":"first"}\n')
+        live_server.config_log_manager.get_logger("/tmp/" + log_name + ".ini")
+
+        # First fetch to get file_size
+        data, _ = self._get(live_server, "/logs/" + log_name + "?lines=100")
+        offset = data["file_size"]
+
+        # Append a new line
+        with open(log_path, "a") as f:
+            f.write('{"timestamp":"2026-01-01 00:00:01","level":"INFO","job_id":"5","message":"second"}\n')
+
+        tail, status = self._get(live_server, "/logs/%s/tail?offset=%d" % (log_name, offset))
+        assert status == 200
+        assert len(tail["entries"]) == 1
+        assert tail["entries"][0]["message"] == "second"
+
+
 # ---------------------------------------------------------------------------
 # ConfigLockManager extended tests
 # ---------------------------------------------------------------------------
@@ -458,6 +566,26 @@ class TestConfigLogManager:
         l1 = mgr.get_logger("/cfg/autoProcess.ini")
         l2 = mgr.get_logger("/cfg/autoProcess.ini")
         assert l1 is l2
+
+    def test_get_all_log_files_empty(self, tmp_path):
+        mgr = ConfigLogManager(str(tmp_path))
+        assert mgr.get_all_log_files() == []
+
+    def test_get_all_log_files_after_get_logger(self, tmp_path):
+        mgr = ConfigLogManager(str(tmp_path))
+        mgr.get_logger("/cfg/autoProcess.ini")
+        mgr.get_logger("/cfg/autoProcess.tv.ini")
+        result = mgr.get_all_log_files()
+        names = {e["name"] for e in result}
+        assert names == {"autoProcess", "autoProcess.tv"}
+        for e in result:
+            assert e["path"].endswith(e["name"] + ".log")
+
+    def test_get_all_log_files_deduplicates(self, tmp_path):
+        mgr = ConfigLogManager(str(tmp_path))
+        mgr.get_logger("/cfg/autoProcess.ini")
+        mgr.get_logger("/cfg/autoProcess.ini")  # same config twice
+        assert len(mgr.get_all_log_files()) == 1
 
 
 # ---------------------------------------------------------------------------

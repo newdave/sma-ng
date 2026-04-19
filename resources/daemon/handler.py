@@ -312,6 +312,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
         limit = int(query.get("limit", [100])[0])
         offset = int(query.get("offset", [0])[0])
         jobs = self.server.job_db.get_jobs(status=status, config=config, limit=limit, offset=offset)
+        for job in jobs:
+            if job.get("config"):
+                job["log_name"] = os.path.splitext(os.path.basename(job["config"]))[0]
         self.send_json_response(200, {"jobs": jobs, "count": len(jobs), "limit": limit, "offset": offset})
 
     def _get_job(self, path):
@@ -387,6 +390,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 "config": entry["config"],
                 "default_args": entry.get("default_args", []),
                 "log_file": self.server.config_log_manager.get_log_file(entry["config"]),
+                "log_name": os.path.splitext(os.path.basename(entry["config"]))[0],
                 "active_jobs": self.server.config_lock_manager.get_active_jobs(entry["config"]),
                 "pending_jobs": self.server.job_db.pending_count_for_config(entry["config"]),
             }
@@ -400,12 +404,139 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 "default_config": default_config,
                 "default_args": pcm.default_args,
                 "default_log": self.server.config_log_manager.get_log_file(default_config),
+                "default_log_name": os.path.splitext(os.path.basename(default_config))[0],
                 "default_active_jobs": self.server.config_lock_manager.get_active_jobs(default_config),
                 "default_pending_jobs": self.server.job_db.pending_count_for_config(default_config),
                 "path_configs": configs_with_status,
                 "logs_directory": self.server.config_log_manager.logs_dir,
             },
         )
+
+    def _get_logs(self):
+        """List all known log files with metadata."""
+        log_files = self.server.config_log_manager.get_all_log_files()
+        result = []
+        for entry in log_files:
+            info = {"name": entry["name"], "file": entry["path"]}
+            try:
+                st = os.stat(entry["path"])
+                info["size"] = st.st_size
+                from datetime import timezone as _tz
+
+                info["mtime"] = datetime.fromtimestamp(st.st_mtime, tz=_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            except OSError:
+                info["size"] = 0
+                info["mtime"] = None
+            result.append(info)
+        self.send_json_response(200, result)
+
+    def _get_log_content(self, path, query):
+        """Fetch log content for a specific log file.
+
+        URL patterns:
+          GET /logs/<logname>           — last N lines, with optional filters
+          GET /logs/<logname>/tail      — lines after byte offset (for polling)
+
+        Query params:
+          job_id=<int>    filter to this job only
+          level=INFO|...  minimum level filter (ERROR > WARNING > INFO > DEBUG)
+          lines=<n>       last N lines (default 500, max 2000; ignored if offset given)
+          offset=<bytes>  return content starting at this byte offset
+        """
+        _LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
+
+        # Parse the logname from path, handling /logs/<name> and /logs/<name>/tail
+        # path starts with "/logs/"
+        remainder = path[len("/logs/") :]
+        is_tail = remainder.endswith("/tail")
+        if is_tail:
+            remainder = remainder[: -len("/tail")]
+        logname = remainder.strip("/")
+
+        # Validate against whitelist — prevent path traversal
+        known = {e["name"]: e["path"] for e in self.server.config_log_manager.get_all_log_files()}
+        if not logname or logname not in known:
+            self.send_json_response(404, {"error": "Log not found"})
+            return
+
+        log_path = known[logname]
+
+        # Parse query params
+        job_id_filter = query.get("job_id", [None])[0]
+        level_filter = (query.get("level", [None])[0] or "").upper() or None
+        lines_param = int(query.get("lines", [500])[0])
+        lines_param = min(lines_param, 2000)
+        offset_param = query.get("offset", [None])[0]
+        if offset_param is not None:
+            offset_param = int(offset_param)
+
+        # Get current file size for tail polling
+        try:
+            file_size = os.path.getsize(log_path)
+        except OSError:
+            self.send_json_response(200, {"entries": [], "file_size": 0})
+            return
+
+        if is_tail:
+            if offset_param is None:
+                self.send_json_response(400, {"error": "offset param required for /tail"})
+                return
+            # Handle log rotation: if offset > file_size, reset to 0
+            if offset_param > file_size:
+                offset_param = 0
+            raw_lines = self._read_from_offset(log_path, offset_param)
+        elif offset_param is not None:
+            raw_lines = self._read_from_offset(log_path, offset_param)
+        else:
+            raw_lines = self._tail_lines(log_path, lines_param)
+
+        entries = []
+        for line in raw_lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except (ValueError, KeyError):
+                continue
+            # Apply job_id filter
+            if job_id_filter is not None and str(entry.get("job_id", "")) != str(job_id_filter):
+                continue
+            # Apply level filter
+            if level_filter:
+                entry_level = (entry.get("level") or "").upper()
+                if _LEVEL_ORDER.get(entry_level, 0) < _LEVEL_ORDER.get(level_filter, 0):
+                    continue
+            entries.append(entry)
+
+        self.send_json_response(200, {"entries": entries, "file_size": file_size})
+
+    @staticmethod
+    def _tail_lines(filepath, n):
+        """Read last n lines from a file without loading the whole file."""
+        try:
+            with open(filepath, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                if size == 0:
+                    return []
+                block = min(size, max(n * 250, 65536))
+                f.seek(-block, 2)
+                data = f.read()
+        except OSError:
+            return []
+        return data.decode("utf-8", errors="replace").splitlines()[-n:]
+
+    @staticmethod
+    def _read_from_offset(filepath, offset):
+        """Read lines from a file starting at byte offset."""
+        try:
+            with open(filepath, "rb") as f:
+                f.seek(offset)
+                data = f.read()
+        except OSError:
+            return []
+        return data.decode("utf-8", errors="replace").splitlines()
 
     def _get_scan(self, query):
         # Filter a list of paths to those not yet recorded as scanned.
@@ -481,12 +612,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
         "/stats": lambda self, p, q: self._get_stats(p, q),
         "/scan": lambda self, p, q: self._get_scan(q),
         "/browse": lambda self, p, q: self._get_browse(q),
+        "/logs": lambda self, p, q: self._get_logs(),
         "/favicon.png": lambda self, p, q: self._get_favicon(p, q),
     }
 
     _GET_PREFIX_ROUTES = [
         ("/docs/", lambda self, p, q: self._get_docs(p, q)),
         ("/jobs/", lambda self, p, q: self._get_job(p)),
+        ("/logs/", lambda self, p, q: self._get_log_content(p, q)),
     ]
 
     def do_GET(self):

@@ -150,6 +150,16 @@ class ConfigLogManager:
         log_name = self._config_to_logname(config_path)
         return os.path.join(self.logs_dir, f"{log_name}.log")
 
+    def get_all_log_files(self):
+        """Return list of {name, path} for every known log file (one per registered config)."""
+        with self.lock:
+            seen = {}
+            for config_path in self.loggers:
+                log_name = self._config_to_logname(config_path)
+                log_path = os.path.join(self.logs_dir, f"{log_name}.log")
+                seen[log_name] = log_path
+            return [{"name": name, "path": path} for name, path in seen.items()]
+
 
 class PathConfigManager:
     """Manages path-to-config mappings for different media directories."""
