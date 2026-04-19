@@ -39,12 +39,6 @@ jobs:
     if: needs.release-please.outputs.pr != ''
     runs-on: ubuntu-latest
     steps:
-      - name: Approve release PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ fromJSON(needs.release-please.outputs.pr).number }}
-        run: gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve
-
       - name: Enable auto-merge (squash)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
