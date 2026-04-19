@@ -90,7 +90,7 @@ cmd_submit() {
     local json
     json=$(jq -n "${payload[@]}" "$jq_expr")
 
-    curl -s -X POST "$SMA_DAEMON_URL/webhook" \
+    curl -s -X POST "$SMA_DAEMON_URL/webhook/generic" \
         -H "Content-Type: application/json" \
         "${auth_headers[@]}" \
         -d "$json" | jq .

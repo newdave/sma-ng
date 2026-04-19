@@ -24,11 +24,13 @@ class DaemonServer(HTTPServer):
         logger,
         worker_count=2,
         api_key=None,
+        basic_auth=None,
         heartbeat_interval=30,
         stale_seconds=120,
         ffmpeg_dir=None,
         cli_api_key=None,
         cli_ffmpeg_dir=None,
+        cli_basic_auth=None,
         job_timeout_seconds=0,
         progress_log_interval=60,
     ):
@@ -40,10 +42,12 @@ class DaemonServer(HTTPServer):
         self.logger = logger
         self.worker_count = worker_count
         self.api_key = api_key
+        self.basic_auth = basic_auth  # (username, password) tuple or None
         self.stale_seconds = stale_seconds
         self.node_id = socket.gethostname()
         self.started_at = datetime.now(timezone.utc)
         self._cli_api_key = cli_api_key
+        self._cli_basic_auth = cli_basic_auth
         self._cli_ffmpeg_dir = cli_ffmpeg_dir
         self._job_processes = {}  # job_id -> Popen, for cancel support
         self._job_progress = {}  # job_id -> timecode string (e.g. "00:01:23")
@@ -143,6 +147,12 @@ class DaemonServer(HTTPServer):
 
         # Re-apply api_key priority: CLI arg > env var > config file
         self.api_key = self._cli_api_key or os.environ.get("SMA_DAEMON_API_KEY") or self.path_config_manager.api_key
+
+        # Re-apply basic_auth priority: CLI arg > env vars > config file
+        env_user = os.environ.get("SMA_DAEMON_USERNAME")
+        env_pass = os.environ.get("SMA_DAEMON_PASSWORD")
+        env_basic = (env_user, env_pass) if env_user and env_pass else None
+        self.basic_auth = self._cli_basic_auth or env_basic or self.path_config_manager.basic_auth
 
         # Re-apply ffmpeg_dir priority: CLI arg > env var > config file
         new_ffmpeg_dir = self._cli_ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or self.path_config_manager.ffmpeg_dir

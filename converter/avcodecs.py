@@ -792,11 +792,7 @@ class AacCodec(AudioCodec):
     codec_name = "aac"
     ffmpeg_codec_name = "aac"
     ffprobe_codec_name = "aac"
-    aac_experimental_enable = ["-strict", "experimental"]
     max_channels = 6
-
-    def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
-        return self.aac_experimental_enable
 
 
 class FdkAacCodec(AudioCodec):
@@ -917,10 +913,6 @@ class FlacCodec(AudioCodec):
     codec_name = "flac"
     ffmpeg_codec_name = "flac"
     ffprobe_codec_name = "flac"
-    flac_experimental_enable = ["-strict", "experimental"]
-
-    def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
-        return self.flac_experimental_enable
 
 
 class DtsCodec(AudioCodec):
@@ -995,10 +987,6 @@ class OpusCodec(AudioCodec):
     codec_name = "opus"
     ffmpeg_codec_name = "libopus"
     ffprobe_codec_name = "opus"
-    opus_experimental_enable = ["-strict", "experimental"]
-
-    def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
-        return self.opus_experimental_enable
 
 
 class PCMS24LECodec(AudioCodec):

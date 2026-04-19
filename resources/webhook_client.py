@@ -64,7 +64,7 @@ def submit_job(path, config=None, args=None, logger=None):
         log.error("Python 'requests' module required for webhook client. Install with: pip install requests")
         return None
 
-    url = get_daemon_url() + "/webhook"
+    url = get_daemon_url() + "/webhook/generic"
     payload = {"path": path}
     if config:
         payload["config"] = config

@@ -210,7 +210,7 @@ log "Submitting: $TARGET"
 [[ "${#EXTRA_ARGS[@]}" -gt 0 ]] && log "Extra args: ${EXTRA_ARGS[*]}"
 [[ -n "$CONFIG_OVERRIDE" ]] && log "Config:     $CONFIG_OVERRIDE"
 
-response=$(curl_post_json "${SMA_BASE}/webhook" "$payload") || {
+response=$(curl_post_json "${SMA_BASE}/webhook/generic" "$payload") || {
     die "Submission failed. Check daemon is running at ${SMA_BASE}."
 }
 

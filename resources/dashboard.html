@@ -586,7 +586,7 @@ function dashboard() {
         const extraArgs = [...this.submitFlags];
         if (this.submitArgs.trim()) extraArgs.push(...this.submitArgs.trim().split(/\s+/));
         if (extraArgs.length) body.args = extraArgs;
-        const r = await fetch('/webhook', {method:'POST', headers: this.authHeaders(), body: JSON.stringify(body)});
+        const r = await fetch('/webhook/generic', {method:'POST', headers: this.authHeaders(), body: JSON.stringify(body)});
         const d = await r.json();
         if (r.ok) {
           this.submitResult = 'Job #' + d.job_id + ' queued for ' + d.path;
