@@ -232,7 +232,7 @@ class TestDashboardHTML:
         assert "fetch('/stats'" in DASHBOARD_HTML
         assert "fetch('/configs'" in DASHBOARD_HTML
         assert "fetch('/jobs" in DASHBOARD_HTML
-        assert "fetch('/webhook'" in DASHBOARD_HTML
+        assert "fetch('/webhook/generic'" in DASHBOARD_HTML
 
     def test_stat_keys_present(self):
         for key in ("total", "pending", "running", "completed", "failed"):
@@ -783,18 +783,18 @@ class TestHTTPEndpoints:
         assert status == 404
 
     def test_webhook_empty_body(self, live_server):
-        data, status = self._post(live_server, "/webhook", data=None)
+        data, status = self._post(live_server, "/webhook/generic", data=None)
         assert status == 400
 
     def test_webhook_nonexistent_path(self, live_server):
-        data, status = self._post(live_server, "/webhook", data={"path": "/nonexistent/file.mkv"})
+        data, status = self._post(live_server, "/webhook/generic", data={"path": "/nonexistent/file.mkv"})
         assert status == 400
         assert "does not exist" in data["error"]
 
     def test_webhook_valid_path_json(self, live_server, tmp_path):
         f = tmp_path / "movie.mkv"
         f.touch()
-        data, status = self._post(live_server, "/webhook", data={"path": str(f)})
+        data, status = self._post(live_server, "/webhook/generic", data={"path": str(f)})
         assert status == 202
         assert "job_id" in data
         assert data["job_id"] is not None
@@ -803,7 +803,7 @@ class TestHTTPEndpoints:
         f = tmp_path / "movie.mkv"
         f.touch()
         host, port = live_server.server_address
-        url = "http://%s:%d/webhook" % (host, port)
+        url = "http://%s:%d/webhook/generic" % (host, port)
         body = str(f).encode()
         req = urllib.request.Request(url, data=body, method="POST")
         req.add_header("Content-Length", str(len(body)))
@@ -814,8 +814,8 @@ class TestHTTPEndpoints:
     def test_webhook_duplicate_submission(self, live_server, tmp_path):
         f = tmp_path / "movie.mkv"
         f.touch()
-        data1, _ = self._post(live_server, "/webhook", data={"path": str(f)})
-        data2, status2 = self._post(live_server, "/webhook", data={"path": str(f)})
+        data1, _ = self._post(live_server, "/webhook/generic", data={"path": str(f)})
+        data2, status2 = self._post(live_server, "/webhook/generic", data={"path": str(f)})
         assert status2 == 200
         assert data2["status"] == "duplicate"
 
@@ -823,7 +823,7 @@ class TestHTTPEndpoints:
         """JSON body where args is a string gets split into a list."""
         f = tmp_path / "movie.mkv"
         f.touch()
-        data, status = self._post(live_server, "/webhook", data={"path": str(f), "args": "-tmdb 603"})
+        data, status = self._post(live_server, "/webhook/generic", data={"path": str(f), "args": "-tmdb 603"})
         assert status == 202
 
     def test_cleanup_endpoint(self, live_server):
@@ -875,7 +875,7 @@ class TestHTTPEndpoints:
 
         f = recycle / "movie.mkv"
         f.touch()
-        data, status = self._post(live_server, "/webhook", data={"path": str(f)})
+        data, status = self._post(live_server, "/webhook/generic", data={"path": str(f)})
         assert status == 400
         assert "recycle-bin" in data["error"]
 
@@ -889,7 +889,7 @@ class TestHTTPEndpoints:
 
         f = subdir / "movie.mkv"
         f.touch()
-        data, status = self._post(live_server, "/webhook", data={"path": str(f)})
+        data, status = self._post(live_server, "/webhook/generic", data={"path": str(f)})
         assert status == 400
         assert "recycle-bin" in data["error"]
 
@@ -904,7 +904,7 @@ class TestHTTPEndpoints:
 
         f = media / "movie.mkv"
         f.touch()
-        data, status = self._post(live_server, "/webhook", data={"path": str(f)})
+        data, status = self._post(live_server, "/webhook/generic", data={"path": str(f)})
         assert status == 202
 
 

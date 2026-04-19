@@ -32,7 +32,7 @@ SCRIPTS = {
 
 
 class _MockDaemonHandler(http.server.BaseHTTPRequestHandler):
-    """Captures POST /webhook requests and responds with a job_id.
+    """Captures POST /webhook/* requests and responds with a job_id.
     Handles GET /jobs/{id} for polling, always returning completed."""
 
     def log_message(self, format, *args):
@@ -180,22 +180,21 @@ class TestPostRadarr:
         assert result.returncode == 0
         assert len(submissions) == 1
         body = submissions[0]
-        assert body["path"] == "/movies/The Matrix (1999)/The Matrix.mkv"
-        assert "-tmdb" in body.get("args", [])
-        assert "603" in body.get("args", [])
+        assert body["movieFile"]["path"] == "/movies/The Matrix (1999)/The Matrix.mkv"
+        assert body["movie"]["tmdbId"] == 603
 
     def test_submits_with_imdb_id(self):
         result, submissions = _run("radarr", env_override=self._env(radarr_movie_tmdbid=""))
         assert result.returncode == 0
-        args = submissions[0].get("args", [])
-        assert "-imdb" in args
-        assert "tt0133093" in args
+        movie = submissions[0]["movie"]
+        assert "tmdbId" not in movie
+        assert movie["imdbId"] == "tt0133093"
 
     def test_submits_both_tmdb_and_imdb(self):
         result, submissions = _run("radarr", env_override=self._env())
-        args = submissions[0].get("args", [])
-        assert "-tmdb" in args
-        assert "-imdb" in args
+        movie = submissions[0]["movie"]
+        assert "tmdbId" in movie
+        assert "imdbId" in movie
 
     def test_missing_path_exits_nonzero(self):
         result, submissions = _run("radarr", env_override=self._env(radarr_moviefile_path=""))
@@ -288,13 +287,10 @@ class TestPostSonarr:
         assert result.returncode == 0
         assert len(submissions) == 1
         body = submissions[0]
-        args = body.get("args", [])
-        assert body["path"] == "/tv/Breaking Bad/Season 01/Breaking.Bad.S01E01.mkv"
-        assert "-tvdb" in args
-        assert "81189" in args
-        assert "-s" in args
-        assert "1" in args
-        assert "-e" in args
+        assert body["episodeFile"]["path"] == "/tv/Breaking Bad/Season 01/Breaking.Bad.S01E01.mkv"
+        assert body["series"]["tvdbId"] == 81189
+        assert body["episodes"][0]["seasonNumber"] == 1
+        assert body["episodes"][0]["episodeNumber"] == 1
 
     def test_multi_episode_all_in_args(self):
         result, submissions = _run(
@@ -302,9 +298,8 @@ class TestPostSonarr:
             env_override=self._env(sonarr_episodefile_episodenumbers="1,2,3"),
         )
         assert result.returncode == 0
-        args = submissions[0].get("args", [])
-        ep_values = [args[i + 1] for i, a in enumerate(args) if a == "-e"]
-        assert ep_values == ["1", "2", "3"]
+        ep_numbers = [str(ep["episodeNumber"]) for ep in submissions[0]["episodes"]]
+        assert ep_numbers == ["1", "2", "3"]
 
     def test_missing_path_exits_nonzero(self):
         result, submissions = _run("sonarr", env_override=self._env(sonarr_episodefile_path=""))
@@ -377,14 +372,10 @@ class TestPostSonarr:
         )
         assert result.returncode == 0
         body = submissions[0]
-        assert body["path"] == path
-        args = body.get("args", [])
-        assert "-tvdb" in args
-        assert "289574" in args
-        assert "-s" in args
-        assert "11" in args
-        assert "-e" in args
-        assert "101" in args
+        assert body["episodeFile"]["path"] == path
+        assert body["series"]["tvdbId"] == 289574
+        assert body["episodes"][0]["seasonNumber"] == 11
+        assert body["episodes"][0]["episodeNumber"] == 101
 
 
 # ---------------------------------------------------------------------------

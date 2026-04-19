@@ -66,7 +66,7 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `GET` | `/logs` | Yes | List all log files with metadata |
 | `GET` | `/logs/<name>` | Yes | Get log content. Query: `?lines=200&level=ERROR&job_id=42&offset=0` |
 | `GET` | `/logs/<name>/tail` | Yes | Poll for new entries after byte offset. Query: `?offset=<bytes>` |
-| `POST` | `/webhook` | Yes | Submit conversion job (file or directory path) |
+| `POST` | `/webhook/generic` | Yes | Submit conversion job (file or directory path) |
 | `POST` | `/webhook/sonarr` | Yes | Native Sonarr webhook endpoint (On Download/Upgrade) |
 | `POST` | `/webhook/radarr` | Yes | Native Radarr webhook endpoint (On Download/Upgrade) |
 | `POST` | `/cleanup` | Yes | Remove old jobs. Query: `?days=30` |
@@ -86,24 +86,24 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 
 ```bash
 # Plain text body
-curl -X POST http://localhost:8585/webhook \
+curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -d "/path/to/movie.mkv"
 
 # JSON body
-curl -X POST http://localhost:8585/webhook \
+curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv"}'
 
 # JSON with extra manual.py arguments
-curl -X POST http://localhost:8585/webhook \
+curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "args": ["-tmdb", "603"]}'
 
 # JSON with config override (bypasses path matching)
-curl -X POST http://localhost:8585/webhook \
+curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "config": "/custom/autoProcess.ini"}'

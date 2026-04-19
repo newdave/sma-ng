@@ -60,6 +60,12 @@ class TestEstimateVideoBitrate:
 class TestStreamTitles:
     """Test stream title generation for video, audio, and subtitles."""
 
+    @pytest.fixture(autouse=True)
+    def _no_custom_stream_title(self):
+        """Suppress any user-defined streamTitle hook so tests use the built-in logic."""
+        with patch("resources.mediaprocessor.streamTitle", None):
+            yield
+
     def _make_processor(self):
         with patch("resources.mediaprocessor.Converter"):
             with patch("resources.readsettings.ReadSettings._validate_binaries"):
