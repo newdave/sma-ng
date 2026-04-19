@@ -9,10 +9,6 @@ permissions:
   pull-requests: write
   packages: write
 
-env:
-  # Used by the publish job to generate release assets.
-  # The Docker image version comes from pyproject.toml via docker.yml.
-
 jobs:
   # ── Step 1: Run release-please on every push to main ────────────────────────
   # Creates or updates a "Release PR" that bumps pyproject.toml and the
