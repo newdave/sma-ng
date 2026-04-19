@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.0.1...sma-ng-v1.1.0) (2026-04-19)
+
+
+### Features
+
+* upgrade FFmpeg from 8.0 to 8.1 ([93e4995](https://github.com/newdave/sma-ng/commit/93e4995616ce00971eb15d3fa7ea67949d61cf54))
+
 ## [1.0.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.0.0...sma-ng-v1.0.1) (2026-04-19)
 
 
