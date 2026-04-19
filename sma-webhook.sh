@@ -72,17 +72,21 @@ cmd_submit() {
 
     local payload=()
     payload+=(--arg p "$filepath")
+    # shellcheck disable=SC2016  # $p/$c/$a/$r are jq variables, not shell variables
     local jq_expr='{path: $p'
     if [[ -n "$config" ]]; then
         payload+=(--arg c "$config")
+        # shellcheck disable=SC2016
         jq_expr+=', config: $c'
     fi
     if [[ ${#extra_args[@]} -gt 0 ]]; then
         payload+=(--argjson a "$(printf '%s\n' "${extra_args[@]}" | jq -R . | jq -s .)")
+        # shellcheck disable=SC2016
         jq_expr+=', args: $a'
     fi
     if [[ "$retries" -gt 0 ]]; then
         payload+=(--argjson r "$retries")
+        # shellcheck disable=SC2016
         jq_expr+=', max_retries: $r'
     fi
     jq_expr+='}'
