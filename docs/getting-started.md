@@ -7,6 +7,7 @@
 - Python packages: `pip install -r setup/requirements.txt`
 
 Optional:
+
 - qBittorrent integration: `pip install -r setup/requirements-qbittorrent.txt`
 - Deluge integration: `pip install -r setup/requirements-deluge.txt`
 
