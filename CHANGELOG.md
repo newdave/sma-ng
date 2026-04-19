@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.1...sma-ng-v1.1.2) (2026-04-19)
+
+
+### Bug Fixes
+
+* resolve Pyright errors in test_mediaprocessor and test_handler import ([492629b](https://github.com/newdave/sma-ng/commit/492629b867d3428b151ca349d34573052c3e67c4))
+
 ## [1.1.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.0...sma-ng-v1.1.1) (2026-04-19)
 
 
