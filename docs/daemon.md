@@ -67,6 +67,8 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `GET` | `/logs/<name>` | Yes | Get log content. Query: `?lines=200&level=ERROR&job_id=42&offset=0` |
 | `GET` | `/logs/<name>/tail` | Yes | Poll for new entries after byte offset. Query: `?offset=<bytes>` |
 | `POST` | `/webhook` | Yes | Submit conversion job (file or directory path) |
+| `POST` | `/webhook/sonarr` | Yes | Native Sonarr webhook endpoint (On Download/Upgrade) |
+| `POST` | `/webhook/radarr` | Yes | Native Radarr webhook endpoint (On Download/Upgrade) |
 | `POST` | `/cleanup` | Yes | Remove old jobs. Query: `?days=30` |
 | `POST` | `/reload` | Yes | Reload `daemon.json` without restarting |
 | `POST` | `/restart` | Yes | Graceful restart. Query: `?node=<id>` for remote node (PostgreSQL) |

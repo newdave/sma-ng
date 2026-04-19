@@ -148,7 +148,7 @@ def main():
     args = parser.parse_args()
 
     log.info("SMA-NG Daemon starting...")
-    log.info("Python %s" % sys.version)
+    log.debug("Python %s" % sys.version)
 
     # Initialize managers
     config_log_manager = ConfigLogManager(args.logs_dir)
@@ -163,6 +163,7 @@ def main():
 
     # Determine job timeout (priority: CLI --job-timeout > daemon.json; 0 means no timeout)
     job_timeout_seconds = args.job_timeout or path_config_manager.job_timeout_seconds
+    progress_log_interval = path_config_manager.progress_log_interval
 
     # Run smoke test if requested via CLI or daemon.json.
     # --smoke-test on CLI: run check and exit (no DB/server needed — safe pre-flight).
@@ -184,25 +185,25 @@ def main():
     log.info("Node: %s" % socket.gethostname())
     log.info("Database: %s" % db_label)
     if ffmpeg_dir:
-        log.info("FFmpeg/FFprobe directory: %s" % ffmpeg_dir)
-    log.info("Heartbeat interval: %ds (stale after %ds)" % (args.heartbeat_interval, args.stale_seconds))
-    log.info("Logs directory: %s" % config_log_manager.logs_dir)
-    log.info("Concurrency: One process per config (jobs for same config queue)")
+        log.debug("FFmpeg/FFprobe directory: %s" % ffmpeg_dir)
+    log.debug("Heartbeat interval: %ds (stale after %ds)" % (args.heartbeat_interval, args.stale_seconds))
+    log.debug("Logs directory: %s" % config_log_manager.logs_dir)
+    log.debug("Concurrency: One process per config (jobs for same config queue)")
     if job_timeout_seconds:
-        log.info("Job timeout: %ds" % job_timeout_seconds)
+        log.debug("Job timeout: %ds" % job_timeout_seconds)
     else:
-        log.info("Job timeout: disabled")
+        log.debug("Job timeout: disabled")
     if api_key:
         log.info("Authentication: ENABLED (API key required)")
     else:
         log.info("Authentication: DISABLED (no API key configured)")
 
     # Show config mappings
-    log.info("Config to log file mappings:")
+    log.debug("Config to log file mappings:")
     for config_path in path_config_manager.get_all_configs():
         log_file = config_log_manager.get_log_file(config_path)
         exists = "OK" if os.path.exists(config_path) else "MISSING"
-        log.info("  %s [%s] -> %s" % (config_path, exists, log_file))
+        log.debug("  %s [%s] -> %s" % (config_path, exists, log_file))
 
     server_address = (args.host, args.port)
 
@@ -223,33 +224,33 @@ def main():
             cli_api_key=args.api_key,
             cli_ffmpeg_dir=args.ffmpeg_dir,
             job_timeout_seconds=job_timeout_seconds,
+            progress_log_interval=progress_log_interval,
         )
 
         log.info("Listening on http://%s:%d" % (args.host, args.port))
-        log.info("Worker threads: %d" % args.workers)
+        log.debug("Worker threads: %d" % args.workers)
         if path_config_manager.scan_paths:
-            log.info("Scheduled scans: %d path(s)" % len(path_config_manager.scan_paths))
+            log.debug("Scheduled scans: %d path(s)" % len(path_config_manager.scan_paths))
             for sp in path_config_manager.scan_paths:
                 rw = (" -> " + sp["rewrite_to"]) if sp.get("rewrite_to") else ""
-                log.info("  %s (every %ds)%s" % (sp["path"], sp.get("interval", 3600), rw))
+                log.debug("  %s (every %ds)%s" % (sp["path"], sp.get("interval", 3600), rw))
         else:
-            log.info("Scheduled scans: none configured")
-        log.info("Endpoints:")
-        log.info("  POST /webhook      - Submit conversion job")
-        log.info("  GET  /health       - Health check with job stats")
-        log.info("  GET  /jobs         - List jobs (?status=pending&limit=50)")
-        log.info("  GET  /jobs/<id>    - Get specific job (includes progress when running)")
-        log.info("  POST /jobs/<id>/cancel  - Cancel a pending or running job")
-        log.info("  GET  /configs      - Show config mappings and status")
-        log.info("  GET  /stats        - Job statistics")
-        log.info("  POST /cleanup      - Remove old jobs (?days=30)")
-        log.info("  GET  /scan         - Check unscanned paths (?path=... for small lists)")
-        log.info("  POST /scan/filter  - Check unscanned paths (JSON body for large lists)")
-        log.info("  POST /scan/record  - Record paths as scanned")
-        log.info("  POST /reload       - Reload daemon.json config without stopping workers")
-        log.info("  POST /shutdown     - Graceful shutdown (waits for active conversions)")
-        log.info("  POST /restart      - Graceful restart (drains workers, then re-execs)")
-        log.info("")
+            log.debug("Scheduled scans: none configured")
+        log.debug("Endpoints:")
+        log.debug("  POST /webhook      - Submit conversion job")
+        log.debug("  GET  /health       - Health check with job stats")
+        log.debug("  GET  /jobs         - List jobs (?status=pending&limit=50)")
+        log.debug("  GET  /jobs/<id>    - Get specific job (includes progress when running)")
+        log.debug("  POST /jobs/<id>/cancel  - Cancel a pending or running job")
+        log.debug("  GET  /configs      - Show config mappings and status")
+        log.debug("  GET  /stats        - Job statistics")
+        log.debug("  POST /cleanup      - Remove old jobs (?days=30)")
+        log.debug("  GET  /scan         - Check unscanned paths (?path=... for small lists)")
+        log.debug("  POST /scan/filter  - Check unscanned paths (JSON body for large lists)")
+        log.debug("  POST /scan/record  - Record paths as scanned")
+        log.debug("  POST /reload       - Reload daemon.json config without stopping workers")
+        log.debug("  POST /shutdown     - Graceful shutdown (waits for active conversions)")
+        log.debug("  POST /restart      - Graceful restart (drains workers, then re-execs)")
         log.info("Ready to accept connections.")
 
         _validate_hwaccel(path_config_manager, ffmpeg_dir, log)

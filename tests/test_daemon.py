@@ -1490,3 +1490,202 @@ class TestHeadEndpoint:
         with urllib.request.urlopen(req) as resp:
             assert resp.status == 200
             assert resp.headers.get("Content-Type", "").startswith("application/json")
+
+
+# ---------------------------------------------------------------------------
+# Native Sonarr / Radarr webhook parser (unit tests — no live server needed)
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    """Collects send_json_response calls for assertion."""
+
+    def __init__(self):
+        self.status = None
+        self.data = None
+
+    def capture(self, status, data):
+        self.status = status
+        self.data = data
+
+
+def _make_media_handler(payload: dict) -> "tuple[WebhookHandler, _FakeResponse]":
+    """Build a bare WebhookHandler with rfile set to *payload* JSON bytes."""
+    import io
+
+    body = json.dumps(payload).encode()
+    handler = WebhookHandler.__new__(WebhookHandler)
+    handler.headers = {"Content-Length": str(len(body)), "Content-Type": "application/json"}
+    handler.rfile = io.BytesIO(body)
+    resp = _FakeResponse()
+    handler.send_json_response = resp.capture
+    return handler, resp
+
+
+class TestParseSonarrBody:
+    """Unit tests for WebhookHandler._parse_sonarr_body."""
+
+    def test_download_event_returns_path_and_args(self):
+        payload = {
+            "eventType": "Download",
+            "episodeFile": {"path": "/mnt/TV/Show/S01E01.mkv"},
+            "series": {"tvdbId": 73871},
+            "episodes": [{"seasonNumber": 1, "episodeNumber": 1}],
+        }
+        handler, _ = _make_media_handler(payload)
+        path, args = handler._parse_sonarr_body()
+        assert path == "/mnt/TV/Show/S01E01.mkv"
+        assert "-tv" in args
+        assert "-tvdb" in args
+        assert "73871" in args
+        assert "-s" in args
+        assert "1" in args
+        assert "-e" in args
+
+    def test_multi_episode_appends_all_episode_numbers(self):
+        payload = {
+            "eventType": "Download",
+            "episodeFile": {"path": "/mnt/TV/Show/S02E01E02.mkv"},
+            "series": {"tvdbId": 1234},
+            "episodes": [
+                {"seasonNumber": 2, "episodeNumber": 1},
+                {"seasonNumber": 2, "episodeNumber": 2},
+            ],
+        }
+        handler, _ = _make_media_handler(payload)
+        path, args = handler._parse_sonarr_body()
+        assert path == "/mnt/TV/Show/S02E01E02.mkv"
+        assert args.count("-e") == 2
+
+    def test_imdb_fallback_when_no_tvdb(self):
+        payload = {
+            "eventType": "Download",
+            "episodeFile": {"path": "/mnt/TV/Show/ep.mkv"},
+            "series": {"imdbId": "tt0306414"},
+            "episodes": [],
+        }
+        handler, _ = _make_media_handler(payload)
+        path, args = handler._parse_sonarr_body()
+        assert path == "/mnt/TV/Show/ep.mkv"
+        assert "-imdb" in args
+        assert "tt0306414" in args
+
+    def test_test_event_returns_none_and_200(self):
+        payload = {"eventType": "Test"}
+        handler, resp = _make_media_handler(payload)
+        path, args = handler._parse_sonarr_body()
+        assert path is None
+        assert args == []
+        assert resp.status == 200
+
+    def test_unsupported_event_type_returns_none_and_400(self):
+        payload = {"eventType": "Grab"}
+        handler, resp = _make_media_handler(payload)
+        path, args = handler._parse_sonarr_body()
+        assert path is None
+        assert resp.status == 400
+
+    def test_missing_path_returns_none_and_400(self):
+        payload = {
+            "eventType": "Download",
+            "episodeFile": {},
+            "series": {"tvdbId": 1},
+            "episodes": [],
+        }
+        handler, resp = _make_media_handler(payload)
+        path, args = handler._parse_sonarr_body()
+        assert path is None
+        assert resp.status == 400
+
+    def test_empty_body_returns_none_and_400(self):
+        import io
+
+        handler = WebhookHandler.__new__(WebhookHandler)
+        handler.headers = {"Content-Length": "0"}
+        handler.rfile = io.BytesIO(b"")
+        resp = _FakeResponse()
+        handler.send_json_response = resp.capture
+        path, args = handler._parse_sonarr_body()
+        assert path is None
+        assert resp.status == 400
+
+
+class TestParseRadarrBody:
+    """Unit tests for WebhookHandler._parse_radarr_body."""
+
+    def test_download_event_returns_path_and_tmdb(self):
+        payload = {
+            "eventType": "Download",
+            "movieFile": {"path": "/mnt/Movies/The Matrix (1999).mkv"},
+            "movie": {"tmdbId": 603},
+        }
+        handler, _ = _make_media_handler(payload)
+        path, args = handler._parse_radarr_body()
+        assert path == "/mnt/Movies/The Matrix (1999).mkv"
+        assert "-movie" in args
+        assert "-tmdb" in args
+        assert "603" in args
+
+    def test_imdb_fallback_when_no_tmdb(self):
+        payload = {
+            "eventType": "Download",
+            "movieFile": {"path": "/mnt/Movies/film.mkv"},
+            "movie": {"imdbId": "tt0133093"},
+        }
+        handler, _ = _make_media_handler(payload)
+        path, args = handler._parse_radarr_body()
+        assert path == "/mnt/Movies/film.mkv"
+        assert "-imdb" in args
+        assert "tt0133093" in args
+        assert "-tmdb" not in args
+
+    def test_no_id_still_queues_with_movie_flag(self):
+        payload = {
+            "eventType": "Download",
+            "movieFile": {"path": "/mnt/Movies/film.mkv"},
+            "movie": {},
+        }
+        handler, _ = _make_media_handler(payload)
+        path, args = handler._parse_radarr_body()
+        assert path == "/mnt/Movies/film.mkv"
+        assert "-movie" in args
+        assert "-tmdb" not in args
+        assert "-imdb" not in args
+
+    def test_test_event_returns_none_and_200(self):
+        payload = {"eventType": "Test"}
+        handler, resp = _make_media_handler(payload)
+        path, args = handler._parse_radarr_body()
+        assert path is None
+        assert args == []
+        assert resp.status == 200
+
+    def test_unsupported_event_type_returns_none_and_400(self):
+        payload = {"eventType": "Grab"}
+        handler, resp = _make_media_handler(payload)
+        path, args = handler._parse_radarr_body()
+        assert path is None
+        assert resp.status == 400
+
+    def test_missing_path_returns_none_and_400(self):
+        payload = {
+            "eventType": "Download",
+            "movieFile": {},
+            "movie": {"tmdbId": 1},
+        }
+        handler, resp = _make_media_handler(payload)
+        path, args = handler._parse_radarr_body()
+        assert path is None
+        assert resp.status == 400
+
+    def test_empty_body_returns_none_and_400(self):
+        import io
+
+        handler = WebhookHandler.__new__(WebhookHandler)
+        handler.headers = {"Content-Length": "0"}
+        handler.rfile = io.BytesIO(b"")
+        resp = _FakeResponse()
+        handler.send_json_response = resp.capture
+        path, args = handler._parse_radarr_body()
+        assert path is None
+        assert resp.status == 400

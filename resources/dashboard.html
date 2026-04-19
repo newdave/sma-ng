@@ -875,10 +875,88 @@ function dashboard() {
           return this._renderOutputData(data);
         } catch(_) {}
       }
+      if (msg.startsWith('Input Data: ')) {
+        try {
+          const data = JSON.parse(msg.slice('Input Data: '.length));
+          return this._renderInputData(data);
+        } catch(_) {}
+      }
+      if (msg.startsWith('Progress: ')) {
+        try {
+          const data = JSON.parse(msg.slice('Progress: '.length));
+          return this._renderProgress(data);
+        } catch(_) {}
+      }
       return this._esc(msg);
     },
     _esc(s) {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    },
+    _renderInputData(d) {
+      const esc = this._esc.bind(this);
+      const v = d.video || {};
+      const audios = d.audio || [];
+      const subs = d.subtitle || [];
+
+      const vParts = [
+        v.codec       ? `<span class="text-purple-300">${esc(v.codec)}</span>` : null,
+        v.profile     ? `<span class="text-gray-400">${esc(v.profile)}</span>` : null,
+        v.dimensions  ? `<span class="text-gray-300">${esc(v.dimensions)}</span>` : null,
+        v.fps         ? `${parseFloat(v.fps).toFixed(2)} fps` : null,
+        v.level       ? `L${v.level}` : null,
+        v.pix_fmt     ? `<span class="text-gray-400">${esc(v.pix_fmt)}</span>` : null,
+        v.field_order && v.field_order !== 'progressive' ? `<span class="text-orange-400">${esc(v.field_order)}</span>` : null,
+        v.bitrate     ? `${Math.round(v.bitrate / 1000)}k` : null,
+      ].filter(Boolean).join(' <span class="text-gray-700">·</span> ');
+
+      const aLines = audios.map((a, i) => {
+        const parts = [
+          a.codec    ? `<span class="text-green-300">${esc(a.codec)}</span>` : null,
+          a.channels ? `${a.channels}ch` : null,
+          a.samplerate ? `${Math.round(a.samplerate / 1000)}kHz` : null,
+          a.bitrate  ? `${Math.round(a.bitrate / 1000)}k` : null,
+          a.language ? `<span class="text-gray-400">[${esc(a.language)}]</span>` : null,
+          a.disposition ? `<span class="text-gray-500 text-xs">${esc(a.disposition)}</span>` : null,
+        ].filter(Boolean).join(' ');
+        const label = audios.length > 1 ? `audio ${i+1}` : 'audio';
+        return `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">${label}</span><span>${parts}</span></div>`;
+      }).join('');
+
+      const subLine = subs.length
+        ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">subs</span><span class="text-gray-400">${subs.map(s => s.language || 'und').join(', ')}</span></div>`
+        : '';
+
+      return `<span class="text-cyan-300 font-semibold">Input Data</span> <span class="text-gray-500">[${esc(d['format-fullname'] || d.format || '')}]</span>`
+        + `<div class="mt-1 space-y-0.5">`
+        + (vParts ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">video</span><span>${vParts}</span></div>` : '')
+        + aLines
+        + subLine
+        + `</div>`;
+    },
+    _renderProgress(d) {
+      const esc = this._esc.bind(this);
+      const chip = (label, value, colour) =>
+        `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono bg-gray-800 border border-gray-700">`
+        + `<span class="text-gray-500">${label}</span>`
+        + `<span class="${colour}">${esc(String(value))}</span>`
+        + `</span>`;
+
+      const pct = d.percent != null ? parseFloat(d.percent) : null;
+      const bar = pct != null
+        ? `<div class="w-24 h-1.5 bg-gray-700 rounded-full overflow-hidden inline-block align-middle mr-2">`
+          + `<div class="h-full bg-blue-500 rounded-full" style="width:${Math.min(100,pct).toFixed(1)}%"></div>`
+          + `</div>`
+        : '';
+
+      const chips = [
+        pct != null            ? chip('%',         pct.toFixed(1) + '%', 'text-blue-300')  : null,
+        d.elapsed              ? chip('elapsed',   d.elapsed,            'text-gray-300')  : null,
+        d.remaining            ? chip('remaining', d.remaining,          'text-yellow-300'): null,
+        d.fps != null          ? chip('fps',       d.fps,                'text-green-300') : null,
+        d.speed                ? chip('speed',     d.speed,              'text-purple-300'): null,
+      ].filter(Boolean).join(' ');
+
+      return `<span class="text-blue-400 font-semibold">Progress</span> ${bar}${chips}`;
     },
     _renderOutputData(d) {
       const esc = this._esc.bind(this);

@@ -423,6 +423,164 @@ paths:
                   requeued:
                     type: integer
 
+  /webhook/sonarr:
+    post:
+      summary: Native Sonarr webhook endpoint
+      description: |
+        Accepts a native Sonarr webhook payload (On Download / On Upgrade events).
+        Extracts `episodeFile.path`, `series.tvdbId`, and episode numbers, then
+        queues the file for conversion.  Test events return 200 without queuing.
+        Only the `Download` eventType is processed; all others return 400.
+      operationId: sonarrWebhook
+      tags: [conversion]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventType]
+              properties:
+                eventType:
+                  type: string
+                  enum: [Download, Test]
+                episodeFile:
+                  type: object
+                  properties:
+                    path:
+                      type: string
+                      description: Absolute path to the imported episode file
+                series:
+                  type: object
+                  properties:
+                    tvdbId:
+                      type: integer
+                    imdbId:
+                      type: string
+                episodes:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      seasonNumber:
+                        type: integer
+                      episodeNumber:
+                        type: integer
+            example:
+              eventType: Download
+              episodeFile:
+                path: /mnt/media/TV/Show/Season 1/S01E01.mkv
+              series:
+                tvdbId: 73871
+              episodes:
+                - seasonNumber: 1
+                  episodeNumber: 1
+      responses:
+        "202":
+          description: Job queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: queued
+                  job_id:
+                    type: integer
+                  path:
+                    type: string
+                  config:
+                    type: string
+        "200":
+          description: Test event acknowledged or duplicate job
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          description: Bad request (missing path, unsupported eventType)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /webhook/radarr:
+    post:
+      summary: Native Radarr webhook endpoint
+      description: |
+        Accepts a native Radarr webhook payload (On Download / On Upgrade events).
+        Extracts `movieFile.path` and `movie.tmdbId` (or `imdbId` as fallback),
+        then queues the file for conversion.  Test events return 200 without queuing.
+        Only the `Download` eventType is processed; all others return 400.
+      operationId: radarrWebhook
+      tags: [conversion]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventType]
+              properties:
+                eventType:
+                  type: string
+                  enum: [Download, Test]
+                movieFile:
+                  type: object
+                  properties:
+                    path:
+                      type: string
+                      description: Absolute path to the imported movie file
+                movie:
+                  type: object
+                  properties:
+                    tmdbId:
+                      type: integer
+                    imdbId:
+                      type: string
+            example:
+              eventType: Download
+              movieFile:
+                path: /mnt/media/Movies/The Matrix (1999).mkv
+              movie:
+                tmdbId: 603
+      responses:
+        "202":
+          description: Job queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: queued
+                  job_id:
+                    type: integer
+                  path:
+                    type: string
+                  config:
+                    type: string
+        "200":
+          description: Test event acknowledged or duplicate job
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          description: Bad request (missing path, unsupported eventType)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /webhook:
     post:
       summary: Submit a file or directory for conversion

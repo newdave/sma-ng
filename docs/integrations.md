@@ -4,6 +4,20 @@
 
 ### Sonarr
 
+Two integration methods are available:
+
+**Native webhook (recommended):** Sonarr posts directly to SMA-NG's built-in endpoint. No external script required.
+
+1. In Sonarr: **Settings → Connect → Add Webhook**
+   - On Download/Import: Yes, On Upgrade: Yes
+   - URL: `http://<sma-host>:8585/webhook/sonarr`
+   - Method: POST
+   - If API key is configured, add header `X-API-Key: YOUR_SECRET_KEY`
+
+SMA-NG extracts `episodeFile.path`, `series.tvdbId`, and episode numbers from the Sonarr payload and queues the job automatically. Test events (from the **Test** button) return a 200 OK without queuing anything.
+
+**Custom script:** Suitable when SMA-NG runs locally alongside Sonarr (not in a container).
+
 1. Set API credentials in `[Sonarr]` section of `autoProcess.ini`
 2. In Sonarr: **Settings → Connect → Add Custom Script**
    - On Download/Import: Yes, On Upgrade: Yes
@@ -17,6 +31,20 @@ SMA_CONFIG=/opt/sma/config/autoProcess.tv.ini
 ```
 
 ### Radarr
+
+Two integration methods are available:
+
+**Native webhook (recommended):** Radarr posts directly to SMA-NG's built-in endpoint.
+
+1. In Radarr: **Settings → Connect → Add Webhook**
+   - On Download/Import: Yes, On Upgrade: Yes
+   - URL: `http://<sma-host>:8585/webhook/radarr`
+   - Method: POST
+   - If API key is configured, add header `X-API-Key: YOUR_SECRET_KEY`
+
+SMA-NG extracts `movieFile.path` and `movie.tmdbId` (or `imdbId` as fallback) and queues the job. Test events return 200 OK without queuing.
+
+**Custom script:** Suitable when SMA-NG runs locally alongside Radarr.
 
 1. Set API credentials in `[Radarr]` section of `autoProcess.ini`
 2. In Radarr: **Settings → Connect → Add Custom Script**

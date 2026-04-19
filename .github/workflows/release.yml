@@ -12,6 +12,7 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  FFMPEG_VERSION: "8.0"
 
 jobs:
   # ── Step 1: Run release-please on every push to main ────────────────────────
@@ -107,7 +108,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Reuse the buildcache populated by docker.yml on every main push.
+          # The ffmpeg-builder stage (~10-15 min compile) is cached there and
+          # will only be re-run if the builder section of the Dockerfile changes.
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
           build-args: |
-            FFMPEG_VERSION=8.0
+            FFMPEG_VERSION=${{ env.FFMPEG_VERSION }}

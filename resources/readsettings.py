@@ -420,7 +420,7 @@ class ReadSettings:
         """
         self.log = logger or logging.getLogger(__name__)
 
-        self.log.info(sys.executable)
+        self.log.debug(sys.executable)
 
         rootpath = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), self.RELATIVE_TO_ROOT))
 
@@ -453,7 +453,7 @@ class ReadSettings:
                 configFile = new
             self.log.debug("Configuration file specified is a directory, joining with %s." % (self.CONFIG_DEFAULT))
 
-        self.log.info("Loading config file %s." % configFile)
+        self.log.debug("Loading config file %s." % configFile)
 
         write = False  # Will be changed to true if a value is missing from the config file and needs to be written
 
@@ -543,7 +543,7 @@ class ReadSettings:
         if not profile:
             return
 
-        self.log.info("Applying hwaccel profile: %s" % gpu)
+        self.log.debug("Applying hwaccel profile: %s" % gpu)
 
         # Only override if not explicitly set by the user
         if not self.hwaccels:
@@ -579,7 +579,7 @@ class ReadSettings:
 
         mapped = self._map_codecs_with_fallback(self.vcodec, codec_map)
         if mapped != self.vcodec:
-            self.log.info("Video codecs mapped for %s: %s -> %s" % (gpu, self.vcodec, mapped))
+            self.log.debug("Video codecs mapped for %s: %s -> %s" % (gpu, self.vcodec, mapped))
             self.vcodec = mapped
 
         if self.hdr.get("codec"):
