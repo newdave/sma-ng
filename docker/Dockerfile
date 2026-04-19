@@ -160,18 +160,40 @@ ENV DEBIAN_FRONTEND=noninteractive \
     SMA_DAEMON_CONFIG=/app/config/daemon.json \
     SMA_DAEMON_LOGS_DIR=/logs
 
-# GPU acceleration runtime libraries:
-#   libva2        — VAAPI dispatcher
-#   libva-drm2    — VAAPI DRM backend
-#   libdrm2       — DRM/KMS
-#   libvpl2       — Intel oneVPL dispatcher (QSV)
-#   libass9       — ASS subtitle rendering
-#   libfreetype6  — Font rendering
-#   libfontconfig1— Font configuration
-#   libopenjp2-7  — JPEG2000
-#   libzimg2      — zscale filter
-# NVENC requires no runtime libs — the NVIDIA driver on the host provides them
-# when the container is run with --gpus / --runtime=nvidia
+# Runtime shared libraries required by the FFmpeg binary.
+# Each entry maps to a --enable-* flag used at build time.
+#
+# GPU / hardware acceleration (dynamic — GPU driver on host at runtime):
+#   libva2        — VAAPI dispatcher          (--enable-vaapi)
+#   libva-drm2    — VAAPI DRM backend         (--enable-vaapi)
+#   libdrm2       — DRM/KMS                   (--enable-libdrm)
+#   libvpl2       — Intel oneVPL / QSV        (--enable-libvpl)
+# NVENC: no runtime lib — provided by the NVIDIA host driver
+#         (--enable-ffnvcodec, run with --gpus / --runtime=nvidia)
+#
+# Video codecs:
+#   libx264-164   — H.264 encoder             (--enable-libx264)
+#   libx265-199   — H.265/HEVC encoder        (--enable-libx265)
+#   libvpx9       — VP8/VP9                   (--enable-libvpx)
+#   libaom3       — AV1 encoder/decoder       (--enable-libaom)
+#   libdav1d7     — AV1 decoder               (--enable-libdav1d)
+#   libsvtav1enc1d1— AV1 encoder (SVT)         (--enable-libsvtav1)
+#   libopenjp2-7  — JPEG2000                  (--enable-libopenjpeg)
+#
+# Audio codecs:
+#   libmp3lame0   — MP3 encoder               (--enable-libmp3lame)
+#   libopus0      — Opus encoder/decoder      (--enable-libopus)
+#   libvorbis0a   — Vorbis decoder            (--enable-libvorbis)
+#   libvorbisenc2 — Vorbis encoder            (--enable-libvorbis)
+#
+# Filters / rendering:
+#   libass9       — ASS/SSA subtitle rendering (--enable-libass)
+#   libfreetype6  — Font rendering             (--enable-libfreetype)
+#   libfontconfig1— Font configuration         (--enable-libfontconfig)
+#   libzimg2      — zscale filter              (--enable-libzimg)
+#
+# Network / TLS:
+#   libssl3       — OpenSSL TLS               (--enable-openssl)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends software-properties-common \
     && add-apt-repository ppa:kobuk-team/intel-graphics \
@@ -182,16 +204,22 @@ RUN apt-get update \
         libva-drm2 \
         libdrm2 \
         libvpl2 \
-        libass9 \
-        libfreetype6 \
-        libfontconfig1 \
+        libx264-164 \
+        libx265-199 \
+        libvpx9 \
+        libaom3 \
+        libdav1d7 \
+        libsvtav1enc1d1 \
         libopenjp2-7 \
-        libzimg2 \
+        libmp3lame0 \
         libopus0 \
         libvorbis0a \
         libvorbisenc2 \
-        libvpx9 \
-        libmp3lame0 \
+        libass9 \
+        libfreetype6 \
+        libfontconfig1 \
+        libzimg2 \
+        libssl3 \
         ca-certificates \
         tini \
     && apt-get purge -y --auto-remove software-properties-common \
@@ -206,7 +234,13 @@ COPY --from=python-builder /venv /venv
 
 # Create non-root user (skip if UID/GID already exist)
 RUN getent group ${GID} || groupadd -g ${GID} sma \
-    && getent passwd ${UID} || useradd -u ${UID} -g ${GID} -s /bin/sh -m sma
+    && getent passwd ${UID} || useradd -u ${UID} -g ${GID} -s /bin/sh -m sma \
+    # Create render/video groups with the same GIDs used in docker-compose
+    # group_add so bash can resolve the names instead of printing raw GIDs.
+    # These match the Ubuntu host defaults; override RENDER_GID/VIDEO_GID in
+    # .env if your host differs — the container groups are cosmetic only.
+    && getent group 109 || groupadd -g 109 render \
+    && getent group 44  || groupadd -g 44  video
 
 # Copy application code
 WORKDIR /app
@@ -217,14 +251,14 @@ COPY docker/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Runtime directories (seeded at startup via entrypoint; override with volume mounts)
-RUN mkdir -p /config /logs /mnt /downloads /transcode \
+RUN mkdir -p /config /logs /mnt /downloads /transcodesensu \
     && chown -R ${UID}:${GID} /config /logs /app
 
-VOLUME ["/config", "/logs", "/mnt", "/downloads", "/transcode"]
+VOLUME ["/config", "/logs", "/mnt", "/downloads", "/transcodes"]
 
 EXPOSE 8585
 
-USER sma
+USER ${UID}:${GID}
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8585/health')" || exit 1
@@ -233,9 +267,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 # All daemon options are driven by environment variables so they can be
 # overridden at runtime with -e / --env-file without rebuilding the image.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
-CMD python3 daemon.py \
-      --host      "${SMA_DAEMON_HOST}" \
-      --port      "${SMA_DAEMON_PORT}" \
-      --workers   "${SMA_DAEMON_WORKERS}" \
-      --daemon-config "${SMA_DAEMON_CONFIG}" \
-      --logs-dir  "${SMA_DAEMON_LOGS_DIR}"
+CMD ["sh", "-c", "exec python3 daemon.py \
+      --host      \"${SMA_DAEMON_HOST}\" \
+      --port      \"${SMA_DAEMON_PORT}\" \
+      --workers   \"${SMA_DAEMON_WORKERS}\" \
+      --daemon-config \"${SMA_DAEMON_CONFIG}\" \
+      --logs-dir  \"${SMA_DAEMON_LOGS_DIR}\""]
