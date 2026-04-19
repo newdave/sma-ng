@@ -6,6 +6,7 @@ import threading
 from logging.handlers import RotatingFileHandler
 
 from resources.daemon.constants import DEFAULT_DAEMON_CONFIG, DEFAULT_PROCESS_CONFIG, LOGS_DIR, SCRIPT_DIR
+from resources.daemon.context import JobContextFilter
 from resources.log import LOG_BACKUP_COUNT, LOG_MAX_BYTES, JSONFormatter, getLogger
 
 log = getLogger("DAEMON")
@@ -134,6 +135,7 @@ class ConfigLogManager:
             if not logger.handlers:
                 file_handler = RotatingFileHandler(log_file, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8")
                 file_handler.setLevel(logging.DEBUG)
+                file_handler.addFilter(JobContextFilter())
                 if JSONFormatter is not None:
                     file_handler.setFormatter(JSONFormatter())
                 else:

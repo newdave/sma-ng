@@ -494,7 +494,7 @@
                 }"
                 class="shrink-0 w-16 font-bold" x-text="e.level || ''"></span>
           <span x-show="e.job_id" class="text-gray-600 shrink-0 w-8 text-right" x-text="'#'+e.job_id"></span>
-          <span class="text-gray-300 break-all" x-text="e.message || JSON.stringify(e)"></span>
+          <div class="text-gray-300 break-all min-w-0" x-html="formatLogMessage(e)"></div>
         </div>
       </template>
     </div>
@@ -866,6 +866,65 @@ function dashboard() {
     scrollLogToBottom() {
       const el = document.getElementById('log-viewer-body');
       if (el) el.scrollTop = el.scrollHeight;
+    },
+    formatLogMessage(e) {
+      const msg = e.message || '';
+      if (msg.startsWith('Output Data: ')) {
+        try {
+          const data = JSON.parse(msg.slice('Output Data: '.length));
+          return this._renderOutputData(data);
+        } catch(_) {}
+      }
+      return this._esc(msg);
+    },
+    _esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    },
+    _renderOutputData(d) {
+      const esc = this._esc.bind(this);
+      const v = d.video || {};
+      const audios = d.audio || [];
+      const subs = d.subtitle || [];
+
+      const sources = (d.source || []).map(s => {
+        const name = s.split('/').pop();
+        return `<span title="${esc(s)}">${esc(name)}</span>`;
+      }).join(', ');
+
+      const vParts = [
+        v.codec         ? `<span class="text-purple-300">${esc(v.codec)}</span>` : null,
+        v.title         ? `<span class="text-gray-400">${esc(v.title)}</span>` : null,
+        v.bitrate       ? `${v.bitrate}k` : null,
+        v.maxrate       ? `max:${esc(String(v.maxrate))}` : null,
+        v.preset        ? `preset:${esc(v.preset)}` : null,
+        v.level         ? `L${v.level}` : null,
+        v.framedata?.pix_fmt ? `<span class="text-gray-400">${esc(v.framedata.pix_fmt)}</span>` : null,
+        v.params        ? `<span class="text-gray-500 italic">${esc(v.params)}</span>` : null,
+      ].filter(Boolean).join(' <span class="text-gray-700">·</span> ');
+
+      const aLines = audios.map((a, i) => {
+        const parts = [
+          a.codec    ? `<span class="text-green-300">${esc(a.codec)}</span>` : null,
+          a.channels ? `${a.channels}ch` : null,
+          a.bitrate  ? `${a.bitrate}k` : null,
+          a.language ? `<span class="text-gray-400">[${esc(a.language)}]</span>` : null,
+          a.title    ? `&quot;${esc(a.title)}&quot;` : null,
+        ].filter(Boolean).join(' ');
+        const label = audios.length > 1 ? `audio ${i+1}` : 'audio';
+        return `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">${label}</span><span>${parts}</span></div>`;
+      }).join('');
+
+      const subLine = subs.length
+        ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">subs</span><span class="text-gray-400">${subs.length} track${subs.length > 1 ? 's' : ''}</span></div>`
+        : '';
+
+      return `<span class="text-yellow-300 font-semibold">Output Data</span> <span class="text-gray-500">[${esc(d.format || '')}]</span>`
+        + `<div class="mt-1 space-y-0.5">`
+        + `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">source</span><span class="break-all">${sources}</span></div>`
+        + (vParts ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">video</span><span>${vParts}</span></div>` : '')
+        + aLines
+        + subLine
+        + `</div>`;
     },
   };
 }
