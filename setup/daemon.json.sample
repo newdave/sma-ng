@@ -1,6 +1,10 @@
 {
   "default_config": "config/autoProcess.ini",
+
+  "_auth_comment": "Choose one auth method, or omit both for auth-less operation (e.g. behind a reverse proxy).",
   "api_key": null,
+  "username": null,
+  "password": null,
   "db_url": null,
   "ffmpeg_dir": null,
   "job_timeout_seconds": 0,

@@ -455,9 +455,9 @@ class TestDockerWorkflow:
         assert "FFMPEG_VERSION" in build_step["with"]["build-args"]
 
     def test_ffmpeg_version_is_8(self, docker_workflow):
-        steps = docker_workflow["jobs"]["build"]["steps"]
-        build_step = next(s for s in steps if "build-push-action" in s.get("uses", ""))
-        assert "8" in build_step["with"]["build-args"]
+        # The version is defined in the workflow-level env block, then
+        # referenced as ${{ env.FFMPEG_VERSION }} in build-args.
+        assert str(docker_workflow["env"]["FFMPEG_VERSION"]).startswith("8")
 
     def test_layer_cache_configured(self, docker_workflow):
         steps = docker_workflow["jobs"]["build"]["steps"]

@@ -92,7 +92,7 @@ curl -X POST http://localhost:8585/shutdown -H "X-API-Key: YOUR_SECRET_KEY"
 
 **Endpoints:**
 
-- `POST /webhook` - Submit conversion job (returns job_id)
+- `POST /webhook/generic` - Submit conversion job (returns job_id)
 - `GET /health` - Health check with job statistics
 - `GET /jobs` - List jobs (`?status=pending&limit=50&offset=0`)
 - `GET /jobs/<id>` - Get specific job details
@@ -108,20 +108,20 @@ curl -X POST http://localhost:8585/shutdown -H "X-API-Key: YOUR_SECRET_KEY"
 
 ```bash
 # Plain text body (just the path)
-curl -X POST http://localhost:8585/webhook -d "/path/to/movie.mkv"
+curl -X POST http://localhost:8585/webhook/generic -d "/path/to/movie.mkv"
 
 # JSON body
-curl -X POST http://localhost:8585/webhook \
+curl -X POST http://localhost:8585/webhook/generic \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv"}'
 
 # JSON with extra manual.py arguments
-curl -X POST http://localhost:8585/webhook \
+curl -X POST http://localhost:8585/webhook/generic \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "args": ["-tmdb", "603"]}'
 
 # JSON with config override (bypasses path matching)
-curl -X POST http://localhost:8585/webhook \
+curl -X POST http://localhost:8585/webhook/generic \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "config": "/custom/autoProcess.ini"}'
 ```
@@ -140,12 +140,12 @@ The daemon supports API key authentication. When enabled, all endpoints except `
 
 ```bash
 # Using X-API-Key header (recommended)
-curl -X POST http://localhost:8585/webhook \
+curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: YOUR_SECRET_KEY" \
   -d "/path/to/movie.mkv"
 
 # Using Authorization Bearer header
-curl -X POST http://localhost:8585/webhook \
+curl -X POST http://localhost:8585/webhook/generic \
   -H "Authorization: Bearer YOUR_SECRET_KEY" \
   -d "/path/to/movie.mkv"
 ```
