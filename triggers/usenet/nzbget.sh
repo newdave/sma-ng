@@ -61,7 +61,7 @@ submit_file() {
         -H "Content-Type: application/json" \
         $(auth_args) \
         -d "$payload" \
-        "${SMA_BASE}/webhook" > /dev/null
+        "${SMA_BASE}/webhook/generic" > /dev/null
 }
 
 # ── validate NZBGet environment ───────────────────────────────────────────────

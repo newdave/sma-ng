@@ -158,6 +158,12 @@ def main():
     # Determine API key (priority: CLI arg > env var > config file)
     api_key = args.api_key or os.environ.get("SMA_DAEMON_API_KEY") or path_config_manager.api_key
 
+    # Determine Basic Auth credentials (priority: env vars > config file)
+    # Note: not accepted on CLI to prevent credentials appearing in ps output.
+    _env_user = os.environ.get("SMA_DAEMON_USERNAME")
+    _env_pass = os.environ.get("SMA_DAEMON_PASSWORD")
+    basic_auth = (_env_user, _env_pass) if _env_user and _env_pass else path_config_manager.basic_auth
+
     # Determine FFmpeg directory (priority: CLI --ffmpeg-dir > env var > config file)
     ffmpeg_dir = args.ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or path_config_manager.ffmpeg_dir
 
@@ -195,8 +201,10 @@ def main():
         log.debug("Job timeout: disabled")
     if api_key:
         log.info("Authentication: ENABLED (API key required)")
+    elif basic_auth:
+        log.info("Authentication: ENABLED (HTTP Basic Auth required)")
     else:
-        log.info("Authentication: DISABLED (no API key configured)")
+        log.info("Authentication: DISABLED (no credentials configured — suitable for use behind a reverse proxy)")
 
     # Show config mappings
     log.debug("Config to log file mappings:")
@@ -218,10 +226,12 @@ def main():
             log,
             worker_count=args.workers,
             api_key=api_key,
+            basic_auth=basic_auth,
             heartbeat_interval=args.heartbeat_interval,
             stale_seconds=args.stale_seconds,
             ffmpeg_dir=ffmpeg_dir,
             cli_api_key=args.api_key,
+            cli_basic_auth=None,  # basic_auth is env/config only — no CLI exposure
             cli_ffmpeg_dir=args.ffmpeg_dir,
             job_timeout_seconds=job_timeout_seconds,
             progress_log_interval=progress_log_interval,
@@ -237,7 +247,7 @@ def main():
         else:
             log.debug("Scheduled scans: none configured")
         log.debug("Endpoints:")
-        log.debug("  POST /webhook      - Submit conversion job")
+        log.debug("  POST /webhook/generic - Submit conversion job")
         log.debug("  GET  /health       - Health check with job stats")
         log.debug("  GET  /jobs         - List jobs (?status=pending&limit=50)")
         log.debug("  GET  /jobs/<id>    - Get specific job (includes progress when running)")

@@ -173,6 +173,7 @@ class PathConfigManager:
         self.default_config = DEFAULT_PROCESS_CONFIG
         self.default_args = []  # Top-level default args for the default config
         self.api_key = None  # Can be set from daemon.json
+        self.basic_auth = None  # (username, password) tuple; can be set from daemon.json
         self.db_url = None  # Can be set from daemon.json
         self.ffmpeg_dir = None  # Can be set from daemon.json
         self.job_timeout_seconds = 0  # Can be set from daemon.json (0 = no timeout)
@@ -214,6 +215,11 @@ class PathConfigManager:
 
             # Load API key from config (can be overridden by CLI/env)
             self.api_key = config.get("api_key")
+
+            # Load Basic Auth credentials from config (can be overridden by env vars)
+            _username = config.get("username") or None
+            _password = config.get("password") or None
+            self.basic_auth = (_username, _password) if _username and _password else None
 
             # Load PostgreSQL URL from config (can be overridden by CLI/env)
             self.db_url = config.get("db_url")

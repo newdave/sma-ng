@@ -6,7 +6,9 @@
 #
 #   SMA_DAEMON_HOST     Daemon host (default: 127.0.0.1)
 #   SMA_DAEMON_PORT     Daemon port (default: 8585)
-#   SMA_DAEMON_API_KEY  API key if authentication is enabled
+#   SMA_DAEMON_API_KEY  API key if token authentication is enabled
+#   SMA_DAEMON_USERNAME Username if HTTP Basic Auth is enabled
+#   SMA_DAEMON_PASSWORD Password if HTTP Basic Auth is enabled
 #   SMA_POLL_INTERVAL   Seconds between status checks (default: 5)
 #   SMA_TIMEOUT         Max seconds to wait for completion (default: 0 = unlimited)
 #
@@ -25,11 +27,21 @@
 
 set -euo pipefail
 
-SMA_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
-SMA_PORT="${SMA_DAEMON_PORT:-8585}"
+# ── configuration (override with environment variables) ───────────────────────
+
+SMA_DAEMON_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
+SMA_DAEMON_PORT="${SMA_DAEMON_PORT:-8585}"
+SMA_DAEMON_API_KEY="${SMA_DAEMON_API_KEY:-}"
+SMA_DAEMON_USERNAME="${SMA_DAEMON_USERNAME:-}"
+SMA_DAEMON_PASSWORD="${SMA_DAEMON_PASSWORD:-}"
+SMA_POLL_INTERVAL="${SMA_POLL_INTERVAL:-5}"
+SMA_TIMEOUT="${SMA_TIMEOUT:-0}"
+
+SMA_HOST="$SMA_DAEMON_HOST"
+SMA_PORT="$SMA_DAEMON_PORT"
 SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
-POLL_INTERVAL="${SMA_POLL_INTERVAL:-5}"
-TIMEOUT="${SMA_TIMEOUT:-0}"
+POLL_INTERVAL="$SMA_POLL_INTERVAL"
+TIMEOUT="$SMA_TIMEOUT"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -39,6 +51,8 @@ log() { echo "[radarr] $*" >&2; }
 AUTH_ARGS=()
 if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
     AUTH_ARGS=(-H "X-API-Key: ${SMA_DAEMON_API_KEY}")
+elif [[ -n "${SMA_DAEMON_USERNAME:-}" && -n "${SMA_DAEMON_PASSWORD:-}" ]]; then
+    AUTH_ARGS=(--user "${SMA_DAEMON_USERNAME}:${SMA_DAEMON_PASSWORD}")
 fi
 
 curl_get() {
@@ -133,6 +147,9 @@ obj = {
     'movie':     movie,
     'movieFile': {'path': os.environ.get('radarr_moviefile_path', '')},
 }
+config = os.environ.get('SMA_CONFIG', '').strip()
+if config:
+    obj['config'] = config
 print(json.dumps(obj))
 ")
 
@@ -152,7 +169,18 @@ if [[ "$HTTP_CODE" == "000" ]]; then
     log "ERROR: Failed to connect to SMA-NG daemon at ${SMA_BASE}. Is the daemon running?"
     exit 1
 elif [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
-    log "ERROR: Daemon rejected request (HTTP ${HTTP_CODE}). Check SMA_DAEMON_API_KEY."
+    # Show which auth vars are set (mask secrets).
+    if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
+        _key_hint="SMA_DAEMON_API_KEY=${SMA_DAEMON_API_KEY:0:4}**** (set)"
+    else
+        _key_hint="SMA_DAEMON_API_KEY=(not set)"
+    fi
+    if [[ -n "${SMA_DAEMON_USERNAME:-}" ]]; then
+        _user_hint="SMA_DAEMON_USERNAME=${SMA_DAEMON_USERNAME} SMA_DAEMON_PASSWORD=$([ -n "${SMA_DAEMON_PASSWORD:-}" ] && echo '[set]' || echo '[not set]')"
+    else
+        _user_hint="SMA_DAEMON_USERNAME=(not set)"
+    fi
+    log "ERROR: Daemon rejected request (HTTP ${HTTP_CODE}). Auth state: ${_key_hint}  ${_user_hint}"
     exit 1
 elif [[ "$HTTP_CODE" -ge 400 ]]; then
     ERR=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error','unknown'))" 2>/dev/null || echo "$RESPONSE")

@@ -220,20 +220,34 @@ class WebhookHandler(BaseHTTPRequestHandler):
         Returns False and sends 401 response if authentication fails.
         """
         api_key = self.server.api_key
-        if not api_key:
-            # No API key configured, allow all requests
+        basic_auth = self.server.basic_auth  # (username, password) tuple or None
+
+        if not api_key and not basic_auth:
+            # No authentication configured, allow all requests
             return True
 
         # Check X-API-Key header
         request_key = self.headers.get("X-API-Key")
 
-        # Also check Authorization header (Bearer token)
+        # Also check Authorization header (Bearer token or Basic auth)
         if not request_key:
             auth_header = self.headers.get("Authorization", "")
             if auth_header.startswith("Bearer "):
                 request_key = auth_header[7:]
+            elif auth_header.startswith("Basic ") and basic_auth:
+                import base64
 
-        if request_key == api_key:
+                try:
+                    decoded = base64.b64decode(auth_header[6:]).decode("utf-8", errors="replace")
+                    colon = decoded.index(":")
+                    req_user = decoded[:colon]
+                    req_pass = decoded[colon + 1 :]
+                    if req_user == basic_auth[0] and req_pass == basic_auth[1]:
+                        return True
+                except Exception:
+                    pass
+
+        if api_key and request_key == api_key:
             return True
 
         # Authentication failed
@@ -795,7 +809,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     _POST_ROUTES = {
         "/": lambda self, p, q: self._handle_webhook(),
-        "/webhook": lambda self, p, q: self._handle_webhook(),
         "/webhook/generic": lambda self, p, q: self._handle_webhook(),
         "/webhook/sonarr": lambda self, p, q: self._handle_sonarr_webhook(),
         "/webhook/radarr": lambda self, p, q: self._handle_radarr_webhook(),
