@@ -101,6 +101,7 @@ class ConversionWorker(threading.Thread):
         if not os.path.exists(path):
             self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
             self.job_db.fail_job(job_id, "Path does not exist")
+            self.current_job_id = None
             return
 
         # Job is already marked running by claim_next_job()
