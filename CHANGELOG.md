@@ -1,5 +1,63 @@
 # Changelog
 
+## [1.0.0](https://github.com/newdave/sma-ng/compare/sma-ng-v0.3.0...sma-ng-v1.0.0) (2026-04-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove SQLite backend; PostgreSQL is now required
+* drop SQLite backend; require PostgreSQL
+* --db flag and SQLite fallback removed; SMA_DAEMON_DB_URL or daemon.json db_url is now required to start the daemon.
+
+### Features
+
+* add admin dashboard page with database management actions ([93e04f3](https://github.com/newdave/sma-ng/commit/93e04f3cfa03dd85b8eab1b0888a5bc6e6e8b3ab))
+* add i915 GPU tuning and plexmatch sidecar scripts ([6e55738](https://github.com/newdave/sma-ng/commit/6e55738ab6d65910160528d0dbbb1b3b3ef7290a))
+* add job context propagation to daemon logging (option 2) ([be2c262](https://github.com/newdave/sma-ng/commit/be2c26200ab3c0b26bf600ec33f734d2862d1247))
+* add JSON structured logging to daemon file handlers (option 3) ([35dc461](https://github.com/newdave/sma-ng/commit/35dc4619a2c6d6711318e9df60d5e22b92b9cb36))
+* add log viewer to dashboard ([6b1d564](https://github.com/newdave/sma-ng/commit/6b1d56416f1ee0b6e6c97990f5d0b231c3e32a62))
+* add recycle-bin cleaner thread to daemon ([fb85a4a](https://github.com/newdave/sma-ng/commit/fb85a4a739100796062c10a11434a75d97c82fce))
+* add rename task to Makefile and mise.toml ([c3da5f6](https://github.com/newdave/sma-ng/commit/c3da5f6f01388a7998c619e4bebc468fa993fc79))
+* add rename_via_arr to mediamanager; wire force-rename in manual.py ([9a7afd4](https://github.com/newdave/sma-ng/commit/9a7afd4f5b7f760a0e337e0dd5311b07c63ef641))
+* add rename.py CLI and RenameProcessor for standalone media file renaming ([e121a92](https://github.com/newdave/sma-ng/commit/e121a925a8071baaa26f81c6ce39ac521b1c97c6))
+* add startup smoke test for config validation ([613b24d](https://github.com/newdave/sma-ng/commit/613b24d8d93b59903591f9aefd01a6ab181cdce3))
+* air-date episode fallback and date-based naming for episode 0 ([4ec3249](https://github.com/newdave/sma-ng/commit/4ec324945725abb384c581743ef3afac07f37e71))
+* API key auth, native arr webhooks, and trigger script updates ([69a2f27](https://github.com/newdave/sma-ng/commit/69a2f27d03ed0a970e4162428bb8e86b9f7d419d))
+* drop SQLite backend; require PostgreSQL ([04a7d7b](https://github.com/newdave/sma-ng/commit/04a7d7b1687a43485af70a02be7cdb739a79a082))
+* drop SQLite backend; require PostgreSQL ([d87d4e5](https://github.com/newdave/sma-ng/commit/d87d4e5e5bd0f242ba0bcb106d853be13c5e6efc))
+* multi-profile config deployment with per-service credential stamping ([d224218](https://github.com/newdave/sma-ng/commit/d2242182d6f6b146f7a15b3362f526d185e97aa3))
+* naming template improvements ([93dde33](https://github.com/newdave/sma-ng/commit/93dde33896375fea64f378b9acb123f3cdd4c67e))
+* native Sonarr/Radarr webhook endpoints ([e0e26fd](https://github.com/newdave/sma-ng/commit/e0e26fd339929a61af874eaf1769fafb5db2527b))
+* overhaul Docker image and compose for multi-arch, Intel QSV, GPU group resolution ([b0b4faf](https://github.com/newdave/sma-ng/commit/b0b4faf01b127d998af47f6ab7bbb60235f4082c))
+* remove SQLite backend; PostgreSQL is now required ([6ef6a53](https://github.com/newdave/sma-ng/commit/6ef6a531bd3f8a281f4bceadb4bfc6de5033874b))
+* tiered bitrate encoding profiles and codec refinements ([6faf936](https://github.com/newdave/sma-ng/commit/6faf936dfe9c8ffc0434cc0de0ee916b6c49b5b3))
+* update naming templates and defaults in sample configs ([c48e2b9](https://github.com/newdave/sma-ng/commit/c48e2b99e391c1102c70c5f3183d5da1fe83b75a))
+
+
+### Bug Fixes
+
+* array-safe auth headers and HTTP error handling in trigger scripts ([0c2570f](https://github.com/newdave/sma-ng/commit/0c2570ff8a863dd8a2579768b9250941d5c7b252))
+* collect all -vf parts into a single comma-joined filter chain ([0e7d3da](https://github.com/newdave/sma-ng/commit/0e7d3da5d13a36d9c3fbb0c991aa5d37c88b2585))
+* demote noisy per-job worker log lines from INFO to DEBUG ([e5842f7](https://github.com/newdave/sma-ng/commit/e5842f72206d3b5da857a8b1d821e03b4a2c0947))
+* pass disable_existing_loggers=False to fileConfig to preserve existing handlers ([a3aa96c](https://github.com/newdave/sma-ng/commit/a3aa96c408f8fbf5a83c1de954b575f652b7bf50))
+* pretty-render Output Data log entries; inject job_id into config log handlers ([6e69bac](https://github.com/newdave/sma-ng/commit/6e69baceaca249c6d04a5ea0de60470bead06fbc))
+* remove self-approval from auto-merge job ([f8cf207](https://github.com/newdave/sma-ng/commit/f8cf2073232c6c5f0b20ab206cf94638ff27dc72))
+* remove TimeoutStopSec=infinity from systemd unit ([6f094c2](https://github.com/newdave/sma-ng/commit/6f094c2aae55e00a407212a8cb99e61e461d9d1f))
+* resolve CI failures and release.yml YAML error ([7eef8cf](https://github.com/newdave/sma-ng/commit/7eef8cfedfc3980f3949048632db8f229049b9b2))
+* set TimeoutStopSec=10 in systemd unit ([4979a19](https://github.com/newdave/sma-ng/commit/4979a19a4b36a5a6566e9facf022b6ad7bf8de2a))
+* sync daemon log path in logging config on write; add custom hooks template ([9d1aa37](https://github.com/newdave/sma-ng/commit/9d1aa37a502fabb0ca4420e1c25ac3cd297c8cf3))
+* use SIGKILL in deploy:restart to bypass graceful drain ([5613dc0](https://github.com/newdave/sma-ng/commit/5613dc038231cf0848560f55518fe40da19bd425))
+* use venv python shebang in daemon.py and update.py ([2bffcd6](https://github.com/newdave/sma-ng/commit/2bffcd64f21b0e12a12e75919d8523ba83806834))
+
+
+### Documentation
+
+* add /logs endpoints, log viewer, and sync API reference ([4b5f80f](https://github.com/newdave/sma-ng/commit/4b5f80f21562a66a0431b4b133ea49779e92dd64))
+* add git commit workflow rules to CLAUDE.md ([22f8665](https://github.com/newdave/sma-ng/commit/22f866586adda0b9d5e2777743c8f5a7068281b5))
+* split documentation into focused pages; update README and CLAUDE.md ([7ceafe4](https://github.com/newdave/sma-ng/commit/7ceafe4526df7b28e92d8a5afd67c6128f6f65ac))
+* sync docs, sample configs, and update tests ([aa3408b](https://github.com/newdave/sma-ng/commit/aa3408b91ed3fe7135d8b19d2997ec93a0895c98))
+* update for PostgreSQL requirement, new features, and hardware accel ([8f0052d](https://github.com/newdave/sma-ng/commit/8f0052dbf072c1d867312fcd2e61af6a4084bc5a))
+
 ## [0.3.0](https://github.com/newdave/sma-ng/compare/sma-ng-v0.2.0...sma-ng-v0.3.0) (2026-04-03)
 
 
