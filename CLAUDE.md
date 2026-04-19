@@ -5,14 +5,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Documentation Rules
 
 - **Keep documentation in sync with code changes.** When you add, change, or remove a feature, update all relevant docs in the same commit (or immediately after).
+- **Every documentation change must be applied in three places:**
+  1. `docs/` — the canonical source in the main repo
+  2. GitHub wiki (`/tmp/sma-wiki/`) — the corresponding wiki page(s); push with `git add -A && git commit -m "docs: ..." && git push origin HEAD:master`
+  3. Web UI (`resources/docs.html`) — the inline help served at `http://localhost:8585/docs`
 - Docs to update depending on change type:
-  - New/changed daemon endpoints → `docs/daemon.md` + `docs/openapi.yaml` + inline help in `resources/docs.html`
-  - New/changed settings → `docs/configuration.md` + `setup/autoProcess.ini.sample`
-  - New/changed CLI flags or daemon options → `docs/getting-started.md` + `docs/daemon.md` + `AGENTS.md`
-  - New integrations → `docs/integrations.md`
-  - New hardware-acceleration options → `docs/hardware-acceleration.md`
-  - Deployment/CI changes → `docs/deployment.md`
-  - Architecture changes → `docs/README.md` + `CLAUDE.md`
+  - New/changed daemon endpoints → `docs/daemon.md` + `docs/openapi.yaml` + `resources/docs.html` + wiki `Daemon-Mode.md` + wiki `API-Reference.md`
+  - New/changed settings → `docs/configuration.md` + `setup/autoProcess.ini.sample` + `resources/docs.html` + wiki `Configuration.md`
+  - New/changed CLI flags or daemon options → `docs/getting-started.md` + `docs/daemon.md` + `AGENTS.md` + `resources/docs.html` + wiki `Getting-Started.md` + wiki `Daemon-Mode.md`
+  - New/changed `mise` tasks → `mise.toml` description field + wiki `Mise-Tasks.md`
+  - New integrations → `docs/integrations.md` + `resources/docs.html` + wiki `Integrations.md`
+  - New hardware-acceleration options → `docs/hardware-acceleration.md` + `resources/docs.html` + wiki `Hardware-Acceleration.md`
+  - Deployment/CI changes → `docs/deployment.md` + `resources/docs.html` + wiki `Deployment.md`
+  - Architecture changes → `docs/README.md` + `CLAUDE.md` + wiki `Home.md`
 - Never leave stale or incorrect documentation behind — remove or correct it in the same PR.
 
 ## Git Commit Rules
