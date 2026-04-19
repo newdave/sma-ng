@@ -15,6 +15,22 @@ The daemon also writes per-config rotating log files in `logs/`:
 | `config/autoProcess.ini` | `logs/autoProcess.log` |
 | `config/autoProcess.tv.ini` | `logs/autoProcess.tv.log` |
 
+You can also view and filter logs through the dashboard log viewer or via the API:
+
+```bash
+# List all log files
+curl -H "X-API-Key: SECRET" http://localhost:8585/logs
+
+# Last 100 lines of a log
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?lines=100"
+
+# Filter by job ID
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?job_id=42"
+
+# Filter by level
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?level=ERROR"
+```
+
 ---
 
 ## Common Issues

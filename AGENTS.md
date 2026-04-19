@@ -98,6 +98,9 @@ curl -X POST http://localhost:8585/shutdown -H "X-API-Key: YOUR_SECRET_KEY"
 - `GET /jobs/<id>` - Get specific job details
 - `GET /configs` - Show path-to-config mappings and status
 - `GET /stats` - Job statistics by status
+- `GET /logs` - List all log files
+- `GET /logs/<name>` - Get log content (`?lines=200&level=ERROR&job_id=42&offset=0`)
+- `GET /logs/<name>/tail` - Poll for new entries after byte offset
 - `POST /cleanup` - Remove old completed/failed jobs (`?days=30`)
 - `POST /shutdown` - Graceful shutdown (waits for active conversions to finish)
 
@@ -147,7 +150,7 @@ curl -X POST http://localhost:8585/webhook \
   -d "/path/to/movie.mkv"
 ```
 
-Public endpoints (no auth required): `/`, `/dashboard`, `/health`, `/status`, `/docs`
+Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`
 
 ### Path-Based Configuration
 

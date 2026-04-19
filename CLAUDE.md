@@ -2,6 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Documentation Rules
+
+- **Keep documentation in sync with code changes.** When you add, change, or remove a feature, update all relevant docs in the same commit (or immediately after).
+- Docs to update depending on change type:
+  - New/changed daemon endpoints → `docs/daemon.md` + `docs/openapi.yaml` + inline help in `resources/docs.html`
+  - New/changed settings → `docs/configuration.md` + `setup/autoProcess.ini.sample`
+  - New/changed CLI flags or daemon options → `docs/getting-started.md` + `docs/daemon.md` + `AGENTS.md`
+  - New integrations → `docs/integrations.md`
+  - New hardware-acceleration options → `docs/hardware-acceleration.md`
+  - Deployment/CI changes → `docs/deployment.md`
+  - Architecture changes → `docs/README.md` + `CLAUDE.md`
+- Never leave stale or incorrect documentation behind — remove or correct it in the same PR.
+
 ## Git Commit Rules
 
 - **Do NOT add `Co-Authored-By` lines referencing Claude, Anthropic, or any AI to commit messages.**
