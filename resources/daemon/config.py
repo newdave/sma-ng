@@ -314,8 +314,7 @@ class PathConfigManager:
 
         for entry in self.path_configs:
             if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
-                if os.path.exists(entry["config"]):
-                    return list(entry.get("default_args", []))
+                return list(entry.get("default_args", []))
 
         return list(self.default_args)
 
