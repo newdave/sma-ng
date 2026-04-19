@@ -14,15 +14,29 @@ from resources.log import getLogger
 log = getLogger("DAEMON")
 
 # Compiled once at module load; reused for every line of every job's output.
+_FFMPEG_DURATION_RE = _re.compile(r"Duration:\s*(\d+):(\d+):([\d.]+)")
 _FFMPEG_TIME_RE = _re.compile(r"time=(\d+:\d+:\d+)")
 _FFMPEG_PROGRESS_RE = _re.compile(r"\bframe=\s*\d+\b")
-_PROGRESS_LOG_INTERVAL = 60  # seconds between progress log entries
+_FFMPEG_FPS_RE = _re.compile(r"\bfps=\s*([\d.]+)")
+_FFMPEG_SPEED_RE = _re.compile(r"\bspeed=\s*([\d.]+)x")
+_DEFAULT_PROGRESS_LOG_INTERVAL = 60  # seconds between progress log entries
+
+
+def _hms_to_seconds(h, m, s):
+    return int(h) * 3600 + int(m) * 60 + float(s)
+
+
+def _seconds_to_hms(secs):
+    secs = max(0, int(secs))
+    h, rem = divmod(secs, 3600)
+    m, sec = divmod(rem, 60)
+    return "%02d:%02d:%02d" % (h, m, sec)
 
 
 class ConversionWorker(threading.Thread):
     """Background worker thread that processes conversion jobs from the database."""
 
-    def __init__(self, worker_id, job_db, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None, job_timeout_seconds=0, job_processes=None, job_progress=None):
+    def __init__(self, worker_id, job_db, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None, job_timeout_seconds=0, progress_log_interval=_DEFAULT_PROGRESS_LOG_INTERVAL, job_processes=None, job_progress=None):
         super().__init__(daemon=True)
         self.worker_id = worker_id
         self.node_id = socket.gethostname()
@@ -35,6 +49,7 @@ class ConversionWorker(threading.Thread):
         self.script_path = os.path.join(SCRIPT_DIR, "manual.py")
         self.ffmpeg_dir = ffmpeg_dir
         self.job_timeout_seconds = job_timeout_seconds  # 0 means no timeout
+        self.progress_log_interval = progress_log_interval
         self.running = True
         self.current_job_id = None
         self._job_processes = job_processes if job_processes is not None else {}
@@ -85,7 +100,7 @@ class ConversionWorker(threading.Thread):
             return
 
         # Acquire lock for this config (blocks if another job is using it)
-        self.log.info("Worker %d acquiring lock for job %d: %s" % (self.worker_id, job_id, os.path.basename(config_file)))
+        self.log.debug("Worker %d acquiring lock for job %d: %s" % (self.worker_id, job_id, os.path.basename(config_file)))
         self.config_lock_manager.acquire(config_file, job_id, path)
 
         # Check again after acquiring lock (may have been cancelled while waiting)
@@ -131,7 +146,7 @@ class ConversionWorker(threading.Thread):
             "Worker %d processing job %d: %s" % (self.worker_id, job_id, path),
             extra={"worker_id": self.worker_id, "path": path, "config": os.path.basename(config_file)},
         )
-        self.log.info("Using config: %s (log: %s)" % (config_file, log_file))
+        self.log.debug("Using config: %s (log: %s)" % (config_file, log_file))
 
         config_logger.info(
             "Job %d started" % job_id,
@@ -144,6 +159,8 @@ class ConversionWorker(threading.Thread):
         if self.ffmpeg_dir:
             env["PATH"] = self.ffmpeg_dir + os.pathsep + env.get("PATH", "")
 
+        start_time = time.monotonic()
+        total_duration_secs = None
         _last_progress_log: float = 0.0
 
         try:
@@ -160,14 +177,42 @@ class ConversionWorker(threading.Thread):
                 line = line.strip()
                 if not line:
                     continue
-                m = _FFMPEG_TIME_RE.search(line)
-                if m:
-                    self._job_progress[job_id] = m.group(1)
+                # Parse total duration from FFmpeg's initial output line
+                if total_duration_secs is None:
+                    dm = _FFMPEG_DURATION_RE.search(line)
+                    if dm:
+                        total_duration_secs = _hms_to_seconds(dm.group(1), dm.group(2), dm.group(3))
+                tm = _FFMPEG_TIME_RE.search(line)
+                if tm:
+                    self._job_progress[job_id] = tm.group(1)
                 # Throttle FFmpeg progress lines; log all other output immediately.
                 if _FFMPEG_PROGRESS_RE.search(line):
                     now = time.monotonic()
-                    if now - _last_progress_log >= _PROGRESS_LOG_INTERVAL:
-                        config_logger.info("[progress] %s" % line)
+                    if now - _last_progress_log >= self.progress_log_interval:
+                        fps_m = _FFMPEG_FPS_RE.search(line)
+                        speed_m = _FFMPEG_SPEED_RE.search(line)
+                        fps = float(fps_m.group(1)) if fps_m else None
+                        speed = float(speed_m.group(1)) if speed_m else None
+                        elapsed_secs = now - start_time
+                        progress = {"elapsed": _seconds_to_hms(elapsed_secs)}
+                        if fps is not None:
+                            progress["fps"] = round(fps, 1)
+                        if speed and speed > 0:
+                            progress["speed"] = "%.2fx" % speed
+                        if tm and total_duration_secs and total_duration_secs > 0:
+                            parts = tm.group(1).split(":")
+                            current_secs = _hms_to_seconds(parts[0], parts[1], parts[2])
+                            pct = min(100.0, current_secs / total_duration_secs * 100.0)
+                            progress["percent"] = round(pct, 1)
+                            if speed and speed > 0:
+                                remaining_secs = (total_duration_secs - current_secs) / speed
+                            elif elapsed_secs > 0 and pct > 0:
+                                remaining_secs = elapsed_secs * (100.0 - pct) / pct
+                            else:
+                                remaining_secs = None
+                            if remaining_secs is not None:
+                                progress["remaining"] = _seconds_to_hms(remaining_secs)
+                        config_logger.info("Progress: %s" % json.dumps(progress))
                         _last_progress_log = now
                 else:
                     config_logger.info(line)
@@ -201,7 +246,7 @@ class ConversionWorker(threading.Thread):
 class WorkerPool:
     """Manages a pool of ConversionWorker threads."""
 
-    def __init__(self, worker_count, job_db, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None, job_timeout_seconds=0, job_processes=None, job_progress=None):
+    def __init__(self, worker_count, job_db, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None, job_timeout_seconds=0, progress_log_interval=_DEFAULT_PROGRESS_LOG_INTERVAL, job_processes=None, job_progress=None):
         self._workers = []
         self._worker_count = worker_count
         self._job_db = job_db
@@ -211,6 +256,7 @@ class WorkerPool:
         self._logger = logger
         self._ffmpeg_dir = ffmpeg_dir
         self._job_timeout_seconds = job_timeout_seconds
+        self._progress_log_interval = progress_log_interval
         self._job_processes = job_processes if job_processes is not None else {}
         self._job_progress = job_progress if job_progress is not None else {}
         self._start_workers()
@@ -226,6 +272,7 @@ class WorkerPool:
                 logger=self._logger,
                 ffmpeg_dir=self._ffmpeg_dir,
                 job_timeout_seconds=self._job_timeout_seconds,
+                progress_log_interval=self._progress_log_interval,
                 job_processes=self._job_processes,
                 job_progress=self._job_progress,
             )

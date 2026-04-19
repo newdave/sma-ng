@@ -24,6 +24,9 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Single source of truth for the FFmpeg version used in build-args.
+  # Must match ARG FFMPEG_VERSION default in docker/Dockerfile.
+  FFMPEG_VERSION: "8.0"
 
 jobs:
   build:
@@ -76,11 +79,14 @@ jobs:
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}:buildcache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}
           build-args: |
-            FFMPEG_VERSION=8.0
+            FFMPEG_VERSION=${{ env.FFMPEG_VERSION }}
 
       - name: Smoke-test image (PR only)
         if: github.event_name == 'pull_request'
         run: |
-          docker run --rm --entrypoint python3 \
-            ${{ fromJSON(steps.meta.outputs.json).tags[0] }} \
-            -c "import daemon; print('daemon module OK')"
+          IMAGE=${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          # Verify the Python application imports cleanly
+          docker run --rm --entrypoint python3 "$IMAGE" \
+            -c "import resources.daemon; print('resources.daemon OK')"
+          # Verify the FFmpeg binary is present and functional
+          docker run --rm --entrypoint ffmpeg "$IMAGE" -version 2>&1 | head -1

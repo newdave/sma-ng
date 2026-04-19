@@ -7,16 +7,21 @@
 #   SMA_DAEMON_HOST     Daemon host (default: 127.0.0.1)
 #   SMA_DAEMON_PORT     Daemon port (default: 8585)
 #   SMA_DAEMON_API_KEY  API key if authentication is enabled
-#   SMA_CONFIG          Path to autoProcess.ini to use for this Radarr instance.
-#                       When set, overrides daemon path-based config selection.
-#                       Use this when you have multiple Radarr instances each
-#                       with a different autoProcess.ini (e.g. 1080p vs 4K).
-#                       Leave unset to let the daemon select config by file path.
 #   SMA_POLL_INTERVAL   Seconds between status checks (default: 5)
 #   SMA_TIMEOUT         Max seconds to wait for completion (default: 0 = unlimited)
 #
 # Radarr environment variables are provided automatically when the script is
 # called as a Radarr Custom Script connection.
+#
+# Payload sent to POST /webhook/radarr:
+# {
+#   "eventType": "Download",
+#   "movie":     { "tmdbId": 603, "imdbId": "tt0133093" },
+#   "movieFile": { "path": "/mnt/media/Movies/The Matrix.mkv" }
+# }
+#
+# Alternatively, configure Radarr → Settings → Connect → Webhook and point it
+# directly at http://<host>:<port>/webhook/radarr — no script required.
 
 set -euo pipefail
 
@@ -101,11 +106,9 @@ if [[ "$EVENT" != "Download" ]]; then
     exit 1
 fi
 
-# ── build webhook payload ──────────────────────────────────────────────────────
+# ── build native Radarr webhook payload ───────────────────────────────────────
 
 INPUTFILE="${radarr_moviefile_path:-}"
-TMDB_ID="${radarr_movie_tmdbid:-}"
-IMDB_ID="${radarr_movie_imdbid:-}"
 
 if [[ -z "$INPUTFILE" ]]; then
     log "ERROR: radarr_moviefile_path is not set."
@@ -113,46 +116,35 @@ if [[ -z "$INPUTFILE" ]]; then
 fi
 
 log "Input file: ${INPUTFILE}"
-log "TMDB ID: ${TMDB_ID}, IMDB ID: ${IMDB_ID}"
-
-# Build args array: [-tmdb <id>] [-imdb <id>]
-ARGS="[]"
-if [[ -n "$TMDB_ID" ]]; then
-    ARGS=$(echo "$ARGS" | python3 -c "
-import sys, json
-a = json.load(sys.stdin)
-a += ['-tmdb', '${TMDB_ID}']
-print(json.dumps(a))
-")
-fi
-
-if [[ -n "$IMDB_ID" ]]; then
-    ARGS=$(echo "$ARGS" | python3 -c "
-import sys, json
-a = json.load(sys.stdin)
-a += ['-imdb', '${IMDB_ID}']
-print(json.dumps(a))
-")
-fi
+log "TMDB ID: ${radarr_movie_tmdbid:-}, IMDB ID: ${radarr_movie_imdbid:-}"
 
 PAYLOAD=$(python3 -c "
 import json, os
-obj = {'path': '${INPUTFILE}', 'args': ${ARGS}}
-config = os.environ.get('SMA_CONFIG', '').strip()
-if config:
-    obj['config'] = config
+movie = {}
+tmdb = os.environ.get('radarr_movie_tmdbid', '').strip()
+if tmdb:
+    movie['tmdbId'] = int(tmdb)
+imdb = os.environ.get('radarr_movie_imdbid', '').strip()
+if imdb:
+    movie['imdbId'] = imdb
+
+obj = {
+    'eventType': 'Download',
+    'movie':     movie,
+    'movieFile': {'path': os.environ.get('radarr_moviefile_path', '')},
+}
 print(json.dumps(obj))
 ")
 
 # ── submit job ─────────────────────────────────────────────────────────────────
 
-log "Submitting job to ${SMA_BASE}/webhook..."
+log "Submitting job to ${SMA_BASE}/webhook/radarr..."
 
 HTTP_CODE=$(curl -s -o /tmp/sma_response.json -w "%{http_code}" -X POST \
     -H "Content-Type: application/json" \
     "${AUTH_ARGS[@]}" \
     -d "$PAYLOAD" \
-    "${SMA_BASE}/webhook" 2>/dev/null) || HTTP_CODE="000"
+    "${SMA_BASE}/webhook/radarr" 2>/dev/null) || HTTP_CODE="000"
 
 RESPONSE=$(cat /tmp/sma_response.json 2>/dev/null || true)
 

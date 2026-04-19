@@ -176,6 +176,7 @@ class PathConfigManager:
         self.db_url = None  # Can be set from daemon.json
         self.ffmpeg_dir = None  # Can be set from daemon.json
         self.job_timeout_seconds = 0  # Can be set from daemon.json (0 = no timeout)
+        self.progress_log_interval = 60  # seconds between progress log entries
         self.smoke_test = False  # Run startup smoke test against all configs
         self.recycle_bin_max_age_days = 3  # Delete recycle-bin files older than N days (0 = disabled)
         self.recycle_bin_min_free_gb = 50  # Delete oldest files when free space < N GiB (0 = disabled)
@@ -223,6 +224,9 @@ class PathConfigManager:
             # Load job timeout in seconds (0 means no timeout)
             self.job_timeout_seconds = int(config.get("job_timeout_seconds", 0) or 0)
 
+            # Interval in seconds between progress log entries during conversion
+            self.progress_log_interval = int(config.get("progress_log_interval", 60) or 60)
+
             # Run a startup smoke test against all configs before accepting jobs
             self.smoke_test = bool(config.get("smoke_test", False))
 
@@ -245,9 +249,9 @@ class PathConfigManager:
             raw_rewrites = config.get("path_rewrites", [])
             self.path_rewrites = [{"from": r["from"].rstrip("/"), "to": r["to"].rstrip("/")} for r in raw_rewrites if r.get("from") and r.get("to")]
             if self.path_rewrites:
-                self.log.info("Path rewrites (%d):" % len(self.path_rewrites))
+                self.log.debug("Path rewrites (%d):" % len(self.path_rewrites))
                 for r in self.path_rewrites:
-                    self.log.info("  %s -> %s" % (r["from"], r["to"]))
+                    self.log.debug("  %s -> %s" % (r["from"], r["to"]))
 
             # Load scheduled scan paths
             self.scan_paths = config.get("scan_paths", [])
@@ -273,11 +277,11 @@ class PathConfigManager:
             # Sort by path length descending (longest prefix match first)
             self.path_configs.sort(key=lambda x: len(x["path"]), reverse=True)
 
-            self.log.info("Loaded daemon config from %s" % config_file)
-            self.log.info("Default config: %s" % self.default_config)
-            self.log.info("Path mappings (%d):" % len(self.path_configs))
+            self.log.debug("Loaded daemon config from %s" % config_file)
+            self.log.debug("Default config: %s" % self.default_config)
+            self.log.debug("Path mappings (%d):" % len(self.path_configs))
             for entry in self.path_configs:
-                self.log.info("  %s -> %s" % (entry["path"], entry["config"]))
+                self.log.debug("  %s -> %s" % (entry["path"], entry["config"]))
 
         except Exception as e:
             self.log.exception("Error loading daemon config: %s" % e)

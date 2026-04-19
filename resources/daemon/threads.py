@@ -125,24 +125,50 @@ class ScannerThread(_StoppableThread):
         # SMA converts *to* mp4 — any .mp4 present is either already processed or
         # a non-SMA file that would just be re-queued on every scan.
         skip_extensions = frozenset([".mp4"])
-        candidates = []
-        for root, dirs, files in os.walk(scan_dir):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
-            for fname in files:
-                if fname.startswith("."):
-                    continue
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in allowed and ext not in skip_extensions:
-                    candidates.append(os.path.join(root, fname))
 
-        if not candidates:
+        # Walk lazily via os.scandir; filter_unscanned is called in batches so
+        # we never hold the entire tree in memory at once.
+        _BATCH = 500
+        total_seen = 0
+        unscanned = []
+        batch = []
+
+        stack = [scan_dir]
+        while stack:
+            current = stack.pop()
+            try:
+                with os.scandir(current) as it:
+                    subdirs = []
+                    for entry in it:
+                        if entry.name.startswith("."):
+                            continue
+                        try:
+                            is_dir = entry.is_dir(follow_symlinks=False)
+                        except OSError:
+                            continue
+                        if is_dir:
+                            subdirs.append(entry.path)
+                        else:
+                            ext = os.path.splitext(entry.name)[1].lower()
+                            if ext in allowed and ext not in skip_extensions:
+                                batch.append(entry.path)
+                                total_seen += 1
+                                if len(batch) >= _BATCH:
+                                    unscanned.extend(self.job_db.filter_unscanned(batch))
+                                    batch = []
+                    stack.extend(reversed(subdirs))
+            except (PermissionError, OSError):
+                pass
+
+        if batch:
+            unscanned.extend(self.job_db.filter_unscanned(batch))
+
+        if total_seen == 0:
             self.log.debug("Scanner: no media files found in %s" % scan_dir)
             return 0
 
-        # Filter to only files not yet recorded as scanned
-        unscanned = self.job_db.filter_unscanned(candidates)
         if not unscanned:
-            self.log.debug("Scanner: all %d file(s) in %s already scanned" % (len(candidates), scan_dir))
+            self.log.debug("Scanner: all %d file(s) in %s already scanned" % (total_seen, scan_dir))
             return 0
 
         self.log.info("Scanner: found %d new file(s) in %s" % (len(unscanned), scan_dir))

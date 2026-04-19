@@ -796,6 +796,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
     _POST_ROUTES = {
         "/": lambda self, p, q: self._handle_webhook(),
         "/webhook": lambda self, p, q: self._handle_webhook(),
+        "/webhook/generic": lambda self, p, q: self._handle_webhook(),
+        "/webhook/sonarr": lambda self, p, q: self._handle_sonarr_webhook(),
+        "/webhook/radarr": lambda self, p, q: self._handle_radarr_webhook(),
         "/convert": lambda self, p, q: self._handle_webhook(),
         "/admin/delete-failed": lambda self, p, q: self._post_admin_delete_failed(),
         "/admin/delete-offline-nodes": lambda self, p, q: self._post_admin_delete_offline_nodes(),
@@ -841,23 +844,36 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 return
         self.send_json_response(404, {"error": "Not found"})
 
-    def _collect_media_files(self, directory):
-        """Recursively collect media files from a directory.
+    def _walk_media_files(self, directory):
+        """Yield media file paths lazily using os.scandir.
 
-        Only files whose extension is in path_config_manager.media_extensions
-        are included. Hidden directories and dotfiles are skipped.
-        ffprobe validation happens later inside manual.py when each job runs.
+        Uses an explicit stack instead of os.walk so files are emitted one at
+        a time without buffering the entire tree.  This keeps startup latency
+        and peak memory low on large or slow (e.g. unionfs/NFS) mounts.
+        Hidden directories and dotfiles (names starting with '.') are skipped.
         """
         allowed = self.server.path_config_manager.media_extensions
-        candidates = []
-        for root, dirs, files in os.walk(directory):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
-            for fname in files:
-                if fname.startswith("."):
-                    continue
-                if os.path.splitext(fname)[1].lower() in allowed:
-                    candidates.append(os.path.join(root, fname))
-        return sorted(candidates)
+        stack = [directory]
+        while stack:
+            current = stack.pop()
+            try:
+                with os.scandir(current) as it:
+                    subdirs = []
+                    for entry in it:
+                        if entry.name.startswith("."):
+                            continue
+                        try:
+                            is_dir = entry.is_dir(follow_symlinks=False)
+                        except OSError:
+                            continue
+                        if is_dir:
+                            subdirs.append(entry.path)
+                        elif os.path.splitext(entry.name)[1].lower() in allowed:
+                            yield entry.path
+                    # Extend in reverse so leftmost subdirectory is visited first
+                    stack.extend(reversed(subdirs))
+            except (PermissionError, OSError):
+                pass
 
     def _parse_webhook_body(self):
         """Parse request body into (path, extra_args, config_override, max_retries).
@@ -924,14 +940,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
         return filtered_defaults + list(extra_args)
 
     def _queue_directory(self, path, extra_args, config_override, max_retries=0):
-        """Expand directory to media files, queue each, respond."""
-        files = self._collect_media_files(path)
-        if not files:
-            self.send_json_response(200, {"status": "empty", "path": path, "message": "No media files found in directory"})
-            return
+        """Expand directory to media files, queue each, respond.
 
+        Files are discovered and queued lazily via _walk_media_files so the
+        first job is submitted as soon as the first file is found — no full
+        tree buffering before work begins.
+        """
         queued, duplicates = [], []
-        for filepath in files:
+        for filepath in self._walk_media_files(path):
             resolved_config = self._resolve_config(filepath, config_override)
             job_id = self.server.job_db.add_job(filepath, resolved_config, self._merge_args(filepath, extra_args), max_retries=max_retries)
             if job_id is None:
@@ -939,6 +955,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 duplicates.append({"path": filepath, "job_id": existing["id"] if existing else None})
             else:
                 queued.append({"job_id": job_id, "path": filepath, "config": resolved_config})
+
+        if not queued and not duplicates:
+            self.send_json_response(200, {"status": "empty", "path": path, "message": "No media files found in directory"})
+            return
 
         if queued:
             self.server.notify_workers()
@@ -971,28 +991,167 @@ class WebhookHandler(BaseHTTPRequestHandler):
             clear_job_id(token)
         self.send_json_response(202, {"status": "queued", "job_id": job_id, "path": path, "config": resolved_config, "log_file": log_file, "config_busy": config_busy, "pending_jobs": pending})
 
+    def _parse_sonarr_body(self):
+        """Parse a Sonarr-native webhook payload.
+
+        Returns (path, extra_args) on success, or (None, []) with an error
+        response already sent on failure.  Test events return (None, []) with
+        a 200 response already sent.
+
+        Expected payload shape (Sonarr Connection → Webhook, On Download/Upgrade):
+        {
+          "eventType": "Download",
+          "series":      { "tvdbId": 73871, "imdbId": "tt0472308" },
+          "episodes":    [ { "seasonNumber": 3, "episodeNumber": 10 } ],
+          "episodeFile": { "path": "/mnt/media/TV/Show/S03E10.mkv" }
+        }
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self.send_json_response(400, {"error": "Empty request body"})
+            return None, []
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (json.JSONDecodeError, ValueError):
+            self.send_json_response(400, {"error": "Invalid JSON"})
+            return None, []
+
+        event_type = data.get("eventType", "")
+
+        if event_type == "Test":
+            self.send_json_response(200, {"status": "ok", "message": "SMA-NG Sonarr webhook test successful"})
+            return None, []
+
+        if event_type != "Download":
+            self.send_json_response(400, {"error": "Unsupported eventType '%s'; only 'Download' is handled" % event_type})
+            return None, []
+
+        episode_file = data.get("episodeFile") or {}
+        path = episode_file.get("path", "").strip()
+        if not path:
+            self.send_json_response(400, {"error": "episodeFile.path is missing or empty"})
+            return None, []
+
+        series = data.get("series") or {}
+        episodes = data.get("episodes") or []
+
+        args = ["-tv"]
+        tvdb_id = series.get("tvdbId")
+        if tvdb_id:
+            args += ["-tvdb", str(tvdb_id)]
+            # Season/episode only meaningful alongside a series ID
+            if episodes:
+                first = episodes[0]
+                season = first.get("seasonNumber")
+                if season is not None:
+                    args += ["-s", str(season)]
+                for ep in episodes:
+                    ep_num = ep.get("episodeNumber")
+                    if ep_num is not None:
+                        args += ["-e", str(ep_num)]
+        else:
+            imdb_id = series.get("imdbId")
+            if imdb_id:
+                args += ["-imdb", str(imdb_id)]
+
+        return path, args
+
+    def _parse_radarr_body(self):
+        """Parse a Radarr-native webhook payload.
+
+        Returns (path, extra_args) on success, or (None, []) with an error
+        response already sent on failure.  Test events return (None, []) with
+        a 200 response already sent.
+
+        Expected payload shape (Radarr Connection → Webhook, On Download/Upgrade):
+        {
+          "eventType": "Download",
+          "movie":     { "tmdbId": 603, "imdbId": "tt0133093" },
+          "movieFile": { "path": "/mnt/media/Movies/The Matrix.mkv" }
+        }
+        """
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self.send_json_response(400, {"error": "Empty request body"})
+            return None, []
+
+        try:
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (json.JSONDecodeError, ValueError):
+            self.send_json_response(400, {"error": "Invalid JSON"})
+            return None, []
+
+        event_type = data.get("eventType", "")
+
+        if event_type == "Test":
+            self.send_json_response(200, {"status": "ok", "message": "SMA-NG Radarr webhook test successful"})
+            return None, []
+
+        if event_type != "Download":
+            self.send_json_response(400, {"error": "Unsupported eventType '%s'; only 'Download' is handled" % event_type})
+            return None, []
+
+        movie_file = data.get("movieFile") or {}
+        path = movie_file.get("path", "").strip()
+        if not path:
+            self.send_json_response(400, {"error": "movieFile.path is missing or empty"})
+            return None, []
+
+        movie = data.get("movie") or {}
+        args = ["-movie"]
+        tmdb_id = movie.get("tmdbId")
+        if tmdb_id:
+            args += ["-tmdb", str(tmdb_id)]
+        else:
+            imdb_id = movie.get("imdbId")
+            if imdb_id:
+                args += ["-imdb", str(imdb_id)]
+
+        return path, args
+
+    def _dispatch_path(self, path, extra_args, config_override=None, max_retries=0):
+        """Shared tail: validate path, rewrite, queue file or directory."""
+        path = os.path.abspath(path)
+        path = self.server.path_config_manager.rewrite_path(path)
+        if not os.path.exists(path):
+            self.send_json_response(400, {"error": "Path does not exist", "path": path})
+            return
+        if self.server.path_config_manager.is_recycle_bin_path(path):
+            self.server.logger.warning("Rejected recycle-bin path: %s" % path)
+            self.send_json_response(400, {"error": "Path is inside a recycle-bin directory", "path": path})
+            return
+        if os.path.isdir(path):
+            self._queue_directory(path, extra_args, config_override, max_retries)
+        else:
+            self._queue_file(path, extra_args, config_override, max_retries)
+
+    def _handle_sonarr_webhook(self):
+        try:
+            path, extra_args = self._parse_sonarr_body()
+            if path is None:
+                return
+            self._dispatch_path(path, extra_args)
+        except Exception as e:
+            self.server.logger.exception("Error handling Sonarr webhook: %s" % e)
+            self.send_json_response(500, {"error": str(e)})
+
+    def _handle_radarr_webhook(self):
+        try:
+            path, extra_args = self._parse_radarr_body()
+            if path is None:
+                return
+            self._dispatch_path(path, extra_args)
+        except Exception as e:
+            self.server.logger.exception("Error handling Radarr webhook: %s" % e)
+            self.send_json_response(500, {"error": str(e)})
+
     def _handle_webhook(self):
         try:
             path, extra_args, config_override, max_retries = self._parse_webhook_body()
             if path is None:
                 return
-
-            path = os.path.abspath(path)
-            path = self.server.path_config_manager.rewrite_path(path)
-            if not os.path.exists(path):
-                self.send_json_response(400, {"error": "Path does not exist", "path": path})
-                return
-
-            if self.server.path_config_manager.is_recycle_bin_path(path):
-                self.server.logger.warning("Rejected recycle-bin path: %s" % path)
-                self.send_json_response(400, {"error": "Path is inside a recycle-bin directory", "path": path})
-                return
-
-            if os.path.isdir(path):
-                self._queue_directory(path, extra_args, config_override, max_retries)
-            else:
-                self._queue_file(path, extra_args, config_override, max_retries)
-
+            self._dispatch_path(path, extra_args, config_override, max_retries)
         except Exception as e:
             self.server.logger.exception("Error handling request: %s" % e)
             self.send_json_response(500, {"error": str(e)})

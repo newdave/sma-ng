@@ -769,7 +769,7 @@ class MediaProcessor:
                 same_dispo = all(x == dispo_sublist[0] for x in dispo_sublist)
                 if same_language and same_dispo:
                     combinations.append([x.index for x in stream_sublist])
-        self.log.info("The following stream indexes have been identified as being copies: %s [stream-codec-combinations]." % combinations)
+        self.log.debug("The following stream indexes have been identified as being copies: %s [stream-codec-combinations]." % combinations)
         return combinations
 
     # Iterate through generated options and remove potential duplicate streams based on mapped combinations
@@ -889,13 +889,13 @@ class MediaProcessor:
         ###############################################################
         # Audio streams
         ###############################################################
-        self.log.info("Reading audio streams.")
+        self.log.debug("Reading audio streams.")
         audio_settings = self._build_audio_settings(inputfile, info, awl, tagdata)
 
         ###############################################################
         # Subtitle streams
         ###############################################################
-        self.log.info("Reading subtitle streams.")
+        self.log.debug("Reading subtitle streams.")
         subtitle_settings, downloaded_subs = self._build_subtitle_settings(inputfile, info, swl, original, tagdata, sources, ripsubopts, video_settings, vcodecs)
 
         ###############################################################
@@ -1095,10 +1095,10 @@ class MediaProcessor:
 
         Returns a 4-tuple: (video_settings dict, vcodecs list, vcodec str, hdrOutput bool).
         """
-        self.log.info("Reading video stream.")
-        self.log.info("Video codec detected: %s." % info.video.codec)
-        self.log.info("Pix Fmt: %s." % info.video.pix_fmt)
-        self.log.info("Profile: %s." % info.video.profile)
+        self.log.debug("Reading video stream.")
+        self.log.debug("Video codec detected: %s." % info.video.codec)
+        self.log.debug("Pix Fmt: %s." % info.video.pix_fmt)
+        self.log.debug("Profile: %s." % info.video.profile)
 
         vdebug = "video"
         hdrInput = self.isHDRInput(info.video)
@@ -1270,7 +1270,7 @@ class MediaProcessor:
         self.log.debug("Video filter: %s." % vfilter)
         self.log.debug("Video bit depth: %d." % bit_depth)
         self.log.debug("Video bsf: %s." % vbsf)
-        self.log.info("Video codec parameters %s." % vparams)
+        self.log.debug("Video codec parameters %s." % vparams)
         self.log.info("Creating %s video stream from source stream %d." % (vcodec, info.video.index))
 
         video_settings = {
@@ -1838,7 +1838,7 @@ class MediaProcessor:
                 if hwaccel == "qsv":
                     opts.extend(["-extra_hw_frames", "20"])
 
-                self.log.info("%s hwaccel is supported by this ffmpeg build and will be used [hwaccels]." % hwaccel)
+                self.log.debug("%s hwaccel is supported by this ffmpeg build and will be used [hwaccels]." % hwaccel)
                 opts.extend(["-hwaccel", hwaccel])
                 if self.settings.hwoutputfmt.get(hwaccel):
                     opts.extend(["-hwaccel_output_format", self.settings.hwoutputfmt[hwaccel]])
@@ -1848,7 +1848,7 @@ class MediaProcessor:
                 self.log.debug("Decoder: %s." % decoder)
                 if decoder in codecs[video_codec]["decoders"] and decoder in self.settings.hwaccel_decoders:
                     if Converter.decoder(decoder).supportsBitDepth(bit_depth):
-                        self.log.info("%s decoder is also supported by this ffmpeg build and will also be used [hwaccel-decoders]." % decoder)
+                        self.log.debug("%s decoder is also supported by this ffmpeg build and will also be used [hwaccel-decoders]." % decoder)
                         opts.extend(["-vcodec", decoder])
                         self.log.debug("Decoder formats:")
                         self.log.debug(self.converter.ffmpeg.decoder_formats(decoder))
@@ -1860,7 +1860,7 @@ class MediaProcessor:
             for decoder in self.settings.hwaccel_decoders:
                 if decoder in codecs[video_codec]["decoders"] and decoder in self.settings.hwaccel_decoders and decoder.startswith(video_codec):
                     if Converter.decoder(decoder).supportsBitDepth(bit_depth):
-                        self.log.info("%s decoder is supported by this ffmpeg build and will also be used [hwaccel-decoders]." % decoder)
+                        self.log.debug("%s decoder is supported by this ffmpeg build and will also be used [hwaccel-decoders]." % decoder)
                         opts.extend(["-vcodec", decoder])
                         self.log.debug("Decoder formats:")
                         self.log.debug(self.converter.ffmpeg.decoder_formats(decoder))
@@ -1999,7 +1999,7 @@ class MediaProcessor:
         original_language = tagdata.original_language if tagdata else None
 
         SORT_DICT = {
-            "codec": lambda x: (codecs.index(self.getCodecFromOptions(x, info)) if (self.getCodecFromOptions(x, info)) in codecs else 999),
+            "codec": lambda x: codecs.index(self.getCodecFromOptions(x, info)) if (self.getCodecFromOptions(x, info)) in codecs else 999,
             "channels": lambda x: x.get("channels", 999),
             "language": lambda x: languages.index(x.get("language")) if x.get("language") in languages else 999,
             "original-language": lambda x: x.get("language") == original_language,
@@ -2053,8 +2053,8 @@ class MediaProcessor:
                 self.log.debug(["%d->%d" % (output.index(x), sort.index(x)) for x in output])
                 output = sort
 
-        self.log.info("Final sorting:")
-        self.log.info(["%d->%d" % (streams.index(x), output.index(x)) for x in streams])
+        self.log.debug("Final sorting:")
+        self.log.debug(["%d->%d" % (streams.index(x), output.index(x)) for x in streams])
         return output
 
     # Process external subtitle file with CleanIt library

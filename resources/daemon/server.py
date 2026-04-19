@@ -30,6 +30,7 @@ class DaemonServer(HTTPServer):
         cli_api_key=None,
         cli_ffmpeg_dir=None,
         job_timeout_seconds=0,
+        progress_log_interval=60,
     ):
         super().__init__(server_address, handler_class)
         self.job_db = job_db
@@ -58,6 +59,7 @@ class DaemonServer(HTTPServer):
             logger=logger,
             ffmpeg_dir=ffmpeg_dir,
             job_timeout_seconds=job_timeout_seconds,
+            progress_log_interval=progress_log_interval,
             job_processes=self._job_processes,
             job_progress=self._job_progress,
         )
