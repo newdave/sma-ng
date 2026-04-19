@@ -36,7 +36,20 @@ def _seconds_to_hms(secs):
 class ConversionWorker(threading.Thread):
     """Background worker thread that processes conversion jobs from the database."""
 
-    def __init__(self, worker_id, job_db, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None, job_timeout_seconds=0, progress_log_interval=_DEFAULT_PROGRESS_LOG_INTERVAL, job_processes=None, job_progress=None):
+    def __init__(
+        self,
+        worker_id,
+        job_db,
+        path_config_manager,
+        config_log_manager,
+        config_lock_manager,
+        logger,
+        ffmpeg_dir=None,
+        job_timeout_seconds=0,
+        progress_log_interval=_DEFAULT_PROGRESS_LOG_INTERVAL,
+        job_processes=None,
+        job_progress=None,
+    ):
         super().__init__(daemon=True)
         self.worker_id = worker_id
         self.node_id = socket.gethostname()
@@ -246,7 +259,20 @@ class ConversionWorker(threading.Thread):
 class WorkerPool:
     """Manages a pool of ConversionWorker threads."""
 
-    def __init__(self, worker_count, job_db, path_config_manager, config_log_manager, config_lock_manager, logger, ffmpeg_dir=None, job_timeout_seconds=0, progress_log_interval=_DEFAULT_PROGRESS_LOG_INTERVAL, job_processes=None, job_progress=None):
+    def __init__(
+        self,
+        worker_count,
+        job_db,
+        path_config_manager,
+        config_log_manager,
+        config_lock_manager,
+        logger,
+        ffmpeg_dir=None,
+        job_timeout_seconds=0,
+        progress_log_interval=_DEFAULT_PROGRESS_LOG_INTERVAL,
+        job_processes=None,
+        job_progress=None,
+    ):
         self._workers = []
         self._worker_count = worker_count
         self._job_db = job_db
