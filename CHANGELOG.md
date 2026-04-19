@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.0...sma-ng-v1.1.1) (2026-04-19)
+
+
+### Documentation
+
+* replace &lt;repo&gt; placeholder with real GitHub URL ([a2d412e](https://github.com/newdave/sma-ng/commit/a2d412e43ef6f6405f22cf310ae1335b6752adc4))
+
 ## [1.1.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.0.1...sma-ng-v1.1.0) (2026-04-19)
 
 
