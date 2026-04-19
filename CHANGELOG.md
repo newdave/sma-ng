@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.0.0...sma-ng-v1.0.1) (2026-04-19)
+
+
+### Bug Fixes
+
+* make Intel QSV/oneVPL conditional on amd64 for arm64 support ([5e04cd0](https://github.com/newdave/sma-ng/commit/5e04cd0a592b29138375ff9e4021a054f54e0120))
+
 ## [1.0.0](https://github.com/newdave/sma-ng/compare/sma-ng-v0.3.0...sma-ng-v1.0.0) (2026-04-19)
 
 
