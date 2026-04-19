@@ -172,20 +172,45 @@ echo "Service installed. Enable with: sudo systemctl enable --now sma-daemon"
 # ---------------------------------------------------------------------------
 
 [tasks."docker:build"]
-description = "Build the Docker image locally (TAG=sma-ng:local to override)"
+description = "Build the Docker image locally for the native platform (PLATFORM=linux/amd64 to override; TAG=sma-ng:local to override tag)"
 run = """
 TAG="${TAG:-sma-ng:local}"
 FFMPEG_VERSION="${FFMPEG_VERSION:-8.0}"
-echo "Building $TAG (FFmpeg ${FFMPEG_VERSION})..."
+# Default to native platform so --load works (multi-platform requires --push).
+# Detect native arch: arm64 on Apple Silicon, amd64 on x86-64.
+NATIVE="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+PLATFORM="${PLATFORM:-$NATIVE}"
+echo "Building $TAG (FFmpeg ${FFMPEG_VERSION}, platform: ${PLATFORM})..."
 docker build \
   --file docker/Dockerfile \
   --target runtime \
+  --platform "${PLATFORM}" \
   --build-arg FFMPEG_VERSION="${FFMPEG_VERSION}" \
   --tag "$TAG" \
   .
 echo ""
 echo "Built: $TAG"
 echo "Run:   docker run --rm -p 8585:8585 -v $(pwd)/config:/config $TAG"
+"""
+
+[tasks."docker:push"]
+description = "Build and push a multi-platform image (linux/amd64 + linux/arm64) via buildx (IMAGE=ghcr.io/owner/sma-ng:latest to override)"
+run = """
+if [ -z "${IMAGE:-}" ]; then
+  echo "Error: IMAGE is required (e.g. IMAGE=ghcr.io/owner/sma-ng:latest mise run docker:push)" >&2
+  exit 1
+fi
+FFMPEG_VERSION="${FFMPEG_VERSION:-8.0}"
+echo "Building and pushing multi-platform image: $IMAGE (FFmpeg ${FFMPEG_VERSION})..."
+docker buildx build \
+  --file docker/Dockerfile \
+  --target runtime \
+  --platform linux/amd64,linux/arm64 \
+  --build-arg FFMPEG_VERSION="${FFMPEG_VERSION}" \
+  --tag "$IMAGE" \
+  --push \
+  .
+echo "Pushed: $IMAGE"
 """
 
 [tasks."docker:run"]
