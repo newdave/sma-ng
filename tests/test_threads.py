@@ -7,7 +7,7 @@ import unittest.mock as mock
 
 import pytest
 
-from resources.daemon.threads import RecycleBinCleanerThread, ScannerThread
+from resources.daemon.threads import HeartbeatThread, RecycleBinCleanerThread, ScannerThread
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -343,3 +343,372 @@ class TestScannerThreadScan:
         scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db)
         result = scanner._scan({"path": str(tmp_path)})
         assert result > 0
+
+    def test_does_not_rewrite_path_when_no_rewrite_config(self, tmp_path):
+        media = tmp_path / "ep.mkv"
+        media.write_bytes(b"")
+        db = mock.MagicMock()
+        db.filter_unscanned.return_value = [str(media)]
+        db.add_job.return_value = 1
+        scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db)
+        scanner._scan({"path": str(tmp_path)})
+        submitted_path = db.add_job.call_args[0][0]
+        assert submitted_path == str(media)
+
+    def test_does_not_rewrite_when_path_does_not_start_with_rewrite_from(self, tmp_path):
+        media = tmp_path / "ep.mkv"
+        media.write_bytes(b"")
+        db = mock.MagicMock()
+        db.filter_unscanned.return_value = [str(media)]
+        db.add_job.return_value = 1
+        scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db)
+        entry = {
+            "path": str(tmp_path),
+            "rewrite_from": "/different/prefix",
+            "rewrite_to": "/remote/media",
+        }
+        scanner._scan(entry)
+        submitted_path = db.add_job.call_args[0][0]
+        assert submitted_path == str(media)
+
+    def test_add_job_returns_none_still_records_scanned(self, tmp_path):
+        media = tmp_path / "ep.mkv"
+        media.write_bytes(b"")
+        db = mock.MagicMock()
+        db.filter_unscanned.return_value = [str(media)]
+        db.add_job.return_value = None
+        scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db)
+        result = scanner._scan({"path": str(tmp_path)})
+        assert result == 0
+        db.record_scanned.assert_called_once()
+
+    def test_scan_handles_permission_error_on_subdir(self, tmp_path):
+        subdir = tmp_path / "restricted"
+        subdir.mkdir()
+        db = mock.MagicMock()
+        db.filter_unscanned.return_value = []
+        scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db)
+        with mock.patch("os.scandir", side_effect=[PermissionError("denied")]):
+            result = scanner._scan({"path": str(tmp_path)})
+        assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# ScannerThread.run
+# ---------------------------------------------------------------------------
+
+
+class TestScannerThreadRun:
+    def test_run_exits_immediately_with_no_scan_paths(self):
+        scanner = _make_scanner([])
+        scanner.run()  # should return without blocking
+
+    def test_run_calls_scan_and_notifies_when_jobs_found(self, tmp_path):
+        db = mock.MagicMock()
+        server = mock.MagicMock()
+        scanner = _make_scanner([{"path": str(tmp_path), "interval": 3600}], job_db=db)
+        scanner.server = server
+
+        call_count = [0]
+
+        def fake_scan(entry):
+            call_count[0] += 1
+            scanner.running = False
+            return 1
+
+        scanner._scan = fake_scan
+        with mock.patch.object(scanner._stop_event, "wait"):
+            scanner.run()
+
+        assert call_count[0] == 1
+        server.notify_workers.assert_called_once()
+
+    def test_run_does_not_notify_when_no_jobs_found(self, tmp_path):
+        server = mock.MagicMock()
+        scanner = _make_scanner([{"path": str(tmp_path), "interval": 3600}])
+        scanner.server = server
+
+        call_count = [0]
+
+        def fake_scan(entry):
+            call_count[0] += 1
+            scanner.running = False
+            return 0
+
+        scanner._scan = fake_scan
+        with mock.patch.object(scanner._stop_event, "wait"):
+            scanner.run()
+
+        server.notify_workers.assert_not_called()
+
+    def test_run_catches_exception_in_scan(self, tmp_path):
+        scanner = _make_scanner([{"path": str(tmp_path), "interval": 3600}])
+
+        call_count = [0]
+
+        def fake_scan(entry):
+            call_count[0] += 1
+            scanner.running = False
+            raise RuntimeError("oops")
+
+        scanner._scan = fake_scan
+        with mock.patch.object(scanner._stop_event, "wait"):
+            scanner.run()  # must not raise
+
+        assert call_count[0] == 1
+
+    def test_stop_sets_running_false_and_fires_event(self):
+        scanner = _make_scanner([])
+        scanner.stop()
+        assert scanner.running is False
+        assert scanner._stop_event.is_set()
+
+    def test_run_respects_per_path_interval(self, tmp_path):
+        scan_path = {"path": str(tmp_path), "interval": 9999}
+        scanner = _make_scanner([scan_path])
+
+        iterations = [0]
+
+        def fake_scan(entry):
+            iterations[0] += 1
+            if iterations[0] >= 1:
+                scanner.running = False
+            return 0
+
+        scanner._scan = fake_scan
+        with mock.patch.object(scanner._stop_event, "wait"):
+            scanner.run()
+
+        # After first scan the next_run is set far in the future; _scan called only once
+        assert iterations[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# HeartbeatThread
+# ---------------------------------------------------------------------------
+
+
+def _make_heartbeat(job_db=None, server=None, interval=5, stale_seconds=60):
+    if job_db is None:
+        job_db = mock.MagicMock()
+        job_db.is_distributed = True
+        job_db.heartbeat.return_value = None
+        job_db.recover_stale_nodes.return_value = []
+    if server is None:
+        server = mock.MagicMock()
+    log = logging.getLogger("test.heartbeat")
+    return HeartbeatThread(
+        job_db=job_db,
+        node_id="test-node",
+        host="127.0.0.1",
+        worker_count=2,
+        server=server,
+        interval=interval,
+        stale_seconds=stale_seconds,
+        logger=log,
+        started_at=None,
+    )
+
+
+class TestHeartbeatThread:
+    def test_run_exits_immediately_when_not_distributed(self):
+        db = mock.MagicMock()
+        db.is_distributed = False
+        ht = _make_heartbeat(job_db=db)
+        ht.run()  # should return without blocking
+
+    def test_run_calls_heartbeat_each_iteration(self):
+        db = mock.MagicMock()
+        db.is_distributed = True
+        db.heartbeat.return_value = None
+        db.recover_stale_nodes.return_value = []
+        ht = _make_heartbeat(job_db=db)
+
+        call_count = [0]
+
+        def fake_wait(timeout=None):
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                ht.running = False
+
+        ht._stop_event.wait = fake_wait
+        ht.run()
+        assert db.heartbeat.call_count >= 1
+
+    def test_run_triggers_restart_on_restart_command(self):
+        db = mock.MagicMock()
+        db.is_distributed = True
+        db.heartbeat.return_value = "restart"
+        db.recover_stale_nodes.return_value = []
+        server = mock.MagicMock()
+        ht = _make_heartbeat(job_db=db, server=server)
+
+        with mock.patch("threading.Thread") as mock_thread:
+            mock_thread.return_value = mock.MagicMock()
+            ht.run()
+
+        mock_thread.assert_called_once()
+        call_kwargs = mock_thread.call_args[1]
+        assert call_kwargs["target"] == server.graceful_restart
+
+    def test_run_triggers_shutdown_on_shutdown_command(self):
+        db = mock.MagicMock()
+        db.is_distributed = True
+        db.heartbeat.return_value = "shutdown"
+        db.recover_stale_nodes.return_value = []
+        server = mock.MagicMock()
+        ht = _make_heartbeat(job_db=db, server=server)
+
+        with mock.patch("threading.Thread") as mock_thread:
+            mock_thread.return_value = mock.MagicMock()
+            ht.run()
+
+        mock_thread.assert_called_once()
+        call_kwargs = mock_thread.call_args[1]
+        assert call_kwargs["target"] == server.shutdown
+
+    def test_run_notifies_workers_when_stale_jobs_recovered(self):
+        db = mock.MagicMock()
+        db.is_distributed = True
+        db.heartbeat.return_value = None
+        db.recover_stale_nodes.return_value = [("stale-node", 3)]
+        server = mock.MagicMock()
+        ht = _make_heartbeat(job_db=db, server=server)
+
+        call_count = [0]
+
+        def fake_wait(timeout=None):
+            call_count[0] += 1
+            ht.running = False
+
+        ht._stop_event.wait = fake_wait
+        ht.run()
+        server.notify_workers.assert_called_once()
+
+    def test_run_does_not_notify_workers_when_no_stale_jobs(self):
+        db = mock.MagicMock()
+        db.is_distributed = True
+        db.heartbeat.return_value = None
+        db.recover_stale_nodes.return_value = [("old-node", 0)]
+        server = mock.MagicMock()
+        ht = _make_heartbeat(job_db=db, server=server)
+
+        call_count = [0]
+
+        def fake_wait(timeout=None):
+            call_count[0] += 1
+            ht.running = False
+
+        ht._stop_event.wait = fake_wait
+        ht.run()
+        server.notify_workers.assert_not_called()
+
+    def test_run_catches_heartbeat_exception(self):
+        db = mock.MagicMock()
+        db.is_distributed = True
+        db.heartbeat.side_effect = RuntimeError("db gone")
+        ht = _make_heartbeat(job_db=db)
+
+        call_count = [0]
+
+        def fake_wait(timeout=None):
+            call_count[0] += 1
+            ht.running = False
+
+        ht._stop_event.wait = fake_wait
+        ht.run()  # must not raise
+
+    def test_stop_sets_running_false_and_fires_event(self):
+        ht = _make_heartbeat()
+        ht.stop()
+        assert ht.running is False
+        assert ht._stop_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# RecycleBinCleanerThread.run
+# ---------------------------------------------------------------------------
+
+
+class TestRecycleBinCleanerRun:
+    def test_run_exits_when_both_thresholds_zero(self):
+        cleaner = _make_cleaner(max_age_days=0, min_free_gb=0)
+        cleaner.run()  # should return immediately
+
+    def test_run_cleans_configured_directories(self, tmp_path):
+        pcm = mock.MagicMock()
+        pcm.get_all_configs.return_value = ["/cfg.ini"]
+        pcm.get_recycle_bin.return_value = str(tmp_path)
+        cleaner = _make_cleaner(path_config_manager=pcm, max_age_days=30, min_free_gb=0)
+
+        call_count = [0]
+
+        def fake_clean(directory):
+            call_count[0] += 1
+            cleaner.running = False
+            return 0
+
+        cleaner._clean_directory = fake_clean
+        cleaner._stop_event.wait = mock.MagicMock()
+        cleaner.run()
+        assert call_count[0] == 1
+
+    def test_run_catches_exception_in_clean_directory(self, tmp_path):
+        pcm = mock.MagicMock()
+        pcm.get_all_configs.return_value = ["/cfg.ini"]
+        pcm.get_recycle_bin.return_value = str(tmp_path)
+        cleaner = _make_cleaner(path_config_manager=pcm, max_age_days=30, min_free_gb=0)
+
+        call_count = [0]
+
+        def fake_clean(directory):
+            call_count[0] += 1
+            cleaner.running = False
+            raise OSError("disk error")
+
+        cleaner._clean_directory = fake_clean
+        cleaner._stop_event.wait = mock.MagicMock()
+        cleaner.run()  # must not raise
+        assert call_count[0] == 1
+
+    def test_run_skips_none_recycle_bins(self):
+        pcm = mock.MagicMock()
+        pcm.get_all_configs.return_value = ["/cfg.ini"]
+        pcm.get_recycle_bin.return_value = None
+        cleaner = _make_cleaner(path_config_manager=pcm, max_age_days=30, min_free_gb=0)
+        cleaner.running = False
+        cleaner._stop_event.wait = mock.MagicMock()
+        clean_called = [False]
+
+        def fake_clean(directory):
+            clean_called[0] = True
+            return 0
+
+        cleaner._clean_directory = fake_clean
+        cleaner.run()
+        assert not clean_called[0]
+
+    def test_run_deduplicates_recycle_bins(self, tmp_path):
+        pcm = mock.MagicMock()
+        pcm.get_all_configs.return_value = ["/cfg1.ini", "/cfg2.ini"]
+        pcm.get_recycle_bin.return_value = str(tmp_path)  # same bin for both
+        cleaner = _make_cleaner(path_config_manager=pcm, max_age_days=30, min_free_gb=0)
+
+        clean_calls = [0]
+
+        def fake_clean(directory):
+            clean_calls[0] += 1
+            cleaner.running = False
+            return 0
+
+        cleaner._clean_directory = fake_clean
+        cleaner._stop_event.wait = mock.MagicMock()
+        cleaner.run()
+        # Same directory listed twice but should only be cleaned once (set dedup)
+        assert clean_calls[0] == 1
+
+    def test_free_gb_cannot_determine_skips_space_check(self, tmp_path):
+        cleaner = _make_cleaner(max_age_days=0, min_free_gb=1.0)
+        with mock.patch.object(cleaner, "_free_gb", return_value=None):
+            deleted = cleaner._clean_directory(str(tmp_path))
+        assert deleted == 0
