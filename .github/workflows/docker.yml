@@ -26,7 +26,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
   # Single source of truth for the FFmpeg version used in build-args.
   # Must match ARG FFMPEG_VERSION default in docker/Dockerfile.
-  FFMPEG_VERSION: "8.0"
+  FFMPEG_VERSION: "8.1"
 
 jobs:
   build:

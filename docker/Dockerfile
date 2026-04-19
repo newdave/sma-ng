@@ -12,7 +12,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 FROM ubuntu:24.04 AS ffmpeg-builder
 
-ARG FFMPEG_VERSION=8.0
+ARG FFMPEG_VERSION=8.1
 # Injected automatically by Docker Buildx for multi-arch builds
 ARG TARGETARCH
 
