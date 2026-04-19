@@ -13,13 +13,18 @@
 FROM ubuntu:24.04 AS ffmpeg-builder
 
 ARG FFMPEG_VERSION=8.0
+# Injected automatically by Docker Buildx for multi-arch builds
+ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Intel oneVPL (QSV) is only available on amd64 — skip PPA and libvpl-dev on arm64
 RUN apt-get update \
     && apt-get install -y --no-install-recommends software-properties-common \
-    && add-apt-repository ppa:kobuk-team/intel-graphics \
-    && apt-get update \
+    && if [ "$TARGETARCH" = "amd64" ]; then \
+        add-apt-repository ppa:kobuk-team/intel-graphics \
+        && apt-get update; \
+    fi \
     && apt-get install -y --no-install-recommends \
         # Build tools
         build-essential \
@@ -33,8 +38,6 @@ RUN apt-get update \
         # VAAPI / DRM (dynamic — GPU driver loaded at runtime)
         libva-dev \
         libdrm-dev \
-        # oneVPL / Intel QSV (dynamic — MFX dispatcher loaded at runtime)
-        libvpl-dev \
         # Codec libraries (statically linked into the binary)
         libssl-dev \
         zlib1g-dev \
@@ -53,6 +56,11 @@ RUN apt-get update \
         libaom-dev \
         libdav1d-dev \
         libsvtav1enc-dev \
+    # oneVPL / Intel QSV — amd64 only (not available in arm64 Ubuntu repos)
+    && if [ "$TARGETARCH" = "amd64" ]; then \
+        apt-get install -y --no-install-recommends libvpl-dev; \
+    fi \
+    && apt-get purge -y --auto-remove software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 
 # ── nv-codec-headers (NVENC/NVDEC — headers only, no CUDA needed at build time)
@@ -69,17 +77,17 @@ RUN wget -q "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -O /tm
 
 WORKDIR /tmp/ffmpeg
 
-RUN ./configure \
+# Build FFmpeg; --enable-libvpl (Intel QSV) is amd64-only
+RUN VPL_FLAG=$([ "$TARGETARCH" = "amd64" ] && echo "--enable-libvpl" || true); \
+    ./configure \
     --prefix=/usr/local \
     --extra-cflags="-I/usr/local/include" \
     --extra-ldflags="-L/usr/local/lib" \
     --extra-libs="-lpthread -lm -lz -ldl" \
     --enable-static \
     --disable-shared \
-    # GPL required for x264/x265; version3 for additional LGPL-v3 codecs
     --enable-gpl \
     --enable-version3 \
-    # Strip documentation and debug symbols to keep the binary lean
     --disable-doc \
     --disable-htmlpages \
     --disable-manpages \
@@ -87,12 +95,10 @@ RUN ./configure \
     --disable-txtpages \
     --disable-debug \
     --enable-optimizations \
-    # Hardware acceleration (dynamic — GPU drivers on host)
     --enable-vaapi \
     --enable-libdrm \
-    --enable-libvpl \
+    ${VPL_FLAG} \
     --enable-ffnvcodec \
-    # Codec support (statically linked)
     --enable-libx264 \
     --enable-libx265 \
     --enable-libmp3lame \
@@ -107,7 +113,6 @@ RUN ./configure \
     --enable-libaom \
     --enable-libdav1d \
     --enable-libsvtav1 \
-    # Network / TLS
     --enable-openssl \
     --enable-protocol=https \
     && make -j$(nproc) \
@@ -143,6 +148,8 @@ FROM ubuntu:24.04 AS runtime
 
 ARG UID=1000
 ARG GID=1000
+# Injected automatically by Docker Buildx for multi-arch builds
+ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -194,16 +201,18 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #
 # Network / TLS:
 #   libssl3       — OpenSSL TLS               (--enable-openssl)
+# Intel oneVPL (libvpl2) is only available on amd64 — skip PPA and package on arm64
 RUN apt-get update \
     && apt-get install -y --no-install-recommends software-properties-common \
-    && add-apt-repository ppa:kobuk-team/intel-graphics \
-    && apt-get update \
+    && if [ "$TARGETARCH" = "amd64" ]; then \
+        add-apt-repository ppa:kobuk-team/intel-graphics \
+        && apt-get update; \
+    fi \
     && apt-get install -y --no-install-recommends \
         python3 \
         libva2 \
         libva-drm2 \
         libdrm2 \
-        libvpl2 \
         libx264-164 \
         libx265-199 \
         libvpx9 \
@@ -222,6 +231,10 @@ RUN apt-get update \
         libssl3 \
         ca-certificates \
         tini \
+    # oneVPL / Intel QSV runtime — amd64 only
+    && if [ "$TARGETARCH" = "amd64" ]; then \
+        apt-get install -y --no-install-recommends libvpl2; \
+    fi \
     && apt-get purge -y --auto-remove software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 
