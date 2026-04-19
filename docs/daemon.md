@@ -43,6 +43,7 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 - Filterable job history table with requeue/cancel actions
 - Submit Job form with path autocomplete (config prefixes, recent jobs, live filesystem browsing)
 - Job priority controls
+- Log viewer: browse, filter, and live-tail per-config log files
 
 ---
 
@@ -52,6 +53,7 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | --- | --- | --- | --- |
 | `GET` | `/` | No | Redirects to `/dashboard` |
 | `GET` | `/dashboard` | No | Web dashboard |
+| `GET` | `/admin` | No | Admin panel (destructive actions) |
 | `GET` | `/health` | No | Health check with job stats (local node) |
 | `GET` | `/status` | No | Cluster-wide status across all nodes |
 | `GET` | `/docs` | No | Rendered documentation |
@@ -61,6 +63,9 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `GET` | `/stats` | Yes | Job statistics by status |
 | `GET` | `/scan` | Yes | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv` |
 | `GET` | `/browse` | Yes | List filesystem dirs/files within configured paths. Query: `?path=/dir` |
+| `GET` | `/logs` | Yes | List all log files with metadata |
+| `GET` | `/logs/<name>` | Yes | Get log content. Query: `?lines=200&level=ERROR&job_id=42&offset=0` |
+| `GET` | `/logs/<name>/tail` | Yes | Poll for new entries after byte offset. Query: `?offset=<bytes>` |
 | `POST` | `/webhook` | Yes | Submit conversion job (file or directory path) |
 | `POST` | `/cleanup` | Yes | Remove old jobs. Query: `?days=30` |
 | `POST` | `/reload` | Yes | Reload `daemon.json` without restarting |
@@ -122,7 +127,7 @@ curl -H "X-API-Key: SECRET" ...
 curl -H "Authorization: Bearer SECRET" ...
 ```
 
-Public endpoints (no auth required): `/`, `/dashboard`, `/health`, `/status`, `/docs`, `/favicon.png`
+Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`, `/favicon.png`
 
 ---
 
@@ -217,6 +222,71 @@ Each config gets a separate rotating log file in `logs/` named after the config 
 | `config/autoProcess.movies-4k.ini` | `logs/autoProcess.movies-4k.log` |
 
 Rotation: 10MB max, 5 backups. Use `--logs-dir` to change the directory.
+
+---
+
+## Log Viewer API
+
+Log files can be read programmatically via the API or browsed in the dashboard's log viewer drawer.
+
+### List log files
+
+```bash
+curl -H "X-API-Key: SECRET" http://localhost:8585/logs
+```
+
+Returns an array of log file objects:
+
+```json
+[
+  {"name": "autoProcess", "file": "/app/logs/autoProcess.log", "size": 102400, "mtime": "2024-04-19T12:34:56Z"},
+  {"name": "autoProcess.tv", "file": "/app/logs/autoProcess.tv.log", "size": 51200, "mtime": "2024-04-19T10:20:30Z"}
+]
+```
+
+### Get log content
+
+```bash
+# Last 200 lines
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?lines=200"
+
+# Filter by log level
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?level=ERROR"
+
+# Filter by job ID
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?job_id=42"
+
+# Read from byte offset (for polling)
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?offset=51200"
+```
+
+Returns:
+
+```json
+{
+  "entries": [
+    {"timestamp": "2024-04-19T12:00:00Z", "level": "INFO", "message": "Starting conversion", "job_id": 42}
+  ],
+  "file_size": 102400
+}
+```
+
+**Query parameters:**
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `lines` | `200` | Maximum lines to return (tail of file) |
+| `level` | — | Minimum log level filter: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
+| `job_id` | — | Filter entries to a specific job |
+| `offset` | — | Return content starting from this byte offset (auto-resets on log rotation) |
+
+### Poll for new entries (live tail)
+
+```bash
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess/tail?offset=51200"
+```
+
+Use the `file_size` from each response as the `offset` for the next request. The dashboard log viewer uses this automatically in live mode.
 
 ---
 

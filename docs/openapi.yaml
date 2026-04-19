@@ -79,6 +79,10 @@ components:
           type: integer
           default: 0
           description: Scheduling priority — higher values run first among pending jobs (FIFO within same priority)
+        log_name:
+          type: string
+          nullable: true
+          description: Log file stem for the config used by this job (e.g. "autoProcess.tv")
 
     JobStats:
       type: object
@@ -97,6 +101,38 @@ components:
       properties:
         error:
           type: string
+
+    LogFile:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Log name (config file stem, e.g. "autoProcess.tv")
+        file:
+          type: string
+          description: Absolute path to the log file
+        size:
+          type: integer
+          description: Current file size in bytes
+        mtime:
+          type: string
+          format: date-time
+          description: Last-modified timestamp
+
+    LogEntry:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        level:
+          type: string
+          enum: [DEBUG, INFO, WARNING, ERROR, CRITICAL]
+        message:
+          type: string
+        job_id:
+          type: integer
+          nullable: true
 
 paths:
   /health:
@@ -492,6 +528,9 @@ paths:
                       type: string
                   default_log:
                     type: string
+                  default_log_name:
+                    type: string
+                    description: Log name for the default config (e.g. "autoProcess")
                   default_active_jobs:
                     type: array
                   default_pending_jobs:
@@ -511,6 +550,9 @@ paths:
                             type: string
                         log_file:
                           type: string
+                        log_name:
+                          type: string
+                          description: Log name for this config (e.g. "autoProcess.tv")
                         active_jobs:
                           type: array
                         pending_jobs:
@@ -729,6 +771,124 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Directory not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /logs:
+    get:
+      summary: List all log files
+      operationId: listLogs
+      tags: [logs]
+      responses:
+        "200":
+          description: Log file metadata
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LogFile"
+
+  /logs/{name}:
+    get:
+      summary: Get log content
+      operationId: getLogContent
+      tags: [logs]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Log name (config file stem, e.g. "autoProcess.tv")
+        - name: lines
+          in: query
+          schema:
+            type: integer
+            default: 200
+          description: Maximum lines to return (tail of file)
+        - name: level
+          in: query
+          schema:
+            type: string
+            enum: [DEBUG, INFO, WARNING, ERROR, CRITICAL]
+          description: Minimum log level filter
+        - name: job_id
+          in: query
+          schema:
+            type: integer
+          description: Filter entries to a specific job
+        - name: offset
+          in: query
+          schema:
+            type: integer
+          description: Return content starting from this byte offset
+      responses:
+        "200":
+          description: Log entries and current file size
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LogEntry"
+                  file_size:
+                    type: integer
+        "404":
+          description: Log file not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /logs/{name}/tail:
+    get:
+      summary: Poll for new log entries after a byte offset
+      description: Returns entries written after the given byte offset. Use `file_size` from each response as the next `offset`. Resets automatically on log rotation.
+      operationId: tailLog
+      tags: [logs]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: offset
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Byte offset from a previous response's file_size
+        - name: level
+          in: query
+          schema:
+            type: string
+            enum: [DEBUG, INFO, WARNING, ERROR, CRITICAL]
+        - name: job_id
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: New log entries since offset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LogEntry"
+                  file_size:
+                    type: integer
+        "404":
+          description: Log file not found
           content:
             application/json:
               schema:
