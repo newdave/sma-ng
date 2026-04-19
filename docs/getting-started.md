@@ -38,7 +38,7 @@ Use `config/autoProcess.lq.ini` for bandwidth-limited destinations (mobile devic
 [mise](https://mise.jdx.dev/) is a dev-tool manager. Install it once, then:
 
 ```bash
-git clone <repo> && cd sma
+git clone https://github.com/newdave/sma-ng && cd sma-ng
 
 # Install Python 3.12, create venv, install dependencies
 mise install
@@ -57,7 +57,7 @@ mise run daemon
 ### Without mise
 
 ```bash
-git clone <repo> && cd sma
+git clone https://github.com/newdave/sma-ng && cd sma-ng
 python3 -m venv venv && source venv/bin/activate
 pip install -r setup/requirements.txt
 
