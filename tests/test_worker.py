@@ -8,6 +8,7 @@ import pytest
 
 from resources.daemon.worker import (
     ConversionWorker,
+    WorkerPool,
     _hms_to_seconds,
     _seconds_to_hms,
 )
@@ -268,3 +269,255 @@ class TestConversionWorkerProcessJob:
         job = {"id": 11, "path": "/nonexistent/file.mkv", "config": "/cfg.ini", "args": None}
         worker.process_job(job)
         assert worker.current_job_id is None
+
+
+# ---------------------------------------------------------------------------
+# ConversionWorker.stop
+# ---------------------------------------------------------------------------
+
+
+class TestConversionWorkerStop:
+    def test_stop_sets_running_false(self):
+        worker = _make_worker()
+        worker.stop()
+        assert worker.running is False
+
+    def test_stop_sets_job_event(self):
+        worker = _make_worker()
+        worker.stop()
+        assert worker.job_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# ConversionWorker._run_conversion_inner
+# ---------------------------------------------------------------------------
+
+
+def _make_fake_process(stdout_lines, returncode=0):
+    proc = mock.MagicMock()
+    proc.stdout = iter(line + "\n" for line in stdout_lines)
+    proc.returncode = returncode
+    proc.wait.return_value = None
+    return proc
+
+
+class TestRunConversionInner:
+    def test_returns_true_on_zero_exit(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        worker = _make_worker()
+        worker.job_timeout_seconds = 0
+        proc = _make_fake_process([], returncode=0)
+        with mock.patch("subprocess.Popen", return_value=proc):
+            result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+        assert result is True
+
+    def test_returns_false_on_nonzero_exit(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        worker = _make_worker()
+        proc = _make_fake_process([], returncode=1)
+        with mock.patch("subprocess.Popen", return_value=proc):
+            result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+        assert result is False
+
+    def test_returns_false_on_timeout(self, tmp_path):
+        import subprocess as _subprocess
+
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        worker = _make_worker()
+        worker.job_timeout_seconds = 10
+        proc = _make_fake_process([], returncode=0)
+        proc.wait.side_effect = _subprocess.TimeoutExpired(cmd="manual.py", timeout=10)
+        with mock.patch("subprocess.Popen", return_value=proc):
+            result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+        assert result is False
+        proc.kill.assert_called_once()
+
+    def test_returns_false_on_popen_exception(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        worker = _make_worker()
+        with mock.patch("subprocess.Popen", side_effect=OSError("no such file")):
+            result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+        assert result is False
+
+    def test_prepends_ffmpeg_dir_to_path(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        worker = _make_worker()
+        worker.ffmpeg_dir = "/custom/ffmpeg"
+        proc = _make_fake_process([], returncode=0)
+        captured_env = {}
+
+        def fake_popen(cmd, **kwargs):
+            captured_env.update(kwargs.get("env", {}))
+            return proc
+
+        with mock.patch("subprocess.Popen", side_effect=fake_popen):
+            worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+
+        assert captured_env["PATH"].startswith("/custom/ffmpeg")
+
+    def test_parses_ffmpeg_duration_line(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        worker = _make_worker()
+        worker.progress_log_interval = 0
+        duration_line = "  Duration: 01:30:00, start: 0.000000, bitrate: 5000 kb/s"
+        progress_line = "frame=  100 fps= 25 speed=1.00x time=00:01:00 size=  5000kB"
+        proc = _make_fake_process([duration_line, progress_line], returncode=0)
+        with mock.patch("subprocess.Popen", return_value=proc):
+            result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+        assert result is True
+
+    def test_empty_lines_are_skipped(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        worker = _make_worker()
+        proc = _make_fake_process(["", "   ", ""], returncode=0)
+        with mock.patch("subprocess.Popen", return_value=proc):
+            result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+        assert result is True
+
+    def test_cleans_up_job_processes_on_completion(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        job_procs = {}
+        worker = _make_worker()
+        worker._job_processes = job_procs
+        proc = _make_fake_process([], returncode=0)
+        with mock.patch("subprocess.Popen", return_value=proc):
+            worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+        assert 1 not in job_procs
+
+    def test_cleans_up_job_progress_on_completion(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        job_progress = {}
+        worker = _make_worker()
+        worker._job_progress = job_progress
+        progress_line = "frame=   1 fps=25 time=00:00:01"
+        proc = _make_fake_process([progress_line], returncode=0)
+        with mock.patch("subprocess.Popen", return_value=proc):
+            worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+        assert 1 not in job_progress
+
+    def test_extra_args_appended_to_command(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        worker = _make_worker()
+        captured_cmd = []
+
+        proc = _make_fake_process([], returncode=0)
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            return proc
+
+        with mock.patch("subprocess.Popen", side_effect=fake_popen):
+            worker._run_conversion_inner(1, str(media), "/cfg.ini", ["-tmdb", "603"])
+
+        assert "-tmdb" in captured_cmd
+        assert "603" in captured_cmd
+
+
+# ---------------------------------------------------------------------------
+# ConversionWorker.run (loop)
+# ---------------------------------------------------------------------------
+
+
+class TestConversionWorkerRun:
+    def test_run_exits_when_stopped_before_first_job(self):
+        db = mock.MagicMock()
+        db.claim_next_job.return_value = None
+        worker = _make_worker(job_db=db)
+        worker.running = False
+        worker.job_event.set()  # pre-signal so wait returns immediately
+        worker.run()  # must return, not block
+
+    def test_run_processes_available_job(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        db = mock.MagicMock()
+        lock_mgr = mock.MagicMock()
+        lock_mgr.get_locked_configs.return_value = []
+        job = {"id": 99, "path": str(media), "config": "/cfg.ini", "args": None}
+        # Return job once, then None to stop inner loop, then set running=False
+        call_count = [0]
+
+        def claim_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return job
+            worker.running = False
+            return None
+
+        db.claim_next_job.side_effect = claim_side_effect
+        db.get_job.return_value = {"status": "running"}
+        worker = _make_worker(job_db=db, lock_mgr=lock_mgr)
+        worker._run_conversion = mock.MagicMock(return_value=True)
+        worker.job_event.set()
+        worker.run()
+        db.complete_job.assert_called_once_with(99)
+
+
+# ---------------------------------------------------------------------------
+# WorkerPool.restart
+# ---------------------------------------------------------------------------
+
+
+def _make_pool_worker(worker_count=2):
+    mock_workers = [mock.MagicMock() for _ in range(worker_count)]
+    for w in mock_workers:
+        w.is_alive.return_value = False
+        w.job_event = mock.MagicMock()
+        w.running = True
+
+    with mock.patch("resources.daemon.worker.ConversionWorker") as MockWorker:
+        MockWorker.side_effect = list(mock_workers)
+        pool = WorkerPool(
+            worker_count=worker_count,
+            job_db=mock.MagicMock(),
+            path_config_manager=mock.MagicMock(),
+            config_log_manager=mock.MagicMock(),
+            config_lock_manager=mock.MagicMock(),
+            logger=mock.MagicMock(),
+        )
+    pool._workers = mock_workers
+    return pool, mock_workers
+
+
+class TestWorkerPoolRestart:
+    def test_restart_replaces_workers(self):
+        pool, _ = _make_pool_worker(worker_count=2)
+        old_workers = list(pool._workers)
+        with mock.patch("resources.daemon.worker.ConversionWorker") as MockWorker:
+            new_mock = mock.MagicMock()
+            MockWorker.return_value = new_mock
+            pool.restart()
+        for w in old_workers:
+            w.stop.assert_called_once()
+
+    def test_restart_updates_ffmpeg_dir(self):
+        pool, _ = _make_pool_worker(worker_count=1)
+        with mock.patch("resources.daemon.worker.ConversionWorker") as MockWorker:
+            MockWorker.return_value = mock.MagicMock()
+            pool.restart(ffmpeg_dir="/new/ffmpeg")
+        assert pool._ffmpeg_dir == "/new/ffmpeg"
+
+    def test_restart_updates_job_timeout(self):
+        pool, _ = _make_pool_worker(worker_count=1)
+        with mock.patch("resources.daemon.worker.ConversionWorker") as MockWorker:
+            MockWorker.return_value = mock.MagicMock()
+            pool.restart(job_timeout_seconds=3600)
+        assert pool._job_timeout_seconds == 3600
+
+    def test_restart_does_not_change_ffmpeg_dir_when_not_provided(self):
+        pool, _ = _make_pool_worker(worker_count=1)
+        pool._ffmpeg_dir = "/existing/ffmpeg"
+        with mock.patch("resources.daemon.worker.ConversionWorker") as MockWorker:
+            MockWorker.return_value = mock.MagicMock()
+            pool.restart()
+        assert pool._ffmpeg_dir == "/existing/ffmpeg"
