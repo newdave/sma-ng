@@ -26,6 +26,7 @@ class TestEstimateVideoBitrate:
         info = make_media_info(total_bitrate=10000000, audio_bitrate=128000)
         result = mp.estimateVideoBitrate(info)
         # (10000000 - 128000) / 1000 * 0.95 = ~9378
+        assert result is not None
         assert result > 0
         assert result < 10000  # Should be in kbps range
 
@@ -105,6 +106,7 @@ class TestStreamTitles:
         mp = self._make_processor()
         stream = make_stream(type="video", video_width=3840, video_height=2160)
         title = mp.videoStreamTitle(stream, {}, hdr=True)
+        assert title is not None
         assert "HDR" in title
         assert "4K" in title
 
@@ -130,19 +132,22 @@ class TestStreamTitles:
         mp = self._make_processor()
         stream = make_stream(type="audio", disposition={"default": False, "forced": False})
         title = mp.audioStreamTitle(stream, {"channels": 6})
+        assert title is not None
         assert "5.1" in title
 
     def test_audio_title_71(self, make_stream):
         mp = self._make_processor()
         stream = make_stream(type="audio", disposition={"default": False, "forced": False})
         title = mp.audioStreamTitle(stream, {"channels": 8})
+        assert title is not None
         assert "7.1" in title
 
     def test_audio_title_commentary(self, make_stream):
         mp = self._make_processor()
         stream = make_stream(type="audio", disposition={"default": False, "forced": False, "comment": True})
         title = mp.audioStreamTitle(stream, {"channels": 2})
-        assert "Commentary" in title or "Comment" in title.lower() or title is not None
+        assert title is not None
+        assert "Commentary" in title or "Comment" in title.lower()
 
     def test_subtitle_title_no_disposition(self, make_stream):
         mp = self._make_processor()
@@ -165,7 +170,7 @@ class TestStreamTitles:
         assert title == "Custom Title"
 
 
-class TestValidLanguage:
+class TestValidLanguageLegacy:
     """Test language validation logic."""
 
     def _make_processor(self):
@@ -255,17 +260,17 @@ class TestParseFile:
 
     def test_parse_no_extension(self):
         mp = self._make_processor()
-        d, name, ext = mp.parseFile("/path/to/file")
+        _, name, _ = mp.parseFile("/path/to/file")
         assert name == "file"
 
     def test_parse_extension_lowercased(self):
         mp = self._make_processor()
-        d, name, ext = mp.parseFile("/path/to/Movie.MKV")
+        _, _, ext = mp.parseFile("/path/to/Movie.MKV")
         assert ext == "mkv"
 
     def test_parse_dotted_filename(self):
         mp = self._make_processor()
-        d, name, ext = mp.parseFile("/path/to/Movie.2024.1080p.mkv")
+        _, name, ext = mp.parseFile("/path/to/Movie.2024.1080p.mkv")
         assert ext == "mkv"
         assert name == "Movie.2024.1080p"
 
@@ -387,7 +392,7 @@ class TestValidDisposition:
         assert mp.validDisposition(stream, [], unique=True, language="eng", existing=existing) is False
 
 
-class TestDispoStringToDict:
+class TestDispoStringToDictLegacy:
     def _make_processor(self):
         with patch("resources.mediaprocessor.Converter"):
             with patch("resources.readsettings.ReadSettings._validate_binaries"):
@@ -426,7 +431,7 @@ class TestDispoStringToDict:
         assert mp.dispoStringToDict(None) == {}
 
 
-class TestCheckDisposition:
+class TestCheckDispositionLegacy:
     def _make_processor(self):
         with patch("resources.mediaprocessor.Converter"):
             with patch("resources.readsettings.ReadSettings._validate_binaries"):
@@ -450,7 +455,7 @@ class TestCheckDisposition:
         assert mp.checkDisposition([], {"forced": False}) is True
 
 
-class TestTitleDispositionCheck:
+class TestTitleDispositionCheckLegacy:
     def _make_processor(self):
         with patch("resources.mediaprocessor.Converter"):
             with patch("resources.readsettings.ReadSettings._validate_binaries"):
@@ -489,7 +494,7 @@ class TestTitleDispositionCheck:
         assert s.disposition["hearing_impaired"] is True
 
 
-class TestSublistIndexes:
+class TestSublistIndexesLegacy:
     def _make_processor(self):
         with patch("resources.mediaprocessor.Converter"):
             with patch("resources.readsettings.ReadSettings._validate_binaries"):
@@ -529,30 +534,33 @@ class TestGetOutputFile:
     def test_basic_output(self, tmp_path):
         mp = self._make_processor()
         outfile, outdir = mp.getOutputFile(str(tmp_path), "movie", "mkv")
+        assert outfile is not None
         assert outfile.endswith("movie.mp4")
         assert outdir == str(tmp_path)
 
     def test_with_number(self, tmp_path):
         mp = self._make_processor()
         outfile, _ = mp.getOutputFile(str(tmp_path), "movie", "mkv", number=2)
+        assert outfile is not None
         assert ".2." in outfile
 
     def test_with_temp_extension(self, tmp_path):
         mp = self._make_processor()
         outfile, _ = mp.getOutputFile(str(tmp_path), "movie", "mkv", temp_extension="tmp")
+        assert outfile is not None
         assert outfile.endswith(".tmp")
 
     def test_output_dir_override(self, tmp_path):
         mp = self._make_processor()
         outdir = str(tmp_path / "output")
         mp.settings.output_dir = outdir
-        outfile, result_dir = mp.getOutputFile(str(tmp_path), "movie", "mkv")
+        _, result_dir = mp.getOutputFile(str(tmp_path), "movie", "mkv")
         assert result_dir == outdir
 
     def test_ignore_output_dir(self, tmp_path):
         mp = self._make_processor()
         mp.settings.output_dir = "/some/output/dir"
-        outfile, result_dir = mp.getOutputFile(str(tmp_path), "movie", "mkv", ignore_output_dir=True)
+        _, result_dir = mp.getOutputFile(str(tmp_path), "movie", "mkv", ignore_output_dir=True)
         assert result_dir == str(tmp_path)
 
 
@@ -859,7 +867,7 @@ class TestIsHDROutput:
         assert mp.isHDROutput(None, 8) is False
 
 
-class TestFfprobeSafeCodecs:
+class TestFfprobeSafeCodecsLegacy:
     def _make_processor(self):
         with patch("resources.mediaprocessor.Converter"):
             with patch("resources.readsettings.ReadSettings._validate_binaries"):
@@ -1002,7 +1010,7 @@ class TestSetPermissions:
     def test_nonexistent_file_logs(self, tmp_path):
         mp = self._make_processor()
         mp.setPermissions(str(tmp_path / "nonexistent.txt"))
-        mp.log.debug.assert_called()
+        mp.log.debug.assert_called()  # type: ignore[attr-defined]
 
 
 class TestScanForExternalMetadata:
@@ -1069,6 +1077,7 @@ class TestMaxBitrateVBV:
         info = make_media_info(video_codec="h264", video_bitrate=10000000, total_bitrate=10128000, audio_bitrate=128000)
         with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
             options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+        assert options is not None
         assert options["video"]["maxrate"] == "8000k"
         assert options["video"]["bufsize"] == "16000k"
 
@@ -1077,6 +1086,7 @@ class TestMaxBitrateVBV:
         info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
         with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
             options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+        assert options is not None
         assert options["video"]["maxrate"] is None
         assert options["video"]["bufsize"] is None
 
@@ -1285,7 +1295,7 @@ class TestTitleDispositionCheck:
         assert s.disposition["forced"] is True
 
 
-class TestSafeLanguage:
+class TestSafeLanguageLegacy:
     def _make_audio_stream(self, lang, make_stream):
         s = make_stream(type="audio", metadata={"language": lang})
         s.disposition = {"default": True, "forced": False, "comment": False, "hearing_impaired": False, "visual_impaired": False}
@@ -1305,7 +1315,7 @@ class TestSafeLanguage:
         info = MediaInfo()
         audio = self._make_audio_stream("und", make_stream)
         info.streams = [audio]
-        awl, swl = mp.safeLanguage(info)
+        _, _ = mp.safeLanguage(info)
         # 'und' normalized to 'eng' (adl)
         assert audio.metadata["language"] == "eng"
 
@@ -1347,7 +1357,7 @@ class TestSafeLanguage:
         assert "jpn" in awl
 
 
-class TestMapStreamCombinations:
+class TestMapStreamCombinationsLegacy:
     def test_matching_combination_same_language_and_dispo(self, make_stream):
         mp = _make_mp()
         mp.settings.stream_codec_combinations = [["aac", "ac3"]]
@@ -1446,7 +1456,7 @@ class TestFfprobeSafeCodecs:
             assert result == ["custom_codec"]
 
 
-class TestSetDefaultAudioStream:
+class TestSetDefaultAudioStreamLegacy:
     def test_sets_default_when_none_present(self):
         mp = _make_mp()
         mp.settings.adl = "eng"
@@ -1503,7 +1513,7 @@ class TestSetDefaultAudioStream:
         assert "+default" in streams[0]["disposition"]
 
 
-class TestSetDefaultSubtitleStream:
+class TestSetDefaultSubtitleStreamLegacy:
     def test_sets_default_when_sdl_and_force(self):
         mp = _make_mp()
         mp.settings.sdl = "eng"
@@ -1542,7 +1552,7 @@ class TestSetDefaultSubtitleStream:
         mp.setDefaultSubtitleStream([])  # Should not raise
 
 
-class TestSortStreams:
+class TestSortStreamsLegacy:
     def _make_info(self, make_stream):
         from converter.ffmpeg import MediaInfo
 
@@ -1646,7 +1656,7 @@ class TestSetAcceleration:
             settings_hwaccels=["videotoolbox"],
         )
         mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_videotoolbox")
-        opts, device = mp.setAcceleration("h264", "yuv420p")
+        opts, _ = mp.setAcceleration("h264", "yuv420p")
         assert "-hwaccel" in opts
         assert "videotoolbox" in opts
 
@@ -1680,7 +1690,7 @@ class TestSetDefaultAudioStream:
     def _make_stream(self, language="eng", disposition="+default", channels=2, codec="aac"):
         return {"language": language, "disposition": disposition, "channels": channels, "codec": codec, "bitrate": 128}
 
-    def _make_mp(self, adl="eng"):
+    def _make_mp(self, adl: str | None = "eng"):
         mp = _make_mp()
         mp.settings.adl = adl
         mp.settings.audio_sorting_default = "channels.d"
@@ -1752,7 +1762,7 @@ class TestSetDefaultSubtitleStream:
     def _make_sub(self, language="eng", disposition="-default"):
         return {"language": language, "disposition": disposition}
 
-    def _make_mp(self, sdl="eng", sforcedefault=True):
+    def _make_mp(self, sdl: str | None = "eng", sforcedefault: bool = True):
         mp = _make_mp()
         mp.settings.sdl = sdl
         mp.settings.sforcedefault = sforcedefault
@@ -1948,7 +1958,7 @@ class TestIsValidSubtitleSource:
         info.subtitle = [MagicMock()]
         info.video = None
         info.audio = []
-        mp.converter.probe.return_value = info
+        mp.converter.probe.return_value = info  # type: ignore[attr-defined]
         result = mp.isValidSubtitleSource("/path/to/file.srt")
         assert result is info
 
@@ -1958,7 +1968,7 @@ class TestIsValidSubtitleSource:
         info.subtitle = [MagicMock()]
         info.video = MagicMock()
         info.audio = []
-        mp.converter.probe.return_value = info
+        mp.converter.probe.return_value = info  # type: ignore[attr-defined]
         assert mp.isValidSubtitleSource("/path/to/file.srt") is None
 
     def test_file_with_audio_streams_returns_none(self):
@@ -1967,12 +1977,12 @@ class TestIsValidSubtitleSource:
         info.subtitle = [MagicMock()]
         info.video = None
         info.audio = [MagicMock()]
-        mp.converter.probe.return_value = info
+        mp.converter.probe.return_value = info  # type: ignore[attr-defined]
         assert mp.isValidSubtitleSource("/path/to/file.srt") is None
 
     def test_probe_exception_returns_none(self):
         mp = self._make_mp()
-        mp.converter.probe.side_effect = Exception("ffprobe failed")
+        mp.converter.probe.side_effect = Exception("ffprobe failed")  # type: ignore[attr-defined]
         assert mp.isValidSubtitleSource("/path/to/file.srt") is None
 
 
@@ -2072,13 +2082,13 @@ class TestGetDimensions:
         info = MagicMock()
         info.video.video_width = 1920
         info.video.video_height = 1080
-        mp.converter.probe.return_value = info
+        mp.converter.probe.return_value = info  # type: ignore[attr-defined]
         result = mp.getDimensions("/path/to/file.mkv")
         assert result == {"x": 1920, "y": 1080}
 
     def test_probe_returns_none_gives_zeros(self):
         mp = self._make_mp()
-        mp.converter.probe.return_value = None
+        mp.converter.probe.return_value = None  # type: ignore[attr-defined]
         result = mp.getDimensions("/path/to/file.mkv")
         assert result == {"x": 0, "y": 0}
 
@@ -2285,6 +2295,7 @@ class TestBitrateProfileIntegration:
         info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
         with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
             options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+        assert options is not None
         assert options["video"]["bitrate"] == 3000
         assert options["video"]["maxrate"] == "6000k"
         assert options["video"]["bufsize"] == "12000k"
@@ -2295,6 +2306,7 @@ class TestBitrateProfileIntegration:
         info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
         with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
             options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+        assert options is not None
         assert options["video"]["codec"] != "copy"
 
     def test_no_profiles_leaves_vbv_unset_without_maxbitrate(self, tmp_ini, make_media_info):
@@ -2302,5 +2314,6 @@ class TestBitrateProfileIntegration:
         info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
         with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
             options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+        assert options is not None
         assert options["video"]["maxrate"] is None
         assert options["video"]["bufsize"] is None
