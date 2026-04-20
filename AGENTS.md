@@ -1,15 +1,29 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to Codex when working with code in this repository.
+
+## Documentation Rules
+
+- **Keep documentation in sync with code changes.** When you add, change, or remove a feature, update all relevant docs in the same change.
+- **Every documentation change must be applied in three places:**
+  1. `docs/` - the canonical source in the main repo
+  2. GitHub wiki (`/tmp/sma-wiki/`) - the corresponding wiki page(s); push with `git add -A && git commit -m "docs: ..." && git push origin HEAD:master`
+  3. `resources/docs.html` - the inline help served at `http://localhost:8585/docs`
 
 ## Git Commit Rules
 
-- **Do NOT add `Co-Authored-By` lines referencing Codex, Anthropic, or any AI to commit messages.**
-- Do not add any AI attribution to commits whatsoever.
+- Do not add any AI attribution or `Co-Authored-By` lines to commits.
+- Break large changes into smaller logical commits when the user asks for commits.
+- Use informative conventional commit prefixes such as `fix:`, `feat:`, and `refactor:`.
+- Do not create manual `v*` tags.
 
 ## Development Environment
 
 ```bash
+# With mise (recommended)
+mise install
+mise run install
+
 # Create and activate virtual environment
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -32,6 +46,20 @@ make config
 
 Requires Python 3.12+ and FFmpeg installed on system.
 
+`mise` is the preferred task runner for local development and deployment. Common tasks:
+
+- `mise run install` - create `venv` and install dependencies
+- `mise run install-dev` - install dev and test dependencies
+- `mise run test` - run the test suite
+- `mise run lint` - run `ruff`
+- `mise run lint-fix` - auto-fix lint issues
+- `mise run detect-gpu` - detect available hardware acceleration
+- `mise run config` - generate config with detected GPU
+- `mise run daemon` - start the daemon on `0.0.0.0:8585`
+- `mise run convert -- /path/to/file.mkv` - convert a file
+- `mise run preview -- /path/to/file.mkv` - preview options only
+- `mise run codecs` - list supported codecs
+
 ## Project Overview
 
 SMA-NG (Next-Generation Media Automator) is a Python-based media conversion and tagging automation tool. It converts media files to MP4 format using FFmpeg and tags them with metadata from TMDB. It integrates with media managers (Sonarr, Radarr) and downloaders (NZBGet, SABNZBD, Deluge, uTorrent, qBittorrent).
@@ -41,6 +69,9 @@ SMA-NG (Next-Generation Media Automator) is a Python-based media conversion and 
 ```bash
 # Install dependencies
 pip install -r setup/requirements.txt
+
+# Convert with mise wrapper
+mise run convert -- /path/to/file.mkv
 
 # Manual conversion with auto-tagging (guesses metadata from filename)
 python manual.py -i "/path/to/file.mkv" -a
@@ -60,12 +91,23 @@ python manual.py -i "/path/to/file.mkv" -oo
 # List supported codecs
 python manual.py -cl
 
+# Use alternate config file
+python manual.py -i "/path/to/file.mkv" -a -c config/autoProcess.lq.ini
+
+# Force re-encode even if format matches
+python manual.py -i "/path/to/file.mp4" -a -fc
+
+# Tag only
+python manual.py -i "/path/to/file.mp4" -to
+
 # Start daemon (HTTP webhook server)
 python daemon.py --host 0.0.0.0 --port 8585 --workers 4
 
 # Start daemon with API key authentication
 python daemon.py --host 0.0.0.0 --port 8585 --workers 4 --api-key YOUR_SECRET_KEY
 ```
+
+After conversion, `manual.py` automatically triggers a rescan on the matching Sonarr or Radarr instance based on the output file directory path.
 
 ## Daemon Mode
 
@@ -86,331 +128,289 @@ SMA_DAEMON_API_KEY=YOUR_SECRET_KEY python daemon.py
 # Custom daemon config (for path mappings)
 python daemon.py --daemon-config /path/to/daemon.json --workers 4
 
+# Dry-run all configs and exit
+python daemon.py --smoke-test
+
+# Set a per-job timeout
+python daemon.py --job-timeout 7200
+
 # Graceful shutdown (waits for active conversions to finish)
 curl -X POST http://localhost:8585/shutdown -H "X-API-Key: YOUR_SECRET_KEY"
 ```
 
-**Endpoints:**
+### Public Endpoints
 
-- `POST /webhook/generic` - Submit conversion job (returns job_id)
+- `POST /webhook/generic` - Submit conversion job (returns job ID)
 - `GET /health` - Health check with job statistics
-- `GET /jobs` - List jobs (`?status=pending&limit=50&offset=0`)
+- `GET /status` - Cluster-wide node and job status
+- `GET /jobs` - List jobs with filtering and pagination
 - `GET /jobs/<id>` - Get specific job details
 - `GET /configs` - Show path-to-config mappings and status
 - `GET /stats` - Job statistics by status
+- `GET /scan` - Filter unscanned paths
+- `GET /browse` - Browse configured filesystem paths
 - `GET /logs` - List all log files
-- `GET /logs/<name>` - Get log content (`?lines=200&level=ERROR&job_id=42&offset=0`)
+- `GET /logs/<name>` - Get log content
 - `GET /logs/<name>/tail` - Poll for new entries after byte offset
-- `POST /cleanup` - Remove old completed/failed jobs (`?days=30`)
-- `POST /shutdown` - Graceful shutdown (waits for active conversions to finish)
-
-**Request formats:**
-
-```bash
-# Plain text body (just the path)
-curl -X POST http://localhost:8585/webhook/generic -d "/path/to/movie.mkv"
-
-# JSON body
-curl -X POST http://localhost:8585/webhook/generic \
-  -H "Content-Type: application/json" \
-  -d '{"path": "/path/to/movie.mkv"}'
-
-# JSON with extra manual.py arguments
-curl -X POST http://localhost:8585/webhook/generic \
-  -H "Content-Type: application/json" \
-  -d '{"path": "/path/to/movie.mkv", "args": ["-tmdb", "603"]}'
-
-# JSON with config override (bypasses path matching)
-curl -X POST http://localhost:8585/webhook/generic \
-  -H "Content-Type: application/json" \
-  -d '{"path": "/path/to/movie.mkv", "config": "/custom/autoProcess.ini"}'
-```
+- `POST /webhook/sonarr` - Native Sonarr webhook endpoint
+- `POST /webhook/radarr` - Native Radarr webhook endpoint
+- `POST /cleanup` - Remove old completed or failed jobs
+- `POST /reload` - Reload `daemon.json`
+- `POST /restart` - Graceful restart
+- `POST /shutdown` - Graceful shutdown
+- `POST /jobs/<id>/requeue` - Requeue a failed job
+- `POST /jobs/<id>/cancel` - Cancel a pending or running job
+- `POST /jobs/<id>/priority` - Set job priority
+- `POST /jobs/requeue` - Requeue failed jobs in bulk
+- `POST /scan/filter` - Filter unscanned paths for large lists
+- `POST /scan/record` - Mark paths as scanned
 
 ### Authentication
 
-The daemon supports API key authentication. When enabled, all endpoints except `/health` require a valid API key.
+When enabled, all endpoints except `/health` require a valid API key.
 
-**Configure API key (priority order):**
+Priority order:
 
-1. Command line: `--api-key YOUR_SECRET_KEY`
-2. Environment variable: `SMA_DAEMON_API_KEY=YOUR_SECRET_KEY`
-3. Config file: `"api_key": "YOUR_SECRET_KEY"` in daemon.json
+1. `--api-key`
+2. `SMA_DAEMON_API_KEY`
+3. `api_key` in `daemon.json`
 
-**Send authenticated requests:**
-
-```bash
-# Using X-API-Key header (recommended)
-curl -X POST http://localhost:8585/webhook/generic \
-  -H "X-API-Key: YOUR_SECRET_KEY" \
-  -d "/path/to/movie.mkv"
-
-# Using Authorization Bearer header
-curl -X POST http://localhost:8585/webhook/generic \
-  -H "Authorization: Bearer YOUR_SECRET_KEY" \
-  -d "/path/to/movie.mkv"
-```
-
-Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`
+Public endpoints: `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`, `/favicon.png`
 
 ### Path-Based Configuration
 
-The daemon can use different `autoProcess.ini` files based on the input file path. Create `config/daemon.json` (copy from `setup/daemon.json.sample`):
+The daemon can use different `autoProcess.ini` files based on the input path. Matching is longest-prefix-first, so more specific paths take priority over broader ones.
 
-```json
-{
-  "default_config": "config/autoProcess.ini",
-  "api_key": "your_secret_key",
-  "db_url": null,
-  "ffmpeg_dir": null,
-  "media_extensions": [".mp4", ".mkv", ".avi", ".mov", ".ts"],
-  "scan_paths": [
-    {
-      "path": "/mnt/local/Media",
-      "interval": 3600,
-      "rewrite_from": "/mnt/local/Media",
-      "rewrite_to": "/mnt/unionfs/Media"
-    }
-  ],
-  "path_configs": [
-    {
-      "path": "/mnt/unionfs/Media/TV",
-      "config": "config/autoProcess.tv.ini"
-    },
-    {
-      "path": "/mnt/unionfs/Media/Movies/4K",
-      "config": "config/autoProcess.movies-4k.ini"
-    },
-    {
-      "path": "/mnt/unionfs/Media/Movies",
-      "config": "config/autoProcess.movies.ini"
-    }
-  ]
-}
-```
+Important `daemon.json` keys:
 
-**Matching rules:**
+- `default_config` - fallback config when no path matches
+- `api_key` - daemon authentication key
+- `db_url` - PostgreSQL URL for distributed mode
+- `ffmpeg_dir` - prepended to `PATH` for conversion jobs
+- `media_extensions` - extensions used by scanning and `/browse`
+- `path_rewrites` - prefix substitutions before config matching
+- `scan_paths` - scheduled background scanning definitions
+- `path_configs` - per-path config routing
+- `smoke_test` - run dry-run validation of all configs at startup
+- `job_timeout_seconds` - kill long-running jobs after the configured number of seconds
+- `recycle_bin_max_age_days` - recycle-bin cleanup retention
+- `recycle_bin_min_free_gb` - free-space watermark for recycle-bin cleanup
 
-- Paths are matched using longest-prefix-first (more specific paths take priority)
-- `/mnt/unionfs/Media/Movies/4K/film.mkv` matches `Movies/4K` config, not `Movies`
-- Paths not matching any prefix use `default_config`
-- Config paths can be relative (to SMA-NG root) or absolute
+Each `path_configs` entry can also include `default_args` to prepend arguments to jobs from that path.
 
 ### Per-Config Logging
 
-The daemon logs output to separate files in the `logs/` directory based on which config is used:
-
-| Config File | Log File |
-| --- | --- |
-| `config/autoProcess.ini` | `logs/autoProcess.log` |
-| `config/autoProcess.tv.ini` | `logs/autoProcess.tv.log` |
-| `config/autoProcess.movies-4k.ini` | `logs/autoProcess.movies-4k.log` |
-
-Log files use rotation (10MB max, 5 backups). Use `--logs-dir` to change the logs directory.
+The daemon writes rotating logs to `logs/daemon.log` and separate per-config log files in `logs/` based on the config in use. Per-config logs rotate at 10 MB with 5 backups. Use `--logs-dir` to change the logs directory.
 
 ### Concurrency Control
 
-Up to `--workers` jobs can run simultaneously. Concurrency is managed per-config using a semaphore: jobs for the same config run concurrently up to the worker limit, and jobs for different configs always run in parallel.
-
-- Jobs for **different configs** run in parallel immediately
-- Jobs for the **same config** run concurrently up to the worker count, then queue
-- Use `--workers N` to set concurrency (default: 1)
-
-Example with `--workers 4` and 5 queued jobs:
-
-```text
-Job 1: /TV/show1.mkv     -> autoProcess.tv.ini     [runs immediately]
-Job 2: /TV/show2.mkv     -> autoProcess.tv.ini     [runs immediately]
-Job 3: /Movies/film1.mkv -> autoProcess.movies.ini [runs immediately]
-Job 4: /Movies/film2.mkv -> autoProcess.movies.ini [runs immediately]
-Job 5: /TV/show3.mkv     -> autoProcess.tv.ini     [waits for slot]
-```
-
-Check active/waiting jobs via the health endpoint:
-
-```bash
-curl http://localhost:8585/health
-# Returns: {"active": {...}, "waiting": {...}, ...}
-```
+Up to `--workers` jobs can run simultaneously. Jobs for different configs run in parallel immediately. Jobs for the same config share the worker limit and queue once that limit is reached.
 
 ### Job Persistence
 
-Jobs are stored in a PostgreSQL database. This provides:
+Jobs are stored in PostgreSQL. This provides restart recovery, job history, filtering, and distributed coordination across multiple nodes.
 
-- **Restart recovery**: Pending/interrupted jobs resume automatically
-- **Job history**: View completed/failed jobs with timestamps
-- **Filtering**: Query jobs by status, config, with pagination
+Cluster-related runtime flags:
 
-```bash
-# List pending jobs
-curl "http://localhost:8585/jobs?status=pending"
-
-# Get specific job
-curl http://localhost:8585/jobs/42
-
-# View statistics
-curl http://localhost:8585/stats
-# Returns: {"pending": 3, "running": 1, "completed": 150, "failed": 2, "total": 156}
-
-# Cleanup old jobs (default: 30 days)
-curl -X POST "http://localhost:8585/cleanup?days=7"
-```
-
-### PostgreSQL (Distributed / Multi-Node)
-
-PostgreSQL is the only supported database backend. It enables distributed job coordination — no two nodes will ever process the same file.
-
-**Configure PostgreSQL (priority order):**
-
-1. Environment variable: `SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma`
-2. Config file: `"db_url": "postgresql://user:pass@host/sma"` in daemon.json
-
-**daemon.json example:**
-
-```json
-{
-  "default_config": "config/autoProcess.ini",
-  "db_url": "postgresql://sma:password@db-host:5432/sma",
-  "path_configs": [...]
-}
-```
-
-**daemon.env example:**
-
-```bash
-SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
-```
-
-**Cluster-specific options:**
-
-- `--heartbeat-interval N` — seconds between node heartbeat updates (default: 30)
-- `--stale-seconds N` — seconds without a heartbeat before a node's running jobs are requeued (default: 120)
-
-The `/health` endpoint includes cluster-wide status when using PostgreSQL, showing active and waiting jobs across all nodes.
+- `--heartbeat-interval` - heartbeat interval in seconds
+- `--stale-seconds` - requeue running jobs if a node heartbeat goes stale
 
 ## Architecture
 
 ### Entry Points
 
-- `manual.py` - CLI tool for manual conversion/tagging
-- `daemon.py` - HTTP webhook server for triggering conversions via API
-- `triggers/media_managers/sonarr.sh` / `radarr.sh` - Bash scripts triggered by Sonarr/Radarr
-- `triggers/usenet/` / `triggers/torrents/` - Bash scripts for download client integrations
+- `manual.py` - CLI tool for manual conversion and tagging
+- `daemon.py` - thin entry point that imports `resources.daemon.*` and runs `main()`
+- `triggers/media_managers/sonarr.sh` and `triggers/media_managers/radarr.sh` - media-manager trigger scripts
+- `triggers/usenet/` and `triggers/torrents/` - downloader integration scripts
+
+### Daemon Package
+
+The daemon implementation lives under `resources/daemon/`.
+
+| Module | Contents |
+| --- | --- |
+| `constants.py` | `SCRIPT_DIR`, default values, status constants |
+| `db.py` | `PostgreSQLJobDatabase` |
+| `config.py` | `ConfigLockManager`, `ConfigLogManager`, `PathConfigManager` |
+| `handler.py` | `WebhookHandler`, route handlers, HTML helpers |
+| `threads.py` | `_StoppableThread`, `HeartbeatThread`, `ScannerThread` |
+| `worker.py` | `ConversionWorker`, `WorkerPool` |
+| `server.py` | `DaemonServer`, `_validate_hwaccel` |
 
 ### Core Modules
 
-#### `resources/`
+- `resources/mediaprocessor.py` - central conversion pipeline
+- `resources/readsettings.py` - parses `autoProcess.ini` and defines defaults
+- `resources/metadata.py` - TMDB metadata fetch and MP4 tagging
+- `resources/postprocess.py` - runs custom scripts from `post_process/`
+- `resources/extensions.py` - TMDB API key and file extension definitions
+- `resources/mediamanager.py` - Sonarr and Radarr helpers used by triggers and rescans
+- `resources/log.py` and `resources/lang.py` - logging and language helpers
+- `converter/ffmpeg.py` - FFmpeg and FFprobe wrapper classes
+- `converter/avcodecs.py` - codec definitions and encoder mappings
+- `converter/formats.py` - container format definitions
+- `autoprocess/plex.py` - Plex refresh integration
 
-- `mediaprocessor.py` - Central class `MediaProcessor` handling the full conversion pipeline: validation, FFmpeg conversion, tagging, file operations, and post-processing
-- `readsettings.py` - `ReadSettings` class parses `autoProcess.ini`, defines all defaults in `DEFAULTS` dict
-- `metadata.py` - `Metadata` class fetches and writes tags from TMDB using `tmdbsimple` and `mutagen`
-- `postprocess.py` - Runs custom post-process scripts from `post_process/` directory
-- `extensions.py` - Contains TMDB API key and file extension definitions
+## Configuration
 
-#### `converter/`
+The main config file is `config/autoProcess.ini` (copy from `setup/autoProcess.ini.sample`). Override location via `SMA_CONFIG`.
 
-- `ffmpeg.py` - FFmpeg/FFprobe wrapper with `MediaFormatInfo`, `MediaStreamInfo`, progress parsing
-- `avcodecs.py` - Codec definitions with FFmpeg encoder mappings
-- `formats.py` - Container format definitions
+Important sections include `[Converter]`, `[Video]`, `[HDR]`, `[Audio]`, `[Subtitle]`, `[Metadata]`, `[Sonarr]`, `[Radarr]`, and `[Plex]`.
 
-#### `autoprocess/`
+`mise run config` generates three quality-profile configs:
 
-- `plex.py` - Plex library refresh integration
+- `config/autoProcess.ini` - default regular-quality profile
+- `config/autoProcess.rq.ini` - explicit regular-quality profile
+- `config/autoProcess.lq.ini` - lower-quality profile for bandwidth-limited destinations
 
-#### Additional `resources/`
+Daemon settings follow:
 
-- `mediamanager.py` - Shared Sonarr/Radarr API helpers used by trigger scripts
+- CLI flag
+- environment variable
+- `daemon.json`
+- default
 
-### Configuration
+Examples:
 
-The main config file is `config/autoProcess.ini` (copy from `setup/autoProcess.ini.sample`). Override location via `SMA_CONFIG` environment variable.
+- API key: `--api-key` / `SMA_DAEMON_API_KEY` / `daemon.json api_key`
+- DB URL: `SMA_DAEMON_DB_URL` / `daemon.json db_url`
+- FFmpeg dir: `--ffmpeg-dir` / `SMA_DAEMON_FFMPEG_DIR` / `daemon.json ffmpeg_dir`
 
-Key sections:
+## Documentation
 
-- `[Converter]` - FFmpeg paths, output format, threading, file disposition (`delete-original`, `copy-to`, `move-to`, `recycle-bin`)
-- `[Video]` - Codec preferences, bitrate, CRF profiles
-- `[Audio]` - Codec, languages, channel handling
-- `[Subtitle]` - Embedding, burning, subtitle downloads via Subliminal
-- `[Sonarr]`/`[Radarr]` - API settings for media manager integration
-- `[Plex]` - Library refresh settings
+Main documentation lives in `docs/` and is also served at `http://localhost:8585/docs` when the daemon is running.
 
-### Recycle Bin
+- `docs/README.md` - architecture and module reference
+- `docs/getting-started.md` - installation, quick start, CLI
+- `docs/configuration.md` - `autoProcess.ini` reference
+- `docs/daemon.md` - daemon mode, API, clustering
+- `docs/integrations.md` - Sonarr, Radarr, and downloader integrations
+- `docs/hardware-acceleration.md` - GPU configuration
+- `docs/deployment.md` - mise tasks, systemd, Docker, CI, release
+- `docs/troubleshooting.md` - logs and common issues
 
-When `delete-original = True`, SMA can preserve the original source file in a configurable directory before deleting it. Set `recycle-bin` in `[Converter]`:
+When changing functionality, keep `docs/`, `resources/docs.html`, and the wiki copy in sync.
 
-```ini
-[Converter]
-delete-original = True
-recycle-bin = /mnt/recycle
-```
+## Integrations
 
-- Only runs when `delete-original = True` and the recycle bin path is set
-- Uses atomic copy (temp file + `os.replace`) — safe across filesystems
-- Appends `.2`, `.3`... suffix if a file with the same name already exists in the bin
-- A failed copy is logged but does not abort the conversion or the deletion
+Sonarr and Radarr support two integration modes:
 
-### Processing Flow
+- native webhook endpoints at `/webhook/sonarr` and `/webhook/radarr` (recommended)
+- local custom scripts under `triggers/media_managers/`
 
-1. `MediaProcessor.isValidSource()` validates input using FFprobe
-2. `MediaProcessor.process()` builds FFmpeg options based on settings and source info
-3. Conversion runs with optional progress reporting
-4. `Metadata.writeTags()` embeds metadata using mutagen (MP4 tags)
-5. `qtfaststart` relocates moov atom for streaming optimization
-6. Files copied/moved to destination directories
-7. Post-process scripts run, Plex/media manager notified
+Any config section starting with `Sonarr` or `Radarr` is auto-discovered. Matching uses the configured `path` and longest-prefix-first behavior, which is also how `manual.py` chooses which instance to rescan after conversion.
+
+Download client integrations live under `triggers/` and submit jobs to the daemon:
+
+- `triggers/usenet/nzbget.sh`
+- `triggers/usenet/sabnzbd.sh`
+- `triggers/torrents/qbittorrent.sh`
+- `triggers/torrents/deluge.sh`
+- `triggers/torrents/utorrent.sh`
+
+Plex refresh behavior is configured under `[Plex]`. Disable Plex auto-scanning to avoid scans during active conversions.
+
+## Deployment
+
+Remote deployment is built around `mise` tasks and `setup/.local.ini`.
+
+Key tasks:
+
+- `mise run deploy:setup` - first-time host prep
+- `mise run deploy:run` - sync code, install deps, reload systemd
+- `mise run deploy:config` - create missing configs, merge new keys, stamp credentials
+- `mise run deploy:restart` - restart `sma-daemon` on all hosts
+
+Systemd unit: `setup/sma-daemon.service`
+
+Important service notes:
+
+- loads `config/daemon.env`
+- uses `KillMode=mixed` for graceful draining
+- default `ReadWritePaths` include `/opt/sma/config`, `/opt/sma/logs`, `/transcodes`, and `/mnt`
+
+Docker image tags are `latest`, semver tags, and `main`.
 
 ## CI / Release
-
-### Workflows
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | `ci.yml` | PR / push to main | Runs tests |
-| `docker.yml` | PR / push to main (path-filtered) | PR: build-only + smoke test; main: build + push rolling `main` tag to GHCR |
-| `release.yml` | Push to main | Runs release-please (manages release PR + version bump); on release: builds wheel/sdist + Docker image with semver tags |
+| `docker.yml` | PR / push to main (path-filtered) | PR build-only smoke test; main pushes rolling `main` tag to GHCR |
+| `release.yml` | Push to main | release-please manages release PRs and release publishing |
 
-### Release Flow
+Releases are driven by release-please. The version source of truth is `pyproject.toml` under `[project] version`.
 
-Releases are driven by [release-please](https://github.com/googleapis/release-please). No manual tagging.
+## Codex Equivalents For Claude Code Config
 
-1. Merge conventional commits to `main` — release-please opens/updates a Release PR
-2. Merge the Release PR — release-please creates the GitHub Release and `v*` tag
-3. The `publish` and `docker` jobs in `release.yml` run automatically:
-   - Python wheel + sdist built and attached to the GitHub Release
-   - Docker image pushed to GHCR with tags `1.2.3`, `1.2`, `1`, and `latest`
+Claude-specific files under `.claude/` do not map directly to Codex runtime config. In this repository, the Codex equivalent is this `AGENTS.md` file plus the normal repo layout.
 
-### Version Source of Truth
+Translate the Claude setup as follows:
 
-`pyproject.toml` → `[project] version` is the single version source. release-please bumps it when a release PR is merged. The Git tag and Docker image tags are derived from it.
+- `CLAUDE.md` -> `AGENTS.md`
+- `.claude/commands/*.md` -> use the matching shell commands from the sections above
+- `.claude/agents/*.md` -> follow the same intent directly in Codex:
+  - `explorer` -> read-only repo inspection before changing code
+  - `implementer` -> make the smallest working code change, then verify
+  - `test-writer` -> add focused tests around changed behavior
+  - `documentation-writer` -> keep docs scannable and example-driven
+  - `code-reviewer` -> review for correctness, risk, regressions, and missing tests
+- `.claude/skills/*` -> use the same workflow concepts when relevant: discovery, research, blueprinting, implementation, refactoring
 
-Do **not** manually create `v*` tags — this will cause a duplicate release.
+Claude permission allowlists in `.claude/settings*.json` are informational only for Codex. Codex should still prefer the common commands documented here and avoid editing ignored/generated paths such as:
 
-### Conventional Commits
+- `venv/`
+- `**/__pycache__/`
+- `*.pyc`
+- `config/autoProcess.ini`
 
-release-please determines the next version from commit messages:
+When diagnosing runtime issues, check:
 
-- `fix:` → patch bump (1.2.3 → 1.2.4)
-- `feat:` → minor bump (1.2.3 → 1.3.0)
-- `feat!:` or `BREAKING CHANGE:` → major bump (1.2.3 → 2.0.0)
+- `logs/daemon.log`
+- per-config logs in `logs/`
+- `journalctl -u sma-daemon -f` for systemd deployments
 
-## Codex Slash Commands
+Useful environment variables:
 
-- `/project:convert <file>` - Run conversion with auto-tagging
-- `/project:preview <file>` - Show FFmpeg options without converting
-- `/project:codecs` - List all supported codecs
-- `/project:daemon` - Start the HTTP webhook daemon server
+- `SMA_CONFIG`
+- `SMA_DAEMON_API_KEY`
+- `SMA_DAEMON_DB_URL`
+- `SMA_DAEMON_FFMPEG_DIR`
+- `SMA_DAEMON_HOST`
+- `SMA_DAEMON_PORT`
+- `SMA_DAEMON_WORKERS`
+- `SMA_DAEMON_CONFIG`
+- `SMA_DAEMON_LOGS_DIR`
 
-## Key Files for Modifications
+## Key Files For Modifications
 
-When adding new codec support, modify:
+When adding new codec support:
 
-- `converter/avcodecs.py` - Add codec class with FFmpeg encoder mapping
+- `converter/avcodecs.py` - add codec class with FFmpeg encoder mapping
 
-When adding new settings, modify:
+When adding new settings:
 
-- `resources/readsettings.py` - Add to `DEFAULTS` dict and `readConfig()` method
-- `setup/autoProcess.ini.sample` - Add default value
+- `resources/readsettings.py` - add to `DEFAULTS` and `readConfig()`
+- `setup/autoProcess.ini.sample` - add the default value
 
-When adding new downloader/manager integration:
+When adding new API endpoints to the daemon:
 
-- Create new bash script in `triggers/` (usenet/, torrents/, or media_managers/)
-- Add settings section in `readsettings.py` if config support is needed
+- `resources/daemon/handler.py` - add the route handler and register it
+
+When adding new downloader or manager integrations:
+
+- create the script under `triggers/`
+- add config support in `resources/readsettings.py` if needed
+
+When adding new daemon options:
+
+- add the CLI arg in `daemon.py`
+- add env var support using `SMA_DAEMON_*`
+- add config loading in `resources/daemon/config.py`
+- update `setup/daemon.json.sample`
+- update `docs/daemon.md`
+
+When adding or modifying `mise` tasks:
+
+- short inline tasks belong in `mise.toml` with a `description` field
