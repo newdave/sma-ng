@@ -34,9 +34,12 @@ Full documentation is in [docs/](docs/) and served at `http://localhost:8585/doc
 | [Getting Started](docs/getting-started.md) | Installation, quick start, CLI usage, supported codecs |
 | [Configuration](docs/configuration.md) | `autoProcess.ini` settings reference |
 | [Daemon Mode](docs/daemon.md) | HTTP server, API endpoints, dashboard, clustering, persistence |
+| [Docker Compose Quick Start](docs/docker-compose-quickstart.md) | Fastest path to running SMA-NG with Docker Compose |
+| [Environment Architecture](docs/environment-architecture.md) | Deployment-specific storage and virtualization design notes |
 | [Integrations](docs/integrations.md) | Sonarr, Radarr, Plex, NZBGet, SABnzbd, qBittorrent, Deluge |
 | [Hardware Acceleration](docs/hardware-acceleration.md) | QSV, VAAPI, NVENC, VideoToolbox, auto-detection |
 | [Deployment](docs/deployment.md) | mise tasks, remote deploy, systemd service, Docker, CI/release |
+| [Multi-Instance Deployment](docs/multi-instance-deployment.md) | Running multiple SMA-NG daemons on one host or across multiple hosts |
 | [Troubleshooting](docs/troubleshooting.md) | Logs, common issues, environment variables |
 
 ## Default Settings
