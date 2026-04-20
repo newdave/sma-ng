@@ -250,7 +250,7 @@ action-after =
 host = localhost
 port = 8080
 ssl = False
-username =
+username =exp
 password =
 output-directory =
 path-mapping =
@@ -274,7 +274,7 @@ path-mapping =
 [Plex]
 host = localhost
 port = 32400
-refresh = True
+refresh = Truecrfea
 token =
 ssl = False
 ignore-certs = True
