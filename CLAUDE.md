@@ -9,21 +9,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   1. `docs/` — the canonical source in the main repo
   2. GitHub wiki (`/tmp/sma-wiki/`) — the corresponding wiki page(s); push with `git add -A && git commit -m "docs: ..." && git push origin HEAD:master`
   3. Web UI (`resources/docs.html`) — the inline help served at `http://localhost:8585/docs`
-- Docs to update depending on change type:
-  - New/changed daemon endpoints → `docs/daemon.md` + `docs/openapi.yaml` + `resources/docs.html` + wiki `Daemon-Mode.md` + wiki `API-Reference.md`
-  - New/changed settings → `docs/configuration.md` + `setup/autoProcess.ini.sample` + `resources/docs.html` + wiki `Configuration.md`
-  - New/changed CLI flags or daemon options → `docs/getting-started.md` + `docs/daemon.md` + `AGENTS.md` + `resources/docs.html` + wiki `Getting-Started.md` + wiki `Daemon-Mode.md`
-  - New/changed `mise` tasks → `mise.toml` description field + wiki `Mise-Tasks.md`
-  - New integrations → `docs/integrations.md` + `resources/docs.html` + wiki `Integrations.md`
-  - New hardware-acceleration options → `docs/hardware-acceleration.md` + `resources/docs.html` + wiki `Hardware-Acceleration.md`
-  - Deployment/CI changes → `docs/deployment.md` + `resources/docs.html` + wiki `Deployment.md`
-  - Architecture changes → `docs/README.md` + `CLAUDE.md` + wiki `Home.md`
-- Never leave stale or incorrect documentation behind — remove or correct it in the same PR.
 
 ## Git Commit Rules
 
-- **Do NOT add `Co-Authored-By` lines referencing Claude, Anthropic, or any AI to commit messages.**
-- Do not add any AI attribution to commits whatsoever.
+- Do not add any AI attribution (or Co-Authored-By lines) to commits whatsoever.
 - Break large changesets into smaller, contextual commits — each commit should represent one logical change.
 - Write informative commit messages that describe what changed and why (use conventional commit prefixes: `fix:`, `feat:`, `refactor:`, etc.).
 - Commit regularly rather than accumulating large diffs.
@@ -225,3 +214,9 @@ When adding new daemon options:
 - Add to `daemon.json` via `PathConfigManager.load_config()` in `resources/daemon/config.py`
 - Update `setup/daemon.json.sample`
 - Document in `docs/daemon.md`
+
+When adding or modifying `mise` tasks:
+
+- Short inline tasks → `mise.toml` `[tasks.<name>]` section with a `description` field
+- Multi-line or complex tasks → `.mise/tasks/<name>` shell script (always scan this directory)
+- Update wiki `Mise-Tasks.md` to document the task name, description, and usage
