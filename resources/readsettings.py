@@ -378,9 +378,6 @@ class ReadSettings:
             "path-mapping": "",
         },
         "Plex": {
-            "username": "",
-            "password": "",
-            "servername": "",
             "host": "localhost",
             "port": 32400,
             "refresh": False,
@@ -995,9 +992,6 @@ class ReadSettings:
         """Parse ``[Plex]`` and set the ``Plex`` connection dict and ``plexmatch_enabled`` flag."""
         section = "Plex"
         self.Plex = {}
-        self.Plex["username"] = config.get(section, "username")
-        self.Plex["password"] = config.get(section, "password")
-        self.Plex["servername"] = config.get(section, "servername")
         self.Plex["host"] = config.get(section, "host")
         self.Plex["port"] = config.getint(section, "port")
         self.Plex["refresh"] = config.getboolean(section, "refresh")

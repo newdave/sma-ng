@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 import os
 
-from plexapi.myplex import MyPlexAccount
 from plexapi.server import PlexServer
 
-USERNAME = "newdave"
+HOST = "localhost"
+PORT = 32400
 TOKEN = "ztwEQ-7tKZs9uAmszfzd"
-SERVERNAME = "DaveTV"
+SSL = False
 
 
 def main():
     print("Plex Post-Processing Refresh Script")
-    account = MyPlexAccount(username=USERNAME, token=TOKEN)
-    plex: PlexServer = account.resource(SERVERNAME).connect()
-    sectionType = "show" if os.env.get("SMA_SEASON") or os.env.get("SMA_EPISODE") else "movie"
+    protocol = "https" if SSL else "http"
+    plex: PlexServer = PlexServer(f"{protocol}://{HOST}:{PORT}", TOKEN)
+    sectionType = "show" if os.environ.get("SMA_SEASON") or os.environ.get("SMA_EPISODE") else "movie"
     for section in plex.library.sections():
         if section.type == sectionType:
-            print("Updating section %s on server %s" % (section.title, SERVERNAME))
+            print("Updating section %s on server %s:%s" % (section.title, HOST, PORT))
             section.update()
 
 

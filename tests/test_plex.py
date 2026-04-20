@@ -3,17 +3,14 @@
 from unittest.mock import MagicMock, patch
 
 
-def _make_settings(username="", servername="", host="", port=32400, token="", password="", ssl=False, ignore_certs=False, path_mapping=None):
+def _make_settings(host="", port=32400, token="", ssl=False, ignore_certs=False, path_mapping=None):
     settings = MagicMock()
     settings.Plex = {
-        "username": username,
-        "servername": servername,
         "host": host,
         "port": port,
         "token": token,
-        "password": password,
         "ssl": ssl,
-        "ignore_certs": ignore_certs,
+        "ignore-certs": ignore_certs,
         "path-mapping": path_mapping or {},
     }
     return settings
@@ -27,8 +24,7 @@ class TestGetPlexServer:
 
         settings = _make_settings()
         result = getPlexServer(settings)
-        # Returns (None, None) when neither username nor host is configured
-        assert result == (None, None)
+        assert result is None
 
     def test_creates_ssl_session_when_ignore_certs(self):
         from autoprocess.plex import getPlexServer
@@ -75,46 +71,12 @@ class TestGetPlexServer:
             url = mock_ps.call_args[0][0]
             assert url.startswith("https://")
 
-    def test_plex_tv_token_auth(self):
+    def test_missing_token_returns_none(self):
         from autoprocess.plex import getPlexServer
 
-        settings = _make_settings(username="user@example.com", servername="MyServer", token="mytoken")
-        with patch("autoprocess.plex.MyPlexAccount") as mock_account_cls:
-            mock_account = MagicMock()
-            mock_resource = MagicMock()
-            mock_plex = MagicMock()
-            mock_plex.friendlyName = "MyServer"
-            mock_account_cls.return_value = mock_account
-            mock_account.resource.return_value = mock_resource
-            mock_resource.connect.return_value = mock_plex
-
-            result = getPlexServer(settings)
-
-            mock_account_cls.assert_called_once_with(username="user@example.com", token="mytoken", session=None)
-            assert result is mock_plex
-
-    def test_plex_tv_token_fails_falls_back_to_password(self):
-        from autoprocess.plex import getPlexServer
-
-        settings = _make_settings(username="user@example.com", servername="MyServer", token="badtoken", password="mypass")
-        call_count = {"n": 0}
-
-        def account_side_effect(**kwargs):
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                raise Exception("token auth failed")
-            mock_account = MagicMock()
-            mock_resource = MagicMock()
-            mock_plex = MagicMock()
-            mock_plex.friendlyName = "MyServer"
-            mock_account.resource.return_value = mock_resource
-            mock_resource.connect.return_value = mock_plex
-            return mock_account
-
-        with patch("autoprocess.plex.MyPlexAccount", side_effect=account_side_effect):
-            result = getPlexServer(settings)
-
-        assert call_count["n"] == 2
+        settings = _make_settings(host="plex.local", port=32400)
+        result = getPlexServer(settings)
+        assert result is None
 
     def test_direct_connection_error_returns_none(self):
         from autoprocess.plex import getPlexServer
@@ -124,10 +86,10 @@ class TestGetPlexServer:
             result = getPlexServer(settings)
         assert result is None
 
-    def test_no_token_no_host_returns_none(self):
+    def test_missing_host_returns_none(self):
         from autoprocess.plex import getPlexServer
 
-        settings = _make_settings(host="plex.local", port=32400)  # no token
+        settings = _make_settings(token="tok")
         result = getPlexServer(settings)
         assert result is None
 
