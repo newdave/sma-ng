@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.3...sma-ng-v1.1.4) (2026-04-20)
+
+
+### Bug Fixes
+
+* correct qtfs cleanup and recycle bin helper naming ([70b73b8](https://github.com/newdave/sma-ng/commit/70b73b84225fda0218aa6d4d153d75462c996404))
+* harden deploy setup and qsv diagnostics ([0626e51](https://github.com/newdave/sma-ng/commit/0626e5192ccad04ed01c954f5562dfcd0c02079e))
+
+
+### Documentation
+
+* sync Codex and Claude repo guidance ([920b2b0](https://github.com/newdave/sma-ng/commit/920b2b05f9bcdb045f06dd657b33eac64f54824f))
+
 ## [1.1.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.2...sma-ng-v1.1.3) (2026-04-19)
 
 
