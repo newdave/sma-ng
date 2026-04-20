@@ -234,37 +234,37 @@ def compose():
 
 
 class TestComposeBaseService:
-    def test_sma_service_exists(self, compose):
-        assert "sma" in compose["services"]
+    def test_software_service_exists(self, compose):
+        assert "sma-software" in compose["services"]
 
     def test_build_targets_runtime_stage(self, compose):
-        assert compose["services"]["sma"]["build"]["target"] == "runtime"
+        assert compose["services"]["sma-software"]["build"]["target"] == "runtime"
 
     def test_port_8585_mapped(self, compose):
-        ports = compose["services"]["sma"]["ports"]
+        ports = compose["services"]["sma-software"]["ports"]
         assert any("8585" in str(p) for p in ports)
 
     def test_config_volume_mounted(self, compose):
-        volumes = compose["services"]["sma"]["volumes"]
+        volumes = compose["services"]["sma-software"]["volumes"]
         assert any("/config" in str(v) for v in volumes)
 
     def test_logs_volume_mounted(self, compose):
-        volumes = compose["services"]["sma"]["volumes"]
+        volumes = compose["services"]["sma-software"]["volumes"]
         assert any("/logs" in str(v) for v in volumes)
 
     def test_media_volume_mounted(self, compose):
-        volumes = compose["services"]["sma"]["volumes"]
+        volumes = compose["services"]["sma-software"]["volumes"]
         assert any("/mnt" in str(v) for v in volumes)
 
     def test_sma_config_env_set(self, compose):
-        env = compose["services"]["sma"]["environment"]
+        env = compose["services"]["sma-software"]["environment"]
         assert any("SMA_CONFIG" in str(e) for e in env)
 
     def test_restart_policy(self, compose):
-        assert compose["services"]["sma"]["restart"] == "unless-stopped"
+        assert compose["services"]["sma-software"]["restart"] == "unless-stopped"
 
     def test_env_file_configured(self, compose):
-        env_file = compose["services"]["sma"]["env_file"]
+        env_file = compose["services"]["sma-software"]["env_file"]
         assert any("daemon.env" in str(e) for e in env_file)
 
 
@@ -272,10 +272,14 @@ class TestComposeGpuProfiles:
     def test_nvidia_profile_exists(self, compose):
         assert "sma-nvidia" in compose["services"]
         assert "nvidia" in compose["services"]["sma-nvidia"]["profiles"]
+        assert "sma-nvidia-pg" in compose["services"]
+        assert "nvidia-pg" in compose["services"]["sma-nvidia-pg"]["profiles"]
 
     def test_nvidia_gpu_reservation(self, compose):
         devices = compose["services"]["sma-nvidia"]["deploy"]["resources"]["reservations"]["devices"]
         assert any(d.get("driver") == "nvidia" for d in devices)
+        devices_pg = compose["services"]["sma-nvidia-pg"]["deploy"]["resources"]["reservations"]["devices"]
+        assert any(d.get("driver") == "nvidia" for d in devices_pg)
 
     def test_nvidia_capabilities_include_video(self, compose):
         devices = compose["services"]["sma-nvidia"]["deploy"]["resources"]["reservations"]["devices"]
@@ -287,32 +291,40 @@ class TestComposeGpuProfiles:
         env_str = str(env)
         assert "NVIDIA_VISIBLE_DEVICES" in env_str
         assert "NVIDIA_DRIVER_CAPABILITIES" in env_str
+        env_pg = compose["services"]["sma-nvidia-pg"]["environment"]
+        assert "NVIDIA_VISIBLE_DEVICES" in str(env_pg)
 
     def test_intel_profile_exists(self, compose):
         assert "sma-intel" in compose["services"]
         assert "intel" in compose["services"]["sma-intel"]["profiles"]
+        assert "sma-intel-pg" in compose["services"]
+        assert "intel-pg" in compose["services"]["sma-intel-pg"]["profiles"]
 
     def test_intel_mounts_dev_dri(self, compose):
         devices = compose["services"]["sma-intel"]["devices"]
         assert any("/dev/dri" in str(d) for d in devices)
+        devices_pg = compose["services"]["sma-intel-pg"]["devices"]
+        assert any("/dev/dri" in str(d) for d in devices_pg)
 
     def test_intel_adds_render_group(self, compose):
         # group_add uses numeric GID env vars to avoid name-resolution failures
         groups = compose["services"]["sma-intel"]["group_add"]
         assert any("RENDER_GID" in str(g) or "109" in str(g) for g in groups)
+        groups_pg = compose["services"]["sma-intel-pg"]["group_add"]
+        assert any("RENDER_GID" in str(g) or "109" in str(g) for g in groups_pg)
 
-    def test_all_gpu_services_extend_base(self, compose):
-        for svc in ("sma-nvidia", "sma-intel"):
-            assert compose["services"][svc]["extends"]["service"] == "sma"
+    def test_software_profiles_exist(self, compose):
+        assert "software" in compose["services"]["sma-software"]["profiles"]
+        assert "software-pg" in compose["services"]["sma-software-pg"]["profiles"]
 
 
 class TestComposePostgres:
     def test_postgres_service_exists(self, compose):
         assert "sma-pgsql" in compose["services"]
 
-    def test_postgres_always_starts(self, compose):
-        # postgres has no profile so it always starts alongside any sma service
-        assert "profiles" not in compose["services"]["sma-pgsql"]
+    def test_postgres_starts_only_for_pg_profiles(self, compose):
+        profiles = compose["services"]["sma-pgsql"]["profiles"]
+        assert set(profiles) == {"software-pg", "intel-pg", "nvidia-pg"}
 
     def test_postgres_uses_alpine_image(self, compose):
         assert "postgres" in compose["services"]["sma-pgsql"]["image"]
@@ -340,16 +352,23 @@ class TestComposePostgres:
         assert hc is not None
         assert "pg_isready" in str(hc["test"])
 
-    def test_sma_depends_on_postgres_optional(self, compose):
-        # depends_on must be present but required: false so sma still starts
-        # if postgres is unhealthy
-        dep = compose["services"]["sma"].get("depends_on", {})
-        assert "sma-pgsql" in dep
-        assert dep["sma-pgsql"].get("required") is False
+    def test_only_pg_profiles_depend_on_postgres(self, compose):
+        for svc in ("sma-software-pg", "sma-intel-pg", "sma-nvidia-pg"):
+            dep = compose["services"][svc].get("depends_on", {})
+            assert "sma-pgsql" in dep
+            assert dep["sma-pgsql"]["condition"] == "service_healthy"
+        for svc in ("sma-software", "sma-intel", "sma-nvidia"):
+            assert "depends_on" not in compose["services"][svc]
 
-    def test_sma_db_url_env_passthrough(self, compose):
-        env = compose["services"]["sma"]["environment"]
-        assert any("SMA_DAEMON_DB_URL" in str(e) for e in env)
+    def test_non_pg_profiles_default_db_url_blank(self, compose):
+        for svc in ("sma-software", "sma-intel", "sma-nvidia"):
+            env = compose["services"][svc]["environment"]
+            assert env["SMA_DAEMON_DB_URL"] == "${SMA_DAEMON_DB_URL:-}"
+
+    def test_pg_profiles_default_db_url_to_bundled_postgres(self, compose):
+        for svc in ("sma-software-pg", "sma-intel-pg", "sma-nvidia-pg"):
+            env = compose["services"][svc]["environment"]
+            assert "sma-pgsql:5432" in env["SMA_DAEMON_DB_URL"]
 
 
 # ──────────────────────────────────────────────────────────────────────────────

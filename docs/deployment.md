@@ -171,7 +171,7 @@ make docker-run
 **Tags:** `latest`, `1`, `1.2`, `1.2.3` (semver), `main` (rolling build from main branch).
 
 For hardware acceleration diagnostics in containers, the runtime image includes `vainfo` and VAAPI userspace drivers.
-For Intel/QSV setups, use the Intel compose profile (`docker compose --profile intel up`) so `/dev/dri` is mapped.
+For Intel/QSV setups, use either the Intel profile (`docker compose --profile intel up`) or the bundled-PostgreSQL Intel profile (`docker compose --profile intel-pg up`) so `/dev/dri` is mapped.
 
 **Environment variables for Docker:**
 
@@ -184,6 +184,12 @@ For Intel/QSV setups, use the Intel compose profile (`docker compose --profile i
 | `SMA_DAEMON_DB_URL` | | PostgreSQL connection URL (required) |
 | `SMA_DAEMON_FFMPEG_DIR` | | Directory containing `ffmpeg`/`ffprobe` |
 | `SMA_CONFIG` | | Override `autoProcess.ini` path |
+
+See also:
+
+- [Docker Compose Quick Start](docker-compose-quickstart.md)
+- [Environment Architecture](environment-architecture.md)
+- [Multi-Instance Deployment](multi-instance-deployment.md)
 
 ---
 
