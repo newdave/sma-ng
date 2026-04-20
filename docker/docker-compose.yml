@@ -117,8 +117,8 @@ services:
 
   # ────────────────────────────────────────────────────────────────────
   # Intel GPU (QSV + VAAPI via iHD driver)
-  # Requirements: Intel GPU on host; intel-media-va-driver or
-  #               intel-media-va-driver-non-free installed on host
+  # Requirements: Intel GPU on host and /dev/dri access.
+  # The container ships VAAPI userspace drivers + vainfo for diagnostics.
   # Usage: docker compose --profile intel up
   # ────────────────────────────────────────────────────────────────────
   sma-intel:
@@ -137,6 +137,8 @@ services:
       #   VIDEO_GID=$(getent group video  | cut -d: -f3)
       - "${RENDER_GID:-109}"
       - "${VIDEO_GID:-44}"
+    environment:
+      - LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-iHD}
 
 volumes:
   # Persistent storage for the bundled PostgreSQL instance.

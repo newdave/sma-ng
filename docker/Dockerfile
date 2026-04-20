@@ -156,6 +156,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     VIRTUAL_ENV=/venv \
     PATH="/venv/bin:/usr/local/bin:$PATH" \
+    # Prefer Intel's modern VAAPI userspace driver in Intel profile.
+    LIBVA_DRIVER_NAME=iHD \
     # SMA paths — override via environment or volume mounts
     SMA_CONFIG=/app/config/autoProcess.ini \
     SMA_FFMPEG=/usr/local/bin/ffmpeg \
@@ -173,6 +175,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # GPU / hardware acceleration (dynamic — GPU driver on host at runtime):
 #   libva2        — VAAPI dispatcher          (--enable-vaapi)
 #   libva-drm2    — VAAPI DRM backend         (--enable-vaapi)
+#   mesa-va-drivers — Generic VAAPI userspace drivers (AMD/Intel fallback)
+#   intel-media-va-driver / i965-va-driver — Intel VAAPI userspace drivers
+#   vainfo       — VAAPI capability/debug utility
 #   libdrm2       — DRM/KMS                   (--enable-libdrm)
 #   libvpl2       — Intel oneVPL / QSV        (--enable-libvpl)
 # NVENC: no runtime lib — provided by the NVIDIA host driver
@@ -212,6 +217,8 @@ RUN apt-get update \
         python3 \
         libva2 \
         libva-drm2 \
+        mesa-va-drivers \
+        vainfo \
         libdrm2 \
         libx264-164 \
         libx265-199 \
@@ -231,9 +238,12 @@ RUN apt-get update \
         libssl3 \
         ca-certificates \
         tini \
-    # oneVPL / Intel QSV runtime — amd64 only
+    # oneVPL / Intel QSV runtime and Intel VA userspace drivers — amd64 only
     && if [ "$TARGETARCH" = "amd64" ]; then \
-        apt-get install -y --no-install-recommends libvpl2; \
+        apt-get install -y --no-install-recommends \
+            libvpl2 \
+            intel-media-va-driver \
+            i965-va-driver; \
     fi \
     && apt-get purge -y --auto-remove software-properties-common \
     && rm -rf /var/lib/apt/lists/*

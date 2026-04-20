@@ -105,3 +105,41 @@ At daemon startup, SMA-NG probes each unique config's hardware encoder to verify
 This runs in the background and does not delay accepting connections.
 
 Use `python daemon.py --smoke-test` to verify that all configured `autoProcess.ini` files load cleanly before starting the server.
+
+## Docker Intel/VAAPI Troubleshooting
+
+If you see errors like:
+
+```text
+[VAAPI] No VA display found for device /dev/dri/renderD128
+Failed to set value '/dev/dri/renderD128' for option 'qsv_device'
+Error parsing global options: Invalid argument
+```
+
+check the following:
+
+1. Start the Intel profile so `/dev/dri` is mounted:
+
+```bash
+docker compose --profile intel up -d
+```
+
+2. Verify VAAPI visibility inside the container:
+
+```bash
+docker compose exec sma-intel vainfo
+```
+
+3. Ensure the container uses Intel's VAAPI driver (`iHD`):
+
+```yaml
+environment:
+	- LIBVA_DRIVER_NAME=iHD
+```
+
+4. Confirm your config/backend alignment:
+
+- `gpu = qsv` should use QSV codecs (`h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`)
+- `gpu = vaapi` should use VAAPI codecs (`h264vaapi`, `h265vaapi`, `av1vaapi`)
+
+The official Docker image now includes `vainfo` and VAAPI userspace drivers to simplify diagnostics.

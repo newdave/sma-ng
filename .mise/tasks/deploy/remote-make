@@ -7,6 +7,8 @@ LOCAL="setup/.local.ini"
 CFG="scripts/local-config.sh"
 DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 
+_missing_prereq_pattern='(command not found|No such file or directory|not found.*make|make.*not found|python3.*not found|python.*not found|venv.*not found)'
+
 failed=""
 for host in $DEPLOY_HOSTS; do
   cfg="$CFG $LOCAL $host"
@@ -15,6 +17,9 @@ for host in $DEPLOY_HOSTS; do
   key=$($cfg SSH_KEY "")
   ffmpeg_dir=$($cfg FFMPEG_DIR "")
   remote_make="${REMOTE_MAKE:-$($cfg REMOTE_MAKE install)}"
+  auto_create_venv=$($cfg AUTO_CREATE_VENV true)
+  venv_dir=$($cfg VENV_DIR venv)
+  python_bin=$($cfg PYTHON_BIN /usr/bin/python3)
 
   ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
   [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
@@ -22,9 +27,58 @@ for host in $DEPLOY_HOSTS; do
   make_env=""
   [ -n "$ffmpeg_dir" ] && make_env="SMA_DAEMON_FFMPEG_DIR=$ffmpeg_dir"
 
+  _run_make() {
+    # shellcheck disable=SC2086
+    ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $make_env make $remote_make VENV=$venv_dir PYTHON=$python_bin"
+  }
+
+  _venv_healthy() {
+    # shellcheck disable=SC2086
+    ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $make_env test -x $venv_dir/bin/python && test -x $venv_dir/bin/pip && $venv_dir/bin/python -c 'import encodings' >/dev/null 2>&1"
+  }
+
+  _create_venv() {
+    # shellcheck disable=SC2086
+    ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $make_env rm -rf $venv_dir && make venv VENV=$venv_dir PYTHON=$python_bin"
+  }
+
+  maybe_prepare_venv=true
+  [ "$remote_make" = "venv" ] && maybe_prepare_venv=false
+
+  if [ "$maybe_prepare_venv" = "true" ] && [ "$auto_create_venv" = "true" ]; then
+    if ! _venv_healthy >/dev/null 2>&1; then
+      echo "==> [$host] virtualenv missing or unhealthy ($venv_dir), creating it with $python_bin"
+
+      errfile=$(mktemp)
+      trap 'rm -f "$errfile"' EXIT
+      if ! _create_venv 2> >(tee "$errfile" >&2); then
+        if grep -qE "$_missing_prereq_pattern" "$errfile"; then
+          echo ""
+          echo "  WARNING: [$host] pre-req missing — running deploy:setup then retrying venv creation"
+          HOST="$host" mise run deploy:setup
+          _create_venv || { failed="$failed $host"; continue; }
+        else
+          failed="$failed $host"
+          continue
+        fi
+      fi
+    fi
+  fi
+
   echo "==> [$host] make $remote_make"
-  # shellcheck disable=SC2086
-  ssh $ssh_opts "$host" "cd $dir && $make_env make $remote_make" || failed="$failed $host"
+
+  errfile=$(mktemp)
+  trap 'rm -f "$errfile"' EXIT
+  if ! _run_make 2> >(tee "$errfile" >&2); then
+    if grep -qE "$_missing_prereq_pattern" "$errfile"; then
+      echo ""
+      echo "  WARNING: [$host] pre-req missing while running make $remote_make — running deploy:setup then retrying"
+      HOST="$host" mise run deploy:setup
+      _run_make || failed="$failed $host"
+    else
+      failed="$failed $host"
+    fi
+  fi
 done
 
 if [ -n "$failed" ]; then
