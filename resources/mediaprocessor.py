@@ -2614,9 +2614,13 @@ class MediaProcessor:
 
         Silently skips output when stdout is not connected to a TTY (e.g.
         when invoked as a daemon subprocess) to prevent progress-bar escape
-        sequences from polluting log files.
+        sequences from polluting log files. In non-TTY mode, emits the raw
+        FFmpeg progress/debug line instead so daemon log consumers can still
+        detect and forward periodic transcode progress updates.
         """
         if not sys.stdout.isatty():
+            if debug:
+                print(debug.strip(), flush=True)
             return
         try:
             divider = 100 / width

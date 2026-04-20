@@ -505,9 +505,9 @@ class RenameProcessor:
         """
         Trigger a Plex refresh once per unique parent directory of changed files.
 
-        Silently skips when no Plex host is configured.
+        Silently skips when Plex is not fully configured for direct refresh.
         """
-        if not self.settings.Plex.get("host"):
+        if not self.settings.Plex.get("host") or not self.settings.Plex.get("token"):
             return
 
         # Build a mapping of parent-dir -> one representative file path so that

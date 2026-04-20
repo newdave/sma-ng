@@ -587,6 +587,15 @@ class TestConfigLogManager:
         mgr.get_logger("/cfg/autoProcess.ini")  # same config twice
         assert len(mgr.get_all_log_files()) == 1
 
+    def test_get_all_log_files_discovers_existing_disk_logs(self, tmp_path):
+        mgr = ConfigLogManager(str(tmp_path))
+        (tmp_path / "daemon.log").write_text("")
+        (tmp_path / "autoProcess.movies.log").write_text("")
+        (tmp_path / "autoProcess.log.1").write_text("")
+        result = mgr.get_all_log_files()
+        names = {e["name"] for e in result}
+        assert names == {"daemon", "autoProcess.movies"}
+
 
 # ---------------------------------------------------------------------------
 # PathConfigManager extended tests (db_url, ffmpeg_dir from JSON)

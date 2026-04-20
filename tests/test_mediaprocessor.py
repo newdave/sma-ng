@@ -2931,6 +2931,25 @@ class TestDisplayProgressBar:
         with patch.object(sys.stdout, "isatty", return_value=False):
             mp.displayProgressBar(50)  # should not raise or output
 
+    def test_non_tty_emits_raw_debug_line(self, capsys):
+        mp = self._make_mp()
+        import sys
+
+        with patch.object(sys.stdout, "isatty", return_value=False):
+            mp.displayProgressBar(50, debug="frame=  100 fps=25 time=00:00:10")
+        out = capsys.readouterr().out
+        assert "frame=" in out
+        assert "%" not in out
+
+    def test_non_tty_flushes_raw_debug_line(self):
+        mp = self._make_mp()
+        import sys
+
+        with patch.object(sys.stdout, "isatty", return_value=False):
+            with patch("builtins.print") as mock_print:
+                mp.displayProgressBar(50, debug="frame=  100 fps=25 time=00:00:10")
+        mock_print.assert_called_once_with("frame=  100 fps=25 time=00:00:10", flush=True)
+
     def test_tty_writes_bar(self, capsys):
         mp = self._make_mp()
         import sys

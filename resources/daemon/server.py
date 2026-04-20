@@ -50,7 +50,7 @@ class DaemonServer(HTTPServer):
         self._cli_basic_auth = cli_basic_auth
         self._cli_ffmpeg_dir = cli_ffmpeg_dir
         self._job_processes = {}  # job_id -> Popen, for cancel support
-        self._job_progress = {}  # job_id -> timecode string (e.g. "00:01:23")
+        self._job_progress = {}  # job_id -> structured progress payload from FFmpeg output
 
         # Start worker threads via WorkerPool — each worker gets its own Event
         # so workers never race to clear a shared flag.
