@@ -119,7 +119,7 @@ class TestRecycleBinListMediaFiles:
 
 
 # ---------------------------------------------------------------------------
-# RecycleBinCleanerThread._delete
+# RecycleBinCleanerThread._delete_file
 # ---------------------------------------------------------------------------
 
 
@@ -128,13 +128,13 @@ class TestRecycleBinDelete:
         f = tmp_path / "old.mkv"
         f.write_bytes(b"data")
         cleaner = _make_cleaner()
-        result = cleaner._delete(str(f))
+        result = cleaner._delete_file(str(f))
         assert result is True
         assert not f.exists()
 
     def test_returns_false_for_missing_file(self):
         cleaner = _make_cleaner()
-        result = cleaner._delete("/nonexistent/file.mkv")
+        result = cleaner._delete_file("/nonexistent/file.mkv")
         assert result is False
 
 

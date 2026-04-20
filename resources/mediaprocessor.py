@@ -2682,7 +2682,7 @@ class MediaProcessor:
 
                 # Cleanup
                 if self.removeFile(inputfile, replacement=outputfile):
-                    return outputfile
+                    return inputfile
                 else:
                     self.log.error("Error cleaning up QTFS temp files.")
                     return False

@@ -250,7 +250,7 @@ class RecycleBinCleanerThread(_StoppableThread):
             self.log.warning("RecycleCleaner: cannot list directory %s" % directory)
         return results
 
-    def _delete(self, path):
+    def _delete_file(self, path):
         try:
             os.remove(path)
             self.log.info("RecycleCleaner: deleted %s" % path)
@@ -273,7 +273,7 @@ class RecycleBinCleanerThread(_StoppableThread):
             cutoff = now - self.max_age_days * 86400
             for mtime, path in files:
                 if mtime < cutoff:
-                    if self._delete(path):
+                    if self._delete_file(path):
                         deleted += 1
 
         # Re-build list after age pass before checking free space
@@ -288,7 +288,7 @@ class RecycleBinCleanerThread(_StoppableThread):
                 for mtime, path in files:
                     if free >= self.min_free_gb:
                         break
-                    if self._delete(path):
+                    if self._delete_file(path):
                         deleted += 1
                         # Re-query free space so we stop as soon as we've freed enough
                         free = self._free_gb(directory) or 0.0
