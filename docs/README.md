@@ -766,6 +766,8 @@ When `manual.py` processes `/mnt/media/Movies/4K/film.mp4`, it matches `Radarr-4
 
 Configure `[Plex]` section. SMA-NG refreshes the matching library section after conversion. Use `path-mapping` if Plex sees files at different mount points.
 
+Connect directly to the Plex server using its local hostname or IP on port `32400` (or your custom port), and set the Plex `token` in `[Plex]`.
+
 ---
 
 ## Download Client Integration
