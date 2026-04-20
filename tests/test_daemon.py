@@ -667,6 +667,820 @@ class TestPathConfigManagerExtended:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# PostgreSQLJobDatabase unit tests (mocked psycopg2 — no real DB required)
+# ---------------------------------------------------------------------------
+
+
+def _make_fake_psycopg2():
+    """Return a MagicMock tree that mimics psycopg2's pool / extras interface."""
+    from unittest.mock import MagicMock, patch
+
+    pool_mod = MagicMock()
+    extras_mod = MagicMock()
+    psycopg2_mod = MagicMock()
+
+    # cursor_factory sentinel so RealDictCursor can be referenced
+    extras_mod.RealDictCursor = object()
+    psycopg2_mod.extras = extras_mod
+    psycopg2_mod.pool = pool_mod
+
+    return psycopg2_mod, pool_mod, extras_mod
+
+
+def _make_db_with_mock_pool(mock_conn=None, mock_cursor=None):
+    """
+    Construct a PostgreSQLJobDatabase whose pool and _init_db/_reset_running_jobs
+    are fully mocked so the constructor completes without touching Postgres.
+    Returns (db, pool_mock, conn_mock, cursor_mock).
+    """
+    from unittest.mock import MagicMock, patch
+
+    psycopg2_mock = MagicMock()
+    pool_mock = MagicMock()
+    psycopg2_mock.pool.ThreadedConnectionPool.return_value = pool_mock
+    psycopg2_mock.extras.RealDictCursor = object()
+
+    if mock_cursor is None:
+        mock_cursor = MagicMock()
+        # Default: fetchone returns None
+        mock_cursor.fetchone.return_value = None
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.rowcount = 0
+    if mock_conn is None:
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = lambda s: mock_cursor
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+    pool_mock.getconn.return_value = mock_conn
+
+    with patch.dict("sys.modules", {"psycopg2": psycopg2_mock, "psycopg2.pool": psycopg2_mock.pool, "psycopg2.extras": psycopg2_mock.extras}):
+        with patch.object(PostgreSQLJobDatabase, "_init_db"):
+            with patch.object(PostgreSQLJobDatabase, "_reset_running_jobs"):
+                db = PostgreSQLJobDatabase.__new__(PostgreSQLJobDatabase)
+                db.db_url = "postgresql://mock/test"
+                db._node_id = "testnode"
+                db._pool = pool_mock
+                from resources.log import getLogger
+
+                db.log = getLogger("TEST")
+
+    return db, pool_mock, mock_conn, mock_cursor
+
+
+class TestPostgreSQLJobDatabase:
+    """Unit tests for PostgreSQLJobDatabase with mocked psycopg2."""
+
+    # ------------------------------------------------------------------
+    # Constructor / import guard
+    # ------------------------------------------------------------------
+
+    def test_constructor_raises_when_psycopg2_missing(self):
+        import sys
+
+        blocked = {"psycopg2": None, "psycopg2.pool": None, "psycopg2.extras": None}
+        with pytest.raises(ImportError, match="psycopg2 is required"):
+            with pytest.MonkeyPatch().context() as mp:
+                for mod, val in blocked.items():
+                    mp.setitem(sys.modules, mod, val)
+                PostgreSQLJobDatabase("postgresql://localhost/test")
+
+    def test_constructor_creates_pool_and_inits_db(self):
+        from unittest.mock import MagicMock, patch
+
+        psycopg2_mock = MagicMock()
+        psycopg2_mock.extras.RealDictCursor = object()
+        pool_mock = MagicMock()
+        psycopg2_mock.pool.ThreadedConnectionPool.return_value = pool_mock
+
+        with patch.dict("sys.modules", {"psycopg2": psycopg2_mock, "psycopg2.pool": psycopg2_mock.pool, "psycopg2.extras": psycopg2_mock.extras}):
+            with patch.object(PostgreSQLJobDatabase, "_init_db") as init_db:
+                with patch.object(PostgreSQLJobDatabase, "_reset_running_jobs"):
+                    db = PostgreSQLJobDatabase("postgresql://mock/test", max_connections=5)
+                    assert db._pool is pool_mock
+                    assert db.db_url == "postgresql://mock/test"
+                    # _init_db is called by __init__; _reset_running_jobs is called inside _init_db
+                    init_db.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # close()
+    # ------------------------------------------------------------------
+
+    def test_close_calls_closeall(self):
+        db, pool_mock, _, _ = _make_db_with_mock_pool()
+        db.close()
+        pool_mock.closeall.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # _conn context manager
+    # ------------------------------------------------------------------
+
+    def test_conn_commits_on_success(self):
+        from unittest.mock import MagicMock
+
+        db, pool_mock, conn_mock, _ = _make_db_with_mock_pool()
+        with db._conn():
+            pass
+        conn_mock.commit.assert_called_once()
+        pool_mock.putconn.assert_called_once_with(conn_mock)
+
+    def test_conn_rolls_back_and_reraises_on_exception(self):
+        from unittest.mock import MagicMock
+
+        db, pool_mock, conn_mock, _ = _make_db_with_mock_pool()
+        with pytest.raises(ValueError):
+            with db._conn():
+                raise ValueError("boom")
+        conn_mock.rollback.assert_called_once()
+        pool_mock.putconn.assert_called_once_with(conn_mock)
+
+    # ------------------------------------------------------------------
+    # _requeue_running_jobs_for_node
+    # ------------------------------------------------------------------
+
+    def test_requeue_running_jobs_returns_rowcount(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.rowcount = 3
+        cur.fetchone.return_value = None
+        cur.fetchall.return_value = []
+        db, pool_mock, conn_mock, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db._requeue_running_jobs_for_node("node1")
+        assert result == 3
+
+    def test_reset_running_jobs_logs_when_interrupted(self):
+        from unittest.mock import MagicMock, patch
+
+        db, _, _, _ = _make_db_with_mock_pool()
+        with patch.object(db, "_requeue_running_jobs_for_node", return_value=2) as mock_req:
+            with patch.object(db.log, "info") as mock_log:
+                db._reset_running_jobs()
+                mock_req.assert_called_once_with(db._node_id)
+                mock_log.assert_called_once()
+
+    def test_reset_running_jobs_no_log_when_zero(self):
+        from unittest.mock import MagicMock, patch
+
+        db, _, _, _ = _make_db_with_mock_pool()
+        with patch.object(db, "_requeue_running_jobs_for_node", return_value=0):
+            with patch.object(db.log, "info") as mock_log:
+                db._reset_running_jobs()
+                mock_log.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # add_job
+    # ------------------------------------------------------------------
+
+    def test_add_job_returns_id_when_no_duplicate(self):
+        from unittest.mock import MagicMock, call
+
+        cur = MagicMock()
+        # First fetchone: no existing job; second fetchone: new id
+        cur.fetchone.side_effect = [None, {"id": 42}]
+        cur.fetchall.return_value = []
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.add_job("/path/movie.mkv", "/cfg/autoProcess.ini")
+        assert result == 42
+
+    def test_add_job_returns_none_on_duplicate(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"id": 10}
+        cur.fetchall.return_value = []
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.add_job("/path/movie.mkv", "/cfg/autoProcess.ini")
+        assert result is None
+
+    def test_add_job_passes_args_as_json(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.side_effect = [None, {"id": 99}]
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        db.add_job("/path/ep.mkv", "/cfg/tv.ini", args=["-tmdb", "123"], max_retries=2)
+        # Second execute call should include JSON-encoded args
+        calls = cur.execute.call_args_list
+        insert_call = calls[1]
+        assert '"-tmdb"' in insert_call[0][1][2]
+
+    # ------------------------------------------------------------------
+    # find_active_job
+    # ------------------------------------------------------------------
+
+    def test_find_active_job_returns_dict_when_found(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"id": 5, "path": "/a.mkv", "status": "pending"}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.find_active_job("/a.mkv")
+        assert result == {"id": 5, "path": "/a.mkv", "status": "pending"}
+
+    def test_find_active_job_returns_none_when_not_found(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = None
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.find_active_job("/missing.mkv")
+        assert result is None
+
+    # ------------------------------------------------------------------
+    # claim_next_job
+    # ------------------------------------------------------------------
+
+    def test_claim_next_job_returns_none_when_no_pending(self):
+        from unittest.mock import MagicMock, patch
+
+        cur = MagicMock()
+        cur.fetchone.return_value = None
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.claim_next_job(worker_id=1, node_id="node1")
+        assert result is None
+
+    def test_claim_next_job_returns_job_when_available(self):
+        from unittest.mock import MagicMock, patch
+
+        pending_row = {"id": 7, "path": "/m.mkv", "config": "/c.ini", "args": "[]"}
+        full_row = {"id": 7, "path": "/m.mkv", "config": "/c.ini", "args": "[]", "status": "running"}
+        cur = MagicMock()
+        cur.fetchone.return_value = pending_row
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        with patch.object(db, "get_job", return_value=full_row) as mock_get:
+            result = db.claim_next_job(worker_id=1, node_id="node1")
+            mock_get.assert_called_once_with(7)
+            assert result == full_row
+
+    def test_claim_next_job_uses_exclude_configs(self):
+        from unittest.mock import MagicMock, patch
+
+        cur = MagicMock()
+        cur.fetchone.return_value = None
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        db.claim_next_job(worker_id=1, node_id="node1", exclude_configs={"/cfg/tv.ini"})
+        # The SQL should include the exclude clause
+        sql_called = cur.execute.call_args[0][0]
+        assert "ALL" in sql_called or "!=" in sql_called
+
+    # ------------------------------------------------------------------
+    # get_job
+    # ------------------------------------------------------------------
+
+    def test_get_job_returns_dict_when_found(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"id": 3, "path": "/x.mkv"}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.get_job(3)
+        assert result == {"id": 3, "path": "/x.mkv"}
+
+    def test_get_job_returns_none_when_not_found(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = None
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.get_job(9999)
+        assert result is None
+
+    # ------------------------------------------------------------------
+    # get_jobs / get_pending_jobs / get_next_pending_job / get_running_jobs
+    # ------------------------------------------------------------------
+
+    def test_get_jobs_returns_list(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = [{"id": 1, "status": "pending"}, {"id": 2, "status": "pending"}]
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.get_jobs()
+        assert len(result) == 2
+
+    def test_get_jobs_with_status_filter(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = [{"id": 1, "status": "running"}]
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.get_jobs(status="running")
+        assert result[0]["status"] == "running"
+        sql = cur.execute.call_args[0][0]
+        assert "status" in sql
+
+    def test_get_jobs_with_config_filter(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = []
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        db.get_jobs(config="/cfg/tv.ini")
+        sql = cur.execute.call_args[0][0]
+        assert "config" in sql
+
+    def test_get_pending_jobs_returns_list(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = [{"id": 1, "status": "pending"}]
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.get_pending_jobs()
+        assert len(result) == 1
+
+    def test_get_next_pending_job_returns_dict_when_found(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"id": 4, "status": "pending"}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.get_next_pending_job()
+        assert result == {"id": 4, "status": "pending"}
+
+    def test_get_next_pending_job_returns_none_when_empty(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = None
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.get_next_pending_job()
+        assert result is None
+
+    def test_get_running_jobs_returns_list(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = [{"id": 2, "status": "running"}]
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.get_running_jobs()
+        assert len(result) == 1
+        assert result[0]["status"] == "running"
+
+    # ------------------------------------------------------------------
+    # start_job / complete_job
+    # ------------------------------------------------------------------
+
+    def test_start_job_executes_update(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        db.start_job(job_id=5, worker_id=2)
+        cur.execute.assert_called_once()
+        sql, params = cur.execute.call_args[0]
+        assert "UPDATE" in sql.upper()
+        assert 5 in params
+
+    def test_complete_job_sets_completed_status(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        db.complete_job(job_id=8)
+        cur.execute.assert_called_once()
+        sql, params = cur.execute.call_args[0]
+        assert STATUS_COMPLETED in params
+        assert 8 in params
+
+    # ------------------------------------------------------------------
+    # fail_job
+    # ------------------------------------------------------------------
+
+    def test_fail_job_marks_failed_when_no_retries(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"retry_count": 0, "max_retries": 0}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        db.fail_job(job_id=11, error="oops")
+        # Second execute should mark as failed
+        last_call = cur.execute.call_args_list[-1]
+        sql, params = last_call[0]
+        assert STATUS_FAILED in params
+        assert "oops" in params
+
+    def test_fail_job_requeues_with_backoff_when_retries_remain(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"retry_count": 0, "max_retries": 3}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        db.fail_job(job_id=12, error="transient")
+        last_call = cur.execute.call_args_list[-1]
+        sql, params = last_call[0]
+        # Should use STATUS_PENDING and include retry_count=1
+        assert STATUS_PENDING in params
+        assert 1 in params  # retry_count
+
+    def test_fail_job_no_row_still_marks_failed(self):
+        """If the job row can't be found, fail gracefully — just mark failed."""
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = None
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        db.fail_job(job_id=99, error="not found")
+        # Ensure we still try to mark as failed
+        last_call = cur.execute.call_args_list[-1]
+        sql, params = last_call[0]
+        assert STATUS_FAILED in params
+
+    # ------------------------------------------------------------------
+    # get_stats
+    # ------------------------------------------------------------------
+
+    def test_get_stats_returns_dict_with_total(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = [{"status": "pending", "count": 3}, {"status": "completed", "count": 10}]
+        cur.fetchone.return_value = {"total": 13}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        stats = db.get_stats()
+        assert stats["pending"] == 3
+        assert stats["completed"] == 10
+        assert stats["total"] == 13
+
+    def test_get_stats_empty_db(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = []
+        cur.fetchone.return_value = {"total": 0}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        stats = db.get_stats()
+        assert stats["total"] == 0
+
+    # ------------------------------------------------------------------
+    # cleanup_old_jobs
+    # ------------------------------------------------------------------
+
+    def test_cleanup_old_jobs_returns_deleted_count(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.rowcount = 5
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.cleanup_old_jobs(days=7)
+        assert result == 5
+
+    def test_cleanup_old_jobs_zero_deleted_no_log(self):
+        from unittest.mock import MagicMock, patch
+
+        cur = MagicMock()
+        cur.rowcount = 0
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        with patch.object(db.log, "info") as mock_log:
+            result = db.cleanup_old_jobs(days=30)
+            assert result == 0
+            mock_log.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # pending_count / pending_count_for_config
+    # ------------------------------------------------------------------
+
+    def test_pending_count_returns_integer(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"count": 7}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        assert db.pending_count() == 7
+
+    def test_pending_count_for_config_returns_integer(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"count": 2}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        assert db.pending_count_for_config("/cfg/tv.ini") == 2
+
+    # ------------------------------------------------------------------
+    # heartbeat
+    # ------------------------------------------------------------------
+
+    def test_heartbeat_returns_none_when_no_command(self):
+        from datetime import datetime
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"pending_command": None}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.heartbeat("node1", "host1", 4, datetime.utcnow())
+        assert result is None
+
+    def test_heartbeat_returns_command_and_clears_it(self):
+        from datetime import datetime
+        from unittest.mock import MagicMock, call
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"pending_command": "shutdown"}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.heartbeat("node1", "host1", 4, datetime.utcnow())
+        assert result == "shutdown"
+        # Should clear the command
+        clear_call = cur.execute.call_args_list[-1]
+        assert "NULL" in clear_call[0][0]
+
+    def test_heartbeat_no_row_returns_none(self):
+        from datetime import datetime
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = None
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.heartbeat("node1", "host1", 2, datetime.utcnow())
+        assert result is None
+
+    # ------------------------------------------------------------------
+    # get_cluster_nodes
+    # ------------------------------------------------------------------
+
+    def test_get_cluster_nodes_returns_empty_list_when_no_nodes(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = []
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.get_cluster_nodes()
+        assert result == []
+
+    def test_get_cluster_nodes_attaches_active_jobs(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        nodes = [{"node_id": "n1", "host": "h1", "workers": 2, "uptime_seconds": 100}]
+        jobs = [{"node_id": "n1", "job_id": 5, "path": "/m.mkv", "config": "/c.ini"}]
+        cur.fetchall.side_effect = [nodes, jobs]
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.get_cluster_nodes()
+        assert len(result) == 1
+        assert len(result[0]["active_jobs"]) == 1
+        assert result[0]["active_jobs"][0]["job_id"] == 5
+
+    def test_get_cluster_nodes_empty_active_jobs_when_no_running(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        nodes = [{"node_id": "n1", "host": "h1", "workers": 2, "uptime_seconds": 50}]
+        cur.fetchall.side_effect = [nodes, []]
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.get_cluster_nodes()
+        assert result[0]["active_jobs"] == []
+
+    # ------------------------------------------------------------------
+    # recover_stale_nodes
+    # ------------------------------------------------------------------
+
+    def test_recover_stale_nodes_returns_empty_when_no_stale(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = []
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.recover_stale_nodes()
+        assert result == []
+
+    def test_recover_stale_nodes_requeues_and_marks_offline(self):
+        from unittest.mock import MagicMock, patch
+
+        cur = MagicMock()
+        cur.fetchall.return_value = [{"node_id": "dead_node"}]
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        with patch.object(db, "_requeue_running_jobs_for_node", return_value=2) as mock_req:
+            with patch.object(db.log, "warning") as mock_warn:
+                result = db.recover_stale_nodes(stale_seconds=60)
+                mock_req.assert_called_once_with("dead_node")
+                mock_warn.assert_called_once()
+                assert result == [("dead_node", 2)]
+
+    # ------------------------------------------------------------------
+    # mark_node_offline
+    # ------------------------------------------------------------------
+
+    def test_mark_node_offline_requeues_and_updates_status(self):
+        from unittest.mock import MagicMock, patch
+
+        cur = MagicMock()
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        with patch.object(db, "_requeue_running_jobs_for_node", return_value=1) as mock_req:
+            with patch.object(db.log, "info") as mock_log:
+                db.mark_node_offline("node1")
+                mock_req.assert_called_once_with("node1")
+                mock_log.assert_called_once()
+
+    def test_mark_node_offline_no_log_when_none_requeued(self):
+        from unittest.mock import MagicMock, patch
+
+        cur = MagicMock()
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        with patch.object(db, "_requeue_running_jobs_for_node", return_value=0):
+            with patch.object(db.log, "info") as mock_log:
+                db.mark_node_offline("node1")
+                mock_log.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # send_node_command
+    # ------------------------------------------------------------------
+
+    def test_send_node_command_targets_specific_node(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = [{"node_id": "n1"}]
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.send_node_command("n1", "shutdown")
+        assert result == ["n1"]
+        sql = cur.execute.call_args[0][0]
+        assert "node_id" in sql
+
+    def test_send_node_command_broadcasts_when_node_id_is_none(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = [{"node_id": "n1"}, {"node_id": "n2"}]
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.send_node_command(None, "restart")
+        assert len(result) == 2
+        sql = cur.execute.call_args[0][0]
+        assert "online" in sql
+
+    # ------------------------------------------------------------------
+    # requeue_job / requeue_failed_jobs
+    # ------------------------------------------------------------------
+
+    def test_requeue_job_returns_true_when_requeued(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"id": 4}
+        cur.rowcount = 1
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.requeue_job(4)
+        assert result is True
+
+    def test_requeue_job_returns_false_when_not_failed(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = None
+        cur.rowcount = 0
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.requeue_job(99)
+        assert result is False
+
+    def test_requeue_failed_jobs_returns_count(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.rowcount = 3
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.requeue_failed_jobs()
+        assert result == 3
+
+    def test_requeue_failed_jobs_with_config_filter(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.rowcount = 1
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.requeue_failed_jobs(config="/cfg/tv.ini")
+        assert result == 1
+        sql = cur.execute.call_args[0][0]
+        assert "config" in sql
+
+    # ------------------------------------------------------------------
+    # cancel_job
+    # ------------------------------------------------------------------
+
+    def test_cancel_job_returns_true_when_cancelled(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"id": 6}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.cancel_job(6)
+        assert result is True
+
+    def test_cancel_job_returns_false_when_not_cancellable(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = None
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.cancel_job(99)
+        assert result is False
+
+    # ------------------------------------------------------------------
+    # set_job_priority
+    # ------------------------------------------------------------------
+
+    def test_set_job_priority_returns_true_when_updated(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = {"id": 3}
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.set_job_priority(3, 10)
+        assert result is True
+
+    def test_set_job_priority_returns_false_when_not_pending(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchone.return_value = None
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.set_job_priority(3, 10)
+        assert result is False
+
+    # ------------------------------------------------------------------
+    # delete_failed_jobs / delete_offline_nodes / delete_all_jobs
+    # ------------------------------------------------------------------
+
+    def test_delete_failed_jobs_returns_count(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.rowcount = 4
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.delete_failed_jobs()
+        assert result == 4
+
+    def test_delete_failed_jobs_zero_no_log(self):
+        from unittest.mock import MagicMock, patch
+
+        cur = MagicMock()
+        cur.rowcount = 0
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        with patch.object(db.log, "info") as mock_log:
+            result = db.delete_failed_jobs()
+            assert result == 0
+            mock_log.assert_not_called()
+
+    def test_delete_offline_nodes_returns_count(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.rowcount = 2
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.delete_offline_nodes()
+        assert result == 2
+
+    def test_delete_all_jobs_returns_count(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.rowcount = 15
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.delete_all_jobs()
+        assert result == 15
+
+    # ------------------------------------------------------------------
+    # filter_unscanned / record_scanned
+    # ------------------------------------------------------------------
+
+    def test_filter_unscanned_returns_empty_for_empty_input(self):
+        db, _, _, _ = _make_db_with_mock_pool()
+        result = db.filter_unscanned([])
+        assert result == []
+
+    def test_filter_unscanned_returns_new_paths(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        cur.fetchall.return_value = [{"path": "/a.mkv"}]
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        result = db.filter_unscanned(["/a.mkv", "/b.mkv"])
+        assert "/b.mkv" in result
+        assert "/a.mkv" not in result
+
+    def test_record_scanned_noop_for_empty_input(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        db.record_scanned([])
+        cur.executemany.assert_not_called()
+
+    def test_record_scanned_inserts_paths(self):
+        from unittest.mock import MagicMock
+
+        cur = MagicMock()
+        db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+        db.record_scanned(["/x.mkv", "/y.mkv"])
+        cur.executemany.assert_called_once()
+        args = cur.executemany.call_args[0]
+        assert len(args[1]) == 2
+
+    # ------------------------------------------------------------------
+    # is_distributed flag
+    # ------------------------------------------------------------------
+
+    def test_is_distributed_true(self):
+        assert PostgreSQLJobDatabase.is_distributed is True
+
+
 class TestPostgresImportGuard:
     """Test PostgreSQLJobDatabase raises ImportError when psycopg2 unavailable."""
 
