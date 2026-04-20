@@ -5,11 +5,21 @@ import json
 import logging
 import os
 from configparser import RawConfigParser
+from logging.handlers import RotatingFileHandler
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from resources.daemon.context import JobContextFilter, clear_job_id, set_job_id
-from resources.log import JSONFormatter, checkLoggingConfig, defaults
+from resources.log import (
+    ColorFormatter,
+    JSONFormatter,
+    _apply_color_formatters,
+    _apply_job_context_filter,
+    _apply_json_formatter,
+    checkLoggingConfig,
+    defaults,
+)
 
 
 class TestCheckLoggingConfig:
@@ -100,6 +110,24 @@ class TestCheckLoggingConfig:
         assert not val.endswith(",")
         assert not val.endswith(" ")
 
+    def test_migrates_stream_daemon_handler_to_rotating_file_handler(self, tmp_path):
+        configfile = str(tmp_path / "logging.ini")
+        config = RawConfigParser()
+        for s in defaults:
+            config.add_section(s)
+            for k in defaults[s]:
+                config.set(s, k, str(defaults[s][k]))
+        config.set("handler_daemonHandler", "class", "StreamHandler")
+        with open(configfile, "w") as f:
+            config.write(f)
+
+        checkLoggingConfig(configfile, logs_dir=str(tmp_path / "logs"))
+
+        config2 = RawConfigParser()
+        config2.read(configfile)
+        assert config2.get("handler_daemonHandler", "class") == "handlers.RotatingFileHandler"
+        assert "daemon.log" in config2.get("handler_daemonHandler", "args")
+
     def test_idempotent_on_complete_config(self, tmp_path):
         configfile = str(tmp_path / "logging.ini")
         checkLoggingConfig(configfile)
@@ -166,6 +194,80 @@ class TestJobContextFilter:
         filt.filter(record2)
         assert record2.job_id == "1"  # type: ignore[attr-defined]
         clear_job_id(token1)
+
+
+class _TTYStream(io.StringIO):
+    def isatty(self):
+        return True
+
+
+class _NonTTYStream(io.StringIO):
+    def isatty(self):
+        return False
+
+
+class TestColorFormatterHelpers:
+    def test_color_formatter_wraps_warning_and_error(self):
+        warning_formatter = ColorFormatter("%(message)s")
+        warning_record = logging.LogRecord("test", logging.WARNING, "", 0, "warn", (), None)
+        assert warning_formatter.format(warning_record).startswith("\033[33m")
+
+        error_record = logging.LogRecord("test", logging.ERROR, "", 0, "boom", (), None)
+        assert warning_formatter.format(error_record).startswith("\033[31m")
+
+    def test_color_formatter_leaves_info_uncolored(self):
+        formatter = ColorFormatter("%(message)s")
+        record = logging.LogRecord("test", logging.INFO, "", 0, "plain", (), None)
+        assert formatter.format(record) == "plain"
+
+    def test_apply_color_formatters_updates_tty_stream_handlers_only(self):
+        root_handler = logging.StreamHandler(_TTYStream())
+        root_handler.setFormatter(logging.Formatter("%(message)s"))
+        child_handler = logging.StreamHandler(_TTYStream())
+        child_handler.setFormatter(logging.Formatter("%(levelname)s:%(message)s"))
+        non_tty_handler = logging.StreamHandler(_NonTTYStream())
+        non_tty_handler.setFormatter(logging.Formatter("%(message)s"))
+
+        child_logger = logging.getLogger("test.color.child")
+        child_logger.handlers = [child_handler, non_tty_handler]
+
+        with patch.object(logging.root, "handlers", [root_handler]):
+            with patch.dict(logging.Logger.manager.loggerDict, {"test.color.child": child_logger}, clear=False):
+                _apply_color_formatters()
+
+        assert isinstance(root_handler.formatter, ColorFormatter)
+        assert isinstance(child_handler.formatter, ColorFormatter)
+        assert not isinstance(non_tty_handler.formatter, ColorFormatter)
+
+    def test_apply_job_context_filter_is_idempotent(self):
+        daemon_logger = logging.getLogger("DAEMON")
+        original_filters = list(daemon_logger.filters)
+        daemon_logger.filters = []
+        try:
+            _apply_job_context_filter()
+            _apply_job_context_filter()
+            assert len(daemon_logger.filters) == 1
+            assert isinstance(daemon_logger.filters[0], JobContextFilter)
+        finally:
+            daemon_logger.filters = original_filters
+
+    @pytest.mark.skipif(JSONFormatter is None, reason="python-json-logger not installed")
+    def test_apply_json_formatter_updates_rotating_file_handler(self, tmp_path):
+        daemon_logger = logging.getLogger("DAEMON")
+        original_handlers = list(daemon_logger.handlers)
+        handler = RotatingFileHandler(str(tmp_path / "daemon.log"))
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        daemon_logger.handlers = [handler]
+        try:
+            _apply_json_formatter()
+            assert isinstance(handler.formatter, JSONFormatter)
+        finally:
+            daemon_logger.handlers = original_handlers
+            handler.close()
+
+    def test_apply_json_formatter_returns_when_unavailable(self):
+        with patch("resources.log.JSONFormatter", None):
+            _apply_json_formatter()
 
 
 class TestDaemonLogFixture:
