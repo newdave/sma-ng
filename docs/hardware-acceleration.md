@@ -118,10 +118,12 @@ Error parsing global options: Invalid argument
 
 check the following:
 
-1. Start the Intel profile so `/dev/dri` is mounted:
+1. Start an Intel profile so `/dev/dri` is mounted:
 
 ```bash
 docker compose --profile intel up -d
+# or, with bundled PostgreSQL:
+docker compose --profile intel-pg up -d
 ```
 
 2. Verify VAAPI visibility inside the container:

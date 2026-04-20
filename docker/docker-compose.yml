@@ -1,27 +1,82 @@
+x-sma-common: &sma-common
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+    target: runtime
+  image: sma-ng:latest
+  restart: unless-stopped
+  ports:
+    - "${SMA_PORT:-8585}:8585"
+  volumes:
+    - /opt/sma/config:/config
+    - /opt/sma/logs:/logs
+    - /mnt:/mnt
+    - /mnt/unionfs/downloads:/downloads
+    - /transcodes:/transcodes
+  environment: &sma-env
+    SMA_CONFIG: /config/autoProcess.ini
+    SMA_FFMPEG: /usr/local/bin/ffmpeg
+    SMA_FFPROBE: /usr/local/bin/ffprobe
+    SMA_DAEMON_HOST: ${SMA_DAEMON_HOST:-0.0.0.0}
+    SMA_DAEMON_PORT: ${SMA_DAEMON_PORT:-8585}
+    SMA_DAEMON_WORKERS: ${SMA_DAEMON_WORKERS:-2}
+    SMA_DAEMON_CONFIG: ${SMA_DAEMON_CONFIG:-/config/daemon.json}
+    SMA_DAEMON_LOGS_DIR: ${SMA_DAEMON_LOGS_DIR:-/logs}
+    SMA_DAEMON_API_KEY: ${SMA_DAEMON_API_KEY:-}
+    SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-}
+  env_file:
+    - path: /opt/sma/config/daemon.env
+      required: false
+  networks:
+    - sma-net
+
+x-sma-depends-on-pg: &sma-depends-on-pg
+  sma-pgsql:
+    condition: service_healthy
+
+x-sma-nvidia-env: &sma-nvidia-env
+  NVIDIA_VISIBLE_DEVICES: all
+  NVIDIA_DRIVER_CAPABILITIES: video,compute,utility
+
+x-sma-nvidia-deploy: &sma-nvidia-deploy
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu, video]
+
+x-sma-intel-env: &sma-intel-env
+  LIBVA_DRIVER_NAME: ${LIBVA_DRIVER_NAME:-iHD}
+
+x-sma-intel-device-config: &sma-intel-device-config
+  devices:
+    - /dev/dri:/dev/dri
+  group_add:
+    - "${RENDER_GID:-109}"
+    - "${VIDEO_GID:-44}"
+
 services:
 
   # ────────────────────────────────────────────────────────────────────
-  # PostgreSQL database — always started (no profile required).
-  #
-  # If you have an external PostgreSQL instance, remove this service
-  # and set SMA_DAEMON_DB_URL directly in daemon.env.
+  # PostgreSQL database — only started by the *-pg profiles.
   #
   # Default credentials (override in .env):
   #   POSTGRES_PASSWORD=<required>
   #   POSTGRES_USER=sma  POSTGRES_DB=sma
   #
-  # SMA will connect via:
-  #   SMA_DAEMON_DB_URL=postgresql://sma:<password>@postgres:5432/sma
+  # Profiles that include this service:
+  #   software-pg   intel-pg   nvidia-pg
   # ────────────────────────────────────────────────────────────────────
   sma-pgsql:
     image: postgres:16-alpine
     container_name: sma-postgres
+    profiles: [software-pg, intel-pg, nvidia-pg]
     restart: unless-stopped
     networks:
       - sma-net
     ports:
-      # Not exposed by default. Set PGSQL_PORT in .env to publish:
-      #   PGSQL_PORT=5432
       - "${PGSQL_PORT:-}:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-sma}
@@ -37,116 +92,75 @@ services:
       start_period: 10s
 
   # ────────────────────────────────────────────────────────────────────
-  # Base SMA service definition — referenced by all GPU profiles via
-  # 'extends'. Not started directly; choose a profile below.
+  # Encoder/profile matrix:
+  #   software      — CPU-only, external PostgreSQL or no DB
+  #   software-pg   — CPU-only, bundled PostgreSQL
+  #   intel         — Intel QSV + VAAPI, external PostgreSQL or no DB
+  #   intel-pg      — Intel QSV + VAAPI, bundled PostgreSQL
+  #   nvidia        — NVIDIA NVENC/NVDEC, external PostgreSQL or no DB
+  #   nvidia-pg     — NVIDIA NVENC/NVDEC, bundled PostgreSQL
   #
-  # Profiles (pick one):
-  #   software     — CPU-only encoding (no GPU)
-  #   intel        — Intel QSV + VAAPI
-  #   nvidia       — NVIDIA NVENC/NVDEC
-  #
-  # Usage:
+  # Examples:
   #   docker compose --profile software up
-  #   docker compose --profile intel    up
-  #   docker compose --profile nvidia   up
+  #   docker compose --profile software-pg up
+  #   docker compose --profile intel up
+  #   docker compose --profile intel-pg up
+  #   docker compose --profile nvidia up
+  #   docker compose --profile nvidia-pg up
   # ────────────────────────────────────────────────────────────────────
-  sma:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-      target: runtime
-    image: sma-ng:latest
-    container_name: sma-ng
+  sma-software:
+    <<: *sma-common
+    container_name: sma-ng-software
     profiles: [software]
-    restart: unless-stopped
-    ports:
-      - "${SMA_PORT:-8585}:8585"
-    volumes:
-      - /opt/sma/config:/config
-      - /opt/sma/logs:/logs
-      - /mnt:/mnt
-      - /mnt/unionfs/downloads:/downloads
-      - /transcodes:/transcodes
-    environment:
-      # SMA paths
-      - SMA_CONFIG=/config/autoProcess.ini
-      - SMA_FFMPEG=/usr/local/bin/ffmpeg
-      - SMA_FFPROBE=/usr/local/bin/ffprobe
-      # Daemon networking
-      - SMA_DAEMON_HOST=${SMA_DAEMON_HOST:-0.0.0.0}
-      - SMA_DAEMON_PORT=${SMA_DAEMON_PORT:-8585}
-      - SMA_DAEMON_WORKERS=${SMA_DAEMON_WORKERS:-2}
-      # Daemon config / logs
-      - SMA_DAEMON_CONFIG=${SMA_DAEMON_CONFIG:-/config/daemon.json}
-      - SMA_DAEMON_LOGS_DIR=${SMA_DAEMON_LOGS_DIR:-/logs}
-      # Authentication
-      - SMA_DAEMON_API_KEY=${SMA_DAEMON_API_KEY:-}
-      # Database — defaults to the bundled sma-pgsql service.
-      # Override in .env or daemon.env to use an external instance.
-      - SMA_DAEMON_DB_URL=${SMA_DAEMON_DB_URL:-postgresql://${POSTGRES_USER:-sma}:${POSTGRES_PASSWORD}@sma-pgsql:5432/${POSTGRES_DB:-sma}}
-    env_file:
-      - path: /opt/sma/config/daemon.env
-        required: false
-    networks:
-      - sma-net
-    depends_on:
-      sma-pgsql:
-        condition: service_healthy
-        required: false
 
-  # ────────────────────────────────────────────────────────────────────
-  # NVIDIA GPU (NVENC/NVDEC)
-  # Requirements: nvidia-container-toolkit installed on host
-  # Usage: docker compose --profile nvidia up
-  # ────────────────────────────────────────────────────────────────────
+  sma-software-pg:
+    <<: *sma-common
+    container_name: sma-ng-software-pg
+    profiles: [software-pg]
+    environment:
+      <<: *sma-env
+      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-postgresql://${POSTGRES_USER:-sma}:${POSTGRES_PASSWORD}@sma-pgsql:5432/${POSTGRES_DB:-sma}}
+    depends_on:
+      <<: *sma-depends-on-pg
+
   sma-nvidia:
-    extends:
-      service: sma
+    <<: [*sma-common, *sma-nvidia-deploy]
     container_name: sma-ng-nvidia
     profiles: [nvidia]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu, video]
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
+      <<: [*sma-env, *sma-nvidia-env]
 
-  # ────────────────────────────────────────────────────────────────────
-  # Intel GPU (QSV + VAAPI via iHD driver)
-  # Requirements: Intel GPU on host and /dev/dri access.
-  # The container ships VAAPI userspace drivers + vainfo for diagnostics.
-  # Usage: docker compose --profile intel up
-  # ────────────────────────────────────────────────────────────────────
+  sma-nvidia-pg:
+    <<: [*sma-common, *sma-nvidia-deploy]
+    container_name: sma-ng-nvidia-pg
+    profiles: [nvidia-pg]
+    environment:
+      <<: [*sma-env, *sma-nvidia-env]
+      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-postgresql://${POSTGRES_USER:-sma}:${POSTGRES_PASSWORD}@sma-pgsql:5432/${POSTGRES_DB:-sma}}
+    depends_on:
+      <<: *sma-depends-on-pg
+
   sma-intel:
-    extends:
-      service: sma
+    <<: [*sma-common, *sma-intel-device-config]
     container_name: sma-ng-intel
     profiles: [intel]
-    devices:
-      - /dev/dri:/dev/dri
-    group_add:
-      # Numeric GIDs from the host for /dev/dri access.
-      # Group names are resolved inside the container (where they don't
-      # exist), so numeric IDs must be used. Override in .env if your
-      # host uses different GIDs:
-      #   RENDER_GID=$(getent group render | cut -d: -f3)
-      #   VIDEO_GID=$(getent group video  | cut -d: -f3)
-      - "${RENDER_GID:-109}"
-      - "${VIDEO_GID:-44}"
     environment:
-      - LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-iHD}
+      <<: [*sma-env, *sma-intel-env]
+
+  sma-intel-pg:
+    <<: [*sma-common, *sma-intel-device-config]
+    container_name: sma-ng-intel-pg
+    profiles: [intel-pg]
+    environment:
+      <<: [*sma-env, *sma-intel-env]
+      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-postgresql://${POSTGRES_USER:-sma}:${POSTGRES_PASSWORD}@sma-pgsql:5432/${POSTGRES_DB:-sma}}
+    depends_on:
+      <<: *sma-depends-on-pg
 
 volumes:
-  # Persistent storage for the bundled PostgreSQL instance.
   sma-pgdata:
 
 networks:
-  # Private bridge network — only sma-ng and sma-pgsql can communicate.
-  # PostgreSQL is not exposed to the host.
   sma-net:
     driver: bridge
     internal: false
