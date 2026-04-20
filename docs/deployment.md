@@ -170,6 +170,9 @@ make docker-run
 
 **Tags:** `latest`, `1`, `1.2`, `1.2.3` (semver), `main` (rolling build from main branch).
 
+For hardware acceleration diagnostics in containers, the runtime image includes `vainfo` and VAAPI userspace drivers.
+For Intel/QSV setups, use the Intel compose profile (`docker compose --profile intel up`) so `/dev/dri` is mapped.
+
 **Environment variables for Docker:**
 
 | Variable | Default | Description |

@@ -270,6 +270,70 @@ def _validate_hwaccel(path_config_manager, ffmpeg_dir, logger):
         env["PATH"] = ffmpeg_dir + os.pathsep + env.get("PATH", "")
 
     seen = set()
+
+    def _parse_qsv_device(config_parser):
+        """Resolve QSV device from [Converter] hwdevices, falling back to renderD128."""
+        default_device = "/dev/dri/renderD128"
+        try:
+            raw = config_parser.get("Converter", "hwdevices", fallback="").strip()
+        except Exception:
+            return default_device
+        if not raw:
+            return default_device
+
+        for item in raw.split(","):
+            split = item.split(":", 1)
+            if len(split) != 2:
+                continue
+            key = split[0].strip().lower()
+            value = split[1].strip()
+            if key == "qsv" and value:
+                return value
+        return default_device
+
+    def _probe_qsv_init(config_path, config_parser):
+        """Run a dedicated QSV device-init probe and log actionable diagnostics."""
+        device = _parse_qsv_device(config_parser)
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-loglevel",
+                    "error",
+                    "-qsv_device",
+                    device,
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "nullsrc",
+                    "-t",
+                    "0.1",
+                    "-c:v",
+                    "h264_qsv",
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                capture_output=True,
+                env=env,
+                timeout=15,
+                text=True,
+            )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "unknown ffmpeg error").strip()
+                logger.warning(
+                    "QSV initialization self-check failed for device '%s' (config %s). ffmpeg reported: %s. "
+                    "If running in Docker, ensure /dev/dri is mounted and verify VAAPI in-container with 'vainfo'." % (device, os.path.basename(config_path), detail)
+                )
+            else:
+                logger.info("QSV initialization self-check passed for device '%s'" % device)
+        except FileNotFoundError:
+            logger.warning("ffmpeg not found in PATH — cannot run QSV initialization self-check")
+        except subprocess.TimeoutExpired:
+            logger.warning("QSV initialization self-check timed out for device '%s'" % device)
+        except Exception as exc:
+            logger.warning("QSV initialization self-check failed unexpectedly for device '%s': %s" % (device, exc))
+
     for config_path in path_config_manager.get_all_configs():
         if not os.path.exists(config_path):
             continue
@@ -296,6 +360,9 @@ def _validate_hwaccel(path_config_manager, ffmpeg_dir, logger):
                         )
                     else:
                         logger.info("Hardware encoder '%s' validated OK" % encoder)
+
+                    if keyword == "qsv":
+                        _probe_qsv_init(config_path, cp)
                 except FileNotFoundError:
                     logger.warning("ffmpeg not found in PATH — cannot validate hardware encoder '%s'" % encoder)
                 except subprocess.TimeoutExpired:

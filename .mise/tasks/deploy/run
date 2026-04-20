@@ -7,7 +7,7 @@ LOCAL="setup/.local.ini"
 CFG="scripts/local-config.sh"
 DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 
-_missing_prereq_pattern='(command not found|No such file or directory|not found.*make|make.*not found|python3.*not found|rsync.*not found)'
+_missing_prereq_pattern='(command not found|No such file or directory|not found.*make|make.*not found|python3.*not found|python.*not found|rsync.*not found)'
 
 failed=""
 for host in $DEPLOY_HOSTS; do
@@ -18,12 +18,30 @@ for host in $DEPLOY_HOSTS; do
   branch=$($cfg DEPLOY_BRANCH "")
   rsync_extra=$($cfg RSYNC_EXTRA "")
   ffmpeg_dir=$($cfg FFMPEG_DIR "")
+  auto_create_venv=$($cfg AUTO_CREATE_VENV true)
+  venv_dir=$($cfg VENV_DIR venv)
+  python_bin=$($cfg PYTHON_BIN /usr/bin/python3)
 
   ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
   [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
 
   make_env=""
   [ -n "$ffmpeg_dir" ] && make_env="SMA_DAEMON_FFMPEG_DIR=$ffmpeg_dir"
+
+  _run_install() {
+    # shellcheck disable=SC2086
+    ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $make_env make install VENV=$venv_dir PYTHON=$python_bin"
+  }
+
+  _venv_healthy() {
+    # shellcheck disable=SC2086
+    ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $make_env test -x $venv_dir/bin/python && $venv_dir/bin/python -c 'import encodings' >/dev/null 2>&1"
+  }
+
+  _recreate_venv() {
+    # shellcheck disable=SC2086
+    ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $make_env rm -rf $venv_dir && make venv VENV=$venv_dir PYTHON=$python_bin"
+  }
 
   echo ""
   echo "==> [$host] syncing to $dir"
@@ -49,10 +67,23 @@ for host in $DEPLOY_HOSTS; do
 
   echo "==> [$host] installing dependencies"
 
-  _run_install() {
-    # shellcheck disable=SC2086
-    ssh $ssh_opts "$host" "cd $dir && PATH=\$PATH:/usr/bin:/usr/local/bin $make_env make install"
-  }
+  if [ "$auto_create_venv" = "true" ] && ! _venv_healthy; then
+    echo "==> [$host] virtualenv missing or unhealthy ($venv_dir), recreating with $python_bin"
+
+    errfile=$(mktemp)
+    trap 'rm -f "$errfile"' EXIT
+    if ! _recreate_venv 2> >(tee "$errfile" >&2); then
+      if grep -qE "$_missing_prereq_pattern" "$errfile"; then
+        echo ""
+        echo "  WARNING: [$host] pre-req missing — running deploy:setup then retrying venv recreation"
+        HOST="$host" mise run deploy:setup
+        _recreate_venv || { failed="$failed $host"; continue; }
+      else
+        failed="$failed $host"
+        continue
+      fi
+    fi
+  fi
 
   errfile=$(mktemp)
   trap 'rm -f "$errfile"' EXIT

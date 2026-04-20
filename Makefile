@@ -30,6 +30,9 @@ help: ## Show this help
 
 venv:
 	$(PYTHON) -m venv $(VENV)
+	# Ensure the venv interpreter is executable by the service user.
+	chmod 755 $(VENV) $(VENV)/bin || true
+	chmod 755 $(VENV)/bin/python $(VENV)/bin/python3 $(VENV)/bin/python3.* 2>/dev/null || true
 	$(PIP) install --upgrade pip
 
 install: venv ## Install base dependencies
@@ -175,7 +178,7 @@ remote-make: ## Run make target on all DEPLOY_HOSTS without syncing
 # ---------------------------------------------------------------------------
 
 TAG    ?= sma-ng:local
-FFMPEG_VERSION ?= 8.0
+FFMPEG_VERSION ?= 8.1
 
 docker-build: ## Build the Docker image locally (TAG=sma-ng:local FFMPEG_VERSION=8.0 to override)
 	$(call MISE_OR_DIRECT,docker:build, \

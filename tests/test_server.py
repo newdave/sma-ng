@@ -618,8 +618,37 @@ class TestValidateHwaccelExtra:
         logger = MagicMock()
         with patch("subprocess.run", return_value=Mock(returncode=0)) as mock_run:
             _validate_hwaccel(pcm, None, logger)
-        called_args = mock_run.call_args[0][0]
-        assert "h264_qsv" in called_args
+        all_calls = [call[0][0] for call in mock_run.call_args_list]
+        assert any("h264_qsv" in cmd for cmd in all_calls)
+
+    def test_logs_qsv_init_failure_details(self, tmp_path):
+        cfg = tmp_path / "autoProcess.ini"
+        cfg.write_text("[Video]\nvideo-codec = h264, qsv\n")
+        pcm = _make_pcm([str(cfg)])
+        logger = MagicMock()
+
+        # First run validates encoder OK, second run is QSV init self-check and fails.
+        run_results = [Mock(returncode=0), Mock(returncode=1, stderr="No VA display found")]
+        with patch("subprocess.run", side_effect=run_results):
+            _validate_hwaccel(pcm, None, logger)
+
+        warnings = [str(c) for c in logger.warning.call_args_list]
+        assert any("QSV initialization self-check failed" in w for w in warnings)
+        assert any("No VA display found" in w for w in warnings)
+
+    def test_qsv_init_uses_hwdevices_override(self, tmp_path):
+        cfg = tmp_path / "autoProcess.ini"
+        cfg.write_text("[Converter]\nhwdevices = qsv:/dev/dri/renderD129\n[Video]\nvideo-codec = h264, qsv\n")
+        pcm = _make_pcm([str(cfg)])
+        logger = MagicMock()
+
+        with patch("subprocess.run", return_value=Mock(returncode=0)) as mock_run:
+            _validate_hwaccel(pcm, None, logger)
+
+        all_calls = [call[0][0] for call in mock_run.call_args_list]
+        qsv_init_calls = [cmd for cmd in all_calls if "-qsv_device" in cmd]
+        assert qsv_init_calls
+        assert "/dev/dri/renderD129" in qsv_init_calls[0]
 
     def test_validates_videotoolbox_encoder(self, tmp_path):
         cfg = tmp_path / "autoProcess.ini"
