@@ -235,6 +235,18 @@ class TestConversionWorkerProcessJob:
         worker.process_job(job)
         assert captured["args"] == ["-tmdb", "603"]
 
+    def test_invalid_json_args_fail_job_without_running_conversion(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        db = mock.MagicMock()
+        worker = _make_worker(job_db=db)
+        worker._run_conversion = mock.MagicMock()
+        job = {"id": 8, "path": str(media), "config": "/cfg.ini", "args": '["-tmdb", '}
+        worker.process_job(job)
+        db.fail_job.assert_called_once_with(8, "Invalid job args")
+        worker._run_conversion.assert_not_called()
+        assert worker.current_job_id is None
+
     def test_null_args_becomes_empty_list(self, tmp_path):
         media = tmp_path / "movie.mkv"
         media.write_bytes(b"")
@@ -302,6 +314,24 @@ def _make_fake_process(stdout_lines, returncode=0):
 
 
 class TestRunConversionInner:
+    def test_build_progress_payload_returns_structured_data(self):
+        worker = _make_worker()
+        payload = worker._build_progress_payload(
+            "frame=  100 fps= 25 speed=1.50x time=00:01:00 size=  5000kB",
+            mock.Mock(group=mock.Mock(return_value="00:01:00")),
+            600.0,
+            0.0,
+            10.0,
+        )
+        assert payload == {
+            "elapsed": "00:00:10",
+            "timecode": "00:01:00",
+            "fps": 25.0,
+            "speed": "1.50x",
+            "percent": 10.0,
+            "remaining": "00:06:00",
+        }
+
     def test_returns_true_on_zero_exit(self, tmp_path):
         media = tmp_path / "movie.mkv"
         media.write_bytes(b"")
@@ -371,6 +401,34 @@ class TestRunConversionInner:
         with mock.patch("subprocess.Popen", return_value=proc):
             result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
         assert result is True
+
+    def test_logs_periodic_progress_updates(self, tmp_path):
+        media = tmp_path / "movie.mkv"
+        media.write_bytes(b"")
+        worker = _make_worker()
+        worker.progress_log_interval = 5
+        config_logger = mock.MagicMock()
+        worker.config_log_manager.get_logger.return_value = config_logger
+        duration_line = "  Duration: 00:10:00, start: 0.000000, bitrate: 5000 kb/s"
+        progress_line = "frame=  100 fps= 25 speed=1.50x time=00:01:00 size=  5000kB"
+        proc = _make_fake_process([duration_line, progress_line], returncode=0)
+
+        with mock.patch("subprocess.Popen", return_value=proc):
+            with mock.patch("resources.daemon.worker.time.monotonic", side_effect=[0.0, 10.0]):
+                result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+
+        assert result is True
+
+        progress_logs = [call.args[0] for call in config_logger.info.call_args_list if call.args and isinstance(call.args[0], str) and call.args[0].startswith("Progress: ")]
+        assert progress_logs
+
+        payload = json.loads(progress_logs[0].split("Progress: ", 1)[1])
+        assert payload["elapsed"] == "00:00:10"
+        assert payload["timecode"] == "00:01:00"
+        assert payload["fps"] == 25.0
+        assert payload["speed"] == "1.50x"
+        assert payload["percent"] == 10.0
+        assert payload["remaining"] == "00:06:00"
 
     def test_empty_lines_are_skipped(self, tmp_path):
         media = tmp_path / "movie.mkv"

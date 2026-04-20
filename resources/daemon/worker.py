@@ -95,8 +95,15 @@ class ConversionWorker(threading.Thread):
         job_id = job["id"]
         self.current_job_id = job_id
         path = job["path"]
-        args = json.loads(job["args"]) if job["args"] else []
         config_file = job["config"]
+
+        try:
+            args = json.loads(job["args"]) if job["args"] else []
+        except (TypeError, ValueError) as e:
+            self.log.error("Job %d has invalid args payload: %s" % (job_id, e))
+            self.job_db.fail_job(job_id, "Invalid job args")
+            self.current_job_id = None
+            return
 
         if not os.path.exists(path):
             self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
@@ -197,36 +204,15 @@ class ConversionWorker(threading.Thread):
                     if dm:
                         total_duration_secs = _hms_to_seconds(dm.group(1), dm.group(2), dm.group(3))
                 tm = _FFMPEG_TIME_RE.search(line)
-                if tm:
-                    self._job_progress[job_id] = tm.group(1)
                 # Throttle FFmpeg progress lines; log all other output immediately.
                 if _FFMPEG_PROGRESS_RE.search(line):
                     now = time.monotonic()
+                    progress = self._build_progress_payload(line, tm, total_duration_secs, start_time, now)
+                    if progress:
+                        self._job_progress[job_id] = progress
                     if now - _last_progress_log >= self.progress_log_interval:
-                        fps_m = _FFMPEG_FPS_RE.search(line)
-                        speed_m = _FFMPEG_SPEED_RE.search(line)
-                        fps = float(fps_m.group(1)) if fps_m else None
-                        speed = float(speed_m.group(1)) if speed_m else None
-                        elapsed_secs = now - start_time
-                        progress = {"elapsed": _seconds_to_hms(elapsed_secs)}
-                        if fps is not None:
-                            progress["fps"] = round(fps, 1)
-                        if speed and speed > 0:
-                            progress["speed"] = "%.2fx" % speed
-                        if tm and total_duration_secs and total_duration_secs > 0:
-                            parts = tm.group(1).split(":")
-                            current_secs = _hms_to_seconds(parts[0], parts[1], parts[2])
-                            pct = min(100.0, current_secs / total_duration_secs * 100.0)
-                            progress["percent"] = round(pct, 1)
-                            if speed and speed > 0:
-                                remaining_secs = (total_duration_secs - current_secs) / speed
-                            elif elapsed_secs > 0 and pct > 0:
-                                remaining_secs = elapsed_secs * (100.0 - pct) / pct
-                            else:
-                                remaining_secs = None
-                            if remaining_secs is not None:
-                                progress["remaining"] = _seconds_to_hms(remaining_secs)
-                        config_logger.info("Progress: %s" % json.dumps(progress))
+                        if progress:
+                            config_logger.info("Progress: %s" % json.dumps(progress))
                         _last_progress_log = now
                 else:
                     config_logger.info(line)
@@ -255,6 +241,43 @@ class ConversionWorker(threading.Thread):
             self._job_progress.pop(job_id, None)
             config_logger.info("Job %d finished: %s" % (job_id, path))
             config_logger.info("")
+
+    def _build_progress_payload(self, line, time_match, total_duration_secs, start_time, now):
+        elapsed_secs = now - start_time
+        progress = {"elapsed": _seconds_to_hms(elapsed_secs)}
+
+        if time_match:
+            timecode = time_match.group(1)
+            progress["timecode"] = timecode
+        else:
+            timecode = None
+
+        fps_m = _FFMPEG_FPS_RE.search(line)
+        if fps_m:
+            progress["fps"] = round(float(fps_m.group(1)), 1)
+
+        speed_m = _FFMPEG_SPEED_RE.search(line)
+        speed = float(speed_m.group(1)) if speed_m else None
+        if speed and speed > 0:
+            progress["speed"] = "%.2fx" % speed
+
+        if timecode and total_duration_secs and total_duration_secs > 0:
+            parts = timecode.split(":")
+            current_secs = _hms_to_seconds(parts[0], parts[1], parts[2])
+            pct = min(100.0, current_secs / total_duration_secs * 100.0)
+            progress["percent"] = round(pct, 1)
+
+            if speed and speed > 0:
+                remaining_secs = (total_duration_secs - current_secs) / speed
+            elif elapsed_secs > 0 and pct > 0:
+                remaining_secs = elapsed_secs * (100.0 - pct) / pct
+            else:
+                remaining_secs = None
+
+            if remaining_secs is not None:
+                progress["remaining"] = _seconds_to_hms(remaining_secs)
+
+        return progress
 
 
 class WorkerPool:

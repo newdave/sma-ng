@@ -132,7 +132,8 @@ class ConfigLogManager:
             logger = logging.getLogger(f"DAEMON.{log_name}")
             logger.setLevel(logging.DEBUG)
 
-            if not logger.handlers:
+            existing_paths = {getattr(handler, "baseFilename", None) for handler in logger.handlers}
+            if log_file not in existing_paths:
                 file_handler = RotatingFileHandler(log_file, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8")
                 file_handler.setLevel(logging.DEBUG)
                 file_handler.addFilter(JobContextFilter())
@@ -153,14 +154,21 @@ class ConfigLogManager:
         return os.path.join(self.logs_dir, f"{log_name}.log")
 
     def get_all_log_files(self):
-        """Return list of {name, path} for every known log file (one per registered config)."""
+        """Return list of {name, path} for every top-level .log file present on disk."""
         with self.lock:
-            seen = {}
-            for config_path in self.loggers:
-                log_name = self._config_to_logname(config_path)
-                log_path = os.path.join(self.logs_dir, f"{log_name}.log")
-                seen[log_name] = log_path
-            return [{"name": name, "path": path} for name, path in seen.items()]
+            try:
+                entries = sorted(os.scandir(self.logs_dir), key=lambda e: e.name)
+            except OSError:
+                return []
+
+            result = []
+            for entry in entries:
+                if not entry.is_file():
+                    continue
+                if not entry.name.endswith(".log"):
+                    continue
+                result.append({"name": os.path.splitext(entry.name)[0], "path": entry.path})
+            return result
 
 
 class PathConfigManager:

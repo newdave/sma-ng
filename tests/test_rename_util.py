@@ -489,9 +489,17 @@ class TestRefreshPlexForResults:
             proc.refresh_plex_for_results(results)
         mock_plex.assert_not_called()
 
+    def test_no_token_skips(self):
+        proc = _make_processor()
+        proc.settings.Plex = {"host": "localhost", "token": None}
+        results = [{"changed": True, "dry_run": False, "new": "/media/Movies/file.mp4"}]
+        with patch("resources.rename_util.refreshPlex") as mock_plex:
+            proc.refresh_plex_for_results(results)
+        mock_plex.assert_not_called()
+
     def test_calls_refresh_for_changed(self):
         proc = _make_processor()
-        proc.settings.Plex = {"host": "localhost"}
+        proc.settings.Plex = {"host": "localhost", "token": "secret"}
         results = [{"changed": True, "dry_run": False, "new": "/media/Movies/file.mp4"}]
         with patch("resources.rename_util.refreshPlex") as mock_plex:
             proc.refresh_plex_for_results(results)
@@ -499,7 +507,7 @@ class TestRefreshPlexForResults:
 
     def test_skips_dry_run(self):
         proc = _make_processor()
-        proc.settings.Plex = {"host": "localhost"}
+        proc.settings.Plex = {"host": "localhost", "token": "secret"}
         results = [{"changed": True, "dry_run": True, "new": "/media/Movies/file.mp4"}]
         with patch("resources.rename_util.refreshPlex") as mock_plex:
             proc.refresh_plex_for_results(results)
@@ -507,7 +515,7 @@ class TestRefreshPlexForResults:
 
     def test_skips_unchanged(self):
         proc = _make_processor()
-        proc.settings.Plex = {"host": "localhost"}
+        proc.settings.Plex = {"host": "localhost", "token": "secret"}
         results = [{"changed": False, "dry_run": False, "new": "/media/Movies/file.mp4"}]
         with patch("resources.rename_util.refreshPlex") as mock_plex:
             proc.refresh_plex_for_results(results)
@@ -515,7 +523,7 @@ class TestRefreshPlexForResults:
 
     def test_deduplicates_by_directory(self):
         proc = _make_processor()
-        proc.settings.Plex = {"host": "localhost"}
+        proc.settings.Plex = {"host": "localhost", "token": "secret"}
         results = [
             {"changed": True, "dry_run": False, "new": "/media/Movies/a.mp4"},
             {"changed": True, "dry_run": False, "new": "/media/Movies/b.mp4"},
@@ -526,7 +534,7 @@ class TestRefreshPlexForResults:
 
     def test_exception_is_swallowed(self):
         proc = _make_processor()
-        proc.settings.Plex = {"host": "localhost"}
+        proc.settings.Plex = {"host": "localhost", "token": "secret"}
         results = [{"changed": True, "dry_run": False, "new": "/media/Movies/file.mp4"}]
         with patch("resources.rename_util.refreshPlex", side_effect=Exception("plex down")):
             proc.refresh_plex_for_results(results)  # must not raise
