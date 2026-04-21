@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.1...sma-ng-v1.3.2) (2026-04-21)
+
+
+### Bug Fixes
+
+* rename sforcedefault to force_subtitle_defaults in mediaprocessor ([d3ca2e4](https://github.com/newdave/sma-ng/commit/d3ca2e40d1208fd9d0f27102d7ef57bdf33397c9))
+* set LIBVA_DRIVER_NAME=iHD conditionally on Intel GPU only ([a8d419b](https://github.com/newdave/sma-ng/commit/a8d419b55c5612bcaec2f998a36845ec6db14a31))
+
 ## [1.3.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.0...sma-ng-v1.3.1) (2026-04-21)
 
 
