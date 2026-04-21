@@ -12,6 +12,9 @@ the daemon webhook for conversion.
 triggers/
   cli/
     scan.sh         — Manual CLI trigger for a single file or directory
+  lib/
+    common.sh       — Shared Bash helpers for daemon auth, polling, and payload calls
+    json_tools.py   — Shared JSON parser/payload builder used by trigger scripts
   media_managers/
     sonarr.sh       — Sonarr On Import / On Upgrade
     radarr.sh       — Radarr On Import / On Upgrade
