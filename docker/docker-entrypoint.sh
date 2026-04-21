@@ -15,6 +15,8 @@
 #  CONFIG_DIR   Directory to seed (default: /config)
 #  SMA_FFMPEG   Path to ffmpeg binary (default: /usr/local/bin/ffmpeg)
 #  SMA_FFPROBE  Path to ffprobe binary (default: /usr/local/bin/ffprobe)
+#  SMA_GPU      Force GPU backend: nvenc | qsv | vaapi | software
+#               (default: auto-detected on first run via detect-gpu.sh)
 set -e
 
 CONFIG_DIR="${CONFIG_DIR:-/config}"
@@ -41,6 +43,8 @@ mkdir -p "$CONFIG_DIR" "$DEFAULTS_DIR"
 
 # ── seed user config files (skipped if already present) ───────────────────────
 
+_ini_is_new=false
+[ ! -f "$CONFIG_DIR/autoProcess.ini" ] && _ini_is_new=true
 seed_file "$SETUP_DIR/autoProcess.ini.sample" "$CONFIG_DIR/autoProcess.ini"
 seed_file "$SETUP_DIR/daemon.json.sample"     "$CONFIG_DIR/daemon.json"
 seed_file "$SETUP_DIR/daemon.env.sample"      "$CONFIG_DIR/daemon.env"
@@ -78,6 +82,21 @@ _patch_ini "ffmpeg"  "$FFMPEG"
 _patch_ini "ffprobe" "$FFPROBE"
 
 log "FFmpeg: $FFMPEG  FFprobe: $FFPROBE"
+
+# ── GPU auto-detection (first-run only; preserves user edits on restart) ──────
+# SMA_GPU overrides detection at any time; detect-gpu.sh runs on first run only.
+if [ -n "${SMA_GPU:-}" ]; then
+    GPU="$SMA_GPU"
+    tmp="${INI}.patching"
+    sed "s|^gpu *=.*|gpu = ${GPU}|" "$INI" > "$tmp" && mv "$tmp" "$INI"
+    log "GPU: ${GPU} (from SMA_GPU)"
+elif [ "$_ini_is_new" = "true" ]; then
+    GPU="$(/app/scripts/detect-gpu.sh 2>/dev/null || echo software)"
+    tmp="${INI}.patching"
+    sed "s|^gpu *=.*|gpu = ${GPU}|" "$INI" > "$tmp" && mv "$tmp" "$INI"
+    log "GPU: ${GPU} (auto-detected)"
+fi
+
 log "Config directory ready: $CONFIG_DIR"
 
 # ── hand off to the container CMD ─────────────────────────────────────────────
