@@ -3,44 +3,18 @@
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
-LOCAL="setup/.local.ini"
-CFG="scripts/local-config.sh"
-DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+source "$(dirname "$0")/lib.sh"
 
-_missing_prereq_pattern='(command not found|No such file or directory|not found.*make|make.*not found|python3.*not found|python.*not found|rsync.*not found)'
+DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 
 failed=""
 for host in $DEPLOY_HOSTS; do
-  cfg="$CFG $LOCAL $host"
-  dir=$($cfg DEPLOY_DIR ~/sma)
-  port=$($cfg SSH_PORT 22)
-  key=$($cfg SSH_KEY "")
+  init_host_context "$host"
   branch=$($cfg DEPLOY_BRANCH "")
   rsync_extra=$($cfg RSYNC_EXTRA "")
-  ffmpeg_dir=$($cfg FFMPEG_DIR "")
-  auto_create_venv=$($cfg AUTO_CREATE_VENV true)
-  venv_dir=$($cfg VENV_DIR venv)
-  python_bin=$($cfg PYTHON_BIN /usr/bin/python3)
-
-  ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-  [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
-
-  make_env=""
-  [ -n "$ffmpeg_dir" ] && make_env="SMA_DAEMON_FFMPEG_DIR=$ffmpeg_dir"
 
   _run_install() {
-    # shellcheck disable=SC2086
-    ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $make_env make install VENV=$venv_dir PYTHON=$python_bin"
-  }
-
-  _venv_healthy() {
-    # shellcheck disable=SC2086
-    ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $make_env test -x $venv_dir/bin/python && $venv_dir/bin/python -c 'import encodings' >/dev/null 2>&1"
-  }
-
-  _recreate_venv() {
-    # shellcheck disable=SC2086
-    ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $make_env rm -rf $venv_dir && make venv VENV=$venv_dir PYTHON=$python_bin"
+    run_remote_make "$host" install
   }
 
   echo ""
@@ -61,52 +35,20 @@ for host in $DEPLOY_HOSTS; do
 
   if [ -n "$branch" ]; then
     echo "==> [$host] checking out $branch"
-    # shellcheck disable=SC2086
-    ssh $ssh_opts "$host" "cd $dir && git checkout $branch"
+    run_remote_command "$host" "git checkout $branch"
   fi
 
   echo "==> [$host] installing dependencies"
 
-  if [ "$auto_create_venv" = "true" ] && ! _venv_healthy; then
-    echo "==> [$host] virtualenv missing or unhealthy ($venv_dir), recreating with $python_bin"
+  ensure_venv_ready "$host" || { failed="$failed $host"; continue; }
 
-    errfile=$(mktemp)
-    trap 'rm -f "$errfile"' EXIT
-    if ! _recreate_venv 2> >(tee "$errfile" >&2); then
-      if grep -qE "$_missing_prereq_pattern" "$errfile"; then
-        echo ""
-        echo "  WARNING: [$host] pre-req missing — running deploy:setup then retrying venv recreation"
-        HOST="$host" mise run deploy:setup
-        _recreate_venv || { failed="$failed $host"; continue; }
-      else
-        failed="$failed $host"
-        continue
-      fi
-    fi
-  fi
+  run_with_prereq_retry "$host" "pre-req missing — running deploy:setup then retrying" "make install" _run_install || {
+    failed="$failed $host"
+    continue
+  }
 
-  errfile=$(mktemp)
-  trap 'rm -f "$errfile"' EXIT
-
-  if ! _run_install 2> >(tee "$errfile" >&2); then
-    if grep -qE "$_missing_prereq_pattern" "$errfile"; then
-      echo ""
-      echo "  WARNING: [$host] pre-req missing — running deploy:setup then retrying"
-      HOST="$host" mise run deploy:setup
-      echo ""
-      echo "==> [$host] retrying: make install"
-      _run_install || { failed="$failed $host"; continue; }
-    else
-      failed="$failed $host"
-      continue
-    fi
-  fi
-
-  remote_user=$(echo "$host" | cut -s -d@ -f1)
-  remote_user="${remote_user:-$(whoami)}"
   echo "==> [$host] updating systemd unit user to $remote_user"
-  # shellcheck disable=SC2086
-  ssh $ssh_opts "$host" "
+  run_remote_command "$host" "
     if [ -f /etc/systemd/system/sma-daemon.service ]; then
       sed 's/^User=.*/User=$remote_user/; s/^Group=.*/Group=$remote_user/' \
         $dir/setup/sma-daemon.service \
@@ -115,8 +57,7 @@ for host in $DEPLOY_HOSTS; do
   " || { failed="$failed $host"; continue; }
 
   echo "==> [$host] reloading systemd unit"
-  # shellcheck disable=SC2086
-  ssh $ssh_opts "$host" "sudo systemctl daemon-reload" || { failed="$failed $host"; continue; }
+  run_remote_command "$host" "sudo systemctl daemon-reload" || { failed="$failed $host"; continue; }
 done
 
 if [ -n "$failed" ]; then
