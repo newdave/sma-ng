@@ -48,10 +48,9 @@ x-sma-intel-env: &sma-intel-env
 
 x-sma-intel-device-config: &sma-intel-device-config
   devices:
-    - /dev/dri:/dev/dri
+    - /dev/dri/renderD128:/dev/dri/renderD128
   group_add:
     - "${RENDER_GID:-109}"
-    - "${VIDEO_GID:-44}"
 
 services:
 
