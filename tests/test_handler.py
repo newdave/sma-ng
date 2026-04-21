@@ -592,16 +592,11 @@ class TestGetStatus:
         assert "cluster" in body
         assert "jobs" in body
 
-    def test_calls_recover_stale_nodes(self):
+    def test_status_is_read_only(self):
         h = _make_handler()
         h._get_status()
-        h.server.job_db.recover_stale_nodes.assert_called_once_with(h.server.stale_seconds)
-
-    def test_notifies_workers_when_stale_jobs_recovered(self):
-        h = _make_handler()
-        h.server.job_db.recover_stale_nodes.return_value = [("node-old", 2)]
-        h._get_status()
-        h.server.notify_workers.assert_called_once()
+        h.server.job_db.recover_stale_nodes.assert_not_called()
+        h.server.notify_workers.assert_not_called()
 
     def test_replaces_bind_all_host(self):
         h = _make_handler()
@@ -786,6 +781,19 @@ class TestParseWebhookBody:
         h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
         path, args, config, retries = h._parse_webhook_body()
         assert args == ["-tmdb", "603"]
+
+    def test_args_string_preserves_quoted_values(self):
+        data = json.dumps({"path": "/movie.mkv", "args": '--label "Director Cut"'}).encode()
+        h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+        path, args, config, retries = h._parse_webhook_body()
+        assert args == ["--label", "Director Cut"]
+
+    def test_invalid_quoted_args_returns_400(self):
+        data = json.dumps({"path": "/movie.mkv", "args": '"unterminated'}).encode()
+        h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+        path, args, config, retries = h._parse_webhook_body()
+        assert path is None
+        assert h._response_code == 400
 
 
 # ---------------------------------------------------------------------------

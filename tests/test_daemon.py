@@ -85,6 +85,15 @@ class TestPathConfigManager:
         assert ini_file in all_configs
         assert tv_ini in all_configs
 
+    def test_quoted_default_args_are_preserved(self, tmp_path):
+        config_file = str(tmp_path / "daemon.json")
+        ini_file = str(tmp_path / "default.ini")
+        open(ini_file, "w").close()
+        with open(config_file, "w") as f:
+            json.dump({"default_config": ini_file, "default_args": '--label "Director Cut"'}, f)
+        pcm = PathConfigManager(config_file)
+        assert pcm.default_args == ["--label", "Director Cut"]
+
 
 class TestConfigLockManager:
     """Test per-config locking."""

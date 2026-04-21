@@ -278,14 +278,20 @@ class TestScannerThreadScan:
         assert result == 0
         db.add_job.assert_not_called()
 
-    def test_skips_mp4_files(self, tmp_path):
-        (tmp_path / "already_converted.mp4").write_bytes(b"")
+    def test_scans_mp4_files_when_allowed(self, tmp_path):
+        media = tmp_path / "episode.mp4"
+        media.write_bytes(b"")
         db = mock.MagicMock()
-        db.filter_unscanned.return_value = []
-        scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db)
+        db.filter_unscanned.return_value = [str(media)]
+        db.add_job.return_value = 12
+        path_config_manager = mock.MagicMock()
+        path_config_manager.media_extensions = frozenset([".mp4", ".mkv"])
+        path_config_manager.get_config_for_path.return_value = "/default.ini"
+        scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db, path_config_manager=path_config_manager)
         result = scanner._scan({"path": str(tmp_path)})
-        assert result == 0
-        db.filter_unscanned.assert_not_called()
+        assert result == 1
+        db.filter_unscanned.assert_called_once()
+        db.add_job.assert_called_once_with(str(media), "/default.ini", [])
 
     def test_applies_path_rewrite(self, tmp_path):
         media = tmp_path / "show.mkv"

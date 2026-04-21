@@ -135,15 +135,14 @@ class DaemonServer(HTTPServer):
         """Reload daemon.json in-place without stopping workers or active conversions."""
         if not self.path_config_manager._config_file:
             self.logger.warning("No daemon config file to reload.")
-            return
+            return False
 
         self.logger.info("Reloading configuration from %s..." % self.path_config_manager._config_file)
-
-        # Reset mutable collections before re-loading so stale entries are cleared
-        self.path_config_manager.path_configs = []
-        self.path_config_manager.path_rewrites = []
-        self.path_config_manager.scan_paths = []
-        self.path_config_manager.load_config(self.path_config_manager._config_file)
+        try:
+            self.path_config_manager.load_config(self.path_config_manager._config_file)
+        except Exception:
+            self.logger.error("Configuration reload failed; keeping previous runtime settings.")
+            return False
 
         # Re-apply api_key priority: CLI arg > env var > config file
         self.api_key = self._cli_api_key or os.environ.get("SMA_DAEMON_API_KEY") or self.path_config_manager.api_key
@@ -158,6 +157,8 @@ class DaemonServer(HTTPServer):
         new_ffmpeg_dir = self._cli_ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or self.path_config_manager.ffmpeg_dir
         for worker in self.worker_pool._workers:
             worker.ffmpeg_dir = new_ffmpeg_dir
+            worker.job_timeout_seconds = self.path_config_manager.job_timeout_seconds
+            worker.progress_log_interval = self.path_config_manager.progress_log_interval
 
         # Restart scanner thread with updated scan_paths
         self.scanner_thread.stop()
@@ -183,6 +184,7 @@ class DaemonServer(HTTPServer):
         self.recycle_cleaner_thread.start()
 
         self.logger.info("Configuration reloaded.")
+        return True
 
     def graceful_restart(self):
         """Drain active conversions then re-exec the daemon process."""
@@ -340,7 +342,11 @@ def _validate_hwaccel(path_config_manager, ffmpeg_dir, logger):
         try:
             cp = configparser.ConfigParser()
             cp.read(config_path)
-            codec_val = cp.get("Video", "video-codec", fallback="").strip().lower()
+            codec_val = cp.get("Video", "codec", fallback="").strip().lower()
+            if not codec_val:
+                codec_val = cp.get("Video", "video-codec", fallback="").strip().lower()
+                if codec_val:
+                    logger.warning("Config %s uses legacy [Video] video-codec; use [Video] codec instead." % os.path.basename(config_path))
         except Exception:
             continue
 

@@ -88,7 +88,7 @@ class TestValidateHwaccel:
 
     def test_warns_when_ffmpeg_returns_nonzero(self, tmp_path):
         cfg = tmp_path / "autoProcess.ini"
-        cfg.write_text("[Video]\nvideo-codec = h264, nvenc\n")
+        cfg.write_text("[Video]\ncodec = h264, nvenc\n")
         pcm = _make_pcm([str(cfg)])
         logger = MagicMock()
         with patch("subprocess.run", return_value=Mock(returncode=1)) as mock_run:
@@ -99,7 +99,7 @@ class TestValidateHwaccel:
 
     def test_logs_info_validated_ok_when_ffmpeg_returns_zero(self, tmp_path):
         cfg = tmp_path / "autoProcess.ini"
-        cfg.write_text("[Video]\nvideo-codec = h264, nvenc\n")
+        cfg.write_text("[Video]\ncodec = h264, nvenc\n")
         pcm = _make_pcm([str(cfg)])
         logger = MagicMock()
         with patch("subprocess.run", return_value=Mock(returncode=0)):
@@ -109,7 +109,7 @@ class TestValidateHwaccel:
 
     def test_handles_file_not_found_gracefully(self, tmp_path):
         cfg = tmp_path / "autoProcess.ini"
-        cfg.write_text("[Video]\nvideo-codec = h264, nvenc\n")
+        cfg.write_text("[Video]\ncodec = h264, nvenc\n")
         pcm = _make_pcm([str(cfg)])
         logger = MagicMock()
         with patch("subprocess.run", side_effect=FileNotFoundError):
@@ -119,7 +119,7 @@ class TestValidateHwaccel:
 
     def test_handles_timeout_expired_gracefully(self, tmp_path):
         cfg = tmp_path / "autoProcess.ini"
-        cfg.write_text("[Video]\nvideo-codec = h264, nvenc\n")
+        cfg.write_text("[Video]\ncodec = h264, nvenc\n")
         pcm = _make_pcm([str(cfg)])
         logger = MagicMock()
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="ffmpeg", timeout=15)):
@@ -131,7 +131,7 @@ class TestValidateHwaccel:
         cfg1 = tmp_path / "a.ini"
         cfg2 = tmp_path / "b.ini"
         for c in [cfg1, cfg2]:
-            c.write_text("[Video]\nvideo-codec = h264, nvenc\n")
+            c.write_text("[Video]\ncodec = h264, nvenc\n")
         pcm = _make_pcm([str(cfg1), str(cfg2)])
         logger = MagicMock()
         with patch("subprocess.run", return_value=Mock(returncode=0)) as mock_run:
@@ -140,7 +140,7 @@ class TestValidateHwaccel:
 
     def test_appends_ffmpeg_dir_to_path_env(self, tmp_path):
         cfg = tmp_path / "autoProcess.ini"
-        cfg.write_text("[Video]\nvideo-codec = h264, nvenc\n")
+        cfg.write_text("[Video]\ncodec = h264, nvenc\n")
         pcm = _make_pcm([str(cfg)])
         logger = MagicMock()
         with patch("subprocess.run", return_value=Mock(returncode=0)) as mock_run:
@@ -150,7 +150,7 @@ class TestValidateHwaccel:
 
     def test_skips_software_codec(self, tmp_path):
         cfg = tmp_path / "autoProcess.ini"
-        cfg.write_text("[Video]\nvideo-codec = h264\n")
+        cfg.write_text("[Video]\ncodec = h264\n")
         pcm = _make_pcm([str(cfg)])
         logger = MagicMock()
         with patch("subprocess.run") as mock_run:
@@ -159,12 +159,22 @@ class TestValidateHwaccel:
 
     def test_skips_copy_codec(self, tmp_path):
         cfg = tmp_path / "autoProcess.ini"
-        cfg.write_text("[Video]\nvideo-codec = copy\n")
+        cfg.write_text("[Video]\ncodec = copy\n")
         pcm = _make_pcm([str(cfg)])
         logger = MagicMock()
         with patch("subprocess.run") as mock_run:
             _validate_hwaccel(pcm, None, logger)
         mock_run.assert_not_called()
+
+    def test_legacy_video_codec_key_still_supported_with_warning(self, tmp_path):
+        cfg = tmp_path / "autoProcess.ini"
+        cfg.write_text("[Video]\nvideo-codec = h264, nvenc\n")
+        pcm = _make_pcm([str(cfg)])
+        logger = MagicMock()
+        with patch("subprocess.run", return_value=Mock(returncode=0)) as mock_run:
+            _validate_hwaccel(pcm, None, logger)
+        mock_run.assert_called_once()
+        logger.warning.assert_called()
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +388,8 @@ class TestDaemonServerReloadConfig:
         pcm.api_key = None
         pcm.basic_auth = None
         pcm.ffmpeg_dir = None
+        pcm.job_timeout_seconds = 0
+        pcm.progress_log_interval = 60
         logger = MagicMock()
 
         with (
@@ -458,6 +470,35 @@ class TestDaemonServerReloadConfig:
         with patch("resources.daemon.server.ScannerThread"), patch("resources.daemon.server.RecycleBinCleanerThread"), patch.dict("os.environ", {"SMA_DAEMON_API_KEY": "env-key"}):
             server.reload_config()
         assert server.api_key == "env-key"
+
+    def test_reload_updates_worker_runtime_settings(self, tmp_path):
+        server, pcm, _ = self._make_reloadable_server(tmp_path)
+        worker = MagicMock()
+        server.worker_pool._workers = [worker]
+        pcm.ffmpeg_dir = "/cfg/ffmpeg"
+        pcm.job_timeout_seconds = 123
+        pcm.progress_log_interval = 7
+        with patch("resources.daemon.server.ScannerThread"), patch("resources.daemon.server.RecycleBinCleanerThread"), patch.dict("os.environ", {}, clear=True):
+            server.reload_config()
+        assert worker.ffmpeg_dir == "/cfg/ffmpeg"
+        assert worker.job_timeout_seconds == 123
+        assert worker.progress_log_interval == 7
+
+    def test_reload_keeps_previous_runtime_state_on_load_failure(self, tmp_path):
+        server, pcm, logger = self._make_reloadable_server(tmp_path)
+        old_scanner = server.scanner_thread
+        old_cleaner = server.recycle_cleaner_thread
+        pcm.path_configs = [{"path": "/old", "config": "/old.ini", "default_args": []}]
+        pcm.load_config.side_effect = RuntimeError("bad config")
+        with patch("resources.daemon.server.ScannerThread") as MockScan, patch("resources.daemon.server.RecycleBinCleanerThread") as MockRBC:
+            result = server.reload_config()
+        assert result is False
+        old_scanner.stop.assert_not_called()
+        old_cleaner.stop.assert_not_called()
+        MockScan.assert_not_called()
+        MockRBC.assert_not_called()
+        assert pcm.path_configs == [{"path": "/old", "config": "/old.ini", "default_args": []}]
+        logger.error.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -598,8 +639,8 @@ class TestValidateHwaccelExtra:
         logger = MagicMock()
         with patch("subprocess.run", side_effect=ValueError("unexpected")):
             _validate_hwaccel(pcm, None, logger)  # must not raise
-        logger.warning.assert_called_once()
-        assert "failed" in logger.warning.call_args[0][0]
+        messages = [call.args[0] for call in logger.warning.call_args_list]
+        assert any("failed" in message for message in messages)
 
     def test_validates_vaapi_encoder(self, tmp_path):
         cfg = tmp_path / "autoProcess.ini"
