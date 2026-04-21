@@ -3,6 +3,15 @@ name: Release
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "tests/**"
+      - "**/*.md"
+      - "resources/docs.html"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -59,14 +68,11 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Python environment
+        uses: ./.github/actions/setup-python-env
         with:
           python-version: "3.12"
-          cache: pip
-
-      - name: Install build tools
-        run: pip install build
+          install-command: pip install build
 
       - name: Build wheel and sdist
         run: python -m build
