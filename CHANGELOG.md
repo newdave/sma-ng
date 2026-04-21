@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.2.1...sma-ng-v1.2.2) (2026-04-21)
+
+
+### Documentation
+
+* codify workflow and commit discipline ([9671215](https://github.com/newdave/sma-ng/commit/96712153d7430606f4f1cb650cb8a4f445ea4ca0))
+
 ## [1.2.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.2.0...sma-ng-v1.2.1) (2026-04-21)
 
 
