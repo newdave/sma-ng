@@ -182,10 +182,15 @@ class MediaProcessor:
         """
         Build FFmpeg options for the input file and run the conversion.
 
-        Generates stream options via generateOptions(), invokes FFmpeg, handles
-        recycle bin and original file deletion, and returns a dict containing
-        input/output paths, stream options, external subtitle paths, and video
-        dimensions. Returns None on failure.
+        Generates stream options via generateOptions(), invokes FFmpeg, and
+        returns a dict containing input/output paths, stream options, external
+        subtitle paths, and video dimensions. Returns None on failure.
+
+        The original input file is NOT recycled or deleted here. The caller is
+        responsible for calling _cleanup_input (or _recycle_to_bin for the
+        no-moveto case) after the output has been safely placed at its final
+        destination. The returned dict includes a ``"delete"`` flag indicating
+        whether the caller should perform cleanup.
         """
         self.log.debug("Process started.")
 
@@ -234,8 +239,6 @@ class MediaProcessor:
             else:
                 delete = False
 
-        deleted = self._cleanup_input(inputfile, delete)
-
         dim = self.getDimensions(outputfile)
         input_extension = self.parseFile(inputfile)[2]
         output_extension = self.parseFile(outputfile)[2]
@@ -243,7 +246,8 @@ class MediaProcessor:
         return {
             "input": inputfile,
             "input_extension": input_extension,
-            "input_deleted": deleted,
+            "input_deleted": False,
+            "delete": delete,
             "output": outputfile,
             "output_extension": output_extension,
             "options": options,
@@ -292,27 +296,40 @@ class MediaProcessor:
 
         return outputfile, inputfile, ripped_subs
 
+    def _recycle_to_bin(self, inputfile):
+        """Copy inputfile to the recycle bin without deleting it.
+
+        No-op when recycle_bin is not configured or the file does not exist.
+        Call this before any operation that will overwrite the input path so
+        the original bytes are preserved before the path is replaced.
+        """
+        if not self.settings.recycle_bin or not os.path.isfile(inputfile):
+            return
+        try:
+            os.makedirs(self.settings.recycle_bin, exist_ok=True)
+            recycle_dst = os.path.join(self.settings.recycle_bin, os.path.basename(inputfile))
+            if os.path.exists(recycle_dst):
+                base, ext = os.path.splitext(os.path.basename(inputfile))
+                i = 2
+                while os.path.exists(recycle_dst):
+                    recycle_dst = os.path.join(self.settings.recycle_bin, "%s.%d%s" % (base, i, ext))
+                    i += 1
+            self._atomic_copy(inputfile, recycle_dst)
+            self.log.info("Original file recycled to %s." % recycle_dst)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            self.log.exception("Failed to copy original to recycle bin %s." % self.settings.recycle_bin)
+
     def _cleanup_input(self, inputfile, delete):
-        """Recycle and/or delete the original input file and any staged subtitle files.
+        """Copy inputfile to the recycle bin then unlink it and any staged subtitle files.
 
         Returns True if the input file was deleted.
+        Call this only after the output file has been successfully placed at its
+        final destination so the original is never removed before the output is safe.
         """
-        if delete and self.settings.recycle_bin and os.path.isfile(inputfile):
-            try:
-                os.makedirs(self.settings.recycle_bin, exist_ok=True)
-                recycle_dst = os.path.join(self.settings.recycle_bin, os.path.basename(inputfile))
-                if os.path.exists(recycle_dst):
-                    base, ext = os.path.splitext(os.path.basename(inputfile))
-                    i = 2
-                    while os.path.exists(recycle_dst):
-                        recycle_dst = os.path.join(self.settings.recycle_bin, "%s.%d%s" % (base, i, ext))
-                        i += 1
-                self._atomic_copy(inputfile, recycle_dst)
-                self.log.info("Original file recycled to %s." % recycle_dst)
-            except KeyboardInterrupt:
-                raise
-            except Exception:
-                self.log.exception("Failed to copy original to recycle bin %s." % self.settings.recycle_bin)
+        if delete:
+            self._recycle_to_bin(inputfile)
 
         deleted = False
         if delete:

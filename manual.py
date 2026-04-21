@@ -594,7 +594,14 @@ def processFile(
             except Exception:
                 log.exception("Error during file rename")
 
-        # Reverse Ouput
+        # When output_dir is set without moveto, restoreFromOutput will atomically
+        # overwrite the input path with the output. Recycle the original now, while
+        # it still exists, so it is preserved before the path is replaced.
+        _overwrite_input = mp.settings.output_dir and not mp.settings.moveto and os.path.commonpath([mp.settings.output_dir, output["output"]]) == mp.settings.output_dir
+        if _overwrite_input and output.get("delete"):
+            mp._recycle_to_bin(output["input"])
+
+        # Reverse Output
         output["output"] = mp.restoreFromOutput(inputfile, output["output"])
         for i, sub in enumerate(output["external_subs"]):
             output["external_subs"][i] = mp.restoreFromOutput(inputfile, sub)
@@ -605,6 +612,22 @@ def processFile(
             output_files.extend(mp.replicate(sub, relativePath=relativePath))
         for file in output_files:
             mp.setPermissions(file)
+
+        # Clean up the original input only after the output is safely placed.
+        # For the no-moveto case the input path was atomically overwritten by
+        # restoreFromOutput (recycle copy was already taken above); just clear
+        # any staged subtitle temp files. For the moveto case the original is
+        # still at its source path and needs a full recycle + unlink.
+        if _overwrite_input:
+            for subfile in list(mp.deletesubs):
+                if mp.removeFile(subfile):
+                    log.debug("Subtitle %s deleted." % subfile)
+                else:
+                    log.debug("Unable to delete subtitle %s." % subfile)
+            mp.deletesubs = set()
+            output["input_deleted"] = bool(output.get("delete"))
+        else:
+            output["input_deleted"] = mp._cleanup_input(output["input"], output.get("delete", False))
 
         # Plex .plexmatch file (after file is in final destination)
         if mp.settings.plexmatch_enabled and tagdata:

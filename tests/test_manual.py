@@ -439,6 +439,7 @@ class TestProcessFile:
             "output": "/out/file.mp4",
             "input": "/file.mp4",
             "input_deleted": False,
+            "delete": False,
             "external_subs": [],
             "options": {},
             "x": 1920,
