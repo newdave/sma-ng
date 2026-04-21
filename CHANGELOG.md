@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.5](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.4...sma-ng-v1.3.5) (2026-04-21)
+
+
+### Bug Fixes
+
+* update intel QSV/VAAPI render group GID to 109 ([e1a4321](https://github.com/newdave/sma-ng/commit/e1a43212cf7651d69feeed339eba3e5ce800c264))
+
 ## [1.3.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.3...sma-ng-v1.3.4) (2026-04-21)
 
 
