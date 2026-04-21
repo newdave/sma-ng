@@ -246,6 +246,7 @@ class ReadSettings:
             "codecs": "",
         },
         "Universal Audio": {
+            "enabled": False,
             "codec": "aac",
             "channel-bitrate": 128,
             "variable-bitrate": 0,
@@ -839,6 +840,7 @@ class ReadSettings:
 
         # Universal Audio
         section = "Universal Audio"
+        self.ua_enabled = config.getboolean(section, "enabled")
         self.ua = config.getlist(section, "codec")
         self.ua_bitrate = config.getint(section, "channel-bitrate")
         self.ua_vbr = config.getint(section, "variable-bitrate")

@@ -201,6 +201,7 @@ default-sorting = channels.d, map, d.comment
 codecs =
 
 [Universal Audio]
+enabled = true
 codec =
 channel-bitrate = 128
 variable-bitrate = 0
