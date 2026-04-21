@@ -6,7 +6,7 @@
 # On-host targets (install, config, systemd-install, restart) remain here
 # because remote hosts are reached via SSH and may not have mise installed.
 
-.PHONY: help install install-dev install-all clean config systemd-install restart install-mise \
+.PHONY: help install install-dev install-all clean config systemd-install restart install-mise venv \
         lint lint-fix test test-cov detect-gpu daemon convert codecs preview rename \
         deploy-check deploy-setup deploy remote-make \
         docker-build docker-run docker-shell docker-smoke
@@ -61,39 +61,11 @@ systemd-install: ## Install and enable the sma-daemon systemd service (SERVICE_U
 	sudo systemctl daemon-reload
 	sudo systemctl enable --now sma-daemon
 
-_GPU := $(shell \
-  if [ "$$(uname)" = "Darwin" ]; then \
-    if sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -qi apple; then \
-      echo videotoolbox; \
-    else \
-      echo software; \
-    fi; \
-  elif command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then \
-    echo nvenc; \
-  elif [ -d /sys/module/i915 ] || (command -v vainfo >/dev/null 2>&1 && vainfo 2>&1 | grep -qi intel); then \
-    echo qsv; \
-  elif [ -e /dev/dri/renderD128 ] && (command -v vainfo >/dev/null 2>&1 && vainfo >/dev/null 2>&1); then \
-    echo vaapi; \
-  else \
-    echo software; \
-  fi \
-)
+_GPU := $(shell ./scripts/detect-gpu.sh)
 GPU ?= $(_GPU)
 
 config: ## Create config with GPU auto-detection (GPU=<type> to override)
-	@mkdir -p config
-	@if [ -f config/autoProcess.ini ]; then \
-		echo "config/autoProcess.ini already exists, skipping (delete it first to regenerate)"; \
-	else \
-		cp setup/autoProcess.ini.sample config/autoProcess.ini; \
-		if [ "$(GPU)" != "software" ]; then \
-			sed -i.bak 's/^gpu *=.*/gpu = $(GPU)/' config/autoProcess.ini && rm -f config/autoProcess.ini.bak; \
-			echo "Created config/autoProcess.ini (gpu = $(GPU))"; \
-		else \
-			echo "Created config/autoProcess.ini (software encoding)"; \
-		fi; \
-	fi
-	@test -f config/daemon.json || (cp setup/daemon.json.sample config/daemon.json && echo "Created config/daemon.json")
+	GPU="$(GPU)" ./scripts/generate-configs.sh
 
 # ---------------------------------------------------------------------------
 # mise migration helper
@@ -132,10 +104,10 @@ lint-fix: ## Run linter with auto-fix
 	$(call MISE_OR_DIRECT,lint-fix,$(PY) -m ruff check --fix .)
 
 test: ## Run tests
-	$(call MISE_OR_DIRECT,test,$(PY) -m pytest tests/)
+	$(call MISE_OR_DIRECT,test,$(PY) -m pytest)
 
 test-cov: ## Run tests with coverage
-	$(call MISE_OR_DIRECT,test-cov,$(PY) -m pytest tests/ --cov=resources --cov=converter --cov-report=html)
+	$(call MISE_OR_DIRECT,test-cov,$(PY) -m pytest --cov=resources --cov=converter --cov=autoprocess --cov-report=html --cov-report=term-missing:skip-covered)
 
 clean: ## Remove build artifacts and caches
 	$(call MISE_OR_DIRECT,clean, \
@@ -144,7 +116,7 @@ clean: ## Remove build artifacts and caches
 	  rm -rf build/ dist/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage .ruff_cache/)
 
 detect-gpu: ## Detect GPU type for hardware acceleration
-	$(call MISE_OR_DIRECT,detect-gpu,echo $(GPU))
+	$(call MISE_OR_DIRECT,detect-gpu,./scripts/detect-gpu.sh)
 
 daemon: ## Start the daemon server
 	$(call MISE_OR_DIRECT,daemon,$(PY) daemon.py --host 0.0.0.0 --port 8585)
@@ -185,9 +157,7 @@ docker-build: ## Build the Docker image locally (TAG=sma-ng:local FFMPEG_VERSION
 	  docker build --file docker/Dockerfile --target runtime --build-arg FFMPEG_VERSION=$(FFMPEG_VERSION) --tag $(TAG) .)
 
 docker-run: ## Run the locally-built image (TAG=sma-ng:local to override)
-	$(call MISE_OR_DIRECT,docker:run, \
-	  mkdir -p config logs && docker run --rm -p 8585:8585 \
-	    -v $(CURDIR)/config:/config -v $(CURDIR)/logs:/logs $(TAG))
+	TAG="$(TAG)" $(call MISE_OR_DIRECT,docker:run,./scripts/docker-run.sh)
 
 docker-shell: ## Open a shell in the locally-built image
 	$(call MISE_OR_DIRECT,docker:shell, \
