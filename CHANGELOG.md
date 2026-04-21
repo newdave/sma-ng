@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.2...sma-ng-v1.3.3) (2026-04-21)
+
+
+### Bug Fixes
+
+* expose /dev/dri/renderD128 device node directly instead of bind-mounting /dev/dri ([721feb3](https://github.com/newdave/sma-ng/commit/721feb379f4e6da4f8ec4c466e69f87265caa4c3))
+
 ## [1.3.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.1...sma-ng-v1.3.2) (2026-04-21)
 
 
