@@ -166,13 +166,13 @@ class TestDockerfileRuntime:
         assert "tini" in dockerfile_raw
 
     def test_non_root_user_created(self, dockerfile_raw):
-        assert "groupadd" in dockerfile_raw
-        assert "useradd" in dockerfile_raw
+        # ubuntu:24.04 ships the built-in 'ubuntu' user at UID/GID 1000; no
+        # explicit groupadd/useradd needed.
+        assert "USER ubuntu" in dockerfile_raw
 
     def test_user_set_to_sma(self, dockerfile):
-        # USER is set via ARG UID/GID (e.g. USER ${UID}:${GID})
         user_instructions = _instructions_of("USER", dockerfile)
-        assert len(user_instructions) > 0
+        assert any("ubuntu" in u for u in user_instructions)
 
     def test_port_8585_exposed(self, dockerfile):
         exposed = _instructions_of("EXPOSE", dockerfile)
@@ -204,16 +204,18 @@ class TestDockerfileRuntime:
 
     def test_cmd_includes_config_and_logs_paths(self, dockerfile_raw):
         # Paths are set via env vars, referenced in CMD
-        assert "SMA_DAEMON_CONFIG=/app/config/daemon.json" in dockerfile_raw
+        assert "SMA_DAEMON_CONFIG=/config/daemon.json" in dockerfile_raw
         assert "SMA_DAEMON_LOGS_DIR=/logs" in dockerfile_raw
 
     def test_sma_config_env_points_to_volume(self, dockerfile_raw):
-        assert "SMA_CONFIG=/app/config/autoProcess.ini" in dockerfile_raw
+        assert "SMA_CONFIG=/config/autoProcess.ini" in dockerfile_raw
 
-    def test_uid_gid_args_defined(self, dockerfile):
+    def test_no_uid_gid_args(self, dockerfile):
+        # ubuntu:24.04 built-in 'ubuntu' user is used directly; ARG UID/GID
+        # are not needed and should not be present.
         args = _instructions_of("ARG", dockerfile)
-        assert any("UID" in a for a in args)
-        assert any("GID" in a for a in args)
+        assert not any("UID" in a for a in args)
+        assert not any("GID" in a for a in args)
 
     def test_python_unbuffered(self, dockerfile_raw):
         assert "PYTHONUNBUFFERED=1" in dockerfile_raw
@@ -237,8 +239,10 @@ class TestComposeBaseService:
     def test_software_service_exists(self, compose):
         assert "sma-software" in compose["services"]
 
-    def test_build_targets_runtime_stage(self, compose):
-        assert compose["services"]["sma-software"]["build"]["target"] == "runtime"
+    def test_image_from_ghcr(self, compose):
+        # Services pull from GHCR; no local build context in docker-compose.yml.
+        image = compose["services"]["sma-software"]["image"]
+        assert "ghcr.io" in image
 
     def test_port_8585_mapped(self, compose):
         ports = compose["services"]["sma-software"]["ports"]
@@ -360,10 +364,12 @@ class TestComposePostgres:
         for svc in ("sma-software", "sma-intel", "sma-nvidia"):
             assert "depends_on" not in compose["services"][svc]
 
-    def test_non_pg_profiles_default_db_url_blank(self, compose):
+    def test_non_pg_profiles_require_db_url(self, compose):
+        # Non-pg profiles use :? so Docker Compose errors at startup when
+        # SMA_DAEMON_DB_URL is not provided, rather than starting with a blank URL.
         for svc in ("sma-software", "sma-intel", "sma-nvidia"):
             env = compose["services"][svc]["environment"]
-            assert env["SMA_DAEMON_DB_URL"] == "${SMA_DAEMON_DB_URL:-}"
+            assert env["SMA_DAEMON_DB_URL"].startswith("${SMA_DAEMON_DB_URL:?")
 
     def test_pg_profiles_default_db_url_to_bundled_postgres(self, compose):
         for svc in ("sma-software-pg", "sma-intel-pg", "sma-nvidia-pg"):
