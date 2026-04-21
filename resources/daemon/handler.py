@@ -23,6 +23,8 @@ _OL_RE = _re.compile(r"^(\s*)\d+\.\s+(.*)")
 _LIST_CONT_RE = _re.compile(r"^(\s*[-*]\s|^\s*\d+\.\s)")
 _TABLE_SEP_RE = _re.compile(r"^[-:]+$")
 _SLUG_STRIP_RE = _re.compile(r"[^\w-]")
+_ARR_TVDB_RE = _re.compile(r"\{tvdb-(\d+)\}", _re.IGNORECASE)
+_ARR_TMDB_RE = _re.compile(r"\{tmdb-(\d+)\}", _re.IGNORECASE)
 
 DOCS_DIR = os.path.join(SCRIPT_DIR, "docs")
 DOCS_TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "resources", "docs.html")
@@ -323,9 +325,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
     def _get_jobs(self, query):
         status = query.get("status", [None])[0]
         config = query.get("config", [None])[0]
+        search = query.get("search", [None])[0]
         limit = int(query.get("limit", [100])[0])
         offset = int(query.get("offset", [0])[0])
-        jobs = self.server.job_db.get_jobs(status=status, config=config, limit=limit, offset=offset)
+        if search:
+            offset = 0
+            limit = max(limit, 200)
+        jobs = self.server.job_db.get_jobs(status=status, config=config, path=search, limit=limit, offset=offset)
         for job in jobs:
             if job.get("config"):
                 job["log_name"] = os.path.splitext(os.path.basename(job["config"]))[0]
@@ -1049,8 +1055,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
         series = data.get("series") or {}
         episodes = data.get("episodes") or []
 
-        args = ["-tv"]
+        args = ["--tv"]
         tvdb_id = series.get("tvdbId")
+        if not tvdb_id:
+            m = _ARR_TVDB_RE.search(path)
+            if m:
+                tvdb_id = int(m.group(1))
         if tvdb_id:
             args += ["-tvdb", str(tvdb_id)]
             # Season/episode only meaningful alongside a series ID
@@ -1112,8 +1122,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return None, []
 
         movie = data.get("movie") or {}
-        args = ["-movie"]
+        args = ["--movie"]
         tmdb_id = movie.get("tmdbId")
+        if not tmdb_id:
+            m = _ARR_TMDB_RE.search(path)
+            if m:
+                tmdb_id = int(m.group(1))
         if tmdb_id:
             args += ["-tmdb", str(tmdb_id)]
         else:

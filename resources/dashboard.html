@@ -345,7 +345,9 @@
                 x-text="requeueingAll ? 'Requeueing…' : 'Requeue All Failed'">
         </button>
       </div>
-      <div class="flex gap-2">
+      <div class="flex items-center gap-2">
+        <input type="text" x-model="searchQuery" @input="onSearchInput()" placeholder="Search path…"
+               class="text-xs px-2.5 py-1 rounded border border-gray-600 bg-gray-900 text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-400 w-44">
         <template x-for="f in ['all','pending','running','completed','failed']" :key="f">
           <button @click="filter=f; page=0; fetchJobs()"
                   class="text-xs px-2.5 py-1 rounded-full border transition-colors"
@@ -415,7 +417,7 @@
             </tr>
           </template>
           <template x-if="jobs.length === 0">
-            <tr><td colspan="7" class="py-8 text-center text-gray-500 text-sm">No jobs found</td></tr>
+            <tr><td colspan="7" class="py-8 text-center text-gray-500 text-sm" x-text="searchQuery.trim() ? 'No jobs match \u201c' + searchQuery.trim() + '\u201d' : 'No jobs found'"></td></tr>
           </template>
         </tbody>
       </table>
@@ -513,7 +515,7 @@
 function dashboard() {
   return {
     health: {}, stats: {}, configs: {}, jobs: [], cluster: null,
-    filter: 'all', page: 0, pageSize: 50, threadsTab: 'local',
+    filter: 'all', page: 0, pageSize: 50, threadsTab: 'local', searchQuery: '', searchTimer: null,
     lastUpdate: '', interval: null,
     submitPath: '', submitArgs: '', submitFlags: [], submitting: false, submitResult: '', submitError: false,
     flagDefs: [
@@ -574,10 +576,15 @@ function dashboard() {
     async fetchJobs() {
       const params = new URLSearchParams({limit: this.pageSize, offset: this.page * this.pageSize});
       if (this.filter !== 'all') params.set('status', this.filter);
+      if (this.searchQuery.trim()) params.set('search', this.searchQuery.trim());
       try {
         const r = await fetch('/jobs?' + params, {headers: this.authHeaders()}).then(r=>r.json());
         this.jobs = r.jobs || [];
       } catch(e) { this.jobs = []; }
+    },
+    onSearchInput() {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = setTimeout(() => { this.page = 0; this.fetchJobs(); }, 300);
     },
     async submitJob() {
       this.submitting = true; this.submitResult = ''; this.submitError = false;

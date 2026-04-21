@@ -278,7 +278,7 @@ class PostgreSQLJobDatabase:
                 row = cur.fetchone()
                 return dict(row) if row else None
 
-    def get_jobs(self, status=None, config=None, limit=100, offset=0):
+    def get_jobs(self, status=None, config=None, path=None, limit=100, offset=0):
         """Get jobs with optional filtering."""
         query = "SELECT * FROM jobs WHERE 1=1"
         params = []
@@ -288,6 +288,9 @@ class PostgreSQLJobDatabase:
         if config:
             query += " AND config = %s"
             params.append(config)
+        if path:
+            query += " AND path ILIKE %s"
+            params.append("%" + path + "%")
         query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
         params.extend([limit, offset])
         with self._conn() as conn:
