@@ -153,10 +153,10 @@ class TestFirstRunSeeding:
         _run(empty_config)
         seeded = open(os.path.join(empty_config, "autoProcess.ini")).read()
         sample = open(os.path.join(SETUP_DIR, "autoProcess.ini.sample")).read()
-        # Content should be equal except for ffmpeg/ffprobe path substitution
-        sample_stripped = re.sub(r"^(ffmpeg|ffprobe) = .*", "", sample, flags=re.M)
-        seeded_stripped = re.sub(r"^(ffmpeg|ffprobe) = .*", "", seeded, flags=re.M)
-        assert seeded_stripped == sample_stripped
+        # Strip lines patched by the entrypoint on first run: ffmpeg/ffprobe
+        # paths and the gpu= value (set by detect-gpu.sh).
+        _pat = re.compile(r"^(ffmpeg|ffprobe|gpu) = .*", re.M)
+        assert _pat.sub("", seeded) == _pat.sub("", sample)
 
     def test_seeded_json_is_valid(self, empty_config):
         import json
