@@ -1179,36 +1179,36 @@ class TestPostgreSQLJobDatabase:
     # ------------------------------------------------------------------
 
     def test_heartbeat_returns_none_when_no_command(self):
-        from datetime import datetime
+        from datetime import UTC, datetime
         from unittest.mock import MagicMock
 
         cur = MagicMock()
         cur.fetchone.return_value = {"pending_command": None}
         db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
-        result = db.heartbeat("node1", "host1", 4, datetime.utcnow())
+        result = db.heartbeat("node1", "host1", 4, datetime.now(UTC))
         assert result is None
 
     def test_heartbeat_returns_command_and_clears_it(self):
-        from datetime import datetime
+        from datetime import UTC, datetime
         from unittest.mock import MagicMock, call
 
         cur = MagicMock()
         cur.fetchone.return_value = {"pending_command": "shutdown"}
         db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
-        result = db.heartbeat("node1", "host1", 4, datetime.utcnow())
+        result = db.heartbeat("node1", "host1", 4, datetime.now(UTC))
         assert result == "shutdown"
         # Should clear the command
         clear_call = cur.execute.call_args_list[-1]
         assert "NULL" in clear_call[0][0]
 
     def test_heartbeat_no_row_returns_none(self):
-        from datetime import datetime
+        from datetime import UTC, datetime
         from unittest.mock import MagicMock
 
         cur = MagicMock()
         cur.fetchone.return_value = None
         db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
-        result = db.heartbeat("node1", "host1", 2, datetime.utcnow())
+        result = db.heartbeat("node1", "host1", 2, datetime.now(UTC))
         assert result is None
 
     # ------------------------------------------------------------------
