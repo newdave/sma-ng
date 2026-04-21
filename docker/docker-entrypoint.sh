@@ -99,5 +99,13 @@ fi
 
 log "Config directory ready: $CONFIG_DIR"
 
+# ── set LIBVA_DRIVER_NAME for Intel VAAPI/QSV (skip on non-Intel/virtual hosts) ─
+# Only set when not already overridden by the user and Intel kernel module is present.
+# Using /sys/module/i915 avoids running vainfo (which crashes on QEMU boch devices).
+if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -d /sys/module/i915 ]; then
+    export LIBVA_DRIVER_NAME=iHD
+    log "LIBVA_DRIVER_NAME=iHD (Intel GPU detected)"
+fi
+
 # ── hand off to the container CMD ─────────────────────────────────────────────
 exec "$@"

@@ -154,8 +154,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     VIRTUAL_ENV=/venv \
     PATH="/venv/bin:/usr/local/bin:$PATH" \
-    # Prefer Intel's modern VAAPI userspace driver in Intel profile.
-    LIBVA_DRIVER_NAME=iHD \
     # SMA paths — override via environment or volume mounts
     SMA_CONFIG=/config/autoProcess.ini \
     SMA_FFMPEG=/usr/local/bin/ffmpeg \
