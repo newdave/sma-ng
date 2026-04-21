@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.2.2...sma-ng-v1.3.0) (2026-04-21)
+
+
+### Features
+
+* add enabled flag to Universal Audio config section ([2241f2e](https://github.com/newdave/sma-ng/commit/2241f2e5d212ba5f25a49994d9d2e835a7bf0f39))
+
+
+### Bug Fixes
+
+* correct Docker sma user creation, config path, and GPU auto-detection ([37f0d55](https://github.com/newdave/sma-ng/commit/37f0d55f10a4f6adab060be49dfd3e42ed4355e4))
+* tag Docker images as latest on push to main ([4ba0e46](https://github.com/newdave/sma-ng/commit/4ba0e462ff6b43b9d6dc9e2044996557c584005e))
+* use GHCR image in docker-compose and remove broken postgres port binding ([f467539](https://github.com/newdave/sma-ng/commit/f467539a8040fb0f7cf3071c835cb48d824f630b))
+
+
+### Documentation
+
+* update documentation for script extraction and Docker fixes ([e5854bf](https://github.com/newdave/sma-ng/commit/e5854bf0454b6de8bf1b5f856b819cab8e82c20a))
+
 ## [1.2.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.2.1...sma-ng-v1.2.2) (2026-04-21)
 
 
