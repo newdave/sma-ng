@@ -1,0 +1,14 @@
+# docker-compose.override.yml.example
+#
+# Copy to docker-compose.override.yml to expose the PostgreSQL port on the
+# host for local development (psql, GUI clients, etc.).
+# Docker Compose automatically merges override files — no extra flags needed.
+#
+# Example:
+#   cp docker/docker-compose.override.yml.example docker/docker-compose.override.yml
+#   docker compose --profile software-pg up
+
+services:
+  sma-pgsql:
+    ports:
+      - "127.0.0.1:${PGSQL_PORT:-5432}:5432"

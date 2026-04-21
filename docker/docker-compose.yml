@@ -1,9 +1,5 @@
 x-sma-common: &sma-common
-  build:
-    context: ..
-    dockerfile: docker/Dockerfile
-    target: runtime
-  image: sma-ng:latest
+  image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
   restart: unless-stopped
   ports:
     - "${SMA_PORT:-8585}:8585"
@@ -76,8 +72,6 @@ services:
     restart: unless-stopped
     networks:
       - sma-net
-    ports:
-      - "${PGSQL_PORT:-}:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-sma}
       POSTGRES_USER: ${POSTGRES_USER:-sma}
