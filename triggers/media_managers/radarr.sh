@@ -27,6 +27,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../lib/common.sh
+. "${SCRIPT_DIR}/../lib/common.sh"
+
 # ── configuration (override with environment variables) ───────────────────────
 
 SMA_DAEMON_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
@@ -47,63 +51,10 @@ TIMEOUT="$SMA_TIMEOUT"
 
 log() { echo "[radarr] $*" >&2; }
 
-# Build auth header args as an array so word-splitting doesn't corrupt the value.
-AUTH_ARGS=()
-if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
-    AUTH_ARGS=(-H "X-API-Key: ${SMA_DAEMON_API_KEY}")
-elif [[ -n "${SMA_DAEMON_USERNAME:-}" && -n "${SMA_DAEMON_PASSWORD:-}" ]]; then
-    AUTH_ARGS=(--user "${SMA_DAEMON_USERNAME}:${SMA_DAEMON_PASSWORD}")
-fi
-
-curl_get() {
-    local url="$1"
-    curl -sf "${AUTH_ARGS[@]}" "$url"
-}
+sma_init_daemon
 
 wait_for_job() {
-    local job_id="$1"
-    local start
-    start=$(date +%s)
-
-    log "Waiting for job ${job_id} to complete (polling every ${POLL_INTERVAL}s)..."
-
-    while true; do
-        local response status elapsed
-        response=$(curl_get "${SMA_BASE}/jobs/${job_id}" 2>/dev/null) || {
-            log "ERROR: Lost contact with daemon while polling job ${job_id}."
-            return 1
-        }
-
-        status=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
-
-        case "$status" in
-            completed)
-                elapsed=$(( $(date +%s) - start ))
-                log "Job ${job_id} completed in ${elapsed}s."
-                return 0
-                ;;
-            failed)
-                local err
-                err=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error','unknown'))" 2>/dev/null)
-                log "ERROR: Job ${job_id} failed: ${err}"
-                return 1
-                ;;
-            pending|running)
-                if [[ "$TIMEOUT" -gt 0 ]]; then
-                    elapsed=$(( $(date +%s) - start ))
-                    if [[ "$elapsed" -gt "$TIMEOUT" ]]; then
-                        log "ERROR: Timed out waiting for job ${job_id} after ${elapsed}s."
-                        return 1
-                    fi
-                fi
-                sleep "$POLL_INTERVAL"
-                ;;
-            *)
-                log "ERROR: Unknown job status '${status}' for job ${job_id}."
-                return 1
-                ;;
-        esac
-    done
+    sma_wait_for_job "radarr" "$1" "$POLL_INTERVAL" "$TIMEOUT"
 }
 
 # ── event handling ─────────────────────────────────────────────────────────────
@@ -132,26 +83,7 @@ fi
 log "Input file: ${INPUTFILE}"
 log "TMDB ID: ${radarr_movie_tmdbid:-}, IMDB ID: ${radarr_movie_imdbid:-}"
 
-PAYLOAD=$(python3 -c "
-import json, os
-movie = {}
-tmdb = os.environ.get('radarr_movie_tmdbid', '').strip()
-if tmdb:
-    movie['tmdbId'] = int(tmdb)
-imdb = os.environ.get('radarr_movie_imdbid', '').strip()
-if imdb:
-    movie['imdbId'] = imdb
-
-obj = {
-    'eventType': 'Download',
-    'movie':     movie,
-    'movieFile': {'path': os.environ.get('radarr_moviefile_path', '')},
-}
-config = os.environ.get('SMA_CONFIG', '').strip()
-if config:
-    obj['config'] = config
-print(json.dumps(obj))
-")
+PAYLOAD=$(python3 "$SMA_JSON_TOOL" build-radarr-env)
 
 # ── submit job ─────────────────────────────────────────────────────────────────
 
@@ -183,15 +115,15 @@ elif [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
     log "ERROR: Daemon rejected request (HTTP ${HTTP_CODE}). Auth state: ${_key_hint}  ${_user_hint}"
     exit 1
 elif [[ "$HTTP_CODE" -ge 400 ]]; then
-    ERR=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error','unknown'))" 2>/dev/null || echo "$RESPONSE")
+    ERR=$(sma_json_get_field "$RESPONSE" "error" "unknown")
     log "ERROR: Daemon returned HTTP ${HTTP_CODE}: ${ERR}"
     exit 1
 fi
 
-JOB_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('job_id',''))" 2>/dev/null)
+JOB_ID=$(sma_json_get_field "$RESPONSE" "job_id" "")
 
 if [[ -z "$JOB_ID" ]]; then
-    ERR=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error','unknown'))" 2>/dev/null)
+    ERR=$(sma_json_get_field "$RESPONSE" "error" "unknown")
     log "ERROR: Daemon rejected job: ${ERR}"
     exit 1
 fi

@@ -21,10 +21,15 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../lib/common.sh
+. "${SCRIPT_DIR}/../lib/common.sh"
+
 SMA_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
 SMA_PORT="${SMA_DAEMON_PORT:-8585}"
 SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
 BYPASS_CATS="${SMA_BYPASS_CATS:-bypass}"
+sma_init_daemon
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -32,19 +37,13 @@ log()  { echo "[sabnzbd] $*" >&2; }
 info() { log "INFO: $*"; }
 err()  { log "ERROR: $*"; }
 
-auth_args() {
-    if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
-        echo "-H" "X-API-Key: ${SMA_DAEMON_API_KEY}"
-    fi
-}
-
 submit_file() {
     local filepath="$1"
     local payload
-    payload=$(python3 -c "import json,sys; print(json.dumps({'path': sys.argv[1]}))" "$filepath")
+    payload=$(sma_build_generic_payload "$filepath" "")
     curl -sf -X POST \
         -H "Content-Type: application/json" \
-        $(auth_args) \
+        "${AUTH_ARGS[@]}" \
         -d "$payload" \
         "${SMA_BASE}/webhook/generic" > /dev/null
 }

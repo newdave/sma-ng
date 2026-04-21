@@ -30,6 +30,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../lib/common.sh
+. "${SCRIPT_DIR}/../lib/common.sh"
+
 # Auto-load daemon.env if SMA_DAEMON_API_KEY is not already set
 if [[ -z "${SMA_DAEMON_API_KEY:-}" ]]; then
     for _env in \
@@ -50,6 +54,7 @@ fi
 SMA_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
 SMA_PORT="${SMA_DAEMON_PORT:-8585}"
 SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
+sma_init_daemon
 
 WAIT=false
 CONFIG_OVERRIDE=""
@@ -71,12 +76,6 @@ usage() {
 
 log()  { echo "[scan] $*" >&2; }
 die()  { echo "[scan] ERROR: $*" >&2; exit 1; }
-
-auth_header() {
-    if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
-        printf '%s\0%s\0' "-H" "X-API-Key: ${SMA_DAEMON_API_KEY}"
-    fi
-}
 
 curl_get() {
     local url="$1"
@@ -113,47 +112,7 @@ curl_post_json() {
 }
 
 wait_for_job() {
-    local job_id="$1"
-    local start
-    start=$(date +%s)
-
-    log "Waiting for job ${job_id} to complete (polling every ${POLL_INTERVAL}s)..."
-
-    while true; do
-        local response status elapsed
-        response=$(curl_get "${SMA_BASE}/jobs/${job_id}" 2>/dev/null) || {
-            die "Lost contact with daemon while polling job ${job_id}."
-        }
-
-        status=$(echo "$response" | python3 -c \
-            "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
-
-        case "$status" in
-            completed)
-                elapsed=$(( $(date +%s) - start ))
-                log "Job ${job_id} completed in ${elapsed}s."
-                return 0
-                ;;
-            failed)
-                local err
-                err=$(echo "$response" | python3 -c \
-                    "import sys,json; print(json.load(sys.stdin).get('error','unknown'))" 2>/dev/null)
-                die "Job ${job_id} failed: ${err}"
-                ;;
-            pending|running)
-                if [[ "$TIMEOUT" -gt 0 ]]; then
-                    elapsed=$(( $(date +%s) - start ))
-                    if [[ "$elapsed" -gt "$TIMEOUT" ]]; then
-                        die "Timed out waiting for job ${job_id} after ${elapsed}s."
-                    fi
-                fi
-                sleep "$POLL_INTERVAL"
-                ;;
-            *)
-                die "Unknown job status '${status}' for job ${job_id}."
-                ;;
-        esac
-    done
+    sma_wait_for_job "scan" "$1" "$POLL_INTERVAL" "$TIMEOUT" || die "Job $1 failed."
 }
 
 # ── argument parsing ──────────────────────────────────────────────────────────
@@ -189,22 +148,7 @@ fi
 # ── build payload and submit ──────────────────────────────────────────────────
 
 # Encode extra_args as a JSON array
-if [[ "${#EXTRA_ARGS[@]}" -gt 0 ]]; then
-    args_json=$(python3 -c "import sys,json; print(json.dumps(sys.argv[1:]))" -- "${EXTRA_ARGS[@]}")
-else
-    args_json="[]"
-fi
-
-payload=$(python3 -c "
-import sys, json
-path   = sys.argv[1]
-args   = json.loads(sys.argv[2])
-config = sys.argv[3] if sys.argv[3] else None
-obj = {'path': path}
-if args:   obj['args']   = args
-if config: obj['config'] = config
-print(json.dumps(obj))
-" "$TARGET" "$args_json" "${CONFIG_OVERRIDE:-}")
+payload=$(sma_build_generic_payload "$TARGET" "${CONFIG_OVERRIDE:-}" "${EXTRA_ARGS[@]}")
 
 log "Submitting: $TARGET"
 [[ "${#EXTRA_ARGS[@]}" -gt 0 ]] && log "Extra args: ${EXTRA_ARGS[*]}"
@@ -214,8 +158,7 @@ response=$(curl_post_json "${SMA_BASE}/webhook/generic" "$payload") || {
     die "Submission failed. Check daemon is running at ${SMA_BASE}."
 }
 
-job_id=$(echo "$response" | python3 -c \
-    "import sys,json; print(json.load(sys.stdin).get('job_id',''))" 2>/dev/null)
+job_id=$(sma_json_get_field "$response" "job_id" "")
 
 if [[ -z "$job_id" ]]; then
     log "Daemon response: $response"
