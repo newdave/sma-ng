@@ -89,58 +89,11 @@ run = '$PY rename.py "$@"'
 
 [tasks.detect-gpu]
 description = "Detect GPU type for hardware acceleration"
-run = """
-if [ "$(uname)" = "Darwin" ]; then
-  if sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -qi apple; then
-    echo videotoolbox; exit 0
-  fi
-  echo software; exit 0
-fi
-if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
-  echo nvenc; exit 0
-fi
-if [ -d /sys/module/i915 ] || (command -v vainfo >/dev/null 2>&1 && vainfo 2>&1 | grep -qi intel); then
-  echo qsv; exit 0
-fi
-if [ -e /dev/dri/renderD128 ] && command -v vainfo >/dev/null 2>&1 && vainfo >/dev/null 2>&1; then
-  echo vaapi; exit 0
-fi
-echo software
-"""
+run = "./scripts/detect-gpu.sh"
 
 [tasks.config]
 description = "Create config with GPU auto-detection (GPU=<type> mise run config to override)"
-run = """
-GPU="${GPU:-$(mise run detect-gpu 2>/dev/null)}"
-mkdir -p config
-
-create_ini() {
-  local dest="$1" sample="$2" label="$3"
-  if [ -f "$dest" ]; then
-    echo "$dest already exists, skipping (delete it first to regenerate)"
-  else
-    cp "$sample" "$dest"
-    if [ "$GPU" != "software" ]; then
-      sed -i.bak "s/^gpu *=.*/gpu = $GPU/" "$dest" && rm -f "${dest}.bak"
-      echo "Created $dest ($label, gpu = $GPU)"
-    else
-      echo "Created $dest ($label, software encoding)"
-    fi
-  fi
-}
-
-create_ini config/autoProcess.ini    setup/autoProcess.ini.sample    "regular quality"
-create_ini config/autoProcess.rq.ini setup/autoProcess.ini.sample    "regular quality"
-create_ini config/autoProcess.lq.ini setup/autoProcess.ini.sample-lq "lower quality"
-
-test -f config/daemon.json || (cp setup/daemon.json.sample config/daemon.json && echo "Created config/daemon.json")
-
-# Create and populate per-service autoProcess files from setup/.local.ini
-if [ -f setup/.local.ini ]; then
-  echo "Populating per-service configs from setup/.local.ini..."
-  python3 scripts/populate-service-configs.py setup/.local.ini setup/autoProcess.ini.sample --gpu "$GPU"
-fi
-"""
+run = "./scripts/generate-configs.sh"
 
 # ---------------------------------------------------------------------------
 # Deployment
@@ -161,11 +114,7 @@ sudo systemctl status sma-daemon --no-pager -l
 
 [tasks.systemd-install]
 description = "Install systemd service (run as root)"
-run = """
-sudo cp setup/sma-daemon.service /etc/systemd/system/
-sudo systemctl daemon-reload
-echo "Service installed. Enable with: sudo systemctl enable --now sma-daemon"
-"""
+run = 'make systemd-install SERVICE_USER="${SERVICE_USER:-$(whoami)}"'
 
 # ---------------------------------------------------------------------------
 # Docker
@@ -215,21 +164,7 @@ echo "Pushed: $IMAGE"
 
 [tasks."docker:run"]
 description = "Run the locally-built Docker image (requires SMA_DAEMON_DB_URL; TAG=sma-ng:local to override)"
-run = """
-TAG="${TAG:-sma-ng:local}"
-if [ -z "${SMA_DAEMON_DB_URL:-}" ]; then
-  echo "Error: SMA_DAEMON_DB_URL is required (no SQLite fallback)" >&2
-  echo "  Example: SMA_DAEMON_DB_URL=postgresql://sma:pass@host:5432/sma mise run docker:run" >&2
-  exit 1
-fi
-mkdir -p config logs
-docker run --rm \
-  -p 8585:8585 \
-  -e SMA_DAEMON_DB_URL="${SMA_DAEMON_DB_URL}" \
-  -v "$(pwd)/config:/config" \
-  -v "$(pwd)/logs:/logs" \
-  "$TAG"
-"""
+run = "./scripts/docker-run.sh"
 
 [tasks."docker:shell"]
 description = "Open a shell in the locally-built Docker image"
