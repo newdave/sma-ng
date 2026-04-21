@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.2.0...sma-ng-v1.2.1) (2026-04-21)
+
+
+### Documentation
+
+* add daemon error retrieval command ([64aac08](https://github.com/newdave/sma-ng/commit/64aac08299e64d67a27c10154ad496a4dd67e199))
+
 ## [1.2.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.4...sma-ng-v1.2.0) (2026-04-21)
 
 
