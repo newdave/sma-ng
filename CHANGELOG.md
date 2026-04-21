@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.0...sma-ng-v1.3.1) (2026-04-21)
+
+
+### Bug Fixes
+
+* require SMA_DAEMON_DB_URL on non-pg profiles; fix SMA_DAEMON_CONFIG path ([b138479](https://github.com/newdave/sma-ng/commit/b13847923d8f2d74a22aeb71daa0125b6e3d98e0))
+
 ## [1.3.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.2.2...sma-ng-v1.3.0) (2026-04-21)
 
 
