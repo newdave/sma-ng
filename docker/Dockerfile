@@ -159,7 +159,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     # Prefer Intel's modern VAAPI userspace driver in Intel profile.
     LIBVA_DRIVER_NAME=iHD \
     # SMA paths — override via environment or volume mounts
-    SMA_CONFIG=/app/config/autoProcess.ini \
+    SMA_CONFIG=/config/autoProcess.ini \
     SMA_FFMPEG=/usr/local/bin/ffmpeg \
     SMA_FFPROBE=/usr/local/bin/ffprobe \
     # Daemon runtime defaults — override any of these with -e / env_file
@@ -255,15 +255,17 @@ COPY --from=ffmpeg-builder /usr/local/bin/ffprobe /usr/local/bin/ffprobe
 # Copy Python venv from builder
 COPY --from=python-builder /venv /venv
 
-# Create non-root user (skip if UID/GID already exist)
-RUN getent group ${GID} || groupadd -g ${GID} sma \
-    && getent passwd ${UID} || useradd -u ${UID} -g ${GID} -s /bin/sh -m sma \
-    # Create render/video groups with the same GIDs used in docker-compose
-    # group_add so bash can resolve the names instead of printing raw GIDs.
-    # These match the Ubuntu host defaults; override RENDER_GID/VIDEO_GID in
-    # .env if your host differs — the container groups are cosmetic only.
-    && getent group 109 || groupadd -g 109 render \
-    && getent group 44  || groupadd -g 44  video
+# ubuntu:24.04 ships an 'ubuntu' user at UID/GID 1000; remove it so we can
+# create 'sma' at the same IDs unconditionally and have a clean passwd entry.
+RUN userdel  -r ubuntu 2>/dev/null || true \
+    && groupdel ubuntu  2>/dev/null || true \
+    && groupadd -g ${GID} sma \
+    && useradd  -u ${UID} -g ${GID} -s /bin/sh -m sma \
+    # render/video groups let bash resolve GPU device group names (cosmetic).
+    # These GIDs match Ubuntu host defaults; override RENDER_GID/VIDEO_GID in
+    # .env if your host differs.
+    && groupadd -g 109 render \
+    && groupadd -g 44  video
 
 # Copy application code
 WORKDIR /app
@@ -274,14 +276,14 @@ COPY docker/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Runtime directories (seeded at startup via entrypoint; override with volume mounts)
-RUN mkdir -p /config /logs /mnt /downloads /transcodesensu \
+RUN mkdir -p /config /logs /mnt /downloads /transcodes \
     && chown -R ${UID}:${GID} /config /logs /app
 
 VOLUME ["/config", "/logs", "/mnt", "/downloads", "/transcodes"]
 
 EXPOSE 8585
 
-USER ${UID}:${GID}
+USER sma
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8585/health')" || exit 1
