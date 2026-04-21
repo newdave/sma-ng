@@ -121,10 +121,6 @@ class ScannerThread(_StoppableThread):
             return 0
 
         allowed = self.path_config_manager.media_extensions
-        # Skip already-converted files; scanning .mp4 files serves no purpose since
-        # SMA converts *to* mp4 — any .mp4 present is either already processed or
-        # a non-SMA file that would just be re-queued on every scan.
-        skip_extensions = frozenset([".mp4"])
 
         # Walk lazily via os.scandir; filter_unscanned is called in batches so
         # we never hold the entire tree in memory at once.
@@ -150,7 +146,7 @@ class ScannerThread(_StoppableThread):
                             subdirs.append(entry.path)
                         else:
                             ext = os.path.splitext(entry.name)[1].lower()
-                            if ext in allowed and ext not in skip_extensions:
+                            if ext in allowed:
                                 batch.append(entry.path)
                                 total_seen += 1
                                 if len(batch) >= _BATCH:

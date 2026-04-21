@@ -370,7 +370,6 @@ class PostgreSQLJobDatabase:
                         host            = EXCLUDED.host,
                         workers         = EXCLUDED.workers,
                         last_seen       = NOW(),
-                        started_at      = EXCLUDED.started_at,
                         status          = 'online',
                         running_jobs    = EXCLUDED.running_jobs,
                         pending_jobs    = EXCLUDED.pending_jobs

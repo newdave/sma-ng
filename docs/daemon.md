@@ -333,7 +333,7 @@ The daemon can periodically scan directories for new media files and queue them 
 | `rewrite_to` | Replacement prefix |
 | `enabled` | Set to `false` to disable without removing the entry |
 
-Files already in the `scanned_files` database table are skipped on subsequent scans. Only extensions matching `media_extensions` are submitted. `.mp4` files are always skipped (SMA converts *to* mp4 — any `.mp4` present is already processed).
+Files already in the `scanned_files` database table are skipped on subsequent scans. Any file whose extension matches `media_extensions` is eligible for submission, including `.mp4` if you leave it in that list.
 
 **Manual batch scan script:**
 
@@ -439,7 +439,7 @@ Reload `daemon.json` without restarting the daemon or interrupting active conver
 curl -X POST http://localhost:8585/reload -H "X-API-Key: SECRET"
 ```
 
-Reloaded immediately: `path_configs`, `path_rewrites`, `scan_paths`, `api_key`, `media_extensions`, `default_args`, `ffmpeg_dir`.
+Reloaded immediately: `path_configs`, `path_rewrites`, `scan_paths`, `api_key`, `media_extensions`, `default_args`, `ffmpeg_dir`, `job_timeout_seconds`, `progress_log_interval`.
 
 Not reloaded (require full restart): `--host`, `--port`, `--workers`.
 

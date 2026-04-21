@@ -4,189 +4,13 @@ import re as _re
 import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
-from urllib.parse import parse_qs, urlparse
 
 from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING
-
-# Pre-compiled inline Markdown patterns (reused for every line of every page).
-_BOLD_RE = _re.compile(r"\*\*(.+?)\*\*")
-_ITALIC_RE = _re.compile(r"\*(.+?)\*")
-_CODE_RE = _re.compile(r"`([^`]+)`")
-_LINK_RE = _re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
-# Pre-compiled block-level Markdown patterns for the line renderer.
-_HEADING_RE = _re.compile(r"^(#{1,6})\s+(.*)")
-_HR_RE = _re.compile(r"^-{3,}$")
-_UL_RE = _re.compile(r"^(\s*)[-*]\s+(.*)")
-_OL_RE = _re.compile(r"^(\s*)\d+\.\s+(.*)")
-_LIST_CONT_RE = _re.compile(r"^(\s*[-*]\s|^\s*\d+\.\s)")
-_TABLE_SEP_RE = _re.compile(r"^[-:]+$")
-_SLUG_STRIP_RE = _re.compile(r"[^\w-]")
-_ARR_TVDB_RE = _re.compile(r"\{tvdb-(\d+)\}", _re.IGNORECASE)
-_ARR_TMDB_RE = _re.compile(r"\{tmdb-(\d+)\}", _re.IGNORECASE)
-
-DOCS_DIR = os.path.join(SCRIPT_DIR, "docs")
-DOCS_TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "resources", "docs.html")
-DASHBOARD_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "dashboard.html")
-ADMIN_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "admin.html")
-
-# Ordered list of doc pages: (slug, title).  The slug maps to docs/<slug>.md.
-# "index" maps to docs/README.md.
-DOC_PAGES = [
-    ("index", "Overview"),
-    ("getting-started", "Getting Started"),
-    ("configuration", "Configuration"),
-    ("daemon", "Daemon Mode"),
-    ("integrations", "Integrations"),
-    ("hardware-acceleration", "Hardware Acceleration"),
-    ("deployment", "Deployment"),
-    ("troubleshooting", "Troubleshooting"),
-]
-
-
-def _render_markdown_to_html(md_text):
-    """Minimal Markdown to HTML renderer for documentation display."""
-    lines = md_text.split("\n")
-    html_parts = []
-    in_code = False
-    in_table = False
-    in_list = False
-    list_type = None
-
-    for line in lines:
-        # Fenced code blocks
-        if line.strip().startswith("```"):
-            if in_code:
-                html_parts.append("</code></pre>")
-                in_code = False
-            else:
-                lang = line.strip()[3:].strip()
-                html_parts.append('<pre class="bg-gray-800 rounded-lg p-4 overflow-x-auto my-4 border border-gray-700"><code class="text-sm text-green-300">')
-                in_code = True
-            continue
-        if in_code:
-            html_parts.append(line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-            continue
-
-        # Close table if line doesn't look like table
-        if in_table and not line.strip().startswith("|"):
-            html_parts.append("</tbody></table></div>")
-            in_table = False
-
-        # Close list if line doesn't continue it
-        if in_list and line.strip() and not _LIST_CONT_RE.match(line):
-            html_parts.append("</%s>" % list_type)
-            in_list = False
-
-        stripped = line.strip()
-
-        # Blank line
-        if not stripped:
-            if in_list:
-                html_parts.append("</%s>" % list_type)
-                in_list = False
-            continue
-
-        # Headings
-        hm = _HEADING_RE.match(stripped)
-        if hm:
-            level = len(hm.group(1))
-            text = _inline(hm.group(2))
-            slug = _SLUG_STRIP_RE.sub("", hm.group(2).lower().replace(" ", "-"))
-            sizes = {1: "text-3xl", 2: "text-2xl", 3: "text-xl", 4: "text-lg", 5: "text-base", 6: "text-sm"}
-            mt = "mt-10" if level <= 2 else "mt-6"
-            html_parts.append('<h%d id="%s" class="%s %s font-bold text-white mb-3">%s</h%d>' % (level, slug, sizes.get(level, "text-base"), mt, text, level))
-            continue
-
-        # Horizontal rule
-        if _HR_RE.match(stripped):
-            html_parts.append('<hr class="border-gray-700 my-8">')
-            continue
-
-        # Table
-        if stripped.startswith("|"):
-            cells = [c.strip() for c in stripped.split("|")[1:-1]]
-            if all(_TABLE_SEP_RE.match(c) for c in cells):
-                continue  # separator row
-            if not in_table:
-                in_table = True
-                html_parts.append('<div class="overflow-x-auto my-4"><table class="w-full text-sm"><thead><tr class="border-b border-gray-700">')
-                for c in cells:
-                    html_parts.append('<th class="text-left py-2 px-3 text-gray-400">%s</th>' % _inline(c))
-                html_parts.append('</tr></thead><tbody class="divide-y divide-gray-700/50">')
-            else:
-                html_parts.append('<tr class="hover:bg-gray-800/50">')
-                for c in cells:
-                    html_parts.append('<td class="py-2 px-3 text-gray-300">%s</td>' % _inline(c))
-                html_parts.append("</tr>")
-            continue
-
-        # Unordered list
-        lm = _UL_RE.match(line)
-        if lm:
-            if not in_list:
-                in_list = True
-                list_type = "ul"
-                html_parts.append('<ul class="list-disc list-inside space-y-1 my-3 text-gray-300">')
-            html_parts.append("<li>%s</li>" % _inline(lm.group(2)))
-            continue
-
-        # Ordered list
-        lm = _OL_RE.match(line)
-        if lm:
-            if not in_list:
-                in_list = True
-                list_type = "ol"
-                html_parts.append('<ol class="list-decimal list-inside space-y-1 my-3 text-gray-300">')
-            html_parts.append("<li>%s</li>" % _inline(lm.group(2)))
-            continue
-
-        # Paragraph
-        html_parts.append('<p class="text-gray-300 my-2 leading-relaxed">%s</p>' % _inline(stripped))
-
-    # Close open blocks
-    if in_code:
-        html_parts.append("</code></pre>")
-    if in_table:
-        html_parts.append("</tbody></table></div>")
-    if in_list:
-        html_parts.append("</%s>" % list_type)
-
-    return "\n".join(html_parts)
-
-
-def _inline(text):
-    """Process inline Markdown formatting."""
-    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    text = _BOLD_RE.sub(r'<strong class="text-white">\1</strong>', text)  # Bold
-    text = _ITALIC_RE.sub(r"<em>\1</em>", text)  # Italic
-    text = _CODE_RE.sub(r'<code class="bg-gray-800 text-blue-300 px-1.5 py-0.5 rounded text-xs">\1</code>', text)  # Inline code
-    text = _LINK_RE.sub(r'<a href="\2" class="text-blue-400 hover:underline">\1</a>', text)  # Links
-    return text
-
-
-def _load_dashboard_html():
-    with open(DASHBOARD_HTML_PATH, "r", encoding="utf-8") as f:
-        return f.read()
-
-
-def _load_admin_html():
-    with open(ADMIN_HTML_PATH, "r", encoding="utf-8") as f:
-        return f.read()
-
-
-def _load_docs_template(active_slug="index"):
-    with open(DOCS_TEMPLATE_PATH, "r", encoding="utf-8") as f:
-        tmpl = f.read()
-    # Build sidebar nav HTML and inject as %NAV% placeholder
-    nav_items = []
-    for slug, title in DOC_PAGES:
-        href = "/docs" if slug == "index" else "/docs/" + slug
-        active = ' class="bg-gray-700 text-white"' if slug == active_slug else ' class="text-gray-300 hover:text-white"'
-        nav_items.append('<a href="%s"%s>%s</a>' % (href, active, title))
-    nav_html = "\n".join(nav_items)
-    return tmpl.replace("%NAV%", nav_html)
+from resources.daemon.docs_ui import DOCS_DIR, _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _render_markdown_to_html
+from resources.daemon.routes import dispatch_get, dispatch_post, dispatch_post_job_action
+from resources.daemon.webhook_parsing import parse_generic_webhook_body, parse_radarr_body, parse_sonarr_body
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
@@ -307,11 +131,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
         )
 
     def _get_status(self):
-        recovered = self.server.job_db.recover_stale_nodes(self.server.stale_seconds)
-        for stale_id, job_count in recovered:
-            self.server.logger.warning("Status check: recovered %d jobs from stale node %s" % (job_count, stale_id))
-        if any(job_count > 0 for _, job_count in recovered):
-            self.server.notify_workers()
         nodes = self.server.job_db.get_cluster_nodes()
         stats = self.server.job_db.get_stats()
         # Replace 0.0.0.0 (bind-all address) with the IP the client actually
@@ -620,45 +439,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
         except FileNotFoundError:
             self.send_json_response(404, {"error": "favicon not found"})
 
-    _GET_ROUTES = {
-        "/": lambda self, p, q: self._get_root(p, q),
-        "/dashboard": lambda self, p, q: self._get_dashboard(p, q),
-        "/admin": lambda self, p, q: self._get_admin(p, q),
-        "/docs": lambda self, p, q: self._get_docs(p, q),
-        "/health": lambda self, p, q: self._get_health(),
-        "/status": lambda self, p, q: self._get_status(),
-        "/jobs": lambda self, p, q: self._get_jobs(q),
-        "/configs": lambda self, p, q: self._get_configs(),
-        "/stats": lambda self, p, q: self._get_stats(p, q),
-        "/scan": lambda self, p, q: self._get_scan(q),
-        "/browse": lambda self, p, q: self._get_browse(q),
-        "/logs": lambda self, p, q: self._get_logs(),
-        "/favicon.png": lambda self, p, q: self._get_favicon(p, q),
-    }
-
-    _GET_PREFIX_ROUTES = [
-        ("/docs/", lambda self, p, q: self._get_docs(p, q)),
-        ("/jobs/", lambda self, p, q: self._get_job(p)),
-        ("/logs/", lambda self, p, q: self._get_log_content(p, q)),
-    ]
-
     def do_GET(self):
-        parsed = urlparse(self.path)
-        query = parse_qs(parsed.query)
-
-        # Check authentication for non-public endpoints
-        if not self.is_public_endpoint(parsed.path) and not self.check_auth():
-            return
-
-        handler = self._GET_ROUTES.get(parsed.path)
-        if handler is not None:
-            handler(self, parsed.path, query)
-            return
-        for prefix, handler in self._GET_PREFIX_ROUTES:
-            if parsed.path.startswith(prefix):
-                handler(self, parsed.path, query)
-                return
-        self.send_json_response(404, {"error": "Not found"})
+        dispatch_get(self)
 
     # ------------------------------------------------------------------
     # POST route handlers
@@ -813,55 +595,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
         threading.Thread(target=self.server.reload_config, daemon=True).start()
         self.send_json_response(200, {"status": "reloading"})
 
-    _POST_ROUTES = {
-        "/": lambda self, p, q: self._handle_webhook(),
-        "/webhook/generic": lambda self, p, q: self._handle_webhook(),
-        "/webhook/sonarr": lambda self, p, q: self._handle_sonarr_webhook(),
-        "/webhook/radarr": lambda self, p, q: self._handle_radarr_webhook(),
-        "/convert": lambda self, p, q: self._handle_webhook(),
-        "/admin/delete-failed": lambda self, p, q: self._post_admin_delete_failed(),
-        "/admin/delete-offline-nodes": lambda self, p, q: self._post_admin_delete_offline_nodes(),
-        "/admin/delete-all-jobs": lambda self, p, q: self._post_admin_delete_all_jobs(),
-        "/shutdown": lambda self, p, q: self._post_shutdown(p, q),
-        "/restart": lambda self, p, q: self._post_restart(p, q),
-        "/reload": lambda self, p, q: self._post_reload(),
-        "/cleanup": lambda self, p, q: self._post_cleanup(q),
-        "/jobs/requeue": lambda self, p, q: self._post_jobs_requeue_bulk(q),
-        "/scan/filter": lambda self, p, q: self._post_scan_filter(),
-        "/scan/record": lambda self, p, q: self._post_scan_record(),
-    }
-
-    _POST_PREFIX_ROUTES = [
-        ("/jobs/", lambda self, p, q: self._post_job_action(p)),
-    ]
-
     def _post_job_action(self, path):
-        if path.endswith("/requeue"):
-            self._post_job_requeue(path)
-        elif path.endswith("/cancel"):
-            self._post_job_cancel(path)
-        elif path.endswith("/priority"):
-            self._post_job_priority(path)
-        else:
-            self.send_json_response(404, {"error": "Not found"})
+        dispatch_post_job_action(self, path)
 
     def do_POST(self):
-        parsed = urlparse(self.path)
-        query = parse_qs(parsed.query)
-
-        # All POST endpoints require authentication
-        if not self.check_auth():
-            return
-
-        handler = self._POST_ROUTES.get(parsed.path)
-        if handler is not None:
-            handler(self, parsed.path, query)
-            return
-        for prefix, handler in self._POST_PREFIX_ROUTES:
-            if parsed.path.startswith(prefix):
-                handler(self, parsed.path, query)
-                return
-        self.send_json_response(404, {"error": "Not found"})
+        dispatch_post(self)
 
     def _walk_media_files(self, directory):
         """Yield media file paths lazily using os.scandir.
@@ -900,38 +638,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
         Returns (None, [], None, 0) with an error response already sent on failure.
         """
         content_length = int(self.headers.get("Content-Length", 0))
-        if content_length == 0:
-            self.send_json_response(400, {"error": "Empty request body"})
-            return None, [], None, 0
-
         body = self.rfile.read(content_length).decode("utf-8").strip()
-        path = None
-        extra_args = []
-        config_override = None
-        max_retries = 0
-
-        if "application/json" in self.headers.get("Content-Type", ""):
-            try:
-                data = json.loads(body)
-                if isinstance(data, dict):
-                    path = data.get("path") or data.get("file") or data.get("input")
-                    extra_args = data.get("args", [])
-                    config_override = data.get("config")
-                    max_retries = int(data.get("max_retries", 0))
-                    if isinstance(extra_args, str):
-                        extra_args = extra_args.split()
-                elif isinstance(data, str):
-                    path = data
-            except (json.JSONDecodeError, ValueError, TypeError):
-                path = body
-        else:
-            path = body
-
-        if not path:
-            self.send_json_response(400, {"error": "No path provided"})
-            return None, [], None, 0
-
-        return path, extra_args, config_override, max_retries
+        return parse_generic_webhook_body(body, self.headers.get("Content-Type", ""), self.send_json_response)
 
     def _resolve_config(self, path, config_override):
         """Return the config file to use for path, respecting any override."""
@@ -1026,59 +734,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
         }
         """
         content_length = int(self.headers.get("Content-Length", 0))
-        if content_length == 0:
-            self.send_json_response(400, {"error": "Empty request body"})
-            return None, []
-
-        try:
-            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
-        except (json.JSONDecodeError, ValueError):
-            self.send_json_response(400, {"error": "Invalid JSON"})
-            return None, []
-
-        event_type = data.get("eventType", "")
-
-        if event_type == "Test":
-            self.send_json_response(200, {"status": "ok", "message": "SMA-NG Sonarr webhook test successful"})
-            return None, []
-
-        if event_type != "Download":
-            self.send_json_response(400, {"error": "Unsupported eventType '%s'; only 'Download' is handled" % event_type})
-            return None, []
-
-        episode_file = data.get("episodeFile") or {}
-        path = episode_file.get("path", "").strip()
-        if not path:
-            self.send_json_response(400, {"error": "episodeFile.path is missing or empty"})
-            return None, []
-
-        series = data.get("series") or {}
-        episodes = data.get("episodes") or []
-
-        args = ["--tv"]
-        tvdb_id = series.get("tvdbId")
-        if not tvdb_id:
-            m = _ARR_TVDB_RE.search(path)
-            if m:
-                tvdb_id = int(m.group(1))
-        if tvdb_id:
-            args += ["-tvdb", str(tvdb_id)]
-            # Season/episode only meaningful alongside a series ID
-            if episodes:
-                first = episodes[0]
-                season = first.get("seasonNumber")
-                if season is not None:
-                    args += ["-s", str(season)]
-                for ep in episodes:
-                    ep_num = ep.get("episodeNumber")
-                    if ep_num is not None:
-                        args += ["-e", str(ep_num)]
-        else:
-            imdb_id = series.get("imdbId")
-            if imdb_id:
-                args += ["-imdb", str(imdb_id)]
-
-        return path, args
+        body = self.rfile.read(content_length).decode("utf-8").strip()
+        return parse_sonarr_body(body, self.send_json_response)
 
     def _parse_radarr_body(self):
         """Parse a Radarr-native webhook payload.
@@ -1095,47 +752,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
         }
         """
         content_length = int(self.headers.get("Content-Length", 0))
-        if content_length == 0:
-            self.send_json_response(400, {"error": "Empty request body"})
-            return None, []
-
-        try:
-            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
-        except (json.JSONDecodeError, ValueError):
-            self.send_json_response(400, {"error": "Invalid JSON"})
-            return None, []
-
-        event_type = data.get("eventType", "")
-
-        if event_type == "Test":
-            self.send_json_response(200, {"status": "ok", "message": "SMA-NG Radarr webhook test successful"})
-            return None, []
-
-        if event_type != "Download":
-            self.send_json_response(400, {"error": "Unsupported eventType '%s'; only 'Download' is handled" % event_type})
-            return None, []
-
-        movie_file = data.get("movieFile") or {}
-        path = movie_file.get("path", "").strip()
-        if not path:
-            self.send_json_response(400, {"error": "movieFile.path is missing or empty"})
-            return None, []
-
-        movie = data.get("movie") or {}
-        args = ["--movie"]
-        tmdb_id = movie.get("tmdbId")
-        if not tmdb_id:
-            m = _ARR_TMDB_RE.search(path)
-            if m:
-                tmdb_id = int(m.group(1))
-        if tmdb_id:
-            args += ["-tmdb", str(tmdb_id)]
-        else:
-            imdb_id = movie.get("imdbId")
-            if imdb_id:
-                args += ["-imdb", str(imdb_id)]
-
-        return path, args
+        body = self.rfile.read(content_length).decode("utf-8").strip()
+        return parse_radarr_body(body, self.send_json_response)
 
     def _dispatch_path(self, path, extra_args, config_override=None, max_retries=0):
         """Shared tail: validate path, rewrite, queue file or directory."""

@@ -616,7 +616,7 @@ The daemon can periodically scan directories for new media files and queue them 
 | `rewrite_from` | Path prefix to replace before submitting the job (optional) |
 | `rewrite_to` | Replacement prefix (optional; use when the scanner sees files at a different mount point than the converter) |
 
-The daemon tracks which files have been submitted in the `scanned_files` database table. Files already in that table are skipped on subsequent scans. Only files whose extension matches `media_extensions` are submitted.
+The daemon tracks which files have been submitted in the `scanned_files` database table. Files already in that table are skipped on subsequent scans. Any file whose extension matches `media_extensions` is eligible for submission, including `.mp4` if you leave it in that list.
 
 **Manual batch scan (script):** Use `scripts/sma-scan.sh` to walk a directory and submit each media file via webhook, with the same deduplication logic:
 

@@ -2,6 +2,7 @@ import configparser
 import json
 import logging
 import os
+import shlex
 import threading
 from logging.handlers import RotatingFileHandler
 
@@ -216,89 +217,96 @@ class PathConfigManager:
         try:
             with open(config_file, "r", encoding="utf-8") as f:
                 config = json.load(f)
-
-            self.default_config = config.get("default_config", DEFAULT_PROCESS_CONFIG)
-            if not os.path.isabs(self.default_config):
-                self.default_config = os.path.join(SCRIPT_DIR, self.default_config)
-
-            # Load API key from config (can be overridden by CLI/env)
-            self.api_key = config.get("api_key")
-
-            # Load Basic Auth credentials from config (can be overridden by env vars)
-            _username = config.get("username") or None
-            _password = config.get("password") or None
-            self.basic_auth = (_username, _password) if _username and _password else None
-
-            # Load PostgreSQL URL from config (can be overridden by CLI/env)
-            self.db_url = config.get("db_url")
-
-            # Load FFmpeg directory from config (can be overridden by CLI/env)
-            self.ffmpeg_dir = config.get("ffmpeg_dir")
-
-            # Load job timeout in seconds (0 means no timeout)
-            self.job_timeout_seconds = int(config.get("job_timeout_seconds", 0) or 0)
-
-            # Interval in seconds between progress log entries during conversion
-            self.progress_log_interval = int(config.get("progress_log_interval", 60) or 60)
-
-            # Run a startup smoke test against all configs before accepting jobs
-            self.smoke_test = bool(config.get("smoke_test", False))
-
-            # Recycle-bin eviction settings
-            self.recycle_bin_max_age_days = int(config.get("recycle_bin_max_age_days", 3) or 3)
-            self.recycle_bin_min_free_gb = float(config.get("recycle_bin_min_free_gb", 50) or 50)
-
-            # Load media extensions inclusion list for directory scanning
-            raw_exts = config.get("media_extensions")
-            if raw_exts is not None:
-                self.media_extensions = frozenset(("." + e.lower().lstrip(".")) for e in raw_exts if e)
-
-            # Load top-level default args (applied when no path_config matches)
-            raw_default_args = config.get("default_args", [])
-            if isinstance(raw_default_args, str):
-                raw_default_args = raw_default_args.split()
-            self.default_args = raw_default_args
-
-            # Load webhook path rewrites (prefix substitutions applied to incoming webhook paths)
-            raw_rewrites = config.get("path_rewrites", [])
-            self.path_rewrites = [{"from": r["from"].rstrip("/"), "to": r["to"].rstrip("/")} for r in raw_rewrites if r.get("from") and r.get("to")]
-            if self.path_rewrites:
-                self.log.debug("Path rewrites (%d):" % len(self.path_rewrites))
-                for r in self.path_rewrites:
-                    self.log.debug("  %s -> %s" % (r["from"], r["to"]))
-
-            # Load scheduled scan paths
-            self.scan_paths = config.get("scan_paths", [])
-
-            raw_configs = config.get("path_configs", [])
-
-            for entry in raw_configs:
-                path = entry.get("path", "").rstrip("/")
-                config_path = entry.get("config", "")
-
-                if not path or not config_path:
-                    continue
-
-                if not os.path.isabs(config_path):
-                    config_path = os.path.join(SCRIPT_DIR, config_path)
-
-                default_args = entry.get("default_args", [])
-                if isinstance(default_args, str):
-                    default_args = default_args.split()
-
-                self.path_configs.append({"path": os.path.normpath(path), "config": config_path, "default_args": default_args})
-
-            # Sort by path length descending (longest prefix match first)
-            self.path_configs.sort(key=lambda x: len(x["path"]), reverse=True)
+            parsed = self._parse_config_data(config)
+            self._apply_config_data(parsed)
 
             self.log.debug("Loaded daemon config from %s" % config_file)
             self.log.debug("Default config: %s" % self.default_config)
             self.log.debug("Path mappings (%d):" % len(self.path_configs))
             for entry in self.path_configs:
                 self.log.debug("  %s -> %s" % (entry["path"], entry["config"]))
+            return parsed
 
         except Exception as e:
             self.log.exception("Error loading daemon config: %s" % e)
+            raise
+
+    @staticmethod
+    def _parse_args_list(raw_args):
+        if isinstance(raw_args, str):
+            return shlex.split(raw_args)
+        return list(raw_args or [])
+
+    def _parse_config_data(self, config):
+        default_config = config.get("default_config", DEFAULT_PROCESS_CONFIG)
+        if not os.path.isabs(default_config):
+            default_config = os.path.join(SCRIPT_DIR, default_config)
+
+        username = config.get("username") or None
+        password = config.get("password") or None
+
+        media_extensions = self.media_extensions
+        raw_exts = config.get("media_extensions")
+        if raw_exts is not None:
+            media_extensions = frozenset(("." + e.lower().lstrip(".")) for e in raw_exts if e)
+
+        path_rewrites = [{"from": r["from"].rstrip("/"), "to": r["to"].rstrip("/")} for r in config.get("path_rewrites", []) if r.get("from") and r.get("to")]
+
+        path_configs = []
+        for entry in config.get("path_configs", []):
+            path = entry.get("path", "").rstrip("/")
+            config_path = entry.get("config", "")
+            if not path or not config_path:
+                continue
+            if not os.path.isabs(config_path):
+                config_path = os.path.join(SCRIPT_DIR, config_path)
+            path_configs.append(
+                {
+                    "path": os.path.normpath(path),
+                    "config": config_path,
+                    "default_args": self._parse_args_list(entry.get("default_args", [])),
+                }
+            )
+        path_configs.sort(key=lambda x: len(x["path"]), reverse=True)
+
+        return {
+            "default_config": default_config,
+            "api_key": config.get("api_key"),
+            "basic_auth": (username, password) if username and password else None,
+            "db_url": config.get("db_url"),
+            "ffmpeg_dir": config.get("ffmpeg_dir"),
+            "job_timeout_seconds": int(config.get("job_timeout_seconds", 0) or 0),
+            "progress_log_interval": int(config.get("progress_log_interval", 60) or 60),
+            "smoke_test": bool(config.get("smoke_test", False)),
+            "recycle_bin_max_age_days": int(config.get("recycle_bin_max_age_days", 3) or 3),
+            "recycle_bin_min_free_gb": float(config.get("recycle_bin_min_free_gb", 50) or 50),
+            "media_extensions": media_extensions,
+            "default_args": self._parse_args_list(config.get("default_args", [])),
+            "path_rewrites": path_rewrites,
+            "scan_paths": list(config.get("scan_paths", [])),
+            "path_configs": path_configs,
+        }
+
+    def _apply_config_data(self, parsed):
+        self.default_config = parsed["default_config"]
+        self.api_key = parsed["api_key"]
+        self.basic_auth = parsed["basic_auth"]
+        self.db_url = parsed["db_url"]
+        self.ffmpeg_dir = parsed["ffmpeg_dir"]
+        self.job_timeout_seconds = parsed["job_timeout_seconds"]
+        self.progress_log_interval = parsed["progress_log_interval"]
+        self.smoke_test = parsed["smoke_test"]
+        self.recycle_bin_max_age_days = parsed["recycle_bin_max_age_days"]
+        self.recycle_bin_min_free_gb = parsed["recycle_bin_min_free_gb"]
+        self.media_extensions = parsed["media_extensions"]
+        self.default_args = parsed["default_args"]
+        self.path_rewrites = parsed["path_rewrites"]
+        self.scan_paths = parsed["scan_paths"]
+        self.path_configs = parsed["path_configs"]
+        if self.path_rewrites:
+            self.log.debug("Path rewrites (%d):" % len(self.path_rewrites))
+            for rewrite in self.path_rewrites:
+                self.log.debug("  %s -> %s" % (rewrite["from"], rewrite["to"]))
 
     def get_config_for_path(self, file_path):
         """Get the appropriate config file for a given file path."""
