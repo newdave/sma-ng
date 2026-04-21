@@ -339,12 +339,12 @@ class TestGetJobs:
     def test_passes_status_filter(self):
         h = _make_handler()
         h._get_jobs({"status": ["pending"]})
-        h.server.job_db.get_jobs.assert_called_once_with(status="pending", config=None, limit=100, offset=0)
+        h.server.job_db.get_jobs.assert_called_once_with(status="pending", config=None, path=None, limit=100, offset=0)
 
     def test_passes_limit_and_offset(self):
         h = _make_handler()
         h._get_jobs({"limit": ["10"], "offset": ["20"]})
-        h.server.job_db.get_jobs.assert_called_once_with(status=None, config=None, limit=10, offset=20)
+        h.server.job_db.get_jobs.assert_called_once_with(status=None, config=None, path=None, limit=10, offset=20)
 
     def test_adds_log_name_to_jobs_with_config(self):
         h = _make_handler()
@@ -830,7 +830,7 @@ class TestParseSonarrBody:
         h = self._sonarr_body(payload)
         path, args = h._parse_sonarr_body()
         assert path == "/tv/Show/S01E01.mkv"
-        assert "-tv" in args
+        assert "--tv" in args
         assert "-tvdb" in args
         assert "12345" in args
 
@@ -857,6 +857,30 @@ class TestParseSonarrBody:
         path, args = h._parse_sonarr_body()
         assert "-imdb" in args
         assert "tt0472308" in args
+
+    def test_extracts_tvdb_id_from_path_when_not_in_payload(self):
+        payload = {
+            "eventType": "Download",
+            "episodeFile": {"path": "/tv/The Rookie (2018) {tvdb-350665}/S08E16.mkv"},
+            "series": {},
+            "episodes": [],
+        }
+        h = self._sonarr_body(payload)
+        path, args = h._parse_sonarr_body()
+        assert "-tvdb" in args
+        assert "350665" in args
+
+    def test_path_tvdb_not_used_when_payload_has_tvdb(self):
+        payload = {
+            "eventType": "Download",
+            "episodeFile": {"path": "/tv/Show {tvdb-999}/S01E01.mkv"},
+            "series": {"tvdbId": 12345},
+            "episodes": [],
+        }
+        h = self._sonarr_body(payload)
+        path, args = h._parse_sonarr_body()
+        assert "12345" in args
+        assert "999" not in args
 
     def test_includes_season_and_episode_numbers(self):
         payload = {
@@ -921,7 +945,7 @@ class TestParseRadarrBody:
         h = self._radarr_body(payload)
         path, args = h._parse_radarr_body()
         assert path == "/movies/Matrix.mkv"
-        assert "-movie" in args
+        assert "--movie" in args
         assert "-tmdb" in args
         assert "603" in args
 
@@ -946,6 +970,28 @@ class TestParseRadarrBody:
         path, args = h._parse_radarr_body()
         assert "-imdb" in args
         assert "tt0133093" in args
+
+    def test_extracts_tmdb_id_from_path_when_not_in_payload(self):
+        payload = {
+            "eventType": "Download",
+            "movieFile": {"path": "/movies/The Matrix (1999) {tmdb-603}/Matrix.mkv"},
+            "movie": {},
+        }
+        h = self._radarr_body(payload)
+        path, args = h._parse_radarr_body()
+        assert "-tmdb" in args
+        assert "603" in args
+
+    def test_path_tmdb_not_used_when_payload_has_tmdb(self):
+        payload = {
+            "eventType": "Download",
+            "movieFile": {"path": "/movies/Film {tmdb-999}/film.mkv"},
+            "movie": {"tmdbId": 603},
+        }
+        h = self._radarr_body(payload)
+        path, args = h._parse_radarr_body()
+        assert "603" in args
+        assert "999" not in args
 
     def test_invalid_json_returns_400(self):
         body = b"not json"

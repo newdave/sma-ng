@@ -2358,7 +2358,7 @@ class TestParseSonarrBody:
         handler, _ = _make_media_handler(payload)
         path, args = handler._parse_sonarr_body()
         assert path == "/mnt/TV/Show/S01E01.mkv"
-        assert "-tv" in args
+        assert "--tv" in args
         assert "-tvdb" in args
         assert "73871" in args
         assert "-s" in args
@@ -2445,7 +2445,7 @@ class TestParseRadarrBody:
         handler, _ = _make_media_handler(payload)
         path, args = handler._parse_radarr_body()
         assert path == "/mnt/Movies/The Matrix (1999).mkv"
-        assert "-movie" in args
+        assert "--movie" in args
         assert "-tmdb" in args
         assert "603" in args
 
@@ -2471,7 +2471,7 @@ class TestParseRadarrBody:
         handler, _ = _make_media_handler(payload)
         path, args = handler._parse_radarr_body()
         assert path == "/mnt/Movies/film.mkv"
-        assert "-movie" in args
+        assert "--movie" in args
         assert "-tmdb" not in args
         assert "-imdb" not in args
 
