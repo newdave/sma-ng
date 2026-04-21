@@ -2,6 +2,14 @@
 
 This file provides guidance to Codex when working with code in this repository.
 
+## Authority and Compatibility
+
+- **`CLAUDE.md` is the authoritative workflow document for this repository.**
+- If `AGENTS.md` and `CLAUDE.md` overlap, treat `CLAUDE.md` as the source of truth and keep `AGENTS.md` aligned to it.
+- The `.claude/` directory is not legacy; it is the authoritative tool-specific configuration surface for Claude-based workflows.
+- Codex should use this file as its native bootstrap surface, but it must preserve compatibility with the Claude configuration and must not silently diverge from it.
+- When updating workflow rules, commit standards, documentation policy, or repo conventions, update `CLAUDE.md` first and then sync any corresponding Codex-facing guidance in `AGENTS.md`.
+
 ## Documentation Rules
 
 - **Keep documentation in sync with code changes.** When you add, change, or remove a feature, update all relevant docs in the same change.
@@ -14,8 +22,20 @@ This file provides guidance to Codex when working with code in this repository.
 
 - Do not add any AI attribution or `Co-Authored-By` lines to commits.
 - Break large changes into smaller logical commits when the user asks for commits.
+- Never create a single mixed commit when the work spans multiple logical areas.
+- Commit the full worktree as a series of small commits grouped by logical function when multiple areas are touched.
+- Before committing, review the diff and split staged changes by area rather than bundling unrelated changes together.
+- If the user asks to "commit all changes", interpret that as committing the entire worktree using multiple logical commits, not one umbrella commit.
+- Do not bundle unrelated daemon changes, trigger changes, tests, docs, or workflow/config updates into one commit.
 - Use informative conventional commit prefixes such as `fix:`, `feat:`, and `refactor:`.
 - Do not create manual `v*` tags.
+- `CLAUDE.md` is authoritative for commit workflow details, including post-commit sync expectations.
+
+## Shell Script Rules
+
+- Do not embed inline Python in shell scripts or shell commands committed to this repository. This includes `python -c`, `python3 -c`, and Python heredocs.
+- If shell-based automation needs Python logic, move that logic into a standalone `.py` helper and call it from the shell script.
+- Prefer keeping JSON parsing, payload construction, and non-trivial data transforms in those helper modules rather than re-embedding them in Bash.
 
 ## Development Environment
 
@@ -59,6 +79,71 @@ Requires Python 3.12+ and FFmpeg installed on system.
 - `mise run convert -- /path/to/file.mkv` - convert a file
 - `mise run preview -- /path/to/file.mkv` - preview options only
 - `mise run codecs` - list supported codecs
+
+## Repo Workflow Map
+
+Use these task buckets to keep work predictable and aligned with the repo's existing Claude-oriented workflow.
+
+### Exploration
+
+Use for:
+
+- understanding architecture
+- locating config or daemon behavior
+- mapping path-routing, logging, or integration behavior
+
+Common commands:
+
+- `rg --files`
+- `rg "pattern" path/`
+- `git diff`
+- `git status`
+
+### Implementation
+
+Use for:
+
+- feature work
+- bug fixes
+- daemon changes
+- config parsing changes
+
+Implementation expectations:
+
+- keep docs in sync
+- preserve repo conventions from `CLAUDE.md`
+- prefer minimal logical commits over one large mixed commit
+
+### Test Writing
+
+Use for:
+
+- regression coverage
+- branch coverage increases
+- daemon/API contract tests
+- static Docker/docs/config tests
+
+Typical test targets:
+
+- daemon changes: `venv/bin/python -m pytest tests/test_daemon.py tests/test_handler.py tests/test_worker.py -q`
+- media processor changes: `venv/bin/python -m pytest tests/test_mediaprocessor.py -q`
+- Docker/compose changes: `venv/bin/python -m pytest tests/test_docker.py -q`
+- rename/log helper changes: `venv/bin/python -m pytest tests/test_rename.py tests/test_log.py -q`
+
+### Documentation
+
+Use for:
+
+- user-facing docs
+- deployment/runbooks
+- architecture notes
+- getting-started and operations guidance
+
+Documentation expectations:
+
+- `docs/` is the canonical repo copy
+- also sync `/tmp/sma-wiki/` and `resources/docs.html` when required by the change
+- if only part of that sync is being done in the current task, call it out explicitly
 
 ## Project Overview
 
@@ -292,6 +377,36 @@ Main documentation lives in `docs/` and is also served at `http://localhost:8585
 
 When changing functionality, keep `docs/`, `resources/docs.html`, and the wiki copy in sync.
 
+## Validation Expectations
+
+Before closing a task, run the smallest validation set that meaningfully covers the area changed.
+
+Suggested validation matrix:
+
+- daemon package changes:
+  `venv/bin/python -m pytest tests/test_daemon.py tests/test_handler.py tests/test_worker.py -q`
+- FFmpeg/media processing changes:
+  `venv/bin/python -m pytest tests/test_mediaprocessor.py tests/test_metadata.py -q`
+- Docker/compose changes:
+  `venv/bin/python -m pytest tests/test_docker.py -q`
+- docs-only changes:
+  no tests required unless the docs describe behavior changed in code in the same task
+- broad confidence pass:
+  `mise run test`
+
+If you cannot run the appropriate validation, say so explicitly in the final response.
+
+## Codex and `.claude/`
+
+Codex should treat `.claude/` as an authoritative compatibility surface, not as disposable metadata.
+
+Practical rules:
+
+- do not remove or rewrite `.claude/` conventions just because Codex does not consume them directly
+- when adding Codex-native guidance, prefer mirroring or translating existing Claude workflow rather than replacing it
+- if a Codex-native file and a Claude-native file would express the same rule, keep the wording aligned and state which one is authoritative
+- when in doubt, preserve Claude behavior and document the Codex equivalent
+
 ## Integrations
 
 Sonarr and Radarr support two integration modes:
@@ -401,6 +516,7 @@ When adding new API endpoints to the daemon:
 When adding new downloader or manager integrations:
 
 - create the script under `triggers/`
+- do not embed inline Python in the shell entrypoint; place Python logic in a standalone helper module and invoke it
 - add config support in `resources/readsettings.py` if needed
 
 When adding new daemon options:

@@ -14,9 +14,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Do not add any AI attribution (or Co-Authored-By lines) to commits whatsoever.
 - Break large changesets into smaller, contextual commits — each commit should represent one logical change.
+- Never create a single mixed commit when the work spans multiple logical areas.
+- Commit the full worktree as a series of small commits grouped by logical function when multiple areas are touched.
+- Before committing, review the diff and split staged changes by area rather than bundling unrelated changes together.
+- If the user asks to "commit all changes", interpret that as committing the entire worktree using multiple logical commits, not one umbrella commit.
+- Do not bundle unrelated daemon changes, trigger changes, tests, docs, or workflow/config updates into one commit.
 - Write informative commit messages that describe what changed and why (use conventional commit prefixes: `fix:`, `feat:`, `refactor:`, etc.).
 - Commit regularly rather than accumulating large diffs.
 - After each commit, run `git pull --rebase` then `git push`.
+
+## Shell Script Rules
+
+- Do not embed inline Python in shell scripts or shell commands committed to this repository. This includes `python -c`, `python3 -c`, and Python heredocs.
+- If shell-based automation needs Python logic, move that logic into a standalone `.py` helper and call it from the shell script.
+- Prefer keeping JSON parsing, payload construction, and non-trivial data transforms in those helper modules rather than re-embedding them in Bash.
 
 ## Development Environment
 
@@ -205,6 +216,7 @@ When adding new API endpoints to the daemon:
 When adding new downloader/manager integration:
 
 - Create new bash script in `triggers/` (usenet/, torrents/, or media_managers/)
+- Do not embed inline Python in the shell entrypoint; place Python logic in a standalone helper module and invoke it
 - Add settings section in `readsettings.py` if config support is needed
 
 When adding new daemon options:
