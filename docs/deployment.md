@@ -22,7 +22,7 @@ mise run codecs           # List supported codecs
 
 ```bash
 mise run docker:build     # Build image locally
-mise run docker:run       # Run locally-built image
+SMA_DAEMON_DB_URL=postgresql://user:pass@host/db mise run docker:run
 mise run docker:shell     # Open shell in locally-built image
 mise run docker:smoke     # Smoke-test imports and ffmpeg
 ```
@@ -165,7 +165,7 @@ docker run --rm -p 8585:8585 \
 make docker-build
 
 # Run locally-built image
-make docker-run
+SMA_DAEMON_DB_URL=postgresql://user:pass@host/db make docker-run
 ```
 
 **Tags:** `latest`, `1`, `1.2`, `1.2.3` (semver), `main` (rolling build from main branch).

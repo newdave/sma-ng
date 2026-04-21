@@ -4,7 +4,7 @@ SMA-NG supports hardware-accelerated video encoding via FFmpeg. The `gpu` settin
 
 ## GPU Auto-Detection
 
-`make config` (or `mise run config`) auto-detects the GPU and writes the correct value to `autoProcess.ini`:
+`make config` and `mise run config` call the same generator, auto-detect the GPU the same way, and write the correct value to the generated `autoProcess*.ini` profiles:
 
 - macOS → `videotoolbox`
 - NVIDIA GPU (detected via `nvidia-smi`) → `nvenc`

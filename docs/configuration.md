@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Configuration lives in `config/autoProcess.ini` (INI format). Copy from `setup/autoProcess.ini.sample` or generate with `make config`.
+Configuration lives in `config/autoProcess.ini` (INI format). Copy from `setup/autoProcess.ini.sample` or generate it with `make config` or `mise run config`.
 
 Override path via `SMA_CONFIG` environment variable.
 
@@ -198,7 +198,9 @@ Generates an additional stereo AAC stream for device compatibility.
 
 ## [Sonarr] / [Radarr] / Multi-Instance
 
-Multiple instances supported. Any section starting with `Sonarr` or `Radarr` is loaded (e.g., `[Sonarr-Kids]`, `[Radarr-4K]`).
+Multiple instances are supported. Any section whose name starts with `Sonarr` or `Radarr` is loaded automatically, for example `[Sonarr-Kids]` or `[Radarr-4K]`.
+
+In the sample config, the `*arr` sections are grouped together, followed by the download client sections. Keep extra `Sonarr*` / `Radarr*` sections alongside the primary ones so the layout stays predictable.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -226,11 +228,22 @@ path = /mnt/media/TV-Kids
 host = sonarr-kids.example.com
 apikey = def456
 
+[Radarr]
+path = /mnt/media/Movies
+host = radarr.example.com
+apikey = ghi789
+
 [Radarr-4K]
 path = /mnt/media/Movies/4K
 host = radarr-4k.example.com
 apikey = jkl012
 ```
+
+Important notes:
+
+- `path` should be set for every additional `Sonarr*` or `Radarr*` instance so longest-prefix matching can pick the right manager.
+- The base sections `[Sonarr]` and `[Radarr]` are not special beyond their names; they are just the default first instances.
+- Download client sections such as `[SABNZBD]`, `[Deluge]`, `[qBittorrent]`, and `[uTorrent]` are separate and should stay grouped after the `*arr` sections.
 
 ---
 

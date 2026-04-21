@@ -82,6 +82,8 @@ apikey = jkl012
 
 When `manual.py` processes `/mnt/media/Movies/4K/film.mp4`, it matches `Radarr-4K` (longest prefix) and triggers a rescan on that instance.
 
+The sample config also includes commented examples directly under the primary `[Sonarr]` and `[Radarr]` sections so the intended grouping is visible in-place.
+
 ### Plex
 
 Configure `[Plex]` section. SMA-NG refreshes the matching library section after conversion. Use `path-mapping` if Plex sees files at different mount points.
