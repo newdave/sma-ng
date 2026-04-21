@@ -304,18 +304,20 @@ class TestComposeGpuProfiles:
         assert "sma-intel-pg" in compose["services"]
         assert "intel-pg" in compose["services"]["sma-intel-pg"]["profiles"]
 
-    def test_intel_mounts_dev_dri(self, compose):
+    def test_intel_exposes_render_node(self, compose):
+        # Only the render node is needed for headless QSV/VAAPI encoding.
         devices = compose["services"]["sma-intel"]["devices"]
-        assert any("/dev/dri" in str(d) for d in devices)
+        assert any("renderD128" in str(d) for d in devices)
         devices_pg = compose["services"]["sma-intel-pg"]["devices"]
-        assert any("/dev/dri" in str(d) for d in devices_pg)
+        assert any("renderD128" in str(d) for d in devices_pg)
 
     def test_intel_adds_render_group(self, compose):
-        # group_add uses numeric GID env vars to avoid name-resolution failures
+        # group_add uses numeric GID env var; set RENDER_GID to match the host
+        # render group (check with: getent group render).
         groups = compose["services"]["sma-intel"]["group_add"]
-        assert any("RENDER_GID" in str(g) or "109" in str(g) for g in groups)
+        assert any("RENDER_GID" in str(g) for g in groups)
         groups_pg = compose["services"]["sma-intel-pg"]["group_add"]
-        assert any("RENDER_GID" in str(g) or "109" in str(g) for g in groups_pg)
+        assert any("RENDER_GID" in str(g) for g in groups_pg)
 
     def test_software_profiles_exist(self, compose):
         assert "software" in compose["services"]["sma-software"]["profiles"]
