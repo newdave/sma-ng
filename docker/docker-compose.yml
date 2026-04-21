@@ -106,6 +106,9 @@ services:
     <<: *sma-common
     container_name: sma-ng-software
     profiles: [software]
+    environment:
+      <<: *sma-env
+      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:?SMA_DAEMON_DB_URL is required. Use the software-pg profile for a bundled database.}
 
   sma-software-pg:
     <<: *sma-common
@@ -123,6 +126,7 @@ services:
     profiles: [nvidia]
     environment:
       <<: [*sma-env, *sma-nvidia-env]
+      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:?SMA_DAEMON_DB_URL is required. Use the nvidia-pg profile for a bundled database.}
 
   sma-nvidia-pg:
     <<: [*sma-common, *sma-nvidia-deploy]
@@ -140,6 +144,7 @@ services:
     profiles: [intel]
     environment:
       <<: [*sma-env, *sma-intel-env]
+      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:?SMA_DAEMON_DB_URL is required. Use the intel-pg profile for a bundled database.}
 
   sma-intel-pg:
     <<: [*sma-common, *sma-intel-device-config]

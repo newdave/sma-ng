@@ -164,7 +164,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     SMA_DAEMON_HOST=0.0.0.0 \
     SMA_DAEMON_PORT=8585 \
     SMA_DAEMON_WORKERS=2 \
-    SMA_DAEMON_CONFIG=/app/config/daemon.json \
+    SMA_DAEMON_CONFIG=/config/daemon.json \
     SMA_DAEMON_LOGS_DIR=/logs
 
 # Runtime shared libraries required by the FFmpeg binary.
