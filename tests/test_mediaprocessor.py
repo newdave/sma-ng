@@ -1517,7 +1517,7 @@ class TestSetDefaultSubtitleStreamLegacy:
     def test_sets_default_when_sdl_and_force(self):
         mp = _make_mp()
         mp.settings.sdl = "eng"
-        mp.settings.sforcedefault = True
+        mp.settings.force_subtitle_defaults = True
         streams = [
             {"language": "eng", "disposition": "-default"},
             {"language": "fra", "disposition": "-default"},
@@ -1528,7 +1528,7 @@ class TestSetDefaultSubtitleStreamLegacy:
     def test_does_not_override_existing_default(self):
         mp = _make_mp()
         mp.settings.sdl = "eng"
-        mp.settings.sforcedefault = True
+        mp.settings.force_subtitle_defaults = True
         streams = [
             {"language": "fra", "disposition": "+default"},
             {"language": "eng", "disposition": "-default"},
@@ -1540,7 +1540,7 @@ class TestSetDefaultSubtitleStreamLegacy:
     def test_skips_when_no_sdl(self):
         mp = _make_mp()
         mp.settings.sdl = None
-        mp.settings.sforcedefault = True
+        mp.settings.force_subtitle_defaults = True
         streams = [{"language": "eng", "disposition": "-default"}]
         mp.setDefaultSubtitleStream(streams)
         assert "+default" not in streams[0]["disposition"]
@@ -1548,7 +1548,7 @@ class TestSetDefaultSubtitleStreamLegacy:
     def test_skips_when_empty_streams(self):
         mp = _make_mp()
         mp.settings.sdl = "eng"
-        mp.settings.sforcedefault = True
+        mp.settings.force_subtitle_defaults = True
         mp.setDefaultSubtitleStream([])  # Should not raise
 
 
@@ -1762,10 +1762,10 @@ class TestSetDefaultSubtitleStream:
     def _make_sub(self, language="eng", disposition="-default"):
         return {"language": language, "disposition": disposition}
 
-    def _make_mp(self, sdl: str | None = "eng", sforcedefault: bool = True):
+    def _make_mp(self, sdl: str | None = "eng", force_subtitle_defaults: bool = True):
         mp = _make_mp()
         mp.settings.sdl = sdl
-        mp.settings.sforcedefault = sforcedefault
+        mp.settings.force_subtitle_defaults = force_subtitle_defaults
         return mp
 
     def test_sets_default_when_none_present(self):
@@ -1791,7 +1791,7 @@ class TestSetDefaultSubtitleStream:
         assert "+default" not in subs[0]["disposition"]
 
     def test_force_default_false_does_not_override(self):
-        mp = self._make_mp(sforcedefault=False)
+        mp = self._make_mp(force_subtitle_defaults=False)
         subs = [self._make_sub(language="eng", disposition="-default")]
         mp.setDefaultSubtitleStream(subs)
         assert "+default" not in subs[0]["disposition"]
