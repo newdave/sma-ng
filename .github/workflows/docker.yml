@@ -21,6 +21,10 @@ on:
       - "**.py"
       - ".github/workflows/docker.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -78,7 +82,7 @@ jobs:
       #
       # Registry cache (type=registry) persists indefinitely in GHCR,
       # keeping the ffmpeg-builder stage cached across runs without
-      # relying on the 10GB/7-day GHA cache limit.
+      # relying solely on the 10GB/7-day GHA cache limit.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -90,8 +94,12 @@ jobs:
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}:buildcache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: |
+            type=gha,mode=max
+            ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}:buildcache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}
           build-args: |
             FFMPEG_VERSION=${{ env.FFMPEG_VERSION }}
 
