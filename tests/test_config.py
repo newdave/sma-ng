@@ -219,6 +219,7 @@ default-sorting = channels.d
 codecs =
 
 [Universal Audio]
+enabled = true
 codec =
 channel-bitrate = 128
 variable-bitrate = 0
@@ -800,6 +801,26 @@ class TestMigrateFromOld:
         # Should not raise — deprecated option is silently removed
         settings = ReadSettings(ini)
         assert settings is not None
+
+
+class TestReadSettingsUniversalAudio:
+    """Test Universal Audio config parsing."""
+
+    @patch("resources.readsettings.ReadSettings._validate_binaries")
+    def test_universal_audio_enabled_flag_defaults_false(self, mock_validate, tmp_ini):
+        ini = tmp_ini()
+        with open(ini, "r") as f:
+            content = f.read()
+        content = content.replace("[Universal Audio]\nenabled = true", "[Universal Audio]\nenabled = false")
+        content = content.replace("[Universal Audio]\nenabled = false\ncodec =", "[Universal Audio]\nenabled = false\ncodec = aac")
+        with open(ini, "w") as f:
+            f.write(content)
+
+        settings = ReadSettings(ini)
+
+        assert settings.ua_enabled is False
+        assert settings.ua == ["aac"]
+        assert settings.ua_first_only is True
 
 
 class TestBitrateProfiles:

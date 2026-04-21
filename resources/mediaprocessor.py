@@ -957,7 +957,7 @@ class MediaProcessor:
         blocked_audio_languages = []
         blocked_audio_dispositions = []
         acombinations = self.mapStreamCombinations(info.audio)
-        allowua = any(self.settings.ua)
+        allowua = self.settings.ua_enabled and any(self.settings.ua)
 
         ua_codecs = self.ffprobeSafeCodecs(self.settings.ua)
         self.log.debug("Pool universal audio codecs is %s." % (ua_codecs))
