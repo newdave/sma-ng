@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.2.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.4...sma-ng-v1.2.0) (2026-04-21)
+
+
+### Features
+
+* add path search to jobs list ([d97e46c](https://github.com/newdave/sma-ng/commit/d97e46c4e13e5153fcf20556408edf26643922a7))
+* split docker compose profiles by encoder and database ([09b3a2a](https://github.com/newdave/sma-ng/commit/09b3a2afc893af25b53289e07951001c713a04d4))
+
+
+### Bug Fixes
+
+* harden daemon progress reporting and log discovery ([fe5f211](https://github.com/newdave/sma-ng/commit/fe5f21191129dfc77845dec0d4d5ee90b0f4f480))
+* recycle original before restoreFromOutput overwrites input path ([07add3d](https://github.com/newdave/sma-ng/commit/07add3ddc6f19c33f380113db9368305b32763c2))
+
+
+### Documentation
+
+* add deployment architecture and onboarding guides ([ab82b91](https://github.com/newdave/sma-ng/commit/ab82b91b340b20af6458ae3660215569c0aad62c))
+
 ## [1.1.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.3...sma-ng-v1.1.4) (2026-04-20)
 
 
