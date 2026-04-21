@@ -815,7 +815,7 @@ The `gpu` key in `[Converter]` sets the hardware acceleration profile used at ru
 
 ### GPU Config Option
 
-The `gpu` key is a runtime setting in `autoProcess.ini` that selects which hardware acceleration backend SMA-NG uses during conversion. `make config` / `mise run config` auto-detects the GPU and writes the correct value, but you can also set or change it manually at any time. The runtime settings driven by `gpu` are `hwaccels`, `hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`, and `[Video] codec`.
+The `gpu` key is a runtime setting in `autoProcess.ini` that selects which hardware acceleration backend SMA-NG uses during conversion. `make config` and `mise run config` now call the same generator, auto-detect the GPU the same way, and write the correct value into the generated `autoProcess*.ini` files, but you can also set or change it manually at any time. The runtime settings driven by `gpu` are `hwaccels`, `hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`, and `[Video] codec`.
 
 Valid values for `gpu`:
 
@@ -827,7 +827,7 @@ Valid values for `gpu`:
 | `videotoolbox` | Apple Silicon / macOS | Built into macOS; no device path needed |
 | `software` | CPU only | No hardware acceleration |
 
-Auto-detection runs `mise run detect-gpu` (or `make detect-gpu`) which checks for each platform in order: NVIDIA → Intel QSV → VAAPI → VideoToolbox → software.
+Auto-detection runs the same shared script behind `mise run detect-gpu` and `make detect-gpu`, checking each platform in order: NVIDIA → Intel QSV → VAAPI → VideoToolbox → software.
 
 ### Intel QSV
 
@@ -1065,7 +1065,7 @@ mise run codecs           # List supported codecs
 
 ```bash
 mise run docker:build     # Build image locally (TAG=sma-ng:local to override)
-mise run docker:run       # Run locally-built image
+SMA_DAEMON_DB_URL=postgresql://user:pass@host/db mise run docker:run
 mise run docker:shell     # Open shell in locally-built image
 mise run docker:smoke     # Smoke-test imports and ffmpeg
 ```

@@ -75,7 +75,7 @@ If you do not know the answers yet, start with:
 
 ## Quality Profiles
 
-`mise run config` always generates three config files:
+`mise run config` and `make config` now use the same generator and always create three config files:
 
 | File | Profile | Video | Audio |
 | --- | --- | --- | --- |
@@ -140,7 +140,7 @@ git clone https://github.com/newdave/sma-ng && cd sma-ng
 python3 -m venv venv && source venv/bin/activate
 pip install -r setup/requirements.txt
 
-# Generate config with auto GPU detection
+# Generate the same config set as `mise run config`
 make config
 
 # Or copy sample and edit manually
@@ -223,7 +223,7 @@ or:
 mise run detect-gpu
 ```
 
-Then compare the result with your chosen `gpu =` and codec settings. If GPU detection or encoder availability is uncertain, switch to software first and get a clean baseline run before troubleshooting hardware acceleration.
+Both commands use the same detection script. Then compare the result with your chosen `gpu =` and codec settings. If GPU detection or encoder availability is uncertain, switch to software first and get a clean baseline run before troubleshooting hardware acceleration.
 
 ---
 
