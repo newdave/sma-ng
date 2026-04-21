@@ -146,8 +146,6 @@ RUN python3 -m venv /venv \
 # ──────────────────────────────────────────────────────────────────────────────
 FROM ubuntu:24.04 AS runtime
 
-ARG UID=1000
-ARG GID=1000
 # Injected automatically by Docker Buildx for multi-arch builds
 ARG TARGETARCH
 
@@ -255,21 +253,10 @@ COPY --from=ffmpeg-builder /usr/local/bin/ffprobe /usr/local/bin/ffprobe
 # Copy Python venv from builder
 COPY --from=python-builder /venv /venv
 
-# ubuntu:24.04 ships an 'ubuntu' user at UID/GID 1000; remove it so we can
-# create 'sma' at the same IDs unconditionally and have a clean passwd entry.
-RUN userdel  -r ubuntu 2>/dev/null || true \
-    && groupdel ubuntu  2>/dev/null || true \
-    && groupadd -g ${GID} sma \
-    && useradd  -u ${UID} -g ${GID} -s /bin/sh -m sma \
-    # render/video groups let bash resolve GPU device group names (cosmetic).
-    # These GIDs match Ubuntu host defaults; override RENDER_GID/VIDEO_GID in
-    # .env if your host differs.
-    && groupadd -g 109 render \
-    && groupadd -g 44  video
-
 # Copy application code
+# ubuntu:24.04 ships 'ubuntu' at UID/GID 1000 — use it as-is.
 WORKDIR /app
-COPY --chown=${UID}:${GID} . .
+COPY --chown=ubuntu:ubuntu . .
 
 # Install entrypoint script (root-owned, world-executable)
 COPY docker/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -277,13 +264,13 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Runtime directories (seeded at startup via entrypoint; override with volume mounts)
 RUN mkdir -p /config /logs /mnt /downloads /transcodes \
-    && chown -R ${UID}:${GID} /config /logs /app
+    && chown -R ubuntu:ubuntu /config /logs /app
 
 VOLUME ["/config", "/logs", "/mnt", "/downloads", "/transcodes"]
 
 EXPOSE 8585
 
-USER sma
+USER ubuntu
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8585/health')" || exit 1
