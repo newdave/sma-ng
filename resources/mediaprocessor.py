@@ -1955,11 +1955,11 @@ class MediaProcessor:
         """
         Set the default disposition on the first subtitle stream in the preferred language.
 
-        Only acts when sforcedefault is enabled and no default subtitle stream
+        Only acts when force_subtitle_defaults is enabled and no default subtitle stream
         already exists in the output options.
         """
         if len(subtitle_settings) > 0 and self.settings.sdl:
-            if len([x for x in subtitle_settings if "+default" in (x.get("disposition") or "")]) < 1 and self.settings.sforcedefault:
+            if len([x for x in subtitle_settings if "+default" in (x.get("disposition") or "")]) < 1 and self.settings.force_subtitle_defaults:
                 matches = [x for x in subtitle_settings if x.get("language") == self.settings.sdl]
                 if not matches:
                     self.log.debug("No subtitle stream found in default language %s, will not set a default subtitle stream.", self.settings.sdl)
