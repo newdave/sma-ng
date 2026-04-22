@@ -13,6 +13,7 @@ This file provides guidance to Codex when working with code in this repository.
 ## Documentation Rules
 
 - **Keep documentation in sync with code changes.** When you add, change, or remove a feature, update all relevant docs in the same change.
+- **Documentation and tests that explain or validate a feature change belong to the same logical commit as that feature change.** Do not split one logical change into separate code, docs, or test commits just because the files differ.
 - **Every documentation change must be applied in three places:**
   1. `docs/` - the canonical source in the main repo
   2. GitHub wiki (`/tmp/sma-wiki/`) - the corresponding wiki page(s); push with `git add -A && git commit -m "docs: ..." && git push origin HEAD:master`
@@ -22,11 +23,12 @@ This file provides guidance to Codex when working with code in this repository.
 
 - Do not add any AI attribution or `Co-Authored-By` lines to commits.
 - Break large changes into smaller logical commits when the user asks for commits.
+- Define “logical change” by behavior, feature, fix, or operational outcome - not by file type. A feature/fix and its tests/docs/config updates normally belong in the same commit.
 - Never create a single mixed commit when the work spans multiple logical areas.
 - Commit the full worktree as a series of small commits grouped by logical function when multiple areas are touched.
-- Before committing, review the diff and split staged changes by area rather than bundling unrelated changes together.
+- Before committing, review the diff and split staged changes by change boundary rather than by file category or directory.
 - If the user asks to "commit all changes", interpret that as committing the entire worktree using multiple logical commits, not one umbrella commit.
-- Do not bundle unrelated daemon changes, trigger changes, tests, docs, or workflow/config updates into one commit.
+- Do not bundle unrelated daemon changes, trigger changes, tests, docs, or workflow/config updates into one commit. But when those files all support the same underlying change, keep them together in a single logical commit.
 - Use informative conventional commit prefixes such as `fix:`, `feat:`, and `refactor:`.
 - Do not create manual `v*` tags.
 - `CLAUDE.md` is authoritative for commit workflow details, including post-commit sync expectations.
