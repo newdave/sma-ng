@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.12](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.11...sma-ng-v1.6.12) (2026-04-22)
+
+
+### Bug Fixes
+
+* rewrite docker shebangs for container venv ([9a3b646](https://github.com/newdave/sma-ng/commit/9a3b6462a7d9730743ebf95892f3ed0b5401778a))
+
 ## [1.6.11](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.10...sma-ng-v1.6.11) (2026-04-22)
 
 
