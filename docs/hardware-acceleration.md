@@ -9,7 +9,7 @@ SMA-NG supports hardware-accelerated video encoding via FFmpeg. The `gpu` settin
 - macOS → `videotoolbox`
 - NVIDIA GPU (detected via `nvidia-smi`) → `nvenc`
 - Intel iGPU (detected via `/sys/module/i915` or `vainfo`) → `qsv`
-- Generic VA-API device (`/dev/dri/renderD128`) → `vaapi`
+- Generic VA-API device (typically `/dev/dri/renderD128`) → `vaapi`
 - Fallback → software
 
 ```bash
@@ -143,5 +143,12 @@ environment:
 
 - `gpu = qsv` should use QSV codecs (`h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`)
 - `gpu = vaapi` should use VAAPI codecs (`h264vaapi`, `h265vaapi`, `av1vaapi`)
+
+5. On KVM or Proxmox guests using Intel SR-IOV, verify the guest-visible DRI topology.
+
+- The usable Intel VF may appear as `card1` with `renderD128`, or as higher-numbered render nodes, depending on the guest.
+- The Intel Docker Compose profiles mount the whole `/dev/dri` tree so FFmpeg and VAAPI can see the matching `card*` and `renderD*` nodes together.
+- If `card*` is owned by the host `video` group, set `VIDEO_GID` in `docker/.env` so the container can open the DRM node during `vainfo` and QSV initialization.
+- Validate inside the guest first with `ls -l /dev/dri`, then inside the container with `docker compose exec sma-intel vainfo`.
 
 The official Docker image now includes `vainfo` and VAAPI userspace drivers to simplify diagnostics.

@@ -16,7 +16,7 @@ The `-pg` profiles include a bundled PostgreSQL container. The non-`-pg` profile
 With the current compose layout, use the two env files for different jobs:
 
 - `/opt/sma/config/daemon.env` → container/runtime settings (`SMA_DAEMON_*`, `POSTGRES_*`, `LIBVA_DRIVER_NAME`, `NVIDIA_*`)
-- `docker/.env` → Compose interpolation (`SMA_IMAGE_TAG`, `SMA_PORT`, `RENDER_GID`)
+- `docker/.env` → Compose interpolation (`SMA_IMAGE_TAG`, `SMA_PORT`, `RENDER_GID`, `VIDEO_GID`)
 
 ## 1. Prepare Host Directories
 
@@ -97,6 +97,7 @@ cat > docker/.env <<'EOF'
 SMA_IMAGE_TAG=latest
 SMA_PORT=8585
 # RENDER_GID=109
+# VIDEO_GID=44
 EOF
 ```
 
@@ -105,6 +106,7 @@ Use `docker/.env` only for values that Docker Compose itself expands from `docke
 - `SMA_IMAGE_TAG`
 - `SMA_PORT`
 - `RENDER_GID`
+- `VIDEO_GID`
 
 Put daemon/container settings in `/opt/sma/config/daemon.env` instead.
 
@@ -196,6 +198,9 @@ Requirements:
 - host Intel GPU
 - `/dev/dri` available
 - correct render/video group IDs
+
+If the Intel GPU is exposed through SR-IOV, confirm which render node belongs to the VF inside the guest. The working device is often `/dev/dri/renderD129` or higher rather than `/dev/dri/renderD128`.
+The Intel compose profiles now mount the whole `/dev/dri` tree so the container can see the matching `card*` and `renderD*` nodes together, which matters on KVM guests where the VF may show up as `card1` with `renderD128`.
 
 Quick check:
 
@@ -307,7 +312,9 @@ Replace `software-pg` with whichever profile you use.
 ### Intel profile cannot see `/dev/dri`
 
 - verify host device exists
-- verify `RENDER_GID` and `VIDEO_GID`
+- verify `RENDER_GID`
+- verify `VIDEO_GID`
+- for SR-IOV guests, verify the guest itself exposes a matching `card*` and `renderD*` pair under `/dev/dri`
 - verify `vainfo` works inside the container
 
 ### NVIDIA profile starts without GPU

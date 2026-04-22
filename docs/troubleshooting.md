@@ -46,7 +46,9 @@ curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?level=ERROR"
 - Verify `hwdevices` key matches encoder codec name (e.g., `qsv` for `h265qsv`)
 - Verify `hwaccel-output-format` uses dict format: `qsv:qsv` not just `qsv`
 - Check FFmpeg build supports the hwaccel: `ffmpeg -hwaccels`
-- Check device exists: `ls /dev/dri/renderD128`
+- Check the render device exists: `ls /dev/dri/renderD128`
+- On Intel SR-IOV guests, verify the guest exposes the Intel VF as a matching `card*` and `renderD*` pair under `/dev/dri`
+- If `vainfo` still fails, verify the container has both the host `render` and `video` group IDs
 - On Linux, ensure the service user is in the `render` or `video` group: `usermod -aG render <user>`
 
 ### Conversion produces larger output file

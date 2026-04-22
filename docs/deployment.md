@@ -171,7 +171,7 @@ SMA_DAEMON_DB_URL=postgresql://user:pass@host/db make docker-run
 **Tags:** `latest`, `1`, `1.2`, `1.2.3` (semver), `main` (rolling build from main branch).
 
 For hardware acceleration diagnostics in containers, the runtime image includes `vainfo` and VAAPI userspace drivers.
-For Intel/QSV setups, use either the Intel profile (`docker compose --profile intel up`) or the bundled-PostgreSQL Intel profile (`docker compose --profile intel-pg up`) so `/dev/dri` is mapped.
+For Intel/QSV setups, use either the Intel profile (`docker compose --profile intel up`) or the bundled-PostgreSQL Intel profile (`docker compose --profile intel-pg up`) so `/dev/dri` is mapped into the container. This is important on SR-IOV guests where the Intel VF may appear as `card1` while still using `renderD128`.
 
 **Environment variables for Docker:**
 

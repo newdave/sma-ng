@@ -153,7 +153,7 @@ Override path via `SMA_CONFIG` environment variable.
 | `threads` | int | `0` | FFmpeg threads (0 = auto) |
 | `hwaccels` | list | | Hardware acceleration platforms: `qsv`, `vaapi`, `cuda`, `videotoolbox` |
 | `hwaccel-decoders` | list | | HW decoders to use: `hevc_qsv`, `h264_qsv`, `h264_vaapi`, etc. |
-| `hwdevices` | dict | | Device mapping: `qsv:/dev/dri/renderD128` |
+| `hwdevices` | dict | | Device mapping, e.g. `qsv:/dev/dri/renderD128` |
 | `hwaccel-output-format` | dict | | Output format per hwaccel: `qsv:qsv`, `vaapi:vaapi` |
 | `output-directory` | path | | Temporary output location (files moved back after) |
 | `output-format` | string | `mp4` | Container format: `mp4`, `mkv`, `mov` |
@@ -821,8 +821,8 @@ Valid values for `gpu`:
 
 | Value | Platform | Notes |
 | --- | --- | --- |
-| `qsv` | Intel Quick Sync Video | Requires `/dev/dri/renderD128` and i915 kernel module |
-| `vaapi` | Intel/AMD VAAPI | Requires `/dev/dri/renderD128` and `vainfo` |
+| `qsv` | Intel Quick Sync Video | Requires an accessible DRI render node such as `/dev/dri/renderD128` and the i915 kernel module |
+| `vaapi` | Intel/AMD VAAPI | Requires an accessible DRI render node such as `/dev/dri/renderD128` and `vainfo` |
 | `nvenc` | NVIDIA NVENC | Requires NVIDIA driver and `nvidia-smi` |
 | `videotoolbox` | Apple Silicon / macOS | Built into macOS; no device path needed |
 | `software` | CPU only | No hardware acceleration |
@@ -1214,7 +1214,9 @@ The daemon also writes per-config rotating log files in `logs/`:
 - Verify `hwdevices` key matches encoder codec name (e.g., `qsv` for `h265qsv`)
 - Verify `hwaccel-output-format` uses dict format: `qsv:qsv` not just `qsv`
 - Check FFmpeg build supports the hwaccel: `ffmpeg -hwaccels`
-- Check device exists: `ls /dev/dri/renderD128`
+- Check the selected render device exists: `ls /dev/dri/renderD128`
+- On Intel SR-IOV guests, verify the Intel VF appears as a matching `card*` and `renderD*` pair under `/dev/dri`
+- If using Docker Compose, ensure the container joins both the host `render` and `video` groups
 - On Linux, ensure the service user is in the `render` or `video` group
 
 #### Conversion produces larger file
