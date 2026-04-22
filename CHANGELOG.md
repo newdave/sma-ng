@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.3...sma-ng-v1.5.0) (2026-04-22)
+
+
+### Features
+
+* add deploy:ghcr-login mise task for GHCR image access ([e2671cb](https://github.com/newdave/sma-ng/commit/e2671cb9608041e5e44e54412b0d6018d793bb33))
+
 ## [1.4.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.2...sma-ng-v1.4.3) (2026-04-22)
 
 
