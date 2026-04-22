@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.13](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.12...sma-ng-v1.6.13) (2026-04-22)
+
+
+### Bug Fixes
+
+* derive docker cluster hostnames from host ([4689e33](https://github.com/newdave/sma-ng/commit/4689e333d8a4ca178ea9b71bc3c9d1a5c313d4ce))
+
 ## [1.6.12](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.11...sma-ng-v1.6.12) (2026-04-22)
 
 
