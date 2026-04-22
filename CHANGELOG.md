@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.1...sma-ng-v1.4.2) (2026-04-22)
+
+
+### Bug Fixes
+
+* remove :? validation from non-pg SMA_DAEMON_DB_URL in docker-compose.yml ([4c0867c](https://github.com/newdave/sma-ng/commit/4c0867c351c0bd554cb74194f75e5211e49e0152))
+
 ## [1.4.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.0...sma-ng-v1.4.1) (2026-04-22)
 
 
