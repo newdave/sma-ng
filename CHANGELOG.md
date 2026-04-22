@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.10](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.9...sma-ng-v1.6.10) (2026-04-22)
+
+
+### Features
+
+* add docker deploy tasks for bundled postgres management ([32d80f6](https://github.com/newdave/sma-ng/commit/32d80f6b0398772711924d7e4248879792757847))
+
+
+### Bug Fixes
+
+* docker stuff ([286252e](https://github.com/newdave/sma-ng/commit/286252e2504e904db92d6c73839b09e78120ca48))
+
 ## [1.6.9](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.8...sma-ng-v1.6.9) (2026-04-22)
 
 
