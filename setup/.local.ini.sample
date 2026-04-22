@@ -47,16 +47,14 @@ DAEMON_PORT  = 8585
 # Directory containing docker-compose.yml (defaults to $DEPLOY_DIR/docker).
 # DOCKER_COMPOSE_DIR = /opt/sma/docker
 
-# PostgreSQL credentials — required when DOCKER_PROFILE ends in -pg
-# (e.g. software-pg, intel-pg, nvidia-pg). These are injected as env vars
-# into `docker compose` and used to construct SMA_DAEMON_DB_URL so that
-# both the bundled postgres service and inactive-profile services resolve
-# correctly during compose variable interpolation.
-# POSTGRES_PASSWORD =
-# POSTGRES_USER     = sma
-# POSTGRES_DB       = sma
-# POSTGRES_HOST     = sma-pgsql   # internal compose service name; change only if using external PG
-# SMA_DAEMON_DB_URL =             # set explicitly to override daemon.json db_url
+# PostgreSQL credentials — injected as SMA_DAEMON_DB_* env vars for both
+# the sma-daemon container and the bundled sma-pgsql service (when using
+# a *-pg profile). Only set what differs from the defaults shown.
+# SMA_DAEMON_DB_PASSWORD =          # required for *-pg profiles
+# SMA_DAEMON_DB_USER     = sma
+# SMA_DAEMON_DB_NAME     = sma
+# SMA_DAEMON_DB_HOST     = sma-pgsql
+# SMA_DAEMON_DB_URL      =          # set to bypass component vars entirely
 
 # GitHub credentials for GHCR image access (used by deploy:ghcr-login).
 # GH_TOKEN is fetched automatically from the local 'gh' CLI if not set here.

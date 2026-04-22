@@ -34,30 +34,27 @@ for host in $DEPLOY_HOSTS; do
     continue
   fi
 
-  pg_password=$($cfg POSTGRES_PASSWORD "")
-  pg_user=$($cfg POSTGRES_USER "sma")
-  pg_db=$($cfg POSTGRES_DB "sma")
-  pg_host=$($cfg POSTGRES_HOST "sma-pgsql")
   sma_db_url=$($cfg SMA_DAEMON_DB_URL "")
+  sma_db_host=$($cfg SMA_DAEMON_DB_HOST "")
+  sma_db_port=$($cfg SMA_DAEMON_DB_PORT "")
+  sma_db_user=$($cfg SMA_DAEMON_DB_USER "")
+  sma_db_password=$($cfg SMA_DAEMON_DB_PASSWORD "")
+  sma_db_name=$($cfg SMA_DAEMON_DB_NAME "")
 
   mk_ssh_opts "$port" "$key"
 
-  # Build the docker compose command prefix, injecting PG credentials when set.
-  # For sudo, use `sudo env KEY=val` so the vars are visible to docker compose.
-  # SMA_DAEMON_DB_URL is only injected when explicitly set in .local.ini —
-  # otherwise daemon.json db_url takes effect inside the container.
+  # Build the docker compose command prefix from SMA_DAEMON_DB_* vars read from
+  # .local.ini. These feed both the sma-pgsql service (via POSTGRES_* fallbacks
+  # in compose) and the daemon itself. Only vars that are explicitly set are
+  # injected; unset vars fall back to compose defaults or daemon.json.
   pg_env_str=""
-  if [ -n "$pg_password" ]; then
-    pw_q=$(printf '%q' "$pg_password")
-    user_q=$(printf '%q' "$pg_user")
-    db_q=$(printf '%q' "$pg_db")
-    host_q=$(printf '%q' "$pg_host")
-    pg_env_str="POSTGRES_PASSWORD=${pw_q} POSTGRES_USER=${user_q} POSTGRES_DB=${db_q} POSTGRES_HOST=${host_q} "
-  fi
-  if [ -n "$sma_db_url" ]; then
-    db_url_q=$(printf '%q' "$sma_db_url")
-    pg_env_str="${pg_env_str}SMA_DAEMON_DB_URL=${db_url_q} "
-  fi
+  _append_env() { [ -n "$2" ] && pg_env_str="${pg_env_str}$1=$(printf '%q' "$2") "; }
+  _append_env SMA_DAEMON_DB_URL      "$sma_db_url"
+  _append_env SMA_DAEMON_DB_HOST     "$sma_db_host"
+  _append_env SMA_DAEMON_DB_PORT     "$sma_db_port"
+  _append_env SMA_DAEMON_DB_USER     "$sma_db_user"
+  _append_env SMA_DAEMON_DB_PASSWORD "$sma_db_password"
+  _append_env SMA_DAEMON_DB_NAME     "$sma_db_name"
 
   if [ "$use_sudo" = "true" ] && [ -n "$pg_env_str" ]; then
     compose_cmd="sudo env ${pg_env_str}docker compose"
