@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.6.7](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.6...sma-ng-v1.6.7) (2026-04-22)
+
+
+### Bug Fixes
+
+* honor rewritten paths for config routing ([88de91b](https://github.com/newdave/sma-ng/commit/88de91b4247d9cb956a391cfface7971246fa050))
+* improve daemon status handling under load ([70c92e5](https://github.com/newdave/sma-ng/commit/70c92e586b9d23d21a988dcffacb7af6792eac3f))
+
+
+### Documentation
+
+* clarify logical commit grouping rules ([07bda0a](https://github.com/newdave/sma-ng/commit/07bda0a8d867a7152332682bdfc6905b4d69f042))
+
 ## [1.6.6](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.5...sma-ng-v1.6.6) (2026-04-22)
 
 
