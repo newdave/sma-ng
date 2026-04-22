@@ -80,7 +80,7 @@ services:
     environment:
       POSTGRES_DB: ${SMA_DAEMON_DB_NAME:-${POSTGRES_DB:-sma}}
       POSTGRES_USER: ${SMA_DAEMON_DB_USER:-${POSTGRES_USER:-sma}}
-      POSTGRES_PASSWORD: ${SMA_DAEMON_DB_PASSWORD:-${POSTGRES_PASSWORD:?Set SMA_DAEMON_DB_PASSWORD or POSTGRES_PASSWORD}}
+      POSTGRES_PASSWORD: ${SMA_DAEMON_DB_PASSWORD:-${POSTGRES_PASSWORD:-}}
     volumes:
       - sma-pgdata:/var/lib/postgresql/data
     healthcheck:
