@@ -78,9 +78,12 @@ services:
     networks:
       - sma-net
     environment:
-      POSTGRES_DB: ${SMA_DAEMON_DB_NAME:-${POSTGRES_DB:-sma}}
-      POSTGRES_USER: ${SMA_DAEMON_DB_USER:-${POSTGRES_USER:-sma}}
-      POSTGRES_PASSWORD: ${SMA_DAEMON_DB_PASSWORD:-${POSTGRES_PASSWORD:-}}
+      POSTGRES_DB: ${SMA_DAEMON_DB_NAME}
+      POSTGRES_USER: ${SMA_DAEMON_DB_USER}
+      POSTGRES_PASSWORD: ${SMA_DAEMON_DB_PASSWORD}
+    env_file:
+      - path: /opt/sma/config/daemon.env
+        required: false
     volumes:
       - sma-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -113,16 +116,21 @@ services:
     profiles: [software]
     environment:
       <<: *sma-env
-      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-}
-
+    env_file:
+      - path: /opt/sma/config/daemon.env
+        required: false
   sma-software-pg:
     <<: *sma-common
     container_name: sma-ng-software-pg
     profiles: [software-pg]
     environment:
       <<: *sma-env
+      SMA_DAEMON_DB_URL: postgresql://${SMA_DAEMON_DB_USER:-sma}:${SMA_DAEMON_DB_PASSWORD}@sma-pgsql:5432/${SMA_DAEMON_DB_NAME:-sma}
     depends_on:
       <<: *sma-depends-on-pg
+    env_file:
+      - path: /opt/sma/config/daemon.env
+        required: false
 
   sma-nvidia:
     <<: [*sma-common, *sma-nvidia-deploy]
@@ -130,7 +138,9 @@ services:
     profiles: [nvidia]
     environment:
       <<: [*sma-env, *sma-nvidia-env]
-      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-}
+    env_file:
+      - path: /opt/sma/config/daemon.env
+        required: false
 
   sma-nvidia-pg:
     <<: [*sma-common, *sma-nvidia-deploy]
@@ -138,8 +148,12 @@ services:
     profiles: [nvidia-pg]
     environment:
       <<: [*sma-env, *sma-nvidia-env]
+      SMA_DAEMON_DB_URL: postgresql://${SMA_DAEMON_DB_USER:-sma}:${SMA_DAEMON_DB_PASSWORD}@sma-pgsql:5432/${SMA_DAEMON_DB_NAME:-sma}
     depends_on:
       <<: *sma-depends-on-pg
+    env_file:
+      - path: /opt/sma/config/daemon.env
+        required: false
 
   sma-intel:
     <<: [*sma-common, *sma-intel-device-config]
@@ -147,7 +161,9 @@ services:
     profiles: [intel]
     environment:
       <<: [*sma-env, *sma-intel-env]
-      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-}
+    env_file:
+      - path: /opt/sma/config/daemon.env
+        required: false
 
   sma-intel-pg:
     <<: [*sma-common, *sma-intel-device-config]
@@ -155,8 +171,12 @@ services:
     profiles: [intel-pg]
     environment:
       <<: [*sma-env, *sma-intel-env]
+      SMA_DAEMON_DB_URL: postgresql://${SMA_DAEMON_DB_USER:-sma}:${SMA_DAEMON_DB_PASSWORD}@sma-pgsql:5432/${SMA_DAEMON_DB_NAME:-sma}
     depends_on:
       <<: *sma-depends-on-pg
+    env_file:
+      - path: /opt/sma/config/daemon.env
+        required: false
 
 volumes:
   sma-pgdata:
