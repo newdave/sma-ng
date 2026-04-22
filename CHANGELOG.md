@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.5.0...sma-ng-v1.5.1) (2026-04-22)
+
+
+### Bug Fixes
+
+* apply path_rewrites inside get_config_for_path and get_args_for_path ([d1a34a6](https://github.com/newdave/sma-ng/commit/d1a34a6aafa527cc84b64b48ca46fa040835d71e))
+
 ## [1.5.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.3...sma-ng-v1.5.0) (2026-04-22)
 
 
