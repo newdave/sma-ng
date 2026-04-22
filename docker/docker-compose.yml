@@ -62,9 +62,10 @@ services:
   # ────────────────────────────────────────────────────────────────────
   # PostgreSQL database — only started by the *-pg profiles.
   #
-  # Default credentials (override in .env):
-  #   POSTGRES_PASSWORD=<required>
-  #   POSTGRES_USER=sma  POSTGRES_DB=sma
+  # Credentials resolved from SMA_DAEMON_DB_* first, then POSTGRES_* fallbacks:
+  #   SMA_DAEMON_DB_PASSWORD=<required>  (or POSTGRES_PASSWORD)
+  #   SMA_DAEMON_DB_USER=sma             (or POSTGRES_USER)
+  #   SMA_DAEMON_DB_NAME=sma             (or POSTGRES_DB)
   #
   # Profiles that include this service:
   #   software-pg   intel-pg   nvidia-pg
@@ -77,13 +78,13 @@ services:
     networks:
       - sma-net
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-sma}
-      POSTGRES_USER: ${POSTGRES_USER:-sma}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or environment}
+      POSTGRES_DB: ${SMA_DAEMON_DB_NAME:-${POSTGRES_DB:-sma}}
+      POSTGRES_USER: ${SMA_DAEMON_DB_USER:-${POSTGRES_USER:-sma}}
+      POSTGRES_PASSWORD: ${SMA_DAEMON_DB_PASSWORD:-${POSTGRES_PASSWORD:?Set SMA_DAEMON_DB_PASSWORD or POSTGRES_PASSWORD}}
     volumes:
       - sma-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sma} -d ${POSTGRES_DB:-sma}"]
+      test: ["CMD-SHELL", "pg_isready -U ${SMA_DAEMON_DB_USER:-${POSTGRES_USER:-sma}} -d ${SMA_DAEMON_DB_NAME:-${POSTGRES_DB:-sma}}"]
       interval: 10s
       timeout: 5s
       retries: 5
