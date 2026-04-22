@@ -1,62 +1,3 @@
-x-sma-common: &sma-common
-  image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
-  restart: unless-stopped
-  ports:
-    - "${SMA_PORT:-8585}:8585"
-  volumes:
-    - /opt/sma/config:/config
-    - /opt/sma/logs:/logs
-    - /mnt:/mnt
-    - /mnt/unionfs/downloads:/downloads
-    - /transcodes:/transcodes
-  environment: &sma-env
-    SMA_CONFIG: /config/autoProcess.ini
-    SMA_FFMPEG: /usr/local/bin/ffmpeg
-    SMA_FFPROBE: /usr/local/bin/ffprobe
-    SMA_DAEMON_HOST: ${SMA_DAEMON_HOST:-0.0.0.0}
-    SMA_DAEMON_PORT: ${SMA_DAEMON_PORT:-8585}
-    SMA_DAEMON_WORKERS: ${SMA_DAEMON_WORKERS:-2}
-    SMA_DAEMON_CONFIG: ${SMA_DAEMON_CONFIG:-/config/daemon.json}
-    SMA_DAEMON_LOGS_DIR: ${SMA_DAEMON_LOGS_DIR:-/logs}
-    SMA_DAEMON_API_KEY: ${SMA_DAEMON_API_KEY:-}
-    SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-}
-    SMA_DAEMON_DB_HOST: ${SMA_DAEMON_DB_HOST:-}
-    SMA_DAEMON_DB_PORT: ${SMA_DAEMON_DB_PORT:-}
-    SMA_DAEMON_DB_USER: ${SMA_DAEMON_DB_USER:-}
-    SMA_DAEMON_DB_PASSWORD: ${SMA_DAEMON_DB_PASSWORD:-}
-    SMA_DAEMON_DB_NAME: ${SMA_DAEMON_DB_NAME:-}
-  env_file:
-    - path: /opt/sma/config/daemon.env
-      required: false
-  networks:
-    - sma-net
-
-x-sma-depends-on-pg: &sma-depends-on-pg
-  sma-pgsql:
-    condition: service_healthy
-
-x-sma-nvidia-env: &sma-nvidia-env
-  NVIDIA_VISIBLE_DEVICES: all
-  NVIDIA_DRIVER_CAPABILITIES: video,compute,utility
-
-x-sma-nvidia-deploy: &sma-nvidia-deploy
-  deploy:
-    resources:
-      reservations:
-        devices:
-          - driver: nvidia
-            count: all
-            capabilities: [gpu, video]
-
-x-sma-intel-env: &sma-intel-env
-  LIBVA_DRIVER_NAME: ${LIBVA_DRIVER_NAME:-iHD}
-
-x-sma-intel-device-config: &sma-intel-device-config
-  devices:
-    - /dev/dri/renderD128:/dev/dri/renderD128
-  group_add:
-    - "${RENDER_GID:-109}"
-
 services:
 
   # ────────────────────────────────────────────────────────────────────
@@ -77,17 +18,13 @@ services:
     restart: unless-stopped
     networks:
       - sma-net
-    environment:
-      POSTGRES_DB: ${SMA_DAEMON_DB_NAME}
-      POSTGRES_USER: ${SMA_DAEMON_DB_USER}
-      POSTGRES_PASSWORD: ${SMA_DAEMON_DB_PASSWORD}
     env_file:
       - path: /opt/sma/config/daemon.env
-        required: false
+        required: true
     volumes:
       - sma-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${SMA_DAEMON_DB_USER:-${POSTGRES_USER:-sma}} -d ${SMA_DAEMON_DB_NAME:-${POSTGRES_DB:-sma}}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-sma} -d $${POSTGRES_DB:-sma}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -111,75 +48,149 @@ services:
   #   docker compose --profile nvidia-pg up
   # ────────────────────────────────────────────────────────────────────
   sma-software:
-    <<: *sma-common
+    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-software
     profiles: [software]
-    environment:
-      <<: *sma-env
-      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:?SMA_DAEMON_DB_URL is required (or use a -pg profile for bundled postgres)}
+    restart: unless-stopped
+    ports:
+      - "${SMA_PORT:-8585}:8585"
+    volumes:
+      - /opt/sma/config:/config
+      - /opt/sma/logs:/logs
+      - /mnt:/mnt
+      - /mnt/unionfs/downloads:/downloads
+      - /transcodes:/transcodes
     env_file:
       - path: /opt/sma/config/daemon.env
-        required: false
+        required: true
+    networks:
+      - sma-net
+
   sma-software-pg:
-    <<: *sma-common
+    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-software-pg
     profiles: [software-pg]
-    environment:
-      <<: *sma-env
-      SMA_DAEMON_DB_URL: postgresql://${SMA_DAEMON_DB_USER:-sma}:${SMA_DAEMON_DB_PASSWORD}@sma-pgsql:5432/${SMA_DAEMON_DB_NAME:-sma}
+    restart: unless-stopped
+    ports:
+      - "${SMA_PORT:-8585}:8585"
+    volumes:
+      - /opt/sma/config:/config
+      - /opt/sma/logs:/logs
+      - /mnt:/mnt
+      - /mnt/unionfs/downloads:/downloads
+      - /transcodes:/transcodes
     depends_on:
-      <<: *sma-depends-on-pg
+      sma-pgsql:
+        condition: service_healthy
     env_file:
       - path: /opt/sma/config/daemon.env
-        required: false
+        required: true
+    networks:
+      - sma-net
 
   sma-nvidia:
-    <<: [*sma-common, *sma-nvidia-deploy]
+    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-nvidia
     profiles: [nvidia]
-    environment:
-      <<: [*sma-env, *sma-nvidia-env]
-      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:?SMA_DAEMON_DB_URL is required (or use a -pg profile for bundled postgres)}
+    restart: unless-stopped
+    ports:
+      - "${SMA_PORT:-8585}:8585"
+    volumes:
+      - /opt/sma/config:/config
+      - /opt/sma/logs:/logs
+      - /mnt:/mnt
+      - /mnt/unionfs/downloads:/downloads
+      - /transcodes:/transcodes
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]
     env_file:
       - path: /opt/sma/config/daemon.env
-        required: false
+        required: true
+    networks:
+      - sma-net
 
   sma-nvidia-pg:
-    <<: [*sma-common, *sma-nvidia-deploy]
+    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-nvidia-pg
     profiles: [nvidia-pg]
-    environment:
-      <<: [*sma-env, *sma-nvidia-env]
-      SMA_DAEMON_DB_URL: postgresql://${SMA_DAEMON_DB_USER:-sma}:${SMA_DAEMON_DB_PASSWORD}@sma-pgsql:5432/${SMA_DAEMON_DB_NAME:-sma}
+    restart: unless-stopped
+    ports:
+      - "${SMA_PORT:-8585}:8585"
+    volumes:
+      - /opt/sma/config:/config
+      - /opt/sma/logs:/logs
+      - /mnt:/mnt
+      - /mnt/unionfs/downloads:/downloads
+      - /transcodes:/transcodes
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]
     depends_on:
-      <<: *sma-depends-on-pg
+      sma-pgsql:
+        condition: service_healthy
     env_file:
       - path: /opt/sma/config/daemon.env
-        required: false
+        required: true
+    networks:
+      - sma-net
 
   sma-intel:
-    <<: [*sma-common, *sma-intel-device-config]
+    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-intel
     profiles: [intel]
-    environment:
-      <<: [*sma-env, *sma-intel-env]
-      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:?SMA_DAEMON_DB_URL is required (or use a -pg profile for bundled postgres)}
+    restart: unless-stopped
+    ports:
+      - "${SMA_PORT:-8585}:8585"
+    volumes:
+      - /opt/sma/config:/config
+      - /opt/sma/logs:/logs
+      - /mnt:/mnt
+      - /mnt/unionfs/downloads:/downloads
+      - /transcodes:/transcodes
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    group_add:
+      - "${RENDER_GID:-109}"
     env_file:
       - path: /opt/sma/config/daemon.env
-        required: false
+        required: true
+    networks:
+      - sma-net
 
   sma-intel-pg:
-    <<: [*sma-common, *sma-intel-device-config]
+    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-intel-pg
     profiles: [intel-pg]
-    environment:
-      <<: [*sma-env, *sma-intel-env]
-      SMA_DAEMON_DB_URL: postgresql://${SMA_DAEMON_DB_USER:-sma}:${SMA_DAEMON_DB_PASSWORD}@sma-pgsql:5432/${SMA_DAEMON_DB_NAME:-sma}
+    restart: unless-stopped
+    ports:
+      - "${SMA_PORT:-8585}:8585"
+    volumes:
+      - /opt/sma/config:/config
+      - /opt/sma/logs:/logs
+      - /mnt:/mnt
+      - /mnt/unionfs/downloads:/downloads
+      - /transcodes:/transcodes
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    group_add:
+      - "${RENDER_GID:-109}"
     depends_on:
-      <<: *sma-depends-on-pg
+      sma-pgsql:
+        condition: service_healthy
     env_file:
       - path: /opt/sma/config/daemon.env
-        required: false
+        required: true
+    networks:
+      - sma-net
 
 volumes:
   sma-pgdata:
