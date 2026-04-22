@@ -18,6 +18,11 @@ With the current compose layout, use the two env files for different jobs:
 - `/opt/sma/config/daemon.env` → container/runtime settings (`SMA_DAEMON_*`, `POSTGRES_*`, `LIBVA_DRIVER_NAME`, `NVIDIA_*`)
 - `docker/.env` → Compose interpolation (`SMA_IMAGE_TAG`, `SMA_PORT`, `PGSQL_BIND_IP`, `PGSQL_PORT`, `RENDER_GID`, `VIDEO_GID`)
 
+For clustered Docker deployments, the daemon service hostname is derived from
+the Docker host hostname as `sma-ng-${HOSTNAME}`. Set `HOSTNAME` in
+`docker/.env` (or export it before invoking Compose) so each Docker host
+advertises a stable, distinct cluster node ID.
+
 Bundled PostgreSQL is published on the Docker host by default, so other machines on your network can reach it via the Docker host IP and `PGSQL_PORT` (subject to host firewall rules).
 
 ## 1. Prepare Host Directories
@@ -98,6 +103,7 @@ From the repo root:
 cat > docker/.env <<'EOF'
 SMA_IMAGE_TAG=latest
 SMA_PORT=8585
+HOSTNAME=media-node-a
 PGSQL_BIND_IP=0.0.0.0
 PGSQL_PORT=5432
 # RENDER_GID=109
@@ -109,10 +115,14 @@ Use `docker/.env` only for values that Docker Compose itself expands from `docke
 
 - `SMA_IMAGE_TAG`
 - `SMA_PORT`
+- `HOSTNAME`
 - `PGSQL_BIND_IP`
 - `PGSQL_PORT`
 - `RENDER_GID`
 - `VIDEO_GID`
+
+If you run more than one SMA daemon container on the same host, override the
+service `hostname` values so each daemon still gets a unique cluster node ID.
 
 Put daemon/container settings in `/opt/sma/config/daemon.env` instead.
 
