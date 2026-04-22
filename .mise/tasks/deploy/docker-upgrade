@@ -34,7 +34,29 @@ for host in $DEPLOY_HOSTS; do
     continue
   fi
 
+  pg_password=$($cfg POSTGRES_PASSWORD "")
+  pg_user=$($cfg POSTGRES_USER "sma")
+  pg_db=$($cfg POSTGRES_DB "sma")
+
   mk_ssh_opts "$port" "$key"
+
+  # Build the docker compose command prefix, injecting PG credentials when set.
+  # For sudo, use `sudo env KEY=val` so the vars are visible to docker compose.
+  pg_env_str=""
+  if [ -n "$pg_password" ]; then
+    pw_q=$(printf '%q' "$pg_password")
+    user_q=$(printf '%q' "$pg_user")
+    db_q=$(printf '%q' "$pg_db")
+    pg_env_str="POSTGRES_PASSWORD=${pw_q} POSTGRES_USER=${user_q} POSTGRES_DB=${db_q} "
+  fi
+
+  if [ "$use_sudo" = "true" ] && [ -n "$pg_env_str" ]; then
+    compose_cmd="sudo env ${pg_env_str}docker compose"
+  elif [ "$use_sudo" = "true" ]; then
+    compose_cmd="sudo docker compose"
+  else
+    compose_cmd="${pg_env_str}docker compose"
+  fi
 
   sudo_prefix=""
   [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
@@ -46,7 +68,7 @@ for host in $DEPLOY_HOSTS; do
 
   # Pull the latest image for this profile
   echo "==> [$host] pulling latest image"
-  if ! ssh "${SSH_OPTS[@]}" "$host" "cd $compose_dir && ${sudo_prefix}docker compose --profile $profile pull"; then
+  if ! ssh "${SSH_OPTS[@]}" "$host" "cd $compose_dir && ${compose_cmd} --profile $profile pull"; then
     echo "ERROR: [$host] docker compose pull failed" >&2
     failed="$failed $host"
     continue
@@ -54,7 +76,7 @@ for host in $DEPLOY_HOSTS; do
 
   # Recreate only the SMA service — leave postgres untouched
   echo "==> [$host] recreating $service"
-  if ! ssh "${SSH_OPTS[@]}" "$host" "cd $compose_dir && ${sudo_prefix}docker compose --profile $profile up -d --force-recreate --no-deps $service"; then
+  if ! ssh "${SSH_OPTS[@]}" "$host" "cd $compose_dir && ${compose_cmd} --profile $profile up -d --force-recreate --no-deps $service"; then
     echo "ERROR: [$host] docker compose up failed" >&2
     failed="$failed $host"
     continue
