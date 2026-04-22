@@ -268,12 +268,22 @@ COPY --from=python-builder /venv /venv
 # can access Intel render nodes in environments where the container relies on a
 # fixed supplemental render group.
 RUN if ! getent group render >/dev/null; then \
-        groupadd -g 992 render; \
+    groupadd -g 992 render; \
     fi \
     && usermod -aG render ubuntu
 
 WORKDIR /app
 COPY --chown=ubuntu:ubuntu . .
+
+# Rewrite repo entry-script shebangs for the container venv location.
+# Source checkouts use /opt/sma/venv/bin/python3 for bare-metal installs,
+# while the Docker image builds and runs its virtualenv at /venv.
+RUN find /app -maxdepth 1 -type f \( \
+    -name 'daemon.py' -o \
+    -name 'manual.py' -o \
+    -name 'rename.py' -o \
+    -name 'update.py' \
+    \) -exec sed -i '1s|^#!/opt/sma/venv/bin/python3$|#!/venv/bin/python3|' {} +
 
 # Install entrypoint script (root-owned, world-executable)
 COPY docker/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
