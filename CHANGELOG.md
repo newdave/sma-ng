@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.0...sma-ng-v1.4.1) (2026-04-22)
+
+
+### Bug Fixes
+
+* inject POSTGRES_PASSWORD into docker compose commands in deploy:docker-upgrade ([acf6e83](https://github.com/newdave/sma-ng/commit/acf6e83b034229f3336fd6dc665da2b6b6726836))
+
 ## [1.4.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.5...sma-ng-v1.4.0) (2026-04-22)
 
 
