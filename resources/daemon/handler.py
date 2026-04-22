@@ -672,16 +672,21 @@ class WebhookHandler(BaseHTTPRequestHandler):
         Files are discovered and queued lazily via _walk_media_files so the
         first job is submitted as soon as the first file is found — no full
         tree buffering before work begins.
+
+        The directory is walked at its original (submitted) path; path rewrites
+        are applied to each discovered file individually so jobs are created
+        with the rewritten (e.g. union-mount) paths.
         """
         queued, duplicates = [], []
         for filepath in self._walk_media_files(path):
-            resolved_config = self._resolve_config(filepath, config_override)
-            job_id = self.server.job_db.add_job(filepath, resolved_config, self._merge_args(filepath, extra_args), max_retries=max_retries)
+            job_path = self.server.path_config_manager.rewrite_path(filepath)
+            resolved_config = self._resolve_config(job_path, config_override)
+            job_id = self.server.job_db.add_job(job_path, resolved_config, self._merge_args(job_path, extra_args), max_retries=max_retries)
             if job_id is None:
-                existing = self.server.job_db.find_active_job(filepath)
-                duplicates.append({"path": filepath, "job_id": existing["id"] if existing else None})
+                existing = self.server.job_db.find_active_job(job_path)
+                duplicates.append({"path": job_path, "job_id": existing["id"] if existing else None})
             else:
-                queued.append({"job_id": job_id, "path": filepath, "config": resolved_config})
+                queued.append({"job_id": job_id, "path": job_path, "config": resolved_config})
 
         if not queued and not duplicates:
             self.send_json_response(200, {"status": "empty", "path": path, "message": "No media files found in directory"})
@@ -695,13 +700,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     def _queue_file(self, path, extra_args, config_override, max_retries=0):
         """Queue a single file job and respond."""
-        resolved_config = self._resolve_config(path, config_override)
-        job_id = self.server.job_db.add_job(path, resolved_config, self._merge_args(path, extra_args), max_retries=max_retries)
+        job_path = self.server.path_config_manager.rewrite_path(path)
+        resolved_config = self._resolve_config(job_path, config_override)
+        job_id = self.server.job_db.add_job(job_path, resolved_config, self._merge_args(job_path, extra_args), max_retries=max_retries)
 
         if job_id is None:
-            existing = self.server.job_db.find_active_job(path)
-            self.server.logger.info("Duplicate job submission for: %s" % path)
-            self.send_json_response(200, {"status": "duplicate", "job_id": existing["id"] if existing else None, "path": path, "config": resolved_config})
+            existing = self.server.job_db.find_active_job(job_path)
+            self.server.logger.info("Duplicate job submission for: %s" % job_path)
+            self.send_json_response(200, {"status": "duplicate", "job_id": existing["id"] if existing else None, "path": job_path, "config": resolved_config})
             return
 
         self.server.notify_workers()
@@ -711,12 +717,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
         token = set_job_id(job_id)
         try:
             self.server.logger.info(
-                "Queued job %d: %s (config: %s)" % (job_id, path, resolved_config),
-                extra={"job_id": job_id, "path": path, "config": os.path.basename(resolved_config)},
+                "Queued job %d: %s (config: %s)" % (job_id, job_path, resolved_config),
+                extra={"job_id": job_id, "path": job_path, "config": os.path.basename(resolved_config)},
             )
         finally:
             clear_job_id(token)
-        self.send_json_response(202, {"status": "queued", "job_id": job_id, "path": path, "config": resolved_config, "log_file": log_file, "config_busy": config_busy, "pending_jobs": pending})
+        self.send_json_response(202, {"status": "queued", "job_id": job_id, "path": job_path, "config": resolved_config, "log_file": log_file, "config_busy": config_busy, "pending_jobs": pending})
 
     def _parse_sonarr_body(self):
         """Parse a Sonarr-native webhook payload.
@@ -756,13 +762,19 @@ class WebhookHandler(BaseHTTPRequestHandler):
         return parse_radarr_body(body, self.send_json_response)
 
     def _dispatch_path(self, path, extra_args, config_override=None, max_retries=0):
-        """Shared tail: validate path, rewrite, queue file or directory."""
+        """Shared tail: validate path, queue file or directory.
+
+        Path rewrites are deferred to job-creation time so that a directory
+        submission walks the original (local) path while each discovered file
+        is queued under its rewritten (e.g. union-mount) path.
+        """
         path = os.path.abspath(path)
-        path = self.server.path_config_manager.rewrite_path(path)
         if not os.path.exists(path):
             self.send_json_response(400, {"error": "Path does not exist", "path": path})
             return
-        if self.server.path_config_manager.is_recycle_bin_path(path):
+        # Recycle-bin check uses the rewritten path because recycle dirs are
+        # configured using the canonical (post-rewrite) filesystem view.
+        if self.server.path_config_manager.is_recycle_bin_path(self.server.path_config_manager.rewrite_path(path)):
             self.server.logger.warning("Rejected recycle-bin path: %s" % path)
             self.send_json_response(400, {"error": "Path is inside a recycle-bin directory", "path": path})
             return
