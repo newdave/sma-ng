@@ -191,7 +191,9 @@ Full documentation is in [docs/](docs/) and served at `http://localhost:8585/doc
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please). **Do not manually create `v*` tags.**
 
-Conventional commit types: `fix:` → patch, `feat:` → minor, `feat!:` → major.
+This repository uses release-please's `always-bump-patch` versioning strategy by default, so point releases are the norm and patch numbers are effectively unbounded (for example `1.2.12323` is valid).
+
+Conventional commit types still describe the change, but default release bumps remain patch releases unless intentionally overridden.
 
 ## Claude Code Slash Commands
 
