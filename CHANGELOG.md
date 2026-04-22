@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.8](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.7...sma-ng-v1.6.8) (2026-04-22)
+
+
+### Bug Fixes
+
+* refresh docker runtime configuration ([10f4669](https://github.com/newdave/sma-ng/commit/10f466997b99c22cacc6a6a0231c57a6cee22b47))
+
 ## [1.6.7](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.6...sma-ng-v1.6.7) (2026-04-22)
 
 
