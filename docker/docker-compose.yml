@@ -157,9 +157,10 @@ services:
       - /mnt/unionfs/downloads:/downloads
       - /transcodes:/transcodes
     devices:
-      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/dri:/dev/dri
     group_add:
       - "${RENDER_GID:-109}"
+      - "${VIDEO_GID:-44}"
     env_file:
       - path: /opt/sma/config/daemon.env
         required: true
@@ -180,9 +181,10 @@ services:
       - /mnt/unionfs/downloads:/downloads
       - /transcodes:/transcodes
     devices:
-      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/dri:/dev/dri
     group_add:
       - "${RENDER_GID:-109}"
+      - "${VIDEO_GID:-44}"
     depends_on:
       sma-pgsql:
         condition: service_healthy
