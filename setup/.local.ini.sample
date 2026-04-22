@@ -49,11 +49,14 @@ DAEMON_PORT  = 8585
 
 # PostgreSQL credentials — required when DOCKER_PROFILE ends in -pg
 # (e.g. software-pg, intel-pg, nvidia-pg). These are injected as env vars
-# into `docker compose` so the bundled postgres service and the DB URL
-# interpolation in docker-compose.yml resolve correctly.
+# into `docker compose` and used to construct SMA_DAEMON_DB_URL so that
+# both the bundled postgres service and inactive-profile services resolve
+# correctly during compose variable interpolation.
 # POSTGRES_PASSWORD =
 # POSTGRES_USER     = sma
 # POSTGRES_DB       = sma
+# POSTGRES_HOST     = sma-pgsql   # internal compose service name; change only if using external PG
+# POSTGRES_PORT     = 5432
 
 # Directory containing the ffmpeg and ffprobe binaries on the remote host.
 # Passed as SMA_DAEMON_FFMPEG_DIR so the daemon (or entrypoint) can pick up
