@@ -395,6 +395,10 @@ class TestComposePostgres:
         assert hc is not None
         assert "pg_isready" in str(hc["test"])
 
+    def test_postgres_port_published_on_all_interfaces_by_default(self, compose):
+        ports = compose["services"]["sma-pgsql"]["ports"]
+        assert "${PGSQL_BIND_IP:-0.0.0.0}:${PGSQL_PORT:-5432}:5432" in ports
+
     def test_only_pg_profiles_depend_on_postgres(self, compose):
         for svc in ("sma-software-pg", "sma-intel-pg", "sma-nvidia-pg"):
             dep = compose["services"][svc].get("depends_on", {})

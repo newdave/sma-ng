@@ -1,5 +1,5 @@
 {
-  "default_config": "config/autoProcess.ini",
+  "default_config": "/config/autoProcess.ini",
 
   "_auth_comment": "Choose one auth method, or omit both for auth-less operation (e.g. behind a reverse proxy).",
   "api_key": null,
@@ -31,32 +31,32 @@
   "path_configs": [
     {
       "path": "/mnt/unionfs/Media/TV/1080P",
-      "config": "config/autoProcess.rq.ini",
+      "config": "/config/autoProcess.rq.ini",
       "default_args": ["--tv"]
     },
     {
       "path": "/mnt/unionfs/Media/TV/4K",
-      "config": "config/autoProcess.rq.ini",
+      "config": "/config/autoProcess.rq.ini",
       "default_args": ["--tv"]
     },
     {
       "path": "/mnt/unionfs/Media/Movies/4K",
-      "config": "config/autoProcess.rq.ini",
+      "config": "/config/autoProcess.rq.ini",
       "default_args": ["--movie"]
     },
     {
       "path": "/mnt/unionfs/Media/Movies/1080P",
-      "config": "config/autoProcess.rq.ini",
+      "config": "/config/autoProcess.rq.ini",
       "default_args": ["--movie"]
     },
     {
       "path": "/mnt/unionfs/Media/Kids",
-      "config": "config/autoProcess.lq.ini",
+      "config": "/config/autoProcess.lq.ini",
       "default_args": ["--tv"]
     },
     {
       "path": "/mnt/unionfs/Media/Movies/Kids",
-      "config": "config/autoProcess.lq.ini",
+      "config": "/config/autoProcess.lq.ini",
       "default_args": ["--movie"]
     }
   ]

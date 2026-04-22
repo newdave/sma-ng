@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#MISE description="Recreate bundled PostgreSQL containers on DEPLOY_HOSTS running *-pg profiles"
+#MISE depends=["deploy:check"]
+set -euo pipefail
+
+source "$(dirname "$0")/lib.sh"
+
+ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
+PG_HEALTH_TIMEOUT=${PG_HEALTH_TIMEOUT:-120}
+
+failed=""
+matched=0
+
+for host in $DEPLOY_HOSTS; do
+  init_docker_host_context "$host"
+
+  if [ -z "$profile" ]; then
+    echo "ERROR: [$host] DOCKER_PROFILE is not set in $LOCAL — add it to [deploy] or the host section" >&2
+    failed="$failed $host"
+    continue
+  fi
+
+  if ! docker_profile_is_pg "$profile"; then
+    echo "==> [$host] skipping postgres recreate (profile: $profile)"
+    continue
+  fi
+
+  matched=1
+
+  echo ""
+  pg_volumes=$(capture_remote_pg_volume_names "$host" | awk 'NF' | sort -u)
+
+  echo "==> [$host] stopping and removing sma-pgsql (profile: $profile)"
+  if ! run_remote_compose "$host" "--profile $profile stop sma-pgsql"; then
+    echo "ERROR: [$host] docker compose stop failed for sma-pgsql" >&2
+    failed="$failed $host"
+    continue
+  fi
+
+  if ! run_remote_compose "$host" "--profile $profile rm -f sma-pgsql"; then
+    echo "ERROR: [$host] docker compose rm failed for sma-pgsql" >&2
+    failed="$failed $host"
+    continue
+  fi
+
+  echo "==> [$host] removing sma-pgsql volume"
+  if ! remove_remote_pg_volume "$host" "$pg_volumes"; then
+    echo "ERROR: [$host] failed to remove postgres volume" >&2
+    failed="$failed $host"
+    continue
+  fi
+
+  echo "==> [$host] recreating sma-pgsql (profile: $profile)"
+  if ! run_remote_compose "$host" "--profile $profile up -d --force-recreate --no-deps sma-pgsql"; then
+    echo "ERROR: [$host] docker compose up failed for sma-pgsql" >&2
+    failed="$failed $host"
+    continue
+  fi
+
+  echo "==> [$host] waiting for sma-pgsql to become healthy (timeout: ${PG_HEALTH_TIMEOUT}s)"
+  if ! wait_for_remote_container_health "$host" "sma-postgres" "$PG_HEALTH_TIMEOUT"; then
+    echo "ERROR: [$host] sma-pgsql did not become healthy within ${PG_HEALTH_TIMEOUT}s" >&2
+    failed="$failed $host"
+    continue
+  fi
+
+  print_remote_container_summary "$host" "sma-postgres"
+  echo "==> [$host] done"
+done
+
+if [ "$matched" -eq 0 ]; then
+  echo ""
+  echo "No hosts are configured with a *-pg DOCKER_PROFILE."
+  exit 0
+fi
+
+if [ -n "$failed" ]; then
+  echo ""
+  echo "ERROR: postgres recreate failed for:$failed" >&2
+  exit 1
+fi
+
+echo ""
+echo "Bundled PostgreSQL recreated on matching hosts: $DEPLOY_HOSTS"
