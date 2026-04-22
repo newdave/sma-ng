@@ -13,6 +13,11 @@ The repository ships a compose file at [`docker/docker-compose.yml`](../docker/d
 
 The `-pg` profiles include a bundled PostgreSQL container. The non-`-pg` profiles are for external PostgreSQL or single-node/no-cluster setups where you will supply `SMA_DAEMON_DB_URL` yourself.
 
+With the current compose layout, use the two env files for different jobs:
+
+- `/opt/sma/config/daemon.env` → container/runtime settings (`SMA_DAEMON_*`, `POSTGRES_*`, `LIBVA_DRIVER_NAME`, `NVIDIA_*`)
+- `docker/.env` → Compose interpolation (`SMA_IMAGE_TAG`, `SMA_PORT`, `RENDER_GID`)
+
 ## 1. Prepare Host Directories
 
 Create the persistent directories the compose file expects:
@@ -41,7 +46,7 @@ cp setup/autoProcess.ini.sample /opt/sma/config/autoProcess.ini
 cp setup/daemon.json.sample /opt/sma/config/daemon.json
 ```
 
-If you want environment-variable overrides, also create:
+If you want runtime environment overrides, also create:
 
 ```bash
 cp setup/daemon.env.sample /opt/sma/config/daemon.env 2>/dev/null || true
@@ -83,73 +88,91 @@ Notes:
 - for `*-pg` profiles, `db_url` can stay `null` because the compose environment provides it
 - for non-`-pg` profiles, set `db_url` or `SMA_DAEMON_DB_URL` yourself if you want PostgreSQL-backed clustering
 
-## 5. Create a `.env` File
+## 5. Create a Compose `.env` File
 
 From the repo root:
 
 ```bash
 cat > docker/.env <<'EOF'
-POSTGRES_PASSWORD=change-me-now
-SMA_DAEMON_API_KEY=change-me-too
+SMA_IMAGE_TAG=latest
 SMA_PORT=8585
+# RENDER_GID=109
 EOF
 ```
 
-You can also set:
+Use `docker/.env` only for values that Docker Compose itself expands from `docker-compose.yml`, such as:
 
-- `POSTGRES_USER`
-- `POSTGRES_DB`
-- `PGSQL_PORT`
+- `SMA_IMAGE_TAG`
+- `SMA_PORT`
 - `RENDER_GID`
-- `VIDEO_GID`
-- `LIBVA_DRIVER_NAME`
 
-## 6. Start a Profile
+Put daemon/container settings in `/opt/sma/config/daemon.env` instead.
+
+## 6. Edit `daemon.env`
+
+For bundled PostgreSQL profiles (`software-pg`, `intel-pg`, `nvidia-pg`), set matching `POSTGRES_*` values plus the daemon database URL:
+
+```bash
+POSTGRES_USER=sma
+POSTGRES_DB=sma
+POSTGRES_PASSWORD=change-me-now
+SMA_DAEMON_DB_URL=postgresql://sma:change-me-now@sma-pgsql:5432/sma
+SMA_DAEMON_API_KEY=change-me-too
+```
+
+For non-`-pg` profiles, point the daemon at your external database instead:
+
+```bash
+SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
+SMA_DAEMON_API_KEY=change-me-too
+```
+
+## 7. Start a Profile
 
 From the repo root:
 
 ### Software encode with bundled PostgreSQL
 
 ```bash
-docker compose -f docker/docker-compose.yml --profile software-pg up -d
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile software-pg up -d
 ```
 
 ### Software encode without bundled PostgreSQL
 
 ```bash
-docker compose -f docker/docker-compose.yml --profile software up -d
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile software up -d
 ```
 
 ### Intel QSV with bundled PostgreSQL
 
 ```bash
-docker compose -f docker/docker-compose.yml --profile intel-pg up -d
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile intel-pg up -d
 ```
 
 ### Intel QSV without bundled PostgreSQL
 
 ```bash
-docker compose -f docker/docker-compose.yml --profile intel up -d
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile intel up -d
 ```
 
 ### NVIDIA with bundled PostgreSQL
 
 ```bash
-docker compose -f docker/docker-compose.yml --profile nvidia-pg up -d
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile nvidia-pg up -d
 ```
 
 ### NVIDIA without bundled PostgreSQL
 
 ```bash
-docker compose -f docker/docker-compose.yml --profile nvidia up -d
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile nvidia up -d
 ```
 
-## 7. Verify
+## 8. Verify
 
 Check the containers:
 
 ```bash
-docker compose -f docker/docker-compose.yml ps
+docker compose --env-file docker/.env -f docker/docker-compose.yml ps
 ```
 
 Check daemon health:
@@ -177,13 +200,13 @@ Requirements:
 Quick check:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec sma-intel vainfo
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-intel vainfo
 ```
 
 Or for the bundled-PostgreSQL profile:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec sma-intel-pg vainfo
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-intel-pg vainfo
 ```
 
 ### NVIDIA
@@ -196,13 +219,13 @@ Requirements:
 Quick check:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec sma-nvidia ffmpeg -hide_banner -encoders
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-nvidia ffmpeg -hide_banner -encoders
 ```
 
 Or:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec sma-nvidia-pg ffmpeg -hide_banner -encoders
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-nvidia-pg ffmpeg -hide_banner -encoders
 ```
 
 ## Submitting a Test Job
@@ -242,11 +265,7 @@ Use a non-`-pg` profile and set:
 SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
 ```
 
-Place it in:
-
-- `docker/.env`, or
-- `/opt/sma/config/daemon.env`, or
-- `daemon.json`
+Place it in `/opt/sma/config/daemon.env` or `daemon.json`.
 
 ### Route different media roots to different configs
 
@@ -266,7 +285,7 @@ Pull new code and recreate the selected profile:
 
 ```bash
 git pull --rebase
-docker compose -f docker/docker-compose.yml --profile software-pg up -d --build
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile software-pg up -d --build
 ```
 
 Replace `software-pg` with whichever profile you use.
