@@ -107,6 +107,32 @@ ref-frames = 4
 space = bt2020nc
 transfer = smpte2084
 
+[Analyzer]
+# Analyzer is an optional per-job recommendation layer.
+# The current OpenVINO backend mainly validates runtime and device availability
+# (including NPU selectors) and wires analyzer output into preview/planner hooks.
+# Richer model-backed inference can use these same settings in the future.
+enabled = false
+# backend is reserved for optional analyzer runtimes. The planned backend is
+# OpenVINO, but this does not replace FFmpeg hardware acceleration.
+backend = openvino
+# device is passed to the analyzer runtime, for example AUTO, CPU, GPU, NPU,
+# or composite selectors like AUTO:NPU,CPU when the runtime supports them.
+device = AUTO
+# model-dir points at optional analyzer models for future model-backed inference.
+model-dir =
+# cache-dir stores compiled analyzer artifacts when supported by the backend.
+cache-dir =
+# max-frames reserves how many frames may be sampled per input for future inference.
+max-frames = 12
+# target-width reserves the downscale width for future analyzer frame sampling.
+target-width = 960
+allow-codec-reorder = true
+allow-bitrate-adjustments = true
+allow-preset-adjustments = true
+allow-filter-adjustments = true
+allow-force-reencode = true
+
 [Naming]
 enabled = true
 movie-template = {Movie CleanTitle} ({Release Year}) {[Custom Formats]} {[Quality Full]} {[MediaInfo AudioCodec}{ MediaInfo AudioChannels]} {[MediaInfo VideoDynamicRangeType]} {[MediaInfo VideoCodec]}{-Release Group}

@@ -42,6 +42,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+openvino = [
+    "openvino>=2025.0,<2027",
+]
 qbittorrent = [
     "python-qbittorrent>=0.4.3,<1",
 ]

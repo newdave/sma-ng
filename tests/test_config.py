@@ -823,6 +823,72 @@ class TestReadSettingsUniversalAudio:
         assert settings.ua_first_only is True
 
 
+class TestReadSettingsAnalyzer:
+    """Test Analyzer config parsing."""
+
+    @patch("resources.readsettings.ReadSettings._validate_binaries")
+    def test_analyzer_defaults_are_backfilled(self, mock_validate, tmp_ini):
+        settings = ReadSettings(tmp_ini())
+
+        assert settings.analyzer == {
+            "enabled": False,
+            "backend": "openvino",
+            "device": "AUTO",
+            "model_dir": None,
+            "cache_dir": None,
+            "max_frames": 12,
+            "target_width": 960,
+            "allow_codec_reorder": True,
+            "allow_bitrate_adjustments": True,
+            "allow_preset_adjustments": True,
+            "allow_filter_adjustments": True,
+            "allow_force_reencode": True,
+        }
+
+    @patch("resources.readsettings.ReadSettings._validate_binaries")
+    def test_analyzer_custom_values_are_parsed(self, mock_validate, tmp_ini, tmp_path):
+        ini = tmp_ini()
+        model_dir = tmp_path / "models"
+        cache_dir = tmp_path / "cache"
+        with open(ini, "a") as f:
+            f.write(
+                """
+
+[Analyzer]
+enabled = true
+backend = openvino
+device = NPU
+model-dir = %s
+cache-dir = %s
+max-frames = 24
+target-width = 1280
+allow-codec-reorder = false
+allow-bitrate-adjustments = false
+allow-preset-adjustments = false
+allow-filter-adjustments = false
+allow-force-reencode = false
+"""
+                % (model_dir, cache_dir)
+            )
+
+        settings = ReadSettings(ini)
+
+        assert settings.analyzer == {
+            "enabled": True,
+            "backend": "openvino",
+            "device": "NPU",
+            "model_dir": os.path.normpath(str(model_dir)),
+            "cache_dir": os.path.normpath(str(cache_dir)),
+            "max_frames": 24,
+            "target_width": 1280,
+            "allow_codec_reorder": False,
+            "allow_bitrate_adjustments": False,
+            "allow_preset_adjustments": False,
+            "allow_filter_adjustments": False,
+            "allow_force_reencode": False,
+        }
+
+
 class TestBitrateProfiles:
     """Test _parse_bitrate_profiles static method and vbitrate_profiles attribute."""
 
