@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.3...sma-ng-v1.6.4) (2026-04-22)
+
+
+### Bug Fixes
+
+* defer path rewrites to job-creation time in handler ([f681f03](https://github.com/newdave/sma-ng/commit/f681f031d4d81dc2c3f995549c86375ee3353639))
+* require SMA_DAEMON_DB_URL for non-pg profiles via :? syntax ([2390cb5](https://github.com/newdave/sma-ng/commit/2390cb52b26e64803ded599a3d80b006a3f3a297))
+
 ## [1.6.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.2...sma-ng-v1.6.3) (2026-04-22)
 
 
