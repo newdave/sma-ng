@@ -176,7 +176,7 @@ Create `config/daemon.json` (copy from `setup/daemon.json.sample`) to route file
 | `db_url` | PostgreSQL URL for distributed mode |
 | `ffmpeg_dir` | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion |
 | `media_extensions` | File extensions considered media for directory scanning and `/browse` |
-| `path_rewrites` | Prefix substitutions applied to incoming webhook paths before config matching |
+| `path_rewrites` | Prefix substitutions applied to incoming webhook paths before config matching; overlapping rewrites are matched longest-prefix-first |
 | `scan_paths` | Directories for scheduled background scanning |
 | `path_configs` | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection |
 | `smoke_test` | Run option-generation dry-run against all configs at startup. Exits 1 on failure. |
@@ -184,7 +184,7 @@ Create `config/daemon.json` (copy from `setup/daemon.json.sample`) to route file
 | `recycle_bin_max_age_days` | Delete recycle-bin media files older than this many days (default: `3`, `0` = disabled) |
 | `recycle_bin_min_free_gb` | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled) |
 
-Matching is longest-prefix-first: `/mnt/media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`.
+Matching is longest-prefix-first: `/mnt/media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`. If `path_rewrites` overlap, the most specific rewrite is applied before config matching.
 
 ### Per-Path Default Args
 

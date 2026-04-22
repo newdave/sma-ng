@@ -62,6 +62,53 @@ class TestPathConfigManager:
         assert pcm.get_config_for_path("/mnt/media/Movies/4K/film.mkv") == movies4k_ini
         assert pcm.get_config_for_path("/mnt/media/Movies/regular.mkv") == movies_ini
 
+    def test_rewrite_match_uses_rewritten_path_config(self, tmp_path):
+        config_file = str(tmp_path / "daemon.json")
+        default_ini = str(tmp_path / "default.ini")
+        tv1080_ini = str(tmp_path / "tv1080.ini")
+        for f in [default_ini, tv1080_ini]:
+            open(f, "w").close()
+        with open(config_file, "w") as f:
+            json.dump(
+                {
+                    "default_config": default_ini,
+                    "path_rewrites": [
+                        {"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"},
+                    ],
+                    "path_configs": [
+                        {"path": "/mnt/unionfs/Media/TV/1080P", "config": tv1080_ini},
+                    ],
+                },
+                f,
+            )
+        pcm = PathConfigManager(config_file)
+        assert pcm.get_config_for_path("/mnt/local/Media/TV/1080P/TV Show/Season 01/episode.mkv") == tv1080_ini
+
+    def test_longest_rewrite_prefix_wins(self, tmp_path):
+        config_file = str(tmp_path / "daemon.json")
+        default_ini = str(tmp_path / "default.ini")
+        general_ini = str(tmp_path / "general.ini")
+        specific_ini = str(tmp_path / "specific.ini")
+        for f in [default_ini, general_ini, specific_ini]:
+            open(f, "w").close()
+        with open(config_file, "w") as f:
+            json.dump(
+                {
+                    "default_config": default_ini,
+                    "path_rewrites": [
+                        {"from": "/mnt/local", "to": "/mnt/general"},
+                        {"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"},
+                    ],
+                    "path_configs": [
+                        {"path": "/mnt/general/TV/1080P", "config": general_ini},
+                        {"path": "/mnt/unionfs/Media/TV/1080P", "config": specific_ini},
+                    ],
+                },
+                f,
+            )
+        pcm = PathConfigManager(config_file)
+        assert pcm.get_config_for_path("/mnt/local/Media/TV/1080P/show.mkv") == specific_ini
+
     def test_no_match_uses_default(self, tmp_path):
         config_file = str(tmp_path / "daemon.json")
         ini_file = str(tmp_path / "default.ini")
@@ -1947,6 +1994,31 @@ class TestPathConfigManagerUtils:
         # /mnt/local2 should NOT match /mnt/local rewrite
         result = mgr.rewrite_path("/mnt/local2/file.mkv")
         assert result == "/mnt/local2/file.mkv"
+
+    def test_get_args_for_rewritten_path(self, tmp_path):
+        cfg = tmp_path / "daemon.json"
+        import json as _json
+
+        cfg.write_text(
+            _json.dumps(
+                {
+                    "default_config": "config/autoProcess.ini",
+                    "default_args": ["-nt"],
+                    "path_rewrites": [
+                        {"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"},
+                    ],
+                    "path_configs": [
+                        {
+                            "path": "/mnt/unionfs/Media/TV/1080P",
+                            "config": "config/autoProcess.rq.ini",
+                            "default_args": ["--tv"],
+                        }
+                    ],
+                }
+            )
+        )
+        mgr = PathConfigManager(str(cfg))
+        assert mgr.get_args_for_path("/mnt/local/Media/TV/1080P/Show/episode.mkv") == ["--tv"]
 
 
 # ---------------------------------------------------------------------------
