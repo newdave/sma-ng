@@ -115,7 +115,6 @@ services:
     profiles: [software-pg]
     environment:
       <<: *sma-env
-      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-postgresql://${POSTGRES_USER:-sma}:${POSTGRES_PASSWORD}@sma-pgsql:5432/${POSTGRES_DB:-sma}}
     depends_on:
       <<: *sma-depends-on-pg
 
@@ -133,7 +132,6 @@ services:
     profiles: [nvidia-pg]
     environment:
       <<: [*sma-env, *sma-nvidia-env]
-      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-postgresql://${POSTGRES_USER:-sma}:${POSTGRES_PASSWORD}@sma-pgsql:5432/${POSTGRES_DB:-sma}}
     depends_on:
       <<: *sma-depends-on-pg
 
@@ -151,7 +149,6 @@ services:
     profiles: [intel-pg]
     environment:
       <<: [*sma-env, *sma-intel-env]
-      SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-postgresql://${POSTGRES_USER:-sma}:${POSTGRES_PASSWORD}@sma-pgsql:5432/${POSTGRES_DB:-sma}}
     depends_on:
       <<: *sma-depends-on-pg
 

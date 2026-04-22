@@ -56,7 +56,7 @@ DAEMON_PORT  = 8585
 # POSTGRES_USER     = sma
 # POSTGRES_DB       = sma
 # POSTGRES_HOST     = sma-pgsql   # internal compose service name; change only if using external PG
-# POSTGRES_PORT     = 5432
+# SMA_DAEMON_DB_URL =             # set explicitly to override daemon.json db_url
 
 # GitHub credentials for GHCR image access (used by deploy:ghcr-login).
 # GH_TOKEN is fetched automatically from the local 'gh' CLI if not set here.
