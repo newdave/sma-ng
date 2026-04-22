@@ -133,12 +133,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
     def _get_status(self):
         nodes = self.server.job_db.get_cluster_nodes()
         stats = self.server.job_db.get_stats()
-        # Replace 0.0.0.0 (bind-all address) with the IP the client actually
-        # connected to, so the UI can display a useful address.
-        local_ip = self.connection.getsockname()[0]
-        for node in nodes:
-            if node.get("host") == "0.0.0.0":
-                node["host"] = local_ip
         self.send_json_response(200, {"cluster": nodes, "jobs": stats})
 
     def _get_jobs(self, query):

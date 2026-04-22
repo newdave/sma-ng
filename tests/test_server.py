@@ -1,6 +1,10 @@
 """Tests for _validate_hwaccel, DaemonServer.cancel_job, and WorkerPool."""
 
 import subprocess
+import threading
+import time
+import urllib.request
+from http.server import BaseHTTPRequestHandler
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -367,6 +371,37 @@ class TestDaemonServerNotifyWorkers:
         server.worker_pool.notify.assert_called_once()
 
 
+class _BlockingHealthHandler(BaseHTTPRequestHandler):
+    """Handler used to verify one slow request does not block health checks."""
+
+    block_started = threading.Event()
+    release_block = threading.Event()
+
+    def log_message(self, format, *args):
+        return
+
+    def _send_text(self, body):
+        payload = body.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self):
+        if self.path == "/block":
+            self.__class__.block_started.set()
+            released = self.__class__.release_block.wait(timeout=5)
+            self._send_text("released" if released else "timed-out")
+            return
+
+        if self.path == "/health":
+            self._send_text("ok")
+            return
+
+        self.send_error(404)
+
+
 # ---------------------------------------------------------------------------
 # TestDaemonServerReloadConfig
 # ---------------------------------------------------------------------------
@@ -499,6 +534,70 @@ class TestDaemonServerReloadConfig:
         MockRBC.assert_not_called()
         assert pcm.path_configs == [{"path": "/old", "config": "/old.ini", "default_args": []}]
         logger.error.assert_called_once()
+
+
+class TestDaemonServerConcurrency:
+    def _make_live_server(self):
+        job_db = MagicMock()
+        job_db.pending_count.return_value = 0
+        job_db.is_distributed = False
+        pcm = MagicMock()
+        pcm.scan_paths = []
+        pcm.recycle_bin_max_age_days = 0
+        pcm.recycle_bin_min_free_gb = 0
+        logger = MagicMock()
+
+        with (
+            patch("resources.daemon.server.WorkerPool") as MockPool,
+            patch("resources.daemon.server.HeartbeatThread") as MockHB,
+            patch("resources.daemon.server.ScannerThread") as MockScan,
+            patch("resources.daemon.server.RecycleBinCleanerThread") as MockRBC,
+        ):
+            MockPool.return_value = MagicMock()
+            MockHB.return_value = MagicMock()
+            MockScan.return_value = MagicMock()
+            MockRBC.return_value = MagicMock()
+
+            server = DaemonServer(
+                server_address=("127.0.0.1", 0),
+                handler_class=_BlockingHealthHandler,
+                job_db=job_db,
+                path_config_manager=pcm,
+                config_log_manager=MagicMock(),
+                config_lock_manager=MagicMock(),
+                logger=logger,
+            )
+
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, thread
+
+    def test_blocked_request_does_not_starve_health_checks(self):
+        _BlockingHealthHandler.block_started = threading.Event()
+        _BlockingHealthHandler.release_block = threading.Event()
+        server, thread = self._make_live_server()
+        host, port = server.server_address
+
+        def request_block():
+            with urllib.request.urlopen("http://%s:%d/block" % (host, port), timeout=3) as resp:
+                assert resp.read().decode("utf-8") == "released"
+
+        blocker = threading.Thread(target=request_block, daemon=True)
+        blocker.start()
+
+        try:
+            assert _BlockingHealthHandler.block_started.wait(timeout=1), "blocked request never started"
+
+            started = time.monotonic()
+            with urllib.request.urlopen("http://%s:%d/health" % (host, port), timeout=1) as resp:
+                assert resp.read().decode("utf-8") == "ok"
+            assert time.monotonic() - started < 0.5
+        finally:
+            _BlockingHealthHandler.release_block.set()
+            blocker.join(timeout=2)
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
 
 # ---------------------------------------------------------------------------

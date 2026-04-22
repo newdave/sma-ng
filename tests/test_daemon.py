@@ -4,6 +4,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from unittest.mock import patch
 
 import pytest
 
@@ -22,6 +23,7 @@ from daemon import (
     _load_dashboard_html,
     _render_markdown_to_html,
 )
+from resources.daemon.server import _resolve_advertised_host
 
 DASHBOARD_HTML = _load_dashboard_html()
 
@@ -423,6 +425,22 @@ class TestHealthEndpoint:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req) as resp:
             assert resp.headers.get("Content-Type", "").startswith("application/json")
+
+
+class TestNodeHostResolution:
+    """Tests for advertised host selection in cluster status."""
+
+    def test_resolve_advertised_host_keeps_specific_bind_address(self):
+        assert _resolve_advertised_host("10.0.0.20", "sma-node") == "10.0.0.20"
+
+    def test_resolve_advertised_host_prefers_hostname_resolution_for_bind_all(self):
+        with patch("resources.daemon.server.socket.gethostbyname", return_value="10.30.0.41"):
+            assert _resolve_advertised_host("0.0.0.0", "sma-ng-intel") == "10.30.0.41"
+
+    def test_resolve_advertised_host_falls_back_to_hostname_when_no_ip_found(self):
+        with patch("resources.daemon.server.socket.gethostbyname", side_effect=OSError("no host")):
+            with patch("resources.daemon.server.socket.socket", side_effect=OSError("no route")):
+                assert _resolve_advertised_host("0.0.0.0", "sma-ng-intel") == "sma-ng-intel"
 
 
 class TestLogEndpoints:
