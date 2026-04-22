@@ -581,6 +581,21 @@ REMOTE
   # ── stamp daemon credentials into config/daemon.json and config/daemon.env ──
   daemon_api_key=$("$CFG" "$LOCAL" daemon api_key "")
   daemon_db_url=$("$CFG" "$LOCAL" daemon db_url "")
+  # If [daemon] db_url is not set, construct from SMA_DAEMON_DB_* component vars.
+  if [ -z "$daemon_db_url" ]; then
+    _db_host=$($cfg SMA_DAEMON_DB_HOST "")
+    if [ -n "$_db_host" ]; then
+      _db_user=$($cfg SMA_DAEMON_DB_USER "sma")
+      _db_pw=$($cfg SMA_DAEMON_DB_PASSWORD "")
+      _db_port=$($cfg SMA_DAEMON_DB_PORT "5432")
+      _db_name=$($cfg SMA_DAEMON_DB_NAME "sma")
+      if [ -n "$_db_pw" ]; then
+        daemon_db_url="postgresql://${_db_user}:${_db_pw}@${_db_host}:${_db_port}/${_db_name}"
+      else
+        daemon_db_url="postgresql://${_db_user}@${_db_host}:${_db_port}/${_db_name}"
+      fi
+    fi
+  fi
   daemon_ffmpeg_dir=$("$CFG" "$LOCAL" daemon ffmpeg_dir "")
   # daemon ffmpeg_dir falls back to [deploy]/[host] FFMPEG_DIR if not set
   [ -z "$daemon_ffmpeg_dir" ] && daemon_ffmpeg_dir="$ffmpeg_dir"
