@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.11](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.10...sma-ng-v1.6.11) (2026-04-22)
+
+
+### Bug Fixes
+
+* use shared ssh helper in deploy docker-upgrade health check ([f69d6f3](https://github.com/newdave/sma-ng/commit/f69d6f3fe24f5404b8ed2d6e01e8486b54272041))
+
 ## [1.6.10](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.9...sma-ng-v1.6.10) (2026-04-22)
 
 
