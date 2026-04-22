@@ -17,9 +17,11 @@ import time
 from autoprocess import plex
 from converter import Converter, ConverterError, FFMpegConvertError
 from converter.avcodecs import BaseCodec
+from resources.analyzer import AnalyzerRecommendations, build_recommendations
 from resources.extensions import bad_sub_extensions, subtitle_codec_extensions
 from resources.lang import getAlpha3TCode
 from resources.metadata import Metadata
+from resources.openvino_analyzer import OpenVINOAnalyzerBackend, OpenVINOAnalyzerError
 from resources.postprocess import PostProcessor
 from resources.subtitles import SubtitleProcessor
 
@@ -646,7 +648,11 @@ class MediaProcessor:
         """
         dump = {}
         dump["input"], info = self.generateSourceDict(inputfile, tagdata)
-        dump["output"], dump["preopts"], dump["postopts"], dump["ripsubopts"], dump["downloadedsubs"] = self.generateOptions(inputfile, info=info, original=original, tagdata=tagdata)
+        analyzer_recommendations = self._get_analyzer_recommendations(inputfile, info) if info else AnalyzerRecommendations()
+        dump["analyzer"] = self._serialize_analyzer_recommendations(analyzer_recommendations)
+        dump["output"], dump["preopts"], dump["postopts"], dump["ripsubopts"], dump["downloadedsubs"] = self.generateOptions(
+            inputfile, info=info, original=original, tagdata=tagdata, analyzer_recommendations=analyzer_recommendations
+        )
         if self.canBypassConvert(inputfile, info, dump["output"]):
             dump["output"] = dump["input"]
             dump["output"]["bypassConvert"] = True
@@ -864,8 +870,98 @@ class MediaProcessor:
                 codecs.append(ffpcodec)
         return codecs
 
+    def _get_analyzer_recommendations(self, inputfile, info):
+        """Return bounded per-job analyzer recommendations for the current input."""
+        analyzer_config = getattr(self.settings, "analyzer", None) or {}
+        if not analyzer_config.get("enabled"):
+            return AnalyzerRecommendations()
+
+        backend = (analyzer_config.get("backend") or "").strip().lower()
+        try:
+            if backend == "openvino":
+                observations = OpenVINOAnalyzerBackend(analyzer_config).analyze(inputfile=inputfile, info=info)
+            else:
+                self.log.warning("Analyzer backend '%s' is not supported, skipping analyzer recommendations." % backend)
+                return AnalyzerRecommendations()
+        except OpenVINOAnalyzerError as exc:
+            self.log.warning("Analyzer backend unavailable, continuing without analyzer recommendations: %s" % exc)
+            return AnalyzerRecommendations()
+        except Exception:
+            self.log.exception("Analyzer backend failed unexpectedly, continuing without analyzer recommendations.")
+            return AnalyzerRecommendations()
+
+        return build_recommendations(observations, analyzer_config)
+
+    @staticmethod
+    def _codec_family(codec):
+        """Return a normalized codec family name for analyzer-driven reordering."""
+        if not codec:
+            return codec
+
+        normalized = codec.lower()
+        aliases = {
+            "hevc": "h265",
+            "x265": "h265",
+            "x264": "h264",
+        }
+        for prefix in ["h265", "hevc", "x265", "h264", "x264", "av1", "vp9"]:
+            if normalized.startswith(prefix):
+                return aliases.get(prefix, prefix)
+        return aliases.get(normalized, normalized)
+
+    @classmethod
+    def _reorder_codec_pool(cls, codec_pool, preferred_order):
+        """Return codec_pool reordered by preferred_order while preserving mapped encoder priority within a family."""
+        if not preferred_order:
+            return codec_pool
+
+        reordered = []
+        seen = set()
+        preferred_families = [cls._codec_family(codec) for codec in preferred_order]
+
+        for family in preferred_families:
+            for codec in codec_pool:
+                if cls._codec_family(codec) == family and codec not in seen:
+                    reordered.append(codec)
+                    seen.add(codec)
+
+        for codec in codec_pool:
+            if codec not in seen:
+                reordered.append(codec)
+                seen.add(codec)
+        return reordered or codec_pool
+
+    @staticmethod
+    def _merge_video_filters(current_filter, additional_filters):
+        """Merge new video filters into an existing comma-separated filter string."""
+        filters = [f for f in (current_filter or "").split(",") if f]
+        for new_filter in additional_filters or []:
+            if new_filter and new_filter not in filters:
+                filters.append(new_filter)
+        return ",".join(filters) if filters else None
+
+    @staticmethod
+    def _serialize_analyzer_recommendations(recommendations):
+        """Convert analyzer recommendations into a compact serializable dict."""
+        payload = {
+            "codec_order": recommendations.codec_order,
+            "bitrate_ratio_multiplier": recommendations.bitrate_ratio_multiplier,
+            "max_bitrate_ceiling": recommendations.max_bitrate_ceiling,
+            "preset": recommendations.preset,
+            "filters": recommendations.filters,
+            "force_reencode": recommendations.force_reencode,
+            "reasons": recommendations.reasons,
+        }
+        return {key: value for key, value in payload.items() if value not in (None, [], False, "")}
+
+    def _log_analyzer_recommendations(self, recommendations):
+        """Emit a structured log line when analyzer recommendations are present."""
+        payload = self._serialize_analyzer_recommendations(recommendations)
+        if payload:
+            self.log.info("Analyzer recommendations: %s" % json.dumps(payload, sort_keys=True))
+
     # Generate a dict of options to be passed to FFMPEG based on selected settings and the source file parameters and streams
-    def generateOptions(self, inputfile, info=None, original=None, tagdata=None):
+    def generateOptions(self, inputfile, info=None, original=None, tagdata=None, analyzer_recommendations=None):
         """
         Build the full FFmpeg options dict for converting the input file.
 
@@ -892,6 +988,8 @@ class MediaProcessor:
         self.cleanDispositions(info)
 
         awl, swl = self.safeLanguage(info, tagdata)
+        analyzer_recommendations = analyzer_recommendations or self._get_analyzer_recommendations(inputfile, info)
+        self._log_analyzer_recommendations(analyzer_recommendations)
 
         try:
             self.log.info("Input Data: %s" % json.dumps(info.json, sort_keys=False))
@@ -901,7 +999,7 @@ class MediaProcessor:
         ###############################################################
         # Video stream
         ###############################################################
-        video_settings, vcodecs, vcodec, hdrOutput = self._select_video_codec(inputfile, info, codecs, pix_fmts, tagdata)
+        video_settings, vcodecs, vcodec, hdrOutput = self._select_video_codec(inputfile, info, codecs, pix_fmts, tagdata, analyzer_recommendations=analyzer_recommendations)
 
         ###############################################################
         # Audio streams
@@ -1106,7 +1204,7 @@ class MediaProcessor:
 
         return preopts, postopts
 
-    def _select_video_codec(self, inputfile, info, codecs, pix_fmts, tagdata):
+    def _select_video_codec(self, inputfile, info, codecs, pix_fmts, tagdata, analyzer_recommendations=None):
         """
         Analyse the video stream and determine encoding parameters.
 
@@ -1124,6 +1222,8 @@ class MediaProcessor:
 
         vcodecs = self.settings.hdr.get("codec", []) if hdrInput and len(self.settings.hdr.get("codec", [])) > 0 else self.settings.vcodec
         vcodecs = self.ffprobeSafeCodecs(vcodecs)
+        analyzer_recommendations = analyzer_recommendations or AnalyzerRecommendations()
+        vcodecs = self._reorder_codec_pool(vcodecs, analyzer_recommendations.codec_order)
         self.log.debug("Pool of video codecs is %s." % (vcodecs))
         vcodec = "copy" if info.video.codec in vcodecs else vcodecs[0]
 
@@ -1141,12 +1241,18 @@ class MediaProcessor:
         vbitrate_estimate = self.estimateVideoBitrate(info)
         vbitrate_ratio = self.settings.vbitrateratio.get(info.video.codec, self.settings.vbitrateratio.get("*", 1.0))
         vbitrate = vbitrate_estimate * vbitrate_ratio
+        if analyzer_recommendations.bitrate_ratio_multiplier:
+            vbitrate = vbitrate * analyzer_recommendations.bitrate_ratio_multiplier
+        analyzer_max_bitrate = analyzer_recommendations.max_bitrate_ceiling
+        effective_vmaxbitrate = self.settings.vmaxbitrate
+        if analyzer_max_bitrate:
+            effective_vmaxbitrate = min(effective_vmaxbitrate, analyzer_max_bitrate) if effective_vmaxbitrate else analyzer_max_bitrate
         self.log.debug("Using video bitrate ratio of %f, which results in %f changing to %f." % (vbitrate_ratio, vbitrate_estimate, vbitrate))
-        if self.settings.vmaxbitrate and vbitrate > self.settings.vmaxbitrate:
+        if effective_vmaxbitrate and vbitrate > effective_vmaxbitrate:
             self.log.debug("Overriding video bitrate. Codec cannot be copied because video bitrate is too high [video-max-bitrate].")
             vdebug = vdebug + ".max-bitrate"
             vcodec = vcodecs[0]
-            vbitrate = self.settings.vmaxbitrate
+            vbitrate = effective_vmaxbitrate
 
         vwidth = None
         if self.settings.vwidth and self.settings.vwidth < info.video.video_width:
@@ -1192,10 +1298,20 @@ class MediaProcessor:
             vbufsize = "%dk" % (profile_match["maxrate"] * 2)
             vcodec = vcodecs[0]
             self.log.debug("Bitrate profile matched at source %dkbps: target=%dkbps maxrate=%s bufsize=%s [crf-profiles]." % (vbitrate_estimate, vbitrate, vmaxrate, vbufsize))
-        elif self.settings.vmaxbitrate > 0:
-            vmaxrate = "%dk" % self.settings.vmaxbitrate
-            vbufsize = "%dk" % (self.settings.vmaxbitrate * 2)
+        elif effective_vmaxbitrate > 0:
+            vmaxrate = "%dk" % effective_vmaxbitrate
+            vbufsize = "%dk" % (effective_vmaxbitrate * 2)
             self.log.debug("Setting VBV maxrate=%s bufsize=%s from max-bitrate [video-max-bitrate]." % (vmaxrate, vbufsize))
+
+        if analyzer_max_bitrate:
+            if vbitrate and vbitrate > analyzer_max_bitrate:
+                vbitrate = analyzer_max_bitrate
+            if vmaxrate:
+                vmaxrate = "%dk" % min(int(vmaxrate[:-1]), analyzer_max_bitrate)
+                vbufsize = "%dk" % (int(vmaxrate[:-1]) * 2)
+            elif analyzer_max_bitrate > 0:
+                vmaxrate = "%dk" % analyzer_max_bitrate
+                vbufsize = "%dk" % (analyzer_max_bitrate * 2)
 
         vfilter = self.settings.hdr.get("filter") or None if hdrInput else self.settings.vfilter or None
         if hdrInput and self.settings.hdr.get("filter") and self.settings.hdr.get("forcefilter"):
@@ -1255,6 +1371,20 @@ class MediaProcessor:
                     self.log.info("Pix-fmt adjusted to %s in order to maintain compatible bit-depth <=%d." % (vpix_fmt, vencoder.max_depth))
                 else:
                     self.log.debug("No viable pix-fmt option found for bit-depth %d, leave as %s." % (vencoder.max_depth, vpix_fmt))
+
+        if analyzer_recommendations.force_reencode and vcodec == "copy":
+            vcodec = vcodecs[0]
+            vdebug = vdebug + ".analyzer-force-reencode"
+
+        if analyzer_recommendations.filters:
+            vfilter = self._merge_video_filters(vfilter, analyzer_recommendations.filters)
+            if vcodec == "copy":
+                vcodec = vcodecs[0]
+            vdebug = vdebug + ".analyzer-filter"
+
+        if analyzer_recommendations.preset and vcodec != "copy":
+            vpreset = analyzer_recommendations.preset
+            vdebug = vdebug + ".analyzer-preset"
 
         vframedata = self.normalizeFramedata(info.video.framedata, hdrInput) if self.settings.dynamic_params else None
         if vpix_fmt and vframedata and "pix_fmt" in vframedata and vframedata["pix_fmt"] != vpix_fmt:
