@@ -12,81 +12,80 @@ HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-120}
 
 failed=""
 for host in $DEPLOY_HOSTS; do
-  cfg="$CFG $LOCAL $host"
-  init_docker_host_context "$host"
-  rsync_extra=$($cfg RSYNC_EXTRA "")
-  daemon_port=$($cfg DAEMON_PORT 8585)
-  daemon_api_key=$($cfg DAEMON_API_KEY "")
+    cfg="$CFG $LOCAL $host"
+    init_docker_host_context "$host"
+    rsync_extra=$($cfg RSYNC_EXTRA "")
+    daemon_port=$($cfg DAEMON_PORT 8585)
+    daemon_api_key=$($cfg DAEMON_API_KEY "")
 
-  if [ -z "$profile" ]; then
-    echo "ERROR: [$host] DOCKER_PROFILE is not set in $LOCAL — add it to [deploy] or the host section" >&2
-    failed="$failed $host"
-    continue
-  fi
-
-  service="sma-${profile}"
-
-  echo ""
-  echo "==> [$host] upgrading $service (profile: $profile)"
-
-  if ! sync_codebase_to_host "$host" "$rsync_extra"; then
-    echo "ERROR: [$host] rsync failed" >&2
-    failed="$failed $host"
-    continue
-  fi
-
-  # Pull the latest image for this profile
-  echo "==> [$host] pulling latest image"
-  if ! run_remote_compose "$host" "--profile $profile pull"; then
-    echo "ERROR: [$host] docker compose pull failed" >&2
-    failed="$failed $host"
-    continue
-  fi
-
-  # Recreate only the SMA service — leave postgres untouched
-  echo "==> [$host] recreating $service"
-  if ! run_remote_compose "$host" "--profile $profile up -d --force-recreate --no-deps $service"; then
-    echo "ERROR: [$host] docker compose up failed" >&2
-    failed="$failed $host"
-    continue
-  fi
-
-  # Poll the health endpoint until the daemon is ready
-  echo "==> [$host] waiting for $service to become healthy (timeout: ${HEALTH_TIMEOUT}s)"
-  if [ -n "$daemon_api_key" ]; then
-    health_cmd="curl -sf -H 'X-API-Key: ${daemon_api_key}' http://127.0.0.1:${daemon_port}/health"
-  else
-    health_cmd="curl -sf http://127.0.0.1:${daemon_port}/health"
-  fi
-
-  elapsed=0
-  timed_out=false
-  # shellcheck disable=SC2029
-  while ! ssh "${SSH_OPTS[@]}" "$host" "$health_cmd" >/dev/null 2>&1; do
-    if [ "$elapsed" -ge "$HEALTH_TIMEOUT" ]; then
-      timed_out=true
-      break
+    if [ -z "$profile" ]; then
+        echo "ERROR: [$host] DOCKER_PROFILE is not set in $LOCAL — add it to [deploy] or the host section" >&2
+        failed="$failed $host"
+        continue
     fi
-    sleep 5
-    elapsed=$((elapsed + 5))
-  done
 
-  if [ "$timed_out" = "true" ]; then
-    echo "  WARNING: [$host] $service did not become healthy within ${HEALTH_TIMEOUT}s — check logs" >&2
-  else
-    echo "==> [$host] $service healthy (${elapsed}s)"
-  fi
+    service="sma-${profile}"
 
-  # Print running container summary
-  print_remote_container_summary "$host" "$service"
+    echo ""
+    echo "==> [$host] upgrading $service (profile: $profile)"
 
-  echo "==> [$host] done"
+    if ! sync_codebase_to_host "$host" "$rsync_extra"; then
+        echo "ERROR: [$host] rsync failed" >&2
+        failed="$failed $host"
+        continue
+    fi
+
+    # Pull the latest image for this profile
+    echo "==> [$host] pulling latest image"
+    if ! run_remote_compose "$host" "--profile $profile pull"; then
+        echo "ERROR: [$host] docker compose pull failed" >&2
+        failed="$failed $host"
+        continue
+    fi
+
+    # Recreate only the SMA service — leave postgres untouched
+    echo "==> [$host] recreating $service"
+    if ! run_remote_compose "$host" "--profile $profile up -d --force-recreate --no-deps $service"; then
+        echo "ERROR: [$host] docker compose up failed" >&2
+        failed="$failed $host"
+        continue
+    fi
+
+    # Poll the health endpoint until the daemon is ready
+    echo "==> [$host] waiting for $service to become healthy (timeout: ${HEALTH_TIMEOUT}s)"
+    if [ -n "$daemon_api_key" ]; then
+        health_cmd="curl -sf -H 'X-API-Key: ${daemon_api_key}' http://127.0.0.1:${daemon_port}/health"
+    else
+        health_cmd="curl -sf http://127.0.0.1:${daemon_port}/health"
+    fi
+
+    elapsed=0
+    timed_out=false
+    while ! run_remote_command "$host" "$health_cmd" >/dev/null 2>&1; do
+        if [ "$elapsed" -ge "$HEALTH_TIMEOUT" ]; then
+            timed_out=true
+            break
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+
+    if [ "$timed_out" = "true" ]; then
+        echo "  WARNING: [$host] $service did not become healthy within ${HEALTH_TIMEOUT}s — check logs" >&2
+    else
+        echo "==> [$host] $service healthy (${elapsed}s)"
+    fi
+
+    # Print running container summary
+    print_remote_container_summary "$host" "$service"
+
+    echo "==> [$host] done"
 done
 
 if [ -n "$failed" ]; then
-  echo ""
-  echo "ERROR: docker upgrade failed for:$failed" >&2
-  exit 1
+    echo ""
+    echo "ERROR: docker upgrade failed for:$failed" >&2
+    exit 1
 fi
 
 echo ""
