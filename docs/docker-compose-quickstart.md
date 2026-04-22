@@ -16,7 +16,9 @@ The `-pg` profiles include a bundled PostgreSQL container. The non-`-pg` profile
 With the current compose layout, use the two env files for different jobs:
 
 - `/opt/sma/config/daemon.env` → container/runtime settings (`SMA_DAEMON_*`, `POSTGRES_*`, `LIBVA_DRIVER_NAME`, `NVIDIA_*`)
-- `docker/.env` → Compose interpolation (`SMA_IMAGE_TAG`, `SMA_PORT`, `RENDER_GID`, `VIDEO_GID`)
+- `docker/.env` → Compose interpolation (`SMA_IMAGE_TAG`, `SMA_PORT`, `PGSQL_BIND_IP`, `PGSQL_PORT`, `RENDER_GID`, `VIDEO_GID`)
+
+Bundled PostgreSQL is published on the Docker host by default, so other machines on your network can reach it via the Docker host IP and `PGSQL_PORT` (subject to host firewall rules).
 
 ## 1. Prepare Host Directories
 
@@ -96,6 +98,8 @@ From the repo root:
 cat > docker/.env <<'EOF'
 SMA_IMAGE_TAG=latest
 SMA_PORT=8585
+PGSQL_BIND_IP=0.0.0.0
+PGSQL_PORT=5432
 # RENDER_GID=109
 # VIDEO_GID=44
 EOF
@@ -105,6 +109,8 @@ Use `docker/.env` only for values that Docker Compose itself expands from `docke
 
 - `SMA_IMAGE_TAG`
 - `SMA_PORT`
+- `PGSQL_BIND_IP`
+- `PGSQL_PORT`
 - `RENDER_GID`
 - `VIDEO_GID`
 
@@ -121,6 +127,8 @@ POSTGRES_PASSWORD=change-me-now
 SMA_DAEMON_DB_URL=postgresql://sma:change-me-now@sma-pgsql:5432/sma
 SMA_DAEMON_API_KEY=change-me-too
 ```
+
+Because the bundled PostgreSQL service publishes `5432` on the Docker host by default, external tools can usually connect with a URL like `postgresql://sma:change-me-now@<docker-host-ip>:5432/sma` while compose-managed SMA containers continue using the internal `sma-pgsql` hostname.
 
 For non-`-pg` profiles, point the daemon at your external database instead:
 
@@ -261,6 +269,17 @@ In `docker/.env`:
 ```bash
 SMA_PORT=8686
 ```
+
+### Change or restrict the published PostgreSQL address
+
+In `docker/.env`:
+
+```bash
+PGSQL_BIND_IP=127.0.0.1
+PGSQL_PORT=5433
+```
+
+Use `127.0.0.1` if you want PostgreSQL reachable only from the Docker host. Leave the default `0.0.0.0` binding if you want it reachable via the Docker host IP on your network.
 
 ### Use an external PostgreSQL instance
 

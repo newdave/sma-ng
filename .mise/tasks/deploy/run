@@ -9,29 +9,20 @@ DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 
 failed=""
 for host in $DEPLOY_HOSTS; do
+  cfg="$CFG $LOCAL $host"
   init_host_context "$host"
   branch=$($cfg DEPLOY_BRANCH "")
   rsync_extra=$($cfg RSYNC_EXTRA "")
+  remote_user_for_host=$(echo "$host" | cut -s -d@ -f1)
+  remote_user_for_host="${remote_user_for_host:-$(whoami)}"
+  deploy_dir=$($cfg DEPLOY_DIR ~/sma)
 
   _run_install() {
     run_remote_make "$host" install
   }
 
   echo ""
-  echo "==> [$host] syncing to $dir"
-  # shellcheck disable=SC2086
-  rsync -az --delete \
-    -e "ssh $ssh_opts" \
-    --exclude='.git/' \
-    --exclude='venv/' \
-    --exclude='config/' \
-    --exclude='logs/' \
-    --exclude='__pycache__/' \
-    --exclude='*.pyc' \
-    --exclude='.local' \
-    --exclude='*.egg-info/' \
-    $rsync_extra \
-    . "$host:$dir" || { failed="$failed $host"; continue; }
+  sync_codebase_to_host "$host" "$rsync_extra" || { failed="$failed $host"; continue; }
 
   if [ -n "$branch" ]; then
     echo "==> [$host] checking out $branch"
@@ -47,11 +38,11 @@ for host in $DEPLOY_HOSTS; do
     continue
   }
 
-  echo "==> [$host] updating systemd unit user to $remote_user"
+  echo "==> [$host] updating systemd unit user to $remote_user_for_host"
   run_remote_command "$host" "
     if [ -f /etc/systemd/system/sma-daemon.service ]; then
-      sed 's/^User=.*/User=$remote_user/; s/^Group=.*/Group=$remote_user/' \
-        $dir/setup/sma-daemon.service \
+      sed 's/^User=.*/User=$remote_user_for_host/; s/^Group=.*/Group=$remote_user_for_host/' \
+        $deploy_dir/setup/sma-daemon.service \
         | sudo tee /etc/systemd/system/sma-daemon.service > /dev/null
     fi
   " || { failed="$failed $host"; continue; }

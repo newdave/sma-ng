@@ -94,6 +94,14 @@ mise run deploy:config
 
 # 4. Restart daemon on all hosts
 mise run deploy:restart
+
+# Optional: sync code to Docker hosts, pull the latest image, and recreate
+# only the SMA service for each configured profile
+mise run deploy:docker-upgrade
+
+# Optional: restart or recreate bundled PostgreSQL on hosts using *-pg profiles
+mise run deploy:docker-pg-restart
+mise run deploy:docker-pg-recreate
 ```
 
 ### What `deploy:config` Does
@@ -117,7 +125,13 @@ For each remote host:
 | `deploy:run` | Sync code + install deps + reload systemd on all hosts |
 | `deploy:config` | Roll configs: create missing, merge new keys, stamp credentials |
 | `deploy:restart` | Restart `sma-daemon` on all hosts |
+| `deploy:docker-upgrade` | Rsync the local codebase to each Docker host, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
+| `deploy:docker-pg-restart` | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg` |
+| `deploy:docker-pg-recreate` | Stop bundled PostgreSQL, remove its Docker volume, and recreate it on hosts whose `DOCKER_PROFILE` ends in `-pg` |
 | `deploy:remote-make` | Run an arbitrary make target on all hosts (`REMOTE_MAKE=test mise run deploy:remote-make`) |
+
+The Docker-specific deploy tasks require `DOCKER_PROFILE` to be set per host (or in `[deploy]`) in `setup/.local.ini`. The PostgreSQL lifecycle tasks skip hosts that are not using one of the bundled `*-pg` profiles.
+Use `deploy:docker-pg-recreate` only when you intentionally want a fresh bundled PostgreSQL data directory on the remote host; it removes the compose-managed `sma-pgdata` volume before bringing the service back.
 
 ---
 
@@ -172,6 +186,7 @@ SMA_DAEMON_DB_URL=postgresql://user:pass@host/db make docker-run
 
 For hardware acceleration diagnostics in containers, the runtime image includes `vainfo` and VAAPI userspace drivers.
 For Intel/QSV setups, use either the Intel profile (`docker compose --profile intel up`) or the bundled-PostgreSQL Intel profile (`docker compose --profile intel-pg up`) so `/dev/dri` is mapped into the container. This is important on SR-IOV guests where the Intel VF may appear as `card1` while still using `renderD128`.
+The bundled PostgreSQL compose service publishes `5432` on the Docker host by default using `PGSQL_BIND_IP`/`PGSQL_PORT` from `docker/.env` (defaults: `0.0.0.0` and `5432`). That makes the database reachable via the Docker host IP unless you intentionally restrict it to `127.0.0.1` or a more specific interface.
 
 **Environment variables for Docker:**
 

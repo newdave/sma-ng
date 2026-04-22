@@ -39,7 +39,8 @@ DAEMON_PORT  = 8585
 # shutdown webhook). Must match the api_key in daemon.json / SMA_DAEMON_API_KEY.
 # DAEMON_API_KEY = your_secret_key
 
-# Docker Compose profile for this host (used by deploy:docker-upgrade).
+# Docker Compose profile for this host (used by deploy:docker-upgrade,
+# deploy:docker-pg-restart, and deploy:docker-pg-recreate).
 # Must match one of the profiles defined in docker/docker-compose.yml:
 #   software, software-pg, intel, intel-pg, nvidia, nvidia-pg
 # DOCKER_PROFILE = intel-pg

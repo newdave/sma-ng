@@ -1,30 +1,20 @@
 #!/usr/bin/env bash
-#MISE description="Pull latest Docker image and recreate SMA containers on all DEPLOY_HOSTS"
+#MISE description="Sync code to remote hosts, pull latest Docker image, and recreate SMA containers on all DEPLOY_HOSTS"
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
-LOCAL="setup/.local.ini"
-CFG="scripts/local-config.sh"
+source "$(dirname "$0")/lib.sh"
+
 ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-120}
 
-mk_ssh_opts() {
-  local port="$1" key="$2"
-  SSH_OPTS=(-p "$port" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
-  [ -n "$key" ] && SSH_OPTS+=(-i "$(eval echo "$key")")
-}
-
 failed=""
 for host in $DEPLOY_HOSTS; do
   cfg="$CFG $LOCAL $host"
-  dir=$($cfg DEPLOY_DIR ~/sma)
-  port=$($cfg SSH_PORT 22)
-  key=$($cfg SSH_KEY "")
-  use_sudo=$($cfg DEPLOY_USE_SUDO "false")
-  profile=$($cfg DOCKER_PROFILE "")
-  compose_dir=$($cfg DOCKER_COMPOSE_DIR "$dir/docker")
+  init_docker_host_context "$host"
+  rsync_extra=$($cfg RSYNC_EXTRA "")
   daemon_port=$($cfg DAEMON_PORT 8585)
   daemon_api_key=$($cfg DAEMON_API_KEY "")
 
@@ -34,47 +24,20 @@ for host in $DEPLOY_HOSTS; do
     continue
   fi
 
-  sma_db_url=$($cfg SMA_DAEMON_DB_URL "")
-  sma_db_host=$($cfg SMA_DAEMON_DB_HOST "")
-  sma_db_port=$($cfg SMA_DAEMON_DB_PORT "")
-  sma_db_user=$($cfg SMA_DAEMON_DB_USER "")
-  sma_db_password=$($cfg SMA_DAEMON_DB_PASSWORD "")
-  sma_db_name=$($cfg SMA_DAEMON_DB_NAME "")
-
-  mk_ssh_opts "$port" "$key"
-
-  # Build the docker compose command prefix from SMA_DAEMON_DB_* vars read from
-  # .local.ini. These feed both the sma-pgsql service (via POSTGRES_* fallbacks
-  # in compose) and the daemon itself. Only vars that are explicitly set are
-  # injected; unset vars fall back to compose defaults or daemon.json.
-  pg_env_str=""
-  _append_env() { if [ -n "$2" ]; then pg_env_str="${pg_env_str}$1=$(printf '%q' "$2") "; fi; }
-  _append_env SMA_DAEMON_DB_URL      "$sma_db_url"
-  _append_env SMA_DAEMON_DB_HOST     "$sma_db_host"
-  _append_env SMA_DAEMON_DB_PORT     "$sma_db_port"
-  _append_env SMA_DAEMON_DB_USER     "$sma_db_user"
-  _append_env SMA_DAEMON_DB_PASSWORD "$sma_db_password"
-  _append_env SMA_DAEMON_DB_NAME     "$sma_db_name"
-
-  if [ "$use_sudo" = "true" ] && [ -n "$pg_env_str" ]; then
-    compose_cmd="sudo env ${pg_env_str}docker compose"
-  elif [ "$use_sudo" = "true" ]; then
-    compose_cmd="sudo docker compose"
-  else
-    compose_cmd="${pg_env_str}docker compose"
-  fi
-
-  sudo_prefix=""
-  [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
-
   service="sma-${profile}"
 
   echo ""
   echo "==> [$host] upgrading $service (profile: $profile)"
 
+  if ! sync_codebase_to_host "$host" "$rsync_extra"; then
+    echo "ERROR: [$host] rsync failed" >&2
+    failed="$failed $host"
+    continue
+  fi
+
   # Pull the latest image for this profile
   echo "==> [$host] pulling latest image"
-  if ! ssh "${SSH_OPTS[@]}" "$host" "cd $compose_dir && ${compose_cmd} --profile $profile pull"; then
+  if ! run_remote_compose "$host" "--profile $profile pull"; then
     echo "ERROR: [$host] docker compose pull failed" >&2
     failed="$failed $host"
     continue
@@ -82,7 +45,7 @@ for host in $DEPLOY_HOSTS; do
 
   # Recreate only the SMA service — leave postgres untouched
   echo "==> [$host] recreating $service"
-  if ! ssh "${SSH_OPTS[@]}" "$host" "cd $compose_dir && ${compose_cmd} --profile $profile up -d --force-recreate --no-deps $service"; then
+  if ! run_remote_compose "$host" "--profile $profile up -d --force-recreate --no-deps $service"; then
     echo "ERROR: [$host] docker compose up failed" >&2
     failed="$failed $host"
     continue
@@ -115,9 +78,7 @@ for host in $DEPLOY_HOSTS; do
   fi
 
   # Print running container summary
-  # shellcheck disable=SC2029
-  ssh "${SSH_OPTS[@]}" "$host" \
-    "${sudo_prefix}docker ps --filter name=${service} --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'"
+  print_remote_container_summary "$host" "$service"
 
   echo "==> [$host] done"
 done
