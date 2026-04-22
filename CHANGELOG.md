@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.1...sma-ng-v1.6.2) (2026-04-22)
+
+
+### Bug Fixes
+
+* remove :? from POSTGRES_PASSWORD fallback in docker-compose.yml ([58a8a55](https://github.com/newdave/sma-ng/commit/58a8a55b252dbbcdf4b540da010408ece4d4b932))
+
 ## [1.6.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.0...sma-ng-v1.6.1) (2026-04-22)
 
 
