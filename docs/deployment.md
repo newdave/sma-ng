@@ -203,8 +203,10 @@ See also:
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please). **Do not manually create `v*` tags** — this causes duplicate releases.
 
-Conventional commit types:
+This repository pins release-please to the `always-bump-patch` versioning strategy, so releases default to point releases and patch numbers are not capped. Versions such as `1.2.12323` are valid.
+
+Conventional commit types still control changelog grouping and breaking-change signaling, but by default they do not change the release from a point release:
 
 - `fix:` → patch bump
-- `feat:` → minor bump
-- `feat!:` or `BREAKING CHANGE:` → major bump
+- `feat:` → patch bump
+- `feat!:` or `BREAKING CHANGE:` → patch bump unless a one-off override is used
