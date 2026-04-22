@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.5.2...sma-ng-v1.6.0) (2026-04-22)
+
+
+### Features
+
+* add SMA_DAEMON_DB_* component env vars for PostgreSQL connection ([a585f2d](https://github.com/newdave/sma-ng/commit/a585f2da331069c301e701e4c50721ad1ea38cbb))
+
 ## [1.5.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.5.1...sma-ng-v1.5.2) (2026-04-22)
 
 
