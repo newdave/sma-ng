@@ -56,6 +56,23 @@ log = getLogger("DAEMON")
 _SMOKE_TEST_FIXTURE = os.path.join(SCRIPT_DIR, "tests", "fixtures", "test1.mkv")
 
 
+def _build_db_url_from_env():
+    """Construct a PostgreSQL URL from SMA_DAEMON_DB_* component env vars.
+
+    Returns None if SMA_DAEMON_DB_HOST is not set (the minimum required field).
+    """
+    host = os.environ.get("SMA_DAEMON_DB_HOST", "")
+    if not host:
+        return None
+    user = os.environ.get("SMA_DAEMON_DB_USER", "sma")
+    password = os.environ.get("SMA_DAEMON_DB_PASSWORD", "")
+    port = os.environ.get("SMA_DAEMON_DB_PORT", "5432")
+    dbname = os.environ.get("SMA_DAEMON_DB_NAME", "sma")
+    if password:
+        return "postgresql://%s:%s@%s:%s/%s" % (user, password, host, port, dbname)
+    return "postgresql://%s@%s:%s/%s" % (user, host, port, dbname)
+
+
 def run_smoke_test(path_config_manager, ffmpeg_dir, logger):
     """Run a dry-run option-generation check against every configured autoProcess.ini.
 
@@ -179,11 +196,11 @@ def main():
         if args.smoke_test:
             sys.exit(0)
 
-    # Determine database (priority: env var > config file)
+    # Determine database (priority: env var > component env vars > config file)
     # Note: PostgreSQL URL is not accepted on the CLI to prevent credentials appearing in ps output.
-    db_url = os.environ.get("SMA_DAEMON_DB_URL") or path_config_manager.db_url
+    db_url = os.environ.get("SMA_DAEMON_DB_URL") or _build_db_url_from_env() or path_config_manager.db_url
     if not db_url:
-        log.error("No database URL configured. Set SMA_DAEMON_DB_URL or db_url in daemon.json")
+        log.error("No database URL configured. Set SMA_DAEMON_DB_URL (or SMA_DAEMON_DB_HOST + SMA_DAEMON_DB_PASSWORD) or db_url in daemon.json")
         sys.exit(1)
     job_db = PostgreSQLJobDatabase(db_url, logger=log)
     db_label = "PostgreSQL: %s" % db_url

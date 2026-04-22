@@ -20,6 +20,11 @@ x-sma-common: &sma-common
     SMA_DAEMON_LOGS_DIR: ${SMA_DAEMON_LOGS_DIR:-/logs}
     SMA_DAEMON_API_KEY: ${SMA_DAEMON_API_KEY:-}
     SMA_DAEMON_DB_URL: ${SMA_DAEMON_DB_URL:-}
+    SMA_DAEMON_DB_HOST: ${SMA_DAEMON_DB_HOST:-}
+    SMA_DAEMON_DB_PORT: ${SMA_DAEMON_DB_PORT:-}
+    SMA_DAEMON_DB_USER: ${SMA_DAEMON_DB_USER:-}
+    SMA_DAEMON_DB_PASSWORD: ${SMA_DAEMON_DB_PASSWORD:-}
+    SMA_DAEMON_DB_NAME: ${SMA_DAEMON_DB_NAME:-}
   env_file:
     - path: /opt/sma/config/daemon.env
       required: false
