@@ -211,6 +211,20 @@ class ReadSettings:
             "b-frames": -1,
             "ref-frames": -1,
         },
+        "Analyzer": {
+            "enabled": False,
+            "backend": "openvino",
+            "device": "AUTO",
+            "model-dir": "",
+            "cache-dir": "",
+            "max-frames": 12,
+            "target-width": 960,
+            "allow-codec-reorder": True,
+            "allow-bitrate-adjustments": True,
+            "allow-preset-adjustments": True,
+            "allow-filter-adjustments": True,
+            "allow-force-reencode": True,
+        },
         "Naming": {
             "enabled": False,
             "tv-template": "{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle} [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}",
@@ -596,6 +610,7 @@ class ReadSettings:
         - ``_read_permissions`` — ``[Permissions]`` section
         - ``_read_metadata``   — ``[Metadata]`` section
         - ``_read_video``      — ``[Video]``, ``[HDR]``, and ``[Naming]`` sections
+        - ``_read_analyzer``   — ``[Analyzer]`` section
         - ``_read_audio``      — ``[Audio]``, ``[Audio.Sorting]``, ``[Audio.ChannelFilters]``, and ``[Universal Audio]`` sections
         - ``_read_subtitles``  — ``[Subtitle]`` and its sub-sections
         - ``_read_sonarr_radarr`` — all ``[Sonarr*]`` and ``[Radarr*]`` sections
@@ -612,6 +627,7 @@ class ReadSettings:
         self._read_permissions(config)
         self._read_metadata(config)
         self._read_video(config)
+        self._read_analyzer(config)
         self._read_audio(config)
         self._read_subtitles(config)
         self._read_sonarr_radarr(config)
@@ -795,6 +811,23 @@ class ReadSettings:
         if s.endswith("K"):
             return int(float(s[:-1]))
         return int(s)
+
+    def _read_analyzer(self, config):
+        """Parse ``[Analyzer]`` and set optional per-job recommendation controls."""
+        section = "Analyzer"
+        self.analyzer = {}
+        self.analyzer["enabled"] = config.getboolean(section, "enabled")
+        self.analyzer["backend"] = config.get(section, "backend").strip().lower()
+        self.analyzer["device"] = config.get(section, "device").strip() or "AUTO"
+        self.analyzer["model_dir"] = config.getpath(section, "model-dir")
+        self.analyzer["cache_dir"] = config.getpath(section, "cache-dir")
+        self.analyzer["max_frames"] = config.getint(section, "max-frames")
+        self.analyzer["target_width"] = config.getint(section, "target-width")
+        self.analyzer["allow_codec_reorder"] = config.getboolean(section, "allow-codec-reorder")
+        self.analyzer["allow_bitrate_adjustments"] = config.getboolean(section, "allow-bitrate-adjustments")
+        self.analyzer["allow_preset_adjustments"] = config.getboolean(section, "allow-preset-adjustments")
+        self.analyzer["allow_filter_adjustments"] = config.getboolean(section, "allow-filter-adjustments")
+        self.analyzer["allow_force_reencode"] = config.getboolean(section, "allow-force-reencode")
 
     def _read_audio(self, config):
         """Parse ``[Audio]``, ``[Audio.Sorting]``, ``[Audio.ChannelFilters]``, and ``[Universal Audio]`` and set audio codec, language, bitrate, and sorting attributes."""

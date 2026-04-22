@@ -85,6 +85,67 @@ Override video settings for HDR content (detected automatically).
 
 ---
 
+## [Analyzer]
+
+Optional per-job planning layer for analyzer-assisted transcoding decisions.
+
+It does **not** replace FFmpeg encoding or hardware acceleration. Instead, it provides the config, planner hooks, and preview surfaces that an analyzer backend can use before FFmpeg runs.
+
+Current implementation scope:
+
+- backend selection for analyzer runtime
+- OpenVINO device selection including `CPU`, `GPU`, `NPU`, and composite selectors such as `AUTO:NPU,CPU`
+- bounded recommendation plumbing in the planner for codec ordering, bitrate ceilings, presets, filters, and force-reencode decisions
+- preview output integration via `manual.py -oo`
+
+Current backend status:
+
+- the OpenVINO backend currently validates runtime availability and requested device selection
+- the current OpenVINO backend returns placeholder observations, so analyzer-driven recommendation payloads will usually be empty until richer model-backed inference is added
+- `model-dir`, `cache-dir`, `max-frames`, and `target-width` are forward-compatible analyzer settings; they are reserved for richer model-backed inference as the backend grows
+- if the backend is unavailable or a requested device such as `NPU` is missing, SMA-NG logs a warning and falls back to normal planning
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | bool | `false` | Enable analyzer-assisted planning |
+| `backend` | string | `openvino` | Analyzer backend runtime. Current supported value: `openvino` |
+| `device` | string | `AUTO` | OpenVINO target device selector. Valid examples: `AUTO`, `CPU`, `GPU`, `NPU`, `AUTO:NPU,CPU`, `MULTI:NPU,GPU` |
+| `model-dir` | path | | Optional directory containing analyzer models (reserved for richer future inference) |
+| `cache-dir` | path | | Optional cache directory for compiled analyzer artifacts |
+| `max-frames` | int | `12` | Reserved sampling limit for future model-backed inference |
+| `target-width` | int | `960` | Reserved downscale width for future model-backed inference |
+| `allow-codec-reorder` | bool | `true` | Allow analyzer to reorder the configured video codec pool |
+| `allow-bitrate-adjustments` | bool | `true` | Allow analyzer to change bitrate multipliers / ceilings |
+| `allow-preset-adjustments` | bool | `true` | Allow analyzer to override encoder preset |
+| `allow-filter-adjustments` | bool | `true` | Allow analyzer to add bounded FFmpeg filters such as deinterlace/crop/denoise |
+| `allow-force-reencode` | bool | `true` | Allow analyzer to force re-encode when copy would otherwise be selected |
+
+Example:
+
+```ini
+[Analyzer]
+enabled = true
+backend = openvino
+device = AUTO:NPU,CPU
+model-dir =
+cache-dir = /var/cache/sma-openvino
+max-frames = 12
+target-width = 960
+allow-codec-reorder = true
+allow-bitrate-adjustments = true
+allow-preset-adjustments = true
+allow-filter-adjustments = true
+allow-force-reencode = true
+```
+
+### OpenVINO notes
+
+- Install the optional runtime with `pip install -r setup/requirements-openvino.txt` or `pip install .[openvino]`
+- If `device = NPU` (or `AUTO:NPU,...`) is configured and the runtime reports no NPU, SMA-NG logs a warning and falls back to normal planning instead of failing the entire job
+- Analyzer recommendations are intentionally bounded and local to the current job; they do not mutate your saved `autoProcess.ini`
+
+---
+
 ## [Audio]
 
 | Option | Type | Default | Description |
@@ -285,6 +346,17 @@ Download client integration settings. Each has category/label mappings for routi
 2. `bitrate-ratio` scales the estimate per source codec (e.g., H.264 at 0.65x for HEVC target)
 3. `crf-profiles` selects CRF/maxrate/bufsize tier based on scaled bitrate
 4. `max-bitrate` caps the final result
+
+When `[Analyzer]` is enabled, the analyzer may additionally:
+
+1. reorder the configured codec pool before copy/transcode selection
+2. scale the planned bitrate with `bitrate_ratio_multiplier`
+3. apply a stricter bitrate ceiling than `[Video].max-bitrate`
+4. append bounded filters and force re-encode when those filters require it
+
+### Preview Output (`manual.py -oo`)
+
+The JSON preview now includes an `analyzer` object. It may be empty when the analyzer is disabled or produces no bounded recommendations. When populated, it lets you inspect proposed codec ordering, filters, presets, and force-reencode decisions before any conversion runs.
 
 ### Audio Decision Tree
 
