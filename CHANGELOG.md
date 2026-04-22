@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.5.1...sma-ng-v1.5.2) (2026-04-22)
+
+
+### Bug Fixes
+
+* stop overriding SMA_DAEMON_DB_URL in *-pg compose services and docker-upgrade ([97b353c](https://github.com/newdave/sma-ng/commit/97b353c11b041bad6edb6e6a3028eee7d74564bb))
+
 ## [1.5.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.5.0...sma-ng-v1.5.1) (2026-04-22)
 
 
