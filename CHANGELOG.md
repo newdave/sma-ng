@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.6.5](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.4...sma-ng-v1.6.5) (2026-04-22)
+
+
+### Bug Fixes
+
+* align docker compose env handling ([1f0167a](https://github.com/newdave/sma-ng/commit/1f0167a253447bd471df756bbb63dbd541b9c9e2))
+
+
+### Documentation
+
+* add Codex /errors command mirror ([e239184](https://github.com/newdave/sma-ng/commit/e239184f6bf63500364445bdbe9ec02c1bed3750))
+* update docker compose quickstart env setup ([9fe5c3e](https://github.com/newdave/sma-ng/commit/9fe5c3ed15beb155e31735e5dac9a310fa68484d))
+
 ## [1.6.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.3...sma-ng-v1.6.4) (2026-04-22)
 
 
