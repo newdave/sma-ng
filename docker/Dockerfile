@@ -18,7 +18,8 @@ ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Intel oneVPL (QSV) is only available on amd64 — skip PPA and libvpl-dev on arm64
+# Intel oneVPL (QSV) is only available on amd64 — add the Intel graphics PPA
+# before installing any Intel iGPU-specific packages, and skip that path on arm64.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends software-properties-common \
     && if [ "$TARGETARCH" = "amd64" ]; then \
@@ -172,10 +173,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #   libva2        — VAAPI dispatcher          (--enable-vaapi)
 #   libva-drm2    — VAAPI DRM backend         (--enable-vaapi)
 #   mesa-va-drivers — Generic VAAPI userspace drivers (AMD/Intel fallback)
-#   intel-media-va-driver / i965-va-driver — Intel VAAPI userspace drivers
+#   intel-media-va-driver-non-free / i965-va-driver-shaders — Intel VAAPI userspace drivers
 #   vainfo       — VAAPI capability/debug utility
 #   libdrm2       — DRM/KMS                   (--enable-libdrm)
-#   libvpl2       — Intel oneVPL / QSV        (--enable-libvpl)
+#   libvpl2       — Intel oneVPL dispatcher    (--enable-libvpl)
+#   libmfx1       — Intel Media SDK runtime    (legacy/libmfx compatibility)
+#   libmfx-gen1*  — Intel oneVPL GPU runtime   (QSV implementation backend)
+#   intel-opencl-icd — Intel OpenCL userspace runtime (compute dependency)
+#   intel-gpu-tools — Intel GPU diagnostics    (intel_gpu_top, intel_gpu_time)
 # NVENC: no runtime lib — provided by the NVIDIA host driver
 #         (--enable-ffnvcodec, run with --gpus / --runtime=nvidia)
 #
@@ -202,7 +207,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #
 # Network / TLS:
 #   libssl3       — OpenSSL TLS               (--enable-openssl)
-# Intel oneVPL (libvpl2) is only available on amd64 — skip PPA and package on arm64
+# Intel oneVPL and Intel VA userspace packages are only available/useful on
+# amd64 here — add the Intel graphics PPA before installing any Intel iGPU
+# runtime packages and skip that path on arm64.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends software-properties-common \
     && if [ "$TARGETARCH" = "amd64" ]; then \
@@ -234,12 +241,17 @@ RUN apt-get update \
         libssl3 \
         ca-certificates \
         tini \
-    # oneVPL / Intel QSV runtime and Intel VA userspace drivers — amd64 only
+    # oneVPL / Intel QSV runtime, MFX compatibility libs, and Intel VA userspace drivers — amd64 only
     && if [ "$TARGETARCH" = "amd64" ]; then \
+        if apt-cache show libmfx-gen1 >/dev/null 2>&1; then MFX_GEN_PKG=libmfx-gen1; else MFX_GEN_PKG=libmfx-gen1.2; fi; \
         apt-get install -y --no-install-recommends \
             libvpl2 \
-            intel-media-va-driver \
-            i965-va-driver; \
+            libmfx1 \
+            "$MFX_GEN_PKG" \
+            intel-media-va-driver-non-free \
+            i965-va-driver-shaders \
+                intel-opencl-icd \
+            intel-gpu-tools; \
     fi \
     && apt-get purge -y --auto-remove software-properties-common \
     && rm -rf /var/lib/apt/lists/*
@@ -252,7 +264,14 @@ COPY --from=ffmpeg-builder /usr/local/bin/ffprobe /usr/local/bin/ffprobe
 COPY --from=python-builder /venv /venv
 
 # Copy application code
-# ubuntu:24.04 ships 'ubuntu' at UID/GID 1000 — use it as-is.
+# ubuntu:24.04 ships 'ubuntu' at UID/GID 1000 — use it as-is, but ensure it
+# can access Intel render nodes in environments where the container relies on a
+# fixed supplemental render group.
+RUN if ! getent group render >/dev/null; then \
+        groupadd -g 992 render; \
+    fi \
+    && usermod -aG render ubuntu
+
 WORKDIR /app
 COPY --chown=ubuntu:ubuntu . .
 

@@ -152,6 +152,11 @@ class TestDockerfileFFmpegBuild:
     def test_build_deps_include_vpl_headers(self, dockerfile_raw):
         assert "libvpl-dev" in dockerfile_raw
 
+    def test_intel_graphics_ppa_added_before_vpl_headers(self, dockerfile_raw):
+        ppa_idx = dockerfile_raw.index("add-apt-repository ppa:kobuk-team/intel-graphics")
+        vpl_idx = dockerfile_raw.index("libvpl-dev")
+        assert ppa_idx < vpl_idx
+
     def test_build_cache_cleaned(self, dockerfile_raw):
         # Each RUN that calls apt-get should clean the lists
         assert "rm -rf /var/lib/apt/lists/*" in dockerfile_raw
@@ -162,13 +167,41 @@ class TestDockerfileRuntime:
         for lib in ("libva2", "libva-drm2", "libdrm2", "libvpl2"):
             assert lib in dockerfile_raw, f"Missing GPU runtime lib: {lib}"
 
+    def test_intel_qsv_runtime_mfx_packages_present(self, dockerfile_raw):
+        assert "libmfx1" in dockerfile_raw
+        assert "libmfx-gen1" in dockerfile_raw
+
+    def test_intel_gpu_tools_installed(self, dockerfile_raw):
+        assert "intel-gpu-tools" in dockerfile_raw
+
+    def test_intel_opencl_runtime_installed(self, dockerfile_raw):
+        assert "intel-opencl-icd" in dockerfile_raw
+
+    def test_intel_non_free_va_driver_installed(self, dockerfile_raw):
+        assert "intel-media-va-driver-non-free" in dockerfile_raw
+
+    def test_i965_shader_package_installed(self, dockerfile_raw):
+        assert "i965-va-driver-shaders" in dockerfile_raw
+
+    def test_runtime_ppa_added_before_intel_runtime_packages(self, dockerfile_raw):
+        runtime_ppa_idx = dockerfile_raw.rindex("add-apt-repository ppa:kobuk-team/intel-graphics")
+        non_free_idx = dockerfile_raw.rindex("intel-media-va-driver-non-free")
+        assert runtime_ppa_idx < non_free_idx
+
     def test_tini_installed(self, dockerfile_raw):
         assert "tini" in dockerfile_raw
 
     def test_non_root_user_created(self, dockerfile_raw):
         # ubuntu:24.04 ships the built-in 'ubuntu' user at UID/GID 1000; no
-        # explicit groupadd/useradd needed.
+        # explicit useradd is needed.
         assert "USER ubuntu" in dockerfile_raw
+
+    def test_render_group_created_with_fixed_gid(self, dockerfile_raw):
+        assert "getent group render" in dockerfile_raw
+        assert "groupadd -g 992 render" in dockerfile_raw
+
+    def test_ubuntu_user_added_to_render_group(self, dockerfile_raw):
+        assert "usermod -aG render ubuntu" in dockerfile_raw
 
     def test_user_set_to_sma(self, dockerfile):
         user_instructions = _instructions_of("USER", dockerfile)
@@ -303,6 +336,10 @@ class TestComposeGpuProfiles:
         assert "intel" in compose["services"]["sma-intel"]["profiles"]
         assert "sma-intel-pg" in compose["services"]
         assert "intel-pg" in compose["services"]["sma-intel-pg"]["profiles"]
+
+    def test_intel_services_use_stable_hostname(self, compose):
+        assert compose["services"]["sma-intel"]["hostname"] == "sma-ng-intel"
+        assert compose["services"]["sma-intel-pg"]["hostname"] == "sma-ng-intel"
 
     def test_intel_exposes_render_node(self, compose):
         # Only the render node is needed for headless QSV/VAAPI encoding.
