@@ -21,9 +21,11 @@ permissions:
 jobs:
   # ── Step 1: Run release-please on every push to main ────────────────────────
   # Creates or updates a "Release PR" that bumps pyproject.toml and the
-  # release-please manifest. When that PR is merged, release-please creates
-  # the GitHub Release and the v* tag, then sets release_created=true so
-  # the publish and docker jobs below run.
+  # release-please manifest. This repository uses release-please's
+  # always-bump-patch strategy, so releases default to point releases such as
+  # 1.2.12323. When the Release PR is merged, release-please creates the
+  # GitHub Release and the v* tag, then sets release_created=true so the
+  # publish and docker jobs below run.
   release-please:
     name: Release Please
     runs-on: ubuntu-latest

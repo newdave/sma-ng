@@ -364,7 +364,7 @@ Examples:
 - DB URL: `SMA_DAEMON_DB_URL` / `daemon.json db_url`
 - FFmpeg dir: `--ffmpeg-dir` / `SMA_DAEMON_FFMPEG_DIR` / `daemon.json ffmpeg_dir`
 
-## Documentation
+## Project Documentation
 
 Main documentation lives in `docs/` and is also served at `http://localhost:8585/docs` when the daemon is running.
 
@@ -458,6 +458,8 @@ Docker image tags are `latest`, semver tags, and `main`.
 | `release.yml` | Push to main | release-please manages release PRs and release publishing |
 
 Releases are driven by release-please. The version source of truth is `pyproject.toml` under `[project] version`.
+
+This repository uses release-please's `always-bump-patch` versioning strategy by default, so releases normally advance the point release and patch identifiers are not capped (for example `1.2.12323` is valid).
 
 ## Codex Equivalents For Claude Code Config
 
