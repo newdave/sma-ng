@@ -58,6 +58,12 @@ DAEMON_PORT  = 8585
 # POSTGRES_HOST     = sma-pgsql   # internal compose service name; change only if using external PG
 # POSTGRES_PORT     = 5432
 
+# GitHub credentials for GHCR image access (used by deploy:ghcr-login).
+# GH_TOKEN is fetched automatically from the local 'gh' CLI if not set here.
+# GH_USER is detected automatically via the GitHub API if not set here.
+# GH_TOKEN = ghp_...
+# GH_USER  = your-github-username
+
 # Directory containing the ffmpeg and ffprobe binaries on the remote host.
 # Passed as SMA_DAEMON_FFMPEG_DIR so the daemon (or entrypoint) can pick up
 # the correct paths without editing autoProcess.ini by hand.
