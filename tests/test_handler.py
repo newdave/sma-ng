@@ -1676,7 +1676,8 @@ class TestHandleSonarrWebhook:
             headers={"Content-Length": str(len(body)), "Content-Type": "application/json"},
         )
         h.server.path_config_manager.rewrite_path.side_effect = RuntimeError("boom")
-        h._handle_sonarr_webhook()
+        with patch("os.path.exists", return_value=True), patch("os.path.isdir", return_value=False):
+            h._handle_sonarr_webhook()
         assert h._response_code == 500
 
 
@@ -1699,5 +1700,6 @@ class TestHandleRadarrWebhook:
             headers={"Content-Length": str(len(body)), "Content-Type": "application/json"},
         )
         h.server.path_config_manager.rewrite_path.side_effect = RuntimeError("boom")
-        h._handle_radarr_webhook()
+        with patch("os.path.exists", return_value=True), patch("os.path.isdir", return_value=False):
+            h._handle_radarr_webhook()
         assert h._response_code == 500
