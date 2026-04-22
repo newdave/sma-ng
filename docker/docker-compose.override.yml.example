@@ -11,4 +11,4 @@
 services:
   sma-pgsql:
     ports:
-      - "127.0.0.1:${PGSQL_PORT:-5432}:5432"
+      - "${PGSQL_PORT:-5432}:5432"
