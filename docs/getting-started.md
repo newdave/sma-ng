@@ -19,6 +19,7 @@ Optional:
 
 - qBittorrent integration: `pip install -r setup/requirements-qbittorrent.txt`
 - Deluge integration: `pip install -r setup/requirements-deluge.txt`
+- OpenVINO analyzer runtime: `pip install -r setup/requirements-openvino.txt`
 
 ## What SMA-NG Does
 
@@ -198,8 +199,11 @@ This is the safest first functional test because it exercises:
 - source probing
 - stream selection logic
 - encoder selection
+- optional analyzer recommendations (when `[Analyzer]` is enabled)
 
 without writing output.
+
+If you enable the analyzer, the preview JSON includes an `analyzer` section showing any bounded recommendations. For OpenVINO, you can target `CPU`, `GPU`, `NPU`, or composite selectors such as `AUTO:NPU,CPU`. Today the backend primarily validates runtime/device availability and planner wiring; richer model-backed inference is reserved for later expansion.
 
 ### 4. Test a real conversion
 
@@ -278,6 +282,21 @@ Check:
 - `preset`
 
 This section determines whether you are doing software encode, QSV, VAAPI, or NVENC, and what quality/bitrate model is used.
+
+### `[Analyzer]`
+
+Review this section only after the baseline conversion path already works.
+
+Check:
+
+- `enabled`
+- `backend`
+- `device`
+- `max-frames`
+- `target-width`
+- the `allow-*` toggles
+
+Start with `enabled = false`, get a clean preview/conversion first, then enable it once the rest of the pipeline is stable.
 
 ### `[Audio]`
 

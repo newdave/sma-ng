@@ -1,10 +1,12 @@
 """Tests for resources/mediaprocessor.py - core processing logic."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from converter.ffmpeg import MediaInfo
+from resources.analyzer import AnalyzerObservations, AnalyzerRecommendations
 
 
 class TestEstimateVideoBitrate:
@@ -1089,6 +1091,170 @@ class TestMaxBitrateVBV:
         assert options is not None
         assert options["video"]["maxrate"] is None
         assert options["video"]["bufsize"] is None
+
+
+class TestAnalyzerProcessorIntegration:
+    def _make_mp(self, tmp_ini):
+        with patch("resources.readsettings.ReadSettings._validate_binaries"):
+            from resources.mediaprocessor import MediaProcessor
+            from resources.readsettings import ReadSettings
+
+            settings = ReadSettings(tmp_ini())
+            settings.vcodec = ["h264", "av1"]
+            settings.acodec = ["aac"]
+            settings.scodec = ["mov_text"]
+            settings.scodec_image = []
+            settings.analyzer["enabled"] = True
+            settings.analyzer["backend"] = "openvino"
+            settings.analyzer["device"] = "NPU"
+
+        mock_converter = MagicMock()
+        mock_converter.ffmpeg.codecs = {
+            "h264": {"encoders": ["libx264"], "decoders": []},
+            "av1": {"encoders": ["libsvtav1"], "decoders": []},
+            "aac": {"encoders": ["aac"], "decoders": []},
+            "mov_text": {"encoders": ["mov_text"], "decoders": []},
+        }
+        mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8}
+        mock_converter.ffmpeg.hwaccels = []
+        mock_converter.ffmpeg.hwaccel_decoder.return_value = None
+        mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {
+            "h264": "libx264",
+            "av1": "libsvtav1",
+            "aac": "aac",
+            "mov_text": "mov_text",
+        }.get(c, c)
+
+        mp = MediaProcessor.__new__(MediaProcessor)
+        mp.settings = settings
+        mp.converter = mock_converter
+        mp.log = MagicMock()
+        mp.deletesubs = set()
+        from resources.subtitles import SubtitleProcessor
+
+        mp.subtitles = SubtitleProcessor(mp)
+        return mp
+
+    def test_get_analyzer_recommendations_passes_npu_config_to_backend(self, tmp_ini, make_media_info):
+        mp = self._make_mp(tmp_ini)
+        info = make_media_info()
+
+        with (
+            patch("resources.mediaprocessor.OpenVINOAnalyzerBackend") as mock_backend,
+            patch("resources.mediaprocessor.build_recommendations", return_value=AnalyzerRecommendations(force_reencode=True)) as mock_build,
+        ):
+            backend_instance = mock_backend.return_value
+            backend_instance.analyze.return_value = AnalyzerObservations(content_type="animation")
+
+            recommendations = mp._get_analyzer_recommendations("/fake/input.mkv", info)
+
+        mock_backend.assert_called_once_with(mp.settings.analyzer)
+        backend_instance.analyze.assert_called_once_with(inputfile="/fake/input.mkv", info=info)
+        mock_build.assert_called_once_with(backend_instance.analyze.return_value, mp.settings.analyzer)
+        assert recommendations.force_reencode is True
+
+    def test_generate_options_applies_analyzer_video_overrides(self, tmp_ini, make_media_info):
+        mp = self._make_mp(tmp_ini)
+        info = make_media_info(video_codec="h264", video_bitrate=4000000, total_bitrate=4128000, audio_bitrate=128000)
+
+        recommendations = AnalyzerRecommendations(
+            codec_order=["av1", "h264"],
+            bitrate_ratio_multiplier=1.2,
+            max_bitrate_ceiling=7000,
+            preset="slow",
+            filters=["bwdif"],
+            force_reencode=True,
+        )
+
+        with (
+            patch.object(mp, "_get_analyzer_recommendations", return_value=recommendations),
+            patch("resources.mediaprocessor.Converter.encoder", return_value=None),
+            patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c),
+        ):
+            options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+
+        assert options is not None
+        assert options["video"]["codec"] == "av1"
+        assert options["video"]["preset"] == "slow"
+        assert options["video"]["filter"] == "bwdif"
+        assert options["video"]["bitrate"] == pytest.approx(4560, rel=0.05)
+        assert options["video"]["maxrate"] == "7000k"
+        assert options["video"]["bufsize"] == "14000k"
+        assert ".analyzer-force-reencode" in options["video"]["debug"]
+        assert ".analyzer-filter" in options["video"]["debug"]
+        assert ".analyzer-preset" in options["video"]["debug"]
+
+    def test_generate_options_logs_structured_analyzer_recommendations(self, tmp_ini, make_media_info):
+        mp = self._make_mp(tmp_ini)
+        info = make_media_info()
+
+        recommendations = AnalyzerRecommendations(
+            codec_order=["av1", "h264"],
+            preset="slow",
+            filters=["bwdif"],
+            reasons=["interlaced content requires deinterlacing"],
+        )
+
+        with (
+            patch.object(mp, "_get_analyzer_recommendations", return_value=recommendations),
+            patch("resources.mediaprocessor.Converter.encoder", return_value=None),
+            patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c),
+        ):
+            mp.generateOptions("/fake/input.mkv", info=info)
+
+        logged_messages = [call.args[0] for call in mp.log.info.call_args_list if call.args]
+        assert any("Analyzer recommendations:" in message for message in logged_messages)
+        assert any('"filters": ["bwdif"]' in message for message in logged_messages)
+
+    def test_analyzer_codec_reorder_preserves_hw_encoder_priority_within_family(self, tmp_ini, make_media_info):
+        mp = self._make_mp(tmp_ini)
+        mp.settings.vcodec = ["h265qsv", "h265"]
+        info = make_media_info(video_codec="vp9", video_bitrate=4000000, total_bitrate=4128000, audio_bitrate=128000)
+
+        recommendations = AnalyzerRecommendations(codec_order=["h265"])
+
+        with (
+            patch.object(mp, "_get_analyzer_recommendations", return_value=recommendations),
+            patch("resources.mediaprocessor.Converter.encoder", return_value=None),
+            patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c),
+        ):
+            options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+
+        assert options is not None
+        assert options["video"]["codec"] == "h265qsv"
+
+
+class TestAnalyzerPreviewSurfacing:
+    def test_json_dump_includes_serialized_analyzer_recommendations(self):
+        mp = _make_mp()
+        info = MagicMock()
+        info.video = MagicMock(codec="h264")
+
+        recommendations = AnalyzerRecommendations(
+            codec_order=["av1", "h264"],
+            preset="slow",
+            filters=["bwdif"],
+            force_reencode=True,
+        )
+
+        mp.generateSourceDict = MagicMock(return_value=({"extension": "mkv"}, info))
+        mp._get_analyzer_recommendations = MagicMock(return_value=recommendations)
+        mp.generateOptions = MagicMock(return_value=({"source": ["/fake/input.mkv"], "format": "mp4", "video": {"codec": "av1"}, "audio": [], "subtitle": [], "attachment": []}, [], [], [], []))
+        mp.canBypassConvert = MagicMock(return_value=False)
+        mp.converter.parse_options = MagicMock(return_value={})
+        mp.parseFile = MagicMock(return_value=("/fake", "input", "mkv"))
+        mp.getOutputFile = MagicMock(return_value=("/fake/input.mp4", "/fake"))
+        mp.converter.ffmpeg.generateCommands = MagicMock(return_value=["ffmpeg", "-i", "/fake/input.mkv"])
+
+        dump = json.loads(mp.jsonDump("/fake/input.mkv"))
+
+        assert dump["analyzer"] == {
+            "codec_order": ["av1", "h264"],
+            "filters": ["bwdif"],
+            "force_reencode": True,
+            "preset": "slow",
+        }
+        mp.generateOptions.assert_called_once_with("/fake/input.mkv", info=info, original=None, tagdata=None, analyzer_recommendations=recommendations)
 
 
 def _make_mp():
