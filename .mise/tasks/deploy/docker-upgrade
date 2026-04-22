@@ -37,17 +37,24 @@ for host in $DEPLOY_HOSTS; do
   pg_password=$($cfg POSTGRES_PASSWORD "")
   pg_user=$($cfg POSTGRES_USER "sma")
   pg_db=$($cfg POSTGRES_DB "sma")
+  pg_host=$($cfg POSTGRES_HOST "sma-pgsql")
+  pg_port=$($cfg POSTGRES_PORT "5432")
 
   mk_ssh_opts "$port" "$key"
 
   # Build the docker compose command prefix, injecting PG credentials when set.
   # For sudo, use `sudo env KEY=val` so the vars are visible to docker compose.
+  # Always construct SMA_DAEMON_DB_URL for *-pg profiles so compose can satisfy
+  # :? checks on inactive services that require it.
   pg_env_str=""
   if [ -n "$pg_password" ]; then
     pw_q=$(printf '%q' "$pg_password")
     user_q=$(printf '%q' "$pg_user")
     db_q=$(printf '%q' "$pg_db")
-    pg_env_str="POSTGRES_PASSWORD=${pw_q} POSTGRES_USER=${user_q} POSTGRES_DB=${db_q} "
+    host_q=$(printf '%q' "$pg_host")
+    db_url="postgresql://${pg_user}:${pg_password}@${pg_host}:${pg_port}/${pg_db}"
+    db_url_q=$(printf '%q' "$db_url")
+    pg_env_str="POSTGRES_PASSWORD=${pw_q} POSTGRES_USER=${user_q} POSTGRES_DB=${db_q} POSTGRES_HOST=${host_q} SMA_DAEMON_DB_URL=${db_url_q} "
   fi
 
   if [ "$use_sudo" = "true" ] && [ -n "$pg_env_str" ]; then
