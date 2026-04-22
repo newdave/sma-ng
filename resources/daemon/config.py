@@ -310,7 +310,7 @@ class PathConfigManager:
 
     def get_config_for_path(self, file_path):
         """Get the appropriate config file for a given file path."""
-        file_path = os.path.abspath(file_path)
+        file_path = self.rewrite_path(os.path.abspath(file_path))
 
         for entry in self.path_configs:
             if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
@@ -326,7 +326,7 @@ class PathConfigManager:
 
     def get_args_for_path(self, file_path):
         """Get the default args list for a given file path based on path_configs."""
-        file_path = os.path.abspath(file_path)
+        file_path = self.rewrite_path(os.path.abspath(file_path))
 
         for entry in self.path_configs:
             if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
