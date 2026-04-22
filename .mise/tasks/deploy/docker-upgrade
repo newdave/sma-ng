@@ -48,7 +48,7 @@ for host in $DEPLOY_HOSTS; do
   # in compose) and the daemon itself. Only vars that are explicitly set are
   # injected; unset vars fall back to compose defaults or daemon.json.
   pg_env_str=""
-  _append_env() { [ -n "$2" ] && pg_env_str="${pg_env_str}$1=$(printf '%q' "$2") "; }
+  _append_env() { if [ -n "$2" ]; then pg_env_str="${pg_env_str}$1=$(printf '%q' "$2") "; fi; }
   _append_env SMA_DAEMON_DB_URL      "$sma_db_url"
   _append_env SMA_DAEMON_DB_HOST     "$sma_db_host"
   _append_env SMA_DAEMON_DB_PORT     "$sma_db_port"
