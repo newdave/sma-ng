@@ -464,7 +464,8 @@ Claude-specific files under `.claude/` do not map directly to Codex runtime conf
 Translate the Claude setup as follows:
 
 - `CLAUDE.md` -> `AGENTS.md`
-- `.claude/commands/*.md` -> use the matching shell commands from the sections above
+- `.claude/commands/*.md` -> use the matching shell commands from the sections above unless a repo-local Codex mirror exists under `.codex/commands/`
+- `.codex/commands/*.md` -> Codex-native mirrors of Claude slash-command workflows; keep `.claude/commands/*.md` authoritative and sync Codex copies when the Claude command changes
 - `.claude/agents/*.md` -> follow the same intent directly in Codex:
   - `explorer` -> read-only repo inspection before changing code
   - `implementer` -> make the smallest working code change, then verify
