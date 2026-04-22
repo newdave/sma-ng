@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.2...sma-ng-v1.6.3) (2026-04-22)
+
+
+### Bug Fixes
+
+* wire sma-pgsql internal hostname for -pg compose profiles ([d32e845](https://github.com/newdave/sma-ng/commit/d32e845c3b36460bf5150f7dfdeaafeb9249df30))
+
 ## [1.6.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.1...sma-ng-v1.6.2) (2026-04-22)
 
 
