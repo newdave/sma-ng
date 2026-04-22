@@ -101,8 +101,8 @@ log "Config directory ready: $CONFIG_DIR"
 
 # ── set LIBVA_DRIVER_NAME for Intel VAAPI/QSV ────────────────────────────────
 # Must be set before detect-gpu.sh calls vainfo so the iHD driver is selected.
-# /sys/module/i915 is a lightweight host-kernel check; bochs card devices are
-# excluded from the container by the compose device mapping (renderD128 only).
+# The Intel compose profiles mount /dev/dri so guests with SR-IOV VFs exposed as
+# card1/renderD128 still present the full DRI topology inside the container.
 if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -d /sys/module/i915 ]; then
     export LIBVA_DRIVER_NAME=iHD
     log "LIBVA_DRIVER_NAME=iHD (Intel GPU detected)"
