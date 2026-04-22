@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.5...sma-ng-v1.4.0) (2026-04-22)
+
+
+### Features
+
+* add deploy:docker-upgrade mise task for Docker Compose installations ([881cca7](https://github.com/newdave/sma-ng/commit/881cca7da26a5989e460833bdf0e9aa1e18f25ef))
+
 ## [1.3.5](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.4...sma-ng-v1.3.5) (2026-04-21)
 
 
