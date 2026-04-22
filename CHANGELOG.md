@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.0...sma-ng-v1.6.1) (2026-04-22)
+
+
+### Bug Fixes
+
+* _append_env returns 0 when value is empty under set -e ([c8bcac4](https://github.com/newdave/sma-ng/commit/c8bcac4550047dbfe126718f5fbf2f7f2d76345b))
+
 ## [1.6.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.5.2...sma-ng-v1.6.0) (2026-04-22)
 
 
