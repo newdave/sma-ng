@@ -1,17 +1,61 @@
 import configparser
+import ipaddress
 import os
 import socket
 import subprocess
 import sys
 from datetime import datetime, timezone
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 
 from resources.daemon.threads import HeartbeatThread, RecycleBinCleanerThread, ScannerThread
 from resources.daemon.worker import WorkerPool
 
 
-class DaemonServer(HTTPServer):
+def _is_public_ip_address(value):
+    """Return True when *value* is a concrete non-loopback IP address."""
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return not (ip.is_unspecified or ip.is_loopback)
+
+
+def _resolve_advertised_host(bind_host, node_id):
+    """Return the host value that should be advertised in cluster status.
+
+    Prefer the configured bind host when it is already a concrete address.
+    When the daemon binds to all interfaces (for example ``0.0.0.0`` inside
+    Docker), resolve the node hostname to an address and fall back to the
+    outbound interface address before ultimately falling back to the hostname.
+    """
+    bind_host = (bind_host or "").strip()
+    if bind_host and _is_public_ip_address(bind_host):
+        return bind_host
+
+    try:
+        resolved_host = socket.gethostbyname(node_id)
+        if _is_public_ip_address(resolved_host):
+            return resolved_host
+    except OSError:
+        pass
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            outbound_host = sock.getsockname()[0]
+        if _is_public_ip_address(outbound_host):
+            return outbound_host
+    except OSError:
+        pass
+
+    return node_id
+
+
+class DaemonServer(ThreadingHTTPServer):
     """HTTP server with job queue and worker threads."""
+
+    daemon_threads = True
+    request_queue_size = 128
 
     def __init__(
         self,
@@ -78,7 +122,7 @@ class DaemonServer(HTTPServer):
         self.heartbeat_thread = HeartbeatThread(
             job_db=job_db,
             node_id=self.node_id,
-            host=server_address[0],
+            host=_resolve_advertised_host(server_address[0], self.node_id),
             worker_count=worker_count,
             server=self,
             interval=heartbeat_interval,
