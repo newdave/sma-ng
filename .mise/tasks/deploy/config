@@ -345,12 +345,19 @@ PYREMOTE
 
 # Stamp daemon credentials into config/daemon.json and config/daemon.env.
 # Args: <host> <dir> <daemon_api_key> <daemon_db_url> <daemon_ffmpeg_dir> <services_json>
+#       [daemon_db_user] [daemon_db_pw] [daemon_db_name]
+#
+# For -pg profiles: pass empty daemon_db_url and non-empty component vars; the
+# component vars are stamped into daemon.env for the postgres container.
+# For non-pg profiles: pass daemon_db_url (full URL) and leave component vars empty.
 stamp_daemon_config() {
   local host="$1" dir="$2" daemon_api_key="$3" daemon_db_url="$4" \
-        daemon_ffmpeg_dir="$5" services_json="$6"
+        daemon_ffmpeg_dir="$5" services_json="$6" \
+        daemon_db_user="${7:-}" daemon_db_pw="${8:-}" daemon_db_name="${9:-}"
 
   if [ -z "$daemon_api_key" ] && [ -z "$daemon_db_url" ] && \
-     [ -z "$daemon_ffmpeg_dir" ] && [ "$services_json" = "{}" ]; then
+     [ -z "$daemon_ffmpeg_dir" ] && [ "$services_json" = "{}" ] && \
+     [ -z "$daemon_db_user" ] && [ -z "$daemon_db_pw" ] && [ -z "$daemon_db_name" ]; then
     echo "  no daemon credentials configured in $LOCAL [daemon], skipping"
     return
   fi
@@ -364,6 +371,9 @@ deploy_dir    = sys.argv[1]
 api_key       = """$daemon_api_key"""
 db_url        = """$daemon_db_url"""
 ffmpeg_dir    = """$daemon_ffmpeg_dir"""
+db_user       = """$daemon_db_user"""
+db_pw         = """$daemon_db_pw"""
+db_name       = """$daemon_db_name"""
 services      = json.loads("""$services_json""")
 
 # ── daemon.json ───────────────────────────────────────────────────────────
@@ -408,8 +418,11 @@ else:
 env_path = os.path.join(deploy_dir, 'config', 'daemon.env')
 if os.path.exists(env_path):
     env_vars = {
-        'SMA_DAEMON_API_KEY':   api_key,
-        'SMA_DAEMON_DB_URL':    db_url,
+        'SMA_DAEMON_API_KEY':    api_key,
+        'SMA_DAEMON_DB_URL':     db_url,
+        'SMA_DAEMON_DB_USER':    db_user,
+        'SMA_DAEMON_DB_PASSWORD': db_pw,
+        'SMA_DAEMON_DB_NAME':    db_name,
         'SMA_DAEMON_FFMPEG_DIR': ffmpeg_dir,
     }
     with open(env_path) as f:
@@ -580,26 +593,41 @@ REMOTE
 
   # ── stamp daemon credentials into config/daemon.json and config/daemon.env ──
   daemon_api_key=$("$CFG" "$LOCAL" daemon api_key "")
-  daemon_db_url=$("$CFG" "$LOCAL" daemon db_url "")
-  # If [daemon] db_url is not set, construct from SMA_DAEMON_DB_* component vars.
-  if [ -z "$daemon_db_url" ]; then
-    _db_host=$($cfg SMA_DAEMON_DB_HOST "")
-    if [ -n "$_db_host" ]; then
-      _db_user=$($cfg SMA_DAEMON_DB_USER "sma")
-      _db_pw=$($cfg SMA_DAEMON_DB_PASSWORD "")
-      _db_port=$($cfg SMA_DAEMON_DB_PORT "5432")
-      _db_name=$($cfg SMA_DAEMON_DB_NAME "sma")
-      if [ -n "$_db_pw" ]; then
-        daemon_db_url="postgresql://${_db_user}:${_db_pw}@${_db_host}:${_db_port}/${_db_name}"
-      else
-        daemon_db_url="postgresql://${_db_user}@${_db_host}:${_db_port}/${_db_name}"
+  daemon_ffmpeg_dir=$("$CFG" "$LOCAL" daemon ffmpeg_dir "")
+  [ -z "$daemon_ffmpeg_dir" ] && daemon_ffmpeg_dir="$ffmpeg_dir"
+
+  docker_profile=$($cfg DOCKER_PROFILE "")
+  daemon_db_url=""
+  daemon_db_user=""
+  daemon_db_pw=""
+  daemon_db_name=""
+
+  if [[ "$docker_profile" == *-pg ]]; then
+    # Bundled postgres: compose builds the URL using sma-pgsql as the hostname.
+    # Stamp the credential components so both daemon.env and the postgres container have them.
+    daemon_db_user=$($cfg SMA_DAEMON_DB_USER "sma")
+    daemon_db_pw=$($cfg SMA_DAEMON_DB_PASSWORD "")
+    daemon_db_name=$($cfg SMA_DAEMON_DB_NAME "sma")
+  else
+    # External postgres: [daemon] db_url wins; fall back to building from components.
+    daemon_db_url=$("$CFG" "$LOCAL" daemon db_url "")
+    if [ -z "$daemon_db_url" ]; then
+      _db_host=$($cfg SMA_DAEMON_DB_HOST "")
+      if [ -n "$_db_host" ]; then
+        _db_user=$($cfg SMA_DAEMON_DB_USER "sma")
+        _db_pw=$($cfg SMA_DAEMON_DB_PASSWORD "")
+        _db_port=$($cfg SMA_DAEMON_DB_PORT "5432")
+        _db_name=$($cfg SMA_DAEMON_DB_NAME "sma")
+        if [ -n "$_db_pw" ]; then
+          daemon_db_url="postgresql://${_db_user}:${_db_pw}@${_db_host}:${_db_port}/${_db_name}"
+        else
+          daemon_db_url="postgresql://${_db_user}@${_db_host}:${_db_port}/${_db_name}"
+        fi
       fi
     fi
   fi
-  daemon_ffmpeg_dir=$("$CFG" "$LOCAL" daemon ffmpeg_dir "")
-  # daemon ffmpeg_dir falls back to [deploy]/[host] FFMPEG_DIR if not set
-  [ -z "$daemon_ffmpeg_dir" ] && daemon_ffmpeg_dir="$ffmpeg_dir"
-  stamp_daemon_config "$host" "$dir" "$daemon_api_key" "$daemon_db_url" "$daemon_ffmpeg_dir" "$services_json"
+  stamp_daemon_config "$host" "$dir" "$daemon_api_key" "$daemon_db_url" "$daemon_ffmpeg_dir" \
+    "$services_json" "$daemon_db_user" "$daemon_db_pw" "$daemon_db_name"
 
   # ── deploy post-process scripts ──────────────────────────────────────────
   plex_token=$("$CFG" "$LOCAL" Plex token "")
