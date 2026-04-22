@@ -47,6 +47,14 @@ DAEMON_PORT  = 8585
 # Directory containing docker-compose.yml (defaults to $DEPLOY_DIR/docker).
 # DOCKER_COMPOSE_DIR = /opt/sma/docker
 
+# PostgreSQL credentials — required when DOCKER_PROFILE ends in -pg
+# (e.g. software-pg, intel-pg, nvidia-pg). These are injected as env vars
+# into `docker compose` so the bundled postgres service and the DB URL
+# interpolation in docker-compose.yml resolve correctly.
+# POSTGRES_PASSWORD =
+# POSTGRES_USER     = sma
+# POSTGRES_DB       = sma
+
 # Directory containing the ffmpeg and ffprobe binaries on the remote host.
 # Passed as SMA_DAEMON_FFMPEG_DIR so the daemon (or entrypoint) can pick up
 # the correct paths without editing autoProcess.ini by hand.
