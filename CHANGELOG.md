@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.6](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.5...sma-ng-v1.6.6) (2026-04-22)
+
+
+### Bug Fixes
+
+* expose full DRI topology for Intel SR-IOV guests ([3755897](https://github.com/newdave/sma-ng/commit/3755897fb348620b19770a1cea61e862790e5c1b))
+
+
+### Documentation
+
+* document Intel SR-IOV docker requirements ([2ad65d4](https://github.com/newdave/sma-ng/commit/2ad65d47bad36f3099fd12f3fc7736bc115c3c62))
+
 ## [1.6.5](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.4...sma-ng-v1.6.5) (2026-04-22)
 
 
