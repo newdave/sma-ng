@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.9](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.8...sma-ng-v1.6.9) (2026-04-22)
+
+
+### Features
+
+* add analyzer config and openvino backend scaffold ([c7624c9](https://github.com/newdave/sma-ng/commit/c7624c92d395409c8cd9ece2b6c3b581db7de435))
+* apply analyzer recommendations in media planning ([6bac61a](https://github.com/newdave/sma-ng/commit/6bac61ad19c6585030b521d8c1a727a8b2c84963))
+
 ## [1.6.8](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.7...sma-ng-v1.6.8) (2026-04-22)
 
 
