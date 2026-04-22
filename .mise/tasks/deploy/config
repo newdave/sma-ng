@@ -42,7 +42,7 @@ detect_remote_gpu() {
   ssh "${SSH_OPTS[@]}" "$host" 'bash -s' <<'REMOTE'
     if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
       echo nvenc
-    elif [ -d /sys/module/i915 ] || (command -v vainfo >/dev/null 2>&1 && vainfo 2>&1 | grep -qi intel); then
+    elif command -v vainfo >/dev/null 2>&1 && vainfo 2>&1 | grep -qi intel; then
       echo qsv
     elif [ -e /dev/dri/renderD128 ] && command -v vainfo >/dev/null 2>&1 && vainfo >/dev/null 2>&1; then
       echo vaapi

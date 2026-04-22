@@ -39,6 +39,14 @@ DAEMON_PORT  = 8585
 # shutdown webhook). Must match the api_key in daemon.json / SMA_DAEMON_API_KEY.
 # DAEMON_API_KEY = your_secret_key
 
+# Docker Compose profile for this host (used by deploy:docker-upgrade).
+# Must match one of the profiles defined in docker/docker-compose.yml:
+#   software, software-pg, intel, intel-pg, nvidia, nvidia-pg
+# DOCKER_PROFILE = intel-pg
+
+# Directory containing docker-compose.yml (defaults to $DEPLOY_DIR/docker).
+# DOCKER_COMPOSE_DIR = /opt/sma/docker
+
 # Directory containing the ffmpeg and ffprobe binaries on the remote host.
 # Passed as SMA_DAEMON_FFMPEG_DIR so the daemon (or entrypoint) can pick up
 # the correct paths without editing autoProcess.ini by hand.
@@ -173,6 +181,7 @@ DEPLOY_DIR   = /opt/sma
 SSH_KEY      = ~/.ssh/id_ed25519_sma
 REMOTE_MAKE  = install restart
 FFMPEG_DIR   = /opt/ffmpeg/bin
+DOCKER_PROFILE = intel-pg
 
 [user@server2.example.com]
 SSH_PORT     = 2222
