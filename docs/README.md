@@ -575,10 +575,11 @@ Public endpoints (no auth): `/`, `/dashboard`, `/health`, `/status`, `/docs`, `/
 | `db_url` | PostgreSQL URL for distributed mode (overridable via `--db-url` or `SMA_DAEMON_DB_URL`) |
 | `ffmpeg_dir` | Directory containing `ffmpeg`/`ffprobe` binaries. Prepended to PATH for each conversion. Overridable via `--ffmpeg-dir` or `SMA_DAEMON_FFMPEG_DIR` |
 | `media_extensions` | File extensions considered media files for directory scanning and `/browse` (default: `.mp4 .mkv .avi .mov .ts`) |
+| `path_rewrites` | Prefix substitutions applied before config matching; overlapping rewrites are matched longest-prefix-first |
 | `scan_paths` | Directories for scheduled background scanning. See [Scheduled Directory Scanning](#scheduled-directory-scanning) |
 | `path_configs` | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection |
 
-Matching is longest-prefix-first. `/mnt/media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`.
+Matching is longest-prefix-first. `/mnt/media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`. If `path_rewrites` overlap, the most specific rewrite is applied before config matching.
 
 ### Per-Config Logging
 

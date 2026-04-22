@@ -250,7 +250,16 @@ class PathConfigManager:
         if raw_exts is not None:
             media_extensions = frozenset(("." + e.lower().lstrip(".")) for e in raw_exts if e)
 
-        path_rewrites = [{"from": r["from"].rstrip("/"), "to": r["to"].rstrip("/")} for r in config.get("path_rewrites", []) if r.get("from") and r.get("to")]
+        path_rewrites = []
+        for rewrite in config.get("path_rewrites", []):
+            rewrite_from = rewrite.get("from", "").rstrip("/")
+            rewrite_to = rewrite.get("to", "").rstrip("/")
+            if not rewrite_from or not rewrite_to:
+                continue
+            path_rewrites.append({"from": os.path.normpath(rewrite_from), "to": os.path.normpath(rewrite_to)})
+        # Keep rewrite precedence aligned with path_configs: more specific
+        # prefixes must win over broader parent paths.
+        path_rewrites.sort(key=lambda x: len(x["from"]), reverse=True)
 
         path_configs = []
         for entry in config.get("path_configs", []):
@@ -308,9 +317,13 @@ class PathConfigManager:
             for rewrite in self.path_rewrites:
                 self.log.debug("  %s -> %s" % (rewrite["from"], rewrite["to"]))
 
+    def _normalize_match_path(self, path):
+        """Return *path* normalized for rewrite-aware config matching."""
+        return os.path.normpath(self.rewrite_path(os.path.abspath(path)))
+
     def get_config_for_path(self, file_path):
         """Get the appropriate config file for a given file path."""
-        file_path = self.rewrite_path(os.path.abspath(file_path))
+        file_path = self._normalize_match_path(file_path)
 
         for entry in self.path_configs:
             if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
@@ -326,7 +339,7 @@ class PathConfigManager:
 
     def get_args_for_path(self, file_path):
         """Get the default args list for a given file path based on path_configs."""
-        file_path = self.rewrite_path(os.path.abspath(file_path))
+        file_path = self._normalize_match_path(file_path)
 
         for entry in self.path_configs:
             if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
@@ -336,6 +349,7 @@ class PathConfigManager:
 
     def rewrite_path(self, path):
         """Apply the first matching path_rewrites prefix substitution, or return path unchanged."""
+        path = os.path.normpath(path)
         for r in self.path_rewrites:
             prefix = r["from"]
             if path == prefix or path.startswith(prefix + "/"):
