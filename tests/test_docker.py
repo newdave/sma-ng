@@ -257,6 +257,14 @@ class TestDockerfileRuntime:
         workdirs = _instructions_of("WORKDIR", dockerfile)
         assert "/app" in workdirs
 
+    def test_repo_entry_scripts_rewrite_shebangs_for_container_venv(self, dockerfile_raw):
+        assert "#!/opt/sma/venv/bin/python3" in dockerfile_raw
+        assert "#!/venv/bin/python3" in dockerfile_raw
+        assert "daemon.py" in dockerfile_raw
+        assert "manual.py" in dockerfile_raw
+        assert "rename.py" in dockerfile_raw
+        assert "update.py" in dockerfile_raw
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # docker-compose.yml tests
