@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.2...sma-ng-v1.4.3) (2026-04-22)
+
+
+### Bug Fixes
+
+* construct and inject SMA_DAEMON_DB_URL from PG vars in deploy:docker-upgrade ([c3e86d5](https://github.com/newdave/sma-ng/commit/c3e86d51ca75d9ec5bb73f4df10e1ece5b3a92f4))
+
 ## [1.4.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.1...sma-ng-v1.4.2) (2026-04-22)
 
 
