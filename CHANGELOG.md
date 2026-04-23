@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.15](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.14...sma-ng-v1.6.15) (2026-04-23)
+
+
+### Bug Fixes
+
+* set default RENDER_GID to 992 for render group ([6e3d192](https://github.com/newdave/sma-ng/commit/6e3d192b605f800d402029782de6ec987d174117))
+
 ## [1.6.14](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.13...sma-ng-v1.6.14) (2026-04-23)
 
 
