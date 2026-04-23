@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.18](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.17...sma-ng-v1.6.18) (2026-04-23)
+
+
+### Features
+
+* add bitrate, stream action annotations, forced flag, and filename to output data; update dashboard ([a2d6926](https://github.com/newdave/sma-ng/commit/a2d69266b376486d29bb06bb303cf5ba6ca43a3b))
+
+
+### Documentation
+
+* add mise installation instructions, full task reference, and examples ([360bb77](https://github.com/newdave/sma-ng/commit/360bb77055c1ea0009166236c8f121958883303d))
+
 ## [1.6.17](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.16...sma-ng-v1.6.17) (2026-04-23)
 
 
