@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.20](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.19...sma-ng-v1.6.20) (2026-04-23)
+
+
+### Features
+
+* **tasks:** add build:dist task and xml coverage output to test:cov ([f7bd788](https://github.com/newdave/sma-ng/commit/f7bd7881955290d893dc4d52dd3dd5c9627df0fa))
+
 ## [1.6.19](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.18...sma-ng-v1.6.19) (2026-04-23)
 
 
