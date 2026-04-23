@@ -1158,6 +1158,12 @@ mise run remote:run
 
 # Then restart the service
 mise run deploy:restart
+
+# Optional: stop Docker services on one host
+HOST=user@server1.example.com mise run deploy:dockerstop
+
+# Optional: stop Docker services on multiple hosts
+HOSTS="user@server1.example.com user@server2.example.com" mise run deploy:dockerstop
 ```
 
 `remote:run` does the following on each host in `DEPLOY_HOSTS`:
@@ -1215,15 +1221,18 @@ Runs the specified mise task on each host without syncing code first.
 
 #### Summary of deploy tasks
 
-| Task                 | Description                                                                |
-| -------------------- | -------------------------------------------------------------------------- |
-| `deploy:check`       | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                 |
-| `deploy:setup`       | First-time host prep: SSH key, apt deps, deploy dir, systemd install       |
-| `remote:run`         | Sync code + install deps + reload systemd on all hosts                     |
-| `config:roll`        | Roll configs: create missing, merge new keys, stamp credentials            |
-| `deploy:restart`     | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl |
-| `config:audit`       | Audit local configs                                                        |
-| `remote:mise` | Run an arbitrary mise task on all hosts                                    |
+| Task             | Description                                                                |
+| ---------------- | -------------------------------------------------------------------------- |
+| `deploy:check`   | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                 |
+| `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, systemd install       |
+| `remote:run`     | Sync code + install deps + reload systemd on all hosts                     |
+| `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials            |
+| `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl |
+| `config:audit`   | Audit local configs                                                        |
+| `remote:mise`    | Run an arbitrary mise task on all hosts                                    |
+
+Additional Docker lifecycle helper: `deploy:dockerstop` (alias: `deploy:docker:stop`) stops
+services for selected hosts using each host's configured `DOCKER_PROFILE`.
 
 ---
 
