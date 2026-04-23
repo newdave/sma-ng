@@ -42,7 +42,13 @@ for ini_path in sorted(glob.glob(os.path.join(deploy_dir, "config", "*.ini"))):
       cur_sec = m.group(1)
       out.append(line)
       continue
-    sec_overrides = overrides.get(cur_sec, {})
+    # Per-service autoProcess files still use the generic [Sonarr]/[Radarr]
+    # section names internally, so map those back to the originating
+    # Sonarr*/Radarr* section from .local.ini when available.
+    if cur_sec in {"Sonarr", "Radarr"} and service:
+      sec_overrides = overrides.get(service, {})
+    else:
+      sec_overrides = overrides.get(cur_sec, {})
     if sec_overrides:
       m2 = re.match(r"^(\s*)(\S[^=]*?)\s*=\s*(.*)", line)
       if m2:
