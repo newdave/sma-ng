@@ -28,7 +28,7 @@ if [ ! -f "$FILE" ]; then
     exit 0
 fi
 
-awk -v target_sec="$SECTION" -v key="$KEY" -v default="$DEFAULT" '
+awk -v target_sec="$SECTION" -v key="$KEY" -v default_value="$DEFAULT" '
 BEGIN {
     cur_sec = ""
     deploy_val = ""
@@ -73,6 +73,6 @@ BEGIN {
 END {
     if (found_host)      print host_val
     else if (deploy_val != "") print deploy_val
-    else                 print default
+    else                 print default_value
 }
 ' "$FILE"
