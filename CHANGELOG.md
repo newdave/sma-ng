@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.22](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.21...sma-ng-v1.6.22) (2026-04-23)
+
+
+### Bug Fixes
+
+* vendor repo ini_merge implementation ([3ab9fbe](https://github.com/newdave/sma-ng/commit/3ab9fbeac63c4823c118ae75b60d209d3ac04389))
+
 ## [1.6.21](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.20...sma-ng-v1.6.21) (2026-04-23)
 
 
