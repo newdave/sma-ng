@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.24](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.23...sma-ng-v1.6.24) (2026-04-23)
+
+
+### Bug Fixes
+
+* stamp service-specific arr config overrides ([9da3d0c](https://github.com/newdave/sma-ng/commit/9da3d0c32f153787130febb8f59b013cb35a6cff))
+
 ## [1.6.23](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.22...sma-ng-v1.6.23) (2026-04-23)
 
 
