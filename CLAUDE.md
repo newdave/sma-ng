@@ -30,6 +30,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Do not embed inline Python in shell scripts or shell commands committed to this repository. This includes `python -c`, `python3 -c`, and Python heredocs.
 - If shell-based automation needs Python logic, move that logic into a standalone `.py` helper and call it from the shell script.
 - Prefer keeping JSON parsing, payload construction, and non-trivial data transforms in those helper modules rather than re-embedding them in Bash.
+- Shell scripts must conform to ShellCheck best practices and must not produce any ShellCheck warnings or errors. Suppress a warning with a `# shellcheck disable=SCxxxx` comment only when the flag is genuinely a false positive, and always add an inline explanation for why the suppression is safe.
+
+## Markdown Rules
+
+- Markdown files must conform to markdownlint best practices and must not produce any markdownlint warnings or errors.
+- Use ATX-style headings (`#`), fenced code blocks (` ``` `), and consistent list markers.
+- Every fenced code block must declare a language identifier.
+- Blank lines are required before and after headings, lists, and code blocks.
+- Lines must not exceed 120 characters (prose) or be wrapped mid-sentence; prefer semantic line breaks for long paragraphs.
 
 ## Development Environment
 
@@ -104,15 +113,15 @@ python daemon.py --host 0.0.0.0 --port 8585 --workers 4 --api-key YOUR_SECRET_KE
 
 The daemon is a package under `resources/daemon/`. `daemon.py` at project root is a thin entry point that re-exports all names for backward compatibility with tests.
 
-| Module | Contents |
-| --- | --- |
-| `constants.py` | `SCRIPT_DIR`, `DEFAULT_*`, `STATUS_*` constants |
-| `db.py` | `PostgreSQLJobDatabase` |
-| `config.py` | `ConfigLockManager`, `ConfigLogManager`, `PathConfigManager` |
-| `handler.py` | `WebhookHandler` + HTML helpers, multi-page docs routing |
-| `threads.py` | `_StoppableThread`, `HeartbeatThread`, `ScannerThread` |
-| `worker.py` | `ConversionWorker`, `WorkerPool` |
-| `server.py` | `DaemonServer`, `_validate_hwaccel` |
+| Module         | Contents                                                     |
+| -------------- | ------------------------------------------------------------ |
+| `constants.py` | `SCRIPT_DIR`, `DEFAULT_*`, `STATUS_*` constants              |
+| `db.py`        | `PostgreSQLJobDatabase`                                      |
+| `config.py`    | `ConfigLockManager`, `ConfigLogManager`, `PathConfigManager` |
+| `handler.py`   | `WebhookHandler` + HTML helpers, multi-page docs routing     |
+| `threads.py`   | `_StoppableThread`, `HeartbeatThread`, `ScannerThread`       |
+| `worker.py`    | `ConversionWorker`, `WorkerPool`                             |
+| `server.py`    | `DaemonServer`, `_validate_hwaccel`                          |
 
 ### Core Modules
 
@@ -183,11 +192,11 @@ Full documentation is in [docs/](docs/) and served at `http://localhost:8585/doc
 
 ## CI / Release
 
-| Workflow | Trigger | What it does |
-| --- | --- | --- |
-| `ci.yml` | PR / push to main | Runs tests |
-| `docker.yml` | PR / push to main or `v*` tag | PR: build-only; main/tag: build + push to GHCR |
-| `release.yml` | Push to main | release-please manages release PR + version bump; on release: wheel/sdist + Docker semver tags |
+| Workflow      | Trigger                       | What it does                                                                                   |
+| ------------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| `ci.yml`      | PR / push to main             | Runs tests                                                                                     |
+| `docker.yml`  | PR / push to main or `v*` tag | PR: build-only; main/tag: build + push to GHCR                                                 |
+| `release.yml` | Push to main                  | release-please manages release PR + version bump; on release: wheel/sdist + Docker semver tags |
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please). **Do not manually create `v*` tags.**
 
