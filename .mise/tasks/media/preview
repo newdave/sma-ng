@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Preview conversion options (usage: mise run media:preview -- /path/to/file.mkv)"
+set -euo pipefail
+
+"$PY" manual.py -i "$1" -oo

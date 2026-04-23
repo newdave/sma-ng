@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Install dev dependencies (lint, test)"
+#MISE depends=["setup:deps:base"]
+set -euo pipefail
+
+"$PIP" install -e '.[dev]'

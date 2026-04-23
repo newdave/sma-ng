@@ -40,7 +40,7 @@ The original SMA used a bare `pip install`. SMA-NG recommends a virtual environm
 ```bash
 # Recommended: use mise
 mise install
-mise run install
+mise run setup:deps
 
 # Manual: venv + pip
 python3 -m venv venv
@@ -370,18 +370,18 @@ The container image is published at `ghcr.io/newdave/sma-ng:latest`.
 
 ## New Features Not in the Original
 
-| Feature                              | Description                                                                           |
-| ------------------------------------ | ------------------------------------------------------------------------------------- |
-| Hardware acceleration auto-detection | `make detect-gpu` or `mise run detect-gpu` identifies available GPU encoders          |
-| Multi-quality config profiles        | Three bundled profiles: `autoProcess.ini`, `autoProcess.rq.ini`, `autoProcess.lq.ini` |
-| OpenVINO Analyzer                    | Optional `[Analyzer]` section for content-aware encoding decisions                    |
-| File renaming templates              | `[Naming]` section with Sonarr/Radarr-style `{token}` templates                       |
-| Recycle bin                          | `recycle-bin` key copies originals before deletion                                    |
-| Per-config rotating logs             | Each config gets its own log file in `logs/`; rotates at 10 MB                        |
-| Job queue REST API                   | `/jobs`, `/health`, `/status`, `/stats` endpoints for monitoring                      |
-| Scheduled background scanning        | `scan_paths` in `daemon.json` periodically scans directories for unprocessed files    |
-| Graceful shutdown and restart        | `POST /shutdown` and `POST /restart` drain active jobs before stopping                |
-| PostgreSQL clustering                | Optional `db_url` for multi-node distributed mode                                     |
+| Feature | Description |
+| --- | --- |
+| Hardware acceleration auto-detection | `make detect-gpu` or `mise run config:detect:gpu` identifies available GPU encoders |
+| Multi-quality config profiles | Three bundled profiles: `autoProcess.ini`, `autoProcess.rq.ini`, `autoProcess.lq.ini` |
+| OpenVINO Analyzer | Optional `[Analyzer]` section for content-aware encoding decisions |
+| File renaming templates | `[Naming]` section with Sonarr/Radarr-style `{token}` templates |
+| Recycle bin | `recycle-bin` key copies originals before deletion |
+| Per-config rotating logs | Each config gets its own log file in `logs/`; rotates at 10 MB |
+| Job queue REST API | `/jobs`, `/health`, `/status`, `/stats` endpoints for monitoring |
+| Scheduled background scanning | `scan_paths` in `daemon.json` periodically scans directories for unprocessed files |
+| Graceful shutdown and restart | `POST /shutdown` and `POST /restart` drain active jobs before stopping |
+| PostgreSQL clustering | Optional `db_url` for multi-node distributed mode |
 
 ---
 
@@ -390,7 +390,7 @@ The container image is published at `ghcr.io/newdave/sma-ng:latest`.
 Work through these steps in order.
 
 1. **Upgrade Python** to 3.12+ if needed.
-2. **Install dependencies** via `mise run install` or `pip install -r setup/requirements.txt`.
+2. **Install dependencies** via `mise run setup:deps` or `pip install -r setup/requirements.txt`.
 3. **Copy the config sample**: `cp setup/autoProcess.ini.sample config/autoProcess.ini`.
 4. **Port your settings** from the old `autoProcess.ini`:
    - Remove `[Sickbeard]` and `[Sickrage]` sections.

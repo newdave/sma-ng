@@ -53,7 +53,7 @@ This file provides guidance to Codex when working with code in this repository.
 ```bash
 # With mise (recommended)
 mise install
-mise run install
+mise run setup:deps
 
 # Create and activate virtual environment
 python3 -m venv venv
@@ -79,17 +79,17 @@ Requires Python 3.12+ and FFmpeg installed on system.
 
 `mise` is the preferred task runner for local development and deployment. Common tasks:
 
-- `mise run install` - create `venv` and install dependencies
-- `mise run install-dev` - install dev and test dependencies
+- `mise run setup:deps` - create `venv` and install dependencies
+- `mise run setup:deps:dev` - install dev and test dependencies
 - `mise run test` - run the test suite
-- `mise run lint` - run `ruff`
-- `mise run lint-fix` - auto-fix lint issues
-- `mise run detect-gpu` - detect available hardware acceleration
-- `mise run config` - generate config with detected GPU
-- `mise run daemon` - start the daemon on `0.0.0.0:8585`
-- `mise run convert -- /path/to/file.mkv` - convert a file
-- `mise run preview -- /path/to/file.mkv` - preview options only
-- `mise run codecs` - list supported codecs
+- `mise run test:lint` - run `ruff`
+- `mise run dev:lint` - auto-fix lint issues
+- `mise run config:detect:gpu` - detect available hardware acceleration
+- `mise run config:generate` - generate config with detected GPU
+- `mise run daemon:start` - start the daemon on `0.0.0.0:8585`
+- `mise run media:convert -- /path/to/file.mkv` - convert a file
+- `mise run media:preview -- /path/to/file.mkv` - preview options only
+- `mise run media:codecs` - list supported codecs
 
 ## Repo Workflow Map
 
@@ -167,7 +167,7 @@ SMA-NG (Next-Generation Media Automator) is a Python-based media conversion and 
 pip install -r setup/requirements.txt
 
 # Convert with mise wrapper
-mise run convert -- /path/to/file.mkv
+mise run media:convert -- /path/to/file.mkv
 
 # Manual conversion with auto-tagging (guesses metadata from filename)
 python manual.py -i "/path/to/file.mkv" -a
@@ -354,7 +354,7 @@ The main config file is `config/autoProcess.ini` (copy from `setup/autoProcess.i
 
 Important sections include `[Converter]`, `[Video]`, `[HDR]`, `[Audio]`, `[Subtitle]`, `[Metadata]`, `[Sonarr]`, `[Radarr]`, and `[Plex]`.
 
-`mise run config` generates three quality-profile configs:
+`mise run config:generate` generates three quality-profile configs:
 
 - `config/autoProcess.ini` - default regular-quality profile
 - `config/autoProcess.rq.ini` - explicit regular-quality profile
@@ -445,7 +445,7 @@ Key tasks:
 
 - `mise run deploy:setup` - first-time host prep
 - `mise run deploy:run` - sync code, install deps, reload systemd
-- `mise run deploy:config` - create missing configs, merge new keys, stamp credentials
+- `mise run config:roll` - create missing configs, merge new keys, stamp credentials
 - `mise run deploy:restart` - restart `sma-daemon` on all hosts
 
 Systemd unit: `setup/sma-daemon.service`
@@ -543,4 +543,9 @@ When adding new daemon options:
 
 When adding or modifying `mise` tasks:
 
-- short inline tasks belong in `mise.toml` with a `description` field
+- define runnable tasks as executable scripts under grouped `.mise/tasks/<group>/` subdirectories with a
+  `#MISE description=...` header
+- keep `mise.toml` limited to tool and environment configuration; do not add inline `[tasks.*]` definitions
+- shared helper code for task scripts belongs outside `.mise/tasks/` (for example `.mise/shared/`) so it is not
+  exposed as a runnable task
+- update wiki `Mise-Tasks.md` to document the task name, description, and usage

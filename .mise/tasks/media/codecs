@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="List supported codecs"
+set -euo pipefail
+
+"$PY" manual.py -cl

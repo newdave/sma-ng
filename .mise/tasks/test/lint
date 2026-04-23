@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Validate docs/openapi.yaml"
+#MISE aliases=["dev:openapi"]
+set -euo pipefail
+
+"$PY" -m openapi_spec_validator docs/openapi.yaml

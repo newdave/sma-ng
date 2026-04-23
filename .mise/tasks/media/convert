@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Convert a file (usage: mise run media:convert -- /path/to/file.mkv)"
+set -euo pipefail
+
+"$PY" manual.py -i "$1" -a

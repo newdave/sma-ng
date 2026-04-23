@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Disable and remove the sma-daemon systemd service"
+set -euo pipefail
+
+sudo systemctl disable --now sma-daemon 2>/dev/null || true
+sudo rm -f /etc/systemd/system/sma-daemon.service
+sudo systemctl daemon-reload
+echo "Service removed. Config and data directories are untouched."

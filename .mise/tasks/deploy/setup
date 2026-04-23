@@ -80,7 +80,7 @@ for host in $DEPLOY_HOSTS; do
 done
 
 # ── 4. install apt prerequisites on each host ──────────────────────────────
-APT_PACKAGES="build-essential make python3-dev python3-venv"
+APT_PACKAGES="build-essential python3-dev python3-venv"
 for host in $DEPLOY_HOSTS; do
     cfg="$CFG $LOCAL $host"
     port=$($cfg SSH_PORT 22)
@@ -99,7 +99,7 @@ for host in $DEPLOY_HOSTS; do
       echo '  SKIP: apt-get not found'
       exit 0
     fi
-    apt-get install -y build-essential make python3-dev python3-venv
+    apt-get install -y build-essential python3-dev python3-venv
 REMOTE
 done
 
@@ -151,9 +151,29 @@ for host in $DEPLOY_HOSTS; do
 
     remote_user=$(echo "$host" | cut -s -d@ -f1)
     remote_user="${remote_user:-$(whoami)}"
-    echo "==> [$host] installing and enabling sma-daemon service (user: $remote_user)"
-    # shellcheck disable=SC2029  # dir/remote_user intentionally expand client-side before the remote shell runs.
-    ssh "${SSH_OPTS[@]}" "$host" "cd $dir && make systemd-install SERVICE_USER=$remote_user"
+    install_dir=$($cfg SMA_INSTALL_DIR "/opt/sma")
+    echo "==> [$host] installing and enabling sma-daemon service (user: $remote_user, dir: $install_dir)"
+    # shellcheck disable=SC2029,SC2087  # dir/remote_user/install_dir expand client-side; heredoc body stays literal until the remote shell runs it.
+    ssh "${SSH_OPTS[@]}" "$host" 'bash -s' "$dir" "$remote_user" "$install_dir" <<'REMOTE'
+      set -euo pipefail
+      dir="$1"
+      service_user="$2"
+      install_dir="$3"
+      cd "$dir"
+
+      sudo mkdir -p "${install_dir}/config" "${install_dir}/logs"
+      sudo chown -R "$service_user": "${install_dir}/config" "${install_dir}/logs"
+
+      if [ ! -f "${install_dir}/config/daemon.env" ]; then
+        sudo install -o "$service_user" -m 640 setup/daemon.env.sample "${install_dir}/config/daemon.env"
+      fi
+
+      sudo chmod 755 setup/sma-daemon-start.sh
+      sed "s/^User=.*/User=${service_user}/; s/^Group=.*/Group=${service_user}/; s|/opt/sma|${install_dir}|g" setup/sma-daemon.service \
+        | sudo tee /etc/systemd/system/sma-daemon.service > /dev/null
+      sudo systemctl daemon-reload
+      sudo systemctl enable --now sma-daemon
+REMOTE
 done
 
 # ── 7. verify ffmpeg/ffprobe in FFMPEG_DIR on each host ─────────────────────

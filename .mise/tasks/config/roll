@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 #MISE description="Roll config to remote hosts: create missing configs from samples, add new keys from updated samples"
+#MISE aliases=["deploy:config:roll"]
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
 # shellcheck disable=SC1091
 # lib.sh is sourced relative to this script's directory at runtime.
-source "$(dirname "$0")/lib.sh"
+source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
 ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 
 # Resolve the directory this script lives in so lib/ helpers can be found
 # regardless of the caller's working directory.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../deploy" && pwd)"
 
 b64enc() { printf '%s' "$1" | base64 | tr -d '\n'; }
 
@@ -68,8 +69,8 @@ ensure_remote_service_configs() {
   local _svc_b64
   _svc_b64=$(b64enc "$services_json")
   # shellcheck disable=SC2029  # $dir, $gpu, $use_sudo, $_svc_b64 expand client-side (intentional)
-  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir $gpu $use_sudo $_svc_b64" \
-  < "$SCRIPT_DIR/lib/ini_ensure_services.py"
+  ssh "${SSH_OPTS[@]}" "$host" \
+  "python3 $dir/.mise/tasks/deploy/lib/ini_ensure_services.py $dir $gpu $use_sudo $_svc_b64"
 }
 
 sync_ini_keys() {
@@ -125,8 +126,8 @@ stamp_credentials() {
   local _svc_b64
   _svc_b64=$(b64enc "$services_json")
   # shellcheck disable=SC2029  # $dir, $use_sudo, $_svc_b64 expand client-side (intentional)
-  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir $use_sudo $_svc_b64" \
-  < "$SCRIPT_DIR/lib/ini_stamp_credentials.py"
+  ssh "${SSH_OPTS[@]}" "$host" \
+  "python3 $dir/.mise/tasks/deploy/lib/ini_stamp_credentials.py $dir $use_sudo $_svc_b64"
 }
 
 stamp_ffmpeg_paths() {
@@ -136,8 +137,8 @@ stamp_ffmpeg_paths() {
   fi
   echo "  setting ffmpeg/ffprobe paths to $ffmpeg_dir in all *.ini configs"
   # shellcheck disable=SC2029  # $dir, $ffmpeg_dir, $use_sudo expand client-side (intentional)
-  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir $ffmpeg_dir $use_sudo" \
-  < "$SCRIPT_DIR/lib/stamp_ffmpeg.py"
+  ssh "${SSH_OPTS[@]}" "$host" \
+  "python3 $dir/.mise/tasks/deploy/lib/stamp_ffmpeg.py $dir $ffmpeg_dir $use_sudo"
 }
 
 stamp_daemon_config() {
@@ -163,8 +164,7 @@ stamp_daemon_config() {
   _svc_b64=$(b64enc "$services_json")
   # shellcheck disable=SC2029  # $dir and b64-encoded args expand client-side (intentional)
   ssh "${SSH_OPTS[@]}" "$host" \
-  "python3 - $dir $_api_b64 $_db_url_b64 $_ffmpeg_b64 $_dbuser_b64 $_dbpw_b64 $_dbname_b64 $_svc_b64" \
-  < "$SCRIPT_DIR/lib/stamp_daemon.py"
+  "python3 $dir/.mise/tasks/deploy/lib/stamp_daemon.py $dir $_api_b64 $_db_url_b64 $_ffmpeg_b64 $_dbuser_b64 $_dbpw_b64 $_dbname_b64 $_svc_b64"
 }
 
 # Copy and stamp post-process scripts; also update shebangs in root entry points.
@@ -187,8 +187,7 @@ deploy_post_process() {
   _emby_key_b64=$(b64enc "$emby_apikey")
   # shellcheck disable=SC2029  # $dir and b64-encoded args expand client-side (intentional)
   ssh "${SSH_OPTS[@]}" "$host" \
-  "python3 - $dir $_plex_token_b64 $_plex_user_b64 $_plex_srv_b64 $_jf_url_b64 $_jf_token_b64 $_emby_url_b64 $_emby_key_b64" \
-  < "$SCRIPT_DIR/lib/stamp_postprocess.py"
+  "python3 $dir/.mise/tasks/deploy/lib/stamp_postprocess.py $dir $_plex_token_b64 $_plex_user_b64 $_plex_srv_b64 $_jf_url_b64 $_jf_token_b64 $_emby_url_b64 $_emby_key_b64"
 }
 
 # ── Main per-host loop ───────────────────────────────────────────────────────

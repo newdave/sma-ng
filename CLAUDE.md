@@ -242,6 +242,9 @@ When adding new daemon options:
 
 When adding or modifying `mise` tasks:
 
-- Short inline tasks → `mise.toml` `[tasks.<name>]` section with a `description` field
-- Multi-line or complex tasks → `.mise/tasks/<name>` shell script (always scan this directory)
+- Define runnable tasks as executable scripts under grouped `.mise/tasks/<group>/` subdirectories with a
+  `#MISE description=...` header
+- Keep `mise.toml` limited to tool and environment configuration; do not add inline `[tasks.*]` definitions
+- Shared helper code for task scripts belongs outside `.mise/tasks/` (for example `.mise/shared/`) so it is not
+  exposed as a runnable task
 - Update wiki `Mise-Tasks.md` to document the task name, description, and usage

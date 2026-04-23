@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Create config with GPU auto-detection (GPU=<type> mise run config:generate to override)"
+set -euo pipefail
+
+./scripts/generate-configs.sh

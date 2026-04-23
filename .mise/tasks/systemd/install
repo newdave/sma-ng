@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#MISE description="Install systemd service (run as root)"
+set -euo pipefail
+
+SMA_INSTALL_DIR="${SMA_INSTALL_DIR:-/opt/sma}"
+service_user="${SERVICE_USER:-$(whoami)}"
+
+sudo mkdir -p "${SMA_INSTALL_DIR}/config" "${SMA_INSTALL_DIR}/logs"
+sudo chown -R "$service_user": "${SMA_INSTALL_DIR}/config" "${SMA_INSTALL_DIR}/logs"
+
+if [ ! -f "${SMA_INSTALL_DIR}/config/daemon.env" ]; then
+  sudo install -o "$service_user" -m 640 setup/daemon.env.sample "${SMA_INSTALL_DIR}/config/daemon.env"
+fi
+
+sudo chmod 755 setup/sma-daemon-start.sh
+sed "s/^User=.*/User=${service_user}/; s/^Group=.*/Group=${service_user}/; s|/opt/sma|${SMA_INSTALL_DIR}|g" setup/sma-daemon.service \
+  | sudo tee /etc/systemd/system/sma-daemon.service > /dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now sma-daemon

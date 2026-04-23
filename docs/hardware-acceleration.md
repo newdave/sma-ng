@@ -4,7 +4,7 @@ SMA-NG supports hardware-accelerated video encoding via FFmpeg. The `gpu` settin
 
 ## GPU Auto-Detection
 
-`make config` and `mise run config` call the same generator, auto-detect the GPU the same way, and write the correct value to the generated `autoProcess*.ini` profiles:
+`make config` and `mise run config:generate` call the same generator, auto-detect the GPU the same way, and write the correct value to the generated `autoProcess*.ini` profiles:
 
 - macOS → `videotoolbox`
 - NVIDIA GPU (detected via `nvidia-smi`) → `nvenc`
@@ -126,25 +126,25 @@ docker compose --profile intel up -d
 docker compose --profile intel-pg up -d
 ```
 
-2. Verify VAAPI visibility inside the container:
+1. Verify VAAPI visibility inside the container:
 
 ```bash
 docker compose exec sma-intel vainfo
 ```
 
-3. Ensure the container uses Intel's VAAPI driver (`iHD`):
+1. Ensure the container uses Intel's VAAPI driver (`iHD`):
 
 ```yaml
 environment:
-	- LIBVA_DRIVER_NAME=iHD
+  - LIBVA_DRIVER_NAME=iHD
 ```
 
-4. Confirm your config/backend alignment:
+1. Confirm your config/backend alignment:
 
 - `gpu = qsv` should use QSV codecs (`h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`)
 - `gpu = vaapi` should use VAAPI codecs (`h264vaapi`, `h265vaapi`, `av1vaapi`)
 
-5. On KVM or Proxmox guests using Intel SR-IOV, verify the guest-visible DRI topology.
+1. On KVM or Proxmox guests using Intel SR-IOV, verify the guest-visible DRI topology.
 
 - The usable Intel VF may appear as `card1` with `renderD128`, or as higher-numbered render nodes, depending on the guest.
 - The Intel Docker Compose profiles mount the whole `/dev/dri` tree so FFmpeg and VAAPI can see the matching `card*` and `renderD*` nodes together.

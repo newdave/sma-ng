@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run tests with coverage (HTML + terminal summary)"
+#MISE aliases=["dev:test:cov"]
+set -euo pipefail
+
+"$PY" -m pytest --cov=resources --cov=converter --cov=autoprocess --cov-report=html --cov-report=term-missing:skip-covered

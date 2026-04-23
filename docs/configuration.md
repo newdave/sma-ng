@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Configuration lives in `config/autoProcess.ini` (INI format). Copy from `setup/autoProcess.ini.sample` or generate it with `make config` or `mise run config`.
+Configuration lives in `config/autoProcess.ini` (INI format). Copy from `setup/autoProcess.ini.sample` or generate it with `make config` or `mise run config:generate`.
 
 Override path via `SMA_CONFIG` environment variable.
 

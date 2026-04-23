@@ -2,7 +2,7 @@
 
 LOCAL="setup/.local.ini"
 CFG="scripts/local-config.sh"
-MISSING_PREREQ_PATTERN='(command not found|No such file or directory|not found.*make|make.*not found|python3.*not found|python.*not found|rsync.*not found|venv.*not found)'
+MISSING_PREREQ_PATTERN='(command not found|No such file or directory|mise.*not found|python3.*not found|python.*not found|rsync.*not found|venv.*not found)'
 
 init_host_context() {
   local host="$1"
@@ -23,9 +23,9 @@ init_host_context() {
     ssh_opts="$ssh_opts -i $(eval echo "$key")"
   fi
 
-  make_env=""
+  command_env=""
   if [ -n "$ffmpeg_dir" ]; then
-    make_env="SMA_DAEMON_FFMPEG_DIR=$ffmpeg_dir"
+    command_env="SMA_DAEMON_FFMPEG_DIR=$ffmpeg_dir"
   fi
 
   return 0
@@ -183,23 +183,28 @@ capture_remote_pg_volume_names() {
 
 run_remote_command() {
   local host="$1" command="$2"
-  # shellcheck disable=SC2029,SC2086  # dir/make_env/command expand locally so the remote shell receives the composed command.
-  ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $make_env $command"
+  # shellcheck disable=SC2029,SC2086  # dir/command_env/command expand locally so the remote shell receives the composed command.
+  ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $command_env $command"
 }
 
-run_remote_make() {
-  local host="$1" target="$2"
-  run_remote_command "$host" "make $target VENV=$venv_dir PYTHON=$python_bin"
+run_remote_mise_task() {
+  local host="$1" task="$2"
+  run_remote_command "$host" "mise run $task"
+}
+
+install_remote_base_deps() {
+  local host="$1"
+  run_remote_command "$host" "$venv_dir/bin/pip install -r setup/requirements.txt"
 }
 
 venv_healthy() {
   local host="$1"
-  run_remote_command "$host" "test -x $venv_dir/bin/python && test -x $venv_dir/bin/pip && $venv_dir/bin/python -c 'import encodings' >/dev/null 2>&1"
+  run_remote_command "$host" "test -x $venv_dir/bin/python && test -x $venv_dir/bin/pip && $venv_dir/bin/python scripts/check_python_encodings.py >/dev/null 2>&1"
 }
 
 recreate_venv() {
   local host="$1"
-  run_remote_command "$host" "rm -rf $venv_dir && make venv VENV=$venv_dir PYTHON=$python_bin"
+  run_remote_command "$host" "rm -rf $venv_dir && $python_bin -m venv $venv_dir && chmod 755 $venv_dir $venv_dir/bin || true && chmod 755 $venv_dir/bin/python $venv_dir/bin/python3 $venv_dir/bin/python3.* 2>/dev/null || true && $venv_dir/bin/pip install --upgrade pip"
 }
 
 run_with_prereq_retry() {

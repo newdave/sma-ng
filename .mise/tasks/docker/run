@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run the locally-built Docker image (requires SMA_DAEMON_DB_URL; TAG=sma-ng:local to override)"
+set -euo pipefail
+
+./scripts/docker-run.sh

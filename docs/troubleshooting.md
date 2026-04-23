@@ -86,7 +86,7 @@ If `smoke_test: true` is set in `daemon.json` or `--smoke-test` is passed:
 - Check `logs/daemon.log` for `[FAIL]` lines showing which config raised an exception
 - Common cause: a boolean field with a typo (e.g. `force-rename = Truee`) — fix the value in the config
 - Run manually to see output: `python daemon.py --smoke-test`
-- Missing configs are skipped with `[SKIP]` — create them with `mise run config` or `mise run deploy:config`
+- Missing configs are skipped with `[SKIP]` — create them with `mise run config:generate` or `mise run config:roll`
 
 ---
 

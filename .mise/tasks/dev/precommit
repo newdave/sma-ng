@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run pre-commit checks against all files"
+set -euo pipefail
+
+pre-commit run --all-files
