@@ -1,8 +1,7 @@
 import json
-import socket
 from contextlib import contextmanager
 
-from resources.daemon.constants import STATUS_COMPLETED, STATUS_FAILED, STATUS_PENDING, STATUS_RUNNING
+from resources.daemon.constants import STATUS_COMPLETED, STATUS_FAILED, STATUS_PENDING, STATUS_RUNNING, resolve_node_id
 from resources.log import getLogger
 
 log = getLogger("DAEMON")
@@ -30,7 +29,7 @@ class PostgreSQLJobDatabase:
       raise ImportError("psycopg2 is required for PostgreSQL support. Install with: pip install psycopg2-binary")
     self.db_url = db_url
     self.log = logger or log
-    self._node_id = socket.gethostname()
+    self._node_id = resolve_node_id()
     self._pool = psycopg2.pool.ThreadedConnectionPool(
       minconn=1,
       maxconn=max_connections,
@@ -135,11 +134,22 @@ class PostgreSQLJobDatabase:
         )
         return cur.rowcount
 
+  def _lock_job_path(self, cur, path):
+    """Serialize add_job decisions for the same media path within a transaction.
+
+    Multiple nodes can discover the same file at nearly the same time via
+    scanners or duplicate webhook deliveries. A transaction-scoped advisory
+    lock closes that race so only one transaction can decide whether a
+    pending/running row already exists for a given path.
+    """
+    cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (path,))
+
   def add_job(self, path, config, args=None, max_retries=0):
     """Add a job to the queue. Returns job ID, or None if a duplicate is already pending/running."""
     args_json = json.dumps(args or [])
     with self._conn() as conn:
       with conn.cursor() as cur:
+        self._lock_job_path(cur, path)
         cur.execute("SELECT id FROM jobs WHERE path = %s AND status IN (%s, %s) LIMIT 1", (path, STATUS_PENDING, STATUS_RUNNING))
         existing = cur.fetchone()
         if existing:
@@ -447,14 +457,24 @@ class PostgreSQLJobDatabase:
       self.log.warning("Node %s declared stale — requeued %d running jobs" % (stale_node_id, job_count))
     return recovered
 
-  def mark_node_offline(self, node_id):
-    """Mark this node as offline and requeue any jobs it was running."""
+  def mark_node_offline(self, node_id, remove=False):
+    """Mark this node offline or remove it from cluster_nodes.
+
+    When remove=True, the node row is deleted entirely. This is intended for
+    clean daemon shutdown/restart so the node disappears from cluster status
+    immediately instead of lingering as offline.
+    """
     requeued = self._requeue_running_jobs_for_node(node_id)
     with self._conn() as conn:
       with conn.cursor() as cur:
-        cur.execute("UPDATE cluster_nodes SET status = 'offline' WHERE node_id = %s", (node_id,))
+        if remove:
+          cur.execute("DELETE FROM cluster_nodes WHERE node_id = %s", (node_id,))
+        else:
+          cur.execute("UPDATE cluster_nodes SET status = 'offline' WHERE node_id = %s", (node_id,))
     if requeued:
       self.log.info("Requeued %d running jobs on shutdown" % requeued)
+    if remove:
+      self.log.info("Removed node %s from cluster registry" % node_id)
 
   def send_node_command(self, node_id, command):
     """Set pending_command on one or all online nodes.
