@@ -1,13 +1,12 @@
 import json
 import os
 import re as _re
-import socket
 import subprocess
 import sys
 import threading
 import time
 
-from resources.daemon.constants import SCRIPT_DIR
+from resources.daemon.constants import SCRIPT_DIR, resolve_node_id
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.log import getLogger
 
@@ -53,7 +52,7 @@ class ConversionWorker(threading.Thread):
   ):
     super().__init__(daemon=True)
     self.worker_id = worker_id
-    self.node_id = socket.gethostname()
+    self.node_id = resolve_node_id()
     self.job_db = job_db
     self.job_event = threading.Event()  # per-worker event; set by notify_workers()
     self.path_config_manager = path_config_manager

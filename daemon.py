@@ -22,7 +22,6 @@ Usage:
 import argparse
 import os
 import signal
-import socket
 import sys
 import threading
 
@@ -46,7 +45,7 @@ from resources.daemon import (
   _render_markdown_to_html,  # pyright: ignore[reportUnusedImport]
   _StoppableThread,  # pyright: ignore[reportUnusedImport]
 )
-from resources.daemon.constants import DEFAULT_DAEMON_CONFIG, LOGS_DIR, SCRIPT_DIR  # pyright: ignore[reportUnusedImport]
+from resources.daemon.constants import DEFAULT_DAEMON_CONFIG, LOGS_DIR, SCRIPT_DIR, resolve_node_id  # pyright: ignore[reportUnusedImport]
 from resources.daemon.server import _validate_hwaccel
 from resources.log import getLogger
 
@@ -205,7 +204,7 @@ def main():
   job_db = PostgreSQLJobDatabase(db_url, logger=log)
   db_label = "PostgreSQL: %s" % db_url
 
-  log.info("Node: %s" % socket.gethostname())
+  log.info("Node: %s" % resolve_node_id())
   log.info("Database: %s" % db_label)
   if ffmpeg_dir:
     log.debug("FFmpeg/FFprobe directory: %s" % ffmpeg_dir)

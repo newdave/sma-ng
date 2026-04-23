@@ -1,8 +1,8 @@
 """Stamp daemon credentials into config/daemon.json and config/daemon.env.
 
 Usage: python3 stamp_daemon.py <deploy_dir> <api_key_b64> <db_url_b64>
-           <ffmpeg_dir_b64> <db_user_b64> <db_pw_b64> <db_name_b64>
-           <services_b64>
+           <ffmpeg_dir_b64> <node_name_b64> <db_user_b64> <db_pw_b64>
+           <db_name_b64> <services_b64>
 
 All credential arguments are base64-encoded to safely handle special characters.
 Pass an empty base64 value ("") for unused arguments.
@@ -11,6 +11,7 @@ Pass an empty base64 value ("") for unused arguments.
   api_key_b64   - base64(daemon API key)
   db_url_b64    - base64(PostgreSQL connection URL)
   ffmpeg_dir_b64 - base64(ffmpeg binary directory)
+  node_name_b64 - base64(cluster node identifier / SMA_NODE_NAME)
   db_user_b64   - base64(PostgreSQL username, for -pg profiles)
   db_pw_b64     - base64(PostgreSQL password, for -pg profiles)
   db_name_b64   - base64(PostgreSQL database name, for -pg profiles)
@@ -37,10 +38,11 @@ deploy_dir = sys.argv[1]
 api_key = _b64arg(2)
 db_url = _b64arg(3)
 ffmpeg_dir = _b64arg(4)
-db_user = _b64arg(5)
-db_pw = _b64arg(6)
-db_name = _b64arg(7)
-services = json.loads(base64.b64decode(sys.argv[8]).decode()) if len(sys.argv) > 8 else {}
+node_name = _b64arg(5)
+db_user = _b64arg(6)
+db_pw = _b64arg(7)
+db_name = _b64arg(8)
+services = json.loads(base64.b64decode(sys.argv[9]).decode()) if len(sys.argv) > 9 else {}
 
 # ── daemon.json ───────────────────────────────────────────────────────────
 json_path = os.path.join(deploy_dir, "config", "daemon.json")
@@ -84,6 +86,7 @@ else:
 env_path = os.path.join(deploy_dir, "config", "daemon.env")
 if os.path.exists(env_path):
   env_vars = {
+    "SMA_NODE_NAME": node_name,
     "SMA_DAEMON_API_KEY": api_key,
     "SMA_DAEMON_DB_URL": db_url,
     "SMA_DAEMON_DB_USER": db_user,
@@ -96,7 +99,7 @@ if os.path.exists(env_path):
   out = []
   seen = set()
   for line in lines:
-    m = re.match(r"^#?\s*(SMA_DAEMON_\w+)\s*=", line)
+    m = re.match(r"^#?\s*((?:SMA_DAEMON_\w+)|SMA_NODE_NAME)\s*=", line)
     if m:
       var = m.group(1)
       val = env_vars.get(var, "")
