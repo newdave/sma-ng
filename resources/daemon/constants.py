@@ -1,4 +1,5 @@
 import os
+import socket
 
 # Go up two levels: resources/daemon/ → resources/ → project root
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -10,3 +11,8 @@ STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
+
+
+def resolve_node_id():
+  """Return the stable cluster node identifier for this daemon instance."""
+  return os.environ.get("SMA_NODE_NAME", "").strip() or socket.gethostname()

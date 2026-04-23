@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Gracefully shut down sma-daemon on all DEPLOY_HOSTS, then restart via systemctl"
-#MISE depends=["deploy:check"]
+#MISE depends=["deploy:mise"]
 set -euo pipefail
 
 LOCAL="setup/.local.ini"

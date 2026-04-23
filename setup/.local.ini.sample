@@ -51,6 +51,10 @@ DAEMON_PORT  = 8585
 #   software, software-pg, intel, intel-pg, nvidia, nvidia-pg
 # DOCKER_PROFILE = intel-pg
 
+# Stable cluster node identifier stamped into config/daemon.env as
+# SMA_NODE_NAME. Use a distinct value for every daemon instance.
+# SMA_NODE_NAME = sma-node-a
+
 # Directory containing docker-compose.yml (defaults to $DEPLOY_DIR/docker).
 # DOCKER_COMPOSE_DIR = /opt/sma/docker
 

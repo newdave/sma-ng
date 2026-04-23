@@ -56,7 +56,6 @@ services:
   sma-software:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-software
-    hostname: "sma-ng-${HOSTNAME}"
     profiles: [software]
     restart: unless-stopped
     ports:
@@ -79,7 +78,6 @@ services:
   sma-software-pg:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-software-pg
-    hostname: "sma-ng-${HOSTNAME}"
     profiles: [software-pg]
     restart: unless-stopped
     ports:
@@ -105,7 +103,6 @@ services:
   sma-nvidia:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-nvidia
-    hostname: "sma-ng-${HOSTNAME}"
     profiles: [nvidia]
     restart: unless-stopped
     ports:
@@ -137,7 +134,6 @@ services:
   sma-nvidia-pg:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-nvidia-pg
-    hostname: "sma-ng-${HOSTNAME}"
     profiles: [nvidia-pg]
     restart: unless-stopped
     ports:
@@ -172,7 +168,6 @@ services:
   sma-intel:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-intel
-    hostname: "sma-ng-${HOSTNAME}"
     profiles: [intel]
     restart: unless-stopped
     ports:
@@ -201,7 +196,6 @@ services:
   sma-intel-pg:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng-intel-pg
-    hostname: "sma-ng-${HOSTNAME}"
     profiles: [intel-pg]
     restart: unless-stopped
     ports:

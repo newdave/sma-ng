@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Sync code to all DEPLOY_HOSTS, install dependencies, and reload systemd"
-#MISE depends=["deploy:check"]
+#MISE depends=["deploy:mise"]
 set -euo pipefail
 
 # shellcheck disable=SC1091

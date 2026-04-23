@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Restart bundled PostgreSQL containers on DEPLOY_HOSTS running *-pg profiles"
 #MISE aliases=["deploy:docker:pg:restart"]
-#MISE depends=["deploy:check"]
+#MISE depends=["deploy:mise"]
 set -euo pipefail
 
 # shellcheck disable=SC1091

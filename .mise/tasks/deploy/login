@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Log in to ghcr.io on all DEPLOY_HOSTS using a GitHub token"
-#MISE depends=["deploy:check"]
+#MISE depends=["deploy:mise"]
 set -euo pipefail
 
 # shellcheck source=../../shared/deploy/lib.sh
