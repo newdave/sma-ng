@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.17](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.16...sma-ng-v1.6.17) (2026-04-23)
+
+
+### Features
+
+* switch docs web UI renderer to mistune with mermaid diagram support ([b08899f](https://github.com/newdave/sma-ng/commit/b08899f6f9b6a2f20c8a06cc0eee09a560753dc4))
+
+
+### Documentation
+
+* add mermaid diagrams for architecture, pipeline, job lifecycle, integrations, and migration flow ([cd564a1](https://github.com/newdave/sma-ng/commit/cd564a1586d3893b3c42f3dace21bef4c191a87c))
+
 ## [1.6.16](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.15...sma-ng-v1.6.16) (2026-04-23)
 
 
