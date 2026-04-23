@@ -19,10 +19,16 @@ init_host_context() {
   remote_user="${remote_user:-$(whoami)}"
 
   ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-  [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
+  if [ -n "$key" ]; then
+    ssh_opts="$ssh_opts -i $(eval echo "$key")"
+  fi
 
   make_env=""
-  [ -n "$ffmpeg_dir" ] && make_env="SMA_DAEMON_FFMPEG_DIR=$ffmpeg_dir"
+  if [ -n "$ffmpeg_dir" ]; then
+    make_env="SMA_DAEMON_FFMPEG_DIR=$ffmpeg_dir"
+  fi
+
+  return 0
 }
 
 sync_codebase_to_host() {
@@ -83,7 +89,11 @@ init_docker_host_context() {
   fi
 
   sudo_prefix=""
-  [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
+  if [ "$use_sudo" = "true" ]; then
+    sudo_prefix="sudo "
+  fi
+
+  return 0
 }
 
 docker_profile_is_pg() {
@@ -173,7 +183,7 @@ capture_remote_pg_volume_names() {
 
 run_remote_command() {
   local host="$1" command="$2"
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2029,SC2086  # dir/make_env/command expand locally so the remote shell receives the composed command.
   ssh $ssh_opts "$host" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $make_env $command"
 }
 

@@ -13,24 +13,24 @@ DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 
 # Build an ssh_opts array from port and optional key path.
 mk_ssh_opts() {
-  local port="$1" key="$2"
-  SSH_OPTS=(-p "$port" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
-  [ -n "$key" ] && SSH_OPTS+=(-i "$(eval echo "$key")")
+    local port="$1" key="$2"
+    SSH_OPTS=(-p "$port" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+    [ -n "$key" ] && SSH_OPTS+=(-i "$(eval echo "$key")")
 }
 
 # ── 1. ensure SSH key exists ────────────────────────────────────────────────
 key=$("$CFG" "$LOCAL" deploy SSH_KEY "")
 if [ -n "$key" ]; then
-  keyfile=$(eval echo "$key")
-  if [ ! -f "$keyfile" ]; then
-    echo "==> SSH key $keyfile not found — generating ed25519 key"
-    ssh-keygen -t ed25519 -f "$keyfile" -N "" -C "sma-deploy"
-    echo "==> Generated $keyfile"
-  else
-    echo "==> SSH key $keyfile already exists"
-  fi
+    keyfile=$(eval echo "$key")
+    if [ ! -f "$keyfile" ]; then
+        echo "==> SSH key $keyfile not found — generating ed25519 key"
+        ssh-keygen -t ed25519 -f "$keyfile" -N "" -C "sma-deploy"
+        echo "==> Generated $keyfile"
+    else
+        echo "==> SSH key $keyfile already exists"
+    fi
 else
-  echo "==> No SSH_KEY configured, skipping key setup"
+    echo "==> No SSH_KEY configured, skipping key setup"
 fi
 
 # ── 2. add/update Host blocks in ~/.ssh/config ──────────────────────────────
@@ -39,61 +39,61 @@ mkdir -p ~/.ssh && chmod 700 ~/.ssh
 touch "$sshcfg" && chmod 600 "$sshcfg"
 
 for host in $DEPLOY_HOSTS; do
-  cfg="$CFG $LOCAL $host"
-  port=$($cfg SSH_PORT 22)
-  key=$($cfg SSH_KEY "")
-  [ -z "$key" ] && continue
-  keyfile=$(eval echo "$key")
-  [ -f "$keyfile" ] || continue
+    cfg="$CFG $LOCAL $host"
+    port=$($cfg SSH_PORT 22)
+    key=$($cfg SSH_KEY "")
+    [ -z "$key" ] && continue
+    keyfile=$(eval echo "$key")
+    [ -f "$keyfile" ] || continue
 
-  hostname="${host##*@}"
-  user=$(echo "$host" | cut -s -d@ -f1)
-  marker="# sma-deploy: $host"
+    hostname="${host##*@}"
+    user=$(echo "$host" | cut -s -d@ -f1)
+    marker="# sma-deploy: $host"
 
-  if grep -qsF "$marker" "$sshcfg"; then
-    echo "==> [$host] ~/.ssh/config entry already present, skipping"
-  else
-    echo "==> [$host] adding Host block to $sshcfg"
-    {
-      printf '\n%s\n'           "$marker"
-      printf 'Host %s\n'       "$hostname"
-      [ -n "$user" ]         && printf '    User %s\n'        "$user"
-      [ "$port" != "22" ]    && printf '    Port %s\n'        "$port"
-      printf '    IdentityFile %s\n' "$keyfile"
-      printf '    IdentitiesOnly yes\n'
-    } >> "$sshcfg"
-  fi
+    if grep -qsF "$marker" "$sshcfg"; then
+        echo "==> [$host] ~/.ssh/config entry already present, skipping"
+    else
+        echo "==> [$host] adding Host block to $sshcfg"
+        {
+            printf '\n%s\n'           "$marker"
+            printf 'Host %s\n'       "$hostname"
+            [ -n "$user" ]         && printf '    User %s\n'        "$user"
+            [ "$port" != "22" ]    && printf '    Port %s\n'        "$port"
+            printf '    IdentityFile %s\n' "$keyfile"
+            printf '    IdentitiesOnly yes\n'
+        } >> "$sshcfg"
+    fi
 done
 
 # ── 3. copy SSH key to each host ────────────────────────────────────────────
 for host in $DEPLOY_HOSTS; do
-  cfg="$CFG $LOCAL $host"
-  port=$($cfg SSH_PORT 22)
-  key=$($cfg SSH_KEY "")
-  [ -z "$key" ] && continue
-  keyfile=$(eval echo "$key")
-  pubkey="$keyfile.pub"
-  [ -f "$pubkey" ] || continue
+    cfg="$CFG $LOCAL $host"
+    port=$($cfg SSH_PORT 22)
+    key=$($cfg SSH_KEY "")
+    [ -z "$key" ] && continue
+    keyfile=$(eval echo "$key")
+    pubkey="$keyfile.pub"
+    [ -f "$pubkey" ] || continue
 
-  echo "==> [$host] copying SSH key (password prompt may follow)"
-  ssh-copy-id -i "$pubkey" -p "$port" "$host"
+    echo "==> [$host] copying SSH key (password prompt may follow)"
+    ssh-copy-id -i "$pubkey" -p "$port" "$host"
 done
 
 # ── 4. install apt prerequisites on each host ──────────────────────────────
 APT_PACKAGES="build-essential make python3-dev python3-venv"
 for host in $DEPLOY_HOSTS; do
-  cfg="$CFG $LOCAL $host"
-  port=$($cfg SSH_PORT 22)
-  key=$($cfg SSH_KEY "")
-  use_sudo=$($cfg DEPLOY_USE_SUDO "false")
+    cfg="$CFG $LOCAL $host"
+    port=$($cfg SSH_PORT 22)
+    key=$($cfg SSH_KEY "")
+    use_sudo=$($cfg DEPLOY_USE_SUDO "false")
 
-  mk_ssh_opts "$port" "$key"
+    mk_ssh_opts "$port" "$key"
 
-  sudo_prefix=""
-  [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
+    sudo_prefix=""
+    [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
 
-  echo "==> [$host] installing apt prerequisites: $APT_PACKAGES"
-  # shellcheck disable=SC2087  # sudo_prefix intentionally expands client-side
+    echo "==> [$host] installing apt prerequisites: $APT_PACKAGES"
+    # shellcheck disable=SC2029,SC2087  # sudo_prefix expands client-side; the heredoc body stays literal until the remote shell runs it.
   ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}bash -s" <<'REMOTE'
     if ! command -v apt-get >/dev/null 2>&1; then
       echo '  SKIP: apt-get not found'
@@ -105,38 +105,38 @@ done
 
 # ── 5. create DEPLOY_DIR on each host ──────────────────────────────────────
 for host in $DEPLOY_HOSTS; do
-  cfg="$CFG $LOCAL $host"
-  dir=$($cfg DEPLOY_DIR ~/sma)
-  port=$($cfg SSH_PORT 22)
-  key=$($cfg SSH_KEY "")
-  use_sudo=$($cfg DEPLOY_USE_SUDO "false")
+    cfg="$CFG $LOCAL $host"
+    dir=$($cfg DEPLOY_DIR ~/sma)
+    port=$($cfg SSH_PORT 22)
+    key=$($cfg SSH_KEY "")
+    use_sudo=$($cfg DEPLOY_USE_SUDO "false")
 
-  mk_ssh_opts "$port" "$key"
+    mk_ssh_opts "$port" "$key"
 
-  remote_user=$(echo "$host" | cut -s -d@ -f1)
-  echo "==> [$host] ensuring $dir exists"
-  if [ "$use_sudo" = "true" ] && [ -n "$remote_user" ]; then
-    # shellcheck disable=SC2087  # $dir and $remote_user intentionally expand client-side
-    ssh "${SSH_OPTS[@]}" "$host" "sudo mkdir -p $dir && sudo chown $remote_user: $dir"
-  else
-    # shellcheck disable=SC2087  # $dir intentionally expands client-side
-    ssh "${SSH_OPTS[@]}" "$host" "mkdir -p $dir"
-  fi
+    remote_user=$(echo "$host" | cut -s -d@ -f1)
+    echo "==> [$host] ensuring $dir exists"
+    if [ "$use_sudo" = "true" ] && [ -n "$remote_user" ]; then
+        # shellcheck disable=SC2029  # dir/remote_user intentionally expand client-side before the remote shell runs.
+        ssh "${SSH_OPTS[@]}" "$host" "sudo mkdir -p $dir && sudo chown $remote_user: $dir"
+    else
+        # shellcheck disable=SC2029  # dir intentionally expands client-side before the remote shell runs.
+        ssh "${SSH_OPTS[@]}" "$host" "mkdir -p $dir"
+    fi
 done
 
 # ── 6. sync code and install/enable systemd service on each host ───────────
 for host in $DEPLOY_HOSTS; do
-  cfg="$CFG $LOCAL $host"
-  dir=$($cfg DEPLOY_DIR ~/sma)
-  port=$($cfg SSH_PORT 22)
-  key=$($cfg SSH_KEY "")
-  rsync_extra=$($cfg RSYNC_EXTRA "")
+    cfg="$CFG $LOCAL $host"
+    dir=$($cfg DEPLOY_DIR ~/sma)
+    port=$($cfg SSH_PORT 22)
+    key=$($cfg SSH_KEY "")
+    rsync_extra=$($cfg RSYNC_EXTRA "")
 
-  mk_ssh_opts "$port" "$key"
+    mk_ssh_opts "$port" "$key"
 
-  echo "==> [$host] syncing code to $dir"
-  # shellcheck disable=SC2086
-  rsync -az --delete \
+    echo "==> [$host] syncing code to $dir"
+    # shellcheck disable=SC2086
+    rsync -az --delete \
     -e "ssh ${SSH_OPTS[*]}" \
     --exclude='.git/' \
     --exclude='venv/' \
@@ -149,40 +149,41 @@ for host in $DEPLOY_HOSTS; do
     $rsync_extra \
     . "$host:$dir"
 
-  remote_user=$(echo "$host" | cut -s -d@ -f1)
-  remote_user="${remote_user:-$(whoami)}"
-  echo "==> [$host] installing and enabling sma-daemon service (user: $remote_user)"
-  # shellcheck disable=SC2087  # $dir and $remote_user intentionally expand client-side
-  ssh "${SSH_OPTS[@]}" "$host" "cd $dir && make systemd-install SERVICE_USER=$remote_user"
+    remote_user=$(echo "$host" | cut -s -d@ -f1)
+    remote_user="${remote_user:-$(whoami)}"
+    echo "==> [$host] installing and enabling sma-daemon service (user: $remote_user)"
+    # shellcheck disable=SC2029  # dir/remote_user intentionally expand client-side before the remote shell runs.
+    ssh "${SSH_OPTS[@]}" "$host" "cd $dir && make systemd-install SERVICE_USER=$remote_user"
 done
 
 # ── 7. verify ffmpeg/ffprobe in FFMPEG_DIR on each host ─────────────────────
 ok=1
 for host in $DEPLOY_HOSTS; do
-  cfg="$CFG $LOCAL $host"
-  ffmpeg_dir=$($cfg FFMPEG_DIR "")
-  port=$($cfg SSH_PORT 22)
-  key=$($cfg SSH_KEY "")
+    cfg="$CFG $LOCAL $host"
+    ffmpeg_dir=$($cfg FFMPEG_DIR "")
+    port=$($cfg SSH_PORT 22)
+    key=$($cfg SSH_KEY "")
 
-  mk_ssh_opts "$port" "$key"
+    mk_ssh_opts "$port" "$key"
 
-  if [ -z "$ffmpeg_dir" ]; then
-    echo "==> [$host] FFMPEG_DIR not set, skipping ffmpeg check"
-    continue
-  fi
+    if [ -z "$ffmpeg_dir" ]; then
+        echo "==> [$host] FFMPEG_DIR not set, skipping ffmpeg check"
+        continue
+    fi
 
-  echo "==> [$host] checking $ffmpeg_dir/ffmpeg and $ffmpeg_dir/ffprobe"
-  missing=""
-  # shellcheck disable=SC2087  # $ffmpeg_dir intentionally expands client-side
-  ssh "${SSH_OPTS[@]}" "$host" "test -x $ffmpeg_dir/ffmpeg"  2>/dev/null || missing="$missing ffmpeg"
-  ssh "${SSH_OPTS[@]}" "$host" "test -x $ffmpeg_dir/ffprobe" 2>/dev/null || missing="$missing ffprobe"
+    echo "==> [$host] checking $ffmpeg_dir/ffmpeg and $ffmpeg_dir/ffprobe"
+    missing=""
+    # shellcheck disable=SC2029  # ffmpeg_dir intentionally expands client-side before the remote shell runs.
+    ssh "${SSH_OPTS[@]}" "$host" "test -x $ffmpeg_dir/ffmpeg"  2>/dev/null || missing="$missing ffmpeg"
+    # shellcheck disable=SC2029  # ffmpeg_dir intentionally expands client-side before the remote shell runs.
+    ssh "${SSH_OPTS[@]}" "$host" "test -x $ffmpeg_dir/ffprobe" 2>/dev/null || missing="$missing ffprobe"
 
-  if [ -n "$missing" ]; then
-    echo "  WARNING: [$host] not found in $ffmpeg_dir:$missing"
-    ok=0
-  else
-    echo "  OK: [$host] ffmpeg and ffprobe found in $ffmpeg_dir"
-  fi
+    if [ -n "$missing" ]; then
+        echo "  WARNING: [$host] not found in $ffmpeg_dir:$missing"
+        ok=0
+    else
+        echo "  OK: [$host] ffmpeg and ffprobe found in $ffmpeg_dir"
+    fi
 done
 
 [ "$ok" = "1" ] || echo "WARNING: some hosts are missing ffmpeg/ffprobe — install them before deploying"
