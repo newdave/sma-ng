@@ -345,10 +345,7 @@ class TestComposeGpuProfiles:
     assert "sma-intel-pg" in compose["services"]
     assert "intel-pg" in compose["services"]["sma-intel-pg"]["profiles"]
 
-  def test_daemon_services_derive_hostname_from_docker_host(self, compose):
-    # Docker-backed cluster nodes should advertise a hostname that varies
-    # by the host running Docker rather than a service-fixed value.
-    expected = "sma-ng-${HOSTNAME}"
+  def test_daemon_services_do_not_override_container_hostname(self, compose):
     for service_name in (
       "sma-software",
       "sma-software-pg",
@@ -357,7 +354,7 @@ class TestComposeGpuProfiles:
       "sma-intel",
       "sma-intel-pg",
     ):
-      assert compose["services"][service_name]["hostname"] == expected
+      assert "hostname" not in compose["services"][service_name]
 
   def test_intel_exposes_render_node(self, compose):
     # Only the render node is needed for headless QSV/VAAPI encoding.
