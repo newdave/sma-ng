@@ -1,24 +1,24 @@
 try:
-    from config.custom import validation
+  from config.custom import validation
 except ImportError:
-    validation = None
+  validation = None
 try:
-    from config.custom import blockVideoCopy
+  from config.custom import blockVideoCopy
 except ImportError:
-    blockVideoCopy = None
+  blockVideoCopy = None
 try:
-    from config.custom import blockAudioCopy
+  from config.custom import blockAudioCopy
 except ImportError:
-    blockAudioCopy = None
+  blockAudioCopy = None
 try:
-    from config.custom import skipStream
+  from config.custom import skipStream
 except ImportError:
-    skipStream = None
+  skipStream = None
 try:
-    from config.custom import skipUA
+  from config.custom import skipUA
 except ImportError:
-    skipUA = None
+  skipUA = None
 try:
-    from config.custom import streamTitle
+  from config.custom import streamTitle
 except ImportError:
-    streamTitle = None
+  streamTitle = None
