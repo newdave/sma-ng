@@ -7,6 +7,7 @@ import sys
 from datetime import datetime
 from http.server import ThreadingHTTPServer
 
+from resources.daemon.constants import resolve_node_id
 from resources.daemon.threads import HeartbeatThread, RecycleBinCleanerThread, ScannerThread
 from resources.daemon.worker import WorkerPool
 
@@ -88,7 +89,7 @@ class DaemonServer(ThreadingHTTPServer):
     self.api_key = api_key
     self.basic_auth = basic_auth  # (username, password) tuple or None
     self.stale_seconds = stale_seconds
-    self.node_id = socket.gethostname()
+    self.node_id = resolve_node_id()
     self.started_at = datetime.now().astimezone()
     self._cli_api_key = cli_api_key
     self._cli_basic_auth = cli_basic_auth
@@ -252,7 +253,7 @@ class DaemonServer(ThreadingHTTPServer):
 
     if self.job_db.is_distributed:
       try:
-        self.job_db.mark_node_offline(self.node_id)
+        self.job_db.mark_node_offline(self.node_id, remove=True)
       except Exception:
         pass
 
@@ -287,7 +288,7 @@ class DaemonServer(ThreadingHTTPServer):
     # Mark this node offline in the cluster table on clean shutdown
     if self.job_db.is_distributed:
       try:
-        self.job_db.mark_node_offline(self.node_id)
+        self.job_db.mark_node_offline(self.node_id, remove=True)
       except Exception:
         pass
 
