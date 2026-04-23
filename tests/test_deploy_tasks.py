@@ -379,3 +379,92 @@ class TestDeployLibHelpers:
     assert "apikey = kids-key" in content
     assert "webroot = /kids" in content
     assert "recycle-bin = /srv/recycle/Sonarr-Kids" in content
+
+  def test_ini_stamp_credentials_adds_multiple_arr_sections_to_shared_config(self, tmp_path):
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    ini_path = config_dir / "autoProcess.shared.ini"
+    ini_path.write_text("[Converter]\nrecycle-bin = /shared/recycle\n")
+
+    services = {
+      "Sonarr": {
+        "host": "sonarr.local",
+        "port": "8989",
+        "apikey": "tv-key",
+        "config_file": "config/autoProcess.shared.ini",
+      },
+      "Radarr-4K": {
+        "host": "radarr4k.local",
+        "port": "7879",
+        "apikey": "movies4k-key",
+        "webroot": "/4k",
+        "config_file": "config/autoProcess.shared.ini",
+      },
+    }
+    services_b64 = b64encode(json.dumps(services).encode()).decode()
+
+    result = subprocess.run(
+      [
+        "python3",
+        ".mise/shared/deploy/lib/ini_stamp_credentials.py",
+        str(deploy_dir),
+        "false",
+        services_b64,
+      ],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    content = ini_path.read_text()
+    assert "[Sonarr]" in content
+    assert "host = sonarr.local" in content
+    assert "apikey = tv-key" in content
+    assert "[Radarr-4K]" in content
+    assert "host = radarr4k.local" in content
+    assert "port = 7879" in content
+    assert "apikey = movies4k-key" in content
+    assert "webroot = /4k" in content
+
+  def test_ini_ensure_services_creates_suffixed_arr_section(self, tmp_path):
+    deploy_dir = tmp_path / "deploy"
+    setup_dir = deploy_dir / "setup"
+    setup_dir.mkdir(parents=True)
+    (setup_dir / "autoProcess.ini.sample").write_text("[Converter]\nrecycle-bin =\n")
+
+    services = {
+      "Converter": {"recycle-bin": "/srv/recycle"},
+      "Sonarr-Kids": {
+        "host": "kids-sonarr.local",
+        "port": "9898",
+        "apikey": "kids-key",
+        "config_file": "config/autoProcess.kids.ini",
+      },
+    }
+    services_b64 = b64encode(json.dumps(services).encode()).decode()
+
+    result = subprocess.run(
+      [
+        "python3",
+        ".mise/shared/deploy/lib/ini_ensure_services.py",
+        str(deploy_dir),
+        "software",
+        "false",
+        services_b64,
+      ],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    content = (deploy_dir / "config" / "autoProcess.kids.ini").read_text()
+    assert "[Sonarr-Kids]" in content
+    assert "host = kids-sonarr.local" in content
+    assert "port = 9898" in content
+    assert "apikey = kids-key" in content
+    assert "recycle-bin = /srv/recycle/Sonarr-Kids" in content
