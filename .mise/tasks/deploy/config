@@ -3,14 +3,18 @@
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
-LOCAL="setup/.local.ini"
-CFG="scripts/local-config.sh"
+# shellcheck disable=SC1091
+# lib.sh is sourced relative to this script's directory at runtime.
+source "$(dirname "$0")/lib.sh"
+
 ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 
 # Resolve the directory this script lives in so lib/ helpers can be found
 # regardless of the caller's working directory.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+b64enc() { printf '%s' "$1" | base64 | tr -d '\n'; }
 
 # Build an ssh_opts array from port and optional key path.
 mk_ssh_opts() {
@@ -20,25 +24,22 @@ mk_ssh_opts() {
 }
 
 # Ensure a config file exists on the remote host, creating it from a sample if absent.
-# Args: <host> <remote-path> <sample-path> [extra-setup-commands]
-# The optional fourth argument is a shell snippet run after the copy (for e.g. GPU patching).
 ensure_remote_config() {
-  local host="$1" remote_path="$2" sample_path="$3" extra_setup="${4:-}"
+  local host="$1" remote_path="$2" sample_path="$3"
+  # shellcheck disable=SC2029  # $remote_path expands client-side (intentional)
   if ssh "${SSH_OPTS[@]}" "$host" "test -f $remote_path" 2>/dev/null; then
     echo "  exists: $(basename "$remote_path")"
   else
     echo "  creating: $(basename "$remote_path")"
+    # shellcheck disable=SC2029  # $sudo_prefix, $sample_path, $remote_path expand client-side (intentional)
     ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}cp $sample_path $remote_path"
-    if [ -n "$extra_setup" ]; then
-      ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}bash -c '$extra_setup'"
-    fi
   fi
 }
 
 # Detect GPU on a remote host; echoes one of: nvenc qsv vaapi videotoolbox software
 detect_remote_gpu() {
   local host="$1"
-  # shellcheck disable=SC2087
+  # shellcheck disable=SC2087  # heredoc body stays literal until the remote shell runs it
   ssh "${SSH_OPTS[@]}" "$host" 'bash -s' <<'REMOTE'
     if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
       echo nvenc
@@ -52,149 +53,25 @@ detect_remote_gpu() {
 REMOTE
 }
 
-# ── Per-host phase functions ─────────────────────────────────────────────────
-
 # Build a --force-keys argument from [managed_keys] in .local.ini.
-# Each option in [managed_keys] is "Section = key1, key2, ..."; we convert
-# these to the "Section.key1,Section.key2,..." format ini_merge.py expects.
 build_force_keys() {
-  python3 - "$LOCAL" <<'PY'
-import sys, re
-
-path = sys.argv[1]
-try:
-    lines = open(path).readlines()
-except FileNotFoundError:
-    sys.exit(0)
-
-in_section = False
-pairs = []
-for line in lines:
-    s = line.strip()
-    if re.match(r'^\[managed_keys\]', s):
-        in_section = True
-        continue
-    if in_section and re.match(r'^\[', s):
-        break
-    if in_section and '=' in s and not s.startswith('#'):
-        sec, _, keys_str = s.partition('=')
-        sec = sec.strip()
-        for k in keys_str.split(','):
-            k = k.strip()
-            if k:
-                pairs.append(f'{sec}.{k}')
-
-print(','.join(pairs))
-PY
+  python3 "$SCRIPT_DIR/lib/build_force_keys.py" "$LOCAL"
 }
 
 # Create missing per-service autoProcess.*.ini files on the remote host.
-# Reads config_file entries from [Sonarr*] and [Radarr*] sections in .local.ini,
-# creates each missing file from the sample, and stamps credentials into it.
 # Args: <host> <dir> <gpu> <services_json> <use_sudo>
 ensure_remote_service_configs() {
   local host="$1" dir="$2" gpu="$3" services_json="$4" use_sudo="${5:-false}"
   if [ "$services_json" = "{}" ]; then
     return
   fi
-  # shellcheck disable=SC2087  # $dir, $gpu, $services_json, $use_sudo expand client-side (intentional)
-  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir $gpu $use_sudo" <<PYREMOTE
-import sys, os, re, json, subprocess, tempfile
-
-deploy_dir = sys.argv[1]
-gpu        = sys.argv[2] if len(sys.argv) > 2 else ""
-use_sudo   = sys.argv[3] == "true" if len(sys.argv) > 3 else False
-services   = json.loads("""$services_json""")
-
-SERVICE_CREDENTIAL_KEYS = ("host", "port", "ssl", "apikey", "webroot")
-sample_path = os.path.join(deploy_dir, "setup", "autoProcess.ini.sample")
-
-def write_ini_key(lines, section, key, value):
-    out, cur, key_found = [], None, False
-    for line in lines:
-        m = re.match(r"^\[(.+)\]", line.strip())
-        if m:
-            if cur == section and not key_found:
-                out.append(f"{key} = {value}\n")
-                key_found = True
-            cur = m.group(1)
-            out.append(line)
-            continue
-        if cur == section and not key_found:
-            m2 = re.match(r"^(\s*)(\S[^=]*?)\s*=\s*(.*)", line)
-            if m2:
-                _, k, old_val = m2.groups()
-                if k.strip() == key:
-                    if old_val.strip() != value:
-                        line = f"{k.strip()} = {value}\n"
-                    key_found = True
-        out.append(line)
-    if cur == section and not key_found:
-        out.append(f"{key} = {value}\n")
-    return out
-
-recycle_base = services.get("Converter", {}).get("recycle-bin", "").strip()
-
-for sec_name, keys in services.items():
-    is_sonarr = re.match(r"^Sonarr", sec_name, re.IGNORECASE)
-    is_radarr = re.match(r"^Radarr", sec_name, re.IGNORECASE)
-    if not is_sonarr and not is_radarr:
-        continue
-
-    config_file = keys.get("config_file", "").strip()
-    if not config_file:
-        continue
-
-    ini_path = os.path.join(deploy_dir, config_file)
-    ini_section = "Sonarr" if is_sonarr else "Radarr"
-
-    if not os.path.exists(ini_path):
-        os.makedirs(os.path.dirname(ini_path), exist_ok=True)
-        with open(sample_path) as f:
-            content = f.read()
-        if gpu and gpu != "software":
-            content = re.sub(r"(?m)^gpu *=.*", f"gpu = {gpu}", content)
-        if use_sudo:
-            tmp = tempfile.NamedTemporaryFile("w", delete=False, suffix=".ini")
-            tmp.write(content); tmp.close()
-            subprocess.run(["sudo", "mv", tmp.name, ini_path], check=True)
-        else:
-            with open(ini_path, "w") as f:
-                f.write(content)
-        print(f"  created: {config_file}")
-
-    credentials = {k: v for k in SERVICE_CREDENTIAL_KEYS if (v := keys.get(k, "").strip())}
-    lines = open(ini_path).readlines()
-    changed = False
-
-    for key, value in credentials.items():
-        new_lines = write_ini_key(lines, ini_section, key, value)
-        if new_lines != lines:
-            print(f"  [{ini_section}] {key} = {value!r}  ({os.path.basename(ini_path)})")
-            lines = new_lines
-            changed = True
-
-    if recycle_base and sec_name:
-        new_val = f"{recycle_base}/{sec_name}"
-        new_lines = write_ini_key(lines, "Converter", "recycle-bin", new_val)
-        if new_lines != lines:
-            print(f"  [Converter] recycle-bin = {new_val!r}  ({os.path.basename(ini_path)})")
-            lines = new_lines
-            changed = True
-
-    if changed:
-        if use_sudo:
-            tmp = tempfile.NamedTemporaryFile("w", delete=False, suffix=".ini")
-            tmp.writelines(lines); tmp.close()
-            subprocess.run(["sudo", "mv", tmp.name, ini_path], check=True)
-        else:
-            open(ini_path, "w").writelines(lines)
-PYREMOTE
+  local _svc_b64
+  _svc_b64=$(b64enc "$services_json")
+  # shellcheck disable=SC2029  # $dir, $gpu, $use_sudo, $_svc_b64 expand client-side (intentional)
+  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir $gpu $use_sudo $_svc_b64" \
+  < "$SCRIPT_DIR/lib/ini_ensure_services.py"
 }
 
-# Rsync *.ini configs from the remote host, merge any new keys from the sample
-# into each one (and overwrite managed keys), then push them back.
-# Args: <host> <dir> <tmpdir>
 sync_ini_keys() {
   local host="$1" dir="$2" tmpdir="$3"
   local force_keys
@@ -206,19 +83,16 @@ sync_ini_keys() {
     echo "  checking for new keys in autoProcess.ini.sample..."
   fi
 
-  # Fetch all remote *.ini configs locally for diffing
   # shellcheck disable=SC2086
   rsync -az -e "ssh ${SSH_OPTS[*]}" \
-    "$host:$dir/config/" "$tmpdir/remote/" \
-    --include='*.ini' --exclude='*' 2>/dev/null || true
+  "$host:$dir/config/" "$tmpdir/remote/" \
+  --include='*.ini' --exclude='*' 2>/dev/null || true
 
   local changed_files=()
   for remote_ini in "$tmpdir"/remote/*.ini; do
     [ -f "$remote_ini" ] || continue
     local basename sample
     basename=$(basename "$remote_ini")
-    # Use the LQ sample as the merge source for the LQ config file so that
-    # managed keys are pushed from the correct flavour baseline.
     if [ "$basename" = "autoProcess.lq.ini" ]; then
       sample="setup/autoProcess.ini.sample-lq"
     else
@@ -226,23 +100,21 @@ sync_ini_keys() {
     fi
     echo "  merging into $basename..."
     python3 "$SCRIPT_DIR/lib/ini_merge.py" \
-      "$sample" "$remote_ini" \
-      ${force_keys:+--force-keys "$force_keys"}
+    "$sample" "$remote_ini" \
+    --sort --deprecate \
+    ${force_keys:+--force-keys "$force_keys"}
     changed_files+=("$remote_ini")
   done
 
-  # Push updated configs back if any were modified
   if [ "${#changed_files[@]}" -gt 0 ]; then
     echo "  pushing updated configs to $host:$dir/config/"
     # shellcheck disable=SC2086
     rsync -az -e "ssh ${SSH_OPTS[*]}" \
-      "$tmpdir/remote/" "$host:$dir/config/" \
-      --include='*.ini' --exclude='*'
+    "$tmpdir/remote/" "$host:$dir/config/" \
+    --include='*.ini' --exclude='*'
   fi
 }
 
-# Stamp service credentials into all *.ini configs on the remote host.
-# Args: <host> <dir> <services_json> <use_sudo>
 stamp_credentials() {
   local host="$1" dir="$2" services_json="$3" use_sudo="${4:-false}"
   if [ "$services_json" = "{}" ]; then
@@ -250,207 +122,49 @@ stamp_credentials() {
     return
   fi
   echo "  stamping service credentials into all *.ini configs"
-  # shellcheck disable=SC2087  # $dir, $services_json, $use_sudo expand client-side (intentional)
-  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir $use_sudo" <<PYREMOTE
-import sys, os, re, glob, json, subprocess, tempfile
-
-deploy_dir = sys.argv[1]
-use_sudo   = sys.argv[2] == "true" if len(sys.argv) > 2 else False
-overrides  = json.loads("""$services_json""")
-
-# Build a map from config_file basename -> service section name so we can
-# derive a per-service recycle-bin subdirectory for each *.ini config.
-# e.g. config/autoProcess.tv.ini -> "Sonarr" -> recycle-bin = <base>/Sonarr
-config_to_service = {}
-for sec, keys in overrides.items():
-    cf = keys.get('config_file', '').strip()
-    if cf:
-        config_to_service[os.path.basename(cf)] = sec
-
-recycle_base = overrides.get('Converter', {}).get('recycle-bin', '').strip()
-
-for ini_path in sorted(glob.glob(os.path.join(deploy_dir, 'config', '*.ini'))):
-    basename   = os.path.basename(ini_path)
-    service    = config_to_service.get(basename)
-    lines      = open(ini_path).readlines()
-    out, cur_sec, changed = [], None, False
-    for line in lines:
-        m = re.match(r'^\[(.+)\]', line.strip())
-        if m:
-            cur_sec = m.group(1)
-            out.append(line)
-            continue
-        sec_overrides = overrides.get(cur_sec, {})
-        if sec_overrides:
-            m2 = re.match(r'^(\s*)(\S[^=]*?)\s*=\s*(.*)', line)
-            if m2:
-                indent, key, old_val = m2.groups()
-                key = key.strip()
-                new_val = sec_overrides.get(key)
-                # recycle-bin gets a per-service subdirectory when the config
-                # belongs to a known service and a base path is configured.
-                if key == 'recycle-bin' and cur_sec == 'Converter' and recycle_base and service:
-                    new_val = f'{recycle_base}/{service}'
-                if new_val is not None and new_val != old_val.strip():
-                    print(f'  [{cur_sec}] {key}: {old_val.strip()!r} -> {new_val!r}  ({basename})')
-                    line = f'{indent}{key} = {new_val}\n'
-                    changed = True
-        out.append(line)
-    if changed:
-        if use_sudo:
-            tmp = tempfile.NamedTemporaryFile('w', delete=False, suffix='.ini')
-            tmp.writelines(out)
-            tmp.close()
-            subprocess.run(['sudo', 'mv', tmp.name, ini_path], check=True)
-        else:
-            open(ini_path, 'w').writelines(out)
-PYREMOTE
+  local _svc_b64
+  _svc_b64=$(b64enc "$services_json")
+  # shellcheck disable=SC2029  # $dir, $use_sudo, $_svc_b64 expand client-side (intentional)
+  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir $use_sudo $_svc_b64" \
+  < "$SCRIPT_DIR/lib/ini_stamp_credentials.py"
 }
 
-# Apply FFMPEG_DIR to all *.ini configs on the remote host if set.
-# Args: <host> <dir> <ffmpeg_dir> <use_sudo>
 stamp_ffmpeg_paths() {
   local host="$1" dir="$2" ffmpeg_dir="$3" use_sudo="${4:-false}"
   if [ -z "$ffmpeg_dir" ]; then
     return
   fi
   echo "  setting ffmpeg/ffprobe paths to $ffmpeg_dir in all *.ini configs"
-  # shellcheck disable=SC2087
-  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir $ffmpeg_dir $use_sudo" <<'PYREMOTE'
-import sys, os, re, subprocess, tempfile
-
-deploy_dir  = sys.argv[1]
-ffmpeg_dir  = sys.argv[2]
-use_sudo    = sys.argv[3] == "true" if len(sys.argv) > 3 else False
-
-for ini_path in sorted(__import__('glob').glob(os.path.join(deploy_dir, 'config', '*.ini'))):
-    lines = open(ini_path).readlines()
-    out = []
-    changed = False
-    for line in lines:
-        if re.match(r'^ffmpeg *=', line):
-            line = f'ffmpeg = {ffmpeg_dir}/ffmpeg\n'; changed = True
-        elif re.match(r'^ffprobe *=', line):
-            line = f'ffprobe = {ffmpeg_dir}/ffprobe\n'; changed = True
-        out.append(line)
-    if changed:
-        if use_sudo:
-            tmp = tempfile.NamedTemporaryFile('w', delete=False, suffix='.ini')
-            tmp.writelines(out); tmp.close()
-            subprocess.run(['sudo', 'mv', tmp.name, ini_path], check=True)
-        else:
-            open(ini_path, 'w').writelines(out)
-PYREMOTE
+  # shellcheck disable=SC2029  # $dir, $ffmpeg_dir, $use_sudo expand client-side (intentional)
+  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir $ffmpeg_dir $use_sudo" \
+  < "$SCRIPT_DIR/lib/stamp_ffmpeg.py"
 }
 
-# Stamp daemon credentials into config/daemon.json and config/daemon.env.
-# Args: <host> <dir> <daemon_api_key> <daemon_db_url> <daemon_ffmpeg_dir> <services_json>
-#       [daemon_db_user] [daemon_db_pw] [daemon_db_name]
-#
-# For -pg profiles: pass empty daemon_db_url and non-empty component vars; the
-# component vars are stamped into daemon.env for the postgres container.
-# For non-pg profiles: pass daemon_db_url (full URL) and leave component vars empty.
 stamp_daemon_config() {
   local host="$1" dir="$2" daemon_api_key="$3" daemon_db_url="$4" \
-        daemon_ffmpeg_dir="$5" services_json="$6" \
-        daemon_db_user="${7:-}" daemon_db_pw="${8:-}" daemon_db_name="${9:-}"
+  daemon_ffmpeg_dir="$5" services_json="$6" \
+  daemon_db_user="${7:-}" daemon_db_pw="${8:-}" daemon_db_name="${9:-}"
 
   if [ -z "$daemon_api_key" ] && [ -z "$daemon_db_url" ] && \
-     [ -z "$daemon_ffmpeg_dir" ] && [ "$services_json" = "{}" ] && \
-     [ -z "$daemon_db_user" ] && [ -z "$daemon_db_pw" ] && [ -z "$daemon_db_name" ]; then
+  [ -z "$daemon_ffmpeg_dir" ] && [ "$services_json" = "{}" ] && \
+  [ -z "$daemon_db_user" ] && [ -z "$daemon_db_pw" ] && [ -z "$daemon_db_name" ]; then
     echo "  no daemon credentials configured in $LOCAL [daemon], skipping"
     return
   fi
 
   echo "  stamping daemon credentials into config/daemon.json and config/daemon.env"
-  # shellcheck disable=SC2087  # variables expand client-side (intentional)
-  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir" <<PYREMOTE
-import sys, os, json, re
-
-deploy_dir    = sys.argv[1]
-api_key       = """$daemon_api_key"""
-db_url        = """$daemon_db_url"""
-ffmpeg_dir    = """$daemon_ffmpeg_dir"""
-db_user       = """$daemon_db_user"""
-db_pw         = """$daemon_db_pw"""
-db_name       = """$daemon_db_name"""
-services      = json.loads("""$services_json""")
-
-# ── daemon.json ───────────────────────────────────────────────────────────
-json_path = os.path.join(deploy_dir, 'config', 'daemon.json')
-if os.path.exists(json_path):
-    with open(json_path) as f:
-        cfg = json.load(f)
-    changed = False
-    for field, val in [('api_key', api_key), ('db_url', db_url), ('ffmpeg_dir', ffmpeg_dir)]:
-        if val and cfg.get(field) != val:
-            print(f'  daemon.json {field}: {cfg.get(field)!r} -> {val!r}')
-            cfg[field] = val
-            changed = True
-
-    # Rebuild path_configs from service sections that have media_path + config_file.
-    # Entries are sorted longest-path-first so the daemon's prefix matching works
-    # correctly (more specific paths take priority).
-    path_entries = []
-    for sec, keys in services.items():
-        media_path  = keys.get('media_path', '').strip()
-        config_file = keys.get('config_file', '').strip()
-        if media_path and config_file:
-            path_entries.append({'path': media_path, 'config': config_file})
-    if path_entries:
-        path_entries.sort(key=lambda e: len(e['path']), reverse=True)
-        old = cfg.get('path_configs', [])
-        if old != path_entries:
-            print(f'  daemon.json path_configs: rebuilding {len(path_entries)} entries')
-            for e in path_entries:
-                print(f'    {e["path"]} -> {e["config"]}')
-            cfg['path_configs'] = path_entries
-            changed = True
-
-    if changed:
-        with open(json_path, 'w') as f:
-            json.dump(cfg, f, indent=2)
-            f.write('\n')
-else:
-    print('  WARNING: config/daemon.json not found, skipping')
-
-# ── daemon.env ────────────────────────────────────────────────────────────
-env_path = os.path.join(deploy_dir, 'config', 'daemon.env')
-if os.path.exists(env_path):
-    env_vars = {
-        'SMA_DAEMON_API_KEY':    api_key,
-        'SMA_DAEMON_DB_URL':     db_url,
-        'SMA_DAEMON_DB_USER':    db_user,
-        'SMA_DAEMON_DB_PASSWORD': db_pw,
-        'SMA_DAEMON_DB_NAME':    db_name,
-        'SMA_DAEMON_FFMPEG_DIR': ffmpeg_dir,
-    }
-    with open(env_path) as f:
-        lines = f.readlines()
-    out = []
-    seen = set()
-    for line in lines:
-        m = re.match(r'^#?\s*(SMA_DAEMON_\w+)\s*=', line)
-        if m:
-            var = m.group(1)
-            val = env_vars.get(var, '')
-            if val and var not in seen:
-                old = line.rstrip()
-                line = f'{var}={val}\n'
-                if old != line.rstrip():
-                    print(f'  daemon.env {var}: updated')
-                seen.add(var)
-        out.append(line)
-    # append any vars not already present in the file
-    for var, val in env_vars.items():
-        if val and var not in seen:
-            print(f'  daemon.env {var}: added')
-            out.append(f'{var}={val}\n')
-    with open(env_path, 'w') as f:
-        f.writelines(out)
-else:
-    print('  WARNING: config/daemon.env not found, skipping')
-PYREMOTE
+  local _api_b64 _db_url_b64 _ffmpeg_b64 _dbuser_b64 _dbpw_b64 _dbname_b64 _svc_b64
+  _api_b64=$(b64enc "$daemon_api_key")
+  _db_url_b64=$(b64enc "$daemon_db_url")
+  _ffmpeg_b64=$(b64enc "$daemon_ffmpeg_dir")
+  _dbuser_b64=$(b64enc "$daemon_db_user")
+  _dbpw_b64=$(b64enc "$daemon_db_pw")
+  _dbname_b64=$(b64enc "$daemon_db_name")
+  _svc_b64=$(b64enc "$services_json")
+  # shellcheck disable=SC2029  # $dir and b64-encoded args expand client-side (intentional)
+  ssh "${SSH_OPTS[@]}" "$host" \
+  "python3 - $dir $_api_b64 $_db_url_b64 $_ffmpeg_b64 $_dbuser_b64 $_dbpw_b64 $_dbname_b64 $_svc_b64" \
+  < "$SCRIPT_DIR/lib/stamp_daemon.py"
 }
 
 # Copy and stamp post-process scripts; also update shebangs in root entry points.
@@ -458,75 +172,23 @@ PYREMOTE
 #       <jellyfin_url> <jellyfin_token> <emby_url> <emby_apikey>
 deploy_post_process() {
   local host="$1" dir="$2" plex_token="$3" plex_username="$4" \
-        plex_servername="$5" jellyfin_url="$6" jellyfin_token="$7" \
-        emby_url="$8" emby_apikey="$9"
+  plex_servername="$5" jellyfin_url="$6" jellyfin_token="$7" \
+  emby_url="$8" emby_apikey="$9"
 
   echo "  deploying post-process scripts from setup/post_process/ to post_process/"
-  # shellcheck disable=SC2087  # variables expand client-side (intentional)
-  ssh "${SSH_OPTS[@]}" "$host" "python3 - $dir" <<PYREMOTE
-import sys, os, re, glob
-
-deploy_dir = sys.argv[1]
-shebang    = f'#!/{deploy_dir}/venv/bin/python3'
-
-def stamp_shebang(content):
-    """Replace the first shebang line with the venv-relative one."""
-    if content.startswith('#!'):
-        return re.sub(r'^#!.*', shebang, content, count=1)
-    return shebang + '\n' + content
-
-# ── stamp shebang in root-level entry-point scripts ──────────────────────
-entry_points = glob.glob(os.path.join(deploy_dir, '*.py'))
-for path in sorted(entry_points):
-    with open(path) as f:
-        content = f.read()
-    new_content = stamp_shebang(content)
-    if new_content != content:
-        with open(path, 'w') as f:
-            f.write(new_content)
-        print(f'  shebang updated: {os.path.basename(path)}')
-
-# ── copy and stamp post-process scripts ──────────────────────────────────
-src_dir = os.path.join(deploy_dir, 'setup', 'post_process')
-dst_dir = os.path.join(deploy_dir, 'post_process')
-os.makedirs(dst_dir, exist_ok=True)
-
-# Credentials keyed by script basename
-STAMP_RULES = {
-    'plex.py': [
-        (r'^(TOKEN\s*=\s*)["\'].*["\']',      r'\g<1>"""$plex_token"""'),
-        (r'^(USERNAME\s*=\s*)["\'].*["\']',    r'\g<1>"""$plex_username"""'),
-        (r'^(SERVERNAME\s*=\s*)["\'].*["\']',  r'\g<1>"""$plex_servername"""'),
-    ],
-    'jellyfin.py': [
-        (r'^(TOKEN\s*=\s*)["\'].*["\']',       r'\g<1>"""$jellyfin_token"""'),
-        (r'^(url\s*=\s*)["\'].*["\']',         r'\g<1>"""$jellyfin_url"""'),
-    ],
-    'emby.py': [
-        (r'^(BASEURL\s*=\s*)["\'].*["\']',     r'\g<1>"""$emby_url"""'),
-        (r'^(APIKEY\s*=\s*)["\'].*["\']',      r'\g<1>"""$emby_apikey"""'),
-    ],
-}
-
-for src in sorted(glob.glob(os.path.join(src_dir, '*.py'))):
-    name = os.path.basename(src)
-    dst  = os.path.join(dst_dir, name)
-    with open(src) as f:
-        content = f.read()
-    content = stamp_shebang(content)
-    rules = STAMP_RULES.get(name, [])
-    changed = False
-    for pattern, replacement in rules:
-        new_content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
-        if new_content != content:
-            changed = True
-            content = new_content
-    with open(dst, 'w') as f:
-        f.write(content)
-    os.chmod(dst, 0o755)
-    status = 'stamped' if changed else 'copied'
-    print(f'  {status}: post_process/{name}')
-PYREMOTE
+  local _plex_token_b64 _plex_user_b64 _plex_srv_b64
+  local _jf_url_b64 _jf_token_b64 _emby_url_b64 _emby_key_b64
+  _plex_token_b64=$(b64enc "$plex_token")
+  _plex_user_b64=$(b64enc "$plex_username")
+  _plex_srv_b64=$(b64enc "$plex_servername")
+  _jf_url_b64=$(b64enc "$jellyfin_url")
+  _jf_token_b64=$(b64enc "$jellyfin_token")
+  _emby_url_b64=$(b64enc "$emby_url")
+  _emby_key_b64=$(b64enc "$emby_apikey")
+  # shellcheck disable=SC2029  # $dir and b64-encoded args expand client-side (intentional)
+  ssh "${SSH_OPTS[@]}" "$host" \
+  "python3 - $dir $_plex_token_b64 $_plex_user_b64 $_plex_srv_b64 $_jf_url_b64 $_jf_token_b64 $_emby_url_b64 $_emby_key_b64" \
+  < "$SCRIPT_DIR/lib/stamp_postprocess.py"
 }
 
 # ── Main per-host loop ───────────────────────────────────────────────────────
@@ -557,7 +219,7 @@ for host in $DEPLOY_HOSTS; do
   # ── create missing config files from samples ────────────────────────────
   echo "  checking for missing config files..."
   # autoProcess.ini / .rq.ini / .lq.ini — all need GPU-specific patching after creation
-  # shellcheck disable=SC2087
+  # shellcheck disable=SC2029,SC2087  # sudo_prefix/dir/gpu expand locally; heredoc body stays literal until the remote shell runs it.
   ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}bash -s" "$dir" "$gpu" <<'REMOTE'
     dir="$1" gpu="$2"
     create_ini() {
@@ -579,6 +241,12 @@ REMOTE
   ensure_remote_config "$host" "$dir/config/daemon.json" "$dir/setup/daemon.json.sample"
   ensure_remote_config "$host" "$dir/config/daemon.env"  "$dir/setup/daemon.env.sample"
   ensure_remote_service_configs "$host" "$dir" "$gpu" "$services_json" "$use_sudo"
+
+  # ── back up remote config directory before any mutation ─────────────────
+  _backup_ts=$(date +%Y-%m-%dT%H-%M-%S)
+  # shellcheck disable=SC2029  # $dir, $_backup_ts expand client-side (intentional)
+  ssh "${SSH_OPTS[@]}" "$host" \
+  "mkdir -p $dir/.backup/$_backup_ts && cp -a $dir/config/. $dir/.backup/$_backup_ts/"
 
   # ── sync new INI keys from sample into each existing *.ini ──────────────
   tmpdir=$(mktemp -d)
@@ -627,7 +295,7 @@ REMOTE
     fi
   fi
   stamp_daemon_config "$host" "$dir" "$daemon_api_key" "$daemon_db_url" "$daemon_ffmpeg_dir" \
-    "$services_json" "$daemon_db_user" "$daemon_db_pw" "$daemon_db_name"
+  "$services_json" "$daemon_db_user" "$daemon_db_pw" "$daemon_db_name"
 
   # ── deploy post-process scripts ──────────────────────────────────────────
   plex_token=$("$CFG" "$LOCAL" Plex token "")
@@ -638,9 +306,9 @@ REMOTE
   emby_url=$("$CFG" "$LOCAL" Emby url "")
   emby_apikey=$("$CFG" "$LOCAL" Emby apikey "")
   deploy_post_process "$host" "$dir" \
-    "$plex_token" "$plex_username" "$plex_servername" \
-    "$jellyfin_url" "$jellyfin_token" \
-    "$emby_url" "$emby_apikey"
+  "$plex_token" "$plex_username" "$plex_servername" \
+  "$jellyfin_url" "$jellyfin_token" \
+  "$emby_url" "$emby_apikey"
 
   echo "  done"
 done
