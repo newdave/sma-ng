@@ -4,7 +4,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -23,6 +23,7 @@ from daemon import (
   _load_dashboard_html,
   _render_markdown_to_html,
 )
+from resources.daemon.constants import resolve_node_id
 from resources.daemon.docs_ui import _load_admin_html, _load_docs_template
 from resources.daemon.server import _is_public_ip_address, _resolve_advertised_host
 
@@ -112,6 +113,18 @@ class TestPathConfigManager:
       )
     pcm = PathConfigManager(config_file)
     assert pcm.get_config_for_path("/mnt/local/Media/TV/1080P/show.mkv") == specific_ini
+
+
+class TestNodeIdResolution:
+  def test_resolve_node_id_prefers_sma_node_name_env(self, monkeypatch):
+    monkeypatch.setenv("SMA_NODE_NAME", "sma-slave0")
+    monkeypatch.setattr("socket.gethostname", lambda: "docker-hostname")
+    assert resolve_node_id() == "sma-slave0"
+
+  def test_resolve_node_id_falls_back_to_hostname(self, monkeypatch):
+    monkeypatch.delenv("SMA_NODE_NAME", raising=False)
+    monkeypatch.setattr("socket.gethostname", lambda: "docker-hostname")
+    assert resolve_node_id() == "docker-hostname"
 
   def test_no_match_uses_default(self, tmp_path):
     config_file = str(tmp_path / "daemon.json")
@@ -990,6 +1003,18 @@ class TestPostgreSQLJobDatabase:
     result = db.add_job("/path/movie.mkv", "/cfg/autoProcess.ini")
     assert result is None
 
+  def test_add_job_acquires_advisory_lock_for_path(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchone.side_effect = [None, {"id": 42}]
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    db.add_job("/path/movie.mkv", "/cfg/autoProcess.ini")
+
+    first_sql, first_params = cur.execute.call_args_list[0][0]
+    assert "pg_advisory_xact_lock" in first_sql
+    assert first_params == ("/path/movie.mkv",)
+
   def test_add_job_passes_args_as_json(self):
     from unittest.mock import MagicMock
 
@@ -997,9 +1022,9 @@ class TestPostgreSQLJobDatabase:
     cur.fetchone.side_effect = [None, {"id": 99}]
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
     db.add_job("/path/ep.mkv", "/cfg/tv.ini", args=["-tmdb", "123"], max_retries=2)
-    # Second execute call should include JSON-encoded args
+    # Third execute call should include JSON-encoded args
     calls = cur.execute.call_args_list
-    insert_call = calls[1]
+    insert_call = calls[2]
     assert '"-tmdb"' in insert_call[0][1][2]
 
   # ------------------------------------------------------------------
@@ -1417,6 +1442,17 @@ class TestPostgreSQLJobDatabase:
         db.mark_node_offline("node1")
         mock_log.assert_not_called()
 
+  def test_mark_node_offline_remove_deletes_node_row(self):
+    from unittest.mock import MagicMock, patch
+
+    cur = MagicMock()
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    with patch.object(db, "_requeue_running_jobs_for_node", return_value=0):
+      db.mark_node_offline("node1", remove=True)
+
+    sql_calls = [call_args[0][0] for call_args in cur.execute.call_args_list]
+    assert any("DELETE FROM cluster_nodes" in sql for sql in sql_calls)
+
   # ------------------------------------------------------------------
   # send_node_command
   # ------------------------------------------------------------------
@@ -1632,6 +1668,48 @@ class TestPostgresImportGuard:
         for mod, val in blocked.items():
           mp.setitem(sys.modules, mod, val)
         PostgreSQLJobDatabase("postgresql://localhost/test")
+
+
+class TestDaemonServerShutdownLifecycle:
+  def _make_server_for_shutdown(self):
+    server = DaemonServer.__new__(DaemonServer)
+    server.logger = MagicMock()
+    server.node_id = "node-1"
+
+    server.worker_pool = MagicMock()
+    worker = MagicMock()
+    worker.is_alive.return_value = False
+    worker.current_job_id = None
+    server.worker_pool._workers = [worker]
+
+    server.heartbeat_thread = MagicMock()
+    server.scanner_thread = MagicMock()
+    server.recycle_cleaner_thread = MagicMock()
+    server.job_db = MagicMock()
+    server.job_db.is_distributed = True
+    return server
+
+  def test_shutdown_removes_node_from_cluster_registry(self):
+    server = self._make_server_for_shutdown()
+
+    with patch("resources.daemon.server.ThreadingHTTPServer.shutdown", autospec=True) as super_shutdown:
+      DaemonServer.shutdown(server)
+
+    server.job_db.mark_node_offline.assert_called_once_with("node-1", remove=True)
+    super_shutdown.assert_called_once_with(server)
+
+  def test_graceful_restart_removes_node_from_cluster_registry(self):
+    server = self._make_server_for_shutdown()
+
+    with patch("resources.daemon.server.ThreadingHTTPServer.shutdown", autospec=True) as super_shutdown:
+      with patch("resources.daemon.server.os.execv") as execv:
+        with patch("resources.daemon.server.sys.executable", "python3"):
+          with patch("resources.daemon.server.sys.argv", ["daemon.py"]):
+            DaemonServer.graceful_restart(server)
+
+    server.job_db.mark_node_offline.assert_called_once_with("node-1", remove=True)
+    super_shutdown.assert_called_once_with(server)
+    execv.assert_called_once_with("python3", ["python3", "daemon.py"])
 
 
 # ---------------------------------------------------------------------------

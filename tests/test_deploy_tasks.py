@@ -88,6 +88,17 @@ class TestDeployPostgresTasks:
       assert 'source "$(dirname "$0")/../../shared/deploy/lib.sh"' in text
 
 
+class TestClusterTasks:
+  def test_cluster_tasks_source_shared_library(self):
+    for rel_path in (
+      ".mise/tasks/cluster/stop",
+      ".mise/tasks/cluster/start",
+      ".mise/tasks/cluster/restart",
+    ):
+      text = _read(rel_path)
+      assert 'source "$(dirname "$0")/../../shared/deploy/lib.sh"' in text
+
+
 class TestMiseTaskLayout:
   def test_mise_toml_does_not_define_inline_tasks(self):
     text = _read("mise.toml")
@@ -147,6 +158,10 @@ class TestMiseTaskLayout:
     assert "deploy:docker" in tasks
     assert "deploy:docker:upgrade" not in tasks
     assert "deploy:docker:upgrade" in tasks["deploy:docker"]
+
+    assert "cluster:stop" in tasks
+    assert "cluster:start" in tasks
+    assert "cluster:restart" in tasks
 
     assert "pg:restart" in tasks
     assert "deploy:docker:pg:restart" not in tasks
@@ -312,6 +327,11 @@ class TestDeployConfigTask:
     assert "lib/stamp_daemon.py" in text
     assert "lib/stamp_postprocess.py" in text
 
+  def test_deploy_config_depends_on_deploy_mise(self):
+    """config:roll must depend on deploy:mise so remote helper code is current."""
+    text = _read(".mise/tasks/config/roll")
+    assert '#MISE depends=["deploy:mise"]' in text
+
   def test_deploy_config_has_backup_step(self):
     """deploy/config must create a timestamped backup before mutating configs."""
     text = _read(".mise/tasks/config/roll")
@@ -468,3 +488,61 @@ class TestDeployLibHelpers:
     assert "port = 9898" in content
     assert "apikey = kids-key" in content
     assert "recycle-bin = /srv/recycle/Sonarr-Kids" in content
+
+  def test_stamp_daemon_writes_sma_node_name_to_daemon_env(self, tmp_path):
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "daemon.env").write_text("# existing\n")
+    (config_dir / "daemon.json").write_text("{}\n")
+    services_b64 = b64encode(json.dumps({}).encode()).decode()
+    node_name_b64 = b64encode(b"sma-slave0").decode()
+
+    result = subprocess.run(
+      [
+        "python3",
+        ".mise/shared/deploy/lib/stamp_daemon.py",
+        str(deploy_dir),
+        "",
+        "",
+        "",
+        node_name_b64,
+        "",
+        "",
+        "",
+        services_b64,
+      ],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    content = (config_dir / "daemon.env").read_text()
+    assert "SMA_NODE_NAME=sma-slave0" in content
+
+
+class TestDeployMiseTask:
+  def test_deploy_mise_task_syncs_repo_control_plane(self):
+    text = _read(".mise/tasks/deploy/mise")
+    assert '#MISE depends=["deploy:check"]' in text
+    assert "mkdir -p $dir/.mise" in text
+    assert '.mise/ "$host:$dir/.mise/"' in text
+
+  def test_remote_deploy_tasks_depend_on_deploy_mise(self):
+    for rel_path in (
+      ".mise/tasks/config/roll",
+      ".mise/tasks/deploy/sync",
+      ".mise/tasks/deploy/docker",
+      ".mise/tasks/cluster/stop",
+      ".mise/tasks/cluster/start",
+      ".mise/tasks/cluster/restart",
+      ".mise/tasks/deploy/restart",
+      ".mise/tasks/deploy/exec",
+      ".mise/tasks/deploy/login",
+      ".mise/tasks/pg/restart",
+      ".mise/tasks/pg/recreate",
+    ):
+      text = _read(rel_path)
+      assert '#MISE depends=["deploy:mise"]' in text, rel_path
