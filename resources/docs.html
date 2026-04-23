@@ -29,7 +29,9 @@
     </div>
   </div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script>
+mermaid.initialize({ startOnLoad: true, theme: 'dark' });
 document.querySelectorAll('pre').forEach(pre => {
   const btn = document.createElement('button');
   btn.className = 'copy-btn bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white text-xs px-2 py-1 rounded';

@@ -1,21 +1,10 @@
+import html as _html
 import os
 import re as _re
 
-from resources.daemon.constants import SCRIPT_DIR
+import mistune
 
-# Pre-compiled inline Markdown patterns (reused for every line of every page).
-_BOLD_RE = _re.compile(r"\*\*(.+?)\*\*")
-_ITALIC_RE = _re.compile(r"\*(.+?)\*")
-_CODE_RE = _re.compile(r"`([^`]+)`")
-_LINK_RE = _re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
-# Pre-compiled block-level Markdown patterns for the line renderer.
-_HEADING_RE = _re.compile(r"^(#{1,6})\s+(.*)")
-_HR_RE = _re.compile(r"^-{3,}$")
-_UL_RE = _re.compile(r"^(\s*)[-*]\s+(.*)")
-_OL_RE = _re.compile(r"^(\s*)\d+\.\s+(.*)")
-_LIST_CONT_RE = _re.compile(r"^(\s*[-*]\s|^\s*\d+\.\s)")
-_TABLE_SEP_RE = _re.compile(r"^[-:]+$")
-_SLUG_STRIP_RE = _re.compile(r"[^\w-]")
+from resources.daemon.constants import SCRIPT_DIR
 
 DOCS_DIR = os.path.join(SCRIPT_DIR, "docs")
 DOCS_TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "resources", "docs.html")
@@ -36,113 +25,79 @@ DOC_PAGES = [
     ("migration", "Migration Guide"),
 ]
 
+_TAG_STRIP_RE = _re.compile(r"<[^>]+>")
+_SLUG_STRIP_RE = _re.compile(r"[^\w-]")
+_HEADING_SIZES = {1: "text-3xl", 2: "text-2xl", 3: "text-xl", 4: "text-lg", 5: "text-base", 6: "text-sm"}
+
+
+class _DocsRenderer(mistune.HTMLRenderer):
+    def heading(self, text, level, **attrs):
+        plain = _TAG_STRIP_RE.sub("", text)
+        slug = _SLUG_STRIP_RE.sub("", plain.lower().replace(" ", "-"))
+        margin = "mt-10" if level <= 2 else "mt-6"
+        size = _HEADING_SIZES.get(level, "text-base")
+        return f'<h{level} id="{slug}" class="{size} {margin} font-bold text-white mb-3">{text}</h{level}>\n'
+
+    def block_code(self, code, **attrs):
+        lang = (attrs.get("info") or "").strip().split()[0] if attrs.get("info") else ""
+        if lang == "mermaid":
+            return f'<div class="mermaid my-4">{code}</div>\n'
+        return f'<pre class="bg-gray-800 rounded-lg p-4 overflow-x-auto my-4 border border-gray-700"><code class="text-sm text-green-300">{_html.escape(code)}</code></pre>\n'
+
+    def codespan(self, code):
+        return f'<code class="bg-gray-800 text-blue-300 px-1.5 py-0.5 rounded text-xs">{_html.escape(code)}</code>'
+
+    def link(self, text, url, title=None):
+        return f'<a href="{url}" class="text-blue-400 hover:underline">{text}</a>'
+
+    def strong(self, text):
+        return f'<strong class="text-white">{text}</strong>'
+
+    def paragraph(self, text):
+        return f'<p class="text-gray-300 my-2 leading-relaxed">{text}</p>\n'
+
+    def thematic_break(self):
+        return '<hr class="border-gray-700 my-8">\n'
+
+    def list(self, body, ordered, **attrs):
+        tag = "ol" if ordered else "ul"
+        cls = "list-decimal" if ordered else "list-disc"
+        return f'<{tag} class="{cls} list-inside space-y-1 my-3 text-gray-300">{body}</{tag}>\n'
+
+    def list_item(self, text, **attrs):
+        return f"<li>{text.strip()}</li>\n"
+
+    def table(self, text):
+        return f'<div class="overflow-x-auto my-4"><table class="w-full text-sm">{text}</table></div>\n'
+
+    def table_head(self, text):
+        return f'<thead><tr class="border-b border-gray-700">{text}</tr></thead>\n'
+
+    def table_body(self, text):
+        return f'<tbody class="divide-y divide-gray-700/50">{text}</tbody>\n'
+
+    def table_row(self, text):
+        return f'<tr class="hover:bg-gray-800/50">{text}</tr>\n'
+
+    def table_cell(self, text, align=None, head=False):
+        if head:
+            return f'<th class="text-left py-2 px-3 text-gray-400">{text}</th>\n'
+        return f'<td class="py-2 px-3 text-gray-300">{text}</td>\n'
+
+
+_md = mistune.create_markdown(renderer=_DocsRenderer(escape=True), plugins=["table"])
+
 
 def _inline(text):
-    """Process inline Markdown formatting."""
-    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    text = _BOLD_RE.sub(r'<strong class="text-white">\1</strong>', text)
-    text = _ITALIC_RE.sub(r"<em>\1</em>", text)
-    text = _CODE_RE.sub(r'<code class="bg-gray-800 text-blue-300 px-1.5 py-0.5 rounded text-xs">\1</code>', text)
-    text = _LINK_RE.sub(r'<a href="\2" class="text-blue-400 hover:underline">\1</a>', text)
-    return text
+    """Render inline Markdown to HTML (no block wrapper). Preserved for backward compatibility."""
+    rendered = _md(text).strip()
+    if rendered.startswith("<p") and rendered.endswith("</p>"):
+        rendered = rendered[rendered.index(">") + 1 : -4]
+    return rendered
 
 
 def _render_markdown_to_html(md_text):
-    """Minimal Markdown to HTML renderer for documentation display."""
-    lines = md_text.split("\n")
-    html_parts = []
-    in_code = False
-    in_table = False
-    in_list = False
-    list_type = None
-
-    for line in lines:
-        if line.strip().startswith("```"):
-            if in_code:
-                html_parts.append("</code></pre>")
-                in_code = False
-            else:
-                html_parts.append('<pre class="bg-gray-800 rounded-lg p-4 overflow-x-auto my-4 border border-gray-700"><code class="text-sm text-green-300">')
-                in_code = True
-            continue
-        if in_code:
-            html_parts.append(line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-            continue
-
-        if in_table and not line.strip().startswith("|"):
-            html_parts.append("</tbody></table></div>")
-            in_table = False
-
-        if in_list and line.strip() and not _LIST_CONT_RE.match(line):
-            html_parts.append("</%s>" % list_type)
-            in_list = False
-
-        stripped = line.strip()
-        if not stripped:
-            if in_list:
-                html_parts.append("</%s>" % list_type)
-                in_list = False
-            continue
-
-        heading_match = _HEADING_RE.match(stripped)
-        if heading_match:
-            level = len(heading_match.group(1))
-            text = _inline(heading_match.group(2))
-            slug = _SLUG_STRIP_RE.sub("", heading_match.group(2).lower().replace(" ", "-"))
-            sizes = {1: "text-3xl", 2: "text-2xl", 3: "text-xl", 4: "text-lg", 5: "text-base", 6: "text-sm"}
-            margin_top = "mt-10" if level <= 2 else "mt-6"
-            html_parts.append('<h%d id="%s" class="%s %s font-bold text-white mb-3">%s</h%d>' % (level, slug, sizes.get(level, "text-base"), margin_top, text, level))
-            continue
-
-        if _HR_RE.match(stripped):
-            html_parts.append('<hr class="border-gray-700 my-8">')
-            continue
-
-        if stripped.startswith("|"):
-            cells = [cell.strip() for cell in stripped.split("|")[1:-1]]
-            if all(_TABLE_SEP_RE.match(cell) for cell in cells):
-                continue
-            if not in_table:
-                in_table = True
-                html_parts.append('<div class="overflow-x-auto my-4"><table class="w-full text-sm"><thead><tr class="border-b border-gray-700">')
-                for cell in cells:
-                    html_parts.append('<th class="text-left py-2 px-3 text-gray-400">%s</th>' % _inline(cell))
-                html_parts.append('</tr></thead><tbody class="divide-y divide-gray-700/50">')
-            else:
-                html_parts.append('<tr class="hover:bg-gray-800/50">')
-                for cell in cells:
-                    html_parts.append('<td class="py-2 px-3 text-gray-300">%s</td>' % _inline(cell))
-                html_parts.append("</tr>")
-            continue
-
-        unordered_match = _UL_RE.match(line)
-        if unordered_match:
-            if not in_list:
-                in_list = True
-                list_type = "ul"
-                html_parts.append('<ul class="list-disc list-inside space-y-1 my-3 text-gray-300">')
-            html_parts.append("<li>%s</li>" % _inline(unordered_match.group(2)))
-            continue
-
-        ordered_match = _OL_RE.match(line)
-        if ordered_match:
-            if not in_list:
-                in_list = True
-                list_type = "ol"
-                html_parts.append('<ol class="list-decimal list-inside space-y-1 my-3 text-gray-300">')
-            html_parts.append("<li>%s</li>" % _inline(ordered_match.group(2)))
-            continue
-
-        html_parts.append('<p class="text-gray-300 my-2 leading-relaxed">%s</p>' % _inline(stripped))
-
-    if in_code:
-        html_parts.append("</code></pre>")
-    if in_table:
-        html_parts.append("</tbody></table></div>")
-    if in_list:
-        html_parts.append("</%s>" % list_type)
-
-    return "\n".join(html_parts)
+    return _md(md_text)
 
 
 def _load_dashboard_html():
