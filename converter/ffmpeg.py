@@ -369,6 +369,7 @@ class MediaInfo(object):
         return {
             "format": self.format.format,
             "format-fullname": self.format.fullname,
+            "filename": os.path.basename(self.path) if self.path else None,
             "video": self.video.json,
             "audio": [x.json for x in self.audio],
             "subtitle": [x.json for x in self.subtitle],

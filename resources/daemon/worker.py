@@ -19,6 +19,7 @@ _FFMPEG_TIME_RE = _re.compile(r"time=(\d+:\d+:\d+)")
 _FFMPEG_PROGRESS_RE = _re.compile(r"\bframe=\s*\d+\b")
 _FFMPEG_FPS_RE = _re.compile(r"\bfps=\s*([\d.]+)")
 _FFMPEG_SPEED_RE = _re.compile(r"\bspeed=\s*([\d.]+)x")
+_FFMPEG_BITRATE_RE = _re.compile(r"\bbitrate=\s*([\d.]+)\s*kbits/s")
 _DEFAULT_PROGRESS_LOG_INTERVAL = 60  # seconds between progress log entries
 
 
@@ -260,6 +261,10 @@ class ConversionWorker(threading.Thread):
         speed = float(speed_m.group(1)) if speed_m else None
         if speed and speed > 0:
             progress["speed"] = "%.2fx" % speed
+
+        bitrate_m = _FFMPEG_BITRATE_RE.search(line)
+        if bitrate_m:
+            progress["bitrate"] = "%.1fk" % float(bitrate_m.group(1))
 
         if timecode and total_duration_secs and total_duration_secs > 0:
             parts = timecode.split(":")
