@@ -99,42 +99,72 @@ python daemon.py --host 0.0.0.0 --port 8585
 
 ## Architecture
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                         Entry Points                            │
-├──────────┬──────────┬──────────────────────────────────────────┤
-│ manual.py│daemon.py │         triggers/ (bash scripts)         │
-│ CLI tool │HTTP server│  sonarr.sh  radarr.sh  sabnzbd.sh  ...  │
-└────┬─────┴────┬─────┴──────────────────────┬───────────────────┘
-     │          │           │           │              │
-     ▼          ▼           ▼           ▼              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    resources/mediaprocessor.py                   │
-│                     MediaProcessor (core)                        │
-│  isValidSource → generateOptions → convert → tag → replicate    │
-├─────────────────────┬───────────────────┬───────────────────────┤
-│ resources/          │ converter/        │ autoprocess/           │
-│  readsettings.py    │  __init__.py      │  plex.py              │
-│  mediamanager.py    │  ffmpeg.py        │                       │
-│  metadata.py        │  avcodecs.py      │                       │
-│  postprocess.py     │  formats.py       │                       │
-│  extensions.py      │                   │                       │
-│  log.py / lang.py   │                   │                       │
-└─────────────────────┴───────────────────┴───────────────────────┘
+```mermaid
+graph TD
+    subgraph Entry["Entry Points"]
+        CLI["manual.py\nCLI tool"]
+        D["daemon.py\nHTTP server"]
+        T["triggers/*.sh\nbash scripts"]
+    end
+
+    subgraph DaemonPkg["resources/daemon/"]
+        S["server.py\nDaemonServer"]
+        H["handler.py\nWebhookHandler"]
+        W["worker.py\nWorkerPool"]
+        DB["db.py\nPostgreSQL"]
+        TH["threads.py\nHeartbeat · Scanner"]
+    end
+
+    subgraph Resources["resources/"]
+        RS["readsettings.py"]
+        MD["metadata.py"]
+        PP["postprocess.py"]
+        MM["mediamanager.py"]
+        EX["extensions.py"]
+    end
+
+    subgraph Conv["converter/"]
+        FF["ffmpeg.py"]
+        AC["avcodecs.py"]
+        FMT["formats.py"]
+    end
+
+    MP["mediaprocessor.py\nMediaProcessor"]
+    PX["autoprocess/plex.py"]
+
+    CLI --> MP
+    T --> MP
+    D --> S --> H --> W --> MP
+    W --> DB
+    S --> TH
+    MP --> RS
+    MP --> FF
+    MP --> MD
+    MP --> PP
+    MP --> MM
+    MP --> PX
+    FF --> AC
+    FF --> FMT
 ```
 
 ### Data Flow
 
-```text
-Input File
-  → FFprobe validation (isValidSource)
-  → Stream analysis & option generation (generateOptions)
-  → FFmpeg conversion with HW accel (convert)
-  → TMDB metadata tagging (writeTags)
-  → moov atom relocation for streaming (QTFS)
-  → File placement: output_dir → restore → copy-to / move-to (replicate)
-  → Post-process scripts + Plex/Sonarr/Radarr notifications (post)
-  → Output files
+```mermaid
+flowchart TD
+    A([Input File]) --> B{FFprobe\nvalidation}
+    B -- invalid --> Z([Skip / Error])
+    B -- valid --> C[Stream analysis\ngenerateOptions]
+    C --> D{Hardware accel\navailable?}
+    D -- yes --> E[FFmpeg encode\nHW accelerated]
+    D -- no --> F[FFmpeg encode\nsoftware]
+    E & F --> G{TMDB metadata\nconfigured?}
+    G -- yes --> H[writeTags\nmutagen MP4]
+    G -- skip --> I[qtfaststart\nmoov atom relocation]
+    H --> I
+    I --> J["replicate\noutput_dir → copy-to / move-to"]
+    J --> K[Post-process scripts]
+    K --> L[Plex / Sonarr / Radarr notify]
+    L --> M([Done])
 ```
 
 ---
