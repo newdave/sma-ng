@@ -51,6 +51,7 @@ def write_ini_key(lines, section, key, value):
   out = []
   cur = None
   key_found = False
+  section_found = False
 
   for line in lines:
     m = re.match(r"^\[(.+)\]", line.strip())
@@ -61,6 +62,8 @@ def write_ini_key(lines, section, key, value):
         out.append(f"{key} = {value}\n")
         key_found = True
       cur = m.group(1)
+      if cur == section:
+        section_found = True
       out.append(line)
       continue
 
@@ -77,6 +80,11 @@ def write_ini_key(lines, section, key, value):
 
   # Target section was last in file and key was never seen
   if cur == section and not key_found:
+    out.append(f"{key} = {value}\n")
+  elif not section_found:
+    if out and out[-1].strip():
+      out.append("\n")
+    out.append(f"[{section}]\n")
     out.append(f"{key} = {value}\n")
 
   return out
@@ -134,7 +142,7 @@ def main():
     if not config_file:
       continue
 
-    ini_section = "Sonarr" if is_sonarr else "Radarr"
+    ini_section = sec_name
 
     # Create the config file from sample if missing
     if not os.path.exists(config_file):

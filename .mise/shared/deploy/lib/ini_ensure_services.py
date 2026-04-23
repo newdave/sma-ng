@@ -30,6 +30,7 @@ sample_path = os.path.join(deploy_dir, "setup", "autoProcess.ini.sample")
 
 def write_ini_key(lines, section, key, value):
   out, cur, key_found = [], None, False
+  section_found = False
   for line in lines:
     m = re.match(r"^\[(.+)\]", line.strip())
     if m:
@@ -37,6 +38,8 @@ def write_ini_key(lines, section, key, value):
         out.append(f"{key} = {value}\n")
         key_found = True
       cur = m.group(1)
+      if cur == section:
+        section_found = True
       out.append(line)
       continue
     if cur == section and not key_found:
@@ -49,6 +52,11 @@ def write_ini_key(lines, section, key, value):
           key_found = True
     out.append(line)
   if cur == section and not key_found:
+    out.append(f"{key} = {value}\n")
+  elif not section_found:
+    if out and out[-1].strip():
+      out.append("\n")
+    out.append(f"[{section}]\n")
     out.append(f"{key} = {value}\n")
   return out
 
@@ -66,7 +74,7 @@ for sec_name, keys in services.items():
     continue
 
   ini_path = os.path.join(deploy_dir, config_file)
-  ini_section = "Sonarr" if is_sonarr else "Radarr"
+  ini_section = sec_name
 
   if not os.path.exists(ini_path):
     os.makedirs(os.path.dirname(ini_path), exist_ok=True)
