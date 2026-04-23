@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.16](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.15...sma-ng-v1.6.16) (2026-04-23)
+
+
+### Documentation
+
+* add migration guide from sickbeard_mp4_automator ([f2340fc](https://github.com/newdave/sma-ng/commit/f2340fc5545af9528e09bf30eda5a0398d03eb69))
+
 ## [1.6.15](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.14...sma-ng-v1.6.15) (2026-04-23)
 
 
