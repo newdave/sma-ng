@@ -23,43 +23,43 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends software-properties-common \
     && if [ "$TARGETARCH" = "amd64" ]; then \
-        add-apt-repository ppa:kobuk-team/intel-graphics \
-        && apt-get update; \
+    add-apt-repository ppa:kobuk-team/intel-graphics \
+    && apt-get update; \
     fi \
     && apt-get install -y --no-install-recommends \
-        # Build tools
-        build-essential \
-        cmake \
-        git \
-        nasm \
-        yasm \
-        pkg-config \
-        wget \
-        ca-certificates \
-        # VAAPI / DRM (dynamic — GPU driver loaded at runtime)
-        libva-dev \
-        libdrm-dev \
-        # Codec libraries (statically linked into the binary)
-        libssl-dev \
-        zlib1g-dev \
-        libx264-dev \
-        libx265-dev \
-        libmp3lame-dev \
-        libopus-dev \
-        libvorbis-dev \
-        libogg-dev \
-        libvpx-dev \
-        libass-dev \
-        libfreetype6-dev \
-        libfontconfig1-dev \
-        libzimg-dev \
-        libopenjp2-7-dev \
-        libaom-dev \
-        libdav1d-dev \
-        libsvtav1enc-dev \
+    # Build tools
+    build-essential \
+    cmake \
+    git \
+    nasm \
+    yasm \
+    pkg-config \
+    wget \
+    ca-certificates \
+    # VAAPI / DRM (dynamic — GPU driver loaded at runtime)
+    libva-dev \
+    libdrm-dev \
+    # Codec libraries (statically linked into the binary)
+    libssl-dev \
+    zlib1g-dev \
+    libx264-dev \
+    libx265-dev \
+    libmp3lame-dev \
+    libopus-dev \
+    libvorbis-dev \
+    libogg-dev \
+    libvpx-dev \
+    libass-dev \
+    libfreetype6-dev \
+    libfontconfig1-dev \
+    libzimg-dev \
+    libopenjp2-7-dev \
+    libaom-dev \
+    libdav1d-dev \
+    libsvtav1enc-dev \
     # oneVPL / Intel QSV — amd64 only (not available in arm64 Ubuntu repos)
     && if [ "$TARGETARCH" = "amd64" ]; then \
-        apt-get install -y --no-install-recommends libvpl-dev; \
+    apt-get install -y --no-install-recommends libvpl-dev; \
     fi \
     && apt-get purge -y --auto-remove software-properties-common \
     && rm -rf /var/lib/apt/lists/*
@@ -213,45 +213,45 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends software-properties-common \
     && if [ "$TARGETARCH" = "amd64" ]; then \
-        add-apt-repository ppa:kobuk-team/intel-graphics \
-        && apt-get update; \
+    add-apt-repository ppa:kobuk-team/intel-graphics \
+    && apt-get update; \
     fi \
     && apt-get install -y --no-install-recommends \
-        python3 \
-        libva2 \
-        libva-drm2 \
-        mesa-va-drivers \
-        vainfo \
-        libdrm2 \
-        libx264-164 \
-        libx265-199 \
-        libvpx9 \
-        libaom3 \
-        libdav1d7 \
-        libsvtav1enc1d1 \
-        libopenjp2-7 \
-        libmp3lame0 \
-        libopus0 \
-        libvorbis0a \
-        libvorbisenc2 \
-        libass9 \
-        libfreetype6 \
-        libfontconfig1 \
-        libzimg2 \
-        libssl3 \
-        ca-certificates \
-        tini \
+    python3 \
+    libva2 \
+    libva-drm2 \
+    mesa-va-drivers \
+    vainfo \
+    libdrm2 \
+    libx264-164 \
+    libx265-199 \
+    libvpx9 \
+    libaom3 \
+    libdav1d7 \
+    libsvtav1enc1d1 \
+    libopenjp2-7 \
+    libmp3lame0 \
+    libopus0 \
+    libvorbis0a \
+    libvorbisenc2 \
+    libass9 \
+    libfreetype6 \
+    libfontconfig1 \
+    libzimg2 \
+    libssl3 \
+    ca-certificates \
+    tini \
     # oneVPL / Intel QSV runtime, MFX compatibility libs, and Intel VA userspace drivers — amd64 only
     && if [ "$TARGETARCH" = "amd64" ]; then \
-        if apt-cache show libmfx-gen1 >/dev/null 2>&1; then MFX_GEN_PKG=libmfx-gen1; else MFX_GEN_PKG=libmfx-gen1.2; fi; \
-        apt-get install -y --no-install-recommends \
-            libvpl2 \
-            libmfx1 \
-            "$MFX_GEN_PKG" \
-            intel-media-va-driver-non-free \
-            i965-va-driver-shaders \
-                intel-opencl-icd \
-            intel-gpu-tools; \
+    if apt-cache show libmfx-gen1 >/dev/null 2>&1; then MFX_GEN_PKG=libmfx-gen1; else MFX_GEN_PKG=libmfx-gen1.2; fi; \
+    apt-get install -y --no-install-recommends \
+    libvpl2 \
+    libmfx1 \
+    "$MFX_GEN_PKG" \
+    intel-media-va-driver-non-free \
+    i965-va-driver-shaders \
+    intel-opencl-icd \
+    intel-gpu-tools; \
     fi \
     && apt-get purge -y --auto-remove software-properties-common \
     && rm -rf /var/lib/apt/lists/*
@@ -307,8 +307,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 # overridden at runtime with -e / --env-file without rebuilding the image.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["sh", "-c", "exec python3 daemon.py \
-      --host      \"${SMA_DAEMON_HOST}\" \
-      --port      \"${SMA_DAEMON_PORT}\" \
-      --workers   \"${SMA_DAEMON_WORKERS}\" \
-      --daemon-config \"${SMA_DAEMON_CONFIG}\" \
-      --logs-dir  \"${SMA_DAEMON_LOGS_DIR}\""]
+    --host      \"${SMA_DAEMON_HOST}\" \
+    --port      \"${SMA_DAEMON_PORT}\" \
+    --workers   \"${SMA_DAEMON_WORKERS}\" \
+    --daemon-config \"${SMA_DAEMON_CONFIG}\" \
+    --logs-dir  \"${SMA_DAEMON_LOGS_DIR}\""]
