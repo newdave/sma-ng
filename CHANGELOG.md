@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.25](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.24...sma-ng-v1.6.25) (2026-04-23)
+
+
+### Bug Fixes
+
+* support shared and suffixed arr config sections ([93018a9](https://github.com/newdave/sma-ng/commit/93018a9e757ee49f7528afcb7fe51749463aca31))
+
 ## [1.6.24](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.23...sma-ng-v1.6.24) (2026-04-23)
 
 
