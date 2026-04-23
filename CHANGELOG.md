@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.23](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.22...sma-ng-v1.6.23) (2026-04-23)
+
+
+### Bug Fixes
+
+* restore custom hook and deploy task tests ([bf795e1](https://github.com/newdave/sma-ng/commit/bf795e17f763a3b725e708b59821b6914098c4ea))
+
 ## [1.6.22](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.21...sma-ng-v1.6.22) (2026-04-23)
 
 
