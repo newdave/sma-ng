@@ -35,6 +35,7 @@ Automated media conversion, tagging, and integration pipeline. Converts media fi
 - [Post-Process Scripts](#post-process-scripts)
 - [Deployment (mise)](#deployment-mise)
 - [Troubleshooting](#troubleshooting)
+- [Migrating from sickbeard_mp4_automator](migration.md)
 
 ---
 
@@ -146,205 +147,205 @@ Override path via `SMA_CONFIG` environment variable.
 
 ### [Converter]
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `ffmpeg` | path | `ffmpeg` | Path to FFmpeg binary |
-| `ffprobe` | path | `ffprobe` | Path to FFprobe binary |
-| `threads` | int | `0` | FFmpeg threads (0 = auto) |
-| `hwaccels` | list | | Hardware acceleration platforms: `qsv`, `vaapi`, `cuda`, `videotoolbox` |
-| `hwaccel-decoders` | list | | HW decoders to use: `hevc_qsv`, `h264_qsv`, `h264_vaapi`, etc. |
-| `hwdevices` | dict | | Device mapping, e.g. `qsv:/dev/dri/renderD128` |
-| `hwaccel-output-format` | dict | | Output format per hwaccel: `qsv:qsv`, `vaapi:vaapi` |
-| `output-directory` | path | | Temporary output location (files moved back after) |
-| `output-format` | string | `mp4` | Container format: `mp4`, `mkv`, `mov` |
-| `output-extension` | string | `mp4` | Output file extension |
-| `temp-extension` | string | | Temporary file extension during conversion |
-| `temp-output` | bool | `true` | Use temporary output file during conversion |
-| `minimum-size` | int | `0` | Minimum source file size in MB (0 = disabled) |
-| `ignored-extensions` | list | `nfo, ds_store` | Extensions to skip |
-| `copy-to` | path(s) | | Copy output to additional directories (pipe-separated) |
-| `move-to` | path | | Move output to final destination |
-| `delete-original` | bool | `true` | Delete source file after successful conversion |
-| `recycle-bin` | path | | Copy original here before deleting (only when `delete-original = True`) |
-| `process-same-extensions` | bool | `false` | Reprocess files already in output format |
-| `bypass-if-copying-all` | bool | `false` | Skip conversion if all streams can be copied |
-| `force-convert` | bool | `false` | Force conversion even if codec matches |
-| `post-process` | bool | `false` | Run post-process scripts |
-| `wait-post-process` | bool | `false` | Wait for post-process scripts to finish |
-| `preopts` | list | | Extra FFmpeg options before input |
-| `postopts` | list | | Extra FFmpeg options after codec options |
-| `opts-separator` | string | `,` | Separator for preopts/postopts lists |
+| Option                    | Type    | Default         | Description                                                             |
+| ------------------------- | ------- | --------------- | ----------------------------------------------------------------------- |
+| `ffmpeg`                  | path    | `ffmpeg`        | Path to FFmpeg binary                                                   |
+| `ffprobe`                 | path    | `ffprobe`       | Path to FFprobe binary                                                  |
+| `threads`                 | int     | `0`             | FFmpeg threads (0 = auto)                                               |
+| `hwaccels`                | list    |                 | Hardware acceleration platforms: `qsv`, `vaapi`, `cuda`, `videotoolbox` |
+| `hwaccel-decoders`        | list    |                 | HW decoders to use: `hevc_qsv`, `h264_qsv`, `h264_vaapi`, etc.          |
+| `hwdevices`               | dict    |                 | Device mapping, e.g. `qsv:/dev/dri/renderD128`                          |
+| `hwaccel-output-format`   | dict    |                 | Output format per hwaccel: `qsv:qsv`, `vaapi:vaapi`                     |
+| `output-directory`        | path    |                 | Temporary output location (files moved back after)                      |
+| `output-format`           | string  | `mp4`           | Container format: `mp4`, `mkv`, `mov`                                   |
+| `output-extension`        | string  | `mp4`           | Output file extension                                                   |
+| `temp-extension`          | string  |                 | Temporary file extension during conversion                              |
+| `temp-output`             | bool    | `true`          | Use temporary output file during conversion                             |
+| `minimum-size`            | int     | `0`             | Minimum source file size in MB (0 = disabled)                           |
+| `ignored-extensions`      | list    | `nfo, ds_store` | Extensions to skip                                                      |
+| `copy-to`                 | path(s) |                 | Copy output to additional directories (pipe-separated)                  |
+| `move-to`                 | path    |                 | Move output to final destination                                        |
+| `delete-original`         | bool    | `true`          | Delete source file after successful conversion                          |
+| `recycle-bin`             | path    |                 | Copy original here before deleting (only when `delete-original = True`) |
+| `process-same-extensions` | bool    | `false`         | Reprocess files already in output format                                |
+| `bypass-if-copying-all`   | bool    | `false`         | Skip conversion if all streams can be copied                            |
+| `force-convert`           | bool    | `false`         | Force conversion even if codec matches                                  |
+| `post-process`            | bool    | `false`         | Run post-process scripts                                                |
+| `wait-post-process`       | bool    | `false`         | Wait for post-process scripts to finish                                 |
+| `preopts`                 | list    |                 | Extra FFmpeg options before input                                       |
+| `postopts`                | list    |                 | Extra FFmpeg options after codec options                                |
+| `opts-separator`          | string  | `,`             | Separator for preopts/postopts lists                                    |
 
 ### [Video]
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `codec` | list | `h264` | Video codecs in priority order. First is used for encoding, rest are copy-eligible. See [Supported Codecs](#supported-codecs) |
-| `max-bitrate` | int | `0` | Maximum video bitrate in kbps (0 = unlimited). Source exceeding this is re-encoded |
-| `bitrate-ratio` | dict | | Scale source bitrate per codec: `hevc:1.0, h264:0.65, mpeg2video:0.45` |
-| `crf` | int | `24` | Constant Rate Factor (quality). Lower = better quality, larger files |
-| `crf-profiles` | list | | Tiered CRF by source bitrate: `20000:20:5000k:10000k, 10000:22:5000k:10000k` (format: `source_kbps:crf:maxrate:bufsize`) |
-| `preset` | string | | Encoder preset: `ultrafast` to `veryslow` (speed vs compression) |
-| `profile` | list | | Video profile: `main`, `high`, `main10` |
-| `max-level` | float | | Maximum H.264/H.265 level (e.g., `5.2`) |
-| `max-width` | int | `0` | Maximum output width (0 = no limit). Triggers downscale |
-| `pix-fmt` | list | | Pixel format whitelist. Non-matching sources are re-encoded |
-| `dynamic-parameters` | bool | `false` | Pass HDR/color metadata to encoder |
-| `prioritize-source-pix-fmt` | bool | `true` | Keep source pix_fmt if in whitelist |
-| `filter` | string | | Custom FFmpeg video filter |
-| `force-filter` | bool | `false` | Force re-encode when filter is set |
-| `codec-parameters` | string | | Extra codec params (e.g., x265-params) |
+| Option                      | Type   | Default | Description                                                                                                                   |
+| --------------------------- | ------ | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `codec`                     | list   | `h264`  | Video codecs in priority order. First is used for encoding, rest are copy-eligible. See [Supported Codecs](#supported-codecs) |
+| `max-bitrate`               | int    | `0`     | Maximum video bitrate in kbps (0 = unlimited). Source exceeding this is re-encoded                                            |
+| `bitrate-ratio`             | dict   |         | Scale source bitrate per codec: `hevc:1.0, h264:0.65, mpeg2video:0.45`                                                        |
+| `crf`                       | int    | `24`    | Constant Rate Factor (quality). Lower = better quality, larger files                                                          |
+| `crf-profiles`              | list   |         | Tiered CRF by source bitrate: `20000:20:5000k:10000k, 10000:22:5000k:10000k` (format: `source_kbps:crf:maxrate:bufsize`)      |
+| `preset`                    | string |         | Encoder preset: `ultrafast` to `veryslow` (speed vs compression)                                                              |
+| `profile`                   | list   |         | Video profile: `main`, `high`, `main10`                                                                                       |
+| `max-level`                 | float  |         | Maximum H.264/H.265 level (e.g., `5.2`)                                                                                       |
+| `max-width`                 | int    | `0`     | Maximum output width (0 = no limit). Triggers downscale                                                                       |
+| `pix-fmt`                   | list   |         | Pixel format whitelist. Non-matching sources are re-encoded                                                                   |
+| `dynamic-parameters`        | bool   | `false` | Pass HDR/color metadata to encoder                                                                                            |
+| `prioritize-source-pix-fmt` | bool   | `true`  | Keep source pix_fmt if in whitelist                                                                                           |
+| `filter`                    | string |         | Custom FFmpeg video filter                                                                                                    |
+| `force-filter`              | bool   | `false` | Force re-encode when filter is set                                                                                            |
+| `codec-parameters`          | string |         | Extra codec params (e.g., x265-params)                                                                                        |
 
 ### [HDR]
 
 Override video settings for HDR content (detected automatically).
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `codec` | list | Video codec for HDR content |
-| `pix-fmt` | list | Pixel format for HDR (e.g., `p010le`) |
-| `space` | list | Color space: `bt2020nc` |
-| `transfer` | list | Transfer function: `smpte2084` |
-| `primaries` | list | Color primaries: `bt2020` |
-| `preset` | string | Encoder preset override for HDR |
-| `profile` | string | Profile override for HDR |
-| `codec-parameters` | string | Extra params for HDR encoding |
-| `filter` | string | Video filter for HDR content |
-| `force-filter` | bool | Force re-encode for HDR filter |
+| Option             | Type   | Description                           |
+| ------------------ | ------ | ------------------------------------- |
+| `codec`            | list   | Video codec for HDR content           |
+| `pix-fmt`          | list   | Pixel format for HDR (e.g., `p010le`) |
+| `space`            | list   | Color space: `bt2020nc`               |
+| `transfer`         | list   | Transfer function: `smpte2084`        |
+| `primaries`        | list   | Color primaries: `bt2020`             |
+| `preset`           | string | Encoder preset override for HDR       |
+| `profile`          | string | Profile override for HDR              |
+| `codec-parameters` | string | Extra params for HDR encoding         |
+| `filter`           | string | Video filter for HDR content          |
+| `force-filter`     | bool   | Force re-encode for HDR filter        |
 
 ### [Audio]
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `codec` | list | `aac` | Audio codecs in priority order. Streams matching any are copied; others re-encoded to first |
-| `languages` | list | | Language whitelist (ISO 639-3, e.g., `eng`). Empty = all languages |
-| `default-language` | string | `eng` | Default language for unlabeled streams |
-| `first-stream-of-language` | bool | `false` | Keep only first stream per language |
-| `allow-language-relax` | bool | `true` | If no whitelisted language found, keep all audio |
-| `include-original-language` | bool | `false` | Include original media language even if not in whitelist |
-| `channel-bitrate` | int | `128` | Bitrate per channel in kbps (0 = auto) |
-| `variable-bitrate` | int | `0` | VBR quality level (0 = disabled/CBR) |
-| `max-bitrate` | int | `0` | Maximum audio bitrate in kbps |
-| `max-channels` | int | `0` | Maximum audio channels (0 = unlimited, 6 = 5.1) |
-| `copy-original` | bool | `false` | Copy original audio stream in addition to transcoded |
-| `aac-adtstoasc` | bool | `true` | Apply AAC ADTS to ASC bitstream filter |
-| `ignored-dispositions` | list | | Skip streams with these dispositions: `comment`, `hearing_impaired` |
-| `unique-dispositions` | bool | `false` | One stream per disposition per language |
-| `stream-codec-combinations` | list | | Identify duplicate streams by codec combo |
-| `ignore-trudhd` | bool | `true` | Ignore TrueHD streams |
-| `atmos-force-copy` | bool | `false` | Always copy Atmos tracks |
-| `force-default` | bool | `false` | Override source default stream |
-| `relax-to-default` | bool | `false` | If preferred language absent, default to any |
+| Option                      | Type   | Default | Description                                                                                 |
+| --------------------------- | ------ | ------- | ------------------------------------------------------------------------------------------- |
+| `codec`                     | list   | `aac`   | Audio codecs in priority order. Streams matching any are copied; others re-encoded to first |
+| `languages`                 | list   |         | Language whitelist (ISO 639-3, e.g., `eng`). Empty = all languages                          |
+| `default-language`          | string | `eng`   | Default language for unlabeled streams                                                      |
+| `first-stream-of-language`  | bool   | `false` | Keep only first stream per language                                                         |
+| `allow-language-relax`      | bool   | `true`  | If no whitelisted language found, keep all audio                                            |
+| `include-original-language` | bool   | `false` | Include original media language even if not in whitelist                                    |
+| `channel-bitrate`           | int    | `128`   | Bitrate per channel in kbps (0 = auto)                                                      |
+| `variable-bitrate`          | int    | `0`     | VBR quality level (0 = disabled/CBR)                                                        |
+| `max-bitrate`               | int    | `0`     | Maximum audio bitrate in kbps                                                               |
+| `max-channels`              | int    | `0`     | Maximum audio channels (0 = unlimited, 6 = 5.1)                                             |
+| `copy-original`             | bool   | `false` | Copy original audio stream in addition to transcoded                                        |
+| `aac-adtstoasc`             | bool   | `true`  | Apply AAC ADTS to ASC bitstream filter                                                      |
+| `ignored-dispositions`      | list   |         | Skip streams with these dispositions: `comment`, `hearing_impaired`                         |
+| `unique-dispositions`       | bool   | `false` | One stream per disposition per language                                                     |
+| `stream-codec-combinations` | list   |         | Identify duplicate streams by codec combo                                                   |
+| `ignore-trudhd`             | bool   | `true`  | Ignore TrueHD streams                                                                       |
+| `atmos-force-copy`          | bool   | `false` | Always copy Atmos tracks                                                                    |
+| `force-default`             | bool   | `false` | Override source default stream                                                              |
+| `relax-to-default`          | bool   | `false` | If preferred language absent, default to any                                                |
 
 ### [Audio.Sorting]
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `sorting` | list | Sort order for audio streams: `language, channels.d, map, d.comment` |
-| `default-sorting` | list | Sort order for default stream selection |
-| `codecs` | list | Codec priority for sorting |
+| Option            | Type | Description                                                          |
+| ----------------- | ---- | -------------------------------------------------------------------- |
+| `sorting`         | list | Sort order for audio streams: `language, channels.d, map, d.comment` |
+| `default-sorting` | list | Sort order for default stream selection                              |
+| `codecs`          | list | Codec priority for sorting                                           |
 
 ### [Universal Audio]
 
 Generates an additional audio stream (usually stereo AAC) for maximum device compatibility.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `codec` | list | | UA codec (e.g., `aac`). Empty = disabled |
-| `channel-bitrate` | int | `128` | Bitrate per channel |
-| `first-stream-only` | bool | `true` | Only add UA for first audio stream |
+| Option              | Type | Default | Description                              |
+| ------------------- | ---- | ------- | ---------------------------------------- |
+| `codec`             | list |         | UA codec (e.g., `aac`). Empty = disabled |
+| `channel-bitrate`   | int  | `128`   | Bitrate per channel                      |
+| `first-stream-only` | bool | `true`  | Only add UA for first audio stream       |
 
 ### [Subtitle]
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `codec` | list | `mov_text` | Subtitle codec for text-based subs |
-| `codec-image-based` | list | | Codec for image-based subs (PGS, VobSub) |
-| `languages` | list | | Language whitelist (ISO 639-3) |
-| `default-language` | string | `eng` | Default for unlabeled subs |
-| `first-stream-of-language` | bool | `false` | One subtitle per language |
-| `burn-subtitles` | bool | `false` | Burn subtitles into video |
-| `burn-dispositions` | list | `forced` | Only burn subs with these dispositions |
-| `embed-subs` | bool | `true` | Embed subtitle streams in output |
-| `embed-image-subs` | bool | `false` | Embed image-based subs |
-| `embed-only-internal-subs` | bool | `false` | Only embed subs from source (no external files) |
-| `ignored-dispositions` | list | | Skip subs with these dispositions |
-| `remove-bitstream-subs` | list | `true` | Remove bitstream subtitle formats |
-| `include-original-language` | bool | `false` | Include original language subs |
+| Option                      | Type   | Default    | Description                                     |
+| --------------------------- | ------ | ---------- | ----------------------------------------------- |
+| `codec`                     | list   | `mov_text` | Subtitle codec for text-based subs              |
+| `codec-image-based`         | list   |            | Codec for image-based subs (PGS, VobSub)        |
+| `languages`                 | list   |            | Language whitelist (ISO 639-3)                  |
+| `default-language`          | string | `eng`      | Default for unlabeled subs                      |
+| `first-stream-of-language`  | bool   | `false`    | One subtitle per language                       |
+| `burn-subtitles`            | bool   | `false`    | Burn subtitles into video                       |
+| `burn-dispositions`         | list   | `forced`   | Only burn subs with these dispositions          |
+| `embed-subs`                | bool   | `true`     | Embed subtitle streams in output                |
+| `embed-image-subs`          | bool   | `false`    | Embed image-based subs                          |
+| `embed-only-internal-subs`  | bool   | `false`    | Only embed subs from source (no external files) |
+| `ignored-dispositions`      | list   |            | Skip subs with these dispositions               |
+| `remove-bitstream-subs`     | list   | `true`     | Remove bitstream subtitle formats               |
+| `include-original-language` | bool   | `false`    | Include original language subs                  |
 
 ### [Subtitle.CleanIt]
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `enabled` | bool | Enable subtitle cleaning via cleanit library |
-| `config-path` | path | Custom cleanit config |
-| `tags` | list | Cleanit tag sets: `default, no-style` |
+| Option        | Type | Description                                  |
+| ------------- | ---- | -------------------------------------------- |
+| `enabled`     | bool | Enable subtitle cleaning via cleanit library |
+| `config-path` | path | Custom cleanit config                        |
+| `tags`        | list | Cleanit tag sets: `default, no-style`        |
 
 ### [Subtitle.FFSubsync]
 
-| Option | Type | Description |
-| --- | --- | --- |
+| Option    | Type | Description                        |
+| --------- | ---- | ---------------------------------- |
 | `enabled` | bool | Enable subtitle sync via ffsubsync |
 
 ### [Subtitle.Subliminal]
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `download-subs` | bool | Download missing subtitles |
-| `providers` | list | Subtitle providers: `opensubtitles` |
-| `download-forced-subs` | bool | Download forced subtitle variants |
-| `download-hearing-impaired-subs` | bool | Include HI subs in downloads |
+| Option                           | Type | Description                         |
+| -------------------------------- | ---- | ----------------------------------- |
+| `download-subs`                  | bool | Download missing subtitles          |
+| `providers`                      | list | Subtitle providers: `opensubtitles` |
+| `download-forced-subs`           | bool | Download forced subtitle variants   |
+| `download-hearing-impaired-subs` | bool | Include HI subs in downloads        |
 
 ### [Metadata]
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `relocate-moov` | bool | `true` | Move moov atom to file start (streaming optimization) |
-| `full-path-guess` | bool | `true` | Use full file path for guessit metadata matching |
-| `tag` | bool | `true` | Enable TMDB metadata tagging |
-| `tag-language` | string | `eng` | Language for TMDB metadata |
-| `download-artwork` | bool | `false` | Embed cover art from TMDB |
-| `strip-metadata` | bool | `true` | Remove existing metadata before tagging |
-| `keep-titles` | bool | `false` | Preserve original stream titles |
+| Option             | Type   | Default | Description                                           |
+| ------------------ | ------ | ------- | ----------------------------------------------------- |
+| `relocate-moov`    | bool   | `true`  | Move moov atom to file start (streaming optimization) |
+| `full-path-guess`  | bool   | `true`  | Use full file path for guessit metadata matching      |
+| `tag`              | bool   | `true`  | Enable TMDB metadata tagging                          |
+| `tag-language`     | string | `eng`   | Language for TMDB metadata                            |
+| `download-artwork` | bool   | `false` | Embed cover art from TMDB                             |
+| `strip-metadata`   | bool   | `true`  | Remove existing metadata before tagging               |
+| `keep-titles`      | bool   | `false` | Preserve original stream titles                       |
 
 ### [Permissions]
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `chmod` | octal | `0664` | File permissions for output |
-| `uid` | int | `-1` | Owner UID (-1 = no change) |
-| `gid` | int | `-1` | Group GID (-1 = no change) |
+| Option  | Type  | Default | Description                 |
+| ------- | ----- | ------- | --------------------------- |
+| `chmod` | octal | `0664`  | File permissions for output |
+| `uid`   | int   | `-1`    | Owner UID (-1 = no change)  |
+| `gid`   | int   | `-1`    | Group GID (-1 = no change)  |
 
 ### [Sonarr] / [Sonarr-Kids] / [Radarr] / [Radarr-4K] / [Radarr-Kids]
 
 Multiple instances supported. Any section starting with `Sonarr` or `Radarr` is loaded.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `host` | string | `localhost` | API hostname |
-| `port` | int | `8989`/`7878` | API port |
-| `apikey` | string | | API key |
-| `ssl` | bool | `false` | Use HTTPS |
-| `webroot` | string | | URL base path |
-| `path` | string | | Media root path for directory matching (manual.py rescan) |
-| `force-rename` | bool | `false` | Trigger rename after processing |
-| `rescan` | bool | `true` | Trigger library rescan after processing |
-| `block-reprocess` | bool | `false` | Prevent reprocessing same-extension files |
-| `in-progress-check` | bool | `true` | Wait for in-progress scans before rescanning |
+| Option              | Type   | Default       | Description                                               |
+| ------------------- | ------ | ------------- | --------------------------------------------------------- |
+| `host`              | string | `localhost`   | API hostname                                              |
+| `port`              | int    | `8989`/`7878` | API port                                                  |
+| `apikey`            | string |               | API key                                                   |
+| `ssl`               | bool   | `false`       | Use HTTPS                                                 |
+| `webroot`           | string |               | URL base path                                             |
+| `path`              | string |               | Media root path for directory matching (manual.py rescan) |
+| `force-rename`      | bool   | `false`       | Trigger rename after processing                           |
+| `rescan`            | bool   | `true`        | Trigger library rescan after processing                   |
+| `block-reprocess`   | bool   | `false`       | Prevent reprocessing same-extension files                 |
+| `in-progress-check` | bool   | `true`        | Wait for in-progress scans before rescanning              |
 
 Instances are matched by `path` using longest-prefix matching. When `manual.py` processes a file, it finds the matching instance and triggers a rescan via the API.
 
 ### [Plex]
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `host` | string | Plex server hostname |
-| `port` | int | Plex server port (default 32400) |
-| `refresh` | bool | Trigger library refresh after processing |
-| `token` | string | Plex authentication token |
-| `ssl` | bool | Use HTTPS |
-| `ignore-certs` | bool | Skip SSL certificate verification |
-| `path-mapping` | dict | Map SMA-NG paths to Plex library paths (comma-separated, `=` delimited) |
+| Option         | Type   | Description                                                             |
+| -------------- | ------ | ----------------------------------------------------------------------- |
+| `host`         | string | Plex server hostname                                                    |
+| `port`         | int    | Plex server port (default 32400)                                        |
+| `refresh`      | bool   | Trigger library refresh after processing                                |
+| `token`        | string | Plex authentication token                                               |
+| `ssl`          | bool   | Use HTTPS                                                               |
+| `ignore-certs` | bool   | Skip SSL certificate verification                                       |
+| `path-mapping` | dict   | Map SMA-NG paths to Plex library paths (comma-separated, `=` delimited) |
 
 ### [SABNZBD] / [Deluge] / [qBittorrent] / [uTorrent]
 
@@ -398,31 +399,31 @@ After conversion, `manual.py` automatically triggers a rescan on the matching So
 
 ### All Options
 
-| Flag | Long | Description |
-| --- | --- | --- |
-| `-i` | `--input` | Input file or directory |
-| `-c` | `--config` | Alternate config file |
-| `-a` | `--auto` | Auto mode (no prompts, guesses metadata) |
-| `-s` | `--season` | Season number |
-| `-e` | `--episode` | Episode number |
-| `-tvdb` | `--tvdbid` | TVDB ID |
-| `-imdb` | `--imdbid` | IMDB ID |
-| `-tmdb` | `--tmdbid` | TMDB ID |
-| `-nm` | `--nomove` | Disable move-to and output-directory |
-| `-nc` | `--nocopy` | Disable copy-to |
-| `-nd` | `--nodelete` | Disable original file deletion |
-| `-nt` | `--notag` | Disable metadata tagging |
-| `-to` | `--tagonly` | Tag only, no conversion |
-| `-np` | `--nopost` | Disable post-process scripts |
-| `-pr` | `--preserverelative` | Preserve relative directory structure |
-| `-pse` | `--processsameextensions` | Reprocess files already in target format |
-| `-fc` | `--forceconvert` | Force conversion + process-same-extensions |
-| `-m` | `--moveto` | Override move-to path |
-| `-oo` | `--optionsonly` | Show conversion options, don't convert |
-| `-cl` | `--codeclist` | List all supported codecs |
-| `-o` | `--original` | Specify original filename for guessing |
-| `-ms` | `--minsize` | Minimum file size in MB |
-| `-pa` | `--processedarchive` | Path to processed files archive JSON |
+| Flag    | Long                      | Description                                |
+| ------- | ------------------------- | ------------------------------------------ |
+| `-i`    | `--input`                 | Input file or directory                    |
+| `-c`    | `--config`                | Alternate config file                      |
+| `-a`    | `--auto`                  | Auto mode (no prompts, guesses metadata)   |
+| `-s`    | `--season`                | Season number                              |
+| `-e`    | `--episode`               | Episode number                             |
+| `-tvdb` | `--tvdbid`                | TVDB ID                                    |
+| `-imdb` | `--imdbid`                | IMDB ID                                    |
+| `-tmdb` | `--tmdbid`                | TMDB ID                                    |
+| `-nm`   | `--nomove`                | Disable move-to and output-directory       |
+| `-nc`   | `--nocopy`                | Disable copy-to                            |
+| `-nd`   | `--nodelete`              | Disable original file deletion             |
+| `-nt`   | `--notag`                 | Disable metadata tagging                   |
+| `-to`   | `--tagonly`               | Tag only, no conversion                    |
+| `-np`   | `--nopost`                | Disable post-process scripts               |
+| `-pr`   | `--preserverelative`      | Preserve relative directory structure      |
+| `-pse`  | `--processsameextensions` | Reprocess files already in target format   |
+| `-fc`   | `--forceconvert`          | Force conversion + process-same-extensions |
+| `-m`    | `--moveto`                | Override move-to path                      |
+| `-oo`   | `--optionsonly`           | Show conversion options, don't convert     |
+| `-cl`   | `--codeclist`             | List all supported codecs                  |
+| `-o`    | `--original`              | Specify original filename for guessing     |
+| `-ms`   | `--minsize`               | Minimum file size in MB                    |
+| `-pa`   | `--processedarchive`      | Path to processed files archive JSON       |
 
 ---
 
@@ -481,26 +482,26 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 
 ### API Endpoints
 
-| Method | Path | Auth | Description |
-| --- | --- | --- | --- |
-| `GET` | `/` | No | Redirects to `/dashboard` |
-| `GET` | `/dashboard` | No | Web dashboard |
-| `GET` | `/health` | No | Health check with job stats (local node) |
-| `GET` | `/status` | No | Cluster-wide status (PostgreSQL) or local health (SQLite) |
-| `GET` | `/docs` | No | Rendered documentation |
-| `GET` | `/jobs` | Yes | List jobs. Query: `?status=pending&limit=50&offset=0` |
-| `GET` | `/jobs/<id>` | Yes | Get specific job |
-| `GET` | `/configs` | Yes | Config mappings and status |
-| `GET` | `/stats` | Yes | Job statistics by status |
-| `GET` | `/scan` | Yes | Filter paths not yet scanned. Query: `?path=/a.mkv&path=/b.mkv` |
-| `GET` | `/browse` | Yes | List filesystem dirs/files within configured paths. Query: `?path=/dir` |
-| `POST` | `/webhook` | Yes | Submit conversion job (file or directory path) |
-| `POST` | `/cleanup` | Yes | Remove old jobs. Query: `?days=30` |
-| `POST` | `/shutdown` | Yes | Graceful shutdown (drains in-progress jobs) |
-| `POST` | `/jobs/<id>/requeue` | Yes | Requeue a specific failed job |
-| `POST` | `/jobs/requeue` | Yes | Requeue all failed jobs. Query: `?config=...` to filter |
-| `POST` | `/scan/filter` | Yes | Filter unscanned paths. Body: `{"paths": [...]}` |
-| `POST` | `/scan/record` | Yes | Mark paths as scanned. Body: `{"paths": [...]}` |
+| Method | Path                 | Auth | Description                                                             |
+| ------ | -------------------- | ---- | ----------------------------------------------------------------------- |
+| `GET`  | `/`                  | No   | Redirects to `/dashboard`                                               |
+| `GET`  | `/dashboard`         | No   | Web dashboard                                                           |
+| `GET`  | `/health`            | No   | Health check with job stats (local node)                                |
+| `GET`  | `/status`            | No   | Cluster-wide status (PostgreSQL) or local health (SQLite)               |
+| `GET`  | `/docs`              | No   | Rendered documentation                                                  |
+| `GET`  | `/jobs`              | Yes  | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
+| `GET`  | `/jobs/<id>`         | Yes  | Get specific job                                                        |
+| `GET`  | `/configs`           | Yes  | Config mappings and status                                              |
+| `GET`  | `/stats`             | Yes  | Job statistics by status                                                |
+| `GET`  | `/scan`              | Yes  | Filter paths not yet scanned. Query: `?path=/a.mkv&path=/b.mkv`         |
+| `GET`  | `/browse`            | Yes  | List filesystem dirs/files within configured paths. Query: `?path=/dir` |
+| `POST` | `/webhook`           | Yes  | Submit conversion job (file or directory path)                          |
+| `POST` | `/cleanup`           | Yes  | Remove old jobs. Query: `?days=30`                                      |
+| `POST` | `/shutdown`          | Yes  | Graceful shutdown (drains in-progress jobs)                             |
+| `POST` | `/jobs/<id>/requeue` | Yes  | Requeue a specific failed job                                           |
+| `POST` | `/jobs/requeue`      | Yes  | Requeue all failed jobs. Query: `?config=...` to filter                 |
+| `POST` | `/scan/filter`       | Yes  | Filter unscanned paths. Body: `{"paths": [...]}`                        |
+| `POST` | `/scan/record`       | Yes  | Mark paths as scanned. Body: `{"paths": [...]}`                         |
 
 ### Webhook Request Formats
 
@@ -568,16 +569,16 @@ Public endpoints (no auth): `/`, `/dashboard`, `/health`, `/status`, `/docs`, `/
 
 **Top-level keys:**
 
-| Key | Description |
-| --- | --- |
-| `default_config` | Config file used when no `path_configs` prefix matches |
-| `api_key` | API authentication key (overridable via `--api-key` or `SMA_DAEMON_API_KEY`) |
-| `db_url` | PostgreSQL URL for distributed mode (overridable via `--db-url` or `SMA_DAEMON_DB_URL`) |
-| `ffmpeg_dir` | Directory containing `ffmpeg`/`ffprobe` binaries. Prepended to PATH for each conversion. Overridable via `--ffmpeg-dir` or `SMA_DAEMON_FFMPEG_DIR` |
-| `media_extensions` | File extensions considered media files for directory scanning and `/browse` (default: `.mp4 .mkv .avi .mov .ts`) |
-| `path_rewrites` | Prefix substitutions applied before config matching; overlapping rewrites are matched longest-prefix-first |
-| `scan_paths` | Directories for scheduled background scanning. See [Scheduled Directory Scanning](#scheduled-directory-scanning) |
-| `path_configs` | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection |
+| Key                | Description                                                                                                                                        |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `default_config`   | Config file used when no `path_configs` prefix matches                                                                                             |
+| `api_key`          | API authentication key (overridable via `--api-key` or `SMA_DAEMON_API_KEY`)                                                                       |
+| `db_url`           | PostgreSQL URL for distributed mode (overridable via `--db-url` or `SMA_DAEMON_DB_URL`)                                                            |
+| `ffmpeg_dir`       | Directory containing `ffmpeg`/`ffprobe` binaries. Prepended to PATH for each conversion. Overridable via `--ffmpeg-dir` or `SMA_DAEMON_FFMPEG_DIR` |
+| `media_extensions` | File extensions considered media files for directory scanning and `/browse` (default: `.mp4 .mkv .avi .mov .ts`)                                   |
+| `path_rewrites`    | Prefix substitutions applied before config matching; overlapping rewrites are matched longest-prefix-first                                         |
+| `scan_paths`       | Directories for scheduled background scanning. See [Scheduled Directory Scanning](#scheduled-directory-scanning)                                   |
+| `path_configs`     | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection                                                             |
 
 Matching is longest-prefix-first. `/mnt/media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`. If `path_rewrites` overlap, the most specific rewrite is applied before config matching.
 
@@ -585,10 +586,10 @@ Matching is longest-prefix-first. `/mnt/media/Movies/4K/film.mkv` matches `Movie
 
 Each config gets a separate log file in `logs/`. The log filename is derived from the config file stem (filename without extension):
 
-| Config | Log File |
-| --- | --- |
-| `config/autoProcess.ini` | `logs/autoProcess.log` |
-| `config/autoProcess.tv.ini` | `logs/autoProcess.tv.log` |
+| Config                             | Log File                         |
+| ---------------------------------- | -------------------------------- |
+| `config/autoProcess.ini`           | `logs/autoProcess.log`           |
+| `config/autoProcess.tv.ini`        | `logs/autoProcess.tv.log`        |
 | `config/autoProcess.movies-4k.ini` | `logs/autoProcess.movies-4k.log` |
 
 Log rotation: 10MB max, 5 backups.
@@ -610,12 +611,12 @@ The daemon can periodically scan directories for new media files and queue them 
 }
 ```
 
-| Field | Description |
-| --- | --- |
-| `path` | Directory to scan for media files |
-| `interval` | Scan interval in seconds (e.g., `3600` = every hour) |
-| `rewrite_from` | Path prefix to replace before submitting the job (optional) |
-| `rewrite_to` | Replacement prefix (optional; use when the scanner sees files at a different mount point than the converter) |
+| Field          | Description                                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------------ |
+| `path`         | Directory to scan for media files                                                                            |
+| `interval`     | Scan interval in seconds (e.g., `3600` = every hour)                                                         |
+| `rewrite_from` | Path prefix to replace before submitting the job (optional)                                                  |
+| `rewrite_to`   | Replacement prefix (optional; use when the scanner sees files at a different mount point than the converter) |
 
 The daemon tracks which files have been submitted in the `scanned_files` database table. Files already in that table are skipped on subsequent scans. Any file whose extension matches `media_extensions` is eligible for submission, including `.mp4` if you leave it in that list.
 
@@ -820,13 +821,13 @@ The `gpu` key is a runtime setting in `autoProcess.ini` that selects which hardw
 
 Valid values for `gpu`:
 
-| Value | Platform | Notes |
-| --- | --- | --- |
-| `qsv` | Intel Quick Sync Video | Requires an accessible DRI render node such as `/dev/dri/renderD128` and the i915 kernel module |
-| `vaapi` | Intel/AMD VAAPI | Requires an accessible DRI render node such as `/dev/dri/renderD128` and `vainfo` |
-| `nvenc` | NVIDIA NVENC | Requires NVIDIA driver and `nvidia-smi` |
-| `videotoolbox` | Apple Silicon / macOS | Built into macOS; no device path needed |
-| `software` | CPU only | No hardware acceleration |
+| Value          | Platform               | Notes                                                                                           |
+| -------------- | ---------------------- | ----------------------------------------------------------------------------------------------- |
+| `qsv`          | Intel Quick Sync Video | Requires an accessible DRI render node such as `/dev/dri/renderD128` and the i915 kernel module |
+| `vaapi`        | Intel/AMD VAAPI        | Requires an accessible DRI render node such as `/dev/dri/renderD128` and `vainfo`               |
+| `nvenc`        | NVIDIA NVENC           | Requires NVIDIA driver and `nvidia-smi`                                                         |
+| `videotoolbox` | Apple Silicon / macOS  | Built into macOS; no device path needed                                                         |
+| `software`     | CPU only               | No hardware acceleration                                                                        |
 
 Auto-detection runs the same shared script behind `mise run detect-gpu` and `make detect-gpu`, checking each platform in order: NVIDIA → Intel QSV → VAAPI → VideoToolbox → software.
 
@@ -997,33 +998,33 @@ Run `python manual.py -cl` for the full list. Key codecs:
 
 ### Video
 
-| SMA-NG Name | FFmpeg Encoder | Notes |
-| --- | --- | --- |
-| `h264` | libx264 | Software H.264 |
-| `h265` / `hevc` | libx265 | Software HEVC |
-| `h264qsv` | h264_qsv | Intel QSV H.264 |
-| `h265qsv` | hevc_qsv | Intel QSV HEVC |
-| `h264vaapi` | h264_vaapi | Intel VAAPI H.264 |
-| `h265vaapi` | hevc_vaapi | Intel VAAPI HEVC |
-| `av1qsv` | av1_qsv | Intel QSV AV1 |
-| `av1vaapi` | av1_vaapi | Intel VAAPI AV1 |
-| `h265_nvenc` | hevc_nvenc | NVIDIA HEVC |
-| `av1` | libaom-av1 | Software AV1 |
-| `svtav1` | libsvtav1 | SVT-AV1 |
-| `vp9` | libvpx-vp9 | Software VP9 |
+| SMA-NG Name     | FFmpeg Encoder | Notes             |
+| --------------- | -------------- | ----------------- |
+| `h264`          | libx264        | Software H.264    |
+| `h265` / `hevc` | libx265        | Software HEVC     |
+| `h264qsv`       | h264_qsv       | Intel QSV H.264   |
+| `h265qsv`       | hevc_qsv       | Intel QSV HEVC    |
+| `h264vaapi`     | h264_vaapi     | Intel VAAPI H.264 |
+| `h265vaapi`     | hevc_vaapi     | Intel VAAPI HEVC  |
+| `av1qsv`        | av1_qsv        | Intel QSV AV1     |
+| `av1vaapi`      | av1_vaapi      | Intel VAAPI AV1   |
+| `h265_nvenc`    | hevc_nvenc     | NVIDIA HEVC       |
+| `av1`           | libaom-av1     | Software AV1      |
+| `svtav1`        | libsvtav1      | SVT-AV1           |
+| `vp9`           | libvpx-vp9     | Software VP9      |
 
 ### Audio
 
-| SMA-NG Name | FFmpeg Encoder |
-| --- | --- |
-| `aac` | aac / libfdk_aac |
-| `ac3` | ac3 |
-| `eac3` | eac3 |
-| `flac` | flac |
-| `opus` | libopus |
-| `mp3` | libmp3lame |
-| `dts` | dca |
-| `truehd` | truehd |
+| SMA-NG Name | FFmpeg Encoder   |
+| ----------- | ---------------- |
+| `aac`       | aac / libfdk_aac |
+| `ac3`       | ac3              |
+| `eac3`      | eac3             |
+| `flac`      | flac             |
+| `opus`      | libopus          |
+| `mp3`       | libmp3lame       |
+| `dts`       | dca              |
+| `truehd`    | truehd           |
 
 ---
 
@@ -1031,12 +1032,12 @@ Run `python manual.py -cl` for the full list. Key codecs:
 
 Place executable scripts in the `post_process/` directory. They receive environment variables:
 
-| Variable | Description |
-| --- | --- |
-| `SMA_FILES` | JSON array of output file paths |
-| `SMA_TMDBID` | TMDB ID |
-| `SMA_SEASON` | Season number (TV only) |
-| `SMA_EPISODE` | Episode number (TV only) |
+| Variable      | Description                     |
+| ------------- | ------------------------------- |
+| `SMA_FILES`   | JSON array of output file paths |
+| `SMA_TMDBID`  | TMDB ID                         |
+| `SMA_SEASON`  | Season number (TV only)         |
+| `SMA_EPISODE` | Episode number (TV only)        |
 
 See `setup/post_process/` for examples (Plex, Emby, Jellyfin, iTunes).
 
@@ -1175,14 +1176,14 @@ Runs the specified make target on each host without syncing code first.
 
 #### Summary of deploy tasks
 
-| Task | Description |
-| --- | --- |
-| `deploy:check` | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set |
-| `deploy:setup` | First-time host prep: SSH key, apt deps, deploy dir, systemd install |
-| `deploy:run` | Sync code + install deps + reload systemd on all hosts |
-| `deploy:config` | Roll configs: create missing, merge new keys, stamp credentials |
-| `deploy:restart` | Restart `sma-daemon` on all hosts |
-| `deploy:remote-make` | Run an arbitrary make target on all hosts |
+| Task                 | Description                                                          |
+| -------------------- | -------------------------------------------------------------------- |
+| `deploy:check`       | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set           |
+| `deploy:setup`       | First-time host prep: SSH key, apt deps, deploy dir, systemd install |
+| `deploy:run`         | Sync code + install deps + reload systemd on all hosts               |
+| `deploy:config`      | Roll configs: create missing, merge new keys, stamp credentials      |
+| `deploy:restart`     | Restart `sma-daemon` on all hosts                                    |
+| `deploy:remote-make` | Run an arbitrary make target on all hosts                            |
 
 ---
 
@@ -1198,9 +1199,9 @@ journalctl -u sma-daemon -f
 
 The daemon also writes per-config rotating log files in `logs/`:
 
-| Config | Log File |
-| --- | --- |
-| `config/autoProcess.ini` | `logs/autoProcess.log` |
+| Config                      | Log File                      |
+| --------------------------- | ----------------------------- |
+| `config/autoProcess.ini`    | `logs/autoProcess.log`        |
 | `config/autoProcess.ini-tv` | `logs/autoProcess.ini-tv.log` |
 
 ### Common Issues
@@ -1243,18 +1244,18 @@ The daemon also writes per-config rotating log files in `logs/`:
 
 ### Environment Variables
 
-| Variable | Description |
-| --- | --- |
-| `SMA_CONFIG` | Override path to `autoProcess.ini` |
-| `SMA_DAEMON_API_KEY` | Daemon API key |
-| `SMA_DAEMON_DB_URL` | PostgreSQL connection URL for distributed mode |
+| Variable                | Description                                                                 |
+| ----------------------- | --------------------------------------------------------------------------- |
+| `SMA_CONFIG`            | Override path to `autoProcess.ini`                                          |
+| `SMA_DAEMON_API_KEY`    | Daemon API key                                                              |
+| `SMA_DAEMON_DB_URL`     | PostgreSQL connection URL for distributed mode                              |
 | `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` (prepended to PATH for conversions) |
-| `SMA_DAEMON_HOST` | Daemon bind host (Docker default: empty = 0.0.0.0) |
-| `SMA_DAEMON_PORT` | Daemon port (Docker default: 8585) |
-| `SMA_DAEMON_WORKERS` | Number of concurrent workers (Docker default: 4) |
-| `SMA_DAEMON_CONFIG` | Path to daemon.json config file |
-| `SMA_DAEMON_DB` | Path to SQLite database file |
-| `SMA_DAEMON_LOGS_DIR` | Directory for per-config log files |
+| `SMA_DAEMON_HOST`       | Daemon bind host (Docker default: empty = 0.0.0.0)                          |
+| `SMA_DAEMON_PORT`       | Daemon port (Docker default: 8585)                                          |
+| `SMA_DAEMON_WORKERS`    | Number of concurrent workers (Docker default: 4)                            |
+| `SMA_DAEMON_CONFIG`     | Path to daemon.json config file                                             |
+| `SMA_DAEMON_DB`         | Path to SQLite database file                                                |
+| `SMA_DAEMON_LOGS_DIR`   | Directory for per-config log files                                          |
 
 ---
 

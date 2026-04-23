@@ -33,6 +33,7 @@ DOC_PAGES = [
     ("hardware-acceleration", "Hardware Acceleration"),
     ("deployment", "Deployment"),
     ("troubleshooting", "Troubleshooting"),
+    ("migration", "Migration Guide"),
 ]
 
 
