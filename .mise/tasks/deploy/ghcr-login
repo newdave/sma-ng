@@ -12,65 +12,66 @@ DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 gh_token=$("$CFG" "$LOCAL" deploy GH_TOKEN "")
 
 if [ -z "$gh_token" ]; then
-  if ! command -v gh >/dev/null 2>&1; then
-    echo "ERROR: GH_TOKEN is not set in $LOCAL and the 'gh' CLI is not installed." >&2
-    echo "       Set GH_TOKEN in the [deploy] section of $LOCAL, or install the GitHub CLI." >&2
-    exit 1
-  fi
-  echo "==> Fetching GitHub token via gh CLI..."
-  gh_token=$(gh auth token 2>/dev/null) || true
-  if [ -z "$gh_token" ]; then
-    echo "ERROR: 'gh auth token' returned nothing. Run 'gh auth login' first, or set GH_TOKEN in $LOCAL." >&2
-    exit 1
-  fi
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "ERROR: GH_TOKEN is not set in $LOCAL and the 'gh' CLI is not installed." >&2
+        echo "       Set GH_TOKEN in the [deploy] section of $LOCAL, or install the GitHub CLI." >&2
+        exit 1
+    fi
+    echo "==> Fetching GitHub token via gh CLI..."
+    gh_token=$(gh auth token 2>/dev/null) || true
+    if [ -z "$gh_token" ]; then
+        echo "ERROR: 'gh auth token' returned nothing. Run 'gh auth login' first, or set GH_TOKEN in $LOCAL." >&2
+        exit 1
+    fi
 fi
 
 # ── Resolve GitHub username ──────────────────────────────────────────────────
 gh_user=$("$CFG" "$LOCAL" deploy GH_USER "")
 
 if [ -z "$gh_user" ]; then
-  if command -v gh >/dev/null 2>&1; then
-    gh_user=$(gh api user --jq '.login' 2>/dev/null) || true
-  fi
-  if [ -z "$gh_user" ]; then
-    echo "ERROR: GH_USER is not set in $LOCAL and could not be auto-detected." >&2
-    echo "       Set GH_USER in the [deploy] section of $LOCAL." >&2
-    exit 1
-  fi
+    if command -v gh >/dev/null 2>&1; then
+        gh_user=$(gh api user --jq '.login' 2>/dev/null) || true
+    fi
+    if [ -z "$gh_user" ]; then
+        echo "ERROR: GH_USER is not set in $LOCAL and could not be auto-detected." >&2
+        echo "       Set GH_USER in the [deploy] section of $LOCAL." >&2
+        exit 1
+    fi
 fi
 
 echo "==> Logging in to ghcr.io as ${gh_user}"
 
 mk_ssh_opts() {
-  local port="$1" key="$2"
-  SSH_OPTS=(-p "$port" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
-  [ -n "$key" ] && SSH_OPTS+=(-i "$(eval echo "$key")")
+    local port="$1" key="$2"
+    SSH_OPTS=(-p "$port" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+    [ -n "$key" ] && SSH_OPTS+=(-i "$(eval echo "$key")")
 }
 
 failed=""
 for host in $DEPLOY_HOSTS; do
-  cfg="$CFG $LOCAL $host"
-  port=$($cfg SSH_PORT 22)
-  key=$($cfg SSH_KEY "")
-  use_sudo=$($cfg DEPLOY_USE_SUDO "false")
+    cfg="$CFG $LOCAL $host"
+    port=$($cfg SSH_PORT 22)
+    key=$($cfg SSH_KEY "")
+    use_sudo=$($cfg DEPLOY_USE_SUDO "false")
 
-  mk_ssh_opts "$port" "$key"
+    mk_ssh_opts "$port" "$key"
 
-  sudo_prefix=""
-  [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
+    sudo_prefix=""
+    [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
 
-  echo "==> [$host] docker login ghcr.io"
-  if ! printf '%s' "$gh_token" | ssh "${SSH_OPTS[@]}" "$host" \
-      "${sudo_prefix}docker login ghcr.io -u ${gh_user} --password-stdin"; then
-    echo "ERROR: [$host] docker login failed" >&2
-    failed="$failed $host"
-  fi
+    echo "==> [$host] docker login ghcr.io"
+    # shellcheck disable=SC2029  # sudo_prefix/gh_user expand locally before the remote docker login executes.
+    if ! printf '%s' "$gh_token" | ssh "${SSH_OPTS[@]}" "$host" \
+    "${sudo_prefix}docker login ghcr.io -u ${gh_user} --password-stdin"; then
+        echo "ERROR: [$host] docker login failed" >&2
+        failed="$failed $host"
+    fi
 done
 
 if [ -n "$failed" ]; then
-  echo ""
-  echo "ERROR: ghcr login failed for:$failed" >&2
-  exit 1
+    echo ""
+    echo "ERROR: ghcr login failed for:$failed" >&2
+    exit 1
 fi
 
 echo ""

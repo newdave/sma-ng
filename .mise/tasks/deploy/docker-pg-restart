@@ -3,6 +3,8 @@
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
+# shellcheck disable=SC1091
+# lib.sh is sourced relative to this script's directory at runtime.
 source "$(dirname "$0")/lib.sh"
 
 ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
