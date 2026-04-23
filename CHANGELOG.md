@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.6.14](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.13...sma-ng-v1.6.14) (2026-04-23)
+
+
+### Features
+
+* add deploy:config-audit task and ini_audit helper ([f6ff54f](https://github.com/newdave/sma-ng/commit/f6ff54f1300179440cf8f5580c2bd877be994af5))
+
+
+### Bug Fixes
+
+* normalize wildcard cluster hostnames in /status response; add directory webhook test ([d55399f](https://github.com/newdave/sma-ng/commit/d55399fdc2cf22d880812073562076b686f4592b))
+* restore corrupted deploy task files and add ShellCheck suppressions ([70b03e9](https://github.com/newdave/sma-ng/commit/70b03e9a6265d26effa28cb070b244a94ca2a260))
+
+
+### Documentation
+
+* add ShellCheck and Markdown linting rules to AGENTS.md and CLAUDE.md ([2ca1456](https://github.com/newdave/sma-ng/commit/2ca1456162408ad3d473dce2fcddf29b7c57bd22))
+
 ## [1.6.13](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.12...sma-ng-v1.6.13) (2026-04-22)
 
 
