@@ -14,90 +14,90 @@ from converter.ffmpeg import MediaFormatInfo, MediaInfo, MediaStreamInfo
 
 @pytest.fixture
 def make_stream():
-    """Factory fixture for creating MediaStreamInfo objects."""
+  """Factory fixture for creating MediaStreamInfo objects."""
 
-    def _make(type="video", codec="h264", index=0, **kwargs):
-        s = MediaStreamInfo()
-        s.type = type
-        s.codec = codec
-        s.index = index
-        s.metadata = kwargs.pop("metadata", {"language": "eng"})
-        s.disposition = kwargs.pop("disposition", {"default": True, "forced": False})
-        for k, v in kwargs.items():
-            setattr(s, k, v)
-        return s
+  def _make(type="video", codec="h264", index=0, **kwargs):
+    s = MediaStreamInfo()
+    s.type = type
+    s.codec = codec
+    s.index = index
+    s.metadata = kwargs.pop("metadata", {"language": "eng"})
+    s.disposition = kwargs.pop("disposition", {"default": True, "forced": False})
+    for k, v in kwargs.items():
+      setattr(s, k, v)
+    return s
 
-    return _make
+  return _make
 
 
 @pytest.fixture
 def make_format():
-    """Factory fixture for creating MediaFormatInfo objects."""
+  """Factory fixture for creating MediaFormatInfo objects."""
 
-    def _make(**kwargs):
-        f = MediaFormatInfo()
-        f.format = kwargs.get("format", "matroska,webm")
-        f.bitrate = kwargs.get("bitrate", 10000000.0)
-        f.duration = kwargs.get("duration", 7200.0)
-        return f
+  def _make(**kwargs):
+    f = MediaFormatInfo()
+    f.format = kwargs.get("format", "matroska,webm")
+    f.bitrate = kwargs.get("bitrate", 10000000.0)
+    f.duration = kwargs.get("duration", 7200.0)
+    return f
 
-    return _make
+  return _make
 
 
 @pytest.fixture
 def make_media_info(make_stream, make_format):
-    """Factory fixture for creating MediaInfo objects with sensible defaults."""
+  """Factory fixture for creating MediaInfo objects with sensible defaults."""
 
-    def _make(video_codec="h264", video_bitrate=8000000, video_width=1920, video_height=1080, audio_codec="aac", audio_channels=2, audio_bitrate=128000, subtitle_codec=None, total_bitrate=10000000):
-        info = MediaInfo()
-        info.format = make_format(bitrate=total_bitrate)
+  def _make(video_codec="h264", video_bitrate=8000000, video_width=1920, video_height=1080, audio_codec="aac", audio_channels=2, audio_bitrate=128000, subtitle_codec=None, total_bitrate=10000000):
+    info = MediaInfo()
+    info.format = make_format(bitrate=total_bitrate)
 
-        video = make_stream(
-            type="video",
-            codec=video_codec,
-            index=0,
-            bitrate=video_bitrate,
-            video_width=video_width,
-            video_height=video_height,
-            fps=23.976,
-            pix_fmt="yuv420p",
-            profile="main",
-            video_level=4.1,
-            field_order="progressive",
-            metadata={},
-            disposition={"default": True, "forced": False},
-        )
-        video.framedata = {}
-        info.streams.append(video)
+    video = make_stream(
+      type="video",
+      codec=video_codec,
+      index=0,
+      bitrate=video_bitrate,
+      video_width=video_width,
+      video_height=video_height,
+      fps=23.976,
+      pix_fmt="yuv420p",
+      profile="main",
+      video_level=4.1,
+      field_order="progressive",
+      metadata={},
+      disposition={"default": True, "forced": False},
+    )
+    video.framedata = {}
+    info.streams.append(video)
 
-        audio = make_stream(
-            type="audio",
-            codec=audio_codec,
-            index=1,
-            bitrate=audio_bitrate,
-            audio_channels=audio_channels,
-            audio_samplerate=48000,
-            metadata={"language": "eng"},
-            disposition={"default": True, "forced": False},
-        )
-        info.streams.append(audio)
+    audio = make_stream(
+      type="audio",
+      codec=audio_codec,
+      index=1,
+      bitrate=audio_bitrate,
+      audio_channels=audio_channels,
+      audio_samplerate=48000,
+      metadata={"language": "eng"},
+      disposition={"default": True, "forced": False},
+    )
+    info.streams.append(audio)
 
-        if subtitle_codec:
-            sub = make_stream(type="subtitle", codec=subtitle_codec, index=2, metadata={"language": "eng"}, disposition={"default": False, "forced": False})
-            info.streams.append(sub)
+    if subtitle_codec:
+      sub = make_stream(type="subtitle", codec=subtitle_codec, index=2, metadata={"language": "eng"}, disposition={"default": False, "forced": False})
+      info.streams.append(sub)
 
-        return info
+    return info
 
-    return _make
+  return _make
 
 
 @pytest.fixture
 def tmp_ini(tmp_path):
-    """Create a temporary autoProcess.ini with minimal valid config."""
+  """Create a temporary autoProcess.ini with minimal valid config."""
 
-    def _make(content=None, gpu=None):
-        if content is None:
-            content = """[Converter]
+  def _make(content=None, gpu=None):
+    if content is None:
+      content = """[Converter]
 ffmpeg = ffmpeg
 ffprobe = ffprobe
 threads = 0
@@ -352,54 +352,54 @@ ignore-certs = false
 path-mapping =
 plexmatch = true
 """
-        if gpu is not None:
-            content = content.replace("gpu =\n", "gpu = %s\n" % gpu)
-        ini_path = str(tmp_path / "autoProcess.ini")
-        with open(ini_path, "w") as f:
-            f.write(content)
-        return ini_path
+    if gpu is not None:
+      content = content.replace("gpu =\n", "gpu = %s\n" % gpu)
+    ini_path = str(tmp_path / "autoProcess.ini")
+    with open(ini_path, "w") as f:
+      f.write(content)
+    return ini_path
 
-    return _make
+  return _make
 
 
 @pytest.fixture
 def daemon_log(caplog):
-    """Capture log records emitted by the DAEMON logger and its children.
+  """Capture log records emitted by the DAEMON logger and its children.
 
-    The DAEMON logger has propagate=False (set by fileConfig), so caplog's
-    default root-level handler never sees its records.  This fixture injects
-    caplog's handler directly onto the DAEMON logger so records are captured
-    regardless of propagation settings.
+  The DAEMON logger has propagate=False (set by fileConfig), so caplog's
+  default root-level handler never sees its records.  This fixture injects
+  caplog's handler directly onto the DAEMON logger so records are captured
+  regardless of propagation settings.
 
-    Usage::
+  Usage::
 
-        def test_something(daemon_log):
-            do_thing()
-            assert "expected message" in daemon_log.text
-            assert any(r.levelno == logging.ERROR for r in daemon_log.records)
-    """
-    daemon_logger = logging.getLogger("DAEMON")
-    original_level = daemon_logger.level
-    daemon_logger.setLevel(logging.DEBUG)
-    daemon_logger.addHandler(caplog.handler)
-    try:
-        with caplog.at_level(logging.DEBUG, logger="DAEMON"):
-            yield caplog
-    finally:
-        daemon_logger.removeHandler(caplog.handler)
-        daemon_logger.setLevel(original_level)
+      def test_something(daemon_log):
+          do_thing()
+          assert "expected message" in daemon_log.text
+          assert any(r.levelno == logging.ERROR for r in daemon_log.records)
+  """
+  daemon_logger = logging.getLogger("DAEMON")
+  original_level = daemon_logger.level
+  daemon_logger.setLevel(logging.DEBUG)
+  daemon_logger.addHandler(caplog.handler)
+  try:
+    with caplog.at_level(logging.DEBUG, logger="DAEMON"):
+      yield caplog
+  finally:
+    daemon_logger.removeHandler(caplog.handler)
+    daemon_logger.setLevel(original_level)
 
 
 @pytest.fixture
 def job_db():
-    """Yield an open PostgreSQLJobDatabase and close it after the test."""
-    import os
+  """Yield an open PostgreSQLJobDatabase and close it after the test."""
+  import os
 
-    db_url = os.environ.get("TEST_DB_URL")
-    if not db_url:
-        pytest.skip("TEST_DB_URL not set")
-    from daemon import PostgreSQLJobDatabase
+  db_url = os.environ.get("TEST_DB_URL")
+  if not db_url:
+    pytest.skip("TEST_DB_URL not set")
+  from daemon import PostgreSQLJobDatabase
 
-    db = PostgreSQLJobDatabase(db_url)
-    yield db
-    db.close()
+  db = PostgreSQLJobDatabase(db_url)
+  yield db
+  db.close()
