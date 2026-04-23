@@ -292,6 +292,12 @@ class TestDashboardHTML:
         assert "fetch('/jobs" in DASHBOARD_HTML
         assert "fetch('/webhook/generic'" in DASHBOARD_HTML
 
+    def test_submit_result_handles_directory_responses(self):
+        assert "formatSubmitResult(d)" in DASHBOARD_HTML
+        assert "queued_count === 1" in DASHBOARD_HTML
+        assert "jobs queued from" in DASHBOARD_HTML
+        assert "No media files found in directory" in DASHBOARD_HTML
+
     def test_stat_keys_present(self):
         for key in ("total", "pending", "running", "completed", "failed"):
             assert key in DASHBOARD_HTML
@@ -1722,6 +1728,22 @@ class TestHTTPEndpoints:
         f.touch()
         data, status = self._post(live_server, "/webhook/generic", data={"path": str(f), "args": "-tmdb 603"})
         assert status == 202
+
+    def test_webhook_directory_returns_queued_entries(self, live_server, tmp_path):
+        media = tmp_path / "media"
+        media.mkdir()
+        movie = media / "movie.mkv"
+        movie.touch()
+
+        data, status = self._post(live_server, "/webhook/generic", data={"path": str(media)})
+
+        assert status == 202
+        assert data["status"] == "queued"
+        assert data["directory"] == str(media)
+        assert data["queued_count"] == 1
+        assert len(data["queued"]) == 1
+        assert data["queued"][0]["job_id"] is not None
+        assert data["queued"][0]["path"] == str(movie)
 
     def test_cleanup_endpoint(self, live_server):
         jid = live_server.job_db.add_job("/old.mkv", "/cfg.ini")

@@ -132,6 +132,21 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     def _get_status(self):
         nodes = self.server.job_db.get_cluster_nodes()
+        display_host = None
+        try:
+            display_host = self.connection.getsockname()[0]
+        except Exception:
+            display_host = None
+
+        if display_host:
+            normalized_nodes = []
+            for node in nodes:
+                normalized = dict(node)
+                if normalized.get("host") in {"0.0.0.0", "::", ""}:
+                    normalized["host"] = display_host
+                normalized_nodes.append(normalized)
+            nodes = normalized_nodes
+
         stats = self.server.job_db.get_stats()
         self.send_json_response(200, {"cluster": nodes, "jobs": stats})
 
