@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-#MISE description="Validate docs/openapi.yaml"
-#MISE aliases=["dev:openapi"]
+#MISE description="Run the ruff linter and auto-fix issues"
+#MISE aliases=["dev:lint:fix"]
 set -euo pipefail
 
-"$PY" -m openapi_spec_validator docs/openapi.yaml
+"$PY" -m ruff check --fix .
