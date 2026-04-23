@@ -139,7 +139,7 @@ Useful follow-up commands:
 
 ```bash
 mise run dev:check
-mise run config:detect:gpu
+mise run config:gpu
 mise run test:openapi
 mise run media:preview -- /path/to/file.mkv
 mise run media:codecs
@@ -235,7 +235,7 @@ make detect-gpu
 or:
 
 ```bash
-mise run config:detect:gpu
+mise run config:gpu
 ```
 
 Both commands use the same detection script. Then compare the result with your chosen `gpu =` and codec settings. If GPU detection or encoder availability is uncertain, switch to software first and get a clean baseline run before troubleshooting hardware acceleration.
