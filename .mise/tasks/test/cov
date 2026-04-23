@@ -3,4 +3,8 @@
 #MISE aliases=["dev:test:cov"]
 set -euo pipefail
 
-"$PY" -m pytest --cov=resources --cov=converter --cov=autoprocess --cov-report=html --cov-report=term-missing:skip-covered
+"$PY" -m pytest \
+  --cov=resources --cov=converter --cov=autoprocess \
+  --cov-report=xml \
+  --cov-report=html \
+  --cov-report=term-missing:skip-covered
