@@ -3,20 +3,14 @@
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
-LOCAL="setup/.local.ini"
-CFG="scripts/local-config.sh"
+# shellcheck source=../../shared/deploy/lib.sh
+# shellcheck disable=SC1091
+source "$(dirname "$0")/../../shared/deploy/lib.sh"
 ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 
 # If HOST is set (e.g. called as a recovery step from deploy:host), scope to
 # that host only so we don't re-probe or re-prompt for unrelated hosts.
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
-
-# Build an ssh_opts array from port and optional key path.
-mk_ssh_opts() {
-    local port="$1" key="$2"
-    SSH_OPTS=(-p "$port" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
-    [ -n "$key" ] && SSH_OPTS+=(-i "$(eval echo "$key")")
-}
 
 # ── 1. ensure SSH key exists ────────────────────────────────────────────────
 key=$("$CFG" "$LOCAL" deploy SSH_KEY "")
