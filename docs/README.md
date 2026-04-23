@@ -859,7 +859,7 @@ Valid values for `gpu`:
 | `videotoolbox` | Apple Silicon / macOS  | Built into macOS; no device path needed                                                         |
 | `software`     | CPU only               | No hardware acceleration                                                                        |
 
-Auto-detection runs the same shared script behind `mise run config:detect:gpu` and `make detect-gpu`, checking each platform in order: NVIDIA → Intel QSV → VAAPI → VideoToolbox → software.
+Auto-detection runs the same shared script behind `mise run config:gpu` and `make detect-gpu`, checking each platform in order: NVIDIA → Intel QSV → VAAPI → VideoToolbox → software.
 
 ### Intel QSV
 
@@ -1091,7 +1091,7 @@ mise run test:lint             # Run ruff linter
 mise run dev:lint         # Auto-fix lint issues
 mise run dev:format           # Format Python code
 mise run test:openapi          # Validate docs/openapi.yaml
-mise run config:detect:gpu       # Detect available GPU acceleration
+mise run config:gpu       # Detect available GPU acceleration
 mise run config:generate           # Generate config with auto-detected GPU
 mise run config:audit     # Audit local config files
 mise run daemon:smoke     # Validate daemon config and exit
@@ -1154,13 +1154,13 @@ mise run deploy:setup
 
 ```bash
 # Sync code, install dependencies, reload systemd unit
-mise run deploy:run
+mise run remote:run
 
 # Then restart the service
 mise run deploy:restart
 ```
 
-`deploy:run` does the following on each host in `DEPLOY_HOSTS`:
+`remote:run` does the following on each host in `DEPLOY_HOSTS`:
 
 - rsync the repo (excluding `venv/`, `config/`, `logs/`, `__pycache__/`)
 - creates or repairs the virtualenv and installs base Python dependencies
@@ -1208,7 +1208,7 @@ Runs `sudo systemctl restart sma-daemon` on each host.
 #### Running arbitrary mise tasks remotely
 
 ```bash
-REMOTE_TASK=test mise run deploy:remote:task
+REMOTE_TASK=test mise run remote:mise
 ```
 
 Runs the specified mise task on each host without syncing code first.
@@ -1219,11 +1219,11 @@ Runs the specified mise task on each host without syncing code first.
 | -------------------- | -------------------------------------------------------------------------- |
 | `deploy:check`       | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                 |
 | `deploy:setup`       | First-time host prep: SSH key, apt deps, deploy dir, systemd install       |
-| `deploy:run`         | Sync code + install deps + reload systemd on all hosts                     |
+| `remote:run`         | Sync code + install deps + reload systemd on all hosts                     |
 | `config:roll`        | Roll configs: create missing, merge new keys, stamp credentials            |
 | `deploy:restart`     | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl |
 | `config:audit`       | Audit local configs                                                        |
-| `deploy:remote:task` | Run an arbitrary mise task on all hosts                                    |
+| `remote:mise` | Run an arbitrary mise task on all hosts                                    |
 
 ---
 

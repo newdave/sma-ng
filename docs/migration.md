@@ -372,7 +372,7 @@ The container image is published at `ghcr.io/newdave/sma-ng:latest`.
 
 | Feature | Description |
 | --- | --- |
-| Hardware acceleration auto-detection | `make detect-gpu` or `mise run config:detect:gpu` identifies available GPU encoders |
+| Hardware acceleration auto-detection | `make detect-gpu` or `mise run config:gpu` identifies available GPU encoders |
 | Multi-quality config profiles | Three bundled profiles: `autoProcess.ini`, `autoProcess.rq.ini`, `autoProcess.lq.ini` |
 | OpenVINO Analyzer | Optional `[Analyzer]` section for content-aware encoding decisions |
 | File renaming templates | `[Naming]` section with Sonarr/Radarr-style `{token}` templates |

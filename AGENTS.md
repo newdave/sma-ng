@@ -84,7 +84,7 @@ Requires Python 3.12+ and FFmpeg installed on system.
 - `mise run test` - run the test suite
 - `mise run test:lint` - run `ruff`
 - `mise run dev:lint` - auto-fix lint issues
-- `mise run config:detect:gpu` - detect available hardware acceleration
+- `mise run config:gpu` - detect available hardware acceleration
 - `mise run config:generate` - generate config with detected GPU
 - `mise run daemon:start` - start the daemon on `0.0.0.0:8585`
 - `mise run media:convert -- /path/to/file.mkv` - convert a file
@@ -444,7 +444,7 @@ Remote deployment is built around `mise` tasks and `setup/.local.ini`.
 Key tasks:
 
 - `mise run deploy:setup` - first-time host prep
-- `mise run deploy:run` - sync code, install deps, reload systemd
+- `mise run remote:run` - sync code, install deps, reload systemd
 - `mise run config:roll` - create missing configs, merge new keys, stamp credentials
 - `mise run deploy:restart` - restart `sma-daemon` on all hosts
 
