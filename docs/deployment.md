@@ -70,6 +70,7 @@ curl https://mise.run | sh
 | ---------------------------- | ------------------------------------------------------------------------------------------- |
 | `mise run deploy:check`      | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                                  |
 | `mise run deploy:setup`      | First-time host prep: SSH key, apt deps, deploy dir, systemd install                        |
+| `mise run deploy:mise`       | Sync the local `.mise/` deploy control plane to all hosts                                   |
 | `mise run deploy:sync`       | Sync code, install dependencies, and reload systemd on all hosts                            |
 | `mise run config:roll`       | Roll configs to remote hosts: create missing files, merge new keys, stamp credentials       |
 | `mise run deploy:restart`    | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl                  |
@@ -82,6 +83,9 @@ curl https://mise.run | sh
 | `mise run systemd:install`   | Install and enable the systemd service (respects `SMA_INSTALL_DIR`, defaults to `/opt/sma`) |
 | `mise run systemd:restart`   | Restart the `sma-daemon` systemd service immediately (force-kill then start)                |
 | `mise run systemd:uninstall` | Disable and remove the systemd service (leaves config and data untouched)                   |
+
+Also available: `mise run deploy:dockerstop` to stop Docker services on selected nodes.
+Use `HOST=<host>` for one node or `HOSTS="<host1> <host2>"` for multiple nodes.
 
 Run `mise tasks` to print a live list directly from the repo.
 
@@ -170,30 +174,17 @@ DEPLOY_HOSTS = user@server1.example.com user@server2.example.com
 DEPLOY_DIR   = ~/sma
 SSH_KEY      = ~/.ssh/id_ed25519_sma
 FFMPEG_DIR   = /usr/local/bin
+SMA_NODE_NAME = sma-default
+
+[user@server1.example.com]
+SMA_NODE_NAME = sma-master
+
+[user@server2.example.com]
+SMA_NODE_NAME = sma-worker-1
 
 [daemon]
 api_key = your_secret_key
 db_url  =                    # required for multi-node: postgresql://user:pass@host/db
-
-[Sonarr]
-host        = sonarr.example.com
-port        = 443
-ssl         = true
-apikey      = abc123
-media_path  = /mnt/media/TV
-config_file = config/autoProcess.sonarr.ini
-
-[Radarr]
-host        = radarr.example.com
-apikey      = def456
-media_path  = /mnt/media/Movies
-config_file = config/autoProcess.radarr.ini
-
-# Per-host override
-[user@server1.example.com]
-DEPLOY_DIR = /opt/sma
-SSH_PORT   = 2222
-FFMPEG_DIR = /opt/ffmpeg/bin
 ```
 
 ### Deployment Workflow
@@ -202,18 +193,27 @@ FFMPEG_DIR = /opt/ffmpeg/bin
 # 1. First-time: SSH key, apt deps, deploy dir, systemd install
 mise run deploy:setup
 
-# 2. Sync code, install deps, reload systemd
+# 2. Optional: sync only the remote .mise task/control-plane code
+mise run deploy:mise
+
+# 3. Sync code, install deps, reload systemd
 mise run deploy:sync
 
-# 3. Push configs (create missing, merge new keys, stamp credentials)
+# 4. Push configs (create missing, merge new keys, stamp credentials)
 mise run config:roll
 
-# 4. Restart daemon on all hosts
+# 5. Restart daemon on all hosts
 mise run deploy:restart
 
 # Optional: sync code to Docker hosts, pull the latest image, and recreate
 # only the SMA service for each configured profile
 mise run deploy:docker
+
+# Optional: stop Docker services on one host
+HOST=user@server1.example.com mise run deploy:dockerstop
+
+# Optional: stop Docker services on multiple hosts
+HOSTS="user@server1.example.com user@server2.example.com" mise run deploy:dockerstop
 
 # Optional: restart or recreate bundled PostgreSQL on hosts using *-pg profiles
 mise run pg:restart
@@ -221,6 +221,13 @@ mise run pg:recreate
 ```
 
 ### What `config:roll` Does
+
+`config:roll` depends on `deploy:mise`, so the remote host gets the current local
+`.mise/` helper and task code before any config mutation runs.
+
+For managed deployments, `config:roll` also stamps the host's `SMA_NODE_NAME`
+from `setup/.local.ini` into `config/daemon.env`, and the daemon uses that
+value as its cluster node ID.
 
 For each remote host:
 
@@ -238,6 +245,7 @@ For each remote host:
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `deploy:check`   | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                                                                                |
 | `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, systemd install                                                                      |
+| `deploy:mise`    | Sync the local `.mise/` deploy control plane to each remote `DEPLOY_DIR`                                                                  |
 | `deploy:sync`    | Sync code + install deps + reload systemd on all hosts                                                                                    |
 | `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials                                                                           |
 | `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl                                                                |
@@ -247,7 +255,14 @@ For each remote host:
 | `pg:recreate`    | Stop bundled PostgreSQL, remove its Docker volume, and recreate it on hosts whose `DOCKER_PROFILE` ends in `-pg`                          |
 | `deploy:exec`    | Run an arbitrary mise task on all hosts (`REMOTE_TASK=test mise run deploy:exec`)                                                         |
 
-The Docker-specific deploy tasks require `DOCKER_PROFILE` to be set per host (or in `[deploy]`) in `setup/.local.ini`. The PostgreSQL lifecycle tasks skip hosts that are not using one of the bundled `*-pg` profiles.
+Additional Docker lifecycle helper: `deploy:dockerstop` (alias: `deploy:docker:stop`) stops services on selected hosts.
+
+All remote-facing deploy/config tasks depend on `deploy:mise`, so the remote `.mise/`
+control plane is refreshed before those wrappers run. The Docker-specific deploy tasks
+require `DOCKER_PROFILE` to be set per host (or in `[deploy]`) in `setup/.local.ini`.
+Use `HOST=<host>` to target one node, or `HOSTS="<host1> <host2>"` to target multiple nodes.
+The PostgreSQL lifecycle tasks skip hosts that are not using one of the bundled `*-pg`
+profiles.
 Use `pg:recreate` only when you intentionally want a fresh bundled PostgreSQL data directory on the remote host; it removes the compose-managed `sma-pgdata` volume before bringing the service back.
 
 ---

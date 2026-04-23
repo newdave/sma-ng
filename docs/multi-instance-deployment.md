@@ -256,9 +256,8 @@ For Docker-based clusters:
 - point every `sma-ng` container at the same PostgreSQL if clustering across hosts
 - publish a distinct port per instance on the same host
 - mount the same media paths into the container on every node
-- ensure each daemon container has a unique hostname; the bundled compose file
-  defaults to `sma-ng-${HOSTNAME}`, so set `HOSTNAME` per Docker host and
-  override it if you run multiple SMA daemon containers on one machine
+- set a distinct `SMA_NODE_NAME` for every daemon instance; the daemon uses
+  that value from `daemon.env` as its cluster node ID
 
 If you want a quick starting point, see [Docker Compose Quick Start](docker-compose-quickstart.md).
 
