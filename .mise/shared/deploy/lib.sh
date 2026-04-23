@@ -4,6 +4,12 @@ LOCAL="setup/.local.ini"
 CFG="scripts/local-config.sh"
 MISSING_PREREQ_PATTERN='(command not found|No such file or directory|mise.*not found|python3.*not found|python.*not found|rsync.*not found|venv.*not found)'
 
+mk_ssh_opts() {
+  local port="$1" key="$2"
+  SSH_OPTS=(-p "$port" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+  [ -n "$key" ] && SSH_OPTS+=(-i "$(eval echo "$key")")
+}
+
 init_host_context() {
   local host="$1"
 

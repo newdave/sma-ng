@@ -93,10 +93,3 @@ fi
 
 echo ""
 echo "Docker upgrade complete: $DEPLOY_HOSTS"
-    echo ""
-    echo "ERROR: docker upgrade failed for:$failed" >&2
-    exit 1
-fi
-
-echo ""
-echo "Docker upgrade complete: $DEPLOY_HOSTS"
