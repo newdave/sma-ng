@@ -16,50 +16,50 @@ failed=""
 matched=0
 
 for host in $DEPLOY_HOSTS; do
-  init_docker_host_context "$host"
+    init_docker_host_context "$host"
 
-  if [ -z "$profile" ]; then
-    echo "ERROR: [$host] DOCKER_PROFILE is not set in $LOCAL — add it to [deploy] or the host section" >&2
-    failed="$failed $host"
-    continue
-  fi
+    if [ -z "$profile" ]; then
+        echo "ERROR: [$host] DOCKER_PROFILE is not set in $LOCAL — add it to [deploy] or the host section" >&2
+        failed="$failed $host"
+        continue
+    fi
 
-  if ! docker_profile_is_pg "$profile"; then
-    echo "==> [$host] skipping postgres restart (profile: $profile)"
-    continue
-  fi
+    if ! docker_profile_is_pg "$profile"; then
+        echo "==> [$host] skipping postgres restart (profile: $profile)"
+        continue
+    fi
 
-  matched=1
+    matched=1
 
-  echo ""
-  echo "==> [$host] restarting sma-pgsql (profile: $profile)"
-  if ! run_remote_compose "$host" "--profile $profile restart sma-pgsql"; then
-    echo "ERROR: [$host] docker compose restart failed for sma-pgsql" >&2
-    failed="$failed $host"
-    continue
-  fi
+    echo ""
+    echo "==> [$host] restarting sma-pgsql (profile: $profile)"
+    if ! run_remote_compose "$host" "--profile $profile restart sma-pgsql"; then
+        echo "ERROR: [$host] docker compose restart failed for sma-pgsql" >&2
+        failed="$failed $host"
+        continue
+    fi
 
-  echo "==> [$host] waiting for sma-pgsql to become healthy (timeout: ${PG_HEALTH_TIMEOUT}s)"
-  if ! wait_for_remote_container_health "$host" "sma-postgres" "$PG_HEALTH_TIMEOUT"; then
-    echo "ERROR: [$host] sma-pgsql did not become healthy within ${PG_HEALTH_TIMEOUT}s" >&2
-    failed="$failed $host"
-    continue
-  fi
+    echo "==> [$host] waiting for sma-pgsql to become healthy (timeout: ${PG_HEALTH_TIMEOUT}s)"
+    if ! wait_for_remote_container_health "$host" "sma-postgres" "$PG_HEALTH_TIMEOUT"; then
+        echo "ERROR: [$host] sma-pgsql did not become healthy within ${PG_HEALTH_TIMEOUT}s" >&2
+        failed="$failed $host"
+        continue
+    fi
 
-  print_remote_container_summary "$host" "sma-postgres"
-  echo "==> [$host] done"
+    print_remote_container_summary "$host" "sma-postgres"
+    echo "==> [$host] done"
 done
 
 if [ "$matched" -eq 0 ]; then
-  echo ""
-  echo "No hosts are configured with a *-pg DOCKER_PROFILE."
-  exit 0
+    echo ""
+    echo "No hosts are configured with a *-pg DOCKER_PROFILE."
+    exit 0
 fi
 
 if [ -n "$failed" ]; then
-  echo ""
-  echo "ERROR: postgres restart failed for:$failed" >&2
-  exit 1
+    echo ""
+    echo "ERROR: postgres restart failed for:$failed" >&2
+    exit 1
 fi
 
 echo ""
