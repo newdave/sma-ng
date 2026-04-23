@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Build wheel and sdist distribution artifacts"
+#MISE depends=["setup:deps:dev"]
+set -euo pipefail
+
+"$PY" -m build
