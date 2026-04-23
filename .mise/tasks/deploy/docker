@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #MISE description="Sync code to remote hosts, pull latest Docker image, and recreate SMA containers on all DEPLOY_HOSTS"
+#MISE aliases=["deploy:docker:upgrade"]
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
 # shellcheck disable=SC1091
 # lib.sh is sourced relative to this script's directory at runtime.
-source "$(dirname "$0")/lib.sh"
+source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
 ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
@@ -85,6 +86,13 @@ for host in $DEPLOY_HOSTS; do
 done
 
 if [ -n "$failed" ]; then
+    echo ""
+    echo "ERROR: docker upgrade failed for:$failed" >&2
+    exit 1
+fi
+
+echo ""
+echo "Docker upgrade complete: $DEPLOY_HOSTS"
     echo ""
     echo "ERROR: docker upgrade failed for:$failed" >&2
     exit 1

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Smoke-test the locally-built image: verify Python imports and ffmpeg"
+set -euo pipefail
+
+TAG="${TAG:-sma-ng:local}"
+echo "--- import checks ---"
+docker run --rm --entrypoint python3 "$TAG" \
+    scripts/docker_smoke_imports.py
+echo "--- ffmpeg version ---"
+docker run --rm --entrypoint ffmpeg "$TAG" -version | head -2
+echo "--- ffprobe version ---"
+docker run --rm --entrypoint ffprobe "$TAG" -version | head -2
+echo "Smoke tests passed."

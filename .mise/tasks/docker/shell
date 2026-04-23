@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Open a shell in the locally-built Docker image"
+set -euo pipefail
+
+TAG="${TAG:-sma-ng:local}"
+docker run --rm -it \
+    -v "$(pwd)/config:/config" \
+    -v "$(pwd)/logs:/logs" \
+    --entrypoint /bin/sh \
+    "$TAG"

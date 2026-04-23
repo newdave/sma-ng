@@ -76,13 +76,13 @@ If you do not know the answers yet, start with:
 
 ## Quality Profiles
 
-`mise run config` and `make config` now use the same generator and always create three config files:
+`mise run config:generate` and `make config` now use the same generator and always create three config files:
 
-| File | Profile | Video | Audio |
-| --- | --- | --- | --- |
-| `config/autoProcess.ini` | Regular Quality (default) | 3 Mbit/s 1080p · 20 Mbit/s 4K | EAC3, 128 kbps/ch |
-| `config/autoProcess.rq.ini` | Regular Quality (explicit) | same as above | same as above |
-| `config/autoProcess.lq.ini` | Lower Quality | 2 Mbit/s capped at 1080p (4K downscaled) | AAC, 96 kbps/ch |
+| File                        | Profile                    | Video                                    | Audio             |
+| --------------------------- | -------------------------- | ---------------------------------------- | ----------------- |
+| `config/autoProcess.ini`    | Regular Quality (default)  | 3 Mbit/s 1080p · 20 Mbit/s 4K            | EAC3, 128 kbps/ch |
+| `config/autoProcess.rq.ini` | Regular Quality (explicit) | same as above                            | same as above     |
+| `config/autoProcess.lq.ini` | Lower Quality              | 2 Mbit/s capped at 1080p (4K downscaled) | AAC, 96 kbps/ch   |
 
 Use `config/autoProcess.lq.ini` for bandwidth-limited destinations (mobile devices, remote access). Route files to it via `path_configs` in `daemon.json`:
 
@@ -115,16 +115,16 @@ git clone https://github.com/newdave/sma-ng && cd sma-ng
 
 # Install Python 3.12, create venv, install dependencies
 mise install
-mise run install
+mise run setup:deps
 
 # Generate config (auto-detects GPU)
-mise run config
+mise run config:generate
 
 # Test a conversion
-mise run convert -- /path/to/file.mkv
+mise run media:convert -- /path/to/file.mkv
 
 # Start the daemon
-mise run daemon
+mise run daemon:start
 ```
 
 What this gives you:
@@ -138,9 +138,11 @@ What this gives you:
 Useful follow-up commands:
 
 ```bash
-mise run detect-gpu
-mise run preview -- /path/to/file.mkv
-mise run codecs
+mise run dev:check
+mise run config:detect:gpu
+mise run test:openapi
+mise run media:preview -- /path/to/file.mkv
+mise run media:codecs
 ```
 
 ### Without mise
@@ -150,7 +152,7 @@ git clone https://github.com/newdave/sma-ng && cd sma-ng
 python3 -m venv venv && source venv/bin/activate
 pip install -r setup/requirements.txt
 
-# Generate the same config set as `mise run config`
+# Generate the same config set as `mise run config:generate`
 make config
 
 # Or copy sample and edit manually
@@ -233,7 +235,7 @@ make detect-gpu
 or:
 
 ```bash
-mise run detect-gpu
+mise run config:detect:gpu
 ```
 
 Both commands use the same detection script. Then compare the result with your chosen `gpu =` and codec settings. If GPU detection or encoder availability is uncertain, switch to software first and get a clean baseline run before troubleshooting hardware acceleration.
@@ -244,12 +246,12 @@ Both commands use the same detection script. Then compare the result with your c
 
 The normal bootstrap path generates these files:
 
-| File | Purpose |
-| --- | --- |
-| `config/autoProcess.ini` | Main/default conversion config |
-| `config/autoProcess.rq.ini` | Explicit regular-quality profile |
-| `config/autoProcess.lq.ini` | Lower-quality profile |
-| `config/daemon.json` | Optional daemon path routing and cluster config |
+| File                        | Purpose                                         |
+| --------------------------- | ----------------------------------------------- |
+| `config/autoProcess.ini`    | Main/default conversion config                  |
+| `config/autoProcess.rq.ini` | Explicit regular-quality profile                |
+| `config/autoProcess.lq.ini` | Lower-quality profile                           |
+| `config/daemon.json`        | Optional daemon path routing and cluster config |
 
 You can operate successfully with only:
 
@@ -426,31 +428,31 @@ python manual.py -i /path/to/file.mkv -a -c config/autoProcess.ini
 
 ### All Flags
 
-| Flag | Long | Description |
-| --- | --- | --- |
-| `-i` | `--input` | Input file or directory |
-| `-c` | `--config` | Alternate config file |
-| `-a` | `--auto` | Auto mode (no prompts, guesses metadata) |
-| `-s` | `--season` | Season number |
-| `-e` | `--episode` | Episode number |
-| `-tvdb` | `--tvdbid` | TVDB ID |
-| `-imdb` | `--imdbid` | IMDB ID |
-| `-tmdb` | `--tmdbid` | TMDB ID |
-| `-nm` | `--nomove` | Disable move-to and output-directory |
-| `-nc` | `--nocopy` | Disable copy-to |
-| `-nd` | `--nodelete` | Disable original file deletion |
-| `-nt` | `--notag` | Disable metadata tagging |
-| `-to` | `--tagonly` | Tag only, no conversion |
-| `-np` | `--nopost` | Disable post-process scripts |
-| `-pr` | `--preserverelative` | Preserve relative directory structure |
-| `-pse` | `--processsameextensions` | Reprocess files already in target format |
-| `-fc` | `--forceconvert` | Force conversion + process-same-extensions |
-| `-m` | `--moveto` | Override move-to path |
-| `-oo` | `--optionsonly` | Show conversion options, don't convert |
-| `-cl` | `--codeclist` | List all supported codecs |
-| `-o` | `--original` | Specify original filename for guessing |
-| `-ms` | `--minsize` | Minimum file size in MB |
-| `-pa` | `--processedarchive` | Path to processed files archive JSON |
+| Flag    | Long                      | Description                                |
+| ------- | ------------------------- | ------------------------------------------ |
+| `-i`    | `--input`                 | Input file or directory                    |
+| `-c`    | `--config`                | Alternate config file                      |
+| `-a`    | `--auto`                  | Auto mode (no prompts, guesses metadata)   |
+| `-s`    | `--season`                | Season number                              |
+| `-e`    | `--episode`               | Episode number                             |
+| `-tvdb` | `--tvdbid`                | TVDB ID                                    |
+| `-imdb` | `--imdbid`                | IMDB ID                                    |
+| `-tmdb` | `--tmdbid`                | TMDB ID                                    |
+| `-nm`   | `--nomove`                | Disable move-to and output-directory       |
+| `-nc`   | `--nocopy`                | Disable copy-to                            |
+| `-nd`   | `--nodelete`              | Disable original file deletion             |
+| `-nt`   | `--notag`                 | Disable metadata tagging                   |
+| `-to`   | `--tagonly`               | Tag only, no conversion                    |
+| `-np`   | `--nopost`                | Disable post-process scripts               |
+| `-pr`   | `--preserverelative`      | Preserve relative directory structure      |
+| `-pse`  | `--processsameextensions` | Reprocess files already in target format   |
+| `-fc`   | `--forceconvert`          | Force conversion + process-same-extensions |
+| `-m`    | `--moveto`                | Override move-to path                      |
+| `-oo`   | `--optionsonly`           | Show conversion options, don't convert     |
+| `-cl`   | `--codeclist`             | List all supported codecs                  |
+| `-o`    | `--original`              | Specify original filename for guessing     |
+| `-ms`   | `--minsize`               | Minimum file size in MB                    |
+| `-pa`   | `--processedarchive`      | Path to processed files archive JSON       |
 
 ---
 
@@ -585,12 +587,12 @@ After you have a first successful run:
 
 Place executable scripts in `post_process/`. They receive:
 
-| Variable | Description |
-| --- | --- |
-| `SMA_FILES` | JSON array of output file paths |
-| `SMA_TMDBID` | TMDB ID |
-| `SMA_SEASON` | Season number (TV only) |
-| `SMA_EPISODE` | Episode number (TV only) |
+| Variable      | Description                     |
+| ------------- | ------------------------------- |
+| `SMA_FILES`   | JSON array of output file paths |
+| `SMA_TMDBID`  | TMDB ID                         |
+| `SMA_SEASON`  | Season number (TV only)         |
+| `SMA_EPISODE` | Episode number (TV only)        |
 
 See `setup/post_process/` for examples (Plex, Emby, Jellyfin, iTunes).
 
@@ -602,30 +604,30 @@ Run `python manual.py -cl` for the full list. Key codecs:
 
 ### Video
 
-| SMA-NG Name | FFmpeg Encoder | Notes |
-| --- | --- | --- |
-| `h264` | libx264 | Software H.264 |
-| `h265` / `hevc` | libx265 | Software HEVC |
-| `h264qsv` | h264_qsv | Intel QSV H.264 |
-| `h265qsv` | hevc_qsv | Intel QSV HEVC |
-| `h264vaapi` | h264_vaapi | Intel VAAPI H.264 |
-| `h265vaapi` | hevc_vaapi | Intel VAAPI HEVC |
-| `av1qsv` | av1_qsv | Intel QSV AV1 |
-| `av1vaapi` | av1_vaapi | Intel VAAPI AV1 |
-| `h265_nvenc` | hevc_nvenc | NVIDIA HEVC |
-| `av1` | libaom-av1 | Software AV1 |
-| `svtav1` | libsvtav1 | SVT-AV1 |
-| `vp9` | libvpx-vp9 | Software VP9 |
+| SMA-NG Name     | FFmpeg Encoder | Notes             |
+| --------------- | -------------- | ----------------- |
+| `h264`          | libx264        | Software H.264    |
+| `h265` / `hevc` | libx265        | Software HEVC     |
+| `h264qsv`       | h264_qsv       | Intel QSV H.264   |
+| `h265qsv`       | hevc_qsv       | Intel QSV HEVC    |
+| `h264vaapi`     | h264_vaapi     | Intel VAAPI H.264 |
+| `h265vaapi`     | hevc_vaapi     | Intel VAAPI HEVC  |
+| `av1qsv`        | av1_qsv        | Intel QSV AV1     |
+| `av1vaapi`      | av1_vaapi      | Intel VAAPI AV1   |
+| `h265_nvenc`    | hevc_nvenc     | NVIDIA HEVC       |
+| `av1`           | libaom-av1     | Software AV1      |
+| `svtav1`        | libsvtav1      | SVT-AV1           |
+| `vp9`           | libvpx-vp9     | Software VP9      |
 
 ### Audio
 
-| SMA-NG Name | FFmpeg Encoder |
-| --- | --- |
-| `aac` | aac / libfdk_aac |
-| `ac3` | ac3 |
-| `eac3` | eac3 |
-| `flac` | flac |
-| `opus` | libopus |
-| `mp3` | libmp3lame |
-| `dts` | dca |
-| `truehd` | truehd |
+| SMA-NG Name | FFmpeg Encoder   |
+| ----------- | ---------------- |
+| `aac`       | aac / libfdk_aac |
+| `ac3`       | ac3              |
+| `eac3`      | eac3             |
+| `flac`      | flac             |
+| `opus`      | libopus          |
+| `mp3`       | libmp3lame       |
+| `dts`       | dca              |
+| `truehd`    | truehd           |

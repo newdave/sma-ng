@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run tests (smoke tests auto-skip without fixture/ffmpeg; daemon tests skip without TEST_DB_URL)"
+#MISE aliases=["test", "dev:test:run"]
+set -euo pipefail
+
+"$PY" -m pytest

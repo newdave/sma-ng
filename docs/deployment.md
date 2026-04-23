@@ -12,65 +12,78 @@ curl https://mise.run | sh
 
 ### Setup
 
-| Task | Description |
-| --- | --- |
-| `mise run venv` | Create the Python virtual environment |
-| `mise run install` | Install base runtime dependencies from `setup/requirements.txt` |
-| `mise run install-dev` | Install dev dependencies (lint, test tools) |
-| `mise run install-all` | Install all optional dependencies including qBittorrent and Deluge integrations |
-| `mise run clean` | Remove build artifacts, caches, and compiled bytecode |
+| Task                      | Description                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------- |
+| `mise run setup:venv`     | Create the Python virtual environment                                           |
+| `mise run setup:deps`     | Install base runtime dependencies from `setup/requirements.txt`                 |
+| `mise run setup:deps:dev` | Install dev dependencies (lint, test tools)                                     |
+| `mise run setup:deps:all` | Install all optional dependencies including qBittorrent and Deluge integrations |
+| `mise run setup:clean`    | Remove build artifacts, caches, and compiled bytecode                           |
 
 ### Development
 
-| Task | Description |
-| --- | --- |
-| `mise run lint` | Run the ruff linter and report issues |
-| `mise run lint-fix` | Run the ruff linter and auto-fix issues |
-| `mise run test` | Run the test suite (daemon tests require `TEST_DB_URL`) |
-| `mise run test-cov` | Run tests with coverage report (HTML + terminal summary) |
+| Task                     | Description                                              |
+| ------------------------ | -------------------------------------------------------- |
+| `mise run test:lint`     | Run the ruff linter and report issues                    |
+| `mise run dev:lint`      | Run the ruff linter and auto-fix issues                  |
+| `mise run dev:format`    | Format Python code with ruff                             |
+| `mise run dev:precommit` | Run pre-commit checks against all files                  |
+| `mise run test:openapi`  | Validate `docs/openapi.yaml`                             |
+| `mise run test`          | Run the test suite (daemon tests require `TEST_DB_URL`)  |
+| `mise run test:cov`      | Run tests with coverage report (HTML + terminal summary) |
+| `mise run test:daemon`   | Run focused daemon/API worker tests                      |
+| `mise run test:deploy`   | Run focused deploy/config task tests                     |
+| `mise run dev:check`     | Run the local CI-equivalent check set                    |
 
 ### Media Tools
 
-| Task | Description |
-| --- | --- |
-| `mise run daemon` | Start the daemon HTTP server on `0.0.0.0:8585` |
-| `mise run convert -- /path/to/file.mkv` | Convert a media file with auto-tagging |
-| `mise run preview -- /path/to/file.mkv` | Preview FFmpeg conversion options without converting |
-| `mise run codecs` | List all supported video and audio codecs |
-| `mise run rename -- /path/to/file-or-dir` | Rename media files using naming templates |
+| Task                                            | Description                                          |
+| ----------------------------------------------- | ---------------------------------------------------- |
+| `mise run daemon:start`                         | Start the daemon HTTP server on `0.0.0.0:8585`       |
+| `mise run media:convert -- /path/to/file.mkv`   | Convert a media file with auto-tagging               |
+| `mise run media:preview -- /path/to/file.mkv`   | Preview FFmpeg conversion options without converting |
+| `mise run media:codecs`                         | List all supported video and audio codecs            |
+| `mise run media:rename -- /path/to/file-or-dir` | Rename media files using naming templates            |
 
 ### GPU and Configuration
 
-| Task | Description |
-| --- | --- |
-| `mise run detect-gpu` | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
-| `mise run config` | Generate `config/` ini files with GPU auto-detection |
+| Task                         | Description                                                                        |
+| ---------------------------- | ---------------------------------------------------------------------------------- |
+| `mise run config:detect:gpu` | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
+| `mise run config:generate`   | Generate `config/` ini files with GPU auto-detection                               |
+| `mise run config:audit`      | Audit local `autoProcess.ini` files against the sample and `daemon.json`           |
+| `mise run daemon:smoke`      | Run daemon smoke-test config validation and exit                                   |
 
 ### Docker Tasks
 
-| Task | Description |
-| --- | --- |
-| `mise run docker:build` | Build the Docker image locally for the native platform |
-| `mise run docker:push` | Build and push a multi-arch image (`linux/amd64` + `linux/arm64`) — requires `IMAGE=` |
-| `mise run docker:run` | Run the locally-built image — requires `SMA_DAEMON_DB_URL` |
-| `mise run docker:shell` | Open an interactive shell inside the locally-built image |
-| `mise run docker:smoke` | Smoke-test the image: verify Python imports and FFmpeg binary |
+| Task                    | Description                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------- |
+| `mise run docker:build` | Build the Docker image locally for the native platform                                |
+| `mise run docker:push`  | Build and push a multi-arch image (`linux/amd64` + `linux/arm64`) — requires `IMAGE=` |
+| `mise run docker:run`   | Run the locally-built image — requires `SMA_DAEMON_DB_URL`                            |
+| `mise run docker:shell` | Open an interactive shell inside the locally-built image                              |
+| `mise run docker:smoke` | Smoke-test the image: verify Python imports and FFmpeg binary                         |
 
 ### Deploy Tasks
 
-| Task | Description |
-| --- | --- |
-| `mise run deploy:check` | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set |
-| `mise run deploy:setup` | First-time host prep: SSH key, apt deps, deploy dir, systemd install |
-| `mise run deploy:run` | Sync code, install dependencies, and reload systemd on all hosts |
-| `mise run deploy:config` | Roll configs to remote hosts: create missing files, merge new keys, stamp credentials |
-| `mise run deploy:restart` | Force-restart the `sma-daemon` systemd service on all hosts |
-| `mise run deploy:docker-upgrade` | Rsync code to Docker hosts, pull latest image, and recreate the SMA container |
-| `mise run deploy:docker-pg-restart` | Restart bundled PostgreSQL on hosts using `*-pg` Docker profiles |
-| `mise run deploy:docker-pg-recreate` | Remove and recreate bundled PostgreSQL (destructive — removes `sma-pgdata` volume) |
-| `mise run deploy:remote-make` | Run an arbitrary make target on all hosts (`REMOTE_MAKE=test mise run deploy:remote-make`) |
-| `mise run deploy:ghcr-login` | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token |
-| `mise run systemd-install` | Install the systemd service file (run as root on the target host) |
+| Task                          | Description                                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| `mise run deploy:check`       | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                                  |
+| `mise run deploy:setup`       | First-time host prep: SSH key, apt deps, deploy dir, systemd install                        |
+| `mise run deploy:run`         | Sync code, install dependencies, and reload systemd on all hosts                            |
+| `mise run config:roll`        | Roll configs to remote hosts: create missing files, merge new keys, stamp credentials       |
+| `mise run deploy:restart`     | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl                  |
+| `mise run config:audit`       | Audit local configs                                                                         |
+| `mise run deploy:docker`      | Rsync code to Docker hosts, pull latest image, and recreate the SMA container               |
+| `mise run pgsql:restart`      | Restart bundled PostgreSQL on hosts using `*-pg` Docker profiles                            |
+| `mise run pgsql:recreate`     | Remove and recreate bundled PostgreSQL (destructive — removes `sma-pgdata` volume)          |
+| `mise run deploy:remote:task` | Run an arbitrary mise task on all hosts (`REMOTE_TASK=test mise run deploy:remote:task`)    |
+| `mise run deploy:ghcr:login`  | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token                              |
+| `mise run systemd:install`    | Install and enable the systemd service (respects `SMA_INSTALL_DIR`, defaults to `/opt/sma`) |
+| `mise run systemd:start`      | Start the `sma-daemon` systemd service                                                      |
+| `mise run systemd:stop`       | Stop the `sma-daemon` systemd service                                                       |
+| `mise run systemd:restart`    | Restart the `sma-daemon` systemd service immediately (force-kill then start)                |
+| `mise run systemd:uninstall`  | Disable and remove the systemd service (leaves config and data untouched)                   |
 
 Run `mise tasks` to print a live list directly from the repo.
 
@@ -79,7 +92,7 @@ Run `mise tasks` to print a live list directly from the repo.
 ### Generate config, overriding GPU type
 
 ```bash
-GPU=nvenc mise run config
+GPU=nvenc mise run config:generate
 ```
 
 Useful on machines where auto-detection picks the wrong encoder (for example, when both Intel and NVIDIA GPUs are
@@ -88,7 +101,7 @@ present and you want to force one).
 ### Preview conversion options before committing
 
 ```bash
-mise run preview -- /mnt/media/movies/test-file.mkv
+mise run media:preview -- /mnt/media/movies/test-file.mkv
 ```
 
 Prints the full FFmpeg command and stream map without touching the file.
@@ -97,7 +110,7 @@ Use this to verify encoder selection, stream copying, and audio downmix decision
 ### Run tests with coverage and open the report
 
 ```bash
-mise run test-cov && open htmlcov/index.html
+mise run test:cov && open htmlcov/index.html
 ```
 
 Generates an HTML report in `htmlcov/` so you can browse coverage by file and line.
@@ -124,10 +137,10 @@ Requires `docker buildx` and registry credentials.
 ### Run the test suite on all remote hosts
 
 ```bash
-REMOTE_MAKE=test mise run deploy:remote-make
+REMOTE_TASK=test mise run deploy:remote:task
 ```
 
-SSHes into every host in `DEPLOY_HOSTS` and runs `make test` in `DEPLOY_DIR`.
+SSHes into every host in `DEPLOY_HOSTS` and runs `mise run test` in `DEPLOY_DIR`.
 Useful for verifying a code deployment before switching over.
 
 ### Open a shell in the Docker image for debugging
@@ -195,21 +208,21 @@ mise run deploy:setup
 mise run deploy:run
 
 # 3. Push configs (create missing, merge new keys, stamp credentials)
-mise run deploy:config
+mise run config:roll
 
 # 4. Restart daemon on all hosts
 mise run deploy:restart
 
 # Optional: sync code to Docker hosts, pull the latest image, and recreate
 # only the SMA service for each configured profile
-mise run deploy:docker-upgrade
+mise run deploy:docker
 
 # Optional: restart or recreate bundled PostgreSQL on hosts using *-pg profiles
-mise run deploy:docker-pg-restart
-mise run deploy:docker-pg-recreate
+mise run pgsql:restart
+mise run pgsql:recreate
 ```
 
-### What `deploy:config` Does
+### What `config:roll` Does
 
 For each remote host:
 
@@ -223,20 +236,21 @@ For each remote host:
 
 ### Deploy Tasks Reference
 
-| Task | Description |
-| --- | --- |
-| `deploy:check` | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set |
-| `deploy:setup` | First-time host prep: SSH key, apt deps, deploy dir, systemd install |
-| `deploy:run` | Sync code + install deps + reload systemd on all hosts |
-| `deploy:config` | Roll configs: create missing, merge new keys, stamp credentials |
-| `deploy:restart` | Restart `sma-daemon` on all hosts |
-| `deploy:docker-upgrade` | Rsync the local codebase to each Docker host, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
-| `deploy:docker-pg-restart` | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg` |
-| `deploy:docker-pg-recreate` | Stop bundled PostgreSQL, remove its Docker volume, and recreate it on hosts whose `DOCKER_PROFILE` ends in `-pg` |
-| `deploy:remote-make` | Run an arbitrary make target on all hosts (`REMOTE_MAKE=test mise run deploy:remote-make`) |
+| Task                 | Description                                                                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `deploy:check`       | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                                                                                |
+| `deploy:setup`       | First-time host prep: SSH key, apt deps, deploy dir, systemd install                                                                      |
+| `deploy:run`         | Sync code + install deps + reload systemd on all hosts                                                                                    |
+| `config:roll`        | Roll configs: create missing, merge new keys, stamp credentials                                                                           |
+| `deploy:restart`     | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl                                                                |
+| `config:audit`       | Audit local configs                                                                                                                       |
+| `deploy:docker`      | Rsync the local codebase to each Docker host, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
+| `pgsql:restart`      | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg`                                                                  |
+| `pgsql:recreate`     | Stop bundled PostgreSQL, remove its Docker volume, and recreate it on hosts whose `DOCKER_PROFILE` ends in `-pg`                          |
+| `deploy:remote:task` | Run an arbitrary mise task on all hosts (`REMOTE_TASK=test mise run deploy:remote:task`)                                                  |
 
 The Docker-specific deploy tasks require `DOCKER_PROFILE` to be set per host (or in `[deploy]`) in `setup/.local.ini`. The PostgreSQL lifecycle tasks skip hosts that are not using one of the bundled `*-pg` profiles.
-Use `deploy:docker-pg-recreate` only when you intentionally want a fresh bundled PostgreSQL data directory on the remote host; it removes the compose-managed `sma-pgdata` volume before bringing the service back.
+Use `pgsql:recreate` only when you intentionally want a fresh bundled PostgreSQL data directory on the remote host; it removes the compose-managed `sma-pgdata` volume before bringing the service back.
 
 ---
 
@@ -295,15 +309,15 @@ The bundled PostgreSQL compose service publishes `5432` on the Docker host by de
 
 **Environment variables for Docker:**
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `SMA_DAEMON_HOST` | `0.0.0.0` | Bind host |
-| `SMA_DAEMON_PORT` | `8585` | Port |
-| `SMA_DAEMON_WORKERS` | `2` | Worker count |
-| `SMA_DAEMON_API_KEY` | | API key |
-| `SMA_DAEMON_DB_URL` | | PostgreSQL connection URL (required) |
-| `SMA_DAEMON_FFMPEG_DIR` | | Directory containing `ffmpeg`/`ffprobe` |
-| `SMA_CONFIG` | | Override `autoProcess.ini` path |
+| Variable                | Default   | Description                             |
+| ----------------------- | --------- | --------------------------------------- |
+| `SMA_DAEMON_HOST`       | `0.0.0.0` | Bind host                               |
+| `SMA_DAEMON_PORT`       | `8585`    | Port                                    |
+| `SMA_DAEMON_WORKERS`    | `2`       | Worker count                            |
+| `SMA_DAEMON_API_KEY`    |           | API key                                 |
+| `SMA_DAEMON_DB_URL`     |           | PostgreSQL connection URL (required)    |
+| `SMA_DAEMON_FFMPEG_DIR` |           | Directory containing `ffmpeg`/`ffprobe` |
+| `SMA_CONFIG`            |           | Override `autoProcess.ini` path         |
 
 See also:
 
@@ -315,11 +329,11 @@ See also:
 
 ## CI / Release
 
-| Workflow | Trigger | Description |
-| --- | --- | --- |
-| `ci.yml` | PR / push to main | Runs test suite |
-| `docker.yml` | PR / push to main or `v*` tag | PR: build-only + smoke test; main/tag: build + push to GHCR |
-| `release.yml` | Push to main | release-please manages release PR + version bump; on release: wheel/sdist + Docker semver tags |
+| Workflow      | Trigger                       | Description                                                                                    |
+| ------------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| `ci.yml`      | PR / push to main             | Runs test suite                                                                                |
+| `docker.yml`  | PR / push to main or `v*` tag | PR: build-only + smoke test; main/tag: build + push to GHCR                                    |
+| `release.yml` | Push to main                  | release-please manages release PR + version bump; on release: wheel/sdist + Docker semver tags |
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please). **Do not manually create `v*` tags** — this causes duplicate releases.
 

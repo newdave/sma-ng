@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Install all optional dependencies (qbittorrent, deluge, dev)"
+#MISE depends=["setup:deps:dev"]
+set -euo pipefail
+
+"$PIP" install -r setup/requirements-qbittorrent.txt
+"$PIP" install -r setup/requirements-deluge.txt

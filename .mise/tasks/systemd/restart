@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Restart the local sma-daemon systemd service immediately (skips graceful drain)"
+#MISE aliases=["systemd:force:restart"]
+set -euo pipefail
+
+sudo systemctl kill --signal=SIGKILL sma-daemon 2>/dev/null || true
+sudo systemctl reset-failed sma-daemon 2>/dev/null || true
+sudo systemctl start sma-daemon
+sudo systemctl status sma-daemon --no-pager -l

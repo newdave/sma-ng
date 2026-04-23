@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Install base dependencies"
+#MISE aliases=["setup:deps"]
+#MISE depends=["setup:venv"]
+set -euo pipefail
+
+"$PIP" install -r setup/requirements.txt

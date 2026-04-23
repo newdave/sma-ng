@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run focused deploy/config task tests"
+#MISE aliases=["dev:test:deploy"]
+set -euo pipefail
+
+"$PY" -m pytest tests/test_deploy_tasks.py tests/test_ini_audit.py tests/test_ini_merge.py -q

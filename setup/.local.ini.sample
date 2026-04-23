@@ -28,6 +28,12 @@ SSH_PORT     = 22
 # Required when DEPLOY_DIR is owned by root (e.g. /opt/sma).
 DEPLOY_USE_SUDO = false
 
+# Base installation directory on the remote host.
+# Config, logs, and the systemd unit file all reference this path.
+# Defaults to /opt/sma if not set.  Set SMA_INSTALL_DIR on local installs too
+# (e.g. export SMA_INSTALL_DIR=~/sma before running `mise run systemd:install`).
+# SMA_INSTALL_DIR = /opt/sma
+
 # make target(s) to run on the host after each sync.
 REMOTE_MAKE  = install
 

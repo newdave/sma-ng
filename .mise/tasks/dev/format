@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Format Python code with ruff"
+set -euo pipefail
+
+"$PY" -m ruff format .

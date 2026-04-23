@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Rename media files using naming templates (usage: mise run media:rename -- /path/to/file-or-dir)"
+set -euo pipefail
+
+"$PY" rename.py "$@"

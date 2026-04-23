@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Detect GPU type for hardware acceleration"
+set -euo pipefail
+
+./scripts/detect-gpu.sh

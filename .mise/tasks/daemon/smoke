@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run daemon smoke-test config validation and exit"
+#MISE aliases=["media:daemon:smoke"]
+set -euo pipefail
+
+"$PY" daemon.py --smoke-test

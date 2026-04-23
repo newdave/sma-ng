@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#MISE description="Build the Docker image locally for the native platform (PLATFORM=linux/amd64 to override; TAG=sma-ng:local to override tag)"
+set -euo pipefail
+
+TAG="${TAG:-sma-ng:local}"
+FFMPEG_VERSION="${FFMPEG_VERSION:-8.1}"
+# Default to native platform so --load works; multi-platform builds require --push.
+NATIVE="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+PLATFORM="${PLATFORM:-$NATIVE}"
+
+echo "Building $TAG (FFmpeg ${FFMPEG_VERSION}, platform: ${PLATFORM})..."
+docker build \
+    --file docker/Dockerfile \
+    --target runtime \
+    --platform "${PLATFORM}" \
+    --build-arg FFMPEG_VERSION="${FFMPEG_VERSION}" \
+    --tag "$TAG" \
+    .
+echo ""
+echo "Built: $TAG"
+echo "Run:   docker run --rm -p 8585:8585 -v $(pwd)/config:/config $TAG"

@@ -62,16 +62,16 @@ git clone <repo> && cd sma
 
 # Install Python 3.12, create venv, install dependencies
 mise install
-mise run install
+mise run setup:deps
 
 # Generate config (auto-detects GPU)
-mise run config
+mise run config:generate
 
 # Test a conversion
-mise run convert -- /path/to/file.mkv
+mise run media:convert -- /path/to/file.mkv
 
 # Start the daemon
-mise run daemon
+mise run daemon:start
 ```
 
 ### Without mise
@@ -847,7 +847,7 @@ The `gpu` key in `[Converter]` sets the hardware acceleration profile used at ru
 
 ### GPU Config Option
 
-The `gpu` key is a runtime setting in `autoProcess.ini` that selects which hardware acceleration backend SMA-NG uses during conversion. `make config` and `mise run config` now call the same generator, auto-detect the GPU the same way, and write the correct value into the generated `autoProcess*.ini` files, but you can also set or change it manually at any time. The runtime settings driven by `gpu` are `hwaccels`, `hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`, and `[Video] codec`.
+The `gpu` key is a runtime setting in `autoProcess.ini` that selects which hardware acceleration backend SMA-NG uses during conversion. `make config` and `mise run config:generate` now call the same generator, auto-detect the GPU the same way, and write the correct value into the generated `autoProcess*.ini` files, but you can also set or change it manually at any time. The runtime settings driven by `gpu` are `hwaccels`, `hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`, and `[Video] codec`.
 
 Valid values for `gpu`:
 
@@ -859,7 +859,7 @@ Valid values for `gpu`:
 | `videotoolbox` | Apple Silicon / macOS  | Built into macOS; no device path needed                                                         |
 | `software`     | CPU only               | No hardware acceleration                                                                        |
 
-Auto-detection runs the same shared script behind `mise run detect-gpu` and `make detect-gpu`, checking each platform in order: NVIDIA → Intel QSV → VAAPI → VideoToolbox → software.
+Auto-detection runs the same shared script behind `mise run config:detect:gpu` and `make detect-gpu`, checking each platform in order: NVIDIA → Intel QSV → VAAPI → VideoToolbox → software.
 
 ### Intel QSV
 
@@ -1075,22 +1075,30 @@ See `setup/post_process/` for examples (Plex, Emby, Jellyfin, iTunes).
 
 ## Deployment (mise)
 
-SMA-NG uses [mise](https://mise.jdx.dev/) as a task runner for both local development and remote deployments. All tasks are defined in `mise.toml` (local dev) and `.mise/tasks/deploy/` (deployment).
+SMA-NG uses [mise](https://mise.jdx.dev/) as a task runner for both local development and remote deployments.
+Runnable tasks are executable scripts under `.mise/tasks/`; `mise.toml` only defines tools and shared environment.
 
 ### Local Development Tasks
 
 ```bash
-mise run install          # Create venv and install dependencies
-mise run install-dev      # Install dev + test dependencies
+mise run setup:deps          # Create venv and install dependencies
+mise run setup:deps:dev      # Install dev + test dependencies
 mise run test             # Run test suite
-mise run lint             # Run ruff linter
-mise run lint-fix         # Auto-fix lint issues
-mise run detect-gpu       # Detect available GPU acceleration
-mise run config           # Generate config with auto-detected GPU
-mise run daemon           # Start daemon on 0.0.0.0:8585
-mise run convert -- /path/to/file.mkv  # Convert a file
-mise run preview -- /path/to/file.mkv  # Preview options only
-mise run codecs           # List supported codecs
+mise run test:daemon      # Run focused daemon/API worker tests
+mise run test:deploy      # Run focused deploy/config task tests
+mise run dev:check            # Run local CI-equivalent checks
+mise run test:lint             # Run ruff linter
+mise run dev:lint         # Auto-fix lint issues
+mise run dev:format           # Format Python code
+mise run test:openapi          # Validate docs/openapi.yaml
+mise run config:detect:gpu       # Detect available GPU acceleration
+mise run config:generate           # Generate config with auto-detected GPU
+mise run config:audit     # Audit local config files
+mise run daemon:smoke     # Validate daemon config and exit
+mise run daemon:start           # Start daemon on 0.0.0.0:8585
+mise run media:convert -- /path/to/file.mkv  # Convert a file
+mise run media:preview -- /path/to/file.mkv  # Preview options only
+mise run media:codecs           # List supported codecs
 ```
 
 #### Docker tasks
@@ -1155,16 +1163,17 @@ mise run deploy:restart
 `deploy:run` does the following on each host in `DEPLOY_HOSTS`:
 
 - rsync the repo (excluding `venv/`, `config/`, `logs/`, `__pycache__/`)
-- `make install` on the remote host (creates venv, installs Python deps)
+- creates or repairs the virtualenv and installs base Python dependencies
 - Updates `User=` and `Group=` in the systemd unit file to match the SSH user
 - Runs `systemctl daemon-reload`
 
-If `make install` fails due to missing prerequisites (Python, make, rsync), it automatically runs `deploy:setup` for that host and retries.
+If dependency installation fails due to missing prerequisites (Python, `rsync`, or `venv` support), it automatically
+runs `deploy:setup` for that host and retries.
 
 #### Rolling config to remote hosts
 
 ```bash
-mise run deploy:config
+mise run config:roll
 ```
 
 This task manages config files on remote hosts without overwriting customizations:
@@ -1196,24 +1205,25 @@ mise run deploy:restart
 
 Runs `sudo systemctl restart sma-daemon` on each host.
 
-#### Running arbitrary make targets remotely
+#### Running arbitrary mise tasks remotely
 
 ```bash
-REMOTE_MAKE=test mise run deploy:remote-make
+REMOTE_TASK=test mise run deploy:remote:task
 ```
 
-Runs the specified make target on each host without syncing code first.
+Runs the specified mise task on each host without syncing code first.
 
 #### Summary of deploy tasks
 
-| Task                 | Description                                                          |
-| -------------------- | -------------------------------------------------------------------- |
-| `deploy:check`       | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set           |
-| `deploy:setup`       | First-time host prep: SSH key, apt deps, deploy dir, systemd install |
-| `deploy:run`         | Sync code + install deps + reload systemd on all hosts               |
-| `deploy:config`      | Roll configs: create missing, merge new keys, stamp credentials      |
-| `deploy:restart`     | Restart `sma-daemon` on all hosts                                    |
-| `deploy:remote-make` | Run an arbitrary make target on all hosts                            |
+| Task                 | Description                                                                |
+| -------------------- | -------------------------------------------------------------------------- |
+| `deploy:check`       | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                 |
+| `deploy:setup`       | First-time host prep: SSH key, apt deps, deploy dir, systemd install       |
+| `deploy:run`         | Sync code + install deps + reload systemd on all hosts                     |
+| `config:roll`        | Roll configs: create missing, merge new keys, stamp credentials            |
+| `deploy:restart`     | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl |
+| `config:audit`       | Audit local configs                                                        |
+| `deploy:remote:task` | Run an arbitrary mise task on all hosts                                    |
 
 ---
 

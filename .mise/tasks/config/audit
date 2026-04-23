@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Audit local autoProcess.ini files against the sample and daemon.json"
+#MISE aliases=["deploy:config:audit"]
 set -euo pipefail
 
 sample="${SAMPLE:-setup/autoProcess.ini.sample}"

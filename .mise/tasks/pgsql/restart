@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #MISE description="Restart bundled PostgreSQL containers on DEPLOY_HOSTS running *-pg profiles"
+#MISE aliases=["deploy:docker:pg:restart"]
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
 # shellcheck disable=SC1091
 # lib.sh is sourced relative to this script's directory at runtime.
-source "$(dirname "$0")/lib.sh"
+source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
 ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
