@@ -43,7 +43,8 @@ config/autoProcess.*.ini
 config/daemon.json
 config/daemon.env
 config/logging.ini
-config/custom.py
+!config/custom.py
+!config/__init__.py
 config/sma.log*
 *.log
 logs/*.log
