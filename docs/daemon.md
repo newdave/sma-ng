@@ -250,10 +250,12 @@ Returns an array of log file objects:
 
 ```json
 [
-  {"name": "autoProcess", "file": "/app/logs/autoProcess.log", "size": 102400, "mtime": "2024-04-19T12:34:56Z"},
-  {"name": "autoProcess.tv", "file": "/app/logs/autoProcess.tv.log", "size": 51200, "mtime": "2024-04-19T10:20:30Z"}
+  {"name": "autoProcess", "file": "/app/logs/autoProcess.log", "size": 102400, "mtime": "2024-04-19T12:34:56-04:00"},
+  {"name": "autoProcess.tv", "file": "/app/logs/autoProcess.tv.log", "size": 51200, "mtime": "2024-04-19T10:20:30-04:00"}
 ]
 ```
+
+`mtime` is emitted in the daemon host's local timezone and includes the UTC offset.
 
 ### Get log content
 
@@ -276,11 +278,13 @@ Returns:
 ```json
 {
   "entries": [
-    {"timestamp": "2024-04-19T12:00:00Z", "level": "INFO", "message": "Starting conversion", "job_id": 42}
+    {"timestamp": "2024-04-19T12:00:00-04:00", "level": "INFO", "message": "Starting conversion", "job_id": 42}
   ],
   "file_size": 102400
 }
 ```
+
+Structured timestamps returned by the daemon API use the daemon host's local timezone and include the UTC offset.
 
 **Query parameters:**
 
