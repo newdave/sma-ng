@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.6.26](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.25...sma-ng-v1.6.26) (2026-04-23)
+
+
+### Features
+
+* add cluster lifecycle tasks (start/stop/restart/status) ([d51d9a3](https://github.com/newdave/sma-ng/commit/d51d9a3d78f9dea453625a5275e5037e0e37bccd))
+* clean up cluster node on graceful shutdown ([b090079](https://github.com/newdave/sma-ng/commit/b0900797c0d8e6d1cb55d98aedcc977c3293b084))
+
+
+### Documentation
+
+* document cluster lifecycle tasks and node cleanup ([d5719e6](https://github.com/newdave/sma-ng/commit/d5719e66d61dec3f227f9ab5727c251ab3ef4f38))
+
 ## [1.6.25](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.24...sma-ng-v1.6.25) (2026-04-23)
 
 
