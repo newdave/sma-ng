@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#MISE description="Audit local autoProcess.ini files against the sample and daemon.json"
+set -euo pipefail
+
+sample="${SAMPLE:-setup/autoProcess.ini.sample}"
+daemon="${DAEMON:-config/daemon.json}"
+json_output="${JSON:-false}"
+
+ini_files=()
+for ini in config/*.ini; do
+    [ -f "$ini" ] || continue
+    ini_files+=("$ini")
+done
+
+if [ "${#ini_files[@]}" -eq 0 ]; then
+    echo "ERROR: no config/*.ini files found to audit" >&2
+    exit 1
+fi
+
+args=(--sample "$sample" --ini "${ini_files[@]}")
+
+if [ -f "$daemon" ]; then
+    args+=(--daemon "$daemon")
+fi
+
+if [ "$json_output" = "true" ]; then
+    args+=(--json)
+fi
+
+python3 scripts/ini_audit.py "${args[@]}" "$@"
