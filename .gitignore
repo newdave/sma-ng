@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 build/
+!.mise/tasks/build/
 develop-eggs/
 dist/
 downloads/

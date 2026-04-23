@@ -58,11 +58,11 @@ curl https://mise.run | sh
 
 | Task                    | Description                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------- |
-| `mise run docker:build` | Build the Docker image locally for the native platform                                |
-| `mise run docker:push`  | Build and push a multi-arch image (`linux/amd64` + `linux/arm64`) — requires `IMAGE=` |
+| `mise run build:docker` | Build the Docker image locally for the native platform                                |
+| `mise run build:push`   | Build and push a multi-arch image (`linux/amd64` + `linux/arm64`) — requires `IMAGE=` |
 | `mise run docker:run`   | Run the locally-built image — requires `SMA_DAEMON_DB_URL`                            |
-| `mise run docker:shell` | Open an interactive shell inside the locally-built image                              |
-| `mise run docker:smoke` | Smoke-test the image: verify Python imports and FFmpeg binary                         |
+| `mise run build:shell`  | Open an interactive shell inside the locally-built image                              |
+| `mise run test:smoke`   | Smoke-test the image: verify Python imports and FFmpeg binary                         |
 
 ### Deploy Tasks
 
@@ -119,7 +119,7 @@ On Linux, replace `open` with `xdg-open`.
 ### Smoke-test the Docker image before deploying
 
 ```bash
-mise run docker:build && mise run docker:smoke
+mise run build:docker && mise run test:smoke
 ```
 
 Builds a local `sma-ng:local` image and immediately verifies Python imports and FFmpeg availability inside it.
@@ -128,7 +128,7 @@ No containers are left running afterwards.
 ### Push a multi-architecture image to a registry
 
 ```bash
-IMAGE=ghcr.io/myorg/sma-ng:2.0.0 mise run docker:push
+IMAGE=ghcr.io/myorg/sma-ng:2.0.0 mise run build:push
 ```
 
 Builds for both `linux/amd64` and `linux/arm64` via `docker buildx` and pushes both manifests.
@@ -146,7 +146,7 @@ Useful for verifying a code deployment before switching over.
 ### Open a shell in the Docker image for debugging
 
 ```bash
-mise run docker:shell
+mise run build:shell
 ```
 
 Starts the locally-built `sma-ng:local` image with `/config` and `/logs` bind-mounted and drops you into `/bin/sh`.

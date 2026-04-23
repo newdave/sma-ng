@@ -154,19 +154,19 @@ TAG    ?= sma-ng:local
 FFMPEG_VERSION ?= 8.1
 
 docker-build: ## Build the Docker image locally (TAG=sma-ng:local FFMPEG_VERSION=8.0 to override)
-	$(call MISE_OR_DIRECT,docker:build, \
+	$(call MISE_OR_DIRECT,build:docker, \
 	  docker build --file docker/Dockerfile --target runtime --build-arg FFMPEG_VERSION=$(FFMPEG_VERSION) --tag $(TAG) .)
 
 docker-run: ## Run the locally-built image (TAG=sma-ng:local to override)
 	TAG="$(TAG)" $(call MISE_OR_DIRECT,docker:run,./scripts/docker-run.sh)
 
 docker-shell: ## Open a shell in the locally-built image
-	$(call MISE_OR_DIRECT,docker:shell, \
+	$(call MISE_OR_DIRECT,build:shell, \
 	  docker run --rm -it -v $(CURDIR)/config:/config -v $(CURDIR)/logs:/logs \
 	    --entrypoint /bin/sh $(TAG))
 
 docker-smoke: ## Smoke-test the locally-built image (imports + ffmpeg)
-	$(call MISE_OR_DIRECT,docker:smoke, \
+	$(call MISE_OR_DIRECT,test:smoke, \
 	  docker run --rm --entrypoint python3 $(TAG) \
 	    scripts/docker_smoke_imports.py && \
 	  docker run --rm --entrypoint ffmpeg $(TAG) -version | head -2)

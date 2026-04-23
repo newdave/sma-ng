@@ -2,7 +2,9 @@
 #MISE description="Smoke-test the locally-built image: verify Python imports and ffmpeg"
 set -euo pipefail
 
-TAG="${TAG:-sma-ng:local}"
+# shellcheck source=../../../shared/docker/env.sh
+# shellcheck disable=SC1091  # path declared above; shellcheck requires -x to follow sourced files
+source "${MISE_PROJECT_ROOT}/.mise/shared/docker/env.sh"
 echo "--- import checks ---"
 docker run --rm --entrypoint python3 "$TAG" \
     scripts/docker_smoke_imports.py

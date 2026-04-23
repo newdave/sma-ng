@@ -2,7 +2,9 @@
 #MISE description="Open a shell in the locally-built Docker image"
 set -euo pipefail
 
-TAG="${TAG:-sma-ng:local}"
+# shellcheck source=../../shared/docker/env.sh
+# shellcheck disable=SC1091  # path declared above; shellcheck requires -x to follow sourced files
+source "${MISE_PROJECT_ROOT}/.mise/shared/docker/env.sh"
 docker run --rm -it \
     -v "$(pwd)/config:/config" \
     -v "$(pwd)/logs:/logs" \
