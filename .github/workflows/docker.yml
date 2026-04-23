@@ -2,8 +2,8 @@ name: Docker
 
 on:
   push:
-    branches: [main]
-    tags: ["v*"]
+    branches: [ main ]
+    tags: [ "v*" ]
     paths:
       - "docker/Dockerfile"
       - "docker/docker-entrypoint.sh"
@@ -13,7 +13,7 @@ on:
       - ".github/workflows/docker.yml"
       - ".mise/tasks/**"
   pull_request:
-    branches: [main]
+    branches: [ main ]
     paths:
       - "docker/Dockerfile"
       - "docker/docker-entrypoint.sh"
@@ -91,7 +91,8 @@ jobs:
           context: .
           file: docker/Dockerfile
           target: runtime
-          platforms: ${{ startsWith(github.ref, 'refs/tags/v') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          platforms: ${{ startsWith(github.ref, 'refs/tags/v') &&
+            'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: ${{ github.event_name != 'pull_request' }}
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -114,4 +115,4 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           TAG: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-        run: mise run test:smoke
+        run: mise run build:smoke

@@ -47,12 +47,12 @@ curl https://mise.run | sh
 
 ### GPU and Configuration
 
-| Task                         | Description                                                                        |
-| ---------------------------- | ---------------------------------------------------------------------------------- |
-| `mise run config:gpu` | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
-| `mise run config:generate`   | Generate `config/` ini files with GPU auto-detection                               |
-| `mise run config:audit`      | Audit local `autoProcess.ini` files against the sample and `daemon.json`           |
-| `mise run daemon:smoke`      | Run daemon smoke-test config validation and exit                                   |
+| Task                       | Description                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| `mise run config:gpu`      | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
+| `mise run config:generate` | Generate `config/` ini files with GPU auto-detection                               |
+| `mise run config:audit`    | Audit local `autoProcess.ini` files against the sample and `daemon.json`           |
+| `mise run daemon:smoke`    | Run daemon smoke-test config validation and exit                                   |
 
 ### Docker Tasks
 
@@ -62,28 +62,26 @@ curl https://mise.run | sh
 | `mise run build:push`   | Build and push a multi-arch image (`linux/amd64` + `linux/arm64`) — requires `IMAGE=` |
 | `mise run docker:run`   | Run the locally-built image — requires `SMA_DAEMON_DB_URL`                            |
 | `mise run build:shell`  | Open an interactive shell inside the locally-built image                              |
-| `mise run test:smoke`   | Smoke-test the image: verify Python imports and FFmpeg binary                         |
+| `mise run build:smoke`  | Smoke-test the image: verify Python imports and FFmpeg binary                         |
 
 ### Deploy Tasks
 
-| Task                          | Description                                                                                 |
-| ----------------------------- | ------------------------------------------------------------------------------------------- |
-| `mise run deploy:check`       | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                                  |
-| `mise run deploy:setup`       | First-time host prep: SSH key, apt deps, deploy dir, systemd install                        |
-| `mise run remote:run`         | Sync code, install dependencies, and reload systemd on all hosts                            |
-| `mise run config:roll`        | Roll configs to remote hosts: create missing files, merge new keys, stamp credentials       |
-| `mise run deploy:restart`     | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl                  |
-| `mise run config:audit`       | Audit local configs                                                                         |
-| `mise run deploy:docker`      | Rsync code to Docker hosts, pull latest image, and recreate the SMA container               |
-| `mise run pgsql:restart`      | Restart bundled PostgreSQL on hosts using `*-pg` Docker profiles                            |
-| `mise run pgsql:recreate`     | Remove and recreate bundled PostgreSQL (destructive — removes `sma-pgdata` volume)          |
-| `mise run remote:mise` | Run an arbitrary mise task on all hosts (`REMOTE_TASK=test mise run remote:mise`)    |
-| `mise run docker:login`  | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token                              |
-| `mise run systemd:install`    | Install and enable the systemd service (respects `SMA_INSTALL_DIR`, defaults to `/opt/sma`) |
-| `mise run systemd:start`      | Start the `sma-daemon` systemd service                                                      |
-| `mise run systemd:stop`       | Stop the `sma-daemon` systemd service                                                       |
-| `mise run systemd:restart`    | Restart the `sma-daemon` systemd service immediately (force-kill then start)                |
-| `mise run systemd:uninstall`  | Disable and remove the systemd service (leaves config and data untouched)                   |
+| Task                         | Description                                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------------- |
+| `mise run deploy:check`      | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                                  |
+| `mise run deploy:setup`      | First-time host prep: SSH key, apt deps, deploy dir, systemd install                        |
+| `mise run deploy:sync`       | Sync code, install dependencies, and reload systemd on all hosts                            |
+| `mise run config:roll`       | Roll configs to remote hosts: create missing files, merge new keys, stamp credentials       |
+| `mise run deploy:restart`    | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl                  |
+| `mise run config:audit`      | Audit local configs                                                                         |
+| `mise run deploy:docker`     | Rsync code to Docker hosts, pull latest image, and recreate the SMA container               |
+| `mise run pg:restart`        | Restart bundled PostgreSQL on hosts using `*-pg` Docker profiles                            |
+| `mise run pg:recreate`       | Remove and recreate bundled PostgreSQL (destructive — removes `sma-pgdata` volume)          |
+| `mise run deploy:exec`       | Run an arbitrary mise task on all hosts (`REMOTE_TASK=test mise run deploy:exec`)           |
+| `mise run deploy:login`      | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token                              |
+| `mise run systemd:install`   | Install and enable the systemd service (respects `SMA_INSTALL_DIR`, defaults to `/opt/sma`) |
+| `mise run systemd:restart`   | Restart the `sma-daemon` systemd service immediately (force-kill then start)                |
+| `mise run systemd:uninstall` | Disable and remove the systemd service (leaves config and data untouched)                   |
 
 Run `mise tasks` to print a live list directly from the repo.
 
@@ -119,7 +117,7 @@ On Linux, replace `open` with `xdg-open`.
 ### Smoke-test the Docker image before deploying
 
 ```bash
-mise run build:docker && mise run test:smoke
+mise run build:docker && mise run build:smoke
 ```
 
 Builds a local `sma-ng:local` image and immediately verifies Python imports and FFmpeg availability inside it.
@@ -137,7 +135,7 @@ Requires `docker buildx` and registry credentials.
 ### Run the test suite on all remote hosts
 
 ```bash
-REMOTE_TASK=test mise run remote:mise
+REMOTE_TASK=test mise run deploy:exec
 ```
 
 SSHes into every host in `DEPLOY_HOSTS` and runs `mise run test` in `DEPLOY_DIR`.
@@ -205,7 +203,7 @@ FFMPEG_DIR = /opt/ffmpeg/bin
 mise run deploy:setup
 
 # 2. Sync code, install deps, reload systemd
-mise run remote:run
+mise run deploy:sync
 
 # 3. Push configs (create missing, merge new keys, stamp credentials)
 mise run config:roll
@@ -218,8 +216,8 @@ mise run deploy:restart
 mise run deploy:docker
 
 # Optional: restart or recreate bundled PostgreSQL on hosts using *-pg profiles
-mise run pgsql:restart
-mise run pgsql:recreate
+mise run pg:restart
+mise run pg:recreate
 ```
 
 ### What `config:roll` Does
@@ -236,21 +234,21 @@ For each remote host:
 
 ### Deploy Tasks Reference
 
-| Task                 | Description                                                                                                                               |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `deploy:check`       | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                                                                                |
-| `deploy:setup`       | First-time host prep: SSH key, apt deps, deploy dir, systemd install                                                                      |
-| `remote:run`         | Sync code + install deps + reload systemd on all hosts                                                                                    |
-| `config:roll`        | Roll configs: create missing, merge new keys, stamp credentials                                                                           |
-| `deploy:restart`     | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl                                                                |
-| `config:audit`       | Audit local configs                                                                                                                       |
-| `deploy:docker`      | Rsync the local codebase to each Docker host, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
-| `pgsql:restart`      | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg`                                                                  |
-| `pgsql:recreate`     | Stop bundled PostgreSQL, remove its Docker volume, and recreate it on hosts whose `DOCKER_PROFILE` ends in `-pg`                          |
-| `remote:mise` | Run an arbitrary mise task on all hosts (`REMOTE_TASK=test mise run remote:mise`)                                                  |
+| Task             | Description                                                                                                                               |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `deploy:check`   | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                                                                                |
+| `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, systemd install                                                                      |
+| `deploy:sync`    | Sync code + install deps + reload systemd on all hosts                                                                                    |
+| `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials                                                                           |
+| `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl                                                                |
+| `config:audit`   | Audit local configs                                                                                                                       |
+| `deploy:docker`  | Rsync the local codebase to each Docker host, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
+| `pg:restart`     | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg`                                                                  |
+| `pg:recreate`    | Stop bundled PostgreSQL, remove its Docker volume, and recreate it on hosts whose `DOCKER_PROFILE` ends in `-pg`                          |
+| `deploy:exec`    | Run an arbitrary mise task on all hosts (`REMOTE_TASK=test mise run deploy:exec`)                                                         |
 
 The Docker-specific deploy tasks require `DOCKER_PROFILE` to be set per host (or in `[deploy]`) in `setup/.local.ini`. The PostgreSQL lifecycle tasks skip hosts that are not using one of the bundled `*-pg` profiles.
-Use `pgsql:recreate` only when you intentionally want a fresh bundled PostgreSQL data directory on the remote host; it removes the compose-managed `sma-pgdata` volume before bringing the service back.
+Use `pg:recreate` only when you intentionally want a fresh bundled PostgreSQL data directory on the remote host; it removes the compose-managed `sma-pgdata` volume before bringing the service back.
 
 ---
 
@@ -263,7 +261,7 @@ The daemon can be installed as a systemd service:
 make systemd-install
 
 # Or via mise (deploys to all remote hosts)
-mise run remote:run
+mise run deploy:sync
 ```
 
 Service unit: `setup/sma-daemon.service`
