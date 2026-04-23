@@ -117,7 +117,7 @@ components:
         mtime:
           type: string
           format: date-time
-          description: Last-modified timestamp
+          description: Last-modified timestamp in the daemon host's local timezone, including UTC offset
 
     LogEntry:
       type: object
@@ -125,6 +125,7 @@ components:
         timestamp:
           type: string
           format: date-time
+          description: Entry timestamp in the daemon host's local timezone, including UTC offset
         level:
           type: string
           enum: [DEBUG, INFO, WARNING, ERROR, CRITICAL]
@@ -158,6 +159,7 @@ paths:
                   started_at:
                     type: string
                     format: date-time
+                    description: Daemon start time in the daemon host's local timezone, including UTC offset
                   uptime_seconds:
                     type: integer
                   workers:

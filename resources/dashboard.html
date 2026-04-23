@@ -875,15 +875,23 @@
                     this.acIndex = -1;
                 },
                 // ─────────────────────────────────────────────────────────────────────────
+                parseTimestamp(value) {
+                    if (!value) return null;
+                    const normalized = String(value).trim().replace(' ', 'T');
+                    if (!normalized) return null;
+                    return new Date(normalized);
+                },
                 fmtTime(t) {
                     if (!t) return '-';
-                    const d = new Date(t.includes('Z') || t.includes('+') ? t : t + 'Z');
+                    const d = this.parseTimestamp(t);
+                    if (Number.isNaN(d?.getTime())) return '-';
                     return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                 },
                 fmtDuration(j) {
                     if (!j.started_at) return '-';
-                    const start = new Date(j.started_at.includes('Z') || j.started_at.includes('+') ? j.started_at : j.started_at + 'Z');
-                    const end = j.completed_at ? new Date(j.completed_at.includes('Z') || j.completed_at.includes('+') ? j.completed_at : j.completed_at + 'Z') : new Date();
+                    const start = this.parseTimestamp(j.started_at);
+                    const end = j.completed_at ? this.parseTimestamp(j.completed_at) : new Date();
+                    if (Number.isNaN(start?.getTime()) || Number.isNaN(end?.getTime())) return '-';
                     const s = Math.round((end - start) / 1000);
                     if (s < 60) return s + 's';
                     if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';

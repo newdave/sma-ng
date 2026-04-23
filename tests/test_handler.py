@@ -4,7 +4,7 @@ import io
 import json
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -502,6 +502,35 @@ class TestGetLogs:
     body = _get_response_body(h)
     assert body[0]["size"] == 0
     assert body[0]["mtime"] is None
+
+  def test_formats_log_mtime_in_local_timezone(self, tmp_path):
+    log_file = tmp_path / "autoProcess.log"
+    log_file.write_text('{"level": "INFO", "message": "test"}\n')
+    h = _make_handler()
+    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "autoProcess", "path": str(log_file)}]
+    local_tz = timezone(timedelta(hours=-5))
+    with patch("resources.daemon.handler._LOCAL_TIMEZONE", local_tz):
+      h._get_logs()
+    body = _get_response_body(h)
+    assert body[0]["mtime"].endswith("-05:00")
+
+
+class TestJsonSerialization:
+  def test_health_serializes_started_at_in_local_timezone(self):
+    local_tz = timezone(timedelta(hours=-5))
+    h = _make_handler()
+    h.server.started_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    with (
+      patch("resources.daemon.handler._LOCAL_TIMEZONE", local_tz),
+      patch(
+        "resources.daemon.handler._local_now",
+        return_value=datetime(2024, 1, 1, 7, 0, 30, tzinfo=local_tz),
+      ),
+    ):
+      h._get_health()
+    body = _get_response_body(h)
+    assert body["started_at"] == "2024-01-01T07:00:00-05:00"
+    assert body["uptime_seconds"] == 30
 
 
 # ---------------------------------------------------------------------------
