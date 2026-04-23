@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import textwrap
+from base64 import b64encode
 
 import pytest
 
@@ -321,3 +322,60 @@ class TestDeployConfigTask:
     text = _read(".mise/tasks/config/roll")
     assert "--sort" in text
     assert "--deprecate" in text
+
+
+class TestDeployLibHelpers:
+  def test_ini_stamp_credentials_uses_service_specific_sonarr_overrides(self, tmp_path):
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    ini_path = config_dir / "autoProcess.sonarr-kids.ini"
+    ini_path.write_text(
+      textwrap.dedent(
+        """
+        [Sonarr]
+        host = old-host
+        port = 8989
+        apikey = old-key
+        webroot =
+
+        [Converter]
+        recycle-bin = /old/recycle
+        """
+      ).strip()
+      + "\n"
+    )
+
+    services = {
+      "Converter": {"recycle-bin": "/srv/recycle"},
+      "Sonarr-Kids": {
+        "host": "kids-sonarr.local",
+        "port": "9898",
+        "apikey": "kids-key",
+        "webroot": "/kids",
+        "config_file": "config/autoProcess.sonarr-kids.ini",
+      },
+    }
+    services_b64 = b64encode(json.dumps(services).encode()).decode()
+
+    result = subprocess.run(
+      [
+        "python3",
+        ".mise/shared/deploy/lib/ini_stamp_credentials.py",
+        str(deploy_dir),
+        "false",
+        services_b64,
+      ],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    content = ini_path.read_text()
+    assert "host = kids-sonarr.local" in content
+    assert "port = 9898" in content
+    assert "apikey = kids-key" in content
+    assert "webroot = /kids" in content
+    assert "recycle-bin = /srv/recycle/Sonarr-Kids" in content
