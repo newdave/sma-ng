@@ -99,7 +99,16 @@ Use `config/autoProcess.lq.ini` for bandwidth-limited destinations (mobile devic
 
 ### With mise (recommended)
 
-[mise](https://mise.jdx.dev/) is a dev-tool manager. Install it once, then:
+[mise](https://mise.jdx.dev/) is a dev-tool manager and task runner. Install it once with the one-liner below,
+then use `mise run <task>` anywhere in the project. See the
+[mise installation docs](https://mise.jdx.dev/getting-started.html) for alternative methods (Homebrew, package
+managers, Windows).
+
+```bash
+curl https://mise.run | sh
+```
+
+Then clone and set up the project:
 
 ```bash
 git clone https://github.com/newdave/sma-ng && cd sma-ng
