@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#MISE description="Stop Docker services for one or more remote nodes (HOST for one host, HOSTS for multiple)"
+#MISE depends=["deploy:mise"]
+set -euo pipefail
+
+# shellcheck disable=SC1091
+# lib.sh is sourced relative to this script's directory at runtime.
+source "$(dirname "$0")/../../shared/deploy/lib.sh"
+
+ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+if [ -n "${HOSTS:-}" ]; then
+    DEPLOY_HOSTS="$HOSTS"
+else
+    DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
+fi
+
+if [ -z "$DEPLOY_HOSTS" ]; then
+    echo "ERROR: no hosts selected. Set HOST, HOSTS, or deploy.DEPLOY_HOSTS in $LOCAL" >&2
+    exit 1
+fi
+
+failed=""
+
+for host in $DEPLOY_HOSTS; do
+    init_docker_host_context "$host"
+
+    if [ -z "$profile" ]; then
+        echo "ERROR: [$host] DOCKER_PROFILE is not set in $LOCAL — add it to [deploy] or the host section" >&2
+        failed="$failed $host"
+        continue
+    fi
+
+    echo ""
+    echo "==> [$host] stopping Docker services for profile: $profile"
+    if ! run_remote_compose "$host" "--profile $profile stop"; then
+        echo "ERROR: [$host] docker compose stop failed" >&2
+        failed="$failed $host"
+        continue
+    fi
+
+    echo "==> [$host] done"
+done
+
+if [ -n "$failed" ]; then
+    echo ""
+    echo "ERROR: cluster stop failed for:$failed" >&2
+    exit 1
+fi
+
+echo ""
+echo "Cluster services stopped on: $DEPLOY_HOSTS"
