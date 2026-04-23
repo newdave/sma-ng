@@ -38,6 +38,15 @@ This file provides guidance to Codex when working with code in this repository.
 - Do not embed inline Python in shell scripts or shell commands committed to this repository. This includes `python -c`, `python3 -c`, and Python heredocs.
 - If shell-based automation needs Python logic, move that logic into a standalone `.py` helper and call it from the shell script.
 - Prefer keeping JSON parsing, payload construction, and non-trivial data transforms in those helper modules rather than re-embedding them in Bash.
+- Shell scripts must conform to ShellCheck best practices and must not produce any ShellCheck warnings or errors. Suppress a warning with a `# shellcheck disable=SCxxxx` comment only when the flag is genuinely a false positive, and always add an inline explanation for why the suppression is safe.
+
+## Markdown Rules
+
+- Markdown files must conform to markdownlint best practices and must not produce any markdownlint warnings or errors.
+- Use ATX-style headings (`#`), fenced code blocks (` ``` `), and consistent list markers.
+- Every fenced code block must declare a language identifier.
+- Blank lines are required before and after headings, lists, and code blocks.
+- Lines must not exceed 120 characters (prose) or be wrapped mid-sentence; prefer semantic line breaks for long paragraphs.
 
 ## Development Environment
 
@@ -315,15 +324,15 @@ Cluster-related runtime flags:
 
 The daemon implementation lives under `resources/daemon/`.
 
-| Module | Contents |
-| --- | --- |
-| `constants.py` | `SCRIPT_DIR`, default values, status constants |
-| `db.py` | `PostgreSQLJobDatabase` |
-| `config.py` | `ConfigLockManager`, `ConfigLogManager`, `PathConfigManager` |
-| `handler.py` | `WebhookHandler`, route handlers, HTML helpers |
-| `threads.py` | `_StoppableThread`, `HeartbeatThread`, `ScannerThread` |
-| `worker.py` | `ConversionWorker`, `WorkerPool` |
-| `server.py` | `DaemonServer`, `_validate_hwaccel` |
+| Module         | Contents                                                     |
+| -------------- | ------------------------------------------------------------ |
+| `constants.py` | `SCRIPT_DIR`, default values, status constants               |
+| `db.py`        | `PostgreSQLJobDatabase`                                      |
+| `config.py`    | `ConfigLockManager`, `ConfigLogManager`, `PathConfigManager` |
+| `handler.py`   | `WebhookHandler`, route handlers, HTML helpers               |
+| `threads.py`   | `_StoppableThread`, `HeartbeatThread`, `ScannerThread`       |
+| `worker.py`    | `ConversionWorker`, `WorkerPool`                             |
+| `server.py`    | `DaemonServer`, `_validate_hwaccel`                          |
 
 ### Core Modules
 
@@ -451,11 +460,11 @@ Docker image tags are `latest`, semver tags, and `main`.
 
 ## CI / Release
 
-| Workflow | Trigger | What it does |
-| --- | --- | --- |
-| `ci.yml` | PR / push to main | Runs tests |
-| `docker.yml` | PR / push to main (path-filtered) | PR build-only smoke test; main pushes rolling `main` tag to GHCR |
-| `release.yml` | Push to main | release-please manages release PRs and release publishing |
+| Workflow      | Trigger                           | What it does                                                     |
+| ------------- | --------------------------------- | ---------------------------------------------------------------- |
+| `ci.yml`      | PR / push to main                 | Runs tests                                                       |
+| `docker.yml`  | PR / push to main (path-filtered) | PR build-only smoke test; main pushes rolling `main` tag to GHCR |
+| `release.yml` | Push to main                      | release-please manages release PRs and release publishing        |
 
 Releases are driven by release-please. The version source of truth is `pyproject.toml` under `[project] version`.
 
