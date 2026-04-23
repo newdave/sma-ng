@@ -10,7 +10,7 @@ on:
       - ".pre-commit-config.yaml"
       - "docs/openapi.yaml"
       - ".github/workflows/ci.yml"
-      - ".github/actions/setup-python-env/**"
+      - ".mise/tasks/**"
   pull_request:
     branches: [main]
     paths:
@@ -20,7 +20,7 @@ on:
       - ".pre-commit-config.yaml"
       - "docs/openapi.yaml"
       - ".github/workflows/ci.yml"
-      - ".github/actions/setup-python-env/**"
+      - ".mise/tasks/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -51,14 +51,23 @@ jobs:
       - name: Install ffmpeg
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
 
-      - name: Set up Python environment
-        uses: ./.github/actions/setup-python-env
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          install-command: pip install -e ".[dev]"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            setup/requirements*.txt
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+
+      - name: Set up venv and install dev deps
+        run: mise run setup:deps:dev
 
       - name: Run tests
-        run: pytest --cov=resources --cov=converter --cov=autoprocess --cov-report=xml --cov-report=term-missing
+        run: mise run test:cov
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
@@ -84,11 +93,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python environment
-        uses: ./.github/actions/setup-python-env
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          install-command: pip install -e ".[dev]"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            setup/requirements*.txt
 
-      - name: Validate docs/openapi.yaml
-        run: python -m openapi_spec_validator docs/openapi.yaml
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+
+      - name: Set up venv and install dev deps
+        run: mise run setup:deps:dev
+
+      - name: Validate OpenAPI spec
+        run: mise run test:openapi

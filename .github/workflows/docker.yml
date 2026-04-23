@@ -11,6 +11,7 @@ on:
       - "pyproject.toml"
       - "**.py"
       - ".github/workflows/docker.yml"
+      - ".mise/tasks/**"
   pull_request:
     branches: [main]
     paths:
@@ -20,6 +21,7 @@ on:
       - "pyproject.toml"
       - "**.py"
       - ".github/workflows/docker.yml"
+      - ".mise/tasks/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -104,12 +106,12 @@ jobs:
           build-args: |
             FFMPEG_VERSION=${{ env.FFMPEG_VERSION }}
 
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+
       - name: Smoke-test image (PR only)
         if: github.event_name == 'pull_request'
-        run: |
-          IMAGE=${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-          # Verify the Python application imports cleanly
-          docker run --rm --entrypoint python3 "$IMAGE" \
-            -c "import resources.daemon; print('resources.daemon OK')"
-          # Verify the FFmpeg binary is present and functional
-          docker run --rm --entrypoint ffmpeg "$IMAGE" -version 2>&1 | head -1
+        env:
+          TAG: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+        run: mise run test:smoke
