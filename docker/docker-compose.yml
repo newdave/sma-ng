@@ -187,7 +187,7 @@ services:
       - /dev/dri/card1:/dev/dri/card0
       - /dev/dri/renderD128:/dev/dri/renderD128
     group_add:
-      - "${RENDER_GID:-109}"
+      - "${RENDER_GID:-992}"
       - "${VIDEO_GID:-44}"
     env_file:
       - path: /opt/sma/config/daemon.env
@@ -216,7 +216,7 @@ services:
       - /dev/dri/card1:/dev/dri/card0
       - /dev/dri/renderD128:/dev/dri/renderD128
     group_add:
-      - "${RENDER_GID:-109}"
+      - "${RENDER_GID:-992}"
       - "${VIDEO_GID:-44}"
     depends_on:
       sma-pgsql:
