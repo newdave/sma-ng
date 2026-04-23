@@ -54,23 +54,36 @@ pip install -r setup/requirements.txt
 
 The most significant change is the shift from synchronous Python scripts to an asynchronous HTTP daemon with a job queue.
 
-### Original flow
+### Original flow — synchronous, blocking
 
-```text
-Download client / media manager
-  → runs postSonarr.py / SABPostProcess.py / etc. directly (blocking)
-    → FFmpeg conversion (inline, same process)
-      → tag + move
+```mermaid
+sequenceDiagram
+    participant DC as Download Client\nor Media Manager
+    participant PY as postSonarr.py\n(blocks until done)
+    participant FF as FFmpeg
+
+    DC->>PY: exec script (process blocks)
+    PY->>FF: FFmpeg conversion
+    FF-->>PY: done
+    PY->>PY: tag + move
+    PY-->>DC: script exits
 ```
 
-### SMA-NG flow
+### SMA-NG flow — asynchronous, non-blocking
 
-```text
-Download client / media manager
-  → HTTP POST to daemon (:8585/webhook/sonarr, /webhook/radarr, or /webhook/generic)
-    → job queued in daemon
-      → worker picks up job → FFmpeg conversion → tag + move
-        → Sonarr/Radarr rescan triggered
+```mermaid
+sequenceDiagram
+    participant DC as Download Client\nor Media Manager
+    participant D as SMA-NG Daemon\n(:8585)
+    participant Q as Job Queue
+    participant W as Worker
+
+    DC->>D: POST /webhook/sonarr
+    D->>Q: Enqueue job
+    D-->>DC: 200 OK (immediate)
+    W->>Q: Dequeue
+    W->>W: FFmpeg + tag + move
+    W->>DC: Sonarr / Radarr rescan
 ```
 
 Key implications:

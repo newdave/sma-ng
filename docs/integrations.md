@@ -91,6 +91,29 @@ Configure `[Plex]` section. SMA-NG refreshes the matching library section after 
 1. Disable automatic library scanning in Plex to prevent Plex from scanning files mid-conversion
 2. Connect directly to the Plex server using its local hostname or IP on port `32400` (or your custom port) and set `token` plus `refresh = true` in `[Plex]`
 
+### Integration Flow
+
+The following sequence applies to both Sonarr and Radarr using the native webhook method:
+
+```mermaid
+sequenceDiagram
+    participant MM as Sonarr / Radarr
+    participant D as SMA-NG Daemon
+    participant Q as Job Queue
+    participant W as ConversionWorker
+    participant P as Plex / Media Manager
+
+    MM->>D: POST /webhook/sonarr (On Download)
+    D->>D: Extract path + tvdbId / tmdbId
+    D->>Q: Enqueue job
+    D-->>MM: 200 OK (immediate)
+    W->>Q: Poll / dequeue
+    W->>W: MediaProcessor.process()
+    W->>Q: Mark done
+    W->>P: Library refresh (optional)
+    W->>MM: Rescan / import notify (optional)
+```
+
 ---
 
 ## Download Clients

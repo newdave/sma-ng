@@ -119,6 +119,15 @@ API key priority order:
 2. `SMA_DAEMON_API_KEY` environment variable
 3. `api_key` field in `daemon.json`
 
+```mermaid
+flowchart LR
+    A["--api-key\nCLI flag"] -->|highest priority| V["Resolved\nAPI Key"]
+    B["SMA_DAEMON_API_KEY\nenv var"] --> V
+    C["api_key\ndaemon.json"] --> V
+    D["none\nauth disabled"] -->|lowest priority| V
+    A -.->|overrides| B -.->|overrides| C -.->|overrides| D
+```
+
 Send the key via header:
 
 ```bash
@@ -374,6 +383,23 @@ The free-space check uses `statvfs` and is mount-point-aware, so it works correc
 
 ---
 
+## Job Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending : webhook received\nor scan match
+    pending --> running : worker picks up
+    running --> done : conversion succeeded
+    running --> failed : error or timeout
+    pending --> cancelled : /jobs/id/cancel
+    running --> cancelled : /jobs/id/cancel
+    failed --> pending : /jobs/requeue
+    done --> [*]
+    cancelled --> [*]
+```
+
+---
+
 ## Job Persistence
 
 Jobs are stored in a PostgreSQL database configured via `SMA_DAEMON_DB_URL` or `db_url` in `daemon.json`. The database provides restart recovery, job history, cluster coordination, and deduplication across nodes.
@@ -418,6 +444,25 @@ SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
 - `--stale-seconds N` — seconds without a heartbeat before a node's running jobs are requeued (default: 120)
 
 **Cluster status:** The `/status` endpoint returns all nodes with their active jobs, worker count, uptime, and last-seen time. The dashboard shows this as a Cluster Nodes panel.
+
+```mermaid
+graph LR
+    subgraph NodeA["Node A (sma-ng-host1)"]
+        W1["WorkerPool\n4 workers"]
+        H1["HeartbeatThread"]
+    end
+    subgraph NodeB["Node B (sma-ng-host2)"]
+        W2["WorkerPool\n2 workers"]
+        H2["HeartbeatThread"]
+    end
+    PG[("PostgreSQL\njobs · scanned_files\nheartbeat")]
+    W1 <-->|claim / complete jobs| PG
+    W2 <-->|claim / complete jobs| PG
+    H1 -->|heartbeat every 30s| PG
+    H2 -->|heartbeat every 30s| PG
+    PG -->|stale detection → requeue orphaned jobs| W1
+    PG -->|stale detection → requeue orphaned jobs| W2
+```
 
 **Remote restart/shutdown:** Use the dashboard buttons or API with `?node=<id>`:
 
