@@ -1,250 +1,368 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SMA-NG Daemon</title>
-<link rel="icon" type="image/png" href="https://raw.githubusercontent.com/newdave/sma-ng/main/logo.png">
-<script src="https://cdn.tailwindcss.com"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-<style>
-[x-cloak]{display:none!important}
-/* Tooltip */
-.tooltip { position:relative; display:inline-block; }
-.tooltip .tip {
-  visibility:hidden; opacity:0; transition:opacity 0.15s;
-  position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
-  background:#1f2937; border:1px solid #374151; color:#d1d5db;
-  font-size:0.7rem; line-height:1.4; white-space:nowrap; max-width:280px;
-  white-space:normal; text-align:center;
-  padding:0.35rem 0.6rem; border-radius:0.375rem; z-index:50; pointer-events:none;
-}
-.tooltip:hover .tip { visibility:visible; opacity:1; }
-/* Autocomplete */
-.ac-item.ac-active { background: #374151; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SMA-NG Daemon</title>
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/newdave/sma-ng/main/logo.png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] {
+      display: none !important
+    }
+
+    /* Tooltip */
+    .tooltip {
+      position: relative;
+      display: inline-block;
+    }
+
+    .tooltip .tip {
+      visibility: hidden;
+      opacity: 0;
+      transition: opacity 0.15s;
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1f2937;
+      border: 1px solid #374151;
+      color: #d1d5db;
+      font-size: 0.7rem;
+      line-height: 1.4;
+      white-space: nowrap;
+      max-width: 280px;
+      white-space: normal;
+      text-align: center;
+      padding: 0.35rem 0.6rem;
+      border-radius: 0.375rem;
+      z-index: 50;
+      pointer-events: none;
+    }
+
+    .tooltip:hover .tip {
+      visibility: visible;
+      opacity: 1;
+    }
+
+    /* Autocomplete */
+    .ac-item.ac-active {
+      background: #374151;
+    }
+  </style>
 </head>
+
 <body class="bg-gray-900 text-gray-100 min-h-screen">
-<div x-data="dashboard()" x-init="init()" x-cloak class="max-w-7xl mx-auto px-4 py-6">
+  <div x-data="dashboard()" x-init="init()" x-cloak class="max-w-7xl mx-auto px-4 py-6">
 
-  <!-- Header -->
-  <div class="flex items-center justify-between mb-8">
-    <div>
-      <h1 class="text-2xl font-bold text-white">SMA-NG</h1>
-      <p class="text-gray-400 text-sm">Media Conversion Daemon</p>
-    </div>
-    <div class="flex items-center gap-4">
-      <a href="/admin" class="text-xs text-red-400 hover:underline">Admin</a>
-      <a href="/docs" class="text-xs text-blue-400 hover:underline">Docs</a>
-      <span class="tooltip text-xs text-gray-500" x-show="health.node" x-text="health.node">
-        <span class="tip">Hostname of this daemon node</span>
-      </span>
-      <span class="tooltip text-xs text-gray-500" x-show="health.uptime_seconds != null" x-text="'Up ' + fmtUptime(health.uptime_seconds)">
-        <span class="tip">Time since daemon started</span>
-      </span>
-      <span class="text-xs text-gray-500" x-text="'Updated ' + lastUpdate"></span>
-      <span class="tooltip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
-            :class="health.status === 'ok' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'">
-        <span class="w-1.5 h-1.5 rounded-full" :class="health.status === 'ok' ? 'bg-green-400' : 'bg-red-400'"></span>
-        <span x-text="health.status === 'ok' ? 'Healthy' : 'Offline'"></span>
-        <span class="tip">Daemon health status — refreshes every 5 seconds</span>
-      </span>
-    </div>
-  </div>
-
-  <!-- Submit Job Form -->
-  <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
-    <h2 class="text-sm font-semibold text-green-400 uppercase tracking-wider mb-3">Submit Job</h2>
-    <form @submit.prevent="submitJob()" class="flex gap-3">
-
-      <!-- Path input with autocomplete -->
-      <div class="flex-1 relative">
-        <input type="text" x-model="submitPath"
-               placeholder="/path/to/file/or/directory"
-               title="Absolute path to the media file or directory to convert"
-               autocomplete="off"
-               class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono"
-               @input="acInput()"
-               @keydown.arrow-down.prevent="acMove(1)"
-               @keydown.arrow-up.prevent="acMove(-1)"
-               @keydown.enter.prevent="acAccept() || $el.closest('form').requestSubmit()"
-               @keydown.escape="acClose()"
-               @focus="acInput()"
-               @blur="setTimeout(()=>acClose(), 150)">
-        <!-- Dropdown -->
-        <ul x-show="acOpen && acItems.length"
-            class="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden max-h-64 overflow-y-auto">
-          <template x-for="(item, i) in acItems" :key="item.value">
-            <li class="ac-item flex items-center gap-2 px-3 py-2 cursor-pointer text-xs font-mono text-gray-200 hover:bg-gray-700"
-                :class="i === acIndex ? 'ac-active' : ''"
-                @mousedown.prevent="acSelect(item)">
-              <span class="flex-shrink-0 text-xxs w-14 text-right"
-                    :class="{'text-purple-400':item.group==='prefix','text-yellow-600':item.group==='recent','text-blue-500':item.group==='dir','text-green-600':item.group==='file'}"
-                    x-text="item.group"></span>
-              <span class="truncate" x-text="item.value"></span>
-            </li>
-          </template>
-        </ul>
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-white">SMA-NG</h1>
+        <p class="text-gray-400 text-sm">Media Conversion Daemon</p>
       </div>
+      <div class="flex items-center gap-4">
+        <a href="/admin" class="text-xs text-red-400 hover:underline">Admin</a>
+        <a href="/docs" class="text-xs text-blue-400 hover:underline">Docs</a>
+        <span class="tooltip text-xs text-gray-500" x-show="health.node" x-text="health.node">
+          <span class="tip">Hostname of this daemon node</span>
+        </span>
+        <span class="tooltip text-xs text-gray-500" x-show="health.uptime_seconds != null"
+          x-text="'Up ' + fmtUptime(health.uptime_seconds)">
+          <span class="tip">Time since daemon started</span>
+        </span>
+        <span class="text-xs text-gray-500" x-text="'Updated ' + lastUpdate"></span>
+        <span class="tooltip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+          :class="health.status === 'ok' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'">
+          <span class="w-1.5 h-1.5 rounded-full" :class="health.status === 'ok' ? 'bg-green-400' : 'bg-red-400'"></span>
+          <span x-text="health.status === 'ok' ? 'Healthy' : 'Offline'"></span>
+          <span class="tip">Daemon health status — refreshes every 5 seconds</span>
+        </span>
+      </div>
+    </div>
 
-      <input type="text" x-model="submitArgs" placeholder="extra args e.g. -tmdb 603"
-             title="Optional extra arguments passed to manual.py (e.g. -tmdb 603, -tvdb 73871 -s 3 -e 10)"
-             class="w-48 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono">
+    <!-- Submit Job Form -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
+      <h2 class="text-sm font-semibold text-green-400 uppercase tracking-wider mb-3">Submit Job</h2>
+      <form @submit.prevent="submitJob()" class="flex gap-3">
 
-      <!-- Flag toggle buttons -->
-      <div class="flex gap-1.5 flex-shrink-0">
-        <template x-for="fd in flagDefs" :key="fd.flag">
-          <button type="button"
-                  :title="fd.title"
-                  @click="toggleFlag(fd.flag)"
-                  :class="submitFlags.includes(fd.flag)
+        <!-- Path input with autocomplete -->
+        <div class="flex-1 relative">
+          <input type="text" x-model="submitPath" placeholder="/path/to/file/or/directory"
+            title="Absolute path to the media file or directory to convert" autocomplete="off"
+            class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono"
+            @input="acInput()" @keydown.arrow-down.prevent="acMove(1)" @keydown.arrow-up.prevent="acMove(-1)"
+            @keydown.enter.prevent="acAccept() || $el.closest('form').requestSubmit()" @keydown.escape="acClose()"
+            @focus="acInput()" @blur="setTimeout(()=>acClose(), 150)">
+          <!-- Dropdown -->
+          <ul x-show="acOpen && acItems.length"
+            class="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden max-h-64 overflow-y-auto">
+            <template x-for="(item, i) in acItems" :key="item.value">
+              <li
+                class="ac-item flex items-center gap-2 px-3 py-2 cursor-pointer text-xs font-mono text-gray-200 hover:bg-gray-700"
+                :class="i === acIndex ? 'ac-active' : ''" @mousedown.prevent="acSelect(item)">
+                <span class="flex-shrink-0 text-xxs w-14 text-right"
+                  :class="{'text-purple-400':item.group==='prefix','text-yellow-600':item.group==='recent','text-blue-500':item.group==='dir','text-green-600':item.group==='file'}"
+                  x-text="item.group"></span>
+                <span class="truncate" x-text="item.value"></span>
+              </li>
+            </template>
+          </ul>
+        </div>
+
+        <input type="text" x-model="submitArgs" placeholder="extra args e.g. -tmdb 603"
+          title="Optional extra arguments passed to manual.py (e.g. -tmdb 603, -tvdb 73871 -s 3 -e 10)"
+          class="w-48 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono">
+
+        <!-- Flag toggle buttons -->
+        <div class="flex gap-1.5 flex-shrink-0">
+          <template x-for="fd in flagDefs" :key="fd.flag">
+            <button type="button" :title="fd.title" @click="toggleFlag(fd.flag)" :class="submitFlags.includes(fd.flag)
                     ? 'bg-indigo-600 border-indigo-500 text-white'
                     : 'bg-gray-900 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200'"
-                  class="px-2.5 py-2 border rounded-lg text-xs font-mono transition-colors whitespace-nowrap"
-                  x-text="fd.label"></button>
-        </template>
-      </div>
-
-      <button type="submit" :disabled="!submitPath.trim() || submitting"
-              title="Queue this path for conversion"
-              class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium text-white transition-colors whitespace-nowrap">
-        <span x-show="!submitting">Submit</span>
-        <span x-show="submitting">Queuing…</span>
-      </button>
-    </form>
-    <div x-show="submitResult" class="mt-3 text-sm px-3 py-2 rounded-lg"
-         :class="submitError ? 'bg-red-900/50 text-red-300' : 'bg-green-900/50 text-green-300'"
-         x-text="submitResult"></div>
-  </div>
-
-  <!-- Job Statistics -->
-  <div class="mb-6">
-    <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Job Statistics</h2>
-    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
-      <template x-for="s in statCards" :key="s.key">
-        <div class="tooltip bg-gray-800 rounded-lg p-4 border border-gray-700 cursor-default"
-             @click="if(s.key!=='total'){filter=s.key;fetchJobs();document.getElementById('jobs-table').scrollIntoView({behavior:'smooth'})}">
-          <div class="text-xs font-medium uppercase tracking-wider" :class="s.color" x-text="s.label"></div>
-          <div class="text-2xl font-bold text-white mt-1" x-text="stats[s.key] ?? 0"></div>
-          <span class="tip" x-text="s.tip"></span>
-        </div>
-      </template>
-    </div>
-  </div>
-
-  <!-- Local Threads / Cluster Threads (tabbed) -->
-  <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
-    <!-- Tab bar -->
-    <div class="flex gap-1 mb-4 border-b border-gray-700 -mx-5 px-5">
-      <button @click="threadsTab='local'"
-              class="pb-2 px-1 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors"
-              :class="threadsTab==='local' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300'">
-        Local Threads
-      </button>
-      <button @click="threadsTab='cluster'"
-              x-show="cluster && cluster.cluster && cluster.cluster.length > 0"
-              class="pb-2 px-1 ml-4 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors"
-              :class="threadsTab==='cluster' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300'">
-        Cluster Threads
-      </button>
-    </div>
-
-    <!-- Local Threads pane -->
-    <div x-show="threadsTab==='local'">
-      <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-3xl font-bold text-white" x-text="activeWorkers"></span>
-        <span class="text-gray-500 text-sm" x-text="'/ ' + (health.workers || 0) + ' busy'"></span>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2" x-show="activeWorkers > 0">
-        <template x-for="(jobs, config) in (health.active||{})" :key="config">
-          <template x-for="info in jobs" :key="info.job_id">
-            <div class="bg-gray-700/50 rounded p-2">
-              <div class="flex items-center gap-2 mb-0.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
-                <span class="text-xs text-blue-300 font-medium truncate" x-text="config.split('/').pop()"></span>
-              </div>
-              <div class="tooltip text-xs text-gray-400 truncate pl-3.5 cursor-default" :title="info.path" x-text="info.path.split('/').pop()">
-                <span class="tip" x-text="info.path"></span>
-              </div>
-              <div class="text-xs text-gray-600 pl-3.5">Job #<span x-text="info.job_id"></span></div>
-            </div>
+              class="px-2.5 py-2 border rounded-lg text-xs font-mono transition-colors whitespace-nowrap"
+              x-text="fd.label"></button>
           </template>
-        </template>
+        </div>
+
+        <button type="submit" :disabled="!submitPath.trim() || submitting" title="Queue this path for conversion"
+          class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium text-white transition-colors whitespace-nowrap">
+          <span x-show="!submitting">Submit</span>
+          <span x-show="submitting">Queuing…</span>
+        </button>
+      </form>
+      <div x-show="submitResult" class="mt-3 text-sm px-3 py-2 rounded-lg"
+        :class="submitError ? 'bg-red-900/50 text-red-300' : 'bg-green-900/50 text-green-300'" x-text="submitResult">
       </div>
-      <p class="text-gray-600 text-xs" x-show="activeWorkers === 0">No active conversions</p>
-      <!-- Waiting queues -->
-      <div class="mt-3 space-y-1" x-show="Object.keys(health.waiting||{}).length">
-        <div class="text-xs text-gray-500 mb-1">Queued</div>
-        <template x-for="(count, config) in (health.waiting||{})" :key="config">
-          <div class="flex items-center justify-between">
-            <span class="text-xs text-gray-400 truncate" x-text="config.split('/').pop()"></span>
-            <span class="tooltip text-xs bg-yellow-900/60 text-yellow-300 px-2 py-0.5 rounded-full ml-2 flex-shrink-0" x-text="count">
-              <span class="tip">Jobs waiting for this config's slot to become available</span>
-            </span>
+    </div>
+
+    <!-- Job Statistics -->
+    <div class="mb-6">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Job Statistics</h2>
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <template x-for="s in statCards" :key="s.key">
+          <div class="tooltip bg-gray-800 rounded-lg p-4 border border-gray-700 cursor-default"
+            @click="if(s.key!=='total'){filter=s.key;fetchJobs();document.getElementById('jobs-table').scrollIntoView({behavior:'smooth'})}">
+            <div class="text-xs font-medium uppercase tracking-wider" :class="s.color" x-text="s.label"></div>
+            <div class="text-2xl font-bold text-white mt-1" x-text="stats[s.key] ?? 0"></div>
+            <span class="tip" x-text="s.tip"></span>
           </div>
         </template>
       </div>
     </div>
 
-    <!-- Cluster Threads pane -->
-    <div x-show="threadsTab==='cluster' && cluster && cluster.cluster && cluster.cluster.length > 0">
+    <!-- Local Threads / Cluster Threads (tabbed) -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
+      <!-- Tab bar -->
+      <div class="flex gap-1 mb-4 border-b border-gray-700 -mx-5 px-5">
+        <button @click="threadsTab='local'"
+          class="pb-2 px-1 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors"
+          :class="threadsTab==='local' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300'">
+          Local Threads
+        </button>
+        <button @click="threadsTab='cluster'" x-show="cluster && cluster.cluster && cluster.cluster.length > 0"
+          class="pb-2 px-1 ml-4 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors"
+          :class="threadsTab==='cluster' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300'">
+          Cluster Threads
+        </button>
+      </div>
+
+      <!-- Local Threads pane -->
+      <div x-show="threadsTab==='local'">
+        <div class="flex items-baseline gap-2 mb-3">
+          <span class="text-3xl font-bold text-white" x-text="activeWorkers"></span>
+          <span class="text-gray-500 text-sm" x-text="'/ ' + (health.workers || 0) + ' busy'"></span>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2" x-show="activeWorkers > 0">
+          <template x-for="(jobs, config) in (health.active||{})" :key="config">
+            <template x-for="info in jobs" :key="info.job_id">
+              <div class="bg-gray-700/50 rounded p-2">
+                <div class="flex items-center gap-2 mb-0.5">
+                  <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
+                  <span class="text-xs text-blue-300 font-medium truncate" x-text="config.split('/').pop()"></span>
+                </div>
+                <div class="tooltip text-xs text-gray-400 truncate pl-3.5 cursor-default" :title="info.path"
+                  x-text="info.path.split('/').pop()">
+                  <span class="tip" x-text="info.path"></span>
+                </div>
+                <div class="text-xs text-gray-600 pl-3.5">Job #<span x-text="info.job_id"></span></div>
+              </div>
+            </template>
+          </template>
+        </div>
+        <p class="text-gray-600 text-xs" x-show="activeWorkers === 0">No active conversions</p>
+        <!-- Waiting queues -->
+        <div class="mt-3 space-y-1" x-show="Object.keys(health.waiting||{}).length">
+          <div class="text-xs text-gray-500 mb-1">Queued</div>
+          <template x-for="(count, config) in (health.waiting||{})" :key="config">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-gray-400 truncate" x-text="config.split('/').pop()"></span>
+              <span class="tooltip text-xs bg-yellow-900/60 text-yellow-300 px-2 py-0.5 rounded-full ml-2 flex-shrink-0"
+                x-text="count">
+                <span class="tip">Jobs waiting for this config's slot to become available</span>
+              </span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Cluster Threads pane -->
+      <div x-show="threadsTab==='cluster' && cluster && cluster.cluster && cluster.cluster.length > 0">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
+                <th class="pb-2 pr-4 font-medium">Node</th>
+                <th class="pb-2 pr-4 font-medium">Status</th>
+                <th class="pb-2 pr-4 font-medium">Threads</th>
+                <th class="pb-2 pr-4 font-medium">Running</th>
+                <th class="pb-2 pr-4 font-medium">Pending</th>
+                <th class="pb-2 pr-4 font-medium">Uptime</th>
+                <th class="pb-2 pr-4 font-medium">Last Seen</th>
+                <th class="pb-2 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-700/50 text-xs">
+              <template x-for="node in (cluster && cluster.cluster || [])" :key="node.node_id">
+                <tr class="hover:bg-gray-700/20">
+                  <td class="py-2 pr-4">
+                    <div class="font-mono text-gray-200" x-text="node.host"></div>
+                    <div class="text-gray-600 font-mono" x-text="node.node_id !== node.host ? node.node_id : ''"></div>
+                  </td>
+                  <td class="py-2 pr-4">
+                    <span class="px-2 py-0.5 rounded-full"
+                      :class="node.status === 'online' ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-500'"
+                      x-text="node.status"></span>
+                  </td>
+                  <td class="py-2 pr-4 text-gray-300" x-text="node.workers"></td>
+                  <td class="py-2 pr-4">
+                    <div x-show="node.active_jobs && node.active_jobs.length" class="space-y-1">
+                      <template x-for="job in (node.active_jobs || [])" :key="job.job_id">
+                        <div class="flex items-center gap-1.5">
+                          <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
+                          <span class="tooltip text-gray-300 truncate max-w-xs cursor-default" :title="job.path">
+                            <span x-text="job.path.split('/').pop()"></span>
+                            <span class="text-gray-600 ml-1">#<span x-text="job.job_id"></span></span>
+                            <span class="tip" x-text="job.path"></span>
+                          </span>
+                        </div>
+                      </template>
+                    </div>
+                    <span x-show="!node.active_jobs || !node.active_jobs.length" class="text-gray-600">—</span>
+                  </td>
+                  <td class="py-2 pr-4 text-gray-400" x-text="node.pending_jobs || 0"></td>
+                  <td class="py-2 pr-4 text-gray-400"
+                    x-text="node.uptime_seconds != null ? fmtUptime(node.uptime_seconds) : '—'"></td>
+                  <td class="py-2 pr-4 text-gray-500" x-text="fmtTime(node.last_seen)"></td>
+                  <td class="py-2">
+                    <div x-show="node.status === 'online'" class="flex gap-1.5">
+                      <button @click="nodeRestart(node)" :disabled="node._pending"
+                        class="px-2 py-0.5 rounded border border-blue-700 text-blue-400 hover:border-blue-500 hover:text-blue-300 disabled:opacity-30 transition-colors"
+                        x-text="node._pending === 'restart' ? 'Sending…' : 'Restart'">
+                      </button>
+                      <button @click="nodeShutdown(node)" :disabled="node._pending"
+                        class="px-2 py-0.5 rounded border border-red-800 text-red-500 hover:border-red-600 hover:text-red-400 disabled:opacity-30 transition-colors"
+                        x-text="node._pending === 'shutdown' ? 'Sending…' : 'Shutdown'">
+                      </button>
+                    </div>
+                    <span x-show="node.status !== 'online'" class="text-gray-600">—</span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Config Mappings -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
+      <h2 class="tooltip text-sm font-semibold text-purple-400 uppercase tracking-wider mb-3 cursor-default">
+        Config Mappings
+        <span class="tip">Path prefixes matched longest-first to determine which autoProcess.ini a job uses</span>
+      </h2>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead><tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
-            <th class="pb-2 pr-4 font-medium">Node</th>
-            <th class="pb-2 pr-4 font-medium">Status</th>
-            <th class="pb-2 pr-4 font-medium">Threads</th>
-            <th class="pb-2 pr-4 font-medium">Running</th>
-            <th class="pb-2 pr-4 font-medium">Pending</th>
-            <th class="pb-2 pr-4 font-medium">Uptime</th>
-            <th class="pb-2 pr-4 font-medium">Last Seen</th>
-            <th class="pb-2 font-medium">Actions</th>
-          </tr></thead>
+          <thead>
+            <tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
+              <th class="pb-2 pr-4 font-medium">Path Prefix</th>
+              <th class="pb-2 pr-4 font-medium">Config</th>
+              <th class="pb-2 pr-4 font-medium">
+                <span class="tooltip cursor-default">Default Flags<span class="tip">Args automatically prepended to
+                    every job submitted for this path</span></span>
+              </th>
+              <th class="pb-2 pr-4 font-medium">
+                <span class="tooltip cursor-default">Status<span class="tip">Whether this config is currently running a
+                    job</span></span>
+              </th>
+              <th class="pb-2 pr-4 font-medium">
+                <span class="tooltip cursor-default">Pending<span class="tip">Jobs waiting in queue for this
+                    config</span></span>
+              </th>
+              <th class="pb-2 font-medium">Log</th>
+            </tr>
+          </thead>
           <tbody class="divide-y divide-gray-700/50 text-xs">
-            <template x-for="node in (cluster && cluster.cluster || [])" :key="node.node_id">
-              <tr class="hover:bg-gray-700/20">
-                <td class="py-2 pr-4">
-                  <div class="font-mono text-gray-200" x-text="node.host"></div>
-                  <div class="text-gray-600 font-mono" x-text="node.node_id !== node.host ? node.node_id : ''"></div>
-                </td>
-                <td class="py-2 pr-4">
-                  <span class="px-2 py-0.5 rounded-full"
-                        :class="node.status === 'online' ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-500'"
-                        x-text="node.status"></span>
-                </td>
-                <td class="py-2 pr-4 text-gray-300" x-text="node.workers"></td>
-                <td class="py-2 pr-4">
-                  <div x-show="node.active_jobs && node.active_jobs.length" class="space-y-1">
-                    <template x-for="job in (node.active_jobs || [])" :key="job.job_id">
-                      <div class="flex items-center gap-1.5">
-                        <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
-                        <span class="tooltip text-gray-300 truncate max-w-xs cursor-default" :title="job.path">
-                          <span x-text="job.path.split('/').pop()"></span>
-                          <span class="text-gray-600 ml-1">#<span x-text="job.job_id"></span></span>
-                          <span class="tip" x-text="job.path"></span>
-                        </span>
-                      </div>
+            <!-- Default config row -->
+            <tr x-show="configs.default_config" class="opacity-70 hover:opacity-100 hover:bg-gray-700/20">
+              <td class="py-2 pr-4 text-gray-500 font-mono italic">default</td>
+              <td class="py-2 pr-4 text-gray-400 font-mono" x-text="(configs.default_config||'').split('/').pop()"></td>
+              <td class="py-2 pr-4">
+                <template x-if="configs.default_args && configs.default_args.length">
+                  <span class="flex gap-1 flex-wrap">
+                    <template x-for="a in configs.default_args" :key="a">
+                      <span class="bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded font-mono" x-text="a"></span>
                     </template>
-                  </div>
-                  <span x-show="!node.active_jobs || !node.active_jobs.length" class="text-gray-600">—</span>
+                  </span>
+                </template>
+                <span x-show="!configs.default_args || !configs.default_args.length" class="text-gray-600">—</span>
+              </td>
+              <td class="py-2 pr-4">
+                <span x-show="configs.default_active_jobs?.length"
+                  class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full"
+                  x-text="'Running (' + (configs.default_active_jobs?.length ?? 0) + ')'"></span>
+                <span x-show="!configs.default_active_jobs?.length"
+                  class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
+              </td>
+              <td class="py-2 pr-4 text-gray-500" x-text="configs.default_pending_jobs || 0"></td>
+              <td class="py-2">
+                <button x-show="configs.default_log_name"
+                  @click="openLogViewer(configs.default_log_name, (configs.default_config||'').split('/').pop())"
+                  class="text-blue-400 hover:text-blue-300 font-mono text-xs"
+                  x-text="(configs.default_log||'').split('/').pop()"></button>
+                <span x-show="!configs.default_log_name" class="text-gray-600 font-mono text-xs">—</span>
+              </td>
+            </tr>
+            <template x-for="c in configs.path_configs || []" :key="c.path">
+              <tr class="hover:bg-gray-700/20">
+                <td class="py-2 pr-4 text-gray-300 font-mono" :title="c.path" x-text="c.path"></td>
+                <td class="py-2 pr-4 text-gray-400 font-mono" x-text="c.config.split('/').pop()"></td>
+                <td class="py-2 pr-4">
+                  <template x-if="c.default_args && c.default_args.length">
+                    <span class="flex gap-1 flex-wrap">
+                      <template x-for="a in c.default_args" :key="a">
+                        <span class="bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded font-mono"
+                          x-text="a"></span>
+                      </template>
+                    </span>
+                  </template>
+                  <span x-show="!c.default_args || !c.default_args.length" class="text-gray-600">—</span>
                 </td>
-                <td class="py-2 pr-4 text-gray-400" x-text="node.pending_jobs || 0"></td>
-                <td class="py-2 pr-4 text-gray-400" x-text="node.uptime_seconds != null ? fmtUptime(node.uptime_seconds) : '—'"></td>
-                <td class="py-2 pr-4 text-gray-500" x-text="fmtTime(node.last_seen)"></td>
+                <td class="py-2 pr-4">
+                  <span x-show="c.active_jobs && c.active_jobs.length"
+                    class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full"
+                    x-text="'Running (' + c.active_jobs.length + ')'"></span>
+                  <span x-show="!c.active_jobs || !c.active_jobs.length"
+                    class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
+                </td>
+                <td class="py-2 pr-4 text-gray-400" x-text="c.pending_jobs || 0"></td>
                 <td class="py-2">
-                  <div x-show="node.status === 'online'" class="flex gap-1.5">
-                    <button @click="nodeRestart(node)"
-                            :disabled="node._pending"
-                            class="px-2 py-0.5 rounded border border-blue-700 text-blue-400 hover:border-blue-500 hover:text-blue-300 disabled:opacity-30 transition-colors"
-                            x-text="node._pending === 'restart' ? 'Sending…' : 'Restart'">
-                    </button>
-                    <button @click="nodeShutdown(node)"
-                            :disabled="node._pending"
-                            class="px-2 py-0.5 rounded border border-red-800 text-red-500 hover:border-red-600 hover:text-red-400 disabled:opacity-30 transition-colors"
-                            x-text="node._pending === 'shutdown' ? 'Sending…' : 'Shutdown'">
-                    </button>
-                  </div>
-                  <span x-show="node.status !== 'online'" class="text-gray-600">—</span>
+                  <button x-show="c.log_name" @click="openLogViewer(c.log_name, c.config.split('/').pop())"
+                    class="text-blue-400 hover:text-blue-300 font-mono text-xs"
+                    x-text="c.log_file ? c.log_file.split('/').pop() : ''"></button>
+                  <span x-show="!c.log_name" class="text-gray-600 font-mono text-xs">—</span>
                 </td>
               </tr>
             </template>
@@ -252,767 +370,715 @@
         </table>
       </div>
     </div>
-  </div>
 
-  <!-- Config Mappings -->
-  <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
-    <h2 class="tooltip text-sm font-semibold text-purple-400 uppercase tracking-wider mb-3 cursor-default">
-      Config Mappings
-      <span class="tip">Path prefixes matched longest-first to determine which autoProcess.ini a job uses</span>
-    </h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead><tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
-          <th class="pb-2 pr-4 font-medium">Path Prefix</th>
-          <th class="pb-2 pr-4 font-medium">Config</th>
-          <th class="pb-2 pr-4 font-medium">
-            <span class="tooltip cursor-default">Default Flags<span class="tip">Args automatically prepended to every job submitted for this path</span></span>
-          </th>
-          <th class="pb-2 pr-4 font-medium">
-            <span class="tooltip cursor-default">Status<span class="tip">Whether this config is currently running a job</span></span>
-          </th>
-          <th class="pb-2 pr-4 font-medium">
-            <span class="tooltip cursor-default">Pending<span class="tip">Jobs waiting in queue for this config</span></span>
-          </th>
-          <th class="pb-2 font-medium">Log</th>
-        </tr></thead>
-        <tbody class="divide-y divide-gray-700/50 text-xs">
-          <!-- Default config row -->
-          <tr x-show="configs.default_config" class="opacity-70 hover:opacity-100 hover:bg-gray-700/20">
-            <td class="py-2 pr-4 text-gray-500 font-mono italic">default</td>
-            <td class="py-2 pr-4 text-gray-400 font-mono" x-text="(configs.default_config||'').split('/').pop()"></td>
-            <td class="py-2 pr-4">
-              <template x-if="configs.default_args && configs.default_args.length">
-                <span class="flex gap-1 flex-wrap">
-                  <template x-for="a in configs.default_args" :key="a">
-                    <span class="bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded font-mono" x-text="a"></span>
-                  </template>
-                </span>
-              </template>
-              <span x-show="!configs.default_args || !configs.default_args.length" class="text-gray-600">—</span>
-            </td>
-            <td class="py-2 pr-4">
-              <span x-show="configs.default_active_jobs?.length" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full" x-text="'Running (' + (configs.default_active_jobs?.length ?? 0) + ')'"></span>
-              <span x-show="!configs.default_active_jobs?.length" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
-            </td>
-            <td class="py-2 pr-4 text-gray-500" x-text="configs.default_pending_jobs || 0"></td>
-            <td class="py-2">
-              <button x-show="configs.default_log_name" @click="openLogViewer(configs.default_log_name, (configs.default_config||'').split('/').pop())"
-                      class="text-blue-400 hover:text-blue-300 font-mono text-xs"
-                      x-text="(configs.default_log||'').split('/').pop()"></button>
-              <span x-show="!configs.default_log_name" class="text-gray-600 font-mono text-xs">—</span>
-            </td>
-          </tr>
-          <template x-for="c in configs.path_configs || []" :key="c.path">
-            <tr class="hover:bg-gray-700/20">
-              <td class="py-2 pr-4 text-gray-300 font-mono" :title="c.path" x-text="c.path"></td>
-              <td class="py-2 pr-4 text-gray-400 font-mono" x-text="c.config.split('/').pop()"></td>
-              <td class="py-2 pr-4">
-                <template x-if="c.default_args && c.default_args.length">
-                  <span class="flex gap-1 flex-wrap">
-                    <template x-for="a in c.default_args" :key="a">
-                      <span class="bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded font-mono" x-text="a"></span>
-                    </template>
-                  </span>
-                </template>
-                <span x-show="!c.default_args || !c.default_args.length" class="text-gray-600">—</span>
-              </td>
-              <td class="py-2 pr-4">
-                <span x-show="c.active_jobs && c.active_jobs.length" class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full" x-text="'Running (' + c.active_jobs.length + ')'"></span>
-                <span x-show="!c.active_jobs || !c.active_jobs.length" class="bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
-              </td>
-              <td class="py-2 pr-4 text-gray-400" x-text="c.pending_jobs || 0"></td>
-              <td class="py-2">
-                <button x-show="c.log_name" @click="openLogViewer(c.log_name, c.config.split('/').pop())"
-                        class="text-blue-400 hover:text-blue-300 font-mono text-xs"
-                        x-text="c.log_file ? c.log_file.split('/').pop() : ''"></button>
-                <span x-show="!c.log_name" class="text-gray-600 font-mono text-xs">—</span>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Jobs Table -->
-  <div id="jobs-table" class="bg-gray-800 rounded-lg border border-gray-700 p-5">
-    <div class="flex items-center justify-between mb-3">
-      <div class="flex items-center gap-3">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Recent Jobs</h2>
-        <button @click="requeueAllFailed()" :disabled="requeueingAll || (stats.failed||0) === 0"
-                class="text-xs px-2.5 py-1 rounded border border-red-700 text-red-400 hover:border-red-500 hover:text-red-300 disabled:opacity-30 transition-colors"
-                x-text="requeueingAll ? 'Requeueing…' : 'Requeue All Failed'">
-        </button>
-      </div>
-      <div class="flex items-center gap-2">
-        <input type="text" x-model="searchQuery" @input="onSearchInput()" placeholder="Search path…"
-               class="text-xs px-2.5 py-1 rounded border border-gray-600 bg-gray-900 text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-400 w-44">
-        <template x-for="f in ['all','pending','running','completed','failed']" :key="f">
-          <button @click="filter=f; page=0; fetchJobs()"
-                  class="text-xs px-2.5 py-1 rounded-full border transition-colors"
-                  :class="filter===f ? 'border-blue-500 bg-blue-500/20 text-blue-300' : 'border-gray-600 text-gray-400 hover:border-gray-500'"
-                  x-text="f.charAt(0).toUpperCase()+f.slice(1)">
+    <!-- Jobs Table -->
+    <div id="jobs-table" class="bg-gray-800 rounded-lg border border-gray-700 p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-3">
+          <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Recent Jobs</h2>
+          <button @click="requeueAllFailed()" :disabled="requeueingAll || (stats.failed||0) === 0"
+            class="text-xs px-2.5 py-1 rounded border border-red-700 text-red-400 hover:border-red-500 hover:text-red-300 disabled:opacity-30 transition-colors"
+            x-text="requeueingAll ? 'Requeueing…' : 'Requeue All Failed'">
           </button>
-        </template>
-      </div>
-    </div>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead><tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
-          <th class="pb-2 pr-3 w-12 font-medium">ID</th>
-          <th class="pb-2 pr-3 font-medium">File</th>
-          <th class="pb-2 pr-3 font-medium">Config</th>
-          <th class="pb-2 pr-3 font-medium">Status</th>
-          <th class="pb-2 pr-3 font-medium">Created</th>
-          <th class="pb-2 pr-3 font-medium">Duration</th>
-          <th class="pb-2 font-medium"></th>
-        </tr></thead>
-        <tbody class="divide-y divide-gray-700/50">
-          <template x-for="j in jobs" :key="j.id">
-            <tr class="hover:bg-gray-700/30 group">
-              <td class="py-2 pr-3 text-gray-600 font-mono text-xs" x-text="j.id"></td>
-              <td class="py-2 pr-3 text-xs max-w-xs">
-                <div class="tooltip cursor-default">
-                  <span class="text-gray-300 font-mono" x-text="j.path.split('/').pop()"></span>
-                  <span class="tip" x-text="j.path"></span>
-                </div>
-                <div x-show="j.error" class="text-red-400 mt-0.5 truncate max-w-xs" :title="j.error" x-text="j.error"></div>
-              </td>
-              <td class="py-2 pr-3 text-gray-500 font-mono text-xs" x-text="j.config ? j.config.split('/').pop() : ''"></td>
-              <td class="py-2 pr-3">
-                <span class="text-xs px-2 py-0.5 rounded-full"
-                      :class="{'pending':'bg-gray-700 text-gray-300','running':'bg-blue-900 text-blue-300','completed':'bg-green-900 text-green-300','failed':'bg-red-900 text-red-300'}[j.status] || 'bg-gray-700 text-gray-400'"
-                      x-text="j.status"></span>
-                <span x-show="j.status === 'pending' && (j.priority || 0) !== 0"
-                      class="ml-1 text-xs px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 font-mono"
-                      :title="'Priority: ' + j.priority"
-                      x-text="(j.priority > 0 ? '+' : '') + j.priority"></span>
-              </td>
-              <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtTime(j.created_at)"></td>
-              <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtDuration(j)"></td>
-              <td class="py-2 text-xs">
-                <div class="flex items-center gap-1">
-                  <!-- Priority controls — pending jobs only -->
-                  <template x-if="j.status === 'pending'">
-                    <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button @click="adjustPriority(j, 1)"
-                              title="Run sooner (increase priority)"
-                              class="w-6 h-6 flex items-center justify-center rounded border border-gray-600 text-gray-400 hover:border-indigo-500 hover:text-indigo-300 transition-colors text-xs leading-none">▲</button>
-                      <button @click="adjustPriority(j, -1)"
-                              title="Run later (decrease priority)"
-                              class="w-6 h-6 flex items-center justify-center rounded border border-gray-600 text-gray-400 hover:border-indigo-500 hover:text-indigo-300 transition-colors text-xs leading-none">▼</button>
-                    </div>
-                  </template>
-                  <button x-show="j.status === 'failed'" @click="requeueJob(j.id)"
-                          class="opacity-0 group-hover:opacity-100 px-2 py-0.5 rounded border border-red-700 text-red-400 hover:border-red-500 hover:text-red-300 transition-all">
-                    Requeue
-                  </button>
-                  <button x-show="j.log_name" @click="openLogViewer(j.log_name, '#' + j.id + ' ' + j.path.split('/').pop(), j.id)"
-                          class="opacity-0 group-hover:opacity-100 px-2 py-0.5 rounded border border-gray-600 text-gray-400 hover:border-blue-500 hover:text-blue-300 transition-all">
-                    Logs
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </template>
-          <template x-if="jobs.length === 0">
-            <tr><td colspan="7" class="py-8 text-center text-gray-500 text-sm" x-text="searchQuery.trim() ? 'No jobs match \u201c' + searchQuery.trim() + '\u201d' : 'No jobs found'"></td></tr>
-          </template>
-        </tbody>
-      </table>
-    </div>
-    <div class="flex justify-between items-center mt-3 text-xs text-gray-500" x-show="jobs.length > 0 || page > 0">
-      <span x-text="page === 0 ? 'Showing ' + jobs.length + ' jobs' : 'Page ' + (page+1) + ' · ' + jobs.length + ' jobs'"></span>
-      <div class="flex gap-2">
-        <button @click="if(page>0){page--;fetchJobs()}" :disabled="page===0"
-                class="px-2 py-1 rounded border border-gray-600 disabled:opacity-30" :class="page>0?'hover:border-gray-500':''">Prev</button>
-        <button @click="page++;fetchJobs()" :disabled="jobs.length < pageSize"
-                class="px-2 py-1 rounded border border-gray-600 disabled:opacity-30" :class="jobs.length>=pageSize?'hover:border-gray-500':''">Next</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Log Viewer Drawer (inside Alpine root for data access) -->
-  <div x-show="logViewer.open" x-cloak
-       x-transition:enter="transition ease-out duration-200 transform"
-       x-transition:enter-start="translate-x-full"
-       x-transition:enter-end="translate-x-0"
-       x-transition:leave="transition ease-in duration-150 transform"
-       x-transition:leave-start="translate-x-0"
-       x-transition:leave-end="translate-x-full"
-       class="fixed inset-y-0 right-0 w-full md:w-2/3 xl:w-1/2 bg-gray-950 border-l border-gray-700 shadow-2xl z-50 flex flex-col"
-       @keydown.escape.window="closeLogViewer()">
-    <!-- Header -->
-    <div class="flex items-center gap-3 px-4 py-3 border-b border-gray-700 flex-shrink-0">
-      <div class="flex-1 min-w-0">
+        </div>
         <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold text-white truncate" x-text="logViewer.title"></span>
-          <span class="text-xs text-gray-500 font-mono" x-text="logViewer.logname + '.log'"></span>
-        </div>
-        <div class="flex items-center gap-3 mt-0.5">
-          <span class="text-xs text-gray-500" x-text="logViewer.entries.length + ' entries'"></span>
-          <span class="text-xs text-gray-500" x-show="logViewer.jobId">filtered to job #<span x-text="logViewer.jobId"></span></span>
+          <input type="text" x-model="searchQuery" @input="onSearchInput()" placeholder="Search path…"
+            class="text-xs px-2.5 py-1 rounded border border-gray-600 bg-gray-900 text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-400 w-44">
+          <template x-for="f in ['all','pending','running','completed','failed']" :key="f">
+            <button @click="filter=f; page=0; fetchJobs()"
+              class="text-xs px-2.5 py-1 rounded-full border transition-colors"
+              :class="filter===f ? 'border-blue-500 bg-blue-500/20 text-blue-300' : 'border-gray-600 text-gray-400 hover:border-gray-500'"
+              x-text="f.charAt(0).toUpperCase()+f.slice(1)">
+            </button>
+          </template>
         </div>
       </div>
-      <!-- Level filter -->
-      <select x-model="logViewer.levelFilter"
-              class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
-        <option value="">All levels</option>
-        <option value="DEBUG">DEBUG+</option>
-        <option value="INFO">INFO+</option>
-        <option value="WARNING">WARNING+</option>
-        <option value="ERROR">ERROR+</option>
-      </select>
-      <!-- Search -->
-      <input type="text" x-model="logViewer.searchText" placeholder="Filter…"
-             class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-300 w-32 focus:outline-none focus:border-blue-500 font-mono">
-      <!-- Live toggle -->
-      <button @click="logViewer.liveMode ? stopLiveMode() : startLiveMode()"
-              :class="logViewer.liveMode ? 'border-green-500 text-green-400 bg-green-900/20' : 'border-gray-600 text-gray-400 hover:border-gray-500'"
-              class="px-2 py-1 rounded border text-xs transition-colors flex items-center gap-1">
-        <span :class="logViewer.liveMode ? 'bg-green-400 animate-pulse' : 'bg-gray-600'" class="w-1.5 h-1.5 rounded-full inline-block"></span>
-        Live
-      </button>
-      <!-- Close -->
-      <button @click="closeLogViewer()" class="text-gray-500 hover:text-gray-300 text-xl leading-none px-1">&times;</button>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
+              <th class="pb-2 pr-3 w-12 font-medium">ID</th>
+              <th class="pb-2 pr-3 font-medium">File</th>
+              <th class="pb-2 pr-3 font-medium">Config</th>
+              <th class="pb-2 pr-3 font-medium">Status</th>
+              <th class="pb-2 pr-3 font-medium">Created</th>
+              <th class="pb-2 pr-3 font-medium">Duration</th>
+              <th class="pb-2 font-medium"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-700/50">
+            <template x-for="j in jobs" :key="j.id">
+              <tr class="hover:bg-gray-700/30 group">
+                <td class="py-2 pr-3 text-gray-600 font-mono text-xs" x-text="j.id"></td>
+                <td class="py-2 pr-3 text-xs max-w-xs">
+                  <div class="tooltip cursor-default">
+                    <span class="text-gray-300 font-mono" x-text="j.path.split('/').pop()"></span>
+                    <span class="tip" x-text="j.path"></span>
+                  </div>
+                  <div x-show="j.error" class="text-red-400 mt-0.5 truncate max-w-xs" :title="j.error" x-text="j.error">
+                  </div>
+                </td>
+                <td class="py-2 pr-3 text-gray-500 font-mono text-xs"
+                  x-text="j.config ? j.config.split('/').pop() : ''"></td>
+                <td class="py-2 pr-3">
+                  <span class="text-xs px-2 py-0.5 rounded-full"
+                    :class="{'pending':'bg-gray-700 text-gray-300','running':'bg-blue-900 text-blue-300','completed':'bg-green-900 text-green-300','failed':'bg-red-900 text-red-300'}[j.status] || 'bg-gray-700 text-gray-400'"
+                    x-text="j.status"></span>
+                  <span x-show="j.status === 'pending' && (j.priority || 0) !== 0"
+                    class="ml-1 text-xs px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 font-mono"
+                    :title="'Priority: ' + j.priority" x-text="(j.priority > 0 ? '+' : '') + j.priority"></span>
+                </td>
+                <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtTime(j.created_at)"></td>
+                <td class="py-2 pr-3 text-gray-500 text-xs" x-text="fmtDuration(j)"></td>
+                <td class="py-2 text-xs">
+                  <div class="flex items-center gap-1">
+                    <!-- Priority controls — pending jobs only -->
+                    <template x-if="j.status === 'pending'">
+                      <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button @click="adjustPriority(j, 1)" title="Run sooner (increase priority)"
+                          class="w-6 h-6 flex items-center justify-center rounded border border-gray-600 text-gray-400 hover:border-indigo-500 hover:text-indigo-300 transition-colors text-xs leading-none">▲</button>
+                        <button @click="adjustPriority(j, -1)" title="Run later (decrease priority)"
+                          class="w-6 h-6 flex items-center justify-center rounded border border-gray-600 text-gray-400 hover:border-indigo-500 hover:text-indigo-300 transition-colors text-xs leading-none">▼</button>
+                      </div>
+                    </template>
+                    <button x-show="j.status === 'failed'" @click="requeueJob(j.id)"
+                      class="opacity-0 group-hover:opacity-100 px-2 py-0.5 rounded border border-red-700 text-red-400 hover:border-red-500 hover:text-red-300 transition-all">
+                      Requeue
+                    </button>
+                    <button x-show="j.log_name"
+                      @click="openLogViewer(j.log_name, '#' + j.id + ' ' + j.path.split('/').pop(), j.id)"
+                      class="opacity-0 group-hover:opacity-100 px-2 py-0.5 rounded border border-gray-600 text-gray-400 hover:border-blue-500 hover:text-blue-300 transition-all">
+                      Logs
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="jobs.length === 0">
+              <tr>
+                <td colspan="7" class="py-8 text-center text-gray-500 text-sm"
+                  x-text="searchQuery.trim() ? 'No jobs match \u201c' + searchQuery.trim() + '\u201d' : 'No jobs found'">
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="flex justify-between items-center mt-3 text-xs text-gray-500" x-show="jobs.length > 0 || page > 0">
+        <span
+          x-text="page === 0 ? 'Showing ' + jobs.length + ' jobs' : 'Page ' + (page+1) + ' · ' + jobs.length + ' jobs'"></span>
+        <div class="flex gap-2">
+          <button @click="if(page>0){page--;fetchJobs()}" :disabled="page===0"
+            class="px-2 py-1 rounded border border-gray-600 disabled:opacity-30"
+            :class="page>0?'hover:border-gray-500':''">Prev</button>
+          <button @click="page++;fetchJobs()" :disabled="jobs.length < pageSize"
+            class="px-2 py-1 rounded border border-gray-600 disabled:opacity-30"
+            :class="jobs.length>=pageSize?'hover:border-gray-500':''">Next</button>
+        </div>
+      </div>
     </div>
-    <!-- Entries -->
-    <div class="flex-1 overflow-y-auto font-mono text-xs" id="log-viewer-body">
-      <template x-if="logViewer.loading && logViewer.entries.length === 0">
-        <div class="p-8 text-center text-gray-500">Loading…</div>
-      </template>
-      <template x-if="!logViewer.loading && logViewerFiltered().length === 0">
-        <div class="p-8 text-center text-gray-500">No log entries found</div>
-      </template>
-      <template x-for="(e, idx) in logViewerFiltered()" :key="idx">
-        <div class="flex gap-2 py-0.5 px-3 hover:bg-gray-800 border-b border-gray-900">
-          <span class="text-gray-600 shrink-0 w-40" x-text="e.timestamp || ''"></span>
-          <span :class="{
+
+    <!-- Log Viewer Drawer (inside Alpine root for data access) -->
+    <div x-show="logViewer.open" x-cloak x-transition:enter="transition ease-out duration-200 transform"
+      x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
+      x-transition:leave="transition ease-in duration-150 transform" x-transition:leave-start="translate-x-0"
+      x-transition:leave-end="translate-x-full"
+      class="fixed inset-y-0 right-0 w-full md:w-2/3 xl:w-1/2 bg-gray-950 border-l border-gray-700 shadow-2xl z-50 flex flex-col"
+      @keydown.escape.window="closeLogViewer()">
+      <!-- Header -->
+      <div class="flex items-center gap-3 px-4 py-3 border-b border-gray-700 flex-shrink-0">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold text-white truncate" x-text="logViewer.title"></span>
+            <span class="text-xs text-gray-500 font-mono" x-text="logViewer.logname + '.log'"></span>
+          </div>
+          <div class="flex items-center gap-3 mt-0.5">
+            <span class="text-xs text-gray-500" x-text="logViewer.entries.length + ' entries'"></span>
+            <span class="text-xs text-gray-500" x-show="logViewer.jobId">filtered to job #<span
+                x-text="logViewer.jobId"></span></span>
+          </div>
+        </div>
+        <!-- Level filter -->
+        <select x-model="logViewer.levelFilter"
+          class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
+          <option value="">All levels</option>
+          <option value="DEBUG">DEBUG+</option>
+          <option value="INFO">INFO+</option>
+          <option value="WARNING">WARNING+</option>
+          <option value="ERROR">ERROR+</option>
+        </select>
+        <!-- Search -->
+        <input type="text" x-model="logViewer.searchText" placeholder="Filter…"
+          class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-300 w-32 focus:outline-none focus:border-blue-500 font-mono">
+        <!-- Live toggle -->
+        <button @click="logViewer.liveMode ? stopLiveMode() : startLiveMode()"
+          :class="logViewer.liveMode ? 'border-green-500 text-green-400 bg-green-900/20' : 'border-gray-600 text-gray-400 hover:border-gray-500'"
+          class="px-2 py-1 rounded border text-xs transition-colors flex items-center gap-1">
+          <span :class="logViewer.liveMode ? 'bg-green-400 animate-pulse' : 'bg-gray-600'"
+            class="w-1.5 h-1.5 rounded-full inline-block"></span>
+          Live
+        </button>
+        <!-- Close -->
+        <button @click="closeLogViewer()"
+          class="text-gray-500 hover:text-gray-300 text-xl leading-none px-1">&times;</button>
+      </div>
+      <!-- Entries -->
+      <div class="flex-1 overflow-y-auto font-mono text-xs" id="log-viewer-body">
+        <template x-if="logViewer.loading && logViewer.entries.length === 0">
+          <div class="p-8 text-center text-gray-500">Loading…</div>
+        </template>
+        <template x-if="!logViewer.loading && logViewerFiltered().length === 0">
+          <div class="p-8 text-center text-gray-500">No log entries found</div>
+        </template>
+        <template x-for="(e, idx) in logViewerFiltered()" :key="idx">
+          <div class="flex gap-2 py-0.5 px-3 hover:bg-gray-800 border-b border-gray-900">
+            <span class="text-gray-600 shrink-0 w-40" x-text="e.timestamp || ''"></span>
+            <span :class="{
                   'text-red-400':    e.level === 'ERROR' || e.level === 'CRITICAL',
                   'text-yellow-400': e.level === 'WARNING',
                   'text-blue-400':   e.level === 'INFO',
                   'text-gray-500':   e.level === 'DEBUG'
-                }"
-                class="shrink-0 w-16 font-bold" x-text="e.level || ''"></span>
-          <span x-show="e.job_id" class="text-gray-600 shrink-0 w-8 text-right" x-text="'#'+e.job_id"></span>
-          <div class="text-gray-300 break-all min-w-0" x-html="formatLogMessage(e)"></div>
-        </div>
-      </template>
+                }" class="shrink-0 w-16 font-bold" x-text="e.level || ''"></span>
+            <span x-show="e.job_id" class="text-gray-600 shrink-0 w-8 text-right" x-text="'#'+e.job_id"></span>
+            <div class="text-gray-300 break-all min-w-0" x-html="formatLogMessage(e)"></div>
+          </div>
+        </template>
+      </div>
+      <!-- Footer -->
+      <div
+        class="flex items-center justify-between px-4 py-2 border-t border-gray-700 text-xs text-gray-500 flex-shrink-0">
+        <span x-text="logViewerFiltered().length + ' / ' + logViewer.entries.length + ' shown'"></span>
+        <button @click="scrollLogToBottom()" class="text-gray-600 hover:text-gray-400">↓ Bottom</button>
+      </div>
     </div>
-    <!-- Footer -->
-    <div class="flex items-center justify-between px-4 py-2 border-t border-gray-700 text-xs text-gray-500 flex-shrink-0">
-      <span x-text="logViewerFiltered().length + ' / ' + logViewer.entries.length + ' shown'"></span>
-      <button @click="scrollLogToBottom()" class="text-gray-600 hover:text-gray-400">↓ Bottom</button>
+    <!-- Backdrop for mobile -->
+    <div x-show="logViewer.open" x-cloak @click="closeLogViewer()" class="fixed inset-0 bg-black/40 z-40 md:hidden">
     </div>
   </div>
-  <!-- Backdrop for mobile -->
-  <div x-show="logViewer.open" x-cloak @click="closeLogViewer()"
-       class="fixed inset-0 bg-black/40 z-40 md:hidden"></div>
-</div>
 
-<script>
-function dashboard() {
-  return {
-    health: {}, stats: {}, configs: {}, jobs: [], cluster: null,
-    filter: 'all', page: 0, pageSize: 50, threadsTab: 'local', searchQuery: '', searchTimer: null,
-    lastUpdate: '', interval: null,
-    submitPath: '', submitArgs: '', submitFlags: [], submitting: false, submitResult: '', submitError: false,
-    flagDefs: [
-      {flag: '-fc',      label: 'Force Convert', title: 'Force conversion even if file already has the target extension or matches force-convert=false'},
-      {flag: '-pse',     label: 'Same Ext',      title: 'Allow reprocessing files that already have the target extension'},
-      {flag: '--tv',     label: 'TV',             title: 'Force guessit to treat input as a TV episode (mutually exclusive with Movie)'},
-      {flag: '--movie',  label: 'Movie',          title: 'Force guessit to treat input as a movie (mutually exclusive with TV)'},
-    ],
-    toggleFlag(flag) {
-      const exclusive = ['--tv', '--movie'];
-      if (exclusive.includes(flag)) {
-        // deselect the other exclusive flag first
-        this.submitFlags = this.submitFlags.filter(f => !exclusive.includes(f));
-      }
-      const i = this.submitFlags.indexOf(flag);
-      if (i === -1) this.submitFlags.push(flag);
-      else this.submitFlags.splice(i, 1);
-    },
-    requeueingAll: false,
-    authHeaders(extra) {
-      const h = Object.assign({'Content-Type': 'application/json'}, extra || {});
-      if (window.SMA_API_KEY) h['X-API-Key'] = window.SMA_API_KEY;
-      return h;
-    },
-    statCards: [
-      {key:'total',    label:'Total',     color:'text-gray-400',  tip:'All jobs ever submitted'},
-      {key:'pending',  label:'Pending',   color:'text-yellow-400',tip:'Waiting to be picked up by a worker — click to filter'},
-      {key:'running',  label:'Running',   color:'text-blue-400',  tip:'Currently being converted — click to filter'},
-      {key:'completed',label:'Completed', color:'text-green-400', tip:'Successfully finished — click to filter'},
-      {key:'failed',   label:'Failed',    color:'text-red-400',   tip:'Ended with an error — click to filter'},
-    ],
-    get activeWorkers() {
-      return Object.values(this.health.active || {}).reduce((sum, jobs) => sum + jobs.length, 0);
-    },
-    async init() {
-      await this.refresh();
-      this.interval = setInterval(() => this.refresh(), 5000);
-    },
-    async refresh() {
-      try {
-        const [h, s, c, st] = await Promise.all([
-          fetch('/health', {headers: this.authHeaders()}).then(r=>r.json()),
-          fetch('/stats', {headers: this.authHeaders()}).then(r=>r.json()),
-          fetch('/configs', {headers: this.authHeaders()}).then(r=>r.json()),
-          fetch('/status', {headers: this.authHeaders()}).then(r=>r.json()).catch(()=>null),
-        ]);
-        this.health = h; this.stats = s; this.configs = c;
-        const hadCluster = this.cluster && this.cluster.cluster && this.cluster.cluster.length > 0;
-        this.cluster = (st && st.cluster) ? st : null;
-        // Auto-switch to cluster tab on first load if cluster data is present
-        if (!hadCluster && this.cluster && this.cluster.cluster && this.cluster.cluster.length > 0) {
-          this.threadsTab = 'cluster';
-        }
-        await this.fetchJobs();
-        this.lastUpdate = new Date().toLocaleTimeString();
-      } catch(e) { this.health = {status:'error'}; }
-    },
-    async fetchJobs() {
-      const params = new URLSearchParams({limit: this.pageSize, offset: this.page * this.pageSize});
-      if (this.filter !== 'all') params.set('status', this.filter);
-      if (this.searchQuery.trim()) params.set('search', this.searchQuery.trim());
-      try {
-        const r = await fetch('/jobs?' + params, {headers: this.authHeaders()}).then(r=>r.json());
-        this.jobs = r.jobs || [];
-      } catch(e) { this.jobs = []; }
-    },
-    onSearchInput() {
-      clearTimeout(this.searchTimer);
-      this.searchTimer = setTimeout(() => { this.page = 0; this.fetchJobs(); }, 300);
-    },
-    async submitJob() {
-      this.submitting = true; this.submitResult = ''; this.submitError = false;
-      try {
-        const body = {path: this.submitPath.trim()};
-        const extraArgs = [...this.submitFlags];
-        if (this.submitArgs.trim()) extraArgs.push(...this.submitArgs.trim().split(/\s+/));
-        if (extraArgs.length) body.args = extraArgs;
-        const r = await fetch('/webhook/generic', {method:'POST', headers: this.authHeaders(), body: JSON.stringify(body)});
-        const d = await r.json();
-        if (r.ok) {
-          this.submitResult = 'Job #' + d.job_id + ' queued for ' + d.path;
-          this.submitPath = ''; this.submitArgs = ''; this.submitFlags = [];
-          setTimeout(() => this.refresh(), 500);
-        } else {
-          this.submitError = true;
-          this.submitResult = d.error || 'Failed to submit job';
-        }
-      } catch(e) { this.submitError = true; this.submitResult = 'Request failed: ' + e.message; }
-      this.submitting = false;
-      setTimeout(() => this.submitResult = '', 8000);
-    },
-    async requeueJob(id) {
-      try {
-        const r = await fetch('/jobs/' + id + '/requeue', {method: 'POST', headers: this.authHeaders()});
-        if (r.ok) {
-          const j = this.jobs.find(j => j.id === id);
-          if (j) j.status = 'pending';
-          setTimeout(() => this.refresh(), 500);
-        }
-      } catch(e) {}
-    },
-    async adjustPriority(job, delta) {
-      const newPriority = (job.priority || 0) + delta;
-      try {
-        const r = await fetch('/jobs/' + job.id + '/priority', {
-          method: 'POST',
-          headers: this.authHeaders(),
-          body: JSON.stringify({priority: newPriority}),
-        });
-        if (r.ok) {
-          job.priority = newPriority;
-        }
-      } catch(e) {}
-    },
-    async nodeRestart(node) {
-      node._pending = 'restart';
-      try {
-        await fetch('/restart?node=' + encodeURIComponent(node.node_id), {method: 'POST', headers: this.authHeaders()});
-        setTimeout(() => this.refresh(), 1000);
-      } catch(e) {}
-      node._pending = null;
-    },
-    async nodeShutdown(node) {
-      node._pending = 'shutdown';
-      try {
-        await fetch('/shutdown?node=' + encodeURIComponent(node.node_id), {method: 'POST', headers: this.authHeaders()});
-        setTimeout(() => this.refresh(), 1000);
-      } catch(e) {}
-      node._pending = null;
-    },
-    async requeueAllFailed() {
-      this.requeueingAll = true;
-      try {
-        const r = await fetch('/jobs/requeue', {method: 'POST', headers: this.authHeaders()});
-        if (r.ok) {
-          const d = await r.json();
-          setTimeout(() => this.refresh(), 300);
-        }
-      } catch(e) {}
-      this.requeueingAll = false;
-    },
-    // ── Autocomplete ──────────────────────────────────────────────────────────
-    acOpen: false, acItems: [], acIndex: -1,
-    _acSeq: 0,       // increment each keystroke to discard stale responses
-    _acBrowseDir: '', // last directory passed to /browse (avoid redundant calls)
-
-    async acInput() {
-      const q = this.submitPath;
-      const seq = ++this._acSeq;
-
-      // ── static candidates (no network call needed) ────────────────────────
-      const configPaths = (this.configs.path_configs || []).map(c => c.path);
-      const staticCandidates = [];
-
-      // Config prefixes: show when input is a prefix of the configured path,
-      // the configured path is a prefix of the input, or partial substring match.
-      for (const p of configPaths) {
-        if (!q || p.startsWith(q) || q.startsWith(p) || p.toLowerCase().includes(q.toLowerCase())) {
-          staticCandidates.push({group: 'prefix', value: p, sort: 0});
-        }
-      }
-
-      // Recent job paths
-      const seen = new Set(configPaths);
-      for (const j of this.jobs) {
-        if (!j.path || seen.has(j.path)) continue;
-        seen.add(j.path);
-        if (!q || j.path.toLowerCase().includes(q.toLowerCase())) {
-          staticCandidates.push({group: 'recent', value: j.path, sort: 1});
-        }
-      }
-      staticCandidates.sort((a, b) => a.sort - b.sort);
-
-      // Show static results immediately so the dropdown isn't blank while fetching
-      this._applyAcItems(staticCandidates, seq);
-
-      // ── filesystem browse ─────────────────────────────────────────────────
-      // Derive the directory to browse:
-      //   • empty input  → no path (server returns top-level configured roots)
-      //   • input ends in '/' → treat as directory
-      //   • otherwise → strip the last path component to get the parent dir,
-      //                  use remainder as the filename filter
-      let browseDir = '';
-      let fileFilter = '';
-      if (q) {
-        if (q.endsWith('/')) {
-          browseDir = q.slice(0, -1);
-        } else {
-          const slash = q.lastIndexOf('/');
-          browseDir  = slash > 0 ? q.slice(0, slash) : '/';
-          fileFilter = q.slice(slash + 1).toLowerCase();
-        }
-      }
-
-      // Skip the network call if the directory hasn't changed since last call
-      if (browseDir === this._acBrowseDir && seq !== 1) return;
-      this._acBrowseDir = browseDir;
-
-      try {
-        const url = '/browse' + (browseDir ? '?path=' + encodeURIComponent(browseDir) : '');
-        const resp = await fetch(url, {headers: this.authHeaders()});
-        if (seq !== this._acSeq) return; // superseded by a newer keystroke
-        if (!resp.ok) return;
-        const data = await resp.json();
-
-        // Build filesystem candidates
-        const fsCandidates = [];
-        const staticValues = new Set(staticCandidates.map(c => c.value));
-
-        for (const d of (data.dirs || [])) {
-          if (staticValues.has(d)) continue;
-          const name = d.split('/').pop().toLowerCase();
-          if (!fileFilter || name.startsWith(fileFilter)) {
-            fsCandidates.push({group: 'dir', value: d, sort: 2});
+  <script>
+    function dashboard() {
+      return {
+        health: {}, stats: {}, configs: {}, jobs: [], cluster: null,
+        filter: 'all', page: 0, pageSize: 50, threadsTab: 'local', searchQuery: '', searchTimer: null,
+        lastUpdate: '', interval: null,
+        submitPath: '', submitArgs: '', submitFlags: [], submitting: false, submitResult: '', submitError: false,
+        flagDefs: [
+          { flag: '-fc', label: 'Force Convert', title: 'Force conversion even if file already has the target extension or matches force-convert=false' },
+          { flag: '-pse', label: 'Same Ext', title: 'Allow reprocessing files that already have the target extension' },
+          { flag: '--tv', label: 'TV', title: 'Force guessit to treat input as a TV episode (mutually exclusive with Movie)' },
+          { flag: '--movie', label: 'Movie', title: 'Force guessit to treat input as a movie (mutually exclusive with TV)' },
+        ],
+        toggleFlag(flag) {
+          const exclusive = ['--tv', '--movie'];
+          if (exclusive.includes(flag)) {
+            // deselect the other exclusive flag first
+            this.submitFlags = this.submitFlags.filter(f => !exclusive.includes(f));
           }
-        }
-        for (const f of (data.files || [])) {
-          if (staticValues.has(f)) continue;
-          const name = f.split('/').pop().toLowerCase();
-          if (!fileFilter || name.startsWith(fileFilter)) {
-            fsCandidates.push({group: 'file', value: f, sort: 3});
-          }
-        }
-
-        this._applyAcItems([...staticCandidates, ...fsCandidates], seq);
-      } catch(_) { /* network error — static results already shown */ }
-    },
-
-    _applyAcItems(candidates, seq) {
-      if (seq !== this._acSeq) return;
-      this.acItems = candidates.slice(0, 16);
-      if (this.acIndex >= this.acItems.length) this.acIndex = -1;
-      this.acOpen = this.acItems.length > 0;
-    },
-
-    acMove(dir) {
-      if (!this.acOpen) return;
-      this.acIndex = Math.max(-1, Math.min(this.acItems.length - 1, this.acIndex + dir));
-    },
-    // Returns true if a selection was made (suppresses form submit on Enter).
-    acAccept() {
-      if (!this.acOpen || this.acIndex < 0) return false;
-      this.acSelect(this.acItems[this.acIndex]);
-      return true;
-    },
-    acSelect(item) {
-      // For directories, append '/' so the next keystroke browses into them.
-      this.submitPath = item.group === 'dir' ? item.value + '/' : item.value;
-      this._acBrowseDir = '';
-      this.acClose();
-      // Immediately re-trigger so drilling into a directory feels instant.
-      if (item.group === 'dir') this.acInput();
-    },
-    acClose() {
-      this.acOpen = false;
-      this.acIndex = -1;
-    },
-    // ─────────────────────────────────────────────────────────────────────────
-    fmtTime(t) {
-      if (!t) return '-';
-      const d = new Date(t.includes('Z') || t.includes('+') ? t : t + 'Z');
-      return d.toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-    },
-    fmtDuration(j) {
-      if (!j.started_at) return '-';
-      const start = new Date(j.started_at.includes('Z') || j.started_at.includes('+') ? j.started_at : j.started_at + 'Z');
-      const end = j.completed_at ? new Date(j.completed_at.includes('Z') || j.completed_at.includes('+') ? j.completed_at : j.completed_at + 'Z') : new Date();
-      const s = Math.round((end - start) / 1000);
-      if (s < 60) return s + 's';
-      if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
-      return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
-    },
-    fmtUptime(s) {
-      if (s == null) return '';
-      if (s < 60) return s + 's';
-      if (s < 3600) return Math.floor(s/60) + 'm';
-      if (s < 86400) return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
-      return Math.floor(s/86400) + 'd ' + Math.floor((s%86400)/3600) + 'h';
-    },
-    // ── Log Viewer ────────────────────────────────────────────────────────────
-    logViewer: {
-      open: false, logname: '', jobId: null, title: '',
-      entries: [], fileSize: 0, liveMode: false, loading: false,
-      levelFilter: '', searchText: '', pollTimer: null,
-    },
-    openLogViewer(logname, title, jobId) {
-      this.logViewer.logname = logname;
-      this.logViewer.title = title || logname;
-      this.logViewer.jobId = jobId || null;
-      this.logViewer.entries = [];
-      this.logViewer.fileSize = 0;
-      this.logViewer.levelFilter = '';
-      this.logViewer.searchText = '';
-      this.logViewer.liveMode = false;
-      if (this.logViewer.pollTimer) { clearInterval(this.logViewer.pollTimer); this.logViewer.pollTimer = null; }
-      this.logViewer.open = true;
-      this.$nextTick(() => this.fetchLog());
-    },
-    closeLogViewer() {
-      this.stopLiveMode();
-      this.logViewer.open = false;
-    },
-    async fetchLog() {
-      this.logViewer.loading = true;
-      const params = new URLSearchParams({lines: 500});
-      if (this.logViewer.jobId) params.set('job_id', this.logViewer.jobId);
-      try {
-        const r = await fetch('/logs/' + this.logViewer.logname + '?' + params, {headers: this.authHeaders()});
-        if (r.ok) {
-          const d = await r.json();
-          this.logViewer.entries = d.entries || [];
-          this.logViewer.fileSize = d.file_size || 0;
-        }
-      } catch(_) {}
-      this.logViewer.loading = false;
-      this.$nextTick(() => this.scrollLogToBottom());
-    },
-    async pollLog() {
-      const params = new URLSearchParams({offset: this.logViewer.fileSize});
-      if (this.logViewer.jobId) params.set('job_id', this.logViewer.jobId);
-      try {
-        const r = await fetch('/logs/' + this.logViewer.logname + '/tail?' + params, {headers: this.authHeaders()});
-        if (r.ok) {
-          const d = await r.json();
-          if (d.entries && d.entries.length) {
-            this.logViewer.entries.push(...d.entries);
-            // Cap at 5000 entries to avoid memory growth
-            if (this.logViewer.entries.length > 5000) {
-              this.logViewer.entries = this.logViewer.entries.slice(-5000);
+          const i = this.submitFlags.indexOf(flag);
+          if (i === -1) this.submitFlags.push(flag);
+          else this.submitFlags.splice(i, 1);
+        },
+        requeueingAll: false,
+        authHeaders(extra) {
+          const h = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
+          if (window.SMA_API_KEY) h['X-API-Key'] = window.SMA_API_KEY;
+          return h;
+        },
+        statCards: [
+          { key: 'total', label: 'Total', color: 'text-gray-400', tip: 'All jobs ever submitted' },
+          { key: 'pending', label: 'Pending', color: 'text-yellow-400', tip: 'Waiting to be picked up by a worker — click to filter' },
+          { key: 'running', label: 'Running', color: 'text-blue-400', tip: 'Currently being converted — click to filter' },
+          { key: 'completed', label: 'Completed', color: 'text-green-400', tip: 'Successfully finished — click to filter' },
+          { key: 'failed', label: 'Failed', color: 'text-red-400', tip: 'Ended with an error — click to filter' },
+        ],
+        get activeWorkers() {
+          return Object.values(this.health.active || {}).reduce((sum, jobs) => sum + jobs.length, 0);
+        },
+        async init() {
+          await this.refresh();
+          this.interval = setInterval(() => this.refresh(), 5000);
+        },
+        async refresh() {
+          try {
+            const [h, s, c, st] = await Promise.all([
+              fetch('/health', { headers: this.authHeaders() }).then(r => r.json()),
+              fetch('/stats', { headers: this.authHeaders() }).then(r => r.json()),
+              fetch('/configs', { headers: this.authHeaders() }).then(r => r.json()),
+              fetch('/status', { headers: this.authHeaders() }).then(r => r.json()).catch(() => null),
+            ]);
+            this.health = h; this.stats = s; this.configs = c;
+            const hadCluster = this.cluster && this.cluster.cluster && this.cluster.cluster.length > 0;
+            this.cluster = (st && st.cluster) ? st : null;
+            // Auto-switch to cluster tab on first load if cluster data is present
+            if (!hadCluster && this.cluster && this.cluster.cluster && this.cluster.cluster.length > 0) {
+              this.threadsTab = 'cluster';
             }
-            this.$nextTick(() => this.scrollLogToBottom());
+            await this.fetchJobs();
+            this.lastUpdate = new Date().toLocaleTimeString();
+          } catch (e) { this.health = { status: 'error' }; }
+        },
+        async fetchJobs() {
+          const params = new URLSearchParams({ limit: this.pageSize, offset: this.page * this.pageSize });
+          if (this.filter !== 'all') params.set('status', this.filter);
+          if (this.searchQuery.trim()) params.set('search', this.searchQuery.trim());
+          try {
+            const r = await fetch('/jobs?' + params, { headers: this.authHeaders() }).then(r => r.json());
+            this.jobs = r.jobs || [];
+          } catch (e) { this.jobs = []; }
+        },
+        onSearchInput() {
+          clearTimeout(this.searchTimer);
+          this.searchTimer = setTimeout(() => { this.page = 0; this.fetchJobs(); }, 300);
+        },
+        formatSubmitResult(d) {
+          if (d.job_id !== undefined && d.job_id !== null && d.path) {
+            return 'Job #' + d.job_id + ' queued for ' + d.path;
           }
-          if (d.file_size != null) this.logViewer.fileSize = d.file_size;
-        }
-      } catch(_) {}
-    },
-    startLiveMode() {
-      this.logViewer.liveMode = true;
-      this.logViewer.pollTimer = setInterval(() => this.pollLog(), 3000);
-    },
-    stopLiveMode() {
-      this.logViewer.liveMode = false;
-      if (this.logViewer.pollTimer) { clearInterval(this.logViewer.pollTimer); this.logViewer.pollTimer = null; }
-    },
-    logViewerFiltered() {
-      const _LEVEL = {DEBUG: 0, INFO: 1, WARNING: 2, ERROR: 3, CRITICAL: 4};
-      const minLevel = _LEVEL[this.logViewer.levelFilter] ?? -1;
-      const search = this.logViewer.searchText.toLowerCase();
-      return this.logViewer.entries.filter(e => {
-        if (minLevel >= 0 && (_LEVEL[(e.level||'').toUpperCase()] ?? -1) < minLevel) return false;
-        if (search && !(e.message||'').toLowerCase().includes(search)) return false;
-        return true;
-      });
-    },
-    scrollLogToBottom() {
-      const el = document.getElementById('log-viewer-body');
-      if (el) el.scrollTop = el.scrollHeight;
-    },
-    formatLogMessage(e) {
-      const msg = e.message || '';
-      if (msg.startsWith('Output Data: ')) {
-        try {
-          const data = JSON.parse(msg.slice('Output Data: '.length));
-          return this._renderOutputData(data);
-        } catch(_) {}
-      }
-      if (msg.startsWith('Input Data: ')) {
-        try {
-          const data = JSON.parse(msg.slice('Input Data: '.length));
-          return this._renderInputData(data);
-        } catch(_) {}
-      }
-      if (msg.startsWith('Progress: ')) {
-        try {
-          const data = JSON.parse(msg.slice('Progress: '.length));
-          return this._renderProgress(data);
-        } catch(_) {}
-      }
-      return this._esc(msg);
-    },
-    _esc(s) {
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    },
-    _renderInputData(d) {
-      const esc = this._esc.bind(this);
-      const v = d.video || {};
-      const audios = d.audio || [];
-      const subs = d.subtitle || [];
+          if (d.status === 'empty') {
+            return d.message || ('No media files found in directory: ' + (d.directory || d.path || this.submitPath.trim()));
+          }
+          if (Array.isArray(d.queued) && d.queued.length) {
+            if (d.queued_count === 1 && d.queued[0].job_id !== undefined && d.queued[0].path) {
+              return 'Job #' + d.queued[0].job_id + ' queued for ' + d.queued[0].path;
+            }
+            let msg = (d.queued_count || d.queued.length) + ' jobs queued from ' + (d.directory || this.submitPath.trim());
+            if (d.duplicate_count) msg += ' (' + d.duplicate_count + ' duplicates skipped)';
+            return msg;
+          }
+          if (d.status === 'duplicate' && d.job_id !== undefined && d.job_id !== null) {
+            return 'Job #' + d.job_id + ' is already queued for ' + (d.path || this.submitPath.trim());
+          }
+          return d.message || d.status || 'Job submitted';
+        },
+        async submitJob() {
+          this.submitting = true; this.submitResult = ''; this.submitError = false;
+          try {
+            const body = { path: this.submitPath.trim() };
+            const extraArgs = [...this.submitFlags];
+            if (this.submitArgs.trim()) extraArgs.push(...this.submitArgs.trim().split(/\s+/));
+            if (extraArgs.length) body.args = extraArgs;
+            const r = await fetch('/webhook/generic', { method: 'POST', headers: this.authHeaders(), body: JSON.stringify(body) });
+            const d = await r.json();
+            if (r.ok) {
+              this.submitResult = this.formatSubmitResult(d);
+              this.submitPath = ''; this.submitArgs = ''; this.submitFlags = [];
+              setTimeout(() => this.refresh(), 500);
+            } else {
+              this.submitError = true;
+              this.submitResult = d.error || 'Failed to submit job';
+            }
+          } catch (e) { this.submitError = true; this.submitResult = 'Request failed: ' + e.message; }
+          this.submitting = false;
+          setTimeout(() => this.submitResult = '', 8000);
+        },
+        async requeueJob(id) {
+          try {
+            const r = await fetch('/jobs/' + id + '/requeue', { method: 'POST', headers: this.authHeaders() });
+            if (r.ok) {
+              const j = this.jobs.find(j => j.id === id);
+              if (j) j.status = 'pending';
+              setTimeout(() => this.refresh(), 500);
+            }
+          } catch (e) { }
+        },
+        async adjustPriority(job, delta) {
+          const newPriority = (job.priority || 0) + delta;
+          try {
+            const r = await fetch('/jobs/' + job.id + '/priority', {
+              method: 'POST',
+              headers: this.authHeaders(),
+              body: JSON.stringify({ priority: newPriority }),
+            });
+            if (r.ok) {
+              job.priority = newPriority;
+            }
+          } catch (e) { }
+        },
+        async nodeRestart(node) {
+          node._pending = 'restart';
+          try {
+            await fetch('/restart?node=' + encodeURIComponent(node.node_id), { method: 'POST', headers: this.authHeaders() });
+            setTimeout(() => this.refresh(), 1000);
+          } catch (e) { }
+          node._pending = null;
+        },
+        async nodeShutdown(node) {
+          node._pending = 'shutdown';
+          try {
+            await fetch('/shutdown?node=' + encodeURIComponent(node.node_id), { method: 'POST', headers: this.authHeaders() });
+            setTimeout(() => this.refresh(), 1000);
+          } catch (e) { }
+          node._pending = null;
+        },
+        async requeueAllFailed() {
+          this.requeueingAll = true;
+          try {
+            const r = await fetch('/jobs/requeue', { method: 'POST', headers: this.authHeaders() });
+            if (r.ok) {
+              const d = await r.json();
+              setTimeout(() => this.refresh(), 300);
+            }
+          } catch (e) { }
+          this.requeueingAll = false;
+        },
+        // ── Autocomplete ──────────────────────────────────────────────────────────
+        acOpen: false, acItems: [], acIndex: -1,
+        _acSeq: 0,       // increment each keystroke to discard stale responses
+        _acBrowseDir: '', // last directory passed to /browse (avoid redundant calls)
 
-      const vParts = [
-        v.codec       ? `<span class="text-purple-300">${esc(v.codec)}</span>` : null,
-        v.profile     ? `<span class="text-gray-400">${esc(v.profile)}</span>` : null,
-        v.dimensions  ? `<span class="text-gray-300">${esc(v.dimensions)}</span>` : null,
-        v.fps         ? `${parseFloat(v.fps).toFixed(2)} fps` : null,
-        v.level       ? `L${v.level}` : null,
-        v.pix_fmt     ? `<span class="text-gray-400">${esc(v.pix_fmt)}</span>` : null,
-        v.field_order && v.field_order !== 'progressive' ? `<span class="text-orange-400">${esc(v.field_order)}</span>` : null,
-        v.bitrate     ? `${Math.round(v.bitrate / 1000)}k` : null,
-      ].filter(Boolean).join(' <span class="text-gray-700">·</span> ');
+        async acInput() {
+          const q = this.submitPath;
+          const seq = ++this._acSeq;
 
-      const aLines = audios.map((a, i) => {
-        const parts = [
-          a.codec    ? `<span class="text-green-300">${esc(a.codec)}</span>` : null,
-          a.channels ? `${a.channels}ch` : null,
-          a.samplerate ? `${Math.round(a.samplerate / 1000)}kHz` : null,
-          a.bitrate  ? `${Math.round(a.bitrate / 1000)}k` : null,
-          a.language ? `<span class="text-gray-400">[${esc(a.language)}]</span>` : null,
-          a.disposition ? `<span class="text-gray-500 text-xs">${esc(a.disposition)}</span>` : null,
-        ].filter(Boolean).join(' ');
-        const label = audios.length > 1 ? `audio ${i+1}` : 'audio';
-        return `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">${label}</span><span>${parts}</span></div>`;
-      }).join('');
+          // ── static candidates (no network call needed) ────────────────────────
+          const configPaths = (this.configs.path_configs || []).map(c => c.path);
+          const staticCandidates = [];
 
-      const subLine = subs.length
-        ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">subs</span><span class="text-gray-400">${subs.map(s => s.language || 'und').join(', ')}</span></div>`
-        : '';
+          // Config prefixes: show when input is a prefix of the configured path,
+          // the configured path is a prefix of the input, or partial substring match.
+          for (const p of configPaths) {
+            if (!q || p.startsWith(q) || q.startsWith(p) || p.toLowerCase().includes(q.toLowerCase())) {
+              staticCandidates.push({ group: 'prefix', value: p, sort: 0 });
+            }
+          }
 
-      return `<span class="text-cyan-300 font-semibold">Input Data</span> <span class="text-gray-500">[${esc(d['format-fullname'] || d.format || '')}]</span>`
-        + `<div class="mt-1 space-y-0.5">`
-        + (vParts ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">video</span><span>${vParts}</span></div>` : '')
-        + aLines
-        + subLine
-        + `</div>`;
-    },
-    _renderProgress(d) {
-      const esc = this._esc.bind(this);
-      const chip = (label, value, colour) =>
-        `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono bg-gray-800 border border-gray-700">`
-        + `<span class="text-gray-500">${label}</span>`
-        + `<span class="${colour}">${esc(String(value))}</span>`
-        + `</span>`;
+          // Recent job paths
+          const seen = new Set(configPaths);
+          for (const j of this.jobs) {
+            if (!j.path || seen.has(j.path)) continue;
+            seen.add(j.path);
+            if (!q || j.path.toLowerCase().includes(q.toLowerCase())) {
+              staticCandidates.push({ group: 'recent', value: j.path, sort: 1 });
+            }
+          }
+          staticCandidates.sort((a, b) => a.sort - b.sort);
 
-      const pct = d.percent != null ? parseFloat(d.percent) : null;
-      const bar = pct != null
-        ? `<div class="w-24 h-1.5 bg-gray-700 rounded-full overflow-hidden inline-block align-middle mr-2">`
-          + `<div class="h-full bg-blue-500 rounded-full" style="width:${Math.min(100,pct).toFixed(1)}%"></div>`
-          + `</div>`
-        : '';
+          // Show static results immediately so the dropdown isn't blank while fetching
+          this._applyAcItems(staticCandidates, seq);
 
-      const chips = [
-        pct != null            ? chip('%',         pct.toFixed(1) + '%', 'text-blue-300')  : null,
-        d.elapsed              ? chip('elapsed',   d.elapsed,            'text-gray-300')  : null,
-        d.remaining            ? chip('remaining', d.remaining,          'text-yellow-300'): null,
-        d.fps != null          ? chip('fps',       d.fps,                'text-green-300') : null,
-        d.speed                ? chip('speed',     d.speed,              'text-purple-300'): null,
-      ].filter(Boolean).join(' ');
+          // ── filesystem browse ─────────────────────────────────────────────────
+          // Derive the directory to browse:
+          //   • empty input  → no path (server returns top-level configured roots)
+          //   • input ends in '/' → treat as directory
+          //   • otherwise → strip the last path component to get the parent dir,
+          //                  use remainder as the filename filter
+          let browseDir = '';
+          let fileFilter = '';
+          if (q) {
+            if (q.endsWith('/')) {
+              browseDir = q.slice(0, -1);
+            } else {
+              const slash = q.lastIndexOf('/');
+              browseDir = slash > 0 ? q.slice(0, slash) : '/';
+              fileFilter = q.slice(slash + 1).toLowerCase();
+            }
+          }
 
-      return `<span class="text-blue-400 font-semibold">Progress</span> ${bar}${chips}`;
-    },
-    _renderOutputData(d) {
-      const esc = this._esc.bind(this);
-      const v = d.video || {};
-      const audios = d.audio || [];
-      const subs = d.subtitle || [];
+          // Skip the network call if the directory hasn't changed since last call
+          if (browseDir === this._acBrowseDir && seq !== 1) return;
+          this._acBrowseDir = browseDir;
 
-      const sources = (d.source || []).map(s => {
-        const name = s.split('/').pop();
-        return `<span title="${esc(s)}">${esc(name)}</span>`;
-      }).join(', ');
+          try {
+            const url = '/browse' + (browseDir ? '?path=' + encodeURIComponent(browseDir) : '');
+            const resp = await fetch(url, { headers: this.authHeaders() });
+            if (seq !== this._acSeq) return; // superseded by a newer keystroke
+            if (!resp.ok) return;
+            const data = await resp.json();
 
-      const vParts = [
-        v.codec         ? `<span class="text-purple-300">${esc(v.codec)}</span>` : null,
-        v.title         ? `<span class="text-gray-400">${esc(v.title)}</span>` : null,
-        v.bitrate       ? `${v.bitrate}k` : null,
-        v.maxrate       ? `max:${esc(String(v.maxrate))}` : null,
-        v.preset        ? `preset:${esc(v.preset)}` : null,
-        v.level         ? `L${v.level}` : null,
-        v.framedata?.pix_fmt ? `<span class="text-gray-400">${esc(v.framedata.pix_fmt)}</span>` : null,
-        v.params        ? `<span class="text-gray-500 italic">${esc(v.params)}</span>` : null,
-      ].filter(Boolean).join(' <span class="text-gray-700">·</span> ');
+            // Build filesystem candidates
+            const fsCandidates = [];
+            const staticValues = new Set(staticCandidates.map(c => c.value));
 
-      const aLines = audios.map((a, i) => {
-        const parts = [
-          a.codec    ? `<span class="text-green-300">${esc(a.codec)}</span>` : null,
-          a.channels ? `${a.channels}ch` : null,
-          a.bitrate  ? `${a.bitrate}k` : null,
-          a.language ? `<span class="text-gray-400">[${esc(a.language)}]</span>` : null,
-          a.title    ? `&quot;${esc(a.title)}&quot;` : null,
-        ].filter(Boolean).join(' ');
-        const label = audios.length > 1 ? `audio ${i+1}` : 'audio';
-        return `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">${label}</span><span>${parts}</span></div>`;
-      }).join('');
+            for (const d of (data.dirs || [])) {
+              if (staticValues.has(d)) continue;
+              const name = d.split('/').pop().toLowerCase();
+              if (!fileFilter || name.startsWith(fileFilter)) {
+                fsCandidates.push({ group: 'dir', value: d, sort: 2 });
+              }
+            }
+            for (const f of (data.files || [])) {
+              if (staticValues.has(f)) continue;
+              const name = f.split('/').pop().toLowerCase();
+              if (!fileFilter || name.startsWith(fileFilter)) {
+                fsCandidates.push({ group: 'file', value: f, sort: 3 });
+              }
+            }
 
-      const subLine = subs.length
-        ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">subs</span><span class="text-gray-400">${subs.length} track${subs.length > 1 ? 's' : ''}</span></div>`
-        : '';
+            this._applyAcItems([...staticCandidates, ...fsCandidates], seq);
+          } catch (_) { /* network error — static results already shown */ }
+        },
 
-      return `<span class="text-yellow-300 font-semibold">Output Data</span> <span class="text-gray-500">[${esc(d.format || '')}]</span>`
-        + `<div class="mt-1 space-y-0.5">`
-        + `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">source</span><span class="break-all">${sources}</span></div>`
-        + (vParts ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">video</span><span>${vParts}</span></div>` : '')
-        + aLines
-        + subLine
-        + `</div>`;
-    },
-  };
-}
-</script>
+        _applyAcItems(candidates, seq) {
+          if (seq !== this._acSeq) return;
+          this.acItems = candidates.slice(0, 16);
+          if (this.acIndex >= this.acItems.length) this.acIndex = -1;
+          this.acOpen = this.acItems.length > 0;
+        },
+
+        acMove(dir) {
+          if (!this.acOpen) return;
+          this.acIndex = Math.max(-1, Math.min(this.acItems.length - 1, this.acIndex + dir));
+        },
+        // Returns true if a selection was made (suppresses form submit on Enter).
+        acAccept() {
+          if (!this.acOpen || this.acIndex < 0) return false;
+          this.acSelect(this.acItems[this.acIndex]);
+          return true;
+        },
+        acSelect(item) {
+          // For directories, append '/' so the next keystroke browses into them.
+          this.submitPath = item.group === 'dir' ? item.value + '/' : item.value;
+          this._acBrowseDir = '';
+          this.acClose();
+          // Immediately re-trigger so drilling into a directory feels instant.
+          if (item.group === 'dir') this.acInput();
+        },
+        acClose() {
+          this.acOpen = false;
+          this.acIndex = -1;
+        },
+        // ─────────────────────────────────────────────────────────────────────────
+        fmtTime(t) {
+          if (!t) return '-';
+          const d = new Date(t.includes('Z') || t.includes('+') ? t : t + 'Z');
+          return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        },
+        fmtDuration(j) {
+          if (!j.started_at) return '-';
+          const start = new Date(j.started_at.includes('Z') || j.started_at.includes('+') ? j.started_at : j.started_at + 'Z');
+          const end = j.completed_at ? new Date(j.completed_at.includes('Z') || j.completed_at.includes('+') ? j.completed_at : j.completed_at + 'Z') : new Date();
+          const s = Math.round((end - start) / 1000);
+          if (s < 60) return s + 's';
+          if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+          return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+        },
+        fmtUptime(s) {
+          if (s == null) return '';
+          if (s < 60) return s + 's';
+          if (s < 3600) return Math.floor(s / 60) + 'm';
+          if (s < 86400) return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+          return Math.floor(s / 86400) + 'd ' + Math.floor((s % 86400) / 3600) + 'h';
+        },
+        // ── Log Viewer ────────────────────────────────────────────────────────────
+        logViewer: {
+          open: false, logname: '', jobId: null, title: '',
+          entries: [], fileSize: 0, liveMode: false, loading: false,
+          levelFilter: '', searchText: '', pollTimer: null,
+        },
+        openLogViewer(logname, title, jobId) {
+          this.logViewer.logname = logname;
+          this.logViewer.title = title || logname;
+          this.logViewer.jobId = jobId || null;
+          this.logViewer.entries = [];
+          this.logViewer.fileSize = 0;
+          this.logViewer.levelFilter = '';
+          this.logViewer.searchText = '';
+          this.logViewer.liveMode = false;
+          if (this.logViewer.pollTimer) { clearInterval(this.logViewer.pollTimer); this.logViewer.pollTimer = null; }
+          this.logViewer.open = true;
+          this.$nextTick(() => this.fetchLog());
+        },
+        closeLogViewer() {
+          this.stopLiveMode();
+          this.logViewer.open = false;
+        },
+        async fetchLog() {
+          this.logViewer.loading = true;
+          const params = new URLSearchParams({ lines: 500 });
+          if (this.logViewer.jobId) params.set('job_id', this.logViewer.jobId);
+          try {
+            const r = await fetch('/logs/' + this.logViewer.logname + '?' + params, { headers: this.authHeaders() });
+            if (r.ok) {
+              const d = await r.json();
+              this.logViewer.entries = d.entries || [];
+              this.logViewer.fileSize = d.file_size || 0;
+            }
+          } catch (_) { }
+          this.logViewer.loading = false;
+          this.$nextTick(() => this.scrollLogToBottom());
+        },
+        async pollLog() {
+          const params = new URLSearchParams({ offset: this.logViewer.fileSize });
+          if (this.logViewer.jobId) params.set('job_id', this.logViewer.jobId);
+          try {
+            const r = await fetch('/logs/' + this.logViewer.logname + '/tail?' + params, { headers: this.authHeaders() });
+            if (r.ok) {
+              const d = await r.json();
+              if (d.entries && d.entries.length) {
+                this.logViewer.entries.push(...d.entries);
+                // Cap at 5000 entries to avoid memory growth
+                if (this.logViewer.entries.length > 5000) {
+                  this.logViewer.entries = this.logViewer.entries.slice(-5000);
+                }
+                this.$nextTick(() => this.scrollLogToBottom());
+              }
+              if (d.file_size != null) this.logViewer.fileSize = d.file_size;
+            }
+          } catch (_) { }
+        },
+        startLiveMode() {
+          this.logViewer.liveMode = true;
+          this.logViewer.pollTimer = setInterval(() => this.pollLog(), 3000);
+        },
+        stopLiveMode() {
+          this.logViewer.liveMode = false;
+          if (this.logViewer.pollTimer) { clearInterval(this.logViewer.pollTimer); this.logViewer.pollTimer = null; }
+        },
+        logViewerFiltered() {
+          const _LEVEL = { DEBUG: 0, INFO: 1, WARNING: 2, ERROR: 3, CRITICAL: 4 };
+          const minLevel = _LEVEL[this.logViewer.levelFilter] ?? -1;
+          const search = this.logViewer.searchText.toLowerCase();
+          return this.logViewer.entries.filter(e => {
+            if (minLevel >= 0 && (_LEVEL[(e.level || '').toUpperCase()] ?? -1) < minLevel) return false;
+            if (search && !(e.message || '').toLowerCase().includes(search)) return false;
+            return true;
+          });
+        },
+        scrollLogToBottom() {
+          const el = document.getElementById('log-viewer-body');
+          if (el) el.scrollTop = el.scrollHeight;
+        },
+        formatLogMessage(e) {
+          const msg = e.message || '';
+          if (msg.startsWith('Output Data: ')) {
+            try {
+              const data = JSON.parse(msg.slice('Output Data: '.length));
+              return this._renderOutputData(data);
+            } catch (_) { }
+          }
+          if (msg.startsWith('Input Data: ')) {
+            try {
+              const data = JSON.parse(msg.slice('Input Data: '.length));
+              return this._renderInputData(data);
+            } catch (_) { }
+          }
+          if (msg.startsWith('Progress: ')) {
+            try {
+              const data = JSON.parse(msg.slice('Progress: '.length));
+              return this._renderProgress(data);
+            } catch (_) { }
+          }
+          return this._esc(msg);
+        },
+        _esc(s) {
+          return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        },
+        _renderInputData(d) {
+          const esc = this._esc.bind(this);
+          const v = d.video || {};
+          const audios = d.audio || [];
+          const subs = d.subtitle || [];
+
+          const vParts = [
+            v.codec ? `<span class="text-purple-300">${esc(v.codec)}</span>` : null,
+            v.profile ? `<span class="text-gray-400">${esc(v.profile)}</span>` : null,
+            v.dimensions ? `<span class="text-gray-300">${esc(v.dimensions)}</span>` : null,
+            v.fps ? `${parseFloat(v.fps).toFixed(2)} fps` : null,
+            v.level ? `L${v.level}` : null,
+            v.pix_fmt ? `<span class="text-gray-400">${esc(v.pix_fmt)}</span>` : null,
+            v.field_order && v.field_order !== 'progressive' ? `<span class="text-orange-400">${esc(v.field_order)}</span>` : null,
+            v.bitrate ? `${Math.round(v.bitrate / 1000)}k` : null,
+          ].filter(Boolean).join(' <span class="text-gray-700">·</span> ');
+
+          const aLines = audios.map((a, i) => {
+            const parts = [
+              a.codec ? `<span class="text-green-300">${esc(a.codec)}</span>` : null,
+              a.channels ? `${a.channels}ch` : null,
+              a.samplerate ? `${Math.round(a.samplerate / 1000)}kHz` : null,
+              a.bitrate ? `${Math.round(a.bitrate / 1000)}k` : null,
+              a.language ? `<span class="text-gray-400">[${esc(a.language)}]</span>` : null,
+              a.disposition ? `<span class="text-gray-500 text-xs">${esc(a.disposition)}</span>` : null,
+            ].filter(Boolean).join(' ');
+            const label = audios.length > 1 ? `audio ${i + 1}` : 'audio';
+            return `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">${label}</span><span>${parts}</span></div>`;
+          }).join('');
+
+          const subLine = subs.length
+            ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">subs</span><span class="text-gray-400">${subs.map(s => s.language || 'und').join(', ')}</span></div>`
+            : '';
+
+          return `<span class="text-cyan-300 font-semibold">Input Data</span> <span class="text-gray-500">[${esc(d['format-fullname'] || d.format || '')}]</span>`
+            + `<div class="mt-1 space-y-0.5">`
+            + (vParts ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">video</span><span>${vParts}</span></div>` : '')
+            + aLines
+            + subLine
+            + `</div>`;
+        },
+        _renderProgress(d) {
+          const esc = this._esc.bind(this);
+          const chip = (label, value, colour) =>
+            `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono bg-gray-800 border border-gray-700">`
+            + `<span class="text-gray-500">${label}</span>`
+            + `<span class="${colour}">${esc(String(value))}</span>`
+            + `</span>`;
+
+          const pct = d.percent != null ? parseFloat(d.percent) : null;
+          const bar = pct != null
+            ? `<div class="w-24 h-1.5 bg-gray-700 rounded-full overflow-hidden inline-block align-middle mr-2">`
+            + `<div class="h-full bg-blue-500 rounded-full" style="width:${Math.min(100, pct).toFixed(1)}%"></div>`
+            + `</div>`
+            : '';
+
+          const chips = [
+            pct != null ? chip('%', pct.toFixed(1) + '%', 'text-blue-300') : null,
+            d.elapsed ? chip('elapsed', d.elapsed, 'text-gray-300') : null,
+            d.remaining ? chip('remaining', d.remaining, 'text-yellow-300') : null,
+            d.fps != null ? chip('fps', d.fps, 'text-green-300') : null,
+            d.speed ? chip('speed', d.speed, 'text-purple-300') : null,
+          ].filter(Boolean).join(' ');
+
+          return `<span class="text-blue-400 font-semibold">Progress</span> ${bar}${chips}`;
+        },
+        _renderOutputData(d) {
+          const esc = this._esc.bind(this);
+          const v = d.video || {};
+          const audios = d.audio || [];
+          const subs = d.subtitle || [];
+
+          const sources = (d.source || []).map(s => {
+            const name = s.split('/').pop();
+            return `<span title="${esc(s)}">${esc(name)}</span>`;
+          }).join(', ');
+
+          const vParts = [
+            v.codec ? `<span class="text-purple-300">${esc(v.codec)}</span>` : null,
+            v.title ? `<span class="text-gray-400">${esc(v.title)}</span>` : null,
+            v.bitrate ? `${v.bitrate}k` : null,
+            v.maxrate ? `max:${esc(String(v.maxrate))}` : null,
+            v.preset ? `preset:${esc(v.preset)}` : null,
+            v.level ? `L${v.level}` : null,
+            v.framedata?.pix_fmt ? `<span class="text-gray-400">${esc(v.framedata.pix_fmt)}</span>` : null,
+            v.params ? `<span class="text-gray-500 italic">${esc(v.params)}</span>` : null,
+          ].filter(Boolean).join(' <span class="text-gray-700">·</span> ');
+
+          const aLines = audios.map((a, i) => {
+            const parts = [
+              a.codec ? `<span class="text-green-300">${esc(a.codec)}</span>` : null,
+              a.channels ? `${a.channels}ch` : null,
+              a.bitrate ? `${a.bitrate}k` : null,
+              a.language ? `<span class="text-gray-400">[${esc(a.language)}]</span>` : null,
+              a.title ? `&quot;${esc(a.title)}&quot;` : null,
+            ].filter(Boolean).join(' ');
+            const label = audios.length > 1 ? `audio ${i + 1}` : 'audio';
+            return `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">${label}</span><span>${parts}</span></div>`;
+          }).join('');
+
+          const subLine = subs.length
+            ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">subs</span><span class="text-gray-400">${subs.length} track${subs.length > 1 ? 's' : ''}</span></div>`
+            : '';
+
+          return `<span class="text-yellow-300 font-semibold">Output Data</span> <span class="text-gray-500">[${esc(d.format || '')}]</span>`
+            + `<div class="mt-1 space-y-0.5">`
+            + `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">source</span><span class="break-all">${sources}</span></div>`
+            + (vParts ? `<div class="flex gap-2"><span class="text-gray-500 shrink-0 w-14">video</span><span>${vParts}</span></div>` : '')
+            + aLines
+            + subLine
+            + `</div>`;
+        },
+      };
+    }
+  </script>
 </body>
+
 </html>
