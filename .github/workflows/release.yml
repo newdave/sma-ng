@@ -70,14 +70,23 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
 
-      - name: Set up Python environment
-        uses: ./.github/actions/setup-python-env
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          install-command: pip install build
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            setup/requirements*.txt
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+
+      - name: Set up venv and install dev deps
+        run: mise run setup:deps:dev
 
       - name: Build wheel and sdist
-        run: python -m build
+        run: mise run build:dist
 
       - name: Upload dist to GitHub Release
         uses: softprops/action-gh-release@v2
