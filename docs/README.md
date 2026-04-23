@@ -1104,10 +1104,10 @@ mise run media:codecs           # List supported codecs
 #### Docker tasks
 
 ```bash
-mise run docker:build     # Build image locally (TAG=sma-ng:local to override)
+mise run build:docker     # Build image locally (TAG=sma-ng:local to override)
 SMA_DAEMON_DB_URL=postgresql://user:pass@host/db mise run docker:run
-mise run docker:shell     # Open shell in locally-built image
-mise run docker:smoke     # Smoke-test imports and ffmpeg
+mise run build:shell      # Open shell in locally-built image
+mise run test:smoke       # Smoke-test imports and ffmpeg
 ```
 
 ### Deployment System

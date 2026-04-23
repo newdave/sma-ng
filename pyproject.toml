@@ -78,10 +78,10 @@ packages = ["resources", "converter", "autoprocess"]
 [tool.ruff]
 target-version = "py312"
 line-length = 200
+indent-width = 2
 
 [tool.ruff.format]
 indent-style = "space"
-indent-width = 2
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]

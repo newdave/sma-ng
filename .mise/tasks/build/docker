@@ -2,8 +2,9 @@
 #MISE description="Build the Docker image locally for the native platform (PLATFORM=linux/amd64 to override; TAG=sma-ng:local to override tag)"
 set -euo pipefail
 
-TAG="${TAG:-sma-ng:local}"
-FFMPEG_VERSION="${FFMPEG_VERSION:-8.1}"
+# shellcheck source=../../shared/docker/env.sh
+# shellcheck disable=SC1091  # path declared above; shellcheck requires -x to follow sourced files
+source "${MISE_PROJECT_ROOT}/.mise/shared/docker/env.sh"
 # Default to native platform so --load works; multi-platform builds require --push.
 NATIVE="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
 PLATFORM="${PLATFORM:-$NATIVE}"
