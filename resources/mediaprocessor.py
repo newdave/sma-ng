@@ -214,6 +214,9 @@ class MediaProcessor:
             self.log.exception("Unable to generate options, unexpected exception occurred.")
             return None
 
+        if options and tagdata and getattr(tagdata, "title", None):
+            options["title"] = tagdata.title
+
         if self.canBypassConvert(inputfile, info, options):
             outputfile = inputfile
             self.log.info("Bypassing conversion and setting outputfile to inputfile.")
@@ -268,13 +271,17 @@ class MediaProcessor:
         Note: inputfile may change after convert() if FFmpeg renames it.
         """
         try:
+            input_dir, filename, input_extension = self.parseFile(inputfile)
+            finaloutputfile, _ = self.getOutputFile(input_dir, filename, input_extension)
+            if finaloutputfile:
+                options["filename"] = os.path.basename(finaloutputfile)
             self.log.info("Output Data: %s" % json.dumps(options, sort_keys=False))
-            self.log.info("Preopts: %s" % json.dumps(preopts, sort_keys=False))
-            self.log.info("Postopts: %s" % json.dumps(postopts, sort_keys=False))
+            self.log.debug("Preopts: %s" % json.dumps(preopts, sort_keys=False))
+            self.log.debug("Postopts: %s" % json.dumps(postopts, sort_keys=False))
             if not self.settings.embedsubs:
-                self.log.info("Subtitle Extracts: %s" % json.dumps(ripsubopts, sort_keys=False))
+                self.log.debug("Subtitle Extracts: %s" % json.dumps(ripsubopts, sort_keys=False))
             if self.settings.downloadsubs:
-                self.log.info("Downloaded Subtitles: %s" % json.dumps(downloaded_subs, sort_keys=False))
+                self.log.debug("Downloaded Subtitles: %s" % json.dumps(downloaded_subs, sort_keys=False))
         except KeyboardInterrupt:
             raise
         except Exception:
@@ -1040,6 +1047,16 @@ class MediaProcessor:
         ###############################################################
         options = {"source": sources, "format": self.settings.output_format, "video": video_settings, "audio": audio_settings, "subtitle": subtitle_settings, "attachment": attachments}
 
+        # Annotate action (copy vs transcode) for display in the log viewer
+        if video_settings and video_settings.get("codec"):
+            video_settings["action"] = "copy" if video_settings["codec"] == "copy" else "transcode"
+        for a in audio_settings:
+            if a.get("codec"):
+                a["action"] = "copy" if a["codec"] == "copy" else "transcode"
+        for s in subtitle_settings:
+            if s.get("codec"):
+                s["action"] = "copy" if s["codec"] == "copy" else "transcode"
+
         if self.settings.subencoding:
             options["sub-encoding"] = self.settings.subencoding
 
@@ -1790,6 +1807,7 @@ class MediaProcessor:
                     self.log.exception("Subtitle rip and cleaning failed.")
             self.log.info("Creating %s subtitle stream from source stream %d." % (embed_codec, s.index))
             subtitle_setting = {"map": s.index, "codec": embed_codec, "language": s.metadata["language"], "disposition": s.dispostr, "debug": "subtitle.embed-subs"}
+            subtitle_setting["is_forced"] = s.disposition.get("forced", False)
             subtitle_setting["title"] = self.subtitleStreamTitle(s, subtitle_setting, image_based, tagdata=tagdata)
             subtitle_settings.append(subtitle_setting)
             if self.settings.sub_first_language_stream and not s.disposition["forced"]:
@@ -1837,6 +1855,7 @@ class MediaProcessor:
             "codec": scodec,
             "disposition": sdisposition,
             "language": stream.metadata["language"],
+            "is_forced": getattr(stream, "forced", False),
             "debug": "subtitle.embed-subs",
         }
         subtitle_setting["title"] = self.subtitleStreamTitle(stream, subtitle_setting, image_based, path=external_sub.path, tagdata=tagdata)
