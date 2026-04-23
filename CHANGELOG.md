@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.19](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.18...sma-ng-v1.6.19) (2026-04-23)
+
+
+### Bug Fixes
+
+* code-base tooling config update ([5b7d7bb](https://github.com/newdave/sma-ng/commit/5b7d7bbb4b26939638922c47754f9c6422789c7c))
+
 ## [1.6.18](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.17...sma-ng-v1.6.18) (2026-04-23)
 
 
