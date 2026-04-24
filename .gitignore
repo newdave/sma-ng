@@ -40,6 +40,8 @@ config/autoProcess.ini
 config/autoProcess.ini-*
 config/autoProcess.ini.*
 config/autoProcess.*.ini
+config/sma-ng.yml
+config/sma-ng.yml.*
 config/daemon.json
 config/daemon.env
 config/logging.ini
