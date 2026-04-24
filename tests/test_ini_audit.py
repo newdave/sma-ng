@@ -100,6 +100,18 @@ class TestAuditIni:
     assert len(deprecated) == 1
     assert deprecated[0].level == "info"
 
+  def test_sonarr_and_radarr_sections_are_not_deprecated(self, tmp_path):
+    s = tmp_path / "sample.ini"
+    l = tmp_path / "live.ini"
+    _write(s, SAMPLE_INI)
+    _write(
+      l,
+      LIVE_CLEAN + "\n[Sonarr-Kids]\nhost = sonarr-kids.example.com\n\n[Radarr-4K]\nhost = radarr-4k.example.com\n",
+    )
+    findings = audit_ini(str(s), str(l))
+    deprecated_secs = [f for f in findings if f.section in {"Sonarr-Kids", "Radarr-4K"} and f.key == ""]
+    assert deprecated_secs == [], "Sonarr/Radarr wildcard sections must not be flagged as deprecated"
+
   def test_reports_missing_section_as_warning(self, tmp_path):
     s = tmp_path / "sample.ini"
     l = tmp_path / "live.ini"
