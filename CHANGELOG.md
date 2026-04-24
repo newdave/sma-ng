@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.31](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.30...sma-ng-v1.6.31) (2026-04-24)
+
+
+### Features
+
+* add ruamel.yaml dependency for YAML config support ([d7250ac](https://github.com/newdave/sma-ng/commit/d7250acf959ff07784e56e8966e28a8d1bd5f400))
+
 ## [1.6.30](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.29...sma-ng-v1.6.30) (2026-04-24)
 
 
