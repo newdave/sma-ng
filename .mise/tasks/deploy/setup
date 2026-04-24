@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Prepare remote hosts: generate SSH key, update ~/.ssh/config, copy key, install apt deps, create DEPLOY_DIR, verify ffmpeg"
+#MISE description="Prepare remote hosts: generate SSH key, update ~/.ssh/config, copy key, install apt deps, create DEPLOY_DIR, install systemd unit, verify ffmpeg"
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
@@ -97,7 +97,42 @@ for host in $DEPLOY_HOSTS; do
 REMOTE
 done
 
-# ── 5. create DEPLOY_DIR on each host ──────────────────────────────────────
+# ── 5. install Docker via the Docker apt repo on each host ──────────────────
+for host in $DEPLOY_HOSTS; do
+    cfg="$CFG $LOCAL $host"
+    port=$($cfg SSH_PORT 22)
+    key=$($cfg SSH_KEY "")
+    use_sudo=$($cfg DEPLOY_USE_SUDO "false")
+
+    mk_ssh_opts "$port" "$key"
+
+    sudo_prefix=""
+    [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
+
+    echo "==> [$host] installing Docker via apt"
+    # shellcheck disable=SC2029,SC2087  # sudo_prefix expands client-side; the heredoc body stays literal until the remote shell runs it.
+    ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}bash -s" <<'REMOTE'
+    if command -v docker >/dev/null 2>&1; then
+      echo '  SKIP: docker already installed'
+      exit 0
+    fi
+    if ! command -v apt-get >/dev/null 2>&1; then
+      echo '  SKIP: apt-get not found'
+      exit 0
+    fi
+    apt-get install -y ca-certificates curl
+    install -m 0755 -d /etc/apt/keyrings
+    . /etc/os-release
+    curl -fsSL "https://download.docker.com/linux/${ID}/gpg" -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${ID} ${VERSION_CODENAME:-${UBUNTU_CODENAME}} stable" \
+      | tee /etc/apt/sources.list.d/docker.list > /dev/null
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+REMOTE
+done
+
+# ── 6. create DEPLOY_DIR on each host ──────────────────────────────────────
 for host in $DEPLOY_HOSTS; do
     cfg="$CFG $LOCAL $host"
     dir=$($cfg DEPLOY_DIR ~/sma)
@@ -118,7 +153,7 @@ for host in $DEPLOY_HOSTS; do
     fi
 done
 
-# ── 6. sync code and install/enable systemd service on each host ───────────
+# ── 7. sync code and install systemd service on each host ─────────────────
 for host in $DEPLOY_HOSTS; do
     cfg="$CFG $LOCAL $host"
     dir=$($cfg DEPLOY_DIR ~/sma)
@@ -146,7 +181,7 @@ for host in $DEPLOY_HOSTS; do
     remote_user=$(echo "$host" | cut -s -d@ -f1)
     remote_user="${remote_user:-$(whoami)}"
     install_dir=$($cfg SMA_INSTALL_DIR "/opt/sma")
-    echo "==> [$host] installing and enabling sma-daemon service (user: $remote_user, dir: $install_dir)"
+    echo "==> [$host] installing sma-daemon service (user: $remote_user, dir: $install_dir)"
     # shellcheck disable=SC2029,SC2087  # dir/remote_user/install_dir expand client-side; heredoc body stays literal until the remote shell runs it.
     ssh "${SSH_OPTS[@]}" "$host" 'bash -s' "$dir" "$remote_user" "$install_dir" <<'REMOTE'
       set -euo pipefail
@@ -166,38 +201,18 @@ for host in $DEPLOY_HOSTS; do
       sed "s/^User=.*/User=${service_user}/; s/^Group=.*/Group=${service_user}/; s|/opt/sma|${install_dir}|g" setup/sma-daemon.service \
         | sudo tee /etc/systemd/system/sma-daemon.service > /dev/null
       sudo systemctl daemon-reload
-      sudo systemctl enable --now sma-daemon
-REMOTE
-done
+#      sudo systemctl enable --now sma-daemon  # (removed: do not enable/start by default)
+```
+This is the description of what the code block changes:
+<changeDescription>
+Remove the sudo systemctl enable --now sma-daemon line from the heredoc so the service is only installed, not enabled or started.
+</changeDescription>
 
-# ── 7. verify ffmpeg/ffprobe in FFMPEG_DIR on each host ─────────────────────
-ok=1
-for host in $DEPLOY_HOSTS; do
-    cfg="$CFG $LOCAL $host"
-    ffmpeg_dir=$($cfg FFMPEG_DIR "")
-    port=$($cfg SSH_PORT 22)
-    key=$($cfg SSH_KEY "")
-
-    mk_ssh_opts "$port" "$key"
-
-    if [ -z "$ffmpeg_dir" ]; then
-        echo "==> [$host] FFMPEG_DIR not set, skipping ffmpeg check"
-        continue
-    fi
-
-    echo "==> [$host] checking $ffmpeg_dir/ffmpeg and $ffmpeg_dir/ffprobe"
-    missing=""
-    # shellcheck disable=SC2029  # ffmpeg_dir intentionally expands client-side before the remote shell runs.
-    ssh "${SSH_OPTS[@]}" "$host" "test -x $ffmpeg_dir/ffmpeg"  2>/dev/null || missing="$missing ffmpeg"
-    # shellcheck disable=SC2029  # ffmpeg_dir intentionally expands client-side before the remote shell runs.
-    ssh "${SSH_OPTS[@]}" "$host" "test -x $ffmpeg_dir/ffprobe" 2>/dev/null || missing="$missing ffprobe"
-
-    if [ -n "$missing" ]; then
-        echo "  WARNING: [$host] not found in $ffmpeg_dir:$missing"
-        ok=0
-    else
-        echo "  OK: [$host] ffmpeg and ffprobe found in $ffmpeg_dir"
-    fi
-done
-
-[ "$ok" = "1" ] || echo "WARNING: some hosts are missing ffmpeg/ffprobe — install them before deploying"
+This is the code block that represents the suggested code change:
+```bash
+sudo chmod 755 setup/sma-daemon-start.sh
+      sed "s/^User=.*/User=${service_user}/; s/^Group=.*/Group=${service_user}/; s|/opt/sma|${install_dir}|g" setup/sma-daemon.service \
+        | sudo tee /etc/systemd/system/sma-daemon.service > /dev/null
+      sudo systemctl daemon-reload
+#      sudo systemctl enable --now sma-daemon  # (removed: do not enable/start by default)
+```

@@ -1,4 +1,4 @@
-[Converter]
+[converter]
 bypass-if-copying-all = True
 copy-to =
 delete-original = True
@@ -28,12 +28,12 @@ threads = 0
 wait-post-process = False
 hwdevices =
 
-[Permissions]
+[permissions]
 chmod = 0664
 gid = -1
 uid = -1
 
-[Metadata]
+[metadata]
 download-artwork = poster
 full-path-guess = True
 keep-titles = False
@@ -43,7 +43,7 @@ strip-metadata = True
 tag = True
 tag-language = eng
 
-[Video]
+[video]
 b-frames = 3
 # codec controls the target video codec priority.
 # The first codec is the encoder target. Later codecs are treated as passthrough-compatible.
@@ -78,7 +78,7 @@ prioritize-source-pix-fmt = true
 profile =
 ref-frames = 4
 
-[HDR]
+[hdr]
 b-frames = 3
 # codec works the same way here as in [Video], but only for HDR sources.
 # Leave blank to inherit the normal [Video] codec chain.
@@ -97,7 +97,7 @@ ref-frames = 4
 space = bt2020nc
 transfer = smpte2084
 
-[Audio]
+[audio]
 # codec controls the target audio codec priority.
 # The first codec is used for encoding new audio tracks.
 # Later codecs are treated as copy-eligible passthrough formats.
@@ -126,12 +126,12 @@ stream-codec-combinations =
 unique-dispositions = false
 variable-bitrate = 0
 
-[Audio.Sorting]
+[audio.sorting]
 codecs =
 default-sorting = channels.d, map, d.comment
 sorting = language, channels.d, map, d.comment
 
-[Universal Audio]
+[universal audio]
 enabled = false
 codec = aac
 # enabled controls whether SMA creates an extra stereo-friendly fallback audio stream.
@@ -143,9 +143,9 @@ force-filter = False
 profile =
 variable-bitrate = 0
 
-[Audio.ChannelFilters]
+[audio.channelfilters]
 
-[Subtitle]
+[subtitle]
 # codec controls the text subtitle format written into the output container.
 # For MP4, mov_text is the usual default. Use codec-image-based to keep PGS/VobSub streams.
 codec = mov_text
@@ -168,30 +168,30 @@ languages =
 remove-bitstream-subs = False
 unique-dispositions = False
 
-[Subtitle.Sorting]
+[subtitle.sorting]
 burn-sorting = language, d.comment, d.default.d, d.forced.d
 codecs =
 sorting = language, d.comment, d.default.d, d.forced.d
 
-[Subtitle.CleanIt]
+[subtitle.cleanit]
 enabled = true
 config-path =
 tags =
 
-[Subtitle.FFSubsync]
+[subtitle.ffsubsync]
 enabled = true
 
-[Subtitle.Subliminal]
+[subtitle.subliminal]
 download-forced-subs = False
 download-subs = False
 include-hearing-impaired-subs = False
 providers =
 
-[Subtitle.Subliminal.Auth]
+[subtitle.subliminal.auth]
 opensubtitles =
 tvsubtitles =
 
-[Sonarr]
+[sonarr]
 apikey =
 host = localhost
 port = 8989
@@ -218,7 +218,7 @@ webroot =
 # ssl = False
 # webroot =
 
-[Radarr]
+[radarr]
 apikey =
 host = localhost
 port = 7878
@@ -245,7 +245,20 @@ webroot =
 # ssl = False
 # webroot =
 
-[SABNZBD]
+
+# [Radarr-Kids]
+# apikey =
+# host = localhost
+# port = 7879
+# block-reprocess = False
+# force-rename = True
+# in-progress-check = True
+# path = /mnt/media/Movies/4K
+# rescan = True
+# ssl = False
+# webroot =
+
+[sabnzbd]
 bypass-category = bypass
 convert = True
 output-directory =
@@ -253,7 +266,7 @@ path-mapping =
 radarr-category = movies
 sonarr-category = tv
 
-[Deluge]
+[deluge]
 bypass-label = bypass
 convert = True
 host = localhost
@@ -266,7 +279,7 @@ remove = False
 sonarr-label = sonarr
 username =
 
-[qBittorrent]
+[qbittorrent]
 action-after =
 action-before =
 bypass-label = bypass
@@ -281,7 +294,7 @@ sonarr-label = tv
 ssl = False
 username =
 
-[uTorrent]
+[utorrent]
 action-after =
 action-before =
 bypass-label = bypass
@@ -300,7 +313,7 @@ webui = False
 # Download client sections are grouped together here. Configure the one(s)
 # you actually use and leave the others blank.
 
-[Plex]
+[plex]
 host = localhost
 ignore-certs = True
 path-mapping =

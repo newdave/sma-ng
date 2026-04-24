@@ -22,7 +22,7 @@ EnvironmentFile=-/opt/sma/config/daemon.env
 Environment="SMA_DAEMON_HOST=0.0.0.0"
 Environment="SMA_DAEMON_PORT=8585"
 Environment="SMA_DAEMON_WORKERS=2"
-Environment="SMA_CONFIG=/opt/sma/config/autoProcess.ini"
+Environment="SMA_CONFIG=/opt/sma/config/sma-ng.yml"
 # Set SMA_DAEMON_DB_URL to configure the PostgreSQL backend.
 # Required — the daemon will not start without it.
 # Format: postgresql://user:password@host:port/dbname

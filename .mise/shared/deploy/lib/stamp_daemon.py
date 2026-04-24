@@ -1,4 +1,4 @@
-"""Stamp daemon credentials into config/daemon.json and config/daemon.env.
+"""Stamp daemon credentials into sma-ng.yml Daemon section and config/daemon.env.
 
 Usage: python3 stamp_daemon.py <deploy_dir> <api_key_b64> <db_url_b64>
            <ffmpeg_dir_b64> <node_name_b64> <db_user_b64> <db_pw_b64>
@@ -24,6 +24,8 @@ import os
 import re
 import sys
 
+from ruamel.yaml import YAML
+
 
 def _b64arg(n, default=""):
   if len(sys.argv) > n and sys.argv[n]:
@@ -44,43 +46,57 @@ db_pw = _b64arg(7)
 db_name = _b64arg(8)
 services = json.loads(base64.b64decode(sys.argv[9]).decode()) if len(sys.argv) > 9 else {}
 
-# ── daemon.json ───────────────────────────────────────────────────────────
-json_path = os.path.join(deploy_dir, "config", "daemon.json")
-if os.path.exists(json_path):
-  with open(json_path) as f:
-    cfg = json.load(f)
+# ── sma-ng.yml Daemon section ─────────────────────────────────────────────
+yaml_path = os.path.join(deploy_dir, "config", "sma-ng.yml")
+if os.path.exists(yaml_path):
+  yaml = YAML(typ="rt")
+  yaml.width = 120
+  with open(yaml_path) as f:
+    root = yaml.load(f) or {}
+  cfg = root.setdefault("Daemon", {})
   changed = False
   for field, val in [("api_key", api_key), ("db_url", db_url), ("ffmpeg_dir", ffmpeg_dir)]:
     if val and cfg.get(field) != val:
-      print(f"  daemon.json {field}: {cfg.get(field)!r} -> {val!r}")
+      print(f"  sma-ng.yml Daemon.{field}: {cfg.get(field)!r} -> {val!r}")
       cfg[field] = val
       changed = True
 
-  # Rebuild path_configs from service sections that have media_path + config_file.
+  # Rebuild path_configs from service sections that have path + profile.
   # Entries are sorted longest-path-first so the daemon's prefix matching works
   # correctly (more specific paths take priority).
   path_entries = []
   for sec, keys in services.items():
-    media_path = keys.get("media_path", "").strip()
+    path = keys.get("path", "").strip()
+    profile = keys.get("profile", "").strip()
     config_file = keys.get("config_file", "").strip()
-    if media_path and config_file:
-      path_entries.append({"path": media_path, "config": config_file})
+    if path and (profile or config_file):
+      entry = {"path": path}
+      if profile:
+        entry["profile"] = profile
+      else:
+        basename = os.path.basename(config_file)
+        if basename == "autoProcess.lq.ini":
+          entry["profile"] = "lq"
+        elif basename == "autoProcess.rq.ini":
+          entry["profile"] = "rq"
+        else:
+          entry["config"] = config_file.replace(".ini", ".yaml")
+      path_entries.append(entry)
   if path_entries:
     path_entries.sort(key=lambda e: len(e["path"]), reverse=True)
     old = cfg.get("path_configs", [])
     if old != path_entries:
-      print(f"  daemon.json path_configs: rebuilding {len(path_entries)} entries")
+      print(f"  sma-ng.yml Daemon.path_configs: rebuilding {len(path_entries)} entries")
       for e in path_entries:
-        print(f"    {e['path']} -> {e['config']}")
+        print(f"    {e['path']} -> {e.get('config') or e.get('profile')}")
       cfg["path_configs"] = path_entries
       changed = True
 
   if changed:
-    with open(json_path, "w") as f:
-      json.dump(cfg, f, indent=2)
-      f.write("\n")
+    with open(yaml_path, "w") as f:
+      yaml.dump(root, f)
 else:
-  print("  WARNING: config/daemon.json not found, skipping")
+  print("  WARNING: config/sma-ng.yml not found, skipping daemon YAML stamping")
 
 # ── daemon.env ────────────────────────────────────────────────────────────
 env_path = os.path.join(deploy_dir, "config", "daemon.env")
