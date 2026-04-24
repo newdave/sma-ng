@@ -1,12 +1,12 @@
-"""Audit autoProcess.ini files against a sample and cross-check with daemon.json.
+"""Audit autoProcess YAML/INI files against a sample and cross-check daemon settings.
 
 Exit code 0: no issues found.
 Exit code 1: one or more issues found.
 
 Usage:
-  python3 scripts/ini_audit.py --sample setup/autoProcess.ini.sample \\
-      --ini config/autoProcess.ini [config/autoProcess.lq.ini ...] \\
-      [--daemon config/daemon.json] [--json]
+  python3 scripts/ini_audit.py --sample setup/sma-ng.yml.sample \\
+      --ini config/sma-ng.yml [config/autoProcess.ini ...] \\
+      [--daemon config/sma-ng.yml] [--json]
 
 Checks performed:
   Per-INI:
@@ -16,7 +16,7 @@ Checks performed:
     - Keys present in the live file but absent from the sample (info: deprecated)
 
   Cross-file (when --daemon is provided):
-    - ffmpeg_dir in daemon.json vs [Converter] ffmpeg / ffprobe in the INI
+    - ffmpeg_dir in daemon config vs [Converter] ffmpeg / ffprobe in the config
       files.  If ffmpeg_dir is set and an INI contains absolute paths for
       ffmpeg/ffprobe that are NOT inside ffmpeg_dir, that is a conflict.
       Bare names (e.g. "ffmpeg") are always considered consistent.
@@ -33,7 +33,10 @@ from typing import Optional
 # Allow importing parse_keys from the shared deploy lib without installing it.
 _LIB_DIR = os.path.join(os.path.dirname(__file__), "..", ".mise", "shared", "deploy", "lib")
 sys.path.insert(0, os.path.abspath(_LIB_DIR))
-from ini_merge import parse_keys  # noqa: E402
+from ini_merge import parse_keys as parse_ini_keys  # noqa: E402
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from yaml_merge import parse_keys as parse_yaml_keys  # noqa: E402
 
 # ── Finding dataclass ────────────────────────────────────────────────────────
 
@@ -67,10 +70,17 @@ class Finding:
 # ── Per-INI audit ────────────────────────────────────────────────────────────
 
 
+def parse_config_keys(path: str) -> dict:
+  """Load config keys from either YAML or INI."""
+  if path.endswith((".yaml", ".yml")):
+    return parse_yaml_keys(path)
+  return parse_ini_keys(path)
+
+
 def audit_ini(sample_path: str, live_path: str) -> list[Finding]:
-  """Compare a live INI against the sample and return findings."""
-  sample_secs = parse_keys(sample_path)
-  live_secs = parse_keys(live_path)
+  """Compare a live config against the sample and return findings."""
+  sample_secs = parse_config_keys(sample_path)
+  live_secs = parse_config_keys(live_path)
   findings: list[Finding] = []
 
   for sec, sample_keys in sample_secs.items():
@@ -119,9 +129,12 @@ def audit_ini(sample_path: str, live_path: str) -> list[Finding]:
   # (any prefix of those names is auto-discovered by readsettings) so they are
   # never deprecated — skip them entirely.
   _WILDCARD_PREFIXES = ("sonarr", "radarr")
+  _SKIP_SECTIONS = {"Profiles", "Daemon"}
 
   for sec in live_secs:
     if sec not in sample_secs:
+      if sec in _SKIP_SECTIONS:
+        continue
       if sec.lower().startswith(_WILDCARD_PREFIXES):
         continue
       findings.append(
@@ -164,12 +177,15 @@ def audit_cross_file(
   daemon_path: str,
   ini_paths: list[str],
 ) -> list[Finding]:
-  """Check consistency between daemon.json ffmpeg_dir and INI ffmpeg/ffprobe paths."""
+  """Check consistency between daemon ffmpeg_dir and config ffmpeg/ffprobe paths."""
   findings: list[Finding] = []
 
   try:
-    with open(daemon_path) as f:
-      daemon_cfg = json.load(f)
+    if daemon_path.endswith((".yaml", ".yml")):
+      daemon_cfg = parse_yaml_keys(daemon_path).get("Daemon", {})
+    else:
+      with open(daemon_path) as f:
+        daemon_cfg = json.load(f)
   except (OSError, json.JSONDecodeError) as exc:
     findings.append(
       Finding(
@@ -177,7 +193,7 @@ def audit_cross_file(
         source=daemon_path,
         section="",
         key="",
-        message=f"Could not load daemon.json: {exc}",
+        message=f"Could not load daemon config: {exc}",
       )
     )
     return findings
@@ -189,7 +205,7 @@ def audit_cross_file(
       continue
 
     for ini_path in ini_paths:
-      ini_secs = parse_keys(ini_path)
+      ini_secs = parse_config_keys(ini_path)
       ini_val = ini_secs.get(ini_section, {}).get(ini_key)
       if ini_val is None:
         continue  # key not present — covered by audit_ini
@@ -206,7 +222,7 @@ def audit_cross_file(
             source=ini_path,
             section=ini_section,
             key=ini_key,
-            message=(f'"{ini_key} = {ini_val}" is an absolute path outside daemon.json {daemon_key} ({daemon_val!r}).  Use a bare name or a path inside {daemon_val!r}.'),
+            message=(f'"{ini_key} = {ini_val}" is an absolute path outside daemon {daemon_key} ({daemon_val!r}).  Use a bare name or a path inside {daemon_val!r}.'),
           )
         )
 
@@ -221,11 +237,11 @@ def main() -> None:
   import glob as _glob
 
   parser = argparse.ArgumentParser(
-    description="Audit autoProcess.ini files against a sample.",
+    description="Audit autoProcess config files against a sample.",
   )
-  parser.add_argument("--sample", required=True, help="Path to autoProcess.ini.sample")
-  parser.add_argument("--ini", nargs="+", required=True, help="One or more live INI files (globs are expanded by the shell)")
-  parser.add_argument("--daemon", default="", help="Path to daemon.json for cross-file checks")
+  parser.add_argument("--sample", required=True, help="Path to autoProcess sample")
+  parser.add_argument("--ini", nargs="+", required=True, help="One or more live config files (globs are expanded by the shell)")
+  parser.add_argument("--daemon", default="", help="Path to daemon config for cross-file checks")
   parser.add_argument("--json", action="store_true", help="Output findings as a JSON array")
   args = parser.parse_args()
 

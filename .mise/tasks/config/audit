@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-#MISE description="Audit local autoProcess.ini files against the sample and daemon.json"
+#MISE description="Audit local SMA-NG config files against the sample and daemon settings"
 #MISE aliases=["deploy:config:audit"]
 set -euo pipefail
 
-sample="${SAMPLE:-setup/autoProcess.ini.sample}"
-daemon="${DAEMON:-config/daemon.json}"
+sample="${SAMPLE:-setup/sma-ng.yml.sample}"
+daemon="${DAEMON:-config/sma-ng.yml}"
 json_output="${JSON:-false}"
 
 ini_files=()
+for yaml in config/*.yaml config/*.yml; do
+    [ -f "$yaml" ] || continue
+    ini_files+=("$yaml")
+done
 for ini in config/*.ini; do
     [ -f "$ini" ] || continue
     ini_files+=("$ini")
 done
 
 if [ "${#ini_files[@]}" -eq 0 ]; then
-    echo "ERROR: no config/*.ini files found to audit" >&2
+    echo "ERROR: no config/*.yaml, config/*.yml, or config/*.ini files found to audit" >&2
     exit 1
 fi
 
