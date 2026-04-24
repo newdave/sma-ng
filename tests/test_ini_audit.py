@@ -90,6 +90,16 @@ class TestAuditIni:
     assert missing[0].level == "warning"
     assert missing[0].section == "Converter"
 
+  def test_yaml_missing_key_as_warning(self, tmp_path):
+    s = tmp_path / "sample.yaml"
+    l = tmp_path / "live.yaml"
+    _write(s, "Converter:\n  ffmpeg: ffmpeg\n  ffprobe: ffprobe\n")
+    _write(l, "Converter:\n  ffmpeg: ffmpeg\n")
+    findings = audit_ini(str(s), str(l))
+    missing = [f for f in findings if f.key == "ffprobe"]
+    assert len(missing) == 1
+    assert missing[0].level == "warning"
+
   def test_reports_deprecated_key_as_info(self, tmp_path):
     s = tmp_path / "sample.ini"
     l = tmp_path / "live.ini"
@@ -227,6 +237,15 @@ class TestAuditCrossFile:
     _write(ini, "[Converter]\nffmpeg = /anywhere/ffmpeg\n")
     findings = audit_cross_file(str(daemon), [str(ini)])
     assert findings == []
+
+  def test_yaml_daemon_cross_file(self, tmp_path):
+    daemon = tmp_path / "sma-ng.yml"
+    daemon.write_text("Daemon:\n  ffmpeg_dir: /opt/ffmpeg\n")
+    config = tmp_path / "live.yaml"
+    config.write_text("Converter:\n  ffmpeg: /usr/bin/ffmpeg\n  ffprobe: ffprobe\n")
+    findings = audit_cross_file(str(daemon), [str(config)])
+    conflicts = [f for f in findings if f.key == "ffmpeg"]
+    assert len(conflicts) == 1
 
   def test_malformed_daemon_json_returns_error_finding(self, tmp_path):
     daemon = tmp_path / "daemon.json"
