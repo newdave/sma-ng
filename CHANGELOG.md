@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.29](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.28...sma-ng-v1.6.29) (2026-04-24)
+
+
+### Bug Fixes
+
+* suppress false deprecation warnings for Sonarr/Radarr sections in ini_audit ([f755d16](https://github.com/newdave/sma-ng/commit/f755d16044265d9eba783b95836d0622f3ed78b5))
+
 ## [1.6.28](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.27...sma-ng-v1.6.28) (2026-04-24)
 
 
