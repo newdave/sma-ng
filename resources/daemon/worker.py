@@ -147,6 +147,9 @@ class ConversionWorker(threading.Thread):
       return
 
     try:
+      profile = job.get("profile")
+      if profile and "--profile" not in args and "-p" not in args:
+        args = ["--profile", profile] + args
       success = self._run_conversion(job_id, path, config_file, args)
       if success:
         self.job_db.complete_job(job_id)

@@ -651,7 +651,7 @@ class TestDaemonServerShutdown:
     server.node_id = "mynode"
     with patch("http.server.HTTPServer.shutdown"):
       server.shutdown()
-    server.job_db.mark_node_offline.assert_called_once_with("mynode")
+    server.job_db.mark_node_offline.assert_called_once_with("mynode", remove=True)
 
   def test_shutdown_skips_mark_offline_when_not_distributed(self):
     server = self._make_shutdown_server()
@@ -718,7 +718,7 @@ class TestDaemonServerGracefulRestart:
     server.job_db.is_distributed = True
     with patch("http.server.HTTPServer.shutdown"), patch("os.execv"):
       server.graceful_restart()
-    server.job_db.mark_node_offline.assert_called_once_with("node")
+    server.job_db.mark_node_offline.assert_called_once_with("node", remove=True)
 
   def test_graceful_restart_handles_mark_offline_exception(self):
     server = self._make_restart_server()

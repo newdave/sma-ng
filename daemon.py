@@ -6,7 +6,7 @@ Listens for HTTP POST requests containing absolute file/directory paths
 and spawns conversion processes using manual.py.
 
 Features:
-- Path-based configuration selection via config/daemon.json
+- Path-based configuration selection via sma-ng.yml Daemon section
 - Per-config logging to separate files in logs/ directory
 - Only one process per config runs at a time (others queue)
 - PostgreSQL persistence for job queue (survives restarts)
@@ -45,7 +45,7 @@ from resources.daemon import (
   _render_markdown_to_html,  # pyright: ignore[reportUnusedImport]
   _StoppableThread,  # pyright: ignore[reportUnusedImport]
 )
-from resources.daemon.constants import DEFAULT_DAEMON_CONFIG, LOGS_DIR, SCRIPT_DIR, resolve_node_id  # pyright: ignore[reportUnusedImport]
+from resources.daemon.constants import LOGS_DIR, SCRIPT_DIR, resolve_node_id  # pyright: ignore[reportUnusedImport]
 from resources.daemon.server import _validate_hwaccel
 from resources.log import getLogger
 
@@ -53,6 +53,8 @@ from resources.log import getLogger
 log = getLogger("DAEMON")
 
 _SMOKE_TEST_FIXTURE = os.path.join(SCRIPT_DIR, "tests", "fixtures", "test1.mkv")
+# Backward-compatible module attribute for older tests/extensions that patch it.
+DEFAULT_DAEMON_CONFIG = os.path.join(SCRIPT_DIR, "config", "daemon.json")
 
 
 def _build_db_url_from_env():
@@ -73,14 +75,14 @@ def _build_db_url_from_env():
 
 
 def run_smoke_test(path_config_manager, ffmpeg_dir, logger):
-  """Run a dry-run option-generation check against every configured autoProcess.ini.
+  """Run a dry-run option-generation check against every configured autoProcess config.
 
   Uses MediaProcessor.jsonDump() which runs ffprobe on the fixture file and
   builds the full FFmpeg command string, but does not execute FFmpeg.  Exits
   with code 1 if any config fails so systemd can abort the start.
 
   Args:
-      path_config_manager: PathConfigManager with the loaded daemon.json.
+      path_config_manager: PathConfigManager with the loaded daemon configuration.
       ffmpeg_dir: Optional directory to prepend to PATH for ffprobe.
       logger: Logger instance.
   """
@@ -129,7 +131,7 @@ def main():
   """Parse CLI arguments, configure the daemon, and start the HTTP server.
 
   Resolves configuration from CLI flags, environment variables, and
-  ``daemon.json`` (in that priority order). Initialises the job database
+  the ``Daemon`` config section (in that priority order). Initialises the job database
   PostgreSQL, sets up per-config logging and concurrency locks,
   and then serves requests until interrupted.
   """
@@ -137,7 +139,7 @@ def main():
   parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
   parser.add_argument("--port", type=int, default=8585, help="Port to listen on (default: 8585)")
   parser.add_argument("--workers", type=int, default=1, help="Number of worker threads (default: 1)")
-  parser.add_argument("-d", "--daemon-config", help="Path to daemon.json config file (path mappings)")
+  parser.add_argument("-d", "--daemon-config", help="Path to daemon config file (defaults to sma-ng.yml)")
   parser.add_argument("--logs-dir", default=LOGS_DIR, help="Directory for per-config log files (default: logs/)")
   parser.add_argument(
     "--ffmpeg-dir", help="Directory containing ffmpeg and ffprobe binaries. Prepended to PATH for each conversion subprocess. If omitted, relies on PATH already containing the binaries."
@@ -151,14 +153,14 @@ def main():
   )
   parser.add_argument("--api-key", help="API key for authentication (or set SMA_DAEMON_API_KEY env var)")
   parser.add_argument(
-    "--smoke-test", action="store_true", help="Run a dry-run option-generation check against all configured autoProcess.ini files at startup, then exit with 0 on success or 1 on failure"
+    "--smoke-test", action="store_true", help="Run a dry-run option-generation check against all configured autoProcess files at startup, then exit with 0 on success or 1 on failure"
   )
   parser.add_argument(
     "--job-timeout",
     type=int,
     default=0,
     metavar="SECONDS",
-    help="Maximum seconds a conversion job may run before being killed (default: 0, no timeout). Can also be set via daemon.json job_timeout_seconds.",
+    help="Maximum seconds a conversion job may run before being killed (default: 0, no timeout). Can also be set via Daemon job_timeout_seconds.",
   )
 
   args = parser.parse_args()
@@ -183,13 +185,13 @@ def main():
   # Determine FFmpeg directory (priority: CLI --ffmpeg-dir > env var > config file)
   ffmpeg_dir = args.ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or path_config_manager.ffmpeg_dir
 
-  # Determine job timeout (priority: CLI --job-timeout > daemon.json; 0 means no timeout)
+  # Determine job timeout (priority: CLI --job-timeout > config; 0 means no timeout)
   job_timeout_seconds = args.job_timeout or path_config_manager.job_timeout_seconds
   progress_log_interval = path_config_manager.progress_log_interval
 
-  # Run smoke test if requested via CLI or daemon.json.
+  # Run smoke test if requested via CLI or config.
   # --smoke-test on CLI: run check and exit (no DB/server needed — safe pre-flight).
-  # smoke_test in daemon.json: run check then continue startup; exit 1 on failure.
+  # smoke_test in config: run check then continue startup; exit 1 on failure.
   if args.smoke_test or path_config_manager.smoke_test:
     run_smoke_test(path_config_manager, ffmpeg_dir, log)
     if args.smoke_test:
@@ -199,7 +201,7 @@ def main():
   # Note: PostgreSQL URL is not accepted on the CLI to prevent credentials appearing in ps output.
   db_url = os.environ.get("SMA_DAEMON_DB_URL") or _build_db_url_from_env() or path_config_manager.db_url
   if not db_url:
-    log.error("No database URL configured. Set SMA_DAEMON_DB_URL (or SMA_DAEMON_DB_HOST + SMA_DAEMON_DB_PASSWORD) or db_url in daemon.json")
+    log.error("No database URL configured. Set SMA_DAEMON_DB_URL (or SMA_DAEMON_DB_HOST + SMA_DAEMON_DB_PASSWORD) or db_url in the Daemon config section")
     sys.exit(1)
   job_db = PostgreSQLJobDatabase(db_url, logger=log)
   db_label = "PostgreSQL: %s" % db_url
@@ -274,7 +276,7 @@ def main():
     log.debug("  GET  /scan         - Check unscanned paths (?path=... for small lists)")
     log.debug("  POST /scan/filter  - Check unscanned paths (JSON body for large lists)")
     log.debug("  POST /scan/record  - Record paths as scanned")
-    log.debug("  POST /reload       - Reload daemon.json config without stopping workers")
+    log.debug("  POST /reload       - Reload daemon config without stopping workers")
     log.debug("  POST /shutdown     - Graceful shutdown (waits for active conversions)")
     log.debug("  POST /restart      - Graceful restart (drains workers, then re-execs)")
     log.info("Ready to accept connections.")
