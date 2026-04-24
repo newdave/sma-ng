@@ -67,6 +67,7 @@ class ConversionWorker(threading.Thread):
     self.current_job_id = None
     self._job_processes = job_processes if job_processes is not None else {}
     self._job_progress = job_progress if job_progress is not None else {}
+    self._last_approval_log = 0.0
 
   def stop(self):
     """Signal worker to stop."""
@@ -84,6 +85,19 @@ class ConversionWorker(threading.Thread):
 
       # Drain all available jobs before going back to sleep.
       while self.running:
+        if getattr(self.job_db, "is_distributed", False) and hasattr(self.job_db, "is_node_approved"):
+          approved = False
+          try:
+            approved = self.job_db.is_node_approved(self.node_id)
+          except Exception:
+            self.log.exception("Worker %d failed to check node approval status" % self.worker_id)
+          if not approved:
+            now = time.monotonic()
+            if now - self._last_approval_log >= 60:
+              self.log.info("Worker %d waiting for admin approval of node %s" % (self.worker_id, self.node_id))
+              self._last_approval_log = now
+            break
+
         locked = self.config_lock_manager.get_locked_configs()
         job = self.job_db.claim_next_job(self.worker_id, self.node_id, exclude_configs=locked or None)
         if job:

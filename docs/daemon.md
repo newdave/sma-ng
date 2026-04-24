@@ -23,12 +23,12 @@ All options can also be set via environment variables — see [Environment Varia
 
 **Additional flags:**
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--smoke-test` | | Run a dry-run option-generation check against all configs then exit. Safe pre-flight before systemd considers the unit started. |
-| `--job-timeout SECONDS` | `0` | Kill a conversion job after this many seconds (0 = no timeout). Also settable via `job_timeout_seconds` in `daemon.json`. |
-| `--heartbeat-interval N` | `30` | Seconds between PostgreSQL cluster heartbeat updates |
-| `--stale-seconds N` | `120` | Seconds without a heartbeat before a node's running jobs are requeued |
+| Flag                     | Default | Description                                                                                                                     |
+| ------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--smoke-test`           |         | Run a dry-run option-generation check against all configs then exit. Safe pre-flight before systemd considers the unit started. |
+| `--job-timeout SECONDS`  | `0`     | Kill a conversion job after this many seconds (0 = no timeout). Also settable via `job_timeout_seconds` in `daemon.json`.       |
+| `--heartbeat-interval N` | `30`    | Seconds between PostgreSQL cluster heartbeat updates                                                                            |
+| `--stale-seconds N`      | `120`   | Seconds without a heartbeat before a node's running jobs are requeued                                                           |
 
 ---
 
@@ -38,47 +38,52 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 
 - Real-time job statistics and status
 - Active/waiting job panels with per-worker progress
-- Cluster node status (PostgreSQL mode — shows all nodes with active jobs, uptime, and remote restart/shutdown buttons)
+- Cluster node status (PostgreSQL mode — includes approval state and last command audit details)
 - Config mapping overview
 - Filterable job history table with requeue/cancel actions
 - Submit Job form with path autocomplete (config prefixes, recent jobs, live filesystem browsing)
 - Job priority controls
 - Log viewer: browse, filter, and live-tail per-config log files
+- Admin node controls for approve/reject/restart/shutdown/delete
 
 ---
 
 ## API Endpoints
 
-| Method | Path | Auth | Description |
-| --- | --- | --- | --- |
-| `GET` | `/` | No | Redirects to `/dashboard` |
-| `GET` | `/dashboard` | No | Web dashboard |
-| `GET` | `/admin` | No | Admin panel (destructive actions) |
-| `GET` | `/health` | No | Health check with job stats (local node) |
-| `GET` | `/status` | No | Cluster-wide status across all nodes |
-| `GET` | `/docs` | No | Rendered documentation |
-| `GET` | `/jobs` | Yes | List jobs. Query: `?status=pending&limit=50&offset=0` |
-| `GET` | `/jobs/<id>` | Yes | Get specific job (includes `progress` when running) |
-| `GET` | `/configs` | Yes | Config mappings and status |
-| `GET` | `/stats` | Yes | Job statistics by status |
-| `GET` | `/scan` | Yes | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv` |
-| `GET` | `/browse` | Yes | List filesystem dirs/files within configured paths. Query: `?path=/dir` |
-| `GET` | `/logs` | Yes | List all log files with metadata |
-| `GET` | `/logs/<name>` | Yes | Get log content. Query: `?lines=200&level=ERROR&job_id=42&offset=0` |
-| `GET` | `/logs/<name>/tail` | Yes | Poll for new entries after byte offset. Query: `?offset=<bytes>` |
-| `POST` | `/webhook/generic` | Yes | Submit conversion job (file or directory path) |
-| `POST` | `/webhook/sonarr` | Yes | Native Sonarr webhook endpoint (On Download/Upgrade) |
-| `POST` | `/webhook/radarr` | Yes | Native Radarr webhook endpoint (On Download/Upgrade) |
-| `POST` | `/cleanup` | Yes | Remove old jobs. Query: `?days=30` |
-| `POST` | `/reload` | Yes | Reload `daemon.json` without restarting |
-| `POST` | `/restart` | Yes | Graceful restart. Query: `?node=<id>` for remote node (PostgreSQL) |
-| `POST` | `/shutdown` | Yes | Graceful shutdown. Query: `?node=<id>` for remote node (PostgreSQL) |
-| `POST` | `/jobs/<id>/requeue` | Yes | Requeue a specific failed job |
-| `POST` | `/jobs/<id>/cancel` | Yes | Cancel a pending or running job |
-| `POST` | `/jobs/<id>/priority` | Yes | Set job priority. Body: `{"priority": 10}` |
-| `POST` | `/jobs/requeue` | Yes | Requeue all failed jobs. Query: `?config=...` to filter |
-| `POST` | `/scan/filter` | Yes | Filter unscanned paths (large lists). Body: `{"paths": [...]}` |
-| `POST` | `/scan/record` | Yes | Mark paths as scanned. Body: `{"paths": [...]}` |
+| Method | Path                  | Auth | Description                                                             |
+| ------ | --------------------- | ---- | ----------------------------------------------------------------------- |
+| `GET`  | `/`                   | No   | Redirects to `/dashboard`                                               |
+| `GET`  | `/dashboard`          | No   | Web dashboard                                                           |
+| `GET`  | `/admin`              | No   | Admin panel (destructive actions)                                       |
+| `GET`  | `/health`             | No   | Health check with job stats (local node)                                |
+| `GET`  | `/status`             | No   | Cluster-wide status across all nodes                                    |
+| `GET`  | `/docs`               | No   | Rendered documentation                                                  |
+| `GET`  | `/jobs`               | Yes  | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
+| `GET`  | `/jobs/<id>`          | Yes  | Get specific job (includes `progress` when running)                     |
+| `GET`  | `/configs`            | Yes  | Config mappings and status                                              |
+| `GET`  | `/stats`              | Yes  | Job statistics by status                                                |
+| `GET`  | `/scan`               | Yes  | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv`               |
+| `GET`  | `/browse`             | Yes  | List filesystem dirs/files within configured paths. Query: `?path=/dir` |
+| `GET`  | `/logs`               | Yes  | List all log files with metadata                                        |
+| `GET`  | `/logs/<name>`        | Yes  | Get log content. Query: `?lines=200&level=ERROR&job_id=42&offset=0`     |
+| `GET`  | `/logs/<name>/tail`   | Yes  | Poll for new entries after byte offset. Query: `?offset=<bytes>`        |
+| `POST` | `/webhook/generic`    | Yes  | Submit conversion job (file or directory path)                          |
+| `POST` | `/webhook/sonarr`     | Yes  | Native Sonarr webhook endpoint (On Download/Upgrade)                    |
+| `POST` | `/webhook/radarr`     | Yes  | Native Radarr webhook endpoint (On Download/Upgrade)                    |
+| `POST` | `/cleanup`            | Yes  | Remove old jobs. Query: `?days=30`                                      |
+| `POST` | `/reload`             | Yes  | Reload `daemon.json` without restarting                                 |
+| `POST` | `/restart`            | Yes  | Graceful restart. Query: `?node=<id>` for remote node (PostgreSQL)      |
+| `POST` | `/shutdown`           | Yes  | Graceful shutdown. Query: `?node=<id>` for remote node (PostgreSQL)     |
+| `POST` | `/jobs/<id>/requeue`  | Yes  | Requeue a specific failed job                                           |
+| `POST` | `/jobs/<id>/cancel`   | Yes  | Cancel a pending or running job                                         |
+| `POST` | `/jobs/<id>/priority` | Yes  | Set job priority. Body: `{"priority": 10}`                              |
+| `POST` | `/jobs/requeue`       | Yes  | Requeue all failed jobs. Query: `?config=...` to filter                 |
+| `POST` | `/scan/filter`        | Yes  | Filter unscanned paths (large lists). Body: `{"paths": [...]}`          |
+| `POST` | `/scan/record`        | Yes  | Mark paths as scanned. Body: `{"paths": [...]}`                         |
+
+Node admin API route:
+
+- `POST /admin/nodes/<node_id>/<action>` where action is one of `approve`, `reject`, `restart`, `shutdown`, `delete`
 
 ---
 
@@ -178,20 +183,20 @@ Create `config/daemon.json` (copy from `setup/daemon.json.sample`) to route file
 
 ### Top-Level Keys
 
-| Key | Description |
-| --- | --- |
-| `default_config` | Config file used when no `path_configs` prefix matches |
-| `api_key` | API authentication key |
-| `db_url` | PostgreSQL URL for distributed mode |
-| `ffmpeg_dir` | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion |
-| `media_extensions` | File extensions considered media for directory scanning and `/browse` |
-| `path_rewrites` | Prefix substitutions applied to incoming webhook paths before config matching; overlapping rewrites are matched longest-prefix-first |
-| `scan_paths` | Directories for scheduled background scanning |
-| `path_configs` | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection |
-| `smoke_test` | Run option-generation dry-run against all configs at startup. Exits 1 on failure. |
-| `job_timeout_seconds` | Maximum seconds a conversion may run (0 = no timeout) |
-| `recycle_bin_max_age_days` | Delete recycle-bin media files older than this many days (default: `3`, `0` = disabled) |
-| `recycle_bin_min_free_gb` | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled) |
+| Key                        | Description                                                                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `default_config`           | Config file used when no `path_configs` prefix matches                                                                               |
+| `api_key`                  | API authentication key                                                                                                               |
+| `db_url`                   | PostgreSQL URL for distributed mode                                                                                                  |
+| `ffmpeg_dir`               | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion                                              |
+| `media_extensions`         | File extensions considered media for directory scanning and `/browse`                                                                |
+| `path_rewrites`            | Prefix substitutions applied to incoming webhook paths before config matching; overlapping rewrites are matched longest-prefix-first |
+| `scan_paths`               | Directories for scheduled background scanning                                                                                        |
+| `path_configs`             | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection                                               |
+| `smoke_test`               | Run option-generation dry-run against all configs at startup. Exits 1 on failure.                                                    |
+| `job_timeout_seconds`      | Maximum seconds a conversion may run (0 = no timeout)                                                                                |
+| `recycle_bin_max_age_days` | Delete recycle-bin media files older than this many days (default: `3`, `0` = disabled)                                              |
+| `recycle_bin_min_free_gb`  | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled)               |
 
 Matching is longest-prefix-first: `/mnt/media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`. If `path_rewrites` overlap, the most specific rewrite is applied before config matching.
 
@@ -226,10 +231,10 @@ Check active/waiting jobs: `curl http://localhost:8585/health`
 
 Each config gets a separate rotating log file in `logs/` named after the config file stem:
 
-| Config | Log File |
-| --- | --- |
-| `config/autoProcess.ini` | `logs/autoProcess.log` |
-| `config/autoProcess.tv.ini` | `logs/autoProcess.tv.log` |
+| Config                             | Log File                         |
+| ---------------------------------- | -------------------------------- |
+| `config/autoProcess.ini`           | `logs/autoProcess.log`           |
+| `config/autoProcess.tv.ini`        | `logs/autoProcess.tv.log`        |
 | `config/autoProcess.movies-4k.ini` | `logs/autoProcess.movies-4k.log` |
 
 Rotation: 10MB max, 5 backups. Use `--logs-dir` to change the directory.
@@ -288,12 +293,12 @@ Structured timestamps returned by the daemon API use the daemon host's local tim
 
 **Query parameters:**
 
-| Parameter | Default | Description |
-| --- | --- | --- |
-| `lines` | `200` | Maximum lines to return (tail of file) |
-| `level` | — | Minimum log level filter: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
-| `job_id` | — | Filter entries to a specific job |
-| `offset` | — | Return content starting from this byte offset (auto-resets on log rotation) |
+| Parameter | Default | Description                                                                 |
+| --------- | ------- | --------------------------------------------------------------------------- |
+| `lines`   | `200`   | Maximum lines to return (tail of file)                                      |
+| `level`   | —       | Minimum log level filter: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`   |
+| `job_id`  | —       | Filter entries to a specific job                                            |
+| `offset`  | —       | Return content starting from this byte offset (auto-resets on log rotation) |
 
 ### Poll for new entries (live tail)
 
@@ -338,13 +343,13 @@ The daemon can periodically scan directories for new media files and queue them 
 }
 ```
 
-| Field | Description |
-| --- | --- |
-| `path` | Directory to scan |
-| `interval` | Scan interval in seconds |
-| `rewrite_from` | Path prefix to replace before submitting jobs |
-| `rewrite_to` | Replacement prefix |
-| `enabled` | Set to `false` to disable without removing the entry |
+| Field          | Description                                          |
+| -------------- | ---------------------------------------------------- |
+| `path`         | Directory to scan                                    |
+| `interval`     | Scan interval in seconds                             |
+| `rewrite_from` | Path prefix to replace before submitting jobs        |
+| `rewrite_to`   | Replacement prefix                                   |
+| `enabled`      | Set to `false` to disable without removing the entry |
 
 Files already in the `scanned_files` database table are skipped on subsequent scans. Any file whose extension matches `media_extensions` is eligible for submission, including `.mp4` if you leave it in that list.
 
@@ -367,10 +372,10 @@ bash scripts/sma-scan.sh /mnt/media/Movies --dry-run
 
 The daemon automatically purges old media files from every `recycle-bin` directory configured in any `autoProcess.ini`. Two independent eviction triggers run once per hour:
 
-| Trigger | Key | Default | Behaviour |
-| --- | --- | --- | --- |
-| Age | `recycle_bin_max_age_days` | `3` | Delete files whose last-modified time is older than N days |
-| Space pressure | `recycle_bin_min_free_gb` | `50` | Delete the oldest files first until free space on the mount point exceeds N GiB |
+| Trigger        | Key                        | Default | Behaviour                                                                       |
+| -------------- | -------------------------- | ------- | ------------------------------------------------------------------------------- |
+| Age            | `recycle_bin_max_age_days` | `3`     | Delete files whose last-modified time is older than N days                      |
+| Space pressure | `recycle_bin_min_free_gb`  | `50`    | Delete the oldest files first until free space on the mount point exceeds N GiB |
 
 Set either key to `0` to disable that trigger independently.
 
@@ -449,6 +454,13 @@ SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
 
 **Cluster status:** The `/status` endpoint returns all nodes with their active jobs, worker count, uptime, and last-seen time. The dashboard shows this as a Cluster Nodes panel.
 
+Node approval is enforced in distributed mode:
+
+- New nodes start as `pending` and do not claim jobs.
+- Admin users can approve or reject nodes from `/admin` (or the node admin API route).
+- Rejected and pending nodes continue heartbeating but cannot process media.
+- Approved nodes can receive queued restart/shutdown commands, recorded with request metadata.
+
 ```mermaid
 graph LR
     subgraph NodeA["Node A (sma-ng-host1)"]
@@ -515,13 +527,15 @@ All CLI flags (`--host`, `--port`, `--workers`, etc.) are preserved across resta
 
 ## Environment Variables
 
-| Variable | Description |
-| --- | --- |
-| `SMA_DAEMON_API_KEY` | API key (overrides `--api-key`) |
-| `SMA_DAEMON_DB_URL` | PostgreSQL connection URL |
+| Variable                | Description                                                 |
+| ----------------------- | ----------------------------------------------------------- |
+| `SMA_DAEMON_API_KEY`    | API key (overrides `--api-key`)                             |
+| `SMA_DAEMON_DB_URL`     | PostgreSQL connection URL                                   |
 | `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` (prepended to PATH) |
-| `SMA_DAEMON_HOST` | Bind host (Docker default: `0.0.0.0`) |
-| `SMA_DAEMON_PORT` | Port (Docker default: `8585`) |
-| `SMA_DAEMON_WORKERS` | Number of concurrent workers (Docker default: `2`) |
-| `SMA_DAEMON_CONFIG` | Path to `daemon.json` |
-| `SMA_DAEMON_LOGS_DIR` | Directory for per-config log files |
+| `SMA_DAEMON_HOST`       | Bind host (Docker default: `0.0.0.0`)                       |
+| `SMA_DAEMON_PORT`       | Port (Docker default: `8585`)                               |
+| `SMA_DAEMON_WORKERS`    | Number of concurrent workers (Docker default: `2`)          |
+| `SMA_DAEMON_CONFIG`     | Path to `daemon.json`                                       |
+| `SMA_DAEMON_LOGS_DIR`   | Directory for per-config log files                          |
+
+`SMA_NODE_NAME` sets the explicit cluster node ID and is recommended for Docker and multi-node deployments.

@@ -4,6 +4,7 @@ import re as _re
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler
+from urllib.parse import unquote
 
 from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
@@ -497,6 +498,68 @@ class WebhookHandler(BaseHTTPRequestHandler):
     deleted = self.server.job_db.delete_all_jobs()
     self.send_json_response(200, {"deleted": deleted})
 
+  def _post_admin_node_action(self, path):
+    """Handle POST /admin/nodes/<node_id>/<action>.
+
+    Supported actions: approve, reject, restart, shutdown, delete
+    """
+    parts = path.strip("/").split("/")
+    if len(parts) != 4 or parts[0] != "admin" or parts[1] != "nodes":
+      self.send_json_response(404, {"error": "Not found"})
+      return
+
+    node_id = unquote(parts[2])
+    action = parts[3]
+    actor = self.headers.get("X-Actor", "admin-ui")
+
+    if action in {"approve", "reject"}:
+      content_length = int(self.headers.get("Content-Length", 0))
+      note = None
+      if content_length:
+        try:
+          body = json.loads(self.rfile.read(content_length))
+          note = body.get("note")
+        except (json.JSONDecodeError, ValueError):
+          self.send_json_response(400, {"error": "Invalid JSON body"})
+          return
+
+      updated = self.server.job_db.set_node_approval(
+        node_id=node_id,
+        approved=(action == "approve"),
+        actor=actor,
+        note=note,
+      )
+      if not updated:
+        self.send_json_response(404, {"error": "Node not found", "node": node_id})
+        return
+
+      self.send_json_response(
+        200,
+        {
+          "status": "approved" if action == "approve" else "rejected",
+          "node": updated,
+        },
+      )
+      return
+
+    if action in {"restart", "shutdown"}:
+      targeted = self.server.job_db.send_node_command(node_id, action, requested_by=actor)
+      if not targeted:
+        self.send_json_response(404, {"error": "Node not found", "node": node_id})
+        return
+      self.send_json_response(202, {"status": f"{action}_requested", "nodes": targeted})
+      return
+
+    if action == "delete":
+      deleted = self.server.job_db.delete_node(node_id)
+      if not deleted:
+        self.send_json_response(404, {"error": "Node not found", "node": node_id})
+        return
+      self.send_json_response(200, {"deleted": True, "node": node_id})
+      return
+
+    self.send_json_response(404, {"error": "Unknown node action"})
+
   def _post_jobs_requeue_bulk(self, query):
     config = query.get("config", [None])[0]
     count = self.server.job_db.requeue_failed_jobs(config=config)
@@ -577,14 +640,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
   def _post_shutdown(self, _path, query):
     node_id = query.get("node", [None])[0]
+    actor = self.headers.get("X-Actor", "api")
     if node_id and self.server.job_db.is_distributed:
       # Remote: write command to DB; target node acts on next heartbeat
-      targeted = self.server.job_db.send_node_command(node_id, "shutdown")
+      targeted = self.server.job_db.send_node_command(node_id, "shutdown", requested_by=actor)
       self.send_json_response(202, {"status": "shutdown_requested", "nodes": targeted})
       return
     if not node_id and self.server.job_db.is_distributed:
       # Broadcast to all online nodes (including self)
-      targeted = self.server.job_db.send_node_command(None, "shutdown")
+      targeted = self.server.job_db.send_node_command(None, "shutdown", requested_by=actor)
       self.send_json_response(202, {"status": "shutdown_requested", "nodes": targeted})
       return
     # Local shutdown
@@ -596,14 +660,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
   def _post_restart(self, _path, query):
     node_id = query.get("node", [None])[0]
+    actor = self.headers.get("X-Actor", "api")
     if node_id and self.server.job_db.is_distributed:
       # Remote: write command to DB; target node acts on next heartbeat
-      targeted = self.server.job_db.send_node_command(node_id, "restart")
+      targeted = self.server.job_db.send_node_command(node_id, "restart", requested_by=actor)
       self.send_json_response(202, {"status": "restart_requested", "nodes": targeted})
       return
     if not node_id and self.server.job_db.is_distributed:
       # Broadcast to all online nodes (including self)
-      targeted = self.server.job_db.send_node_command(None, "restart")
+      targeted = self.server.job_db.send_node_command(None, "restart", requested_by=actor)
       self.send_json_response(202, {"status": "restart_requested", "nodes": targeted})
       return
     # Local restart
