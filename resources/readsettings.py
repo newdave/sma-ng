@@ -1,130 +1,22 @@
-"""Configuration file parser for SMA-NG. Reads autoProcess.ini (or the file at $SMA_CONFIG) using SMAConfigParser, a thin ConfigParser subclass, and exposes all settings as attributes on the ReadSettings instance."""
+"""Configuration file parser for SMA-NG.
+
+Reads sma-ng.yml, auto-migrating a sibling autoProcess.ini on first use,
+and exposes all settings as attributes on the ReadSettings instance.
+"""
 
 import logging
 import os
 import shutil
 import sys
-from configparser import ConfigParser
 
 from resources.extensions import *
-
-
-class SMAConfigParser(ConfigParser, object):
-  """ConfigParser subclass with additional typed helpers for SMA-NG config values.
-
-  Extends the standard :class:`configparser.ConfigParser` with methods that
-  parse comma-separated lists, key:value dictionaries, filesystem paths and
-  directories, and file extensions directly from INI values.
-  """
-
-  def getlist(self, section, option, vars=None, separator=",", default=None, lower=True, replace=None):
-    """Return an INI value as a list, splitting on ``separator`` (default ``","``).
-
-    Empty values return ``default``. Items are stripped of leading/trailing
-    whitespace; pass ``lower=True`` (the default) to also lowercase them.
-    Characters in ``replace`` are removed from every item before returning.
-    """
-    if default is None:
-      default = []
-    if replace is None:
-      replace = [" "]
-    value = self.get(section, option, vars=vars)
-
-    if not isinstance(value, str) and isinstance(value, list):
-      return value
-
-    if value == "":
-      return list(default)
-
-    value = value.split(separator)
-
-    for r in replace:
-      value = [x.replace(r, "") for x in value]
-    if lower:
-      value = [x.lower() for x in value]
-
-    value = [x.strip() for x in value]
-    return value
-
-  def getdict(self, section, option, vars=None, listseparator=",", dictseparator=":", default=None, lower=True, replace=None, valueModifier=None):
-    """Return an INI value as a dict, splitting items by ``listseparator`` then each item by ``dictseparator``.
-
-    Items without the ``dictseparator`` are ignored. ``valueModifier``, when
-    provided, is called on each value; entries that raise ``ValueError`` or
-    ``TypeError`` are skipped. The ``default`` dict is used as the base.
-    """
-    if default is None:
-      default = {}
-    l = self.getlist(section, option, vars, listseparator, [], lower, replace)
-    output = dict(default)
-    for listitem in l:
-      split = listitem.split(dictseparator, 1)
-      if len(split) > 1:
-        if valueModifier:
-          try:
-            split[1] = valueModifier(split[1])
-          except (ValueError, TypeError):
-            self.log.exception("Invalid value for getdict")
-            continue
-        output[split[0]] = split[1]
-    return output
-
-  def getpath(self, section, option, vars=None, create=False):
-    """Return an INI value as a normalised filesystem path, or ``None`` if the value is empty.
-
-    When ``create=True`` the directory is created if it does not already exist (equivalent to the old ``getdirectory`` method).
-    """
-    path = self.get(section, option, vars=vars).strip()
-    if path == "":
-      return None
-    path = os.path.normpath(path)
-    if create:
-      try:
-        os.makedirs(path)
-      except (OSError, TypeError):
-        pass
-    return path
-
-  def getdirectory(self, section, option, vars=None):
-    """Return an INI value as a path, creating the directory if it does not exist. Returns ``None`` for empty values."""
-    return self.getpath(section, option, vars=vars, create=True)
-
-  def getdirectories(self, section, option, vars=None, separator=",", default=None):
-    """Return a list of paths from a comma-separated INI value, creating each directory if it does not exist."""
-    directories = self.getlist(section, option, vars=vars, separator=separator, default=default, lower=False)
-    directories = [os.path.normpath(x) for x in directories]
-    for d in directories:
-      if not os.path.isdir(d):
-        try:
-          os.makedirs(d)
-        except (OSError, TypeError):
-          pass
-    return directories
-
-  def getextension(self, section, option, vars=None):
-    """Return a single normalised file extension (lowercase, no leading dot/spaces), or ``None`` for empty values."""
-    extension = self.get(section, option, vars=vars).lower().replace(" ", "").replace(".", "")
-    if extension == "":
-      return None
-    return extension
-
-  def getextensions(self, section, option, separator=",", vars=None):
-    """Return a list of normalised file extensions (dots and spaces stripped) from a comma-separated INI value."""
-    return self.getlist(section, option, vars, separator, replace=[" ", "."])
-
-  def getint(self, section, option, vars=None, fallback=0):
-    """Return an INI value as an integer, defaulting to ``0`` instead of raising when the key is absent."""
-    return super(SMAConfigParser, self).getint(section, option, vars=vars, fallback=fallback)
-
-  def getboolean(self, section, option, vars=None, fallback=False):
-    """Return an INI value as a boolean, defaulting to ``False`` instead of raising when the key is absent."""
-    return super(SMAConfigParser, self).getboolean(section, option, vars=vars, fallback=fallback)
+from resources.yamlconfig import cfg_getdirectories, cfg_getdirectory, cfg_getextension, cfg_getextensions, cfg_getpath
 
 
 class ReadSettings:
-  """Parses ``autoProcess.ini`` and exposes all settings as typed attributes.
+  """Parses ``sma-ng.yml`` and exposes all settings as typed attributes.
 
-  On construction, reads the INI file (creating it from ``DEFAULTS`` if
+  On construction, reads the YAML file (creating it from ``DEFAULTS`` if
   absent), validates codec and hardware-acceleration options, and populates
   attributes such as ``Video``, ``Audio``, ``Subtitle``, ``Plex``, etc.
   """
@@ -134,18 +26,18 @@ class ReadSettings:
       "ffmpeg": "ffmpeg" if os.name != "nt" else "ffmpeg.exe",
       "ffprobe": "ffprobe" if os.name != "nt" else "ffprobe.exe",
       "threads": 0,
-      "hwaccels": "",
-      "hwaccel-decoders": "",
-      "hwdevices": "",
-      "hwaccel-output-format": "",
+      "hwaccels": [],
+      "hwaccel-decoders": [],
+      "hwdevices": {},
+      "hwaccel-output-format": {},
       "output-directory": "",
       "output-directory-space-ratio": 0.0,
       "output-format": "mp4",
       "output-extension": "mp4",
       "temp-extension": "",
-      "minimum-size": "0",
-      "ignored-extensions": "nfo, ds_store",
-      "copy-to": "",
+      "minimum-size": 0,
+      "ignored-extensions": ["nfo", "ds_store"],
+      "copy-to": [],
       "move-to": "",
       "delete-original": True,
       "recycle-bin": "",
@@ -155,9 +47,8 @@ class ReadSettings:
       "post-process": False,
       "wait-post-process": False,
       "detailed-progress": False,
-      "opts-separator": ",",
-      "preopts": "",
-      "postopts": "",
+      "preopts": [],
+      "postopts": [],
       "regex-directory-replace": r"[^\w\-_\. ]",
     },
     "Permissions": {
@@ -177,18 +68,18 @@ class ReadSettings:
     },
     "Video": {
       "gpu": "",
-      "codec": "h265",
+      "codec": ["h265"],
       "max-bitrate": 0,
-      "bitrate-ratio": "",
+      "bitrate-ratio": {},
       "crf-profiles": "",
       "crf-profiles-hd": "",
       "preset": "",
       "codec-parameters": "",
       "dynamic-parameters": False,
       "max-width": 0,
-      "profile": "",
+      "profile": [],
       "max-level": 0.0,
-      "pix-fmt": "",
+      "pix-fmt": [],
       "prioritize-source-pix-fmt": True,
       "filter": "",
       "force-filter": False,
@@ -197,16 +88,16 @@ class ReadSettings:
       "ref-frames": -1,
     },
     "HDR": {
-      "codec": "",
-      "pix-fmt": "",
-      "space": "bt2020nc",
-      "transfer": "smpte2084",
-      "primaries": "bt2020",
+      "codec": [],
+      "pix-fmt": [],
+      "space": ["bt2020nc"],
+      "transfer": ["smpte2084"],
+      "primaries": ["bt2020"],
       "preset": "",
       "codec-parameters": "",
       "filter": "",
       "force-filter": False,
-      "profile": "",
+      "profile": [],
       "look-ahead-depth": 0,
       "b-frames": -1,
       "ref-frames": -1,
@@ -232,8 +123,8 @@ class ReadSettings:
       "movie-template": "{Movie CleanTitle} ({Release Year}) [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}",
     },
     "Audio": {
-      "codec": "ac3",
-      "languages": "",
+      "codec": ["ac3"],
+      "languages": [],
       "default-language": "",
       "include-original-language": True,
       "first-stream-of-language": False,
@@ -244,24 +135,24 @@ class ReadSettings:
       "filter": "",
       "profile": "",
       "force-filter": False,
-      "sample-rates": "",
+      "sample-rates": [],
       "sample-format": "",
       "atmos-force-copy": False,
       "copy-original": False,
       "aac-adtstoasc": False,
-      "ignored-dispositions": "",
+      "ignored-dispositions": [],
       "force-default": False,
       "unique-dispositions": False,
-      "stream-codec-combinations": "",
+      "stream-codec-combinations": [],
     },
     "Audio.Sorting": {
-      "sorting": "language, channels.d, map, d.comment",
-      "default-sorting": "channels.d, map, d.comment",
-      "codecs": "",
+      "sorting": ["language", "channels.d", "map", "d.comment"],
+      "default-sorting": ["channels.d", "map", "d.comment"],
+      "codecs": [],
     },
     "Universal Audio": {
       "enabled": False,
-      "codec": "aac",
+      "codec": ["aac"],
       "channel-bitrate": 128,
       "variable-bitrate": 0,
       "first-stream-only": False,
@@ -273,35 +164,35 @@ class ReadSettings:
       "6-2": "pan=stereo|FL=0.5*FC+0.707*FL+0.707*BL+0.5*LFE|FR=0.5*FC+0.707*FR+0.707*BR+0.5*LFE",
     },
     "Subtitle": {
-      "codec": "mov_text",
-      "codec-image-based": "",
-      "languages": "",
+      "codec": ["mov_text"],
+      "codec-image-based": [],
+      "languages": [],
       "default-language": "",
       "force-default": False,
       "include-original-language": False,
       "first-stream-of-language": False,
       "encoding": "",
       "burn-subtitles": False,
-      "burn-dispositions": "",
+      "burn-dispositions": [],
       "embed-subs": True,
       "embed-image-subs": False,
       "embed-only-internal-subs": False,
       "filename-dispositions": "forced",
       "ignore-embedded-subs": False,
-      "ignored-dispositions": "",
+      "ignored-dispositions": [],
       "unique-dispositions": False,
-      "attachment-codec": "",
+      "attachment-codec": [],
       "remove-bitstream-subs": False,
     },
     "Subtitle.Sorting": {
-      "sorting": "language, d.comment, d.default.d, d.forced.d",
-      "codecs": "",
-      "burn-sorting": "language, d.comment, d.default.d, d.forced.d",
+      "sorting": ["language", "d.comment", "d.default.d", "d.forced.d"],
+      "codecs": [],
+      "burn-sorting": ["language", "d.comment", "d.default.d", "d.forced.d"],
     },
     "Subtitle.CleanIt": {
       "enabled": False,
       "config-path": "",
-      "tags": "",
+      "tags": [],
     },
     "Subtitle.FFSubsync": {
       "enabled": False,
@@ -310,7 +201,7 @@ class ReadSettings:
       "download-subs": False,
       "download-forced-subs": False,
       "include-hearing-impaired-subs": False,
-      "providers": "",
+      "providers": [],
     },
     "Subtitle.Subliminal.Auth": {
       "opensubtitles": "",
@@ -404,7 +295,7 @@ class ReadSettings:
     },
   }
 
-  CONFIG_DEFAULT = "autoProcess.ini"
+  CONFIG_DEFAULT = "sma-ng.yml"
   CONFIG_DIRECTORY = "./config"
   RESOURCE_DIRECTORY = "./resources"
   RELATIVE_TO_ROOT = "../"
@@ -415,20 +306,21 @@ class ReadSettings:
   def CONFIG_RELATIVEPATH(self):
     return os.path.join(self.CONFIG_DIRECTORY, self.CONFIG_DEFAULT)
 
-  def __init__(self, configFile=None, logger=None):
+  def __init__(self, configFile=None, logger=None, profile=None):
     """Load and parse the SMA-NG configuration file.
 
     Resolves the config path in priority order: explicit ``configFile``
     argument, ``$SMA_CONFIG`` environment variable, then the default
-    ``config/autoProcess.ini`` relative to the SMA root. If the file does
-    not exist it is created with all ``DEFAULTS`` values. Missing keys in
-    an existing file are backfilled and written. After parsing, binary paths
-    are validated via ``_validate_binaries()``.
+    ``config/sma-ng.yml`` relative to the SMA root. If a sibling INI
+    exists and YAML does not, the INI is migrated and kept as ``.bak``.
+    Missing keys in an existing file are backfilled and written. After
+    parsing, binary paths are validated via ``_validate_binaries()``.
 
     Args:
-        configFile: Path to an ``autoProcess.ini`` file, or a directory
+        configFile: Path to an ``sma-ng.yml`` file, or a directory
             containing one. Defaults to the standard location.
         logger: Optional logger instance. Defaults to the module logger.
+        profile: Optional named profile from the ``Profiles`` section.
     """
     self.log = logger or logging.getLogger(__name__)
 
@@ -437,72 +329,75 @@ class ReadSettings:
     rootpath = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), self.RELATIVE_TO_ROOT))
 
     defaultConfigFile = os.path.normpath(os.path.join(rootpath, self.CONFIG_RELATIVEPATH))
-    oldConfigFile = os.path.normpath(os.path.join(rootpath, self.CONFIG_DEFAULT))
     envConfigFile = os.environ.get(self.ENV_CONFIG_VAR)
 
     if envConfigFile and os.path.exists(os.path.realpath(envConfigFile)):
       configFile = os.path.realpath(envConfigFile)
       self.log.debug("%s environment variable override found." % (self.ENV_CONFIG_VAR))
     elif not configFile:
-      if not os.path.exists(defaultConfigFile) and os.path.exists(oldConfigFile):
-        try:
-          os.rename(oldConfigFile, defaultConfigFile)
-          self.log.info("Moved configuration file to new default location %s." % defaultConfigFile)
-          configFile = defaultConfigFile
-        except OSError:
-          configFile = oldConfigFile
-          self.log.debug("Unable to move configuration file to new location, using old location.")
-      else:
-        configFile = defaultConfigFile
+      legacy_yaml = os.path.join(os.path.dirname(defaultConfigFile), "autoProcess.yaml")
+      configFile = legacy_yaml if not os.path.exists(defaultConfigFile) and os.path.exists(legacy_yaml) else defaultConfigFile
       self.log.debug("Loading default config file.")
 
     if os.path.isdir(configFile):
-      new = os.path.realpath(os.path.join(configFile, self.CONFIG_RELATIVEPATH))
-      old = os.path.realpath(os.path.join(configFile, self.CONFIG_DEFAULT))
-      if not os.path.exists(new) and os.path.exists(old):
-        configFile = old
-      else:
-        configFile = new
+      configFile = os.path.realpath(os.path.join(configFile, self.CONFIG_RELATIVEPATH))
       self.log.debug("Configuration file specified is a directory, joining with %s." % (self.CONFIG_DEFAULT))
 
     self.log.debug("Loading config file %s." % configFile)
 
     write = False  # Will be changed to true if a value is missing from the config file and needs to be written
 
-    config = SMAConfigParser(strict=False)
-    if os.path.isfile(configFile):
+    from resources.yamlconfig import load as _yaml_load
+    from resources.yamlconfig import migrate_ini_to_yaml as _migrate
+
+    if configFile.endswith(".ini"):
+      yaml_path = os.path.splitext(configFile)[0] + ".yaml"
+      ini_path = configFile
+    else:
+      yaml_path = configFile
+      ini_path = os.path.splitext(configFile)[0] + ".ini"
+    if not os.path.isfile(yaml_path) and os.path.isfile(ini_path):
+      bak_path = ini_path + ".bak"
+      self.log.info("Migrating %s -> %s (backup: %s)" % (ini_path, yaml_path, bak_path))
+      _migrate(ini_path, yaml_path, bak_path, self.DEFAULTS)
+
+    data = {}
+    if os.path.isfile(yaml_path):
       try:
-        config.read(configFile)
+        data = _yaml_load(yaml_path) or {}
       except Exception:
-        self.log.exception("Error reading config file %s." % configFile)
+        self.log.exception("Error reading config file %s." % yaml_path)
         sys.exit(1)
     else:
-      self.log.error("Config file not found, creating %s." % configFile)
-      # config.filename = filename
+      self.log.error("Config file not found, creating %s." % yaml_path)
       write = True
 
     # Make sure all sections and all keys for each section are present
     for s in self.DEFAULTS:
-      if not config.has_section(s):
-        config.add_section(s)
+      if s not in data:
+        data[s] = {}
         write = True
       if s in self.DYNAMIC_SECTIONS:
         continue
-      for k in self.DEFAULTS[s]:
-        if not config.has_option(s, k):
-          config.set(s, k, str(self.DEFAULTS[s][k]))
+      for k, v in self.DEFAULTS[s].items():
+        if k not in data[s]:
+          data[s][k] = v
           write = True
 
     # If any keys are missing from the config file, write them
     if write:
-      self.writeConfig(config, configFile)
+      self.writeConfig(data, yaml_path)
 
-    config = self.migrateFromOld(config, configFile)
+    if profile:
+      data = self._apply_profile(data, profile)
+    self._profile = profile
 
-    self.readConfig(config)
+    data = self.migrateFromOld(data, yaml_path)
 
-    self._config = config
-    self._configFile = configFile
+    self.readConfig(data)
+
+    self._config = data
+    self._configFile = yaml_path
 
     self._validate_binaries()
 
@@ -599,8 +494,66 @@ class ReadSettings:
       if hdr_mapped != self.hdr["codec"]:
         self.hdr["codec"] = hdr_mapped
 
-  def readConfig(self, config):
-    """Parse all sections of ``config`` and populate instance attributes.
+  @staticmethod
+  def _apply_profile(data, profile):
+    profiles = data.get("Profiles") or {}
+    if profile not in profiles:
+      raise KeyError("Profile %r not found in config (available: %s)" % (profile, ", ".join(profiles) or "none"))
+    for section, overrides in profiles[profile].items():
+      data.setdefault(section, {}).update(overrides)
+    return data
+
+  @staticmethod
+  def _as_list(value, separator=",", lower=True, replace=None):
+    if value is None or value == "":
+      return []
+    if isinstance(value, list):
+      items = value
+    else:
+      items = str(value).split(separator)
+    if replace is None:
+      replace = [" "]
+    output = []
+    for item in items:
+      item = str(item)
+      for char in replace:
+        item = item.replace(char, "")
+      item = item.strip()
+      if lower:
+        item = item.lower()
+      if item:
+        output.append(item)
+    return output
+
+  @staticmethod
+  def _as_dict(value, item_separator=",", key_separator=":", value_modifier=None):
+    if value is None or value == "":
+      return {}
+    if isinstance(value, dict):
+      return dict(value)
+    output = {}
+    for item in str(value).split(item_separator):
+      if key_separator not in item:
+        continue
+      key, val = [x.strip() for x in item.split(key_separator, 1)]
+      if value_modifier:
+        try:
+          val = value_modifier(val)
+        except (ValueError, TypeError):
+          continue
+      output[key] = val
+    return output
+
+  @staticmethod
+  def _as_bool(value):
+    if isinstance(value, bool):
+      return value
+    if value is None:
+      return False
+    return str(value).strip().lower() in ["true", "yes", "t", "1", "y", "on"]
+
+  def readConfig(self, data):
+    """Parse all sections of ``data`` and populate instance attributes.
 
     Reads the ``[Video]`` ``gpu`` key first because it affects both the
     converter (hwaccel profile) and video codec (GPU encoder mapping). Then
@@ -618,53 +571,53 @@ class ReadSettings:
     - ``_read_plex``       — ``[Plex]`` section
 
     Args:
-        config: A populated ``SMAConfigParser`` instance.
+        data: A populated configuration dictionary.
     """
     # GPU is in [Video] but affects both converter (hwaccel profile) and video (codec mapping)
-    self.gpu = config.get("Video", "gpu").strip().lower() if config.has_option("Video", "gpu") else ""
+    self.gpu = str(data.get("Video", {}).get("gpu", "")).strip().lower()
 
-    self._read_converter(config)
-    self._read_permissions(config)
-    self._read_metadata(config)
-    self._read_video(config)
-    self._read_analyzer(config)
-    self._read_audio(config)
-    self._read_subtitles(config)
-    self._read_sonarr_radarr(config)
-    self._read_downloaders(config)
-    self._read_plex(config)
+    self._read_converter(data)
+    self._read_permissions(data)
+    self._read_metadata(data)
+    self._read_video(data)
+    self._read_analyzer(data)
+    self._read_audio(data)
+    self._read_subtitles(data)
+    self._read_sonarr_radarr(data)
+    self._read_downloaders(data)
+    self._read_plex(data)
 
-  def _read_converter(self, config):
+  def _read_converter(self, data):
     """Parse ``[Converter]`` and set FFmpeg paths, output format, threading, and file-disposition attributes."""
     section = "Converter"
-    self.ffmpeg = config.getpath(section, "ffmpeg", vars=os.environ)
-    self.ffprobe = config.getpath(section, "ffprobe", vars=os.environ)
-    self.threads = config.getint(section, "threads")
-    self.hwaccels = config.getlist(section, "hwaccels")
-    self.hwaccel_decoders = config.getlist(section, "hwaccel-decoders")
-    self.hwdevices = config.getdict(section, "hwdevices", lower=False, replace=[])
-    self.hwoutputfmt = config.getdict(section, "hwaccel-output-format")
-    self.output_dir = config.getdirectory(section, "output-directory")
-    self.output_dir_ratio = config.getfloat(section, "output-directory-space-ratio")
-    self.output_format = config.get(section, "output-format")
-    self.output_extension = config.getextension(section, "output-extension")
-    self.temp_extension = config.getextension(section, "temp-extension")
-    self.minimum_size = config.getint(section, "minimum-size")
-    self.ignored_extensions = config.getextensions(section, "ignored-extensions")
-    self.copyto = config.getdirectories(section, "copy-to", separator="|")
-    self.moveto = config.getdirectory(section, "move-to")
-    self.delete = config.getboolean(section, "delete-original")
-    self.recycle_bin = config.get(section, "recycle-bin").strip() or None
-    self.process_same_extensions = config.getboolean(section, "process-same-extensions")
-    self.bypass_copy_all = config.getboolean(section, "bypass-if-copying-all")
-    self.force_convert = config.getboolean(section, "force-convert")
-    self.postprocess = config.getboolean(section, "post-process")
-    self.waitpostprocess = config.getboolean(section, "wait-post-process")
-    self.detailedprogress = config.getboolean(section, "detailed-progress")
-    self.opts_sep = config.get(section, "opts-separator")
-    self.preopts = config.getlist(section, "preopts", separator=self.opts_sep)
-    self.postopts = config.getlist(section, "postopts", separator=self.opts_sep)
-    self.regex = config.get(section, "regex-directory-replace", raw=True)
+    cfg = data[section]
+    self.ffmpeg = cfg_getpath(cfg["ffmpeg"])
+    self.ffprobe = cfg_getpath(cfg["ffprobe"])
+    self.threads = cfg["threads"]
+    self.hwaccels = self._as_list(cfg["hwaccels"])
+    self.hwaccel_decoders = self._as_list(cfg["hwaccel-decoders"])
+    self.hwdevices = self._as_dict(cfg["hwdevices"])
+    self.hwoutputfmt = self._as_dict(cfg["hwaccel-output-format"])
+    self.output_dir = cfg_getdirectory(cfg["output-directory"])
+    self.output_dir_ratio = cfg["output-directory-space-ratio"]
+    self.output_format = cfg["output-format"]
+    self.output_extension = cfg_getextension(cfg["output-extension"])
+    self.temp_extension = cfg_getextension(cfg["temp-extension"])
+    self.minimum_size = cfg["minimum-size"]
+    self.ignored_extensions = cfg_getextensions(self._as_list(cfg["ignored-extensions"]))
+    self.copyto = cfg_getdirectories(self._as_list(cfg["copy-to"], separator="|", lower=False))
+    self.moveto = cfg_getdirectory(cfg["move-to"])
+    self.delete = cfg["delete-original"]
+    self.recycle_bin = str(cfg["recycle-bin"]).strip() or None
+    self.process_same_extensions = cfg["process-same-extensions"]
+    self.bypass_copy_all = cfg["bypass-if-copying-all"]
+    self.force_convert = cfg["force-convert"]
+    self.postprocess = cfg["post-process"]
+    self.waitpostprocess = cfg["wait-post-process"]
+    self.detailedprogress = cfg["detailed-progress"]
+    self.preopts = self._as_list(cfg["preopts"], lower=False, replace=[])
+    self.postopts = self._as_list(cfg["postopts"], lower=False, replace=[])
+    self.regex = cfg["regex-directory-replace"]
 
     if self.gpu:
       self._apply_hwaccel_profile(self.gpu)
@@ -673,27 +626,29 @@ class ReadSettings:
       self.process_same_extensions = True
       self.log.warning("Force-convert is true, so process-same-extensions is being overridden to true as well")
 
-  def _read_permissions(self, config):
+  def _read_permissions(self, data):
     """Parse ``[Permissions]`` and set the ``permissions`` dict (``chmod``, ``uid``, ``gid``)."""
     section = "Permissions"
+    cfg = data[section]
     self.permissions = {}
-    self.permissions["chmod"] = config.get(section, "chmod")
+    self.permissions["chmod"] = cfg["chmod"]
     try:
       self.permissions["chmod"] = int(self.permissions["chmod"], 8)
     except (ValueError, TypeError):
       self.log.exception("Invalid permissions, defaulting to 664.")
       self.permissions["chmod"] = int("0664", 8)
-    self.permissions["uid"] = config.getint(section, "uid", vars=os.environ)
-    self.permissions["gid"] = config.getint(section, "gid", vars=os.environ)
+    self.permissions["uid"] = cfg["uid"]
+    self.permissions["gid"] = cfg["gid"]
 
-  def _read_metadata(self, config):
+  def _read_metadata(self, data):
     """Parse ``[Metadata]`` and set tagging, artwork, moov-relocation, and disposition-sanitisation attributes."""
     section = "Metadata"
-    self.relocate_moov = config.getboolean(section, "relocate-moov")
-    self.fullpathguess = config.getboolean(section, "full-path-guess")
-    self.tagfile = config.getboolean(section, "tag")
-    self.taglanguage = config.get(section, "tag-language").lower()
-    artwork = config.get(section, "download-artwork").lower()
+    cfg = data[section]
+    self.relocate_moov = cfg["relocate-moov"]
+    self.fullpathguess = cfg["full-path-guess"]
+    self.tagfile = cfg["tag"]
+    self.taglanguage = cfg["tag-language"].lower()
+    artwork = str(cfg["download-artwork"]).lower()
     if artwork == "poster":
       self.artwork = True
       self.thumbnail = False
@@ -703,59 +658,62 @@ class ReadSettings:
     else:
       self.thumbnail = False
       try:
-        self.artwork = config.getboolean(section, "download-artwork")
+        self.artwork = bool(cfg["download-artwork"])
       except (ValueError, TypeError):
         self.artwork = True
         self.log.error("Invalid download-artwork value, defaulting to 'poster'.")
-    self.sanitize_disposition = config.getlist(section, "sanitize-disposition")
-    self.strip_metadata = config.getboolean(section, "strip-metadata")
-    self.keep_titles = config.getboolean(section, "keep-titles")
+    self.sanitize_disposition = self._as_list(cfg["sanitize-disposition"])
+    self.strip_metadata = cfg["strip-metadata"]
+    self.keep_titles = cfg["keep-titles"]
 
-  def _read_video(self, config):
+  def _read_video(self, data):
     """Parse ``[Video]``, ``[HDR]``, and ``[Naming]`` and set video codec, bitrate, HDR, and naming attributes."""
     section = "Video"
-    self.vcodec = config.getlist(section, "codec")
-    self.vmaxbitrate = config.getint(section, "max-bitrate")
-    self.vbitrateratio = config.getdict(section, "bitrate-ratio", lower=True, valueModifier=float)
-    self.vbitrate_profiles = self._parse_bitrate_profiles(config.get(section, "crf-profiles"))
-    self.vbitrate_profiles_hd = self._parse_bitrate_profiles(config.get(section, "crf-profiles-hd"))
-    self.preset = config.get(section, "preset")
-    self.codec_params = config.get(section, "codec-parameters")
-    self.dynamic_params = config.getboolean(section, "dynamic-parameters")
-    self.vfilter = config.get(section, "filter")
-    self.vforcefilter = config.getboolean(section, "force-filter")
-    self.vwidth = config.getint(section, "max-width")
-    self.video_level = config.getfloat(section, "max-level")
-    self.vprofile = config.getlist(section, "profile")
-    self.pix_fmt = config.getlist(section, "pix-fmt")
-    self.keep_source_pix_fmt = config.getboolean(section, "prioritize-source-pix-fmt")
-    self.look_ahead_depth = config.getint(section, "look-ahead-depth")
-    self.b_frames = config.getint(section, "b-frames")
-    self.ref_frames = config.getint(section, "ref-frames")
+    cfg = data[section]
+    self.vcodec = self._as_list(cfg["codec"])
+    self.vmaxbitrate = cfg["max-bitrate"]
+    self.vbitrateratio = self._as_dict(cfg["bitrate-ratio"], value_modifier=float)
+    self.vbitrate_profiles = self._parse_bitrate_profiles(cfg["crf-profiles"])
+    self.vbitrate_profiles_hd = self._parse_bitrate_profiles(cfg["crf-profiles-hd"])
+    self.preset = cfg["preset"]
+    self.codec_params = cfg["codec-parameters"]
+    self.dynamic_params = cfg["dynamic-parameters"]
+    self.vfilter = cfg["filter"]
+    self.vforcefilter = cfg["force-filter"]
+    self.vwidth = cfg["max-width"]
+    self.video_level = cfg["max-level"]
+    self.vprofile = self._as_list(cfg["profile"])
+    self.pix_fmt = self._as_list(cfg["pix-fmt"])
+    self.keep_source_pix_fmt = cfg["prioritize-source-pix-fmt"]
+    self.look_ahead_depth = cfg["look-ahead-depth"]
+    self.b_frames = cfg["b-frames"]
+    self.ref_frames = cfg["ref-frames"]
 
     # HDR
     section = "HDR"
+    cfg = data[section]
     self.hdr = {}
-    self.hdr["codec"] = config.getlist(section, "codec")
-    self.hdr["pix_fmt"] = config.getlist(section, "pix-fmt")
-    self.hdr["space"] = config.getlist(section, "space")
-    self.hdr["transfer"] = config.getlist(section, "transfer")
-    self.hdr["primaries"] = config.getlist(section, "primaries")
-    self.hdr["preset"] = config.get(section, "preset")
-    self.hdr["codec_params"] = config.get(section, "codec-parameters")
-    self.hdr["filter"] = config.get(section, "filter")
-    self.hdr["forcefilter"] = config.getboolean(section, "force-filter")
-    self.hdr["profile"] = config.getlist(section, "profile")
-    self.hdr["look_ahead_depth"] = config.getint(section, "look-ahead-depth")
-    self.hdr["b_frames"] = config.getint(section, "b-frames")
-    self.hdr["ref_frames"] = config.getint(section, "ref-frames")
+    self.hdr["codec"] = self._as_list(cfg["codec"])
+    self.hdr["pix_fmt"] = self._as_list(cfg["pix-fmt"])
+    self.hdr["space"] = self._as_list(cfg["space"])
+    self.hdr["transfer"] = self._as_list(cfg["transfer"])
+    self.hdr["primaries"] = self._as_list(cfg["primaries"])
+    self.hdr["preset"] = cfg["preset"]
+    self.hdr["codec_params"] = cfg["codec-parameters"]
+    self.hdr["filter"] = cfg["filter"]
+    self.hdr["forcefilter"] = cfg["force-filter"]
+    self.hdr["profile"] = self._as_list(cfg["profile"])
+    self.hdr["look_ahead_depth"] = cfg["look-ahead-depth"]
+    self.hdr["b_frames"] = cfg["b-frames"]
+    self.hdr["ref_frames"] = cfg["ref-frames"]
 
     # Naming
     section = "Naming"
-    self.naming_enabled = config.getboolean(section, "enabled")
-    self.naming_tv_template = config.get(section, "tv-template")
-    self.naming_tv_airdate_template = config.get(section, "tv-airdate-template")
-    self.naming_movie_template = config.get(section, "movie-template")
+    cfg = data[section]
+    self.naming_enabled = cfg["enabled"]
+    self.naming_tv_template = cfg["tv-template"]
+    self.naming_tv_airdate_template = cfg["tv-airdate-template"]
+    self.naming_movie_template = cfg["movie-template"]
 
     if self.gpu:
       self._apply_hwaccel_codec_map(self.gpu)
@@ -812,122 +770,131 @@ class ReadSettings:
       return int(float(s[:-1]))
     return int(s)
 
-  def _read_analyzer(self, config):
+  def _read_analyzer(self, data):
     """Parse ``[Analyzer]`` and set optional per-job recommendation controls."""
     section = "Analyzer"
+    cfg = data[section]
     self.analyzer = {}
-    self.analyzer["enabled"] = config.getboolean(section, "enabled")
-    self.analyzer["backend"] = config.get(section, "backend").strip().lower()
-    self.analyzer["device"] = config.get(section, "device").strip() or "AUTO"
-    self.analyzer["model_dir"] = config.getpath(section, "model-dir")
-    self.analyzer["cache_dir"] = config.getpath(section, "cache-dir")
-    self.analyzer["max_frames"] = config.getint(section, "max-frames")
-    self.analyzer["target_width"] = config.getint(section, "target-width")
-    self.analyzer["allow_codec_reorder"] = config.getboolean(section, "allow-codec-reorder")
-    self.analyzer["allow_bitrate_adjustments"] = config.getboolean(section, "allow-bitrate-adjustments")
-    self.analyzer["allow_preset_adjustments"] = config.getboolean(section, "allow-preset-adjustments")
-    self.analyzer["allow_filter_adjustments"] = config.getboolean(section, "allow-filter-adjustments")
-    self.analyzer["allow_force_reencode"] = config.getboolean(section, "allow-force-reencode")
+    self.analyzer["enabled"] = cfg["enabled"]
+    self.analyzer["backend"] = cfg["backend"].strip().lower()
+    self.analyzer["device"] = cfg["device"].strip() or "AUTO"
+    self.analyzer["model_dir"] = cfg_getpath(cfg["model-dir"])
+    self.analyzer["cache_dir"] = cfg_getpath(cfg["cache-dir"])
+    self.analyzer["max_frames"] = cfg["max-frames"]
+    self.analyzer["target_width"] = cfg["target-width"]
+    self.analyzer["allow_codec_reorder"] = cfg["allow-codec-reorder"]
+    self.analyzer["allow_bitrate_adjustments"] = cfg["allow-bitrate-adjustments"]
+    self.analyzer["allow_preset_adjustments"] = cfg["allow-preset-adjustments"]
+    self.analyzer["allow_filter_adjustments"] = cfg["allow-filter-adjustments"]
+    self.analyzer["allow_force_reencode"] = cfg["allow-force-reencode"]
 
-  def _read_audio(self, config):
+  def _read_audio(self, data):
     """Parse ``[Audio]``, ``[Audio.Sorting]``, ``[Audio.ChannelFilters]``, and ``[Universal Audio]`` and set audio codec, language, bitrate, and sorting attributes."""
     section = "Audio"
-    self.acodec = config.getlist(section, "codec")
-    self.awl = config.getlist(section, "languages")
-    self.adl = config.get(section, "default-language").lower()
-    self.audio_original_language = config.getboolean(section, "include-original-language")
-    self.abitrate = config.getint(section, "channel-bitrate")
-    self.avbr = config.getint(section, "variable-bitrate")
-    self.amaxbitrate = config.getint(section, "max-bitrate")
-    self.maxchannels = config.getint(section, "max-channels")
-    self.aprofile = config.get(section, "profile").lower()
-    self.afilter = config.get(section, "filter")
-    self.aforcefilter = config.getboolean(section, "force-filter")
-    self.audio_samplerates = [int(x) for x in config.getlist(section, "sample-rates") if x.isdigit()]
-    self.audio_sampleformat = config.get(section, "sample-format")
-    self.audio_atmos_force_copy = config.getboolean(section, "atmos-force-copy")
-    self.audio_copyoriginal = config.getboolean(section, "copy-original")
-    self.audio_first_language_stream = config.getboolean(section, "first-stream-of-language")
-    self.aac_adtstoasc = config.getboolean(section, "aac-adtstoasc")
-    self.ignored_audio_dispositions = config.getlist(section, "ignored-dispositions")
-    self.force_audio_defaults = config.getboolean(section, "force-default")
-    self.unique_audio_dispositions = config.getboolean(section, "unique-dispositions")
-    self.stream_codec_combinations = sorted([x.split(":") for x in config.getlist(section, "stream-codec-combinations")], key=lambda x: len(x), reverse=True)
+    cfg = data[section]
+    self.acodec = self._as_list(cfg["codec"])
+    self.awl = self._as_list(cfg["languages"])
+    self.adl = cfg["default-language"].lower()
+    self.audio_original_language = cfg["include-original-language"]
+    self.abitrate = cfg["channel-bitrate"]
+    self.avbr = cfg["variable-bitrate"]
+    self.amaxbitrate = cfg["max-bitrate"]
+    self.maxchannels = cfg["max-channels"]
+    self.aprofile = cfg["profile"].lower()
+    self.afilter = cfg["filter"]
+    self.aforcefilter = cfg["force-filter"]
+    self.audio_samplerates = [int(x) for x in self._as_list(cfg["sample-rates"]) if str(x).isdigit()]
+    self.audio_sampleformat = cfg["sample-format"]
+    self.audio_atmos_force_copy = cfg["atmos-force-copy"]
+    self.audio_copyoriginal = cfg["copy-original"]
+    self.audio_first_language_stream = cfg["first-stream-of-language"]
+    self.aac_adtstoasc = cfg["aac-adtstoasc"]
+    self.ignored_audio_dispositions = self._as_list(cfg["ignored-dispositions"])
+    self.force_audio_defaults = cfg["force-default"]
+    self.unique_audio_dispositions = cfg["unique-dispositions"]
+    self.stream_codec_combinations = sorted([x.split(":") for x in self._as_list(cfg["stream-codec-combinations"])], key=lambda x: len(x), reverse=True)
 
     section = "Audio.Sorting"
-    self.audio_sorting = config.getlist(section, "sorting")
-    self.audio_sorting_default = config.getlist(section, "default-sorting")
-    self.audio_sorting_codecs = config.getlist(section, "codecs")
+    cfg = data[section]
+    self.audio_sorting = self._as_list(cfg["sorting"])
+    self.audio_sorting_default = self._as_list(cfg["default-sorting"])
+    self.audio_sorting_codecs = self._as_list(cfg["codecs"])
 
     section = "Audio.ChannelFilters"
     self.afilterchannels = {}
-    if config.has_section(section):
-      for key, value in config.items(section):
+    if section in data:
+      for key, value in data.get(section, {}).items():
         if value:
           try:
             channels = [int(x) for x in key.split("-", 1)]
-            self.afilterchannels[channels[0]] = {channels[1]: config.get(section, key)}
+            self.afilterchannels[channels[0]] = {channels[1]: value}
           except (ValueError, IndexError):
             self.log.exception("Unable to parse %s %s, skipping." % (section, key))
             continue
 
     # Universal Audio
     section = "Universal Audio"
-    self.ua_enabled = config.getboolean(section, "enabled")
-    self.ua = config.getlist(section, "codec")
-    self.ua_bitrate = config.getint(section, "channel-bitrate")
-    self.ua_vbr = config.getint(section, "variable-bitrate")
-    self.ua_first_only = config.getboolean(section, "first-stream-only")
-    self.ua_profile = config.get(section, "profile").lower()
-    self.ua_filter = config.get(section, "filter")
-    self.ua_forcefilter = config.getboolean(section, "force-filter")
+    cfg = data[section]
+    self.ua_enabled = cfg["enabled"]
+    self.ua = self._as_list(cfg["codec"])
+    self.ua_bitrate = cfg["channel-bitrate"]
+    self.ua_vbr = cfg["variable-bitrate"]
+    self.ua_first_only = cfg["first-stream-only"]
+    self.ua_profile = cfg["profile"].lower()
+    self.ua_filter = cfg["filter"]
+    self.ua_forcefilter = cfg["force-filter"]
 
-  def _read_subtitles(self, config):
+  def _read_subtitles(self, data):
     """Parse ``[Subtitle]`` and its sub-sections and set subtitle codec, language, embed, burn, and subliminal download attributes."""
     section = "Subtitle"
-    self.scodec = config.getlist(section, "codec")
-    self.scodec_image = config.getlist(section, "codec-image-based")
-    self.swl = config.getlist(section, "languages")
-    self.sdl = config.get(section, "default-language").lower()
-    self.subtitle_original_language = config.getboolean(section, "include-original-language")
-    self.sub_first_language_stream = config.getboolean(section, "first-stream-of-language")
-    self.subencoding = config.get(section, "encoding")
-    self.burn_subtitles = config.getboolean(section, "burn-subtitles")
-    self.burn_dispositions = config.getlist(section, "burn-dispositions")
-    self.embedsubs = config.getboolean(section, "embed-subs")
-    self.embedimgsubs = config.getboolean(section, "embed-image-subs")
-    self.embedonlyinternalsubs = config.getboolean(section, "embed-only-internal-subs")
-    self.filename_dispositions = config.getlist(section, "filename-dispositions")
-    self.ignore_embedded_subs = config.getboolean(section, "ignore-embedded-subs")
-    self.ignored_subtitle_dispositions = config.getlist(section, "ignored-dispositions")
-    self.force_subtitle_defaults = config.getboolean(section, "force-default")
-    self.unique_subtitle_dispositions = config.getboolean(section, "unique-dispositions")
-    self.attachmentcodec = config.getlist(section, "attachment-codec")
-    self.removebvs = config.getlist(section, "remove-bitstream-subs")
+    cfg = data[section]
+    self.scodec = self._as_list(cfg["codec"])
+    self.scodec_image = self._as_list(cfg["codec-image-based"])
+    self.swl = self._as_list(cfg["languages"])
+    self.sdl = cfg["default-language"].lower()
+    self.subtitle_original_language = cfg["include-original-language"]
+    self.sub_first_language_stream = cfg["first-stream-of-language"]
+    self.subencoding = cfg["encoding"]
+    self.burn_subtitles = cfg["burn-subtitles"]
+    self.burn_dispositions = self._as_list(cfg["burn-dispositions"])
+    self.embedsubs = cfg["embed-subs"]
+    self.embedimgsubs = cfg["embed-image-subs"]
+    self.embedonlyinternalsubs = cfg["embed-only-internal-subs"]
+    self.filename_dispositions = self._as_list(cfg["filename-dispositions"])
+    self.ignore_embedded_subs = cfg["ignore-embedded-subs"]
+    self.ignored_subtitle_dispositions = self._as_list(cfg["ignored-dispositions"])
+    self.force_subtitle_defaults = cfg["force-default"]
+    self.unique_subtitle_dispositions = cfg["unique-dispositions"]
+    self.attachmentcodec = self._as_list(cfg["attachment-codec"])
+    self.removebvs = cfg["remove-bitstream-subs"]
 
     section = "Subtitle.Sorting"
-    self.sub_sorting = config.getlist(section, "sorting")
-    self.sub_sorting_codecs = config.getlist(section, "codecs")
-    self.burn_sorting = config.getlist(section, "burn-sorting")
+    cfg = data[section]
+    self.sub_sorting = self._as_list(cfg["sorting"])
+    self.sub_sorting_codecs = self._as_list(cfg["codecs"])
+    self.burn_sorting = self._as_list(cfg["burn-sorting"])
 
     section = "Subtitle.CleanIt"
-    self.cleanit = config.getboolean(section, "enabled")
-    self.cleanit_config = config.get(section, "config-path")
-    self.cleanit_tags = config.getlist(section, "tags")
+    cfg = data[section]
+    self.cleanit = cfg["enabled"]
+    self.cleanit_config = cfg["config-path"]
+    self.cleanit_tags = self._as_list(cfg["tags"])
 
     section = "Subtitle.FFSubsync"
-    self.ffsubsync = config.getboolean(section, "enabled")
+    cfg = data[section]
+    self.ffsubsync = cfg["enabled"]
 
     section = "Subtitle.Subliminal"
-    self.downloadsubs = config.getboolean(section, "download-subs")
-    self.downloadforcedsubs = config.getboolean(section, "download-forced-subs")
-    self.hearing_impaired = config.getboolean(section, "include-hearing-impaired-subs")
-    self.subproviders = config.getlist(section, "providers")
+    cfg = data[section]
+    self.downloadsubs = cfg["download-subs"]
+    self.downloadforcedsubs = cfg["download-forced-subs"]
+    self.hearing_impaired = cfg["include-hearing-impaired-subs"]
+    self.subproviders = self._as_list(cfg["providers"])
 
     section = "Subtitle.Subliminal.Auth"
     self.subproviders_auth = {}
-    if config.has_section(section):
-      for key, value in config.items(section, raw=True):
+    if section in data:
+      for key, value in data.get(section, {}).items():
         if value:
           try:
             credentials = [x.strip() for x in value.split(":", 1)]
@@ -939,30 +906,31 @@ class ReadSettings:
             self.log.exception("Unable to parse %s %s, skipping." % (section, key))
             continue
 
-  def _read_sonarr_radarr(self, config):
+  def _read_sonarr_radarr(self, data):
     """Parse all ``[Sonarr*]`` and ``[Radarr*]`` sections and populate ``sonarr_instances``, ``radarr_instances``, ``Sonarr``, and ``Radarr`` attributes."""
     self.sonarr_instances = []
     self.radarr_instances = []
-    for section in config.sections():
+    for section in list(data.keys()):
       if section.lower().startswith("sonarr") or section.lower().startswith("radarr"):
         is_sonarr = section.lower().startswith("sonarr")
         base = "Sonarr" if is_sonarr else "Radarr"
         defaults = self.DEFAULTS[base]
+        cfg = data.get(section, {})
         instance = {"section": section}
-        instance["host"] = config.get(section, "host", fallback=defaults["host"])
-        instance["port"] = config.getint(section, "port", fallback=defaults["port"])
-        instance["apikey"] = config.get(section, "apikey", fallback=defaults["apikey"])
-        instance["ssl"] = config.getboolean(section, "ssl", fallback=defaults["ssl"])
-        instance["webroot"] = config.get(section, "webroot", fallback=defaults["webroot"])
+        instance["host"] = cfg.get("host", defaults["host"])
+        instance["port"] = cfg.get("port", defaults["port"])
+        instance["apikey"] = cfg.get("apikey", defaults["apikey"])
+        instance["ssl"] = cfg.get("ssl", defaults["ssl"])
+        instance["webroot"] = cfg.get("webroot", defaults["webroot"])
         if not instance["webroot"].startswith("/"):
           instance["webroot"] = "/" + instance["webroot"]
         if instance["webroot"].endswith("/"):
           instance["webroot"] = instance["webroot"][:-1]
-        instance["path"] = config.get(section, "path", fallback=defaults.get("path", ""))
-        instance["rename"] = config.getboolean(section, "force-rename", fallback=defaults["force-rename"])
-        instance["rescan"] = config.getboolean(section, "rescan", fallback=defaults["rescan"])
-        instance["in-progress-check"] = config.getboolean(section, "in-progress-check", fallback=defaults["in-progress-check"])
-        instance["blockreprocess"] = config.getboolean(section, "block-reprocess", fallback=defaults["block-reprocess"])
+        instance["path"] = cfg.get("path", defaults.get("path", ""))
+        instance["rename"] = cfg.get("force-rename", defaults["force-rename"])
+        instance["rescan"] = cfg.get("rescan", defaults["rescan"])
+        instance["in-progress-check"] = cfg.get("in-progress-check", defaults["in-progress-check"])
+        instance["blockreprocess"] = cfg.get("block-reprocess", defaults["block-reprocess"])
         if is_sonarr:
           self.sonarr_instances.append(instance)
         else:
@@ -974,67 +942,72 @@ class ReadSettings:
     self.Sonarr = next((i for i in self.sonarr_instances if i["section"] == "Sonarr"), {})
     self.Radarr = next((i for i in self.radarr_instances if i["section"] == "Radarr"), {})
 
-  def _read_downloader_labels(self, config, section, label_key="label"):
+  def _read_downloader_labels(self, data, section, label_key="label"):
     """Read the common sonarr/radarr/bypass label fields for a downloader section."""
+    cfg = data[section]
     return {
-      "sonarr": config.get(section, "sonarr-%s" % label_key).lower(),
-      "radarr": config.get(section, "radarr-%s" % label_key).lower(),
-      "bypass": config.getlist(section, "bypass-%s" % label_key),
-      "convert": config.getboolean(section, "convert"),
-      "output-dir": config.getdirectory(section, "output-directory"),
-      "path-mapping": config.getdict(section, "path-mapping", dictseparator="=", lower=False, replace=[]),
+      "sonarr": cfg["sonarr-%s" % label_key].lower(),
+      "radarr": cfg["radarr-%s" % label_key].lower(),
+      "bypass": self._as_list(cfg["bypass-%s" % label_key]),
+      "convert": cfg["convert"],
+      "output-dir": cfg_getdirectory(cfg["output-directory"]),
+      "path-mapping": self._as_dict(cfg["path-mapping"], key_separator="="),
     }
 
-  def _read_downloaders(self, config):
+  def _read_downloaders(self, data):
     """Parse ``[SABNZBD]``, ``[Deluge]``, ``[qBittorrent]``, and ``[uTorrent]`` and set the ``SAB``, ``deluge``, ``qBittorrent``, and ``uTorrent`` dicts."""
     # SAB uses "category" instead of "label"
     section = "SABNZBD"
-    self.SAB = self._read_downloader_labels(config, section, label_key="category")
+    self.SAB = self._read_downloader_labels(data, section, label_key="category")
 
     # Deluge
     section = "Deluge"
-    self.deluge = self._read_downloader_labels(config, section)
-    self.deluge["host"] = config.get(section, "host")
-    self.deluge["port"] = config.getint(section, "port")
-    self.deluge["user"] = config.get(section, "username")
-    self.deluge["pass"] = config.get(section, "password")
-    self.deluge["remove"] = config.getboolean(section, "remove")
+    cfg = data[section]
+    self.deluge = self._read_downloader_labels(data, section)
+    self.deluge["host"] = cfg["host"]
+    self.deluge["port"] = cfg["port"]
+    self.deluge["user"] = cfg["username"]
+    self.deluge["pass"] = cfg["password"]
+    self.deluge["remove"] = cfg["remove"]
 
     # qBittorrent
     section = "qBittorrent"
-    self.qBittorrent = self._read_downloader_labels(config, section)
-    self.qBittorrent["actionbefore"] = config.get(section, "action-before")
-    self.qBittorrent["actionafter"] = config.get(section, "action-after")
-    self.qBittorrent["host"] = config.get(section, "host")
-    self.qBittorrent["port"] = config.get(section, "port")
-    self.qBittorrent["ssl"] = config.getboolean(section, "ssl")
-    self.qBittorrent["username"] = config.get(section, "username")
-    self.qBittorrent["password"] = config.get(section, "password")
+    cfg = data[section]
+    self.qBittorrent = self._read_downloader_labels(data, section)
+    self.qBittorrent["actionbefore"] = cfg["action-before"]
+    self.qBittorrent["actionafter"] = cfg["action-after"]
+    self.qBittorrent["host"] = cfg["host"]
+    self.qBittorrent["port"] = cfg["port"]
+    self.qBittorrent["ssl"] = cfg["ssl"]
+    self.qBittorrent["username"] = cfg["username"]
+    self.qBittorrent["password"] = cfg["password"]
 
     # uTorrent
     section = "uTorrent"
-    self.uTorrent = self._read_downloader_labels(config, section)
-    self.uTorrent["webui"] = config.getboolean(section, "webui")
-    self.uTorrent["actionbefore"] = config.get(section, "action-before")
-    self.uTorrent["actionafter"] = config.get(section, "action-after")
-    self.uTorrent["host"] = config.get(section, "host")
-    self.uTorrent["port"] = config.get(section, "port")
-    self.uTorrent["ssl"] = config.getboolean(section, "ssl")
-    self.uTorrent["username"] = config.get(section, "username")
-    self.uTorrent["password"] = config.get(section, "password")
+    cfg = data[section]
+    self.uTorrent = self._read_downloader_labels(data, section)
+    self.uTorrent["webui"] = cfg["webui"]
+    self.uTorrent["actionbefore"] = cfg["action-before"]
+    self.uTorrent["actionafter"] = cfg["action-after"]
+    self.uTorrent["host"] = cfg["host"]
+    self.uTorrent["port"] = cfg["port"]
+    self.uTorrent["ssl"] = cfg["ssl"]
+    self.uTorrent["username"] = cfg["username"]
+    self.uTorrent["password"] = cfg["password"]
 
-  def _read_plex(self, config):
+  def _read_plex(self, data):
     """Parse ``[Plex]`` and set the ``Plex`` connection dict and ``plexmatch_enabled`` flag."""
     section = "Plex"
+    cfg = data[section]
     self.Plex = {}
-    self.Plex["host"] = config.get(section, "host")
-    self.Plex["port"] = config.getint(section, "port")
-    self.Plex["refresh"] = config.getboolean(section, "refresh")
-    self.Plex["token"] = config.get(section, "token")
-    self.Plex["ssl"] = config.getboolean(section, "ssl")
-    self.Plex["ignore-certs"] = config.getboolean(section, "ignore-certs")
-    self.Plex["path-mapping"] = config.getdict(section, "path-mapping", dictseparator="=", lower=False, replace=[])
-    self.Plex["plexmatch"] = config.getboolean(section, "plexmatch")
+    self.Plex["host"] = cfg["host"]
+    self.Plex["port"] = cfg["port"]
+    self.Plex["refresh"] = cfg["refresh"]
+    self.Plex["token"] = cfg["token"]
+    self.Plex["ssl"] = cfg["ssl"]
+    self.Plex["ignore-certs"] = cfg["ignore-certs"]
+    self.Plex["path-mapping"] = self._as_dict(cfg["path-mapping"], key_separator="=")
+    self.Plex["plexmatch"] = cfg["plexmatch"]
 
     self.plexmatch_enabled = bool(self.Plex.get("host") and self.Plex.get("plexmatch", True))
 
@@ -1042,7 +1015,7 @@ class ReadSettings:
     """Validate that ffmpeg and ffprobe binaries exist and are executable."""
     for name, path in [("ffmpeg", self.ffmpeg), ("ffprobe", self.ffprobe)]:
       if not path:
-        self.log.error("%s path is not configured. Set it in autoProcess.ini [Converter] section." % name)
+        self.log.error("%s path is not configured. Set it in sma-ng.yml [Converter] section." % name)
         sys.exit(1)
       resolved = shutil.which(path)
       if resolved:
@@ -1050,93 +1023,90 @@ class ReadSettings:
       elif os.path.isfile(path) and os.access(path, os.X_OK):
         self.log.debug("%s found at %s" % (name, path))
       else:
-        self.log.error("%s not found: '%s'. Verify the path in autoProcess.ini [Converter] section or ensure it is installed and in PATH." % (name, path))
+        self.log.error("%s not found: '%s'. Verify the path in sma-ng.yml [Converter] section or ensure it is installed and in PATH." % (name, path))
         sys.exit(1)
 
-  def writeConfig(self, config, cfgfile):
-    if not os.path.isdir(os.path.dirname(cfgfile)):
-      os.makedirs(os.path.dirname(cfgfile))
-    try:
-      fp = open(cfgfile, "w")
-      config.write(fp)
-      fp.close()
-    except (OSError, PermissionError, IOError):
-      self.log.exception("Error writing to %s due to permissions." % (self.CONFIG_DEFAULT))
+  def writeConfig(self, data, cfgfile):
+    from resources.yamlconfig import write as _yaml_write
 
-  def migrateFromOld(self, config, configFile):
+    try:
+      _yaml_write(cfgfile, data)
+    except (OSError, PermissionError, IOError):
+      self.log.exception("Error writing to %s due to permissions." % cfgfile)
+
+  def migrateFromOld(self, data, configFile):
     try:
       write = False
-      if config.has_option("Converter", "sort-streams"):
-        if not config.getboolean("Converter", "sort-streams"):
-          config.remove_option("Converter", "sort-streams")
-          config.set("Audio.Sorting", "sorting", "")
-          config.set("Subtitle.Sorting", "sorting", "")
+      if "sort-streams" in data.get("Converter", {}):
+        if not self._as_bool(data["Converter"].get("sort-streams")):
+          data["Converter"].pop("sort-streams", None)
+          data["Audio.Sorting"]["sorting"] = []
+          data["Subtitle.Sorting"]["sorting"] = []
           write = True
-      elif config.has_option("Audio", "prefer-more-channels"):
-        asorting = config.get("Audio.Sorting", "sorting").lower()
-        if config.getboolean("Audio", "prefer-more-channels"):
+      elif "prefer-more-channels" in data.get("Audio", {}):
+        asorting = self._as_list(data["Audio.Sorting"]["sorting"])
+        if self._as_bool(data["Audio"].get("prefer-more-channels")):
           if "channels" in asorting and "channels.a" not in asorting and "channels.d" not in asorting:
-            asorting = asorting.replace("channels", "channels.d")
+            asorting = ["channels.d" if x == "channels" else x for x in asorting]
             self.log.debug("Replacing channels with channels.d based on deprecated settings [prefer-more-channels: True].")
           else:
-            asorting = asorting.replace("channels.a", "channels.d")
+            asorting = ["channels.d" if x == "channels.a" else x for x in asorting]
             self.log.debug("Replacing channels.a with channels.d based on deprecated settings [prefer-more-channels: True].")
         else:
-          asorting = asorting.replace("channels.d", "channels.a")
+          asorting = ["channels.a" if x == "channels.d" else x for x in asorting]
           self.log.debug("Replacing channels.d with channels.a based on deprecated settings [prefer-more-channels: False].")
-        config.remove_option("Audio", "prefer-more-channels")
-        config.set("Audio.Sorting", "sorting", asorting)
+        data["Audio"].pop("prefer-more-channels", None)
+        data["Audio.Sorting"]["sorting"] = asorting
         write = True
 
-      if config.has_option("Audio", "default-more-channels"):
-        adsorting = config.get("Audio.Sorting", "default-sorting").lower()
-        if config.getboolean("Audio", "default-more-channels"):
+      if "default-more-channels" in data.get("Audio", {}):
+        adsorting = self._as_list(data["Audio.Sorting"]["default-sorting"])
+        if self._as_bool(data["Audio"].get("default-more-channels")):
           if "channels" in adsorting and "channels.a" not in adsorting and "channels.d" not in adsorting:
-            adsorting = adsorting.replace("channels", "channels.d")
+            adsorting = ["channels.d" if x == "channels" else x for x in adsorting]
             self.log.debug("Replacing channels with channels.d based on deprecated settings [default-more-channels: True].")
           else:
-            adsorting = adsorting.replace("channels.a", "channels.d")
+            adsorting = ["channels.d" if x == "channels.a" else x for x in adsorting]
             self.log.debug("Replacing channels.a with channels.d based on deprecated settings [default-more-channels: True].")
         else:
-          adsorting = adsorting.replace("channels.d", "channels.a")
+          adsorting = ["channels.a" if x == "channels.d" else x for x in adsorting]
           self.log.debug("Replacing channels.d with channels.a based on deprecated settings [default-more-channels: False].")
-        config.remove_option("Audio", "default-more-channels")
-        config.set("Audio.Sorting", "default-sorting", adsorting)
+        data["Audio"].pop("default-more-channels", None)
+        data["Audio.Sorting"]["default-sorting"] = adsorting
         write = True
 
-      if config.has_option("Audio.Sorting", "final-sort") and config.has_option("Audio.Sorting", "sorting") and config.getboolean("Audio.Sorting", "final-sort"):
-        config.remove_option("Audio.Sorting", "final-sort")
-        asort = config.getlist("Audio.Sorting", "sorting")
+      if "final-sort" in data.get("Audio.Sorting", {}) and "sorting" in data.get("Audio.Sorting", {}) and self._as_bool(data["Audio.Sorting"].get("final-sort")):
+        data["Audio.Sorting"].pop("final-sort", None)
+        asort = self._as_list(data["Audio.Sorting"]["sorting"])
         if "map" not in asort:
           asort.append("map")
-          config.set("Audio.Sorting", "sorting", "".join("%s, " % x for x in asort)[:-2])
+          data["Audio.Sorting"]["sorting"] = asort
           self.log.debug("Final-sort is deprecated, adding to sorting list [audio.sorting-final-sort: True].")
         else:
           self.log.debug("Final-sort is deprecated, removing [audio.sorting-final-sort: True].")
         write = True
-      elif config.has_option("Audio.Sorting", "final-sort"):
-        config.remove_option("Audio.Sorting", "final-sort")
+      elif "final-sort" in data.get("Audio.Sorting", {}):
+        data["Audio.Sorting"].pop("final-sort", None)
         self.log.debug("Final-sort is deprecated, removing [audio.sorting-final-sort: False].")
         write = True
 
-      if config.has_option("Audio", "copy-original-before"):
-        config.remove_option("Audio", "copy-original-before")
+      if "copy-original-before" in data.get("Audio", {}):
+        data["Audio"].pop("copy-original-before", None)
         write = True
 
-      if config.has_option("Universal Audio", "move-after"):
-        config.remove_option("Universal Audio", "move-after")
+      if "move-after" in data.get("Universal Audio", {}):
+        data["Universal Audio"].pop("move-after", None)
         write = True
 
       # gpu moved from [Converter] to [Video]
-      if config.has_option("Converter", "gpu"):
-        gpu_val = config.get("Converter", "gpu")
-        config.remove_option("Converter", "gpu")
-        if not config.has_option("Video", "gpu") or not config.get("Video", "gpu").strip():
-          config.set("Video", "gpu", gpu_val)
+      if "gpu" in data.get("Converter", {}):
+        gpu_val = data["Converter"].pop("gpu")
+        if not str(data.get("Video", {}).get("gpu", "")).strip():
+          data.setdefault("Video", {})["gpu"] = gpu_val
         write = True
 
       if write:
-        self.writeConfig(config, configFile)
+        self.writeConfig(data, configFile)
     except Exception:
       self.log.exception("Unable to migrate old sorting options.")
-    return config
+    return data
