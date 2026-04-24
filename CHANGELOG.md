@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.6.32](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.31...sma-ng-v1.6.32) (2026-04-24)
+
+
+### Features
+
+* add sma-ng.yml.sample and update deploy tooling for YAML config ([5b8d3d5](https://github.com/newdave/sma-ng/commit/5b8d3d5bdeb14e2774538065cf3d037254efdb67))
+* migrate daemon to YAML config with Daemon section and profile support ([b6a480d](https://github.com/newdave/sma-ng/commit/b6a480ddc5c513e4455bfbb4a57e5f49735271fe))
+* replace SMAConfigParser with YAML in ReadSettings ([a800244](https://github.com/newdave/sma-ng/commit/a800244e3a64820b4b1647262f16cb9be7918aa9))
+* update config audit and roll tasks for YAML format ([5d8f0a5](https://github.com/newdave/sma-ng/commit/5d8f0a562fce5dd0a16fff00323286ab0ceea8d7))
+* update Docker for YAML config ([679d1cc](https://github.com/newdave/sma-ng/commit/679d1cc7072f7a16680a76ef4062e5b87d319f05))
+* update update.py to support YAML config format ([26cadb3](https://github.com/newdave/sma-ng/commit/26cadb3885712499bc8856014e55f6fbe3830f74))
+
+
+### Documentation
+
+* update all documentation for YAML config migration ([d948c84](https://github.com/newdave/sma-ng/commit/d948c84ccd93e9dc2779d289fd93e12a5d8f69ab))
+
 ## [1.6.31](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.30...sma-ng-v1.6.31) (2026-04-24)
 
 
