@@ -237,11 +237,11 @@ class TestDockerfileRuntime:
 
   def test_cmd_includes_config_and_logs_paths(self, dockerfile_raw):
     # Paths are set via env vars, referenced in CMD
-    assert "SMA_DAEMON_CONFIG=/config/daemon.json" in dockerfile_raw
+    assert "SMA_DAEMON_CONFIG=/config/sma-ng.yml" in dockerfile_raw
     assert "SMA_DAEMON_LOGS_DIR=/logs" in dockerfile_raw
 
   def test_sma_config_env_points_to_volume(self, dockerfile_raw):
-    assert "SMA_CONFIG=/config/autoProcess.ini" in dockerfile_raw
+    assert "SMA_CONFIG=/config/sma-ng.yml" in dockerfile_raw
 
   def test_no_uid_gid_args(self, dockerfile):
     # ubuntu:24.04 built-in 'ubuntu' user is used directly; ARG UID/GID

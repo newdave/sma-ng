@@ -156,14 +156,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VIRTUAL_ENV=/venv \
     PATH="/venv/bin:/usr/local/bin:$PATH" \
     # SMA paths — override via environment or volume mounts
-    SMA_CONFIG=/config/autoProcess.ini \
+    SMA_CONFIG=/config/sma-ng.yml \
     SMA_FFMPEG=/usr/local/bin/ffmpeg \
     SMA_FFPROBE=/usr/local/bin/ffprobe \
     # Daemon runtime defaults — override any of these with -e / env_file
     SMA_DAEMON_HOST=0.0.0.0 \
     SMA_DAEMON_PORT=8585 \
     SMA_DAEMON_WORKERS=2 \
-    SMA_DAEMON_CONFIG=/config/daemon.json \
+    SMA_DAEMON_CONFIG=/config/sma-ng.yml \
     SMA_DAEMON_LOGS_DIR=/logs
 
 # Runtime shared libraries required by the FFmpeg binary.

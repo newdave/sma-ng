@@ -43,43 +43,41 @@ mkdir -p "$CONFIG_DIR" "$DEFAULTS_DIR"
 
 # ── seed user config files (skipped if already present) ───────────────────────
 
-_ini_is_new=false
-[ ! -f "$CONFIG_DIR/autoProcess.ini" ] && _ini_is_new=true
-seed_file "$SETUP_DIR/autoProcess.ini.sample" "$CONFIG_DIR/autoProcess.ini"
-seed_file "$SETUP_DIR/daemon.json.sample"     "$CONFIG_DIR/daemon.json"
+_config_is_new=false
+[ ! -f "$CONFIG_DIR/sma-ng.yml" ] && _config_is_new=true
+seed_file "$SETUP_DIR/sma-ng.yml.sample" "$CONFIG_DIR/sma-ng.yml"
 seed_file "$SETUP_DIR/daemon.env.sample"      "$CONFIG_DIR/daemon.env"
 seed_file "$SETUP_DIR/custom.py.sample"       "$CONFIG_DIR/custom.py"
 
 # ── always refresh defaults/ with the latest shipped samples ──────────────────
 # These are read-only reference copies — users should never edit them.
 
-cp "$SETUP_DIR/autoProcess.ini.sample" "$DEFAULTS_DIR/autoProcess.ini.sample"
-cp "$SETUP_DIR/daemon.json.sample"     "$DEFAULTS_DIR/daemon.json.sample"
+cp "$SETUP_DIR/sma-ng.yml.sample" "$DEFAULTS_DIR/sma-ng.yml.sample"
 cp "$SETUP_DIR/daemon.env.sample"      "$DEFAULTS_DIR/daemon.env.sample"
 cp "$SETUP_DIR/custom.py.sample"       "$DEFAULTS_DIR/custom.py.sample"
 
 log "defaults/ refreshed with latest samples"
 
-# ── patch autoProcess.ini with discovered ffmpeg paths ────────────────────────
+# ── patch sma-ng.yml with discovered ffmpeg paths ───────────────────────
 # Only patch lines that still hold the bare default ("ffmpeg" / "ffprobe").
 # User-defined absolute paths are left alone.
 
 FFMPEG="${SMA_FFMPEG:-/usr/local/bin/ffmpeg}"
 FFPROBE="${SMA_FFPROBE:-/usr/local/bin/ffprobe}"
 
-INI="$CONFIG_DIR/autoProcess.ini"
+CONFIG="$CONFIG_DIR/sma-ng.yml"
 
 # sed -i is not POSIX; use a temp file for portability across BusyBox/GNU
-_patch_ini() {
+_patch_yaml() {
     key="$1"; val="$2"
-    tmp="${INI}.patching"
-    sed "s|^${key} = ffmpeg\$|${key} = ${val}|; \
-         s|^${key} = ffprobe\$|${key} = ${val}|" \
-        "$INI" > "$tmp" && mv "$tmp" "$INI"
+    tmp="${CONFIG}.patching"
+    sed "s|^  ${key}: ffmpeg\$|  ${key}: ${val}|; \
+         s|^  ${key}: ffprobe\$|  ${key}: ${val}|" \
+        "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
 }
 
-_patch_ini "ffmpeg"  "$FFMPEG"
-_patch_ini "ffprobe" "$FFPROBE"
+_patch_yaml "ffmpeg"  "$FFMPEG"
+_patch_yaml "ffprobe" "$FFPROBE"
 
 log "FFmpeg: $FFMPEG  FFprobe: $FFPROBE"
 
@@ -87,15 +85,17 @@ log "FFmpeg: $FFMPEG  FFprobe: $FFPROBE"
 # SMA_GPU overrides detection at any time; detect-gpu.sh runs on first run only.
 if [ -n "${SMA_GPU:-}" ]; then
     GPU="$SMA_GPU"
-    tmp="${INI}.patching"
-    sed "s|^gpu *=.*|gpu = ${GPU}|" "$INI" > "$tmp" && mv "$tmp" "$INI"
+    tmp="${CONFIG}.patching"
+    sed "s|^  gpu:.*|  gpu: ${GPU}|" "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
     log "GPU: ${GPU} (from SMA_GPU)"
-elif [ "$_ini_is_new" = "true" ]; then
+elif [ "$_config_is_new" = "true" ]; then
     GPU="$(/app/scripts/detect-gpu.sh 2>/dev/null || echo software)"
-    tmp="${INI}.patching"
-    sed "s|^gpu *=.*|gpu = ${GPU}|" "$INI" > "$tmp" && mv "$tmp" "$INI"
+    tmp="${CONFIG}.patching"
+    sed "s|^  gpu:.*|  gpu: ${GPU}|" "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
     log "GPU: ${GPU} (auto-detected)"
 fi
+
+export SMA_CONFIG="${SMA_CONFIG:-$CONFIG}"
 
 log "Config directory ready: $CONFIG_DIR"
 

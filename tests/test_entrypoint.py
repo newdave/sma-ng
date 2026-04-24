@@ -19,8 +19,7 @@ SETUP_DIR = os.path.join(PROJECT_ROOT, "setup")
 
 # Sample files the entrypoint is expected to seed
 SEEDED_FILES = {
-  "autoProcess.ini": "autoProcess.ini.sample",
-  "daemon.json": "daemon.json.sample",
+  "sma-ng.yml": "sma-ng.yml.sample",
   "daemon.env": "daemon.env.sample",
   "custom.py": "custom.py.sample",
 }
@@ -149,22 +148,14 @@ class TestFirstRunSeeding:
     for dst_name in SEEDED_FILES:
       assert os.path.isfile(os.path.join(empty_config, dst_name)), f"Expected {dst_name} to be seeded"
 
-  def test_seeded_ini_matches_sample(self, empty_config):
+  def test_seeded_yaml_matches_sample(self, empty_config):
     _run(empty_config)
-    seeded = open(os.path.join(empty_config, "autoProcess.ini")).read()
-    sample = open(os.path.join(SETUP_DIR, "autoProcess.ini.sample")).read()
+    seeded = open(os.path.join(empty_config, "sma-ng.yml")).read()
+    sample = open(os.path.join(SETUP_DIR, "sma-ng.yml.sample")).read()
     # Strip lines patched by the entrypoint on first run: ffmpeg/ffprobe
     # paths and the gpu= value (set by detect-gpu.sh).
-    _pat = re.compile(r"^(ffmpeg|ffprobe|gpu) = .*", re.M)
+    _pat = re.compile(r"^  (ffmpeg|ffprobe|gpu): .*", re.M)
     assert _pat.sub("", seeded) == _pat.sub("", sample)
-
-  def test_seeded_json_is_valid(self, empty_config):
-    import json
-
-    _run(empty_config)
-    with open(os.path.join(empty_config, "daemon.json")) as fh:
-      parsed = json.load(fh)
-    assert "default_config" in parsed
 
   def test_seeded_env_is_readable(self, empty_config):
     _run(empty_config)
@@ -180,15 +171,10 @@ class TestFirstRunSeeding:
 
 
 class TestIdempotency:
-  def test_existing_ini_not_overwritten(self, populated_config):
+  def test_existing_yaml_not_overwritten(self, populated_config):
     _run(populated_config)
-    content = open(os.path.join(populated_config, "autoProcess.ini")).read()
-    assert "# existing autoProcess.ini" in content
-
-  def test_existing_json_not_overwritten(self, populated_config):
-    _run(populated_config)
-    content = open(os.path.join(populated_config, "daemon.json")).read()
-    assert "# existing daemon.json" in content
+    content = open(os.path.join(populated_config, "sma-ng.yml")).read()
+    assert "# existing sma-ng.yml" in content
 
   def test_existing_env_not_overwritten(self, populated_config):
     _run(populated_config)
@@ -232,7 +218,7 @@ class TestDefaultsDirectory:
     # Write a stale defaults file
     defaults_dir = os.path.join(populated_config, "defaults")
     os.makedirs(defaults_dir, exist_ok=True)
-    stale = os.path.join(defaults_dir, "autoProcess.ini.sample")
+    stale = os.path.join(defaults_dir, "sma-ng.yml.sample")
     open(stale, "w").write("# stale content\n")
 
     _run(populated_config)
@@ -245,35 +231,35 @@ class TestDefaultsDirectory:
 
 
 class TestFFmpegPatching:
-  def test_default_ffmpeg_path_written_to_ini(self, empty_config):
+  def test_default_ffmpeg_path_written_to_yaml(self, empty_config):
     _run(empty_config)
-    ini = open(os.path.join(empty_config, "autoProcess.ini")).read()
-    assert "ffmpeg = /usr/local/bin/ffmpeg" in ini
+    config = open(os.path.join(empty_config, "sma-ng.yml")).read()
+    assert "  ffmpeg: /usr/local/bin/ffmpeg" in config
 
-  def test_default_ffprobe_path_written_to_ini(self, empty_config):
+  def test_default_ffprobe_path_written_to_yaml(self, empty_config):
     _run(empty_config)
-    ini = open(os.path.join(empty_config, "autoProcess.ini")).read()
-    assert "ffprobe = /usr/local/bin/ffprobe" in ini
+    config = open(os.path.join(empty_config, "sma-ng.yml")).read()
+    assert "  ffprobe: /usr/local/bin/ffprobe" in config
 
   def test_custom_ffmpeg_path_via_env(self, empty_config):
     _run(empty_config, env_extra={"SMA_FFMPEG": "/opt/bin/ffmpeg"})
-    ini = open(os.path.join(empty_config, "autoProcess.ini")).read()
-    assert "ffmpeg = /opt/bin/ffmpeg" in ini
+    config = open(os.path.join(empty_config, "sma-ng.yml")).read()
+    assert "  ffmpeg: /opt/bin/ffmpeg" in config
 
   def test_custom_ffprobe_path_via_env(self, empty_config):
     _run(empty_config, env_extra={"SMA_FFPROBE": "/opt/bin/ffprobe"})
-    ini = open(os.path.join(empty_config, "autoProcess.ini")).read()
-    assert "ffprobe = /opt/bin/ffprobe" in ini
+    config = open(os.path.join(empty_config, "sma-ng.yml")).read()
+    assert "  ffprobe: /opt/bin/ffprobe" in config
 
   def test_user_custom_ffmpeg_path_preserved(self, populated_config):
     """If the user has already set a custom path, the patch must not change it."""
-    ini_path = os.path.join(populated_config, "autoProcess.ini")
-    open(ini_path, "w").write("[Converter]\nffmpeg = /my/custom/ffmpeg\nffprobe = /my/custom/ffprobe\n")
+    config_path = os.path.join(populated_config, "sma-ng.yml")
+    open(config_path, "w").write("Converter:\n  ffmpeg: /my/custom/ffmpeg\n  ffprobe: /my/custom/ffprobe\n")
     _run(populated_config)
-    ini = open(ini_path).read()
-    # The sed rule only replaces bare "ffmpeg" / "ffprobe" values, not absolute paths
-    assert "/my/custom/ffmpeg" in ini
-    assert "/my/custom/ffprobe" in ini
+    config = open(config_path).read()
+    # The sed rule only replaces bare ffmpeg/ffprobe values, not absolute paths.
+    assert "/my/custom/ffmpeg" in config
+    assert "/my/custom/ffprobe" in config
 
 
 # ── exec hand-off ─────────────────────────────────────────────────────────────
