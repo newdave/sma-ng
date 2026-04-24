@@ -58,6 +58,8 @@ def _make_server(
   server.job_db.delete_failed_jobs.return_value = 2
   server.job_db.delete_offline_nodes.return_value = 1
   server.job_db.delete_all_jobs.return_value = 10
+  server.job_db.set_node_approval.return_value = {"node_id": "test-node-1", "approval_status": "approved"}
+  server.job_db.delete_node.return_value = True
   server.job_db.record_scanned.return_value = None
   server.job_db.is_distributed = is_distributed
 
@@ -734,14 +736,14 @@ class TestPostShutdown:
     h = _make_handler(method="POST", is_distributed=True)
     h.server.job_db.send_node_command.return_value = 1
     h._post_shutdown("/shutdown", {"node": ["node-2"]})
-    h.server.job_db.send_node_command.assert_called_once_with("node-2", "shutdown")
+    h.server.job_db.send_node_command.assert_called_once_with("node-2", "shutdown", requested_by="api")
     assert h._response_code == 202
 
   def test_distributed_broadcast_shutdown(self):
     h = _make_handler(method="POST", is_distributed=True)
     h.server.job_db.send_node_command.return_value = 3
     h._post_shutdown("/shutdown", {})
-    h.server.job_db.send_node_command.assert_called_once_with(None, "shutdown")
+    h.server.job_db.send_node_command.assert_called_once_with(None, "shutdown", requested_by="api")
     assert h._response_code == 202
 
 
@@ -761,13 +763,48 @@ class TestPostRestart:
     h = _make_handler(method="POST", is_distributed=True)
     h.server.job_db.send_node_command.return_value = 1
     h._post_restart("/restart", {"node": ["node-2"]})
-    h.server.job_db.send_node_command.assert_called_once_with("node-2", "restart")
+    h.server.job_db.send_node_command.assert_called_once_with("node-2", "restart", requested_by="api")
 
   def test_distributed_broadcast_restart(self):
     h = _make_handler(method="POST", is_distributed=True)
     h.server.job_db.send_node_command.return_value = 2
     h._post_restart("/restart", {})
-    h.server.job_db.send_node_command.assert_called_once_with(None, "restart")
+    h.server.job_db.send_node_command.assert_called_once_with(None, "restart", requested_by="api")
+
+
+class TestPostAdminNodeAction:
+  def test_approve_node_returns_200(self):
+    body = json.dumps({"note": "trusted host"}).encode()
+    h = _make_handler(
+      method="POST",
+      body=body,
+      headers={"Content-Length": str(len(body)), "Content-Type": "application/json", "X-Actor": "qa-admin"},
+    )
+    h.server.job_db.set_node_approval.return_value = {"node_id": "node-1", "approval_status": "approved"}
+    h._post_admin_node_action("/admin/nodes/node-1/approve")
+    h.server.job_db.set_node_approval.assert_called_once_with(node_id="node-1", approved=True, actor="qa-admin", note="trusted host")
+    assert h._response_code == 200
+
+  def test_reject_node_returns_200(self):
+    h = _make_handler(method="POST", headers={"Content-Length": "0"})
+    h.server.job_db.set_node_approval.return_value = {"node_id": "node-1", "approval_status": "rejected"}
+    h._post_admin_node_action("/admin/nodes/node-1/reject")
+    h.server.job_db.set_node_approval.assert_called_once_with(node_id="node-1", approved=False, actor="admin-ui", note=None)
+    assert h._response_code == 200
+
+  def test_restart_node_command_returns_202(self):
+    h = _make_handler(method="POST", headers={"X-Actor": "ops"})
+    h.server.job_db.send_node_command.return_value = ["node-1"]
+    h._post_admin_node_action("/admin/nodes/node-1/restart")
+    h.server.job_db.send_node_command.assert_called_once_with("node-1", "restart", requested_by="ops")
+    assert h._response_code == 202
+
+  def test_delete_node_returns_200(self):
+    h = _make_handler(method="POST")
+    h.server.job_db.delete_node.return_value = True
+    h._post_admin_node_action("/admin/nodes/node-1/delete")
+    h.server.job_db.delete_node.assert_called_once_with("node-1")
+    assert h._response_code == 200
 
 
 # ---------------------------------------------------------------------------

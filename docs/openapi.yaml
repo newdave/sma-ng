@@ -718,6 +718,56 @@ paths:
                   active_jobs:
                     type: integer
 
+  /admin/nodes/{nodeId}/{action}:
+    post:
+      summary: Perform an admin action on a cluster node
+      description: |
+        Distributed-mode node management endpoint used by the admin UI.
+        Actions: approve, reject, restart, shutdown, delete.
+      operationId: adminNodeAction
+      tags: [management]
+      parameters:
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [approve, reject, restart, shutdown, delete]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  description: Optional approval or rejection note
+      responses:
+        "200":
+          description: Approval/rejection/delete completed
+          content:
+            application/json:
+              schema:
+                type: object
+        "202":
+          description: Restart/shutdown command queued for the target node
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: Node not found or unknown action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /scan:
     get:
       summary: Filter a list of paths to those not yet scanned

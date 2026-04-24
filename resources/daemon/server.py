@@ -21,14 +21,20 @@ def _is_public_ip_address(value):
   return not (ip.is_unspecified or ip.is_loopback)
 
 
-def _resolve_advertised_host(bind_host, node_id):
+def _resolve_advertised_host(bind_host, node_id, prefer_node_id=False):
   """Return the host value that should be advertised in cluster status.
 
   Prefer the configured bind host when it is already a concrete address.
   When the daemon binds to all interfaces (for example ``0.0.0.0`` inside
   Docker), resolve the node hostname to an address and fall back to the
   outbound interface address before ultimately falling back to the hostname.
+  When ``prefer_node_id`` is True, return ``node_id`` directly. This is used
+  when ``SMA_NODE_NAME`` is configured so cluster host identity remains stable
+  and human-readable across restarts.
   """
+  if prefer_node_id:
+    return node_id
+
   bind_host = (bind_host or "").strip()
   if bind_host and _is_public_ip_address(bind_host):
     return bind_host
@@ -120,10 +126,15 @@ class DaemonServer(ThreadingHTTPServer):
       self.notify_workers()
 
     # Start heartbeat thread (only does real work with PostgreSQL backend)
+    configured_node_name = os.environ.get("SMA_NODE_NAME", "").strip()
     self.heartbeat_thread = HeartbeatThread(
       job_db=job_db,
       node_id=self.node_id,
-      host=_resolve_advertised_host(server_address[0], self.node_id),
+      host=_resolve_advertised_host(
+        server_address[0],
+        self.node_id,
+        prefer_node_id=bool(configured_node_name),
+      ),
       worker_count=worker_count,
       server=self,
       interval=heartbeat_interval,

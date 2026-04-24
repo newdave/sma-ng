@@ -344,6 +344,9 @@ class TestAdminHTML:
     assert "endpoint: '/admin/delete-failed'" in ADMIN_HTML
     assert "endpoint: '/admin/delete-offline-nodes'" in ADMIN_HTML
     assert "endpoint: '/admin/delete-all-jobs'" in ADMIN_HTML
+    assert "/admin/nodes/" in ADMIN_HTML
+    assert "nodeAction(node, 'approve')" in ADMIN_HTML
+    assert "nodeAction(node, 'reject')" in ADMIN_HTML
 
 
 class TestDocsTemplate:
@@ -508,6 +511,9 @@ class TestNodeHostResolution:
       socket_ctx.getsockname.return_value = ("192.168.50.20", 40000)
       with patch("resources.daemon.server.socket.gethostbyname", return_value="127.0.0.1"):
         assert _resolve_advertised_host("0.0.0.0", "sma-ng-intel") == "192.168.50.20"
+
+  def test_resolve_advertised_host_prefers_node_id_when_requested(self):
+    assert _resolve_advertised_host("0.0.0.0", "sma-node-name", prefer_node_id=True) == "sma-node-name"
 
 
 class TestLogEndpoints:
@@ -1468,6 +1474,17 @@ class TestPostgreSQLJobDatabase:
     sql = cur.execute.call_args[0][0]
     assert "node_id" in sql
 
+  def test_send_node_command_records_requested_by(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchall.return_value = [{"node_id": "n1"}]
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    db.send_node_command("n1", "shutdown", requested_by="ops-user")
+    sql, params = cur.execute.call_args[0]
+    assert "command_requested_by" in sql
+    assert "ops-user" in params
+
   def test_send_node_command_broadcasts_when_node_id_is_none(self):
     from unittest.mock import MagicMock
 
@@ -1478,6 +1495,31 @@ class TestPostgreSQLJobDatabase:
     assert len(result) == 2
     sql = cur.execute.call_args[0][0]
     assert "online" in sql
+
+  def test_is_node_approved_true_for_approved_node(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchone.return_value = {"approval_status": "approved"}
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    assert db.is_node_approved("n1") is True
+
+  def test_set_node_approval_returns_updated_row(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchone.return_value = {"node_id": "n1", "approval_status": "approved"}
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    updated = db.set_node_approval("n1", approved=True, actor="admin", note="ok")
+    assert updated["approval_status"] == "approved"
+
+  def test_delete_node_returns_true_when_deleted(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.rowcount = 1
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    assert db.delete_node("n1") is True
 
   # ------------------------------------------------------------------
   # requeue_job / requeue_failed_jobs

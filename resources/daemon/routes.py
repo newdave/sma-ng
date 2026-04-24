@@ -101,4 +101,5 @@ def _post_routes():
 def _post_prefix_routes():
   return [
     ("/jobs/", lambda handler, path, query: dispatch_post_job_action(handler, path)),
+    ("/admin/nodes/", lambda handler, path, query: handler._post_admin_node_action(path)),
   ]

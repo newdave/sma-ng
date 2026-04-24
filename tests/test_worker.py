@@ -520,6 +520,24 @@ class TestConversionWorkerRun:
     worker.run()
     db.complete_job.assert_called_once_with(99)
 
+  def test_run_skips_claim_when_node_not_approved(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    lock_mgr = mock.MagicMock()
+    lock_mgr.get_locked_configs.return_value = []
+    worker = _make_worker(job_db=db, lock_mgr=lock_mgr)
+    worker.job_event.set()
+
+    def _approval_side_effect(*args, **kwargs):
+      worker.running = False
+      return False
+
+    db.is_node_approved.side_effect = _approval_side_effect
+    worker.run()
+
+    db.is_node_approved.assert_called_once_with(worker.node_id)
+    db.claim_next_job.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # WorkerPool.restart

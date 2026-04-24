@@ -85,8 +85,16 @@ class PostgreSQLJobDatabase:
                         last_seen    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         started_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         status       TEXT NOT NULL DEFAULT 'online',
+                approval_status TEXT NOT NULL DEFAULT 'pending',
+                approved_by  TEXT,
+                approved_at  TIMESTAMPTZ,
+                approval_note TEXT,
                         running_jobs INTEGER NOT NULL DEFAULT 0,
-                        pending_jobs INTEGER NOT NULL DEFAULT 0
+                pending_jobs INTEGER NOT NULL DEFAULT 0,
+                command_requested_at TIMESTAMPTZ,
+                command_requested_by TEXT,
+                last_command TEXT,
+                last_command_at TIMESTAMPTZ
                     )
                 """)
         # Migrations: add columns to existing tables
@@ -98,6 +106,43 @@ class PostgreSQLJobDatabase:
                     ALTER TABLE cluster_nodes
                     ADD COLUMN IF NOT EXISTS pending_command TEXT
                 """)
+        cur.execute("""
+              ALTER TABLE cluster_nodes
+              ADD COLUMN IF NOT EXISTS approval_status TEXT
+            """)
+        cur.execute("""
+              ALTER TABLE cluster_nodes
+              ADD COLUMN IF NOT EXISTS approved_by TEXT
+            """)
+        cur.execute("""
+              ALTER TABLE cluster_nodes
+              ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ
+            """)
+        cur.execute("""
+              ALTER TABLE cluster_nodes
+              ADD COLUMN IF NOT EXISTS approval_note TEXT
+            """)
+        cur.execute("""
+              ALTER TABLE cluster_nodes
+              ADD COLUMN IF NOT EXISTS command_requested_at TIMESTAMPTZ
+            """)
+        cur.execute("""
+              ALTER TABLE cluster_nodes
+              ADD COLUMN IF NOT EXISTS command_requested_by TEXT
+            """)
+        cur.execute("""
+              ALTER TABLE cluster_nodes
+              ADD COLUMN IF NOT EXISTS last_command TEXT
+            """)
+        cur.execute("""
+              ALTER TABLE cluster_nodes
+              ADD COLUMN IF NOT EXISTS last_command_at TIMESTAMPTZ
+            """)
+        # Existing clusters should continue to run after upgrade; only newly inserted
+        # nodes default to pending approval.
+        cur.execute("UPDATE cluster_nodes SET approval_status = 'approved' WHERE approval_status IS NULL")
+        cur.execute("ALTER TABLE cluster_nodes ALTER COLUMN approval_status SET DEFAULT 'pending'")
+        cur.execute("ALTER TABLE cluster_nodes ALTER COLUMN approval_status SET NOT NULL")
         for col_sql in [
           "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0",
           "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_retries INTEGER DEFAULT 0",
@@ -391,10 +436,51 @@ class PostgreSQLJobDatabase:
         command = row["pending_command"] if row else None
         if command:
           cur.execute(
-            "UPDATE cluster_nodes SET pending_command = NULL WHERE node_id = %s",
-            (node_id,),
+            """
+            UPDATE cluster_nodes
+            SET pending_command = NULL,
+                last_command = %s,
+                last_command_at = NOW()
+            WHERE node_id = %s
+            """,
+            (command, node_id),
           )
         return command
+
+  def is_node_approved(self, node_id):
+    """Return True when node approval_status is approved."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("SELECT approval_status FROM cluster_nodes WHERE node_id = %s", (node_id,))
+        row = cur.fetchone()
+        return bool(row and row.get("approval_status") == "approved")
+
+  def set_node_approval(self, node_id, approved=True, actor=None, note=None):
+    """Set node approval state and return the updated node row."""
+    status = "approved" if approved else "rejected"
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+          UPDATE cluster_nodes
+          SET approval_status = %s,
+              approved_by = %s,
+              approved_at = NOW(),
+              approval_note = %s
+          WHERE node_id = %s
+          RETURNING *
+          """,
+          (status, actor, note, node_id),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+  def delete_node(self, node_id):
+    """Delete a cluster node row by id. Returns True if deleted."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("DELETE FROM cluster_nodes WHERE node_id = %s", (node_id,))
+        return cur.rowcount > 0
 
   def get_cluster_nodes(self):
     """Return all rows from cluster_nodes ordered by last_seen descending.
@@ -476,7 +562,7 @@ class PostgreSQLJobDatabase:
     if remove:
       self.log.info("Removed node %s from cluster registry" % node_id)
 
-  def send_node_command(self, node_id, command):
+  def send_node_command(self, node_id, command, requested_by=None):
     """Set pending_command on one or all online nodes.
 
     node_id may be a specific node ID string, or None to broadcast to all
@@ -487,13 +573,27 @@ class PostgreSQLJobDatabase:
       with conn.cursor() as cur:
         if node_id:
           cur.execute(
-            "UPDATE cluster_nodes SET pending_command = %s WHERE node_id = %s RETURNING node_id",
-            (command, node_id),
+            """
+            UPDATE cluster_nodes
+            SET pending_command = %s,
+                command_requested_at = NOW(),
+                command_requested_by = %s
+            WHERE node_id = %s
+            RETURNING node_id
+            """,
+            (command, requested_by, node_id),
           )
         else:
           cur.execute(
-            "UPDATE cluster_nodes SET pending_command = %s WHERE status = 'online' RETURNING node_id",
-            (command,),
+            """
+            UPDATE cluster_nodes
+            SET pending_command = %s,
+                command_requested_at = NOW(),
+                command_requested_by = %s
+            WHERE status = 'online'
+            RETURNING node_id
+            """,
+            (command, requested_by),
           )
         return [r["node_id"] for r in cur.fetchall()]
 
