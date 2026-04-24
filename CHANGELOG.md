@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.30](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.29...sma-ng-v1.6.30) (2026-04-24)
+
+
+### Bug Fixes
+
+* preserve Sonarr/Radarr sections when ini_merge --deprecate is run ([50ad738](https://github.com/newdave/sma-ng/commit/50ad7381502d33a1609f84a5fd182571b5f4c953))
+
 ## [1.6.29](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.28...sma-ng-v1.6.29) (2026-04-24)
 
 
