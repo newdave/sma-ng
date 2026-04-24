@@ -1,0 +1,470 @@
+Converter:
+  bypass-if-copying-all: true
+  copy-to: []
+  delete-original: true
+  detailed-progress: false
+  ffmpeg: ffmpeg
+  ffprobe: ffprobe
+  force-convert: false
+  hwaccel-decoders: []
+  # hwaccel-output-format maps each hwaccel backend to its preferred output pixel format.
+  # Format: hwaccel: format, for example:
+  #   hwaccel-output-format:
+  #     qsv: qsv
+  #     cuda: cuda
+  hwaccel-output-format: {}
+  hwaccels: []
+  ignored-extensions:
+    - nfo
+    - ds_store
+  minimum-size: 0
+  move-to:
+  # opts-separator is obsolete in YAML — list fields use native YAML sequences.
+  output-directory: /transcodes/sma
+  output-directory-space-ratio: 0.0
+  output-extension: mp4
+  output-format: mp4
+  post-process: false
+  postopts: []
+  preopts: []
+  process-same-extensions: false
+  recycle-bin: /mnt/local/recycle
+  regex-directory-replace: '[^\w\-_\. ]'
+  temp-extension: sma
+  threads: 0
+  wait-post-process: false
+  # hwdevices overrides the detected device path for each hardware backend.
+  # Format: hwaccel: device, for example:
+  #   hwdevices:
+  #     qsv: /dev/dri/renderD129
+  hwdevices: {}
+
+Permissions:
+  chmod: "0664"
+  gid: -1
+  uid: -1
+
+Metadata:
+  download-artwork: poster
+  full-path-guess: true
+  keep-titles: false
+  relocate-moov: true
+  sanitize-disposition:
+  strip-metadata: true
+  tag: true
+  tag-language: eng
+
+Video:
+  b-frames: 3
+  # codec controls the target video codec priority.
+  # The first codec is the encoder target. Later codecs are treated as passthrough-compatible.
+  # Examples:
+  #   gpu: qsv,          codec: [hevc, h265] -> use QSV HEVC with software HEVC fallback.
+  #   gpu: nvenc,        codec: [h264]       -> use NVENC H.264 with software H.264 fallback.
+  #   gpu: videotoolbox, codec: [hevc, h265] -> use VideoToolbox HEVC when available.
+  #   gpu: "",           codec: [hevc, h265] -> software-only HEVC output.
+  codec:
+    - hevc
+    - h265
+  # gpu selects the hardware acceleration profile:
+  #   qsv, nvenc, vaapi, videotoolbox, or blank for software-only.
+  # Supported hardware codec families:
+  #   qsv          -> h264, h265, av1, vp9
+  #   nvenc        -> h264, h265, av1
+  #   vaapi        -> h264, h265, av1
+  #   videotoolbox -> h264, h265
+  gpu: qsv
+  # codec-parameters are passed directly to the selected encoder.
+  # Keep backend-specific flags here only when they match the active gpu profile.
+  codec-parameters: -low_power 1 -async_depth 1 -extbrc 1
+  # crf-profiles provide bitrate tiers keyed by source bitrate.
+  # Format: source_kbps:quality:target_bitrate:max_bitrate
+  # When a tier matches, it overrides bitrate-ratio and max-bitrate and forces explicit output bitrate settings.
+  crf-profiles: 0:22:3M:6M,8000:22:5M:10M
+  # Use crf-profiles-hd for higher-resolution content when you want separate bitrate tiers for 4K and larger sources.
+  crf-profiles-hd: 0:22:20M:30M,15000:22:20M:30M,25000:21:25M:50M
+  # bitrate-ratio maps source codec to a multiplier used when computing output bitrate.
+  bitrate-ratio:
+    hevc: 0.85
+    h264: 0.65
+    mpeg2video: 0.45
+    vc1: 0.50
+    vp9: 0.85
+    av1: 1.1
+    "*": 0.60
+  dynamic-parameters: true
+  filter:
+  force-filter: false
+  look-ahead-depth: 16
+  max-bitrate: 0
+  max-level: 5.2
+  max-width: 0
+  pix-fmt: []
+  preset: fast
+  prioritize-source-pix-fmt: true
+  profile: []
+  ref-frames: 4
+
+HDR:
+  b-frames: 3
+  # codec works the same way here as in Video, but only for HDR sources.
+  # Leave blank to inherit the normal Video codec chain.
+  codec:
+    - hevc
+    - h265
+  # codec-parameters are passed directly to the selected encoder.
+  # Keep QSV-only flags here only when gpu = qsv; other backends ignore or reject them.
+  codec-parameters: -low_power 1 -async_depth 1 -extbrc 1
+  filter:
+  force-filter: false
+  look-ahead-depth: 16
+  pix-fmt: []
+  preset: fast
+  primaries:
+    - bt2020
+  profile: []
+  ref-frames: 4
+  space:
+    - bt2020nc
+  transfer:
+    - smpte2084
+
+Analyzer:
+  # Analyzer is an optional per-job recommendation layer.
+  # The current OpenVINO backend mainly validates runtime and device availability
+  # (including NPU selectors) and wires analyzer output into preview/planner hooks.
+  # Richer model-backed inference can use these same settings in the future.
+  enabled: false
+  # backend is reserved for optional analyzer runtimes. The planned backend is
+  # OpenVINO, but this does not replace FFmpeg hardware acceleration.
+  backend: openvino
+  # device is passed to the analyzer runtime, for example AUTO, CPU, GPU, NPU,
+  # or composite selectors like AUTO:NPU,CPU when the runtime supports them.
+  device: AUTO
+  # model-dir points at optional analyzer models for future model-backed inference.
+  model-dir:
+  # cache-dir stores compiled analyzer artifacts when supported by the backend.
+  cache-dir:
+  # max-frames reserves how many frames may be sampled per input for future inference.
+  max-frames: 12
+  # target-width reserves the downscale width for future analyzer frame sampling.
+  target-width: 960
+  allow-codec-reorder: true
+  allow-bitrate-adjustments: true
+  allow-preset-adjustments: true
+  allow-filter-adjustments: true
+  allow-force-reencode: true
+
+Naming:
+  enabled: true
+  movie-template: >-
+    {Movie CleanTitle} ({Release Year}) {[Custom Formats]} {[Quality Full]}
+    {[MediaInfo AudioCodec}{ MediaInfo AudioChannels]}
+    {[MediaInfo VideoDynamicRangeType]} {[MediaInfo VideoCodec]}{-Release Group}
+  tv-airdate-template: >-
+    {Series TitleYear} - {Air-Date} - {Episode CleanTitle:90} {[Custom Formats]}
+    {[Quality Full]} {[MediaInfo AudioCodec}{ MediaInfo AudioChannels]}
+    {[MediaInfo VideoDynamicRangeType]} {[MediaInfo VideoCodec]}{-Release Group}
+  tv-template: >-
+    {Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle:90}
+    {[Custom Formats]} {[Quality Full]} {[MediaInfo AudioCodec}{ MediaInfo AudioChannels]}
+    {[MediaInfo VideoDynamicRangeType]} {[MediaInfo VideoCodec]}{-Release Group}
+
+Audio:
+  # codec controls the target audio codec priority.
+  # The first codec is used for encoding new audio tracks.
+  # Later codecs are treated as copy-eligible passthrough formats.
+  # Example:
+  #   codec: [eac3, ac3, aac]
+  #     -> prefer EAC3 output, otherwise keep AC3/AAC when already compatible.
+  codec:
+    - eac3
+    - ac3
+    - aac
+  aac-adtstoasc: true
+  allow-language-relax: true
+  atmos-force-copy: true
+  channel-bitrate: 128
+  copy-original: false
+  default-language: eng
+  filter:
+  first-stream-of-language: true
+  force-default: false
+  force-filter: false
+  ignore-trudhd: true
+  ignored-dispositions:
+    - comment
+  include-original-language: true
+  languages:
+    - eng
+  max-bitrate: 0
+  max-channels: 0
+  profile:
+  relax-to-default: false
+  sample-format:
+  sample-rates: []
+  stream-codec-combinations: []
+  unique-dispositions: false
+  variable-bitrate: 0
+
+Audio.Sorting:
+  codecs: []
+  default-sorting:
+    - channels.d
+    - map
+    - d.comment
+  sorting:
+    - language
+    - channels.d
+    - map
+    - d.comment
+
+Universal Audio:
+  # enabled controls whether SMA creates an extra stereo-friendly fallback audio stream.
+  # Leave disabled unless you explicitly want an additional universal track.
+  enabled: false
+  codec:
+    - aac
+  channel-bitrate: 96
+  filter:
+  first-stream-only: false
+  force-filter: false
+  profile:
+  variable-bitrate: 0
+
+Audio.ChannelFilters: {}
+
+Subtitle:
+  # codec controls the text subtitle format written into the output container.
+  # For MP4, mov_text is the usual default. Use codec-image-based to keep PGS/VobSub streams.
+  codec:
+    - mov_text
+  attachment-codec: []
+  burn-dispositions: []
+  burn-subtitles: false
+  codec-image-based: []
+  default-language: eng
+  embed-image-subs: false
+  embed-only-internal-subs: false
+  embed-subs: true
+  encoding:
+  filename-dispositions: forced
+  first-stream-of-language: false
+  force-default: true
+  ignore-embedded-subs: false
+  ignored-dispositions: []
+  include-original-language: false
+  languages:
+    - eng
+  remove-bitstream-subs: true
+  unique-dispositions: false
+
+Subtitle.Sorting:
+  burn-sorting:
+    - language
+    - d.comment
+    - d.default.d
+    - d.forced.d
+  codecs: []
+  sorting:
+    - language
+    - d.comment
+    - d.default.d
+    - d.forced.d
+
+Subtitle.CleanIt:
+  enabled: true
+  config-path:
+  tags: []
+
+Subtitle.FFSubsync:
+  enabled: true
+
+Subtitle.Subliminal:
+  download-forced-subs: false
+  download-subs: false
+  include-hearing-impaired-subs: false
+  providers: []
+
+Subtitle.Subliminal.Auth:
+  opensubtitles:
+  tvsubtitles:
+
+Sonarr:
+  apikey:
+  host: localhost
+  port: 8989
+  block-reprocess: false
+  force-rename: true
+  in-progress-check: true
+  path:
+  rescan: true
+  ssl: false
+  webroot:
+  # For multiple instances add additional top-level sections, e.g.:
+  # Sonarr-4k:
+  #   host: sonarr4k.local
+  #   port: 8989
+  #   path: /media/4k/
+
+# Additional Sonarr instances are discovered automatically when the section
+# name starts with "Sonarr". Use path for longest-prefix matching.
+#
+# Sonarr-Kids:
+#   apikey:
+#   host: localhost
+#   port: 8990
+#   block-reprocess: false
+#   force-rename: true
+#   in-progress-check: true
+#   path: /mnt/media/TV-Kids
+#   rescan: true
+#   ssl: false
+#   webroot:
+
+Radarr:
+  apikey:
+  host: localhost
+  port: 7878
+  block-reprocess: false
+  force-rename: true
+  in-progress-check: true
+  path:
+  rescan: true
+  ssl: false
+  webroot:
+
+# Additional Radarr instances are discovered automatically when the section
+# name starts with "Radarr". Use path for longest-prefix matching.
+#
+# Radarr-4K:
+#   apikey:
+#   host: localhost
+#   port: 7879
+#   block-reprocess: false
+#   force-rename: true
+#   in-progress-check: true
+#   path: /mnt/media/Movies/4K
+#   rescan: true
+#   ssl: false
+#   webroot:
+
+# Download client sections are grouped together here. Configure the one(s)
+# you actually use and leave the others blank.
+
+SABNZBD:
+  bypass-category: bypass
+  convert: true
+  output-directory:
+  path-mapping:
+  radarr-category: movies
+  sonarr-category: tv
+
+Deluge:
+  bypass-label: bypass
+  convert: true
+  host: localhost
+  output-directory:
+  password:
+  path-mapping:
+  port: 58846
+  radarr-label: radarr
+  remove: false
+  sonarr-label: sonarr
+  username:
+
+qBittorrent:
+  action-after:
+  action-before:
+  bypass-label: bypass
+  convert: true
+  host: localhost
+  output-directory:
+  password:
+  path-mapping:
+  port: 8080
+  radarr-label: movies
+  sonarr-label: tv
+  ssl: false
+  username:
+
+uTorrent:
+  action-after:
+  action-before:
+  bypass-label: bypass
+  convert: true
+  host: localhost
+  output-directory:
+  password:
+  path-mapping:
+  port: 8080
+  radarr-label: radarr
+  sonarr-label: sonarr
+  ssl: false
+  username:
+  webui: false
+
+Plex:
+  host: localhost
+  ignore-certs: true
+  path-mapping:
+  plexmatch: true
+  port: 32400
+  refresh: true
+  ssl: false
+  token:
+
+# ── Quality profiles ─────────────────────────────────────────────────
+# Named overrides applied on top of the base settings above.
+# Reference via Daemon.path_configs `profile: rq`.
+# Only listed keys are overridden; all other base settings apply unchanged.
+Profiles:
+  rq:
+    Video:
+      codec: [h265]
+      max-bitrate: 8000
+    Audio:
+      codec: [ac3, aac]
+  lq:
+    Video:
+      codec: [h264]
+      max-bitrate: 3000
+      preset: fast
+    Audio:
+      codec: [aac]
+      max-channels: 2
+
+# ── Daemon settings ──────────────────────────────────────────────────
+# Only used when running daemon.py. manual.py ignores this section.
+Daemon:
+  api_key: null
+  username: null
+  password: null
+  db_url: null
+  ffmpeg_dir: null
+  job_timeout_seconds: 0
+  progress_log_interval: 60
+  smoke_test: false
+  recycle_bin_max_age_days: 3
+  recycle_bin_min_free_gb: 100
+  media_extensions:
+    - .mp4
+    - .mkv
+    - .avi
+    - .mov
+    - .ts
+  path_rewrites: []
+  path_configs:
+    - path: /mnt/unionfs/Media/TV/1080P
+      profile: rq
+      default_args: [--tv]
+    - path: /mnt/unionfs/Media/Movies/4K
+      profile: rq
+      default_args: [--movie]
+    - path: /mnt/unionfs/Media/Kids
+      profile: lq
+      default_args: [--tv]
+    # External config file still works for fully custom setups:
+    # - path: /mnt/unionfs/Media/Special
+    #   config: /config/autoProcess.special.yaml
+  scan_paths: []

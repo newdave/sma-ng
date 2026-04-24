@@ -42,7 +42,7 @@ REMOTE_MAKE  = install
 DAEMON_PORT  = 8585
 
 # API key for the sma-daemon (used by deploy:restart when sending the
-# shutdown webhook). Must match the api_key in daemon.json / SMA_DAEMON_API_KEY.
+# shutdown webhook). Must match Daemon.api_key in sma-ng.yml or SMA_DAEMON_API_KEY.
 # DAEMON_API_KEY = your_secret_key
 
 # Docker Compose profile for this host (used by deploy:docker-upgrade,
@@ -75,11 +75,11 @@ DAEMON_PORT  = 8585
 
 # Directory containing the ffmpeg and ffprobe binaries on the remote host.
 # Passed as SMA_DAEMON_FFMPEG_DIR so the daemon (or entrypoint) can pick up
-# the correct paths without editing autoProcess.ini by hand.
+# the correct paths without editing sma-ng.yml by hand.
 FFMPEG_DIR   = /usr/local/bin
 
 # ── daemon configuration ───────────────────────────────────────────────────────
-# Keys here mirror daemon.json fields and are stamped into config/daemon.json
+# Keys here mirror Daemon fields and are stamped into config/sma-ng.yml
 # by `mise run deploy:config`. Environment-variable equivalents are shown in
 # comments for reference.
 
@@ -96,41 +96,37 @@ api_key  =
 ffmpeg_dir =
 
 # ── managed keys ──────────────────────────────────────────────────────────────
-# Keys listed here are always overwritten from autoProcess.ini.sample on every
+# Keys listed here are always overwritten from sma-ng.yml.sample on every
 # `mise run deploy:config`, even when the key already exists on the remote host.
 # Use this for tuning values you want to keep in sync across all workers.
 #
 # Format: Section = key1, key2, key3
-# Section names must match autoProcess.ini section headers exactly.
+# Section names must match sma-ng.yml top-level section names exactly.
 # Keys not listed here are only added if absent (normal merge behaviour).
 
-# Quality flavours:
-#   Regular Quality (default): QUALITY=rq mise run config  (uses autoProcess.ini.sample)
-#   Lower Quality:             QUALITY=lq mise run config  (uses autoProcess.ini.sample-lq)
-# To push a different quality profile to workers, change the source sample in deploy:config.
+# Quality profiles:
+#   Use profile = rq or profile = lq in service sections below to route paths
+#   to named Profiles in config/sma-ng.yml.
 
 [managed_keys]
 Video = crf-profiles, crf-profiles-hd, look-ahead-depth, b-frames, ref-frames
 # HDR   = look-ahead-depth, b-frames, ref-frames
 
-# ── autoProcess.ini overrides ─────────────────────────────────────────────────
-# Section names mirror autoProcess.ini exactly.
-# `mise run deploy:config` stamps these into every *.ini on remote hosts.
+# ── sma-ng.yml overrides ──────────────────────────────────────────────────────
+# Section names mirror sma-ng.yml exactly.
+# `mise run deploy:config` stamps these into config/sma-ng.yml on remote hosts.
 
 [Converter]
 # Base directory for the recycle bin (leave blank to disable).
-# deploy:config appends the service name as a subdirectory for each config,
-# e.g. /mnt/recycle -> /mnt/recycle/Sonarr, /mnt/recycle/Radarr, etc.
+# deploy:config can stamp this into the shared sma-ng.yml Converter section.
 recycle-bin =
 
 # ── service credentials ────────────────────────────────────────────────────────
 # Add one section per service instance; omit keys you don't want to override.
 
-# media_path: root path for this instance's library on the remote host.
-#   When set, deploy:config adds an entry to daemon.json path_configs so the
-#   daemon uses config_file for any job whose path starts with media_path.
-# config_file: relative path (from DEPLOY_DIR) to the autoProcess.ini for
-#   this instance.  Required when media_path is set.
+# path: root path for this instance's library on the remote host.
+#   When set, deploy:config adds an entry to Daemon.path_configs.
+# profile: named profile from sma-ng.yml Profiles. Required when path is set.
 
 [Sonarr]
 host        = sonarr.example.com
@@ -138,8 +134,8 @@ port        = 443
 ssl         = true
 apikey      =
 webroot     =
-media_path  =
-config_file = config/autoProcess.sonarr.ini
+path  =
+profile = rq
 
 [Sonarr-Instance]
 host        = sonarr-instance.example.com
@@ -147,8 +143,8 @@ port        = 443
 ssl         = true
 apikey      =
 webroot     =
-media_path  =
-config_file = config/autoProcess.sonarr-instance.ini
+path  =
+profile = rq
 
 [Radarr]
 host        = radarr.example.com
@@ -156,8 +152,8 @@ port        = 443
 ssl         = true
 apikey      =
 webroot     =
-media_path  =
-config_file = config/autoProcess.radarr.ini
+path  =
+profile = rq
 
 [Radarr-Instance-1]
 host        = radarr-instance-1.example.com
@@ -165,8 +161,8 @@ port        = 443
 ssl         = true
 apikey      =
 webroot     =
-media_path  =
-config_file = config/autoProcess.radarr-instance-1.ini
+path  =
+profile = rq
 
 [Radarr-Instance-2]
 host        = radarr-instance-2.example.com
@@ -174,8 +170,8 @@ port        = 443
 ssl         = true
 apikey      =
 webroot     =
-media_path  =
-config_file = config/autoProcess.radarr-instance-2.ini
+path  =
+profile = lq
 
 [Plex]
 host  = plex.example.com

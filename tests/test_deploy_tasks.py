@@ -15,6 +15,7 @@ from base64 import b64encode
 import pytest
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PYTHON = os.path.join(PROJECT_ROOT, "venv", "bin", "python")
 
 
 def _read(rel_path):
@@ -321,7 +322,6 @@ class TestDeployConfigTask:
     """deploy/config must delegate Python work via lib/ helper files."""
     text = _read(".mise/tasks/config/roll")
     assert "lib/build_force_keys.py" in text
-    assert "lib/ini_ensure_services.py" in text
     assert "lib/ini_stamp_credentials.py" in text
     assert "lib/stamp_ffmpeg.py" in text
     assert "lib/stamp_daemon.py" in text
@@ -380,7 +380,7 @@ class TestDeployLibHelpers:
 
     result = subprocess.run(
       [
-        "python3",
+        PYTHON,
         ".mise/shared/deploy/lib/ini_stamp_credentials.py",
         str(deploy_dir),
         "false",
@@ -426,7 +426,7 @@ class TestDeployLibHelpers:
 
     result = subprocess.run(
       [
-        "python3",
+        PYTHON,
         ".mise/shared/deploy/lib/ini_stamp_credentials.py",
         str(deploy_dir),
         "false",
@@ -468,7 +468,7 @@ class TestDeployLibHelpers:
 
     result = subprocess.run(
       [
-        "python3",
+        PYTHON,
         ".mise/shared/deploy/lib/ini_ensure_services.py",
         str(deploy_dir),
         "software",
@@ -500,7 +500,7 @@ class TestDeployLibHelpers:
 
     result = subprocess.run(
       [
-        "python3",
+        PYTHON,
         ".mise/shared/deploy/lib/stamp_daemon.py",
         str(deploy_dir),
         "",
@@ -521,6 +521,46 @@ class TestDeployLibHelpers:
     assert result.returncode == 0, result.stderr or result.stdout
     content = (config_dir / "daemon.env").read_text()
     assert "SMA_NODE_NAME=sma-slave0" in content
+
+  def test_stamp_daemon_builds_profile_path_configs(self, tmp_path):
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "sma-ng.yml").write_text("Daemon:\n  path_configs: []\n")
+    (config_dir / "daemon.env").write_text("# existing\n")
+    services = {
+      "Sonarr": {"path": "/media/tv", "profile": "rq"},
+      "Radarr-LQ": {"path": "/media/movies/mobile", "profile": "lq"},
+    }
+    services_b64 = b64encode(json.dumps(services).encode()).decode()
+
+    result = subprocess.run(
+      [
+        PYTHON,
+        ".mise/shared/deploy/lib/stamp_daemon.py",
+        str(deploy_dir),
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        services_b64,
+      ],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    content = (config_dir / "sma-ng.yml").read_text()
+    assert "path: /media/movies/mobile" in content
+    assert "profile: lq" in content
+    assert "path: /media/tv" in content
+    assert "profile: rq" in content
+    assert "config:" not in content
 
 
 class TestDeployMiseTask:

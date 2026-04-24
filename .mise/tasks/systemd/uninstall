@@ -1,8 +1,28 @@
 #!/usr/bin/env bash
-#MISE description="Disable and remove the sma-daemon systemd service"
+#MISE description="Disable and remove the sma-daemon systemd service on all DEPLOY_HOSTS"
 set -euo pipefail
 
-sudo systemctl disable --now sma-daemon 2>/dev/null || true
-sudo rm -f /etc/systemd/system/sma-daemon.service
-sudo systemctl daemon-reload
-echo "Service removed. Config and data directories are untouched."
+# shellcheck source=../../shared/deploy/lib.sh
+# shellcheck disable=SC1091
+source "$(dirname "$0")/../../shared/deploy/lib.sh"
+
+ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
+
+for host in $DEPLOY_HOSTS; do
+    cfg="$CFG $LOCAL $host"
+    init_host_context "$host"
+    use_sudo=$($cfg DEPLOY_USE_SUDO "false")
+
+    sudo_prefix=""
+    [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
+
+    echo "==> [$host] disabling and removing sma-daemon service"
+    # shellcheck disable=SC2029,SC2086,SC2154  # sudo_prefix/ssh_opts expand client-side; ssh_opts is set by init_host_context.
+    ssh $ssh_opts "$host" "${sudo_prefix}bash -s" <<'REMOTE'
+    systemctl disable --now sma-daemon 2>/dev/null || true
+    rm -f /etc/systemd/system/sma-daemon.service
+    systemctl daemon-reload
+    echo "Service removed. Config and data directories are untouched."
+REMOTE
+done
