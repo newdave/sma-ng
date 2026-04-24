@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.27](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.26...sma-ng-v1.6.27) (2026-04-24)
+
+
+### Bug Fixes
+
+* make cluster mise tasks executable for discovery ([411b0b3](https://github.com/newdave/sma-ng/commit/411b0b3f935f056b455505c099f94ce44503f1a7))
+
 ## [1.6.26](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.25...sma-ng-v1.6.26) (2026-04-23)
 
 
