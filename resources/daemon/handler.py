@@ -734,6 +734,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
       return config_override
     return self.server.path_config_manager.get_config_for_path(path)
 
+  def _resolve_profile(self, path, config_override):
+    """Return the profile to apply for path, unless an explicit config override is used."""
+    if config_override:
+      return None
+    getter = getattr(self.server.path_config_manager, "get_profile_for_path", None)
+    profile = getter(path) if callable(getter) else None
+    return profile if isinstance(profile, str) and profile else None
+
   def _merge_args(self, path, extra_args):
     """Merge per-path default_args with request args.
 
@@ -753,6 +761,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     return filtered_defaults + list(extra_args)
 
+  def _merge_profile_arg(self, args, profile):
+    """Append a path profile unless the caller already supplied one."""
+    merged = list(args)
+    if profile and "--profile" not in merged and "-p" not in merged:
+      merged.extend(["--profile", profile])
+    return merged
+
   def _queue_directory(self, path, extra_args, config_override, max_retries=0):
     """Expand directory to media files, queue each, respond.
 
@@ -768,12 +783,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
     for filepath in self._walk_media_files(path):
       job_path = self.server.path_config_manager.rewrite_path(filepath)
       resolved_config = self._resolve_config(job_path, config_override)
-      job_id = self.server.job_db.add_job(job_path, resolved_config, self._merge_args(job_path, extra_args), max_retries=max_retries)
+      profile = self._resolve_profile(job_path, config_override)
+      job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
+      job_id = self.server.job_db.add_job(job_path, resolved_config, job_args, max_retries=max_retries)
       if job_id is None:
         existing = self.server.job_db.find_active_job(job_path)
         duplicates.append({"path": job_path, "job_id": existing["id"] if existing else None})
       else:
-        queued.append({"job_id": job_id, "path": job_path, "config": resolved_config})
+        queued.append({"job_id": job_id, "path": job_path, "config": resolved_config, "profile": profile})
 
     if not queued and not duplicates:
       self.send_json_response(200, {"status": "empty", "path": path, "message": "No media files found in directory"})
@@ -789,7 +806,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """Queue a single file job and respond."""
     job_path = self.server.path_config_manager.rewrite_path(path)
     resolved_config = self._resolve_config(job_path, config_override)
-    job_id = self.server.job_db.add_job(job_path, resolved_config, self._merge_args(job_path, extra_args), max_retries=max_retries)
+    profile = self._resolve_profile(job_path, config_override)
+    job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
+    job_id = self.server.job_db.add_job(job_path, resolved_config, job_args, max_retries=max_retries)
 
     if job_id is None:
       existing = self.server.job_db.find_active_job(job_path)
@@ -809,7 +828,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
       )
     finally:
       clear_job_id(token)
-    self.send_json_response(202, {"status": "queued", "job_id": job_id, "path": job_path, "config": resolved_config, "log_file": log_file, "config_busy": config_busy, "pending_jobs": pending})
+    self.send_json_response(
+      202,
+      {"status": "queued", "job_id": job_id, "path": job_path, "config": resolved_config, "profile": profile, "log_file": log_file, "config_busy": config_busy, "pending_jobs": pending},
+    )
 
   def _parse_sonarr_body(self):
     """Parse a Sonarr-native webhook payload.

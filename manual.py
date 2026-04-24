@@ -822,6 +822,7 @@ def main():
   parser = argparse.ArgumentParser(description="SMA-NG manual conversion and tagging script")
   parser.add_argument("-i", "--input", help="The source that will be converted. May be a file or a directory")
   parser.add_argument("-c", "--config", help="Specify an alternate configuration file location")
+  parser.add_argument("-p", "--profile", help="Apply a named profile from the configuration file")
   parser.add_argument(
     "-a", "--auto", action="store_true", help="Enable auto mode, the script will not prompt you for any further input, good for batch files. It will guess the metadata using guessit"
   )
@@ -834,9 +835,9 @@ def main():
   parser.add_argument("-nd", "--nodelete", action="store_true", help="Overrides and disables deleting of original files")
   parser.add_argument("-np", "--nopost", action="store_true", help="Overrides and disables the execution of additional post processing scripts")
   parser.add_argument("-pr", "--preserverelative", action="store_true", help="Preserves relative directories when processing multiple files using the copy-to or move-to functionality")
-  parser.add_argument("-pse", "--processsameextensions", action="store_true", help="Overrides process-same-extensions setting in autoProcess.ini enabling the reprocessing of files")
+  parser.add_argument("-pse", "--processsameextensions", action="store_true", help="Overrides process-same-extensions setting in sma-ng.yml enabling the reprocessing of files")
   parser.add_argument(
-    "-fc", "--forceconvert", action="store_true", help="Overrides force-convert setting in autoProcess.ini and also enables process-same-extenions if true forcing the conversion of files"
+    "-fc", "--forceconvert", action="store_true", help="Overrides force-convert setting in sma-ng.yml and also enables process-same-extenions if true forcing the conversion of files"
   )
   parser.add_argument("-oo", "--optionsonly", action="store_true", help="Display generated conversion options only, do not perform conversion")
   parser.add_argument("-cl", "--codeclist", action="store_true", help="Print a list of supported codecs and their paired FFMPEG encoders")
@@ -846,7 +847,7 @@ def main():
 
   move_group = parser.add_mutually_exclusive_group()
   move_group.add_argument("-nm", "--nomove", action="store_true", help="Overrides and disables the custom moving of file options that come from output_dir and move-to")
-  move_group.add_argument("-m", "--moveto", help="Override move-to value setting in autoProcess.ini changing the final destination of the file")
+  move_group.add_argument("-m", "--moveto", help="Override move-to value setting in sma-ng.yml changing the final destination of the file")
 
   tag_group = parser.add_mutually_exclusive_group()
   tag_group.add_argument("-nt", "--notag", action="store_true", help="Overrides and disables tagging when using the automated option")
@@ -870,11 +871,11 @@ def main():
 
   # Settings overrides
   if args["config"] and os.path.exists(args["config"]):
-    settings = ReadSettings(args["config"], logger=log)
+    settings = ReadSettings(args["config"], logger=log, profile=args["profile"])
   elif args["config"] and os.path.exists(os.path.join(os.path.dirname(sys.argv[0]), args["config"])):
-    settings = ReadSettings(os.path.join(os.path.dirname(sys.argv[0]), args["config"]), logger=log)
+    settings = ReadSettings(os.path.join(os.path.dirname(sys.argv[0]), args["config"]), logger=log, profile=args["profile"])
   else:
-    settings = ReadSettings(logger=log)
+    settings = ReadSettings(logger=log, profile=args["profile"])
 
   processedArchive = None
   processedList = None

@@ -6,7 +6,7 @@ import shlex
 import threading
 from logging.handlers import RotatingFileHandler
 
-from resources.daemon.constants import DEFAULT_DAEMON_CONFIG, DEFAULT_PROCESS_CONFIG, LOGS_DIR, SCRIPT_DIR
+from resources.daemon.constants import DAEMON_SECTION, DEFAULT_PROCESS_CONFIG, LOGS_DIR, SCRIPT_DIR
 from resources.daemon.context import JobContextFilter
 from resources.log import LOG_BACKUP_COUNT, LOG_MAX_BYTES, JSONFormatter, getLogger
 
@@ -178,53 +178,65 @@ class PathConfigManager:
   def __init__(self, config_file=None, logger=None):
     self.log = logger or log
     self.path_configs = []
-    self.path_rewrites = []  # Can be set from daemon.json
+    self.path_rewrites = []  # Can be set from sma-ng.yml Daemon section
     self.default_config = DEFAULT_PROCESS_CONFIG
     self.default_args = []  # Top-level default args for the default config
-    self.api_key = None  # Can be set from daemon.json
-    self.basic_auth = None  # (username, password) tuple; can be set from daemon.json
-    self.db_url = None  # Can be set from daemon.json
-    self.ffmpeg_dir = None  # Can be set from daemon.json
-    self.job_timeout_seconds = 0  # Can be set from daemon.json (0 = no timeout)
+    self.api_key = None  # Can be set from sma-ng.yml Daemon section
+    self.basic_auth = None  # (username, password) tuple; can be set from sma-ng.yml Daemon section
+    self.db_url = None  # Can be set from sma-ng.yml Daemon section
+    self.ffmpeg_dir = None  # Can be set from sma-ng.yml Daemon section
+    self.job_timeout_seconds = 0  # Can be set from sma-ng.yml Daemon section (0 = no timeout)
     self.progress_log_interval = 60  # seconds between progress log entries
     self.smoke_test = False  # Run startup smoke test against all configs
     self.recycle_bin_max_age_days = 3  # Delete recycle-bin files older than N days (0 = disabled)
     self.recycle_bin_min_free_gb = 50  # Delete oldest files when free space < N GiB (0 = disabled)
     self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
-    self.scan_paths = []  # Can be set from daemon.json
+    self.scan_paths = []  # Can be set from sma-ng.yml Daemon section
     self._config_file = None  # Resolved path of loaded config file
 
-    # Look up DEFAULT_DAEMON_CONFIG at call time from the daemon module so that
-    # tests patching daemon.DEFAULT_DAEMON_CONFIG take effect.
-    try:
-      import daemon as _daemon_mod
-
-      _default_daemon_cfg = _daemon_mod.DEFAULT_DAEMON_CONFIG
-    except (ImportError, AttributeError):
-      _default_daemon_cfg = DEFAULT_DAEMON_CONFIG
-
-    if config_file and os.path.exists(config_file):
-      self._config_file = config_file
-      self.load_config(config_file)
-    elif os.path.exists(_default_daemon_cfg):
-      self._config_file = _default_daemon_cfg
+    if not config_file:
+      config_file = os.environ.get("SMA_CONFIG") or DEFAULT_PROCESS_CONFIG
+      legacy_yaml = os.path.join(SCRIPT_DIR, "config", "autoProcess.yaml")
+      if config_file == DEFAULT_PROCESS_CONFIG and not os.path.exists(config_file) and os.path.exists(legacy_yaml):
+        config_file = legacy_yaml
+    self._config_file = os.path.realpath(config_file) if os.path.exists(config_file) else None
+    self.default_config = config_file
+    if self._config_file:
       self.load_config(self._config_file)
     else:
-      self.log.info("No daemon config found, using default autoProcess.ini for all paths")
+      self.log.info("No config found, using defaults for all paths")
 
   def load_config(self, config_file):
-    """Load path mappings from daemon.json config file."""
+    """Load daemon settings from sma-ng.yml, with daemon.json fallback."""
     try:
-      with open(config_file, "r", encoding="utf-8") as f:
-        config = json.load(f)
-      parsed = self._parse_config_data(config)
+      if config_file.endswith(".json"):
+        self.log.warning("daemon.json is deprecated; move settings to sma-ng.yml Daemon section")
+        with open(config_file, "r", encoding="utf-8") as f:
+          raw = json.load(f)
+        parsed = self._parse_config_data(raw)
+        self._apply_config_data(parsed)
+        return parsed
+
+      from resources.yamlconfig import load as _yaml_load
+
+      data = _yaml_load(config_file) or {}
+      daemon_data = data.get(DAEMON_SECTION) or {}
+
+      daemon_json = os.path.join(os.path.dirname(config_file), "daemon.json")
+      if not daemon_data and os.path.isfile(daemon_json):
+        self.log.warning("No Daemon section in %s; reading daemon.json (deprecated)" % config_file)
+        with open(daemon_json, "r", encoding="utf-8") as f:
+          daemon_data = json.load(f)
+
+      parsed = self._parse_config_data(daemon_data)
+      parsed["default_config"] = config_file
       self._apply_config_data(parsed)
 
-      self.log.debug("Loaded daemon config from %s" % config_file)
+      self.log.debug("Loaded config from %s" % config_file)
       self.log.debug("Default config: %s" % self.default_config)
       self.log.debug("Path mappings (%d):" % len(self.path_configs))
       for entry in self.path_configs:
-        self.log.debug("  %s -> %s" % (entry["path"], entry["config"]))
+        self.log.debug("  %s -> %s" % (entry["path"], entry.get("config") or entry.get("profile")))
       return parsed
 
     except Exception as e:
@@ -238,10 +250,6 @@ class PathConfigManager:
     return list(raw_args or [])
 
   def _parse_config_data(self, config):
-    default_config = config.get("default_config", DEFAULT_PROCESS_CONFIG)
-    if not os.path.isabs(default_config):
-      default_config = os.path.join(SCRIPT_DIR, default_config)
-
     username = config.get("username") or None
     password = config.get("password") or None
 
@@ -265,21 +273,23 @@ class PathConfigManager:
     for entry in config.get("path_configs", []):
       path = entry.get("path", "").rstrip("/")
       config_path = entry.get("config", "")
-      if not path or not config_path:
+      profile = entry.get("profile", "") or None
+      if not path or (not config_path and not profile):
         continue
-      if not os.path.isabs(config_path):
+      if config_path and not os.path.isabs(config_path):
         config_path = os.path.join(SCRIPT_DIR, config_path)
       path_configs.append(
         {
           "path": os.path.normpath(path),
-          "config": config_path,
+          "config": config_path or None,
+          "profile": profile,
           "default_args": self._parse_args_list(entry.get("default_args", [])),
         }
       )
     path_configs.sort(key=lambda x: len(x["path"]), reverse=True)
 
     return {
-      "default_config": default_config,
+      "default_config": config.get("default_config", self.default_config),
       "api_key": config.get("api_key"),
       "basic_auth": (username, password) if username and password else None,
       "db_url": config.get("db_url"),
@@ -327,7 +337,7 @@ class PathConfigManager:
 
     for entry in self.path_configs:
       if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
-        config_path = entry["config"]
+        config_path = entry["config"] or self.default_config
         if os.path.exists(config_path):
           self.log.debug("Path %s matched %s -> %s" % (file_path, entry["path"], config_path))
           return config_path
@@ -336,6 +346,18 @@ class PathConfigManager:
 
     self.log.debug("Path %s using default config: %s" % (file_path, self.default_config))
     return self.default_config
+
+  def get_profile_for_path(self, file_path):
+    """Get the named profile for a path-config match, if the match uses the default config."""
+    file_path = self._normalize_match_path(file_path)
+
+    for entry in self.path_configs:
+      if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
+        if entry.get("config"):
+          return None
+        return entry.get("profile")
+
+    return None
 
   def get_args_for_path(self, file_path):
     """Get the default args list for a given file path based on path_configs."""
@@ -360,15 +382,22 @@ class PathConfigManager:
     """Return list of all unique config files."""
     configs = {self.default_config}
     for entry in self.path_configs:
-      configs.add(entry["config"])
+      if entry.get("config"):
+        configs.add(entry["config"])
     return list(configs)
 
   def get_recycle_bin(self, config_path):
-    """Return the recycle-bin path from an autoProcess.ini, or None."""
+    """Return the recycle-bin path from an autoProcess config, or None."""
     try:
-      cp = configparser.ConfigParser()
-      cp.read(config_path)
-      val = cp.get("Converter", "recycle-bin", fallback="").strip()
+      if config_path.endswith((".yaml", ".yml")):
+        from resources.yamlconfig import load as _yaml_load
+
+        data = _yaml_load(config_path) or {}
+        val = str(data.get("Converter", {}).get("recycle-bin", "")).strip()
+      else:
+        cp = configparser.ConfigParser()
+        cp.read(config_path)
+        val = cp.get("Converter", "recycle-bin", fallback="").strip()
       return os.path.abspath(val) if val else None
     except Exception:
       return None
