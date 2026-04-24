@@ -46,7 +46,7 @@ ref-frames = 4
 
 Supported QSV codecs: `h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`
 
-`codec-parameters` accepts raw FFmpeg encoder flags. The defaults in `setup/autoProcess.ini.sample` enable QSV low-power mode and extended rate control (`-low_power 1 -async_depth 1 -extbrc 1`). These are automatically cleared at runtime when `gpu` is not `qsv`.
+`codec-parameters` accepts raw FFmpeg encoder flags. The defaults in `setup/sma-ng.yml.sample` enable QSV low-power mode and extended rate control (`-low_power 1 -async_depth 1 -extbrc 1`). These are automatically cleared at runtime when `gpu` is not `qsv`.
 
 ---
 
@@ -104,7 +104,7 @@ At daemon startup, SMA-NG probes each unique config's hardware encoder to verify
 
 This runs in the background and does not delay accepting connections.
 
-Use `python daemon.py --smoke-test` to verify that all configured `autoProcess.ini` files load cleanly before starting the server.
+Use `python daemon.py --smoke-test` to verify that all configured `sma-ng.yml` files load cleanly before starting the server.
 
 ## Docker Intel/VAAPI Troubleshooting
 

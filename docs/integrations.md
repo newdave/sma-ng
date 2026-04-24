@@ -18,16 +18,19 @@ SMA-NG extracts `episodeFile.path`, `series.tvdbId`, and episode numbers from th
 
 **Custom script:** Suitable when SMA-NG runs locally alongside Sonarr (not in a container).
 
-1. Set API credentials in `[Sonarr]` section of `autoProcess.ini`
+1. Set API credentials in `[Sonarr]` section of `sma-ng.yml`
 2. In Sonarr: **Settings → Connect → Add Custom Script**
    - On Download/Import: Yes, On Upgrade: Yes
    - Path: `/bin/bash`
    - Arguments: full path to `triggers/media_managers/sonarr.sh`
 
-**Per-instance config override:** Set `SMA_CONFIG` in Sonarr's environment (Settings → General → Environment Variables) to force a specific config file, useful when Sonarr imports to a staging path that doesn't match `path_configs` prefixes in `daemon.json`:
+**Per-instance profile routing:** Set `Daemon.path_configs` entries in `sma-ng.yml`, useful when Sonarr imports to a staging path that should use a specific profile:
 
-```bash
-SMA_CONFIG=/opt/sma/config/autoProcess.tv.ini
+```yaml
+Daemon:
+  path_configs:
+    - path: /mnt/media/TV
+      profile: rq
 ```
 
 ### Radarr
@@ -46,7 +49,7 @@ SMA-NG extracts `movieFile.path` and `movie.tmdbId` (or `imdbId` as fallback) an
 
 **Custom script:** Suitable when SMA-NG runs locally alongside Radarr.
 
-1. Set API credentials in `[Radarr]` section of `autoProcess.ini`
+1. Set API credentials in `[Radarr]` section of `sma-ng.yml`
 2. In Radarr: **Settings → Connect → Add Custom Script**
    - On Download/Import: Yes, On Upgrade: Yes
    - Path: `/bin/bash`
@@ -126,7 +129,7 @@ In **Settings → Extension Scripts**, add `triggers/usenet/nzbget.sh`. Configur
 
 ### SABnzbd
 
-In **Settings → Folders → Scripts Folder**, point to `triggers/usenet/`. Set `sabnzbd.sh` as the category script. Configure `[SABNZBD]` section in `autoProcess.ini`.
+In **Settings → Folders → Scripts Folder**, point to `triggers/usenet/`. Set `sabnzbd.sh` as the category script. Configure `[SABNZBD]` section in `sma-ng.yml`.
 
 ### qBittorrent
 

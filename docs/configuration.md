@@ -1,6 +1,8 @@
 # Configuration Reference
 
-Configuration lives in `config/autoProcess.ini` (INI format). Copy from `setup/autoProcess.ini.sample` or generate it with `make config` or `mise run config:generate`.
+Configuration lives in `config/sma-ng.yml` (YAML format). Copy from `setup/sma-ng.yml.sample` or generate it with `make config` or `mise run config:generate`.
+
+On first startup, if `sma-ng.yml` is missing and a legacy sibling `autoProcess.ini` exists, SMA-NG migrates the INI file to YAML and keeps the original as `autoProcess.ini.bak`.
 
 Override path via `SMA_CONFIG` environment variable.
 
@@ -19,8 +21,8 @@ Override path via `SMA_CONFIG` environment variable.
 | `temp-extension` | string | | Temporary file extension during conversion |
 | `temp-output` | bool | `true` | Use temporary output file during conversion |
 | `minimum-size` | int | `0` | Minimum source file size in MB (0 = disabled) |
-| `ignored-extensions` | list | `nfo, ds_store` | Extensions to skip |
-| `copy-to` | path(s) | | Copy output to additional directories (pipe-separated) |
+| `ignored-extensions` | list | `[nfo, ds_store]` | Extensions to skip |
+| `copy-to` | path(s) | | Copy output to additional directories |
 | `move-to` | path | | Move output to final destination |
 | `delete-original` | bool | `true` | Delete source file after successful conversion |
 | `recycle-bin` | path | | Copy original here before deleting (only when `delete-original = True`) |
@@ -31,7 +33,6 @@ Override path via `SMA_CONFIG` environment variable.
 | `wait-post-process` | bool | `false` | Wait for post-process scripts to finish |
 | `preopts` | list | | Extra FFmpeg options before input |
 | `postopts` | list | | Extra FFmpeg options after codec options |
-| `opts-separator` | string | `,` | Separator for preopts/postopts lists |
 
 ---
 
@@ -122,27 +123,27 @@ Current backend status:
 
 Example:
 
-```ini
-[Analyzer]
-enabled = true
-backend = openvino
-device = AUTO:NPU,CPU
-model-dir =
-cache-dir = /var/cache/sma-openvino
-max-frames = 12
-target-width = 960
-allow-codec-reorder = true
-allow-bitrate-adjustments = true
-allow-preset-adjustments = true
-allow-filter-adjustments = true
-allow-force-reencode = true
+```yaml
+Analyzer:
+  enabled: true
+  backend: openvino
+  device: AUTO:NPU,CPU
+  model-dir: ""
+  cache-dir: /var/cache/sma-openvino
+  max-frames: 12
+  target-width: 960
+  allow-codec-reorder: true
+  allow-bitrate-adjustments: true
+  allow-preset-adjustments: true
+  allow-filter-adjustments: true
+  allow-force-reencode: true
 ```
 
 ### OpenVINO notes
 
 - Install the optional runtime with `pip install -r setup/requirements-openvino.txt` or `pip install .[openvino]`
 - If `device = NPU` (or `AUTO:NPU,...`) is configured and the runtime reports no NPU, SMA-NG logs a warning and falls back to normal planning instead of failing the entire job
-- Analyzer recommendations are intentionally bounded and local to the current job; they do not mutate your saved `autoProcess.ini`
+- Analyzer recommendations are intentionally bounded and local to the current job; they do not mutate your saved `sma-ng.yml`
 
 ---
 

@@ -50,8 +50,8 @@ curl https://mise.run | sh
 | Task                       | Description                                                                        |
 | -------------------------- | ---------------------------------------------------------------------------------- |
 | `mise run config:gpu`      | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
-| `mise run config:generate` | Generate `config/` ini files with GPU auto-detection                               |
-| `mise run config:audit`    | Audit local `autoProcess.ini` files against the sample and `daemon.json`           |
+| `mise run config:generate` | Generate `config/sma-ng.yml` with GPU auto-detection                         |
+| `mise run config:audit`    | Audit local config files against the YAML sample                                   |
 | `mise run daemon:smoke`    | Run daemon smoke-test config validation and exit                                   |
 
 ### Docker Tasks
@@ -232,11 +232,11 @@ value as its cluster node ID.
 For each remote host:
 
 1. Detects GPU type remotely and sets `gpu =` in the generated config
-2. Creates missing config files from samples (`autoProcess.ini`, `daemon.json`, `daemon.env`)
+2. Creates missing config files from samples (`sma-ng.yml`, `daemon.env`)
 3. Merges new keys from updated samples into existing configs (non-destructive — existing values preserved)
-4. Stamps service credentials from `setup/.local.ini` into all `*.ini` files
-5. Sets `ffmpeg`/`ffprobe` paths from `FFMPEG_DIR` in every `.ini`
-6. Stamps daemon credentials (`api_key`, `db_url`, `ffmpeg_dir`) into `daemon.json` and `daemon.env`
+4. Stamps service credentials from `setup/.local.ini` into YAML/INI configs
+5. Sets `ffmpeg`/`ffprobe` paths from `FFMPEG_DIR` in YAML/INI configs
+6. Stamps daemon credentials (`api_key`, `db_url`, `ffmpeg_dir`) into `Daemon:` in `sma-ng.yml` and `daemon.env`
 7. Deploys post-process scripts with correct interpreter shebang and credentials
 
 ### Deploy Tasks Reference
@@ -330,7 +330,7 @@ The bundled PostgreSQL compose service publishes `5432` on the Docker host by de
 | `SMA_DAEMON_API_KEY`    |           | API key                                 |
 | `SMA_DAEMON_DB_URL`     |           | PostgreSQL connection URL (required)    |
 | `SMA_DAEMON_FFMPEG_DIR` |           | Directory containing `ffmpeg`/`ffprobe` |
-| `SMA_CONFIG`            |           | Override `autoProcess.ini` path         |
+| `SMA_CONFIG`            |           | Override `sma-ng.yml` path         |
 
 See also:
 

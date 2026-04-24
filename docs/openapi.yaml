@@ -82,7 +82,7 @@ components:
         log_name:
           type: string
           nullable: true
-          description: Log file stem for the config used by this job (e.g. "autoProcess.tv")
+          description: Log file stem for the config used by this job (e.g. "sma-ng")
 
     JobStats:
       type: object
@@ -107,7 +107,7 @@ components:
       properties:
         name:
           type: string
-          description: Log name (config file stem, e.g. "autoProcess.tv")
+          description: Log name (config file stem, e.g. "sma-ng")
         file:
           type: string
           description: Absolute path to the log file
@@ -628,7 +628,7 @@ paths:
                           type: string
                         log_name:
                           type: string
-                          description: Log name for this config (e.g. "autoProcess.tv")
+                          description: Log name for this config (e.g. "sma-ng")
                         active_jobs:
                           type: array
                         pending_jobs:
@@ -662,8 +662,8 @@ paths:
 
   /reload:
     post:
-      summary: Reload daemon.json configuration in-place
-      description: Re-reads daemon.json without restarting workers or active conversions.
+      summary: Reload daemon configuration in-place
+      description: Re-reads the Daemon section from sma-ng.yml without restarting workers or active conversions.
       operationId: reload
       tags: [management]
       responses:
@@ -928,7 +928,7 @@ paths:
           required: true
           schema:
             type: string
-          description: Log name (config file stem, e.g. "autoProcess.tv")
+          description: Log name (config file stem, e.g. "sma-ng")
         - name: lines
           in: query
           schema:

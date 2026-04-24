@@ -32,7 +32,7 @@ Full documentation is in [docs/](docs/) and served at `http://localhost:8585/doc
 | Page | Description |
 | --- | --- |
 | [Getting Started](docs/getting-started.md) | Installation, quick start, CLI usage, supported codecs |
-| [Configuration](docs/configuration.md) | `autoProcess.ini` settings reference |
+| [Configuration](docs/configuration.md) | `sma-ng.yml` settings reference |
 | [Daemon Mode](docs/daemon.md) | HTTP server, API endpoints, dashboard, clustering, persistence |
 | [Docker Compose Quick Start](docs/docker-compose-quickstart.md) | Fastest path to running SMA-NG with Docker Compose |
 | [Environment Architecture](docs/environment-architecture.md) | Deployment-specific storage and virtualization design notes |

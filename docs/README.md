@@ -18,7 +18,7 @@ Automated media conversion, tagging, and integration pipeline. Converts media fi
   - [API Endpoints](#api-endpoints)
   - [Webhook Request Formats](#webhook-request-formats)
   - [Authentication](#authentication)
-  - [Path-Based Configuration (daemon.json)](#path-based-configuration-daemonjson)
+  - [Path-Based Configuration](#path-based-configuration)
   - [Per-Config Logging](#per-config-logging)
   - [Scheduled Directory Scanning](#scheduled-directory-scanning)
   - [SQLite Persistence](#sqlite-persistence)
@@ -85,8 +85,8 @@ pip install -r setup/requirements.txt
 make config
 
 # Or copy sample and edit manually
-cp setup/autoProcess.ini.sample config/autoProcess.ini
-$EDITOR config/autoProcess.ini
+cp setup/sma-ng.yml.sample config/sma-ng.yml
+$EDITOR config/sma-ng.yml
 
 # Test a conversion
 python manual.py -i /path/to/file.mkv -a
@@ -171,7 +171,7 @@ flowchart TD
 
 ## Configuration Reference
 
-Configuration lives in `config/autoProcess.ini` (INI format). Copy from `setup/autoProcess.ini.sample`.
+Configuration lives in `config/sma-ng.yml` (YAML format). Copy from `setup/sma-ng.yml.sample`.
 
 Override path via `SMA_CONFIG` environment variable.
 
@@ -406,8 +406,8 @@ python manual.py -i /path/to/file.mkv -oo
 # List supported codecs
 python manual.py -cl
 
-# Use alternate config file
-python manual.py -i /path/to/file.mkv -a -c config/autoProcess.ini-movies4k
+# Use a named profile from the config file
+python manual.py -i /path/to/file.mkv -a -c config/sma-ng.yml --profile rq
 
 # Force re-encode even if format matches
 python manual.py -i /path/to/file.mp4 -a -fc
@@ -473,7 +473,7 @@ python daemon.py \
   --port 8585 \
   --workers 4 \
   --api-key YOUR_SECRET_KEY \
-  --daemon-config config/daemon.json \
+  --daemon-config config/sma-ng.yml \
   --logs-dir logs/ \
   --db config/daemon.db \
   --ffmpeg-dir /usr/local/bin
@@ -483,15 +483,14 @@ python daemon.py \
 
 `--workers` controls how many conversions run at the same time. The daemon also enforces per-config concurrency: up to `--workers` jobs can run against the same config simultaneously, preventing hardware encoder contention.
 
-- Jobs targeting the **same config** run up to `--workers` at a time; excess jobs queue
-- Jobs targeting **different configs** run in parallel (up to `--workers` total)
+- Jobs run up to `--workers` at a time; excess jobs queue
 
 Example with `--workers 2`:
 
 ```text
-Job 1: /TV/show.mkv      -> autoProcess.tv.ini     [starts immediately]
-Job 2: /Movies/film.mkv  -> autoProcess.movies.ini [starts immediately]
-Job 3: /TV/other.mkv     -> autoProcess.tv.ini     [waits for Job 1 or 2 to finish]
+Job 1: /TV/show.mkv      -> sma-ng.yml profile rq [starts immediately]
+Job 2: /Movies/film.mkv  -> sma-ng.yml profile lq [starts immediately]
+Job 3: /TV/other.mkv     -> sma-ng.yml profile rq [waits for an available worker]
 ```
 
 Check active/waiting jobs:
@@ -557,7 +556,7 @@ curl -X POST http://localhost:8585/webhook \
 curl -X POST http://localhost:8585/webhook \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
-  -d '{"path": "/path/to/movie.mkv", "config": "/custom/autoProcess.ini"}'
+  -d '{"path": "/path/to/movie.mkv", "config": "/custom/sma-ng.yml"}'
 ```
 
 ### Authentication
@@ -566,35 +565,33 @@ API key can be set via (priority order):
 
 1. `--api-key` CLI argument
 2. `SMA_DAEMON_API_KEY` environment variable
-3. `api_key` field in `daemon.json`
+3. `Daemon.api_key` in `sma-ng.yml`
 
 Send via header: `X-API-Key: SECRET` or `Authorization: Bearer SECRET`
 
 Public endpoints (no auth): `/`, `/dashboard`, `/health`, `/status`, `/docs`, `/favicon.png`
 
-### Path-Based Configuration (daemon.json)
+### Path-Based Configuration
 
-```json
-{
-  "default_config": "config/autoProcess.ini",
-  "api_key": "your_secret_key",
-  "db_url": null,
-  "ffmpeg_dir": null,
-  "media_extensions": [".mp4", ".mkv", ".avi", ".mov", ".ts"],
-  "scan_paths": [
-    {
-      "path": "/mnt/local/Media",
-      "interval": 3600,
-      "rewrite_from": "/mnt/local/Media",
-      "rewrite_to": "/mnt/unionfs/Media"
-    }
-  ],
-  "path_configs": [
-    {"path": "/mnt/media/TV", "config": "config/autoProcess.tv.ini"},
-    {"path": "/mnt/media/Movies/4K", "config": "config/autoProcess.movies-4k.ini"},
-    {"path": "/mnt/media/Movies", "config": "config/autoProcess.movies-1080p.ini"}
-  ]
-}
+```yaml
+Daemon:
+  default_config: config/sma-ng.yml
+  api_key: your_secret_key
+  db_url:
+  ffmpeg_dir:
+  media_extensions: [.mp4, .mkv, .avi, .mov, .ts]
+  scan_paths:
+    - path: /mnt/local/Media
+      interval: 3600
+      rewrite_from: /mnt/local/Media
+      rewrite_to: /mnt/unionfs/Media
+  path_configs:
+    - path: /mnt/media/TV
+      profile: rq
+    - path: /mnt/media/Movies/4K
+      profile: rq
+    - path: /mnt/media/Movies
+      profile: lq
 ```
 
 **Top-level keys:**
@@ -618,15 +615,13 @@ Each config gets a separate log file in `logs/`. The log filename is derived fro
 
 | Config                             | Log File                         |
 | ---------------------------------- | -------------------------------- |
-| `config/autoProcess.ini`           | `logs/autoProcess.log`           |
-| `config/autoProcess.tv.ini`        | `logs/autoProcess.tv.log`        |
-| `config/autoProcess.movies-4k.ini` | `logs/autoProcess.movies-4k.log` |
+| `config/sma-ng.yml` | `logs/sma-ng.log` |
 
 Log rotation: 10MB max, 5 backups.
 
 ### Scheduled Directory Scanning
 
-The daemon can periodically scan directories for new media files and queue them automatically. Configure `scan_paths` in `daemon.json`:
+The daemon can periodically scan directories for new media files and queue them automatically. Configure `scan_paths` in `Daemon:` section in `sma-ng.yml`:
 
 ```json
 {
@@ -663,7 +658,7 @@ bash scripts/sma-scan.sh /mnt/media/Movies --reset
 bash scripts/sma-scan.sh /mnt/media/Movies --dry-run
 
 # Use a specific config for all files
-bash scripts/sma-scan.sh /mnt/media/Movies --config config/autoProcess.movies.ini
+bash scripts/sma-scan.sh /mnt/media/Movies --config config/sma-ng.yml
 ```
 
 **Scan API endpoints:**
@@ -721,7 +716,7 @@ python daemon.py --db-url postgresql://user:pass@host/sma
 # Environment variable
 SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma python daemon.py
 
-# daemon.json
+# sma-ng.yml Daemon section
 { "db_url": "postgresql://user:pass@host/sma" }
 ```
 
@@ -743,24 +738,27 @@ The daemon stops accepting new jobs immediately, waits for all active conversion
 
 ### Sonarr
 
-1. Configure `[Sonarr]` section in `autoProcess.ini` with host, port, API key
+1. Configure `[Sonarr]` section in `sma-ng.yml` with host, port, API key
 2. In Sonarr: Settings → Connect → Add Custom Script
    - On Download/Import: Yes, On Upgrade: Yes
    - Path: `/bin/bash`
    - Arguments: Full path to `triggers/media_managers/sonarr.sh`
 3. Multiple instances: Add `[Sonarr-Kids]` etc. sections with unique `path` values
 
-**Per-instance config override:** Set `SMA_CONFIG` in Sonarr's environment (Settings → General → Environment Variables) to force a specific `autoProcess.ini` for that Sonarr instance:
+**Per-instance profile routing:** Set `Daemon.path_configs` entries in `sma-ng.yml` to choose `rq` or `lq` based on the imported path:
 
-```bash
-SMA_CONFIG=/opt/sma/config/autoProcess.tv.ini
+```yaml
+Daemon:
+  path_configs:
+    - path: /mnt/media/TV
+      profile: rq
 ```
 
-This is useful when Sonarr imports files to a staging/download path that doesn't match the `path_configs` prefixes in `daemon.json`.
+This is useful when Sonarr imports files to a staging/download path that doesn't match the `path_configs` prefixes in `Daemon:` section in `sma-ng.yml`.
 
 ### Radarr
 
-1. Configure `[Radarr]` section in `autoProcess.ini`
+1. Configure `[Radarr]` section in `sma-ng.yml`
 2. In Radarr: Settings → Connect → Add Custom Script
    - On Download/Import: Yes, On Upgrade: Yes
    - Path: `/bin/bash`
@@ -815,7 +813,7 @@ In Settings → Extension Scripts, add `triggers/usenet/nzbget.sh`. Configure ca
 
 ### SABnzbd
 
-In Settings → Folders → Scripts Folder, point to the `triggers/usenet/` directory. Set `sabnzbd.sh` as the category script. Configure `[SABNZBD]` section in `autoProcess.ini`.
+In Settings → Folders → Scripts Folder, point to the `triggers/usenet/` directory. Set `sabnzbd.sh` as the category script. Configure `[SABNZBD]` section in `sma-ng.yml`.
 
 ### qBittorrent
 
@@ -847,7 +845,7 @@ The `gpu` key in `[Converter]` sets the hardware acceleration profile used at ru
 
 ### GPU Config Option
 
-The `gpu` key is a runtime setting in `autoProcess.ini` that selects which hardware acceleration backend SMA-NG uses during conversion. `make config` and `mise run config:generate` now call the same generator, auto-detect the GPU the same way, and write the correct value into the generated `autoProcess*.ini` files, but you can also set or change it manually at any time. The runtime settings driven by `gpu` are `hwaccels`, `hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`, and `[Video] codec`.
+The `gpu` key is a runtime setting in `sma-ng.yml` that selects which hardware acceleration backend SMA-NG uses during conversion. `make config` and `mise run config:generate` now call the same generator, auto-detect the GPU the same way, and write the correct value into the generated `autoProcess*.ini` files, but you can also set or change it manually at any time. The runtime settings driven by `gpu` are `hwaccels`, `hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`, and `[Video] codec`.
 
 Valid values for `gpu`:
 
@@ -990,7 +988,7 @@ Container format definitions (MP4, MKV, AVI, WebM, etc.) mapping to FFmpeg muxer
 
 ### resources/readsettings.py
 
-**ReadSettings**: Parses `autoProcess.ini` into typed attributes. Handles defaults, type coercion, multi-instance Sonarr/Radarr discovery.
+**ReadSettings**: Parses `sma-ng.yml` into typed attributes. Handles defaults, type coercion, multi-instance Sonarr/Radarr discovery.
 
 ### resources/metadata.py
 
@@ -1134,14 +1132,14 @@ host        = sonarr.example.com
 port        = 443
 ssl         = true
 apikey      = abc123...
-media_path  = /mnt/media/TV
-config_file = config/autoProcess.sonarr.ini
+path  = /mnt/media/TV
+profile = rq
 
 [Radarr]
 host        = radarr.example.com
 apikey      = def456...
-media_path  = /mnt/media/Movies
-config_file = config/autoProcess.radarr.ini
+path  = /mnt/media/Movies
+profile = rq
 ```
 
 1. Run first-time setup (generates SSH key, installs apt dependencies, creates deploy directory, installs systemd service):
@@ -1184,12 +1182,12 @@ mise run config:roll
 
 This task manages config files on remote hosts without overwriting customizations:
 
-- **Creates missing configs** from samples (auto-detects GPU for `autoProcess.ini`)
-- **Merges new keys** from `autoProcess.ini.sample` into existing `*.ini` configs — new settings added to the sample are propagated without touching existing values
-- **Stamps service credentials** from `[Sonarr]`, `[Radarr]`, `[Plex]` etc. sections in `.local.ini` into all `*.ini` configs
-- **Updates `daemon.json`** with `api_key`, `db_url`, and `path_configs` entries built from `media_path` + `config_file` fields in each service section
+- **Creates missing configs** from samples (auto-detects GPU for `sma-ng.yml`)
+- **Merges new keys** from `sma-ng.yml.sample` into existing YAML configs — new settings added to the sample are propagated without touching existing values
+- **Stamps service credentials** from `[Sonarr]`, `[Radarr]`, `[Plex]` etc. sections in `.local.ini` into `sma-ng.yml`
+- **Updates `Daemon:` section in `sma-ng.yml`** with `api_key`, `db_url`, and `path_configs` entries built from `path` + `profile` fields in each service section
 - **Updates `daemon.env`** with `SMA_DAEMON_*` environment variables
-- **Stamps ffmpeg/ffprobe paths** from `FFMPEG_DIR` into all `*.ini` configs
+- **Stamps ffmpeg/ffprobe paths** from `FFMPEG_DIR` into YAML configs
 - **Deploys post-process scripts** from `setup/post_process/` to `post_process/`, stamping in credentials (Plex token, Jellyfin URL, etc.) and updating shebangs to the venv Python
 
 #### Per-host overrides
@@ -1248,10 +1246,10 @@ journalctl -u sma-daemon -f
 
 The daemon also writes per-config rotating log files in `logs/`:
 
-| Config                      | Log File                      |
-| --------------------------- | ----------------------------- |
-| `config/autoProcess.ini`    | `logs/autoProcess.log`        |
-| `config/autoProcess.ini-tv` | `logs/autoProcess.ini-tv.log` |
+| Config                       | Log File                       |
+| ---------------------------- | ------------------------------ |
+| `config/sma-ng.yml`    | `logs/autoProcess.log`         |
+| `config/sma-ng.yml-tv` | `logs/sma-ng.yml-tv.log` |
 
 ### Common Issues
 
@@ -1295,14 +1293,14 @@ The daemon also writes per-config rotating log files in `logs/`:
 
 | Variable                | Description                                                                 |
 | ----------------------- | --------------------------------------------------------------------------- |
-| `SMA_CONFIG`            | Override path to `autoProcess.ini`                                          |
+| `SMA_CONFIG`            | Override path to `sma-ng.yml`                                         |
 | `SMA_DAEMON_API_KEY`    | Daemon API key                                                              |
 | `SMA_DAEMON_DB_URL`     | PostgreSQL connection URL for distributed mode                              |
 | `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` (prepended to PATH for conversions) |
 | `SMA_DAEMON_HOST`       | Daemon bind host (Docker default: empty = 0.0.0.0)                          |
 | `SMA_DAEMON_PORT`       | Daemon port (Docker default: 8585)                                          |
 | `SMA_DAEMON_WORKERS`    | Number of concurrent workers (Docker default: 4)                            |
-| `SMA_DAEMON_CONFIG`     | Path to daemon.json config file                                             |
+| `SMA_DAEMON_CONFIG`     | Path to daemon config, normally `config/sma-ng.yml`                   |
 | `SMA_DAEMON_DB`         | Path to SQLite database file                                                |
 | `SMA_DAEMON_LOGS_DIR`   | Directory for per-config log files                                          |
 

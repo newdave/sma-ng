@@ -48,8 +48,8 @@ Adjust the compose file if your host uses different media paths.
 At minimum, create:
 
 ```bash
-cp setup/autoProcess.ini.sample /opt/sma/config/autoProcess.ini
-cp setup/daemon.json.sample /opt/sma/config/daemon.json
+cp setup/sma-ng.yml.sample /opt/sma/config/sma-ng.yml
+cp setup/sma-ng.yml.sample /opt/sma/config/sma-ng.yml
 ```
 
 If you want runtime environment overrides, also create:
@@ -60,9 +60,9 @@ cp setup/daemon.env.sample /opt/sma/config/daemon.env 2>/dev/null || true
 
 If `setup/daemon.env.sample` is not present in your checkout, just create `/opt/sma/config/daemon.env` manually.
 
-## 3. Edit `autoProcess.ini`
+## 3. Edit `sma-ng.yml`
 
-Set the basics in `/opt/sma/config/autoProcess.ini`:
+Set the basics in `/opt/sma/config/sma-ng.yml`:
 
 - `ffmpeg = /usr/local/bin/ffmpeg`
 - `ffprobe = /usr/local/bin/ffprobe`
@@ -71,20 +71,20 @@ Set the basics in `/opt/sma/config/autoProcess.ini`:
 
 For hardware encoders, also set the appropriate `gpu =` and codec values. See [Hardware Acceleration](hardware-acceleration.md).
 
-## 4. Edit `daemon.json`
+## 4. Edit `Daemon:` section in `sma-ng.yml`
 
 Minimal example:
 
-```json
-{
-  "default_config": "/config/autoProcess.ini",
-  "api_key": "change-me",
-  "db_url": null,
-  "path_configs": [
-    {"path": "/mnt/media/TV", "config": "/config/autoProcess.ini"},
-    {"path": "/mnt/media/Movies", "config": "/config/autoProcess.ini"}
-  ]
-}
+```yaml
+Daemon:
+  default_config: /config/sma-ng.yml
+  api_key: change-me
+  db_url:
+  path_configs:
+    - path: /mnt/media/TV
+      profile: rq
+    - path: /mnt/media/Movies
+      profile: rq
 ```
 
 Notes:
@@ -295,18 +295,18 @@ Use a non-`-pg` profile and set:
 SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
 ```
 
-Place it in `/opt/sma/config/daemon.env` or `daemon.json`.
+Place it in `/opt/sma/config/daemon.env` or `Daemon:` section in `sma-ng.yml`.
 
-### Route different media roots to different configs
+### Route different media roots to different profiles
 
-```json
-{
-  "default_config": "/config/autoProcess.ini",
-  "path_configs": [
-    {"path": "/mnt/media/TV", "config": "/config/autoProcess.tv.ini"},
-    {"path": "/mnt/media/Movies", "config": "/config/autoProcess.movies.ini"}
-  ]
-}
+```yaml
+Daemon:
+  default_config: /config/sma-ng.yml
+  path_configs:
+    - path: /mnt/media/TV
+      profile: rq
+    - path: /mnt/media/Movies
+      profile: lq
 ```
 
 ## Updating
@@ -324,7 +324,7 @@ Replace `software-pg` with whichever profile you use.
 
 ### Daemon starts but jobs fail immediately
 
-- check `/opt/sma/config/autoProcess.ini`
+- check `/opt/sma/config/sma-ng.yml`
 - verify media paths inside the container
 - verify `ffmpeg` and `ffprobe` paths
 

@@ -115,9 +115,9 @@ This is especially important when:
 
 On a single machine, run each instance with its own:
 
-- `daemon.json`
+- `Daemon:` section in `sma-ng.yml`
 - `daemon.env`
-- `autoProcess.ini` set
+- `sma-ng.yml` set
 - port
 - logs directory
 - systemd unit name or container name
@@ -127,48 +127,46 @@ Example layout:
 ```text
 /opt/sma-tv/
 ├─ config/
-│  ├─ autoProcess.ini
-│  ├─ daemon.json
+│  ├─ sma-ng.yml
+│  ├─ `Daemon:` section in `sma-ng.yml`
 │  └─ daemon.env
 └─ logs/
 
 /opt/sma-movies/
 ├─ config/
-│  ├─ autoProcess.ini
-│  ├─ daemon.json
+│  ├─ sma-ng.yml
+│  ├─ `Daemon:` section in `sma-ng.yml`
 │  └─ daemon.env
 └─ logs/
 ```
 
-Example `daemon.json` values:
+Example `Daemon:` section in `sma-ng.yml` values:
 
-```json
-{
-  "default_config": "/opt/sma-tv/config/autoProcess.ini",
-  "api_key": "tv-secret",
-  "db_url": "postgresql://sma:password@127.0.0.1:5432/sma",
-  "path_configs": [
-    {"path": "/mnt/media/TV", "config": "/opt/sma-tv/config/autoProcess.ini"}
-  ]
-}
+```yaml
+Daemon:
+  default_config: /opt/sma-tv/config/sma-ng.yml
+  api_key: tv-secret
+  db_url: postgresql://sma:password@127.0.0.1:5432/sma
+  path_configs:
+    - path: /mnt/media/TV
+      profile: rq
 ```
 
-```json
-{
-  "default_config": "/opt/sma-movies/config/autoProcess.ini",
-  "api_key": "movies-secret",
-  "db_url": "postgresql://sma:password@127.0.0.1:5432/sma",
-  "path_configs": [
-    {"path": "/mnt/media/Movies", "config": "/opt/sma-movies/config/autoProcess.ini"}
-  ]
-}
+```yaml
+Daemon:
+  default_config: /opt/sma-movies/config/sma-ng.yml
+  api_key: movies-secret
+  db_url: postgresql://sma:password@127.0.0.1:5432/sma
+  path_configs:
+    - path: /mnt/media/Movies
+      profile: rq
 ```
 
 Start them on different ports:
 
 ```bash
-python daemon.py --port 8585 --daemon-config /opt/sma-tv/config/daemon.json --logs-dir /opt/sma-tv/logs
-python daemon.py --port 8586 --daemon-config /opt/sma-movies/config/daemon.json --logs-dir /opt/sma-movies/logs
+python daemon.py --port 8585 --daemon-config /opt/sma-tv/config/sma-ng.yml --logs-dir /opt/sma-tv/logs
+python daemon.py --port 8586 --daemon-config /opt/sma-movies/config/sma-ng.yml --logs-dir /opt/sma-movies/logs
 ```
 
 ## Multiple Hosts
@@ -183,7 +181,7 @@ Typical pattern:
 
 1. mount media on every node
 2. deploy the same code version everywhere
-3. give each node its own `daemon.json` and `daemon.env`
+3. give each node its own `Daemon:` section in `sma-ng.yml` and `daemon.env`
 4. point all nodes at the same PostgreSQL
 5. set per-node `ffmpeg_dir`, GPU config, and worker count as needed
 
@@ -191,7 +189,7 @@ Host-specific differences usually belong in:
 
 - mount paths plus `path_rewrites`
 - `ffmpeg_dir`
-- hardware-specific `autoProcess.ini`
+- hardware-specific `sma-ng.yml`
 - worker count
 
 ## Worker Count and Capacity Planning
@@ -242,7 +240,7 @@ Simple pattern:
 EnvironmentFile=/opt/sma-tv/config/daemon.env
 ExecStart=/opt/sma/venv/bin/python /opt/sma/daemon.py \
   --port 8585 \
-  --daemon-config /opt/sma-tv/config/daemon.json \
+  --daemon-config /opt/sma-tv/config/sma-ng.yml \
   --logs-dir /opt/sma-tv/logs
 ```
 
@@ -302,18 +300,18 @@ After bringing nodes up:
 
 Node A and Node B both run:
 
-```json
-{
-  "default_config": "/config/autoProcess.ini",
-  "db_url": "postgresql://sma:password@db.example.com:5432/sma",
-  "path_rewrites": [
-    {"from": "/downloads", "to": "/mnt/downloads"}
-  ],
-  "path_configs": [
-    {"path": "/mnt/media/TV", "config": "/config/autoProcess.tv.ini"},
-    {"path": "/mnt/media/Movies", "config": "/config/autoProcess.movies.ini"}
-  ]
-}
+```yaml
+Daemon:
+  default_config: /config/sma-ng.yml
+  db_url: postgresql://sma:password@db.example.com:5432/sma
+  path_rewrites:
+    - from: /downloads
+      to: /mnt/downloads
+  path_configs:
+    - path: /mnt/media/TV
+      profile: rq
+    - path: /mnt/media/Movies
+      profile: lq
 ```
 
 Node A:
