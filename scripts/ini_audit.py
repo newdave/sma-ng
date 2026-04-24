@@ -114,9 +114,16 @@ def audit_ini(sample_path: str, live_path: str) -> list[Finding]:
           )
         )
 
-  # Sections in live but not in sample
+  # Sections in live but not in sample.
+  # Sonarr-* and Radarr-* sections are intentional wildcard-matched sections
+  # (any prefix of those names is auto-discovered by readsettings) so they are
+  # never deprecated — skip them entirely.
+  _WILDCARD_PREFIXES = ("sonarr", "radarr")
+
   for sec in live_secs:
     if sec not in sample_secs:
+      if sec.lower().startswith(_WILDCARD_PREFIXES):
+        continue
       findings.append(
         Finding(
           level="info",
