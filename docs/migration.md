@@ -107,7 +107,7 @@ python daemon.py --host 0.0.0.0 --port 8585 --workers 4 --api-key YOUR_SECRET_KE
 
 ## Configuration File Changes
 
-The config file is still named `autoProcess.ini` and lives in `config/`. Copy from `setup/autoProcess.ini.sample`.
+The config file is still named `sma-ng.yml` and lives in `config/`. Copy from `setup/sma-ng.yml.sample`.
 
 ### Removed sections
 
@@ -310,17 +310,16 @@ The following media managers are **not supported** in SMA-NG and have no migrati
 
 ## Daemon Configuration (new concept)
 
-SMA-NG adds `daemon.json` (copy from `setup/daemon.json.sample`) for daemon-specific settings.
-This file is separate from `autoProcess.ini`.
+SMA-NG stores daemon-specific settings in the `Daemon:` section of `sma-ng.yml` (copy from `setup/sma-ng.yml.sample`).
 
 Key options:
 
 | Key                   | Description                                                                  |
 | --------------------- | ---------------------------------------------------------------------------- |
-| `default_config`      | Path to the fallback `autoProcess.ini`                                       |
+| `default_config`      | Path to the fallback `sma-ng.yml`                                       |
 | `api_key`             | Authentication key for the HTTP API                                          |
 | `db_url`              | PostgreSQL connection URL for distributed/multi-node mode                    |
-| `path_configs`        | List of `{path, config, default_args}` entries for path-based config routing |
+| `path_configs`        | List of `{path, profile, default_args}` entries for path-based profile routing |
 | `path_rewrites`       | Path prefix substitutions applied before config matching                     |
 | `scan_paths`          | Scheduled background scanning definitions                                    |
 | `job_timeout_seconds` | Maximum runtime per job; `0` for unlimited                                   |
@@ -330,15 +329,19 @@ Key options:
 
 Instead of one config for all content, you can route different paths to different configs:
 
-```json
-{
-  "default_config": "/config/autoProcess.ini",
-  "path_configs": [
-    { "path": "/media/TV/4K",     "config": "/config/autoProcess.rq.ini", "default_args": ["--tv"] },
-    { "path": "/media/Movies/4K", "config": "/config/autoProcess.rq.ini", "default_args": ["--movie"] },
-    { "path": "/media/Kids",      "config": "/config/autoProcess.lq.ini", "default_args": ["--tv"] }
-  ]
-}
+```yaml
+Daemon:
+  default_config: /config/sma-ng.yml
+  path_configs:
+    - path: /media/TV/4K
+      profile: rq
+      default_args: ["--tv"]
+    - path: /media/Movies/4K
+      profile: rq
+      default_args: ["--movie"]
+    - path: /media/Kids
+      profile: lq
+      default_args: ["--tv"]
 ```
 
 Matching is longest-prefix-first: `/media/TV/4K/Show` matches `/media/TV/4K` before `/media/TV`.
@@ -373,13 +376,13 @@ The container image is published at `ghcr.io/newdave/sma-ng:latest`.
 | Feature | Description |
 | --- | --- |
 | Hardware acceleration auto-detection | `make detect-gpu` or `mise run config:gpu` identifies available GPU encoders |
-| Multi-quality config profiles | Three bundled profiles: `autoProcess.ini`, `autoProcess.rq.ini`, `autoProcess.lq.ini` |
+| Multi-quality config profiles | Three bundled profiles: `sma-ng.yml`, `sma-ng.yml profile rq`, `sma-ng.yml profile lq` |
 | OpenVINO Analyzer | Optional `[Analyzer]` section for content-aware encoding decisions |
 | File renaming templates | `[Naming]` section with Sonarr/Radarr-style `{token}` templates |
 | Recycle bin | `recycle-bin` key copies originals before deletion |
 | Per-config rotating logs | Each config gets its own log file in `logs/`; rotates at 10 MB |
 | Job queue REST API | `/jobs`, `/health`, `/status`, `/stats` endpoints for monitoring |
-| Scheduled background scanning | `scan_paths` in `daemon.json` periodically scans directories for unprocessed files |
+| Scheduled background scanning | `scan_paths` in `Daemon:` section in `sma-ng.yml` periodically scans directories for unprocessed files |
 | Graceful shutdown and restart | `POST /shutdown` and `POST /restart` drain active jobs before stopping |
 | PostgreSQL clustering | Optional `db_url` for multi-node distributed mode |
 
@@ -391,8 +394,8 @@ Work through these steps in order.
 
 1. **Upgrade Python** to 3.12+ if needed.
 2. **Install dependencies** via `mise run setup:deps` or `pip install -r setup/requirements.txt`.
-3. **Copy the config sample**: `cp setup/autoProcess.ini.sample config/autoProcess.ini`.
-4. **Port your settings** from the old `autoProcess.ini`:
+3. **Copy the config sample**: `cp setup/sma-ng.yml.sample config/sma-ng.yml`.
+4. **Port your settings** from the old `sma-ng.yml`:
    - Remove `[Sickbeard]` and `[Sickrage]` sections.
    - Remove all `sickbeard-*` and `sickrage-*` keys from downloader sections.
    - Rename `video-codec` to `codec` in `[Video]` if present.
@@ -400,7 +403,7 @@ Work through these steps in order.
    - Replace deprecated `prefer-more-channels` / `default-more-channels` with `[Audio.Sorting]` entries.
    - Add `enabled = True` to `[Universal Audio]` if you used universal audio previously.
 5. **Detect your GPU**: `make detect-gpu` and set `gpu =` in `[Video]` if hardware acceleration is available.
-6. **Copy the daemon config sample**: `cp setup/daemon.json.sample config/daemon.json` and configure paths.
+6. **Copy the daemon config sample**: `cp setup/sma-ng.yml.sample config/sma-ng.yml` and configure paths.
 7. **Start the daemon**: `python daemon.py --host 0.0.0.0 --port 8585 --workers 2`.
 8. **Update Sonarr / Radarr**:
    - Add a Webhook connection pointing to `http://<host>:8585/webhook/sonarr` (or `radarr`).
@@ -413,7 +416,7 @@ Work through these steps in order.
 ## Further Reading
 
 - [Getting Started](getting-started.md) — installation and first-run walkthrough
-- [Configuration](configuration.md) — complete `autoProcess.ini` reference
+- [Configuration](configuration.md) — complete `sma-ng.yml` reference
 - [Daemon Mode](daemon.md) — daemon options, API, clustering
 - [Integrations](integrations.md) — Sonarr, Radarr, and download client setup
 - [Hardware Acceleration](hardware-acceleration.md) — GPU configuration guide

@@ -12,7 +12,7 @@ It focuses on the minimum you need to understand to get a successful first run. 
 ## Requirements
 
 - Python 3.12+
-- FFmpeg (system install or via `ffmpeg_dir` in daemon.json)
+- FFmpeg (system install or via `ffmpeg_dir` in `Daemon:` section in `sma-ng.yml`)
 - Python packages: `pip install -r setup/requirements.txt`
 
 Optional:
@@ -41,7 +41,7 @@ You can use it in two ways:
 Use `manual.py` first if:
 
 - you want to validate FFmpeg and codec behavior quickly
-- you are still tuning `autoProcess.ini`
+- you are still tuning `sma-ng.yml`
 - you want the smallest possible first success
 
 Use `daemon.py` first if:
@@ -76,23 +76,23 @@ If you do not know the answers yet, start with:
 
 ## Quality Profiles
 
-`mise run config:generate` and `make config` now use the same generator and always create three config files:
+`mise run config:generate` and `make config` create one base YAML config with named quality profiles:
 
-| File                        | Profile                    | Video                                    | Audio             |
-| --------------------------- | -------------------------- | ---------------------------------------- | ----------------- |
-| `config/autoProcess.ini`    | Regular Quality (default)  | 3 Mbit/s 1080p · 20 Mbit/s 4K            | EAC3, 128 kbps/ch |
-| `config/autoProcess.rq.ini` | Regular Quality (explicit) | same as above                            | same as above     |
-| `config/autoProcess.lq.ini` | Lower Quality              | 2 Mbit/s capped at 1080p (4K downscaled) | AAC, 96 kbps/ch   |
+| Profile | Video                                    | Audio             |
+| ------- | ---------------------------------------- | ----------------- |
+| base    | Regular-quality defaults                 | EAC3, 128 kbps/ch |
+| `rq`    | Explicit regular-quality override        | EAC3/AAC          |
+| `lq`    | Lower bitrate, stereo-focused override   | AAC, stereo       |
 
-Use `config/autoProcess.lq.ini` for bandwidth-limited destinations (mobile devices, remote access). Route files to it via `path_configs` in `daemon.json`:
+Use the `lq` profile for bandwidth-limited destinations. Route files to it via `Daemon.path_configs` in `sma-ng.yml`:
 
-```json
-{
-  "path_configs": [
-    {"path": "/mnt/media/TV", "config": "config/autoProcess.rq.ini"},
-    {"path": "/mnt/media/Mobile", "config": "config/autoProcess.lq.ini"}
-  ]
-}
+```yaml
+Daemon:
+  path_configs:
+    - path: /mnt/media/TV
+      profile: rq
+    - path: /mnt/media/Mobile
+      profile: lq
 ```
 
 ## Quick Start
@@ -156,8 +156,8 @@ pip install -r setup/requirements.txt
 make config
 
 # Or copy sample and edit manually
-cp setup/autoProcess.ini.sample config/autoProcess.ini
-$EDITOR config/autoProcess.ini
+cp setup/sma-ng.yml.sample config/sma-ng.yml
+$EDITOR config/sma-ng.yml
 
 # Test a conversion
 python manual.py -i /path/to/file.mkv -a
@@ -169,7 +169,7 @@ python daemon.py --host 0.0.0.0 --port 8585
 If FFmpeg is not on `PATH`, either:
 
 - install it system-wide, or
-- point `ffmpeg` and `ffprobe` in `config/autoProcess.ini` to the correct binaries
+- point `ffmpeg` and `ffprobe` in `config/sma-ng.yml` to the correct binaries
 
 ### With Docker Compose
 
@@ -248,21 +248,14 @@ The normal bootstrap path generates these files:
 
 | File                        | Purpose                                         |
 | --------------------------- | ----------------------------------------------- |
-| `config/autoProcess.ini`    | Main/default conversion config                  |
-| `config/autoProcess.rq.ini` | Explicit regular-quality profile                |
-| `config/autoProcess.lq.ini` | Lower-quality profile                           |
-| `config/daemon.json`        | Optional daemon path routing and cluster config |
+| `config/sma-ng.yml` | Main conversion config, profiles, and daemon settings |
+| `config/daemon.env`       | Optional daemon environment variables                |
 
 You can operate successfully with only:
 
-- `config/autoProcess.ini`
+- `config/sma-ng.yml`
 
-You need `config/daemon.json` when:
-
-- using `daemon.py` seriously
-- routing different paths to different configs
-- enabling PostgreSQL-backed clustered mode
-- using path rewrites or scheduled directory scans
+Use the `Daemon:` section in `config/sma-ng.yml` when routing different paths, enabling PostgreSQL-backed clustered mode, using path rewrites, or scheduling directory scans.
 
 ## Minimum Config to Review
 
@@ -390,8 +383,8 @@ python manual.py -i /path/to/file.mkv -oo
 # List supported codecs
 python manual.py -cl
 
-# Use alternate config file
-python manual.py -i /path/to/file.mkv -a -c config/autoProcess.ini-movies4k
+# Use a named profile from the config file
+python manual.py -i /path/to/file.mkv -a -c config/sma-ng.yml --profile rq
 
 # Force re-encode even if format matches
 python manual.py -i /path/to/file.mp4 -a -fc
@@ -423,7 +416,7 @@ python manual.py -i /path/to/file.mkv -oo
 python manual.py -i /path/to/file.mkv -a -nm -nc -nd
 
 # Force software-style baseline testing by using a software codec config
-python manual.py -i /path/to/file.mkv -a -c config/autoProcess.ini
+python manual.py -i /path/to/file.mkv -a -c config/sma-ng.yml
 ```
 
 ### All Flags
@@ -471,7 +464,7 @@ input:    The.Matrix.1999.mkv
 subtitle: The.Matrix.1999.eng.srt
 ```
 
-Language rules from `autoProcess.ini` apply — subtitles for non-whitelisted languages are ignored.
+Language rules from `sma-ng.yml` apply — subtitles for non-whitelisted languages are ignored.
 
 ---
 
@@ -493,7 +486,7 @@ python daemon.py \
   --port 8585 \
   --workers 2 \
   --api-key YOUR_SECRET_KEY \
-  --daemon-config config/daemon.json \
+  --daemon-config config/sma-ng.yml \
   --logs-dir logs
 ```
 

@@ -14,7 +14,7 @@ python daemon.py \
   --port 8585 \
   --workers 4 \
   --api-key YOUR_SECRET_KEY \
-  --daemon-config config/daemon.json \
+  --daemon-config config/sma-ng.yml \
   --logs-dir logs/ \
   --ffmpeg-dir /usr/local/bin
 ```
@@ -26,7 +26,7 @@ All options can also be set via environment variables — see [Environment Varia
 | Flag                     | Default | Description                                                                                                                     |
 | ------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `--smoke-test`           |         | Run a dry-run option-generation check against all configs then exit. Safe pre-flight before systemd considers the unit started. |
-| `--job-timeout SECONDS`  | `0`     | Kill a conversion job after this many seconds (0 = no timeout). Also settable via `job_timeout_seconds` in `daemon.json`.       |
+| `--job-timeout SECONDS`  | `0`     | Kill a conversion job after this many seconds (0 = no timeout). Also settable via `Daemon.job_timeout_seconds` in `sma-ng.yml`.       |
 | `--heartbeat-interval N` | `30`    | Seconds between PostgreSQL cluster heartbeat updates                                                                            |
 | `--stale-seconds N`      | `120`   | Seconds without a heartbeat before a node's running jobs are requeued                                                           |
 
@@ -71,7 +71,7 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `POST` | `/webhook/sonarr`     | Yes  | Native Sonarr webhook endpoint (On Download/Upgrade)                    |
 | `POST` | `/webhook/radarr`     | Yes  | Native Radarr webhook endpoint (On Download/Upgrade)                    |
 | `POST` | `/cleanup`            | Yes  | Remove old jobs. Query: `?days=30`                                      |
-| `POST` | `/reload`             | Yes  | Reload `daemon.json` without restarting                                 |
+| `POST` | `/reload`             | Yes  | Reload `Daemon:` section in `sma-ng.yml` without restarting                                 |
 | `POST` | `/restart`            | Yes  | Graceful restart. Query: `?node=<id>` for remote node (PostgreSQL)      |
 | `POST` | `/shutdown`           | Yes  | Graceful shutdown. Query: `?node=<id>` for remote node (PostgreSQL)     |
 | `POST` | `/jobs/<id>/requeue`  | Yes  | Requeue a specific failed job                                           |
@@ -111,7 +111,7 @@ curl -X POST http://localhost:8585/webhook/generic \
 curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
-  -d '{"path": "/path/to/movie.mkv", "config": "/custom/autoProcess.ini"}'
+  -d '{"path": "/path/to/movie.mkv", "config": "/custom/sma-ng.yml"}'
 ```
 
 ---
@@ -122,13 +122,13 @@ API key priority order:
 
 1. `--api-key` CLI argument
 2. `SMA_DAEMON_API_KEY` environment variable
-3. `api_key` field in `daemon.json`
+3. `Daemon.api_key` in `sma-ng.yml`
 
 ```mermaid
 flowchart LR
     A["--api-key\nCLI flag"] -->|highest priority| V["Resolved\nAPI Key"]
     B["SMA_DAEMON_API_KEY\nenv var"] --> V
-    C["api_key\ndaemon.json"] --> V
+    C["api_key\n`Daemon:` section in `sma-ng.yml`"] --> V
     D["none\nauth disabled"] -->|lowest priority| V
     A -.->|overrides| B -.->|overrides| C -.->|overrides| D
 ```
@@ -147,52 +147,47 @@ Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/health`, `/s
 
 ---
 
-## Path-Based Configuration (daemon.json)
+## Path-Based Configuration
 
-Create `config/daemon.json` (copy from `setup/daemon.json.sample`) to route files to different `autoProcess.ini` files based on their path:
+Configure the `Daemon:` section in `config/sma-ng.yml` to route files by path, apply profiles, and set daemon runtime options.
 
-```json
-{
-  "default_config": "config/autoProcess.ini",
-  "api_key": "your_secret_key",
-  "db_url": null,
-  "ffmpeg_dir": null,
-  "media_extensions": [".mp4", ".mkv", ".avi", ".mov", ".ts"],
-  "path_rewrites": [
-    {
-      "from": "/mnt/local/Media",
-      "to": "/mnt/unionfs/Media"
-    }
-  ],
-  "scan_paths": [
-    {
-      "path": "/mnt/local/Media",
-      "interval": 3600,
-      "rewrite_from": "/mnt/local/Media",
-      "rewrite_to": "/mnt/unionfs/Media",
-      "enabled": true
-    }
-  ],
-  "path_configs": [
-    {"path": "/mnt/media/TV", "config": "config/autoProcess.tv.ini"},
-    {"path": "/mnt/media/Movies/4K", "config": "config/autoProcess.movies-4k.ini"},
-    {"path": "/mnt/media/Movies", "config": "config/autoProcess.movies.ini"}
-  ]
-}
+```yaml
+Daemon:
+  api_key: your_secret_key
+  db_url: null
+  ffmpeg_dir: null
+  media_extensions: [.mp4, .mkv, .avi, .mov, .ts]
+  path_rewrites:
+    - from: /mnt/local/Media
+      to: /mnt/unionfs/Media
+  scan_paths:
+    - path: /mnt/local/Media
+      interval: 3600
+      rewrite_from: /mnt/local/Media
+      rewrite_to: /mnt/unionfs/Media
+      enabled: true
+  path_configs:
+    - path: /mnt/media/TV
+      profile: rq
+      default_args: [--tv]
+    - path: /mnt/media/Movies/Kids
+      profile: lq
+      default_args: [--movie]
+    - path: /mnt/media/Special
+      config: config/autoProcess.special.yaml
 ```
 
 ### Top-Level Keys
 
 | Key                        | Description                                                                                                                          |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `default_config`           | Config file used when no `path_configs` prefix matches                                                                               |
 | `api_key`                  | API authentication key                                                                                                               |
 | `db_url`                   | PostgreSQL URL for distributed mode                                                                                                  |
 | `ffmpeg_dir`               | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion                                              |
 | `media_extensions`         | File extensions considered media for directory scanning and `/browse`                                                                |
 | `path_rewrites`            | Prefix substitutions applied to incoming webhook paths before config matching; overlapping rewrites are matched longest-prefix-first |
 | `scan_paths`               | Directories for scheduled background scanning                                                                                        |
-| `path_configs`             | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection                                               |
+| `path_configs`             | Per-directory routing entries. Use `profile` for named profiles in this file or `config` for an external YAML config                |
 | `smoke_test`               | Run option-generation dry-run against all configs at startup. Exits 1 on failure.                                                    |
 | `job_timeout_seconds`      | Maximum seconds a conversion may run (0 = no timeout)                                                                                |
 | `recycle_bin_max_age_days` | Delete recycle-bin media files older than this many days (default: `3`, `0` = disabled)                                              |
@@ -204,8 +199,10 @@ Matching is longest-prefix-first: `/mnt/media/Movies/4K/film.mkv` matches `Movie
 
 Each `path_configs` entry can include `default_args` to prepend args to every job submitted from that path:
 
-```json
-{"path": "/mnt/media/TV", "config": "config/autoProcess.tv.ini", "default_args": ["--tv"]}
+```yaml
+path: /mnt/media/TV
+profile: rq
+default_args: [--tv]
 ```
 
 ---
@@ -214,13 +211,12 @@ Each `path_configs` entry can include `default_args` to prepend args to every jo
 
 `--workers` controls how many conversions run at the same time.
 
-- Jobs targeting the **same config** run up to `--workers` at a time; excess jobs queue
-- Jobs targeting **different configs** always run in parallel (up to `--workers` total)
+- Jobs run up to `--workers` at a time; excess jobs queue
 
 ```text
-Job 1: /TV/show1.mkv     -> autoProcess.tv.ini     [starts immediately]
-Job 2: /Movies/film1.mkv -> autoProcess.movies.ini [starts immediately]
-Job 3: /TV/show2.mkv     -> autoProcess.tv.ini     [waits for Job 1 to finish]
+Job 1: /TV/show1.mkv     -> sma-ng.yml profile rq [starts immediately]
+Job 2: /Movies/film1.mkv -> sma-ng.yml profile lq [starts immediately]
+Job 3: /TV/show2.mkv     -> sma-ng.yml profile rq [waits for an available worker]
 ```
 
 Check active/waiting jobs: `curl http://localhost:8585/health`
@@ -233,9 +229,7 @@ Each config gets a separate rotating log file in `logs/` named after the config 
 
 | Config                             | Log File                         |
 | ---------------------------------- | -------------------------------- |
-| `config/autoProcess.ini`           | `logs/autoProcess.log`           |
-| `config/autoProcess.tv.ini`        | `logs/autoProcess.tv.log`        |
-| `config/autoProcess.movies-4k.ini` | `logs/autoProcess.movies-4k.log` |
+| `config/sma-ng.yml` | `logs/sma-ng.log` |
 
 Rotation: 10MB max, 5 backups. Use `--logs-dir` to change the directory.
 
@@ -255,8 +249,7 @@ Returns an array of log file objects:
 
 ```json
 [
-  {"name": "autoProcess", "file": "/app/logs/autoProcess.log", "size": 102400, "mtime": "2024-04-19T12:34:56-04:00"},
-  {"name": "autoProcess.tv", "file": "/app/logs/autoProcess.tv.log", "size": 51200, "mtime": "2024-04-19T10:20:30-04:00"}
+  {"name": "sma-ng", "file": "/app/logs/sma-ng.log", "size": 102400, "mtime": "2024-04-19T12:34:56-04:00"}
 ]
 ```
 
@@ -370,7 +363,7 @@ bash scripts/sma-scan.sh /mnt/media/Movies --dry-run
 
 ## Recycle Bin Cleanup
 
-The daemon automatically purges old media files from every `recycle-bin` directory configured in any `autoProcess.ini`. Two independent eviction triggers run once per hour:
+The daemon automatically purges old media files from every `recycle-bin` directory configured in any `sma-ng.yml`. Two independent eviction triggers run once per hour:
 
 | Trigger        | Key                        | Default | Behaviour                                                                       |
 | -------------- | -------------------------- | ------- | ------------------------------------------------------------------------------- |
@@ -411,7 +404,7 @@ stateDiagram-v2
 
 ## Job Persistence
 
-Jobs are stored in a PostgreSQL database configured via `SMA_DAEMON_DB_URL` or `db_url` in `daemon.json`. The database provides restart recovery, job history, cluster coordination, and deduplication across nodes.
+Jobs are stored in a PostgreSQL database configured via `SMA_DAEMON_DB_URL` or `db_url` in `Daemon:` section in `sma-ng.yml`. The database provides restart recovery, job history, cluster coordination, and deduplication across nodes.
 
 ```bash
 curl http://localhost:8585/stats
@@ -437,12 +430,14 @@ For multi-node deployments, configure a shared PostgreSQL database so no two nod
 **Configure (priority order):**
 
 1. `SMA_DAEMON_DB_URL` environment variable
-2. `db_url` field in `daemon.json`
+2. `Daemon.db_url` in `sma-ng.yml`
+
+```yaml
+Daemon:
+  db_url: postgresql://sma:password@db-host:5432/sma
+```
 
 ```bash
-# daemon.json
-{ "db_url": "postgresql://sma:password@db-host:5432/sma" }
-
 # daemon.env
 SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
 ```
@@ -494,7 +489,7 @@ curl -X POST http://localhost:8585/shutdown -H "X-API-Key: SECRET"
 
 ## Config Reload
 
-Reload `daemon.json` without restarting the daemon or interrupting active conversions:
+Reload daemon config without restarting the daemon or interrupting active conversions:
 
 ```bash
 curl -X POST http://localhost:8585/reload -H "X-API-Key: SECRET"
@@ -535,7 +530,7 @@ All CLI flags (`--host`, `--port`, `--workers`, etc.) are preserved across resta
 | `SMA_DAEMON_HOST`       | Bind host (Docker default: `0.0.0.0`)                       |
 | `SMA_DAEMON_PORT`       | Port (Docker default: `8585`)                               |
 | `SMA_DAEMON_WORKERS`    | Number of concurrent workers (Docker default: `2`)          |
-| `SMA_DAEMON_CONFIG`     | Path to `daemon.json`                                       |
+| `SMA_DAEMON_CONFIG`     | Path to daemon config, normally `config/sma-ng.yml`   |
 | `SMA_DAEMON_LOGS_DIR`   | Directory for per-config log files                          |
 
 `SMA_NODE_NAME` sets the explicit cluster node ID and is recommended for Docker and multi-node deployments.

@@ -12,8 +12,7 @@ The daemon also writes per-config rotating log files in `logs/`:
 
 | Config | Log File |
 | --- | --- |
-| `config/autoProcess.ini` | `logs/autoProcess.log` |
-| `config/autoProcess.tv.ini` | `logs/autoProcess.tv.log` |
+| `config/sma-ng.yml` | `logs/sma-ng.log` |
 
 You can also view and filter logs through the dashboard log viewer or via the API:
 
@@ -76,12 +75,12 @@ curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?level=ERROR"
 ### Daemon doesn't start after restart
 
 - Check `journalctl -u sma-daemon --no-pager -n 50` for the error
-- Verify `config/daemon.json` is valid JSON: `python -m json.tool config/daemon.json`
-- Verify `config/autoProcess.ini` exists
+- Verify `config/sma-ng.yml` is valid YAML.
+- Verify `config/sma-ng.yml` exists
 
 ### Smoke test fails at startup
 
-If `smoke_test: true` is set in `daemon.json` or `--smoke-test` is passed:
+If `Daemon.smoke_test: true` is set in `sma-ng.yml` or `--smoke-test` is passed:
 
 - Check `logs/daemon.log` for `[FAIL]` lines showing which config raised an exception
 - Common cause: a boolean field with a typo (e.g. `force-rename = Truee`) — fix the value in the config
@@ -94,12 +93,12 @@ If `smoke_test: true` is set in `daemon.json` or `--smoke-test` is passed:
 
 | Variable | Description |
 | --- | --- |
-| `SMA_CONFIG` | Override path to `autoProcess.ini` |
+| `SMA_CONFIG` | Override path to `sma-ng.yml` |
 | `SMA_DAEMON_API_KEY` | Daemon API key |
 | `SMA_DAEMON_DB_URL` | PostgreSQL connection URL for distributed mode |
 | `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` (prepended to PATH) |
 | `SMA_DAEMON_HOST` | Daemon bind host (Docker default: `0.0.0.0`) |
 | `SMA_DAEMON_PORT` | Daemon port (Docker default: `8585`) |
 | `SMA_DAEMON_WORKERS` | Number of concurrent workers (Docker default: `2`) |
-| `SMA_DAEMON_CONFIG` | Path to `daemon.json` config file |
+| `SMA_DAEMON_CONFIG` | Path to daemon config, normally `config/sma-ng.yml` |
 | `SMA_DAEMON_LOGS_DIR` | Directory for per-config log files |
