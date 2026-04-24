@@ -115,8 +115,18 @@ def sort_section_keys(lines, sample_secs):
   return out
 
 
+# Sections whose names start with these prefixes are wildcard-matched at
+# runtime (any [Sonarr-*] / [Radarr-*] name is valid).  Never deprecate keys
+# inside them just because the section isn't in the sample.
+_WILDCARD_SECTION_PREFIXES = ("sonarr", "radarr")
+
+
 def deprecate_removed_keys(lines, sample_secs):
-  """Prepend '# deprecated: ' to key=value lines absent from the sample."""
+  """Prepend '# deprecated: ' to key=value lines absent from the sample.
+
+  Keys inside Sonarr*/Radarr* sections are never deprecated because those
+  section names are auto-discovered wildcards, not fixed sample sections.
+  """
   out = []
   cur = None
   for line in lines:
@@ -126,10 +136,12 @@ def deprecate_removed_keys(lines, sample_secs):
       out.append(line)
       continue
     if cur and re.match(r"^[^#;].*=", line.strip()):
-      key = _key_from_line(line.strip())
-      if key and key not in sample_secs.get(cur, {}):
-        print(f"  ! [{cur}] {key}: deprecated")
-        line = f"# deprecated: {line.lstrip()}"
+      # Skip wildcard-prefix sections entirely — they have no sample equivalent.
+      if not cur.lower().startswith(_WILDCARD_SECTION_PREFIXES):
+        key = _key_from_line(line.strip())
+        if key and key not in sample_secs.get(cur, {}):
+          print(f"  ! [{cur}] {key}: deprecated")
+          line = f"# deprecated: {line.lstrip()}"
     out.append(line)
   return out
 

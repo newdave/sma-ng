@@ -212,6 +212,26 @@ class TestDeprecate:
     # The already-commented line must not be double-deprecated
     assert "# deprecated: # already commented" not in content
 
+  def test_deprecate_preserves_sonarr_radarr_sections(self, tmp_path):
+    sample = tmp_path / "sample.ini"
+    live = tmp_path / "live.ini"
+    _write(sample, "[Converter]\noutput-extension = mp4\n")
+    _write(
+      live,
+      "[Converter]\noutput-extension = mp4\n\n[Sonarr-Kids]\nhost = sonarr-kids.example.com\nport = 8989\npath = /mnt/TV-Kids\n\n[Radarr-4K]\nhost = radarr-4k.example.com\nport = 7878\n",
+    )
+
+    sys.argv = ["ini_merge.py", str(sample), str(live), "--deprecate"]
+    ini_merge.main()
+
+    content = _read(live)
+    # Keys inside Sonarr*/Radarr* sections must never be commented out
+    assert "# deprecated: host" not in content
+    assert "# deprecated: port" not in content
+    assert "# deprecated: path" not in content
+    assert "host = sonarr-kids.example.com" in content
+    assert "host = radarr-4k.example.com" in content
+
 
 # ── --backup ──────────────────────────────────────────────────────────────────
 
