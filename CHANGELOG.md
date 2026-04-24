@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.28](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.27...sma-ng-v1.6.28) (2026-04-24)
+
+
+### Features
+
+* add admin node approval and management controls ([b2b640d](https://github.com/newdave/sma-ng/commit/b2b640da1fad78d8fd76c8db6e5b4a2e88e99e3a))
+
 ## [1.6.27](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.26...sma-ng-v1.6.27) (2026-04-24)
 
 
