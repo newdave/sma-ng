@@ -96,6 +96,7 @@ class DaemonServer(ThreadingHTTPServer):
     self.basic_auth = basic_auth  # (username, password) tuple or None
     self.stale_seconds = stale_seconds
     self.node_id = resolve_node_id()
+    self.detected_hwaccel: str = ""
     self.started_at = datetime.now().astimezone()
     self._cli_api_key = cli_api_key
     self._cli_basic_auth = cli_basic_auth
@@ -328,6 +329,7 @@ def _validate_hwaccel(path_config_manager, ffmpeg_dir, logger):
     env["PATH"] = ffmpeg_dir + os.pathsep + env.get("PATH", "")
 
   seen = set()
+  detected_keyword = ""
 
   def _parse_qsv_device(config_parser):
     """Resolve QSV device from [Converter] hwdevices, falling back to renderD128."""
@@ -409,6 +411,8 @@ def _validate_hwaccel(path_config_manager, ffmpeg_dir, logger):
     for keyword, encoder in _hwaccel_map.items():
       if keyword in codec_val and encoder not in seen:
         seen.add(encoder)
+        if not detected_keyword:
+          detected_keyword = keyword
         try:
           result = subprocess.run(
             ["ffmpeg", "-f", "lavfi", "-i", "nullsrc", "-t", "0.1", "-c:v", encoder, "-f", "null", "-", "-loglevel", "error"],
@@ -429,3 +433,5 @@ def _validate_hwaccel(path_config_manager, ffmpeg_dir, logger):
           logger.warning("Hardware encoder probe for '%s' timed out" % encoder)
         except Exception as exc:
           logger.warning("Hardware encoder probe for '%s' failed: %s" % (encoder, exc))
+
+  return detected_keyword

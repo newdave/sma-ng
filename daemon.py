@@ -281,7 +281,7 @@ def main():
     log.debug("  POST /restart      - Graceful restart (drains workers, then re-execs)")
     log.info("Ready to accept connections.")
 
-    _validate_hwaccel(path_config_manager, ffmpeg_dir, log)
+    server.detected_hwaccel = _validate_hwaccel(path_config_manager, ffmpeg_dir, log)
 
     def _shutdown(signum, frame):
       log.info("Received signal %d, shutting down..." % signum)

@@ -49,10 +49,12 @@ class ConversionWorker(threading.Thread):
     progress_log_interval=_DEFAULT_PROGRESS_LOG_INTERVAL,
     job_processes=None,
     job_progress=None,
+    pool=None,
   ):
     super().__init__(daemon=True)
     self.worker_id = worker_id
     self.node_id = resolve_node_id()
+    self.pool = pool
     self.job_db = job_db
     self.job_event = threading.Event()  # per-worker event; set by notify_workers()
     self.path_config_manager = path_config_manager
@@ -97,6 +99,15 @@ class ConversionWorker(threading.Thread):
               self.log.info("Worker %d waiting for admin approval of node %s" % (self.worker_id, self.node_id))
               self._last_approval_log = now
             break
+
+        # Pause gate: block workers until resumed
+        if self.pool is not None and self.pool._pause_mode.is_set():
+          self.pool._pause_mode.wait(timeout=5.0)
+          continue
+
+        # Drain gate: exit inner loop — worker goes idle but stays online
+        if self.pool is not None and self.pool._drain_mode.is_set():
+          break
 
         locked = self.config_lock_manager.get_locked_configs()
         job = self.job_db.claim_next_job(self.worker_id, self.node_id, exclude_configs=locked or None)
@@ -330,6 +341,8 @@ class WorkerPool:
     self._progress_log_interval = progress_log_interval
     self._job_processes = job_processes if job_processes is not None else {}
     self._job_progress = job_progress if job_progress is not None else {}
+    self._drain_mode = threading.Event()  # set = cluster drain (no new jobs, stay online)
+    self._pause_mode = threading.Event()  # set = paused (workers block)
     self._start_workers()
 
   def _start_workers(self):
@@ -346,10 +359,30 @@ class WorkerPool:
         progress_log_interval=self._progress_log_interval,
         job_processes=self._job_processes,
         job_progress=self._job_progress,
+        pool=self,
       )
       worker.start()
       self._workers.append(worker)
       self._logger.debug("Started worker thread %d" % (i + 1))
+
+  def set_drain_mode(self) -> None:
+    """Enter cluster drain mode: workers finish active jobs then go idle."""
+    self._drain_mode.set()
+
+  def clear_drain_mode(self) -> None:
+    """Exit cluster drain mode: workers resume picking up new jobs."""
+    self._drain_mode.clear()
+
+  def set_paused(self) -> None:
+    """Pause all workers: block new job pickup immediately."""
+    self._pause_mode.set()
+
+  def clear_paused(self) -> None:
+    """Resume all workers: unblock job pickup and wake sleeping workers."""
+    self._pause_mode.clear()
+    # Wake all sleeping workers so they re-check their state
+    for worker in self._workers:
+      worker.job_event.set()
 
   def notify(self):
     """Wake all workers."""
