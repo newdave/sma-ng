@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.45](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.44...sma-ng-v1.6.45) (2026-04-25)
+
+
+### Bug Fixes
+
+* **deploy:** use $ssh_target in deploy:mise rsync instead of bare $host ([bfe2dda](https://github.com/newdave/sma-ng/commit/bfe2dda014464e66435df363f5def27af9d0c3d1))
+
 ## [1.6.44](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.43...sma-ng-v1.6.44) (2026-04-25)
 
 
