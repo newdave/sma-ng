@@ -534,3 +534,143 @@ All CLI flags (`--host`, `--port`, `--workers`, etc.) are preserved across resta
 | `SMA_DAEMON_LOGS_DIR`   | Directory for per-config log files                          |
 
 `SMA_NODE_NAME` sets the explicit cluster node ID and is recommended for Docker and multi-node deployments.
+
+---
+
+## Cluster Mode
+
+Cluster mode extends multi-node PostgreSQL deployments with unique node identity, coordinated
+fleet management, and aggregated log visibility. All cluster features require `db_url` to point
+at a shared PostgreSQL instance. Single-node SQLite setups are unaffected — all cluster code
+paths are gated on the distributed flag.
+
+### Node Identity
+
+Every node auto-generates a UUID on first start and persists it in `sma-ng.yml` under `daemon.node_id`.
+The UUID is used as the node's identity in the shared PostgreSQL `cluster_nodes` table, preventing
+job-claiming collisions that can occur with hostname-based identity.
+
+Override the auto-generated UUID in two ways:
+
+- Set `SMA_NODE_NAME` environment variable — takes precedence over `sma-ng.yml`.
+- Set `node_id` explicitly in the `daemon:` section of `sma-ng.yml`.
+
+```yaml
+daemon:
+  # Auto-generated on first start. Override for a human-readable cluster identity.
+  node_id: media-server-prod-1
+```
+
+Once a UUID is written to `sma-ng.yml`, it is never regenerated. Delete or null the field only
+if you intentionally want a new identity assigned.
+
+### Shared Work Queue
+
+All nodes pointing at the same PostgreSQL instance share a single job queue. Workers claim
+jobs using `SELECT FOR UPDATE SKIP LOCKED`, which prevents two nodes from ever processing
+the same file simultaneously.
+
+### Node Management
+
+Open any node's admin UI (`/admin`) and select the **Cluster** tab to manage all nodes from
+a single view.
+
+**Node grid columns:**
+
+| Column | Description |
+| --- | --- |
+| Hostname | Reported hostname of the node |
+| Hardware accel | Detected GPU backend (`qsv`, `nvenc`, `vaapi`, `videotoolbox`, or blank for software) |
+| Version | Installed `sma-ng` package version |
+| Status | Current node status (see below) |
+| Last heartbeat | Time of the most recent heartbeat |
+| Uptime | Time since the node started |
+
+**Node status values:**
+
+| Status | Meaning |
+| --- | --- |
+| `online` | Node is running and accepting jobs normally |
+| `idle` | Node is running but has no active workers |
+| `draining` | Node finished active jobs and stopped accepting new ones |
+| `paused` | Workers are frozen; no new jobs are picked up |
+| `offline` | Node has not sent a heartbeat within the stale threshold |
+
+**Available actions per node:**
+
+| Action | Behaviour |
+| --- | --- |
+| **Drain** | Node finishes all active jobs, then stops accepting new ones. Stays registered and online but idle. Use this before scheduled maintenance to let work complete gracefully. |
+| **Pause** | Workers immediately stop picking up new jobs. Active conversions continue to completion. The node stays registered. |
+| **Resume** | Clears a `drain` or `pause` state. Workers resume normal job pickup on the next heartbeat cycle. |
+| **Restart** | Graceful restart — drains active jobs, then re-execs with the same arguments. |
+| **Shutdown** | Graceful shutdown — drains active jobs, then exits. |
+
+Command dispatch is poll-based. Each node checks for pending commands on every heartbeat tick.
+The default heartbeat interval is 30 seconds (`--heartbeat-interval`). Commands are acknowledged
+and their status (`pending` → `executing` → `done` / `failed`) is recorded in the `node_commands`
+table for auditability.
+
+Remote commands can also be issued via the API:
+
+```bash
+# Drain a specific node
+curl -X POST "http://localhost:8585/admin/nodes/media-server-2/drain" -H "X-API-Key: SECRET"
+
+# Pause a node
+curl -X POST "http://localhost:8585/admin/nodes/media-server-2/pause" -H "X-API-Key: SECRET"
+
+# Resume a node
+curl -X POST "http://localhost:8585/admin/nodes/media-server-2/resume" -H "X-API-Key: SECRET"
+```
+
+### Cluster Log Viewer
+
+All nodes write log entries to the shared `logs` PostgreSQL table. The admin UI Cluster tab
+includes a unified log viewer that aggregates entries from every node.
+
+Filter controls:
+
+- **Node** — show logs from one node or all nodes
+- **Level** — minimum severity (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`)
+
+Logs are paginated and ordered newest-first.
+
+**API access:**
+
+```bash
+# All nodes, last 100 entries
+curl -H "X-API-Key: SECRET" "http://localhost:8585/cluster/logs"
+
+# Filter to one node and level
+curl -H "X-API-Key: SECRET" "http://localhost:8585/cluster/logs?node_id=media-server-2&level=ERROR"
+
+# Paginate
+curl -H "X-API-Key: SECRET" "http://localhost:8585/cluster/logs?limit=50&offset=100"
+```
+
+**Log retention:**
+
+Log entries older than `daemon.log_ttl_days` are deleted automatically. Cleanup runs on every
+heartbeat tick and is idempotent — multiple nodes running cleanup concurrently produce no
+duplicate deletions.
+
+Set `log_ttl_days: 0` in `sma-ng.yml` to disable automatic cleanup entirely.
+
+### Cluster Configuration Reference
+
+Add these fields to the `daemon:` section of `sma-ng.yml`:
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `daemon.node_id` | *(auto-generated UUID)* | Unique node identity. Generated on first start and persisted. Override with `SMA_NODE_NAME` or by setting this field explicitly. |
+| `daemon.log_ttl_days` | `30` | Days to retain cluster log entries in PostgreSQL. Set to `0` to disable TTL cleanup. |
+
+```yaml
+daemon:
+  # node_id is auto-generated as a UUID on first start and persisted here.
+  # Override only if you need a human-readable cluster identity.
+  node_id: null
+  # Number of days to retain cluster log entries in PostgreSQL. 0 disables cleanup.
+  log_ttl_days: 30
+```
