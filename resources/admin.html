@@ -60,7 +60,10 @@
           <tbody class="divide-y divide-gray-700/50 text-xs">
             <template x-for="node in nodes" :key="node.node_id">
               <tr class="hover:bg-gray-700/20">
-                <td class="py-2 pr-4 font-mono text-gray-200" x-text="node.node_id"></td>
+                <td class="py-2 pr-4">
+                  <div class="font-mono text-gray-200" x-text="node.node_name || node.node_id"></div>
+                  <div x-show="node.node_name" class="font-mono text-gray-600 text-xs" x-text="node.node_id"></div>
+                </td>
                 <td class="py-2 pr-4 font-mono text-gray-400" x-text="node.host || '—'"></td>
                 <td class="py-2 pr-4">
                   <span class="px-2 py-0.5 rounded-full"
@@ -117,7 +120,7 @@
             class="bg-gray-700 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-teal-500">
             <option value="">All Nodes</option>
             <template x-for="node in nodes" :key="node.node_id">
-              <option :value="node.node_id" x-text="node.node_id"></option>
+              <option :value="node.node_id" x-text="node.node_name || node.node_id"></option>
             </template>
           </select>
         </div>
@@ -155,7 +158,7 @@
             <template x-for="(entry, idx) in clusterLogs" :key="idx">
               <tr class="hover:bg-gray-700/20">
                 <td class="py-1.5 pr-4 font-mono text-gray-400 whitespace-nowrap" x-text="fmtTime(entry.timestamp)"></td>
-                <td class="py-1.5 pr-4 font-mono text-gray-300 whitespace-nowrap" x-text="entry.node_id || '—'"></td>
+                <td class="py-1.5 pr-4 font-mono text-gray-300 whitespace-nowrap" x-text="nodeDisplayName(entry.node_id)"></td>
                 <td class="py-1.5 pr-4">
                   <span class="px-1.5 py-0.5 rounded-full text-xs" :class="logsLevelClass(entry.level)"
                     x-text="entry.level || '—'"></span>
@@ -331,6 +334,12 @@
           } catch {
             return ts;
           }
+        },
+
+        nodeDisplayName(node_id) {
+          if (!node_id) return '—';
+          const n = this.nodes.find(n => n.node_id === node_id);
+          return (n && n.node_name) ? n.node_name : node_id;
         },
 
         async refreshNodes() {

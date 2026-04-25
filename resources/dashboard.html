@@ -234,9 +234,9 @@
                             <template x-for="node in (cluster && cluster.cluster || [])" :key="node.node_id">
                                 <tr class="hover:bg-gray-700/20">
                                     <td class="py-2 pr-4">
-                                        <div class="font-mono text-gray-200" x-text="node.host"></div>
+                                        <div class="font-mono text-gray-200" x-text="node.node_name || node.host"></div>
                                         <div class="text-gray-600 font-mono"
-                                            x-text="node.node_id !== node.host ? node.node_id : ''"></div>
+                                            x-text="(node.node_name || node.node_id !== node.host) ? node.node_id : ''"></div>
                                     </td>
                                     <td class="py-2 pr-4">
                                         <span class="px-2 py-0.5 rounded-full"

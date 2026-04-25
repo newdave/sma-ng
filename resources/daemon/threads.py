@@ -28,7 +28,7 @@ class HeartbeatThread(_StoppableThread):
   and recovers jobs from nodes that have gone stale.
   """
 
-  def __init__(self, job_db, node_id, host, worker_count, server, interval, stale_seconds, logger, started_at, version="", hwaccel="", log_ttl_days=30):
+  def __init__(self, job_db, node_id, host, worker_count, server, interval, stale_seconds, logger, started_at, version="", hwaccel="", log_ttl_days=30, node_name=None):
     super().__init__()
     self.job_db = job_db
     self.node_id = node_id
@@ -42,13 +42,14 @@ class HeartbeatThread(_StoppableThread):
     self.version = version
     self.hwaccel = hwaccel
     self.log_ttl_days = log_ttl_days
+    self.node_name = node_name or None
 
   def run(self):
     if not self.job_db.is_distributed:
       return  # Heartbeat only meaningful for the shared PG backend
     while self.running:
       try:
-        self.job_db.heartbeat(self.node_id, self.host, self.worker_count, self.started_at, version=self.version, hwaccel=self.hwaccel)
+        self.job_db.heartbeat(self.node_id, self.host, self.worker_count, self.started_at, version=self.version, hwaccel=self.hwaccel, node_name=self.node_name)
         cmd = None
         if self.job_db.is_distributed:
           cmd = self.job_db.poll_node_command(self.node_id)
