@@ -448,7 +448,6 @@ daemon:
   recycle_bin_max_age_days: 3
   recycle_bin_min_free_gb: 100
   media_extensions:
-    - .mp4
     - .mkv
     - .avi
     - .mov
