@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/newdave/sma-ng/main/logo.png">
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4/dist/js.yaml.min.js"></script>
   <style>
     [x-cloak] {
       display: none !important
@@ -184,6 +185,32 @@
           Next &rarr;
         </button>
       </div>
+
+      <!-- Cluster Config -->
+      <div class="mt-8">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-base font-semibold text-gray-900">Cluster Base Config</h3>
+          <div class="flex gap-2">
+            <button @click="loadClusterConfig()" :disabled="configLoading"
+              class="px-3 py-1 text-xs rounded bg-gray-100 hover:bg-gray-200 text-gray-700 disabled:opacity-50">
+              Refresh
+            </button>
+            <button @click="nodes[0] && pushNodeConfig(nodes[0])" :disabled="configSaving || !nodes.length"
+              class="px-3 py-1 text-xs rounded bg-blue-100 hover:bg-blue-200 text-blue-700 disabled:opacity-50">
+              Push from this node
+            </button>
+            <button @click="saveClusterConfig()" :disabled="configSaving"
+              class="px-3 py-1 text-xs rounded bg-green-600 hover:bg-green-700 text-white disabled:opacity-50">
+              <span x-text="configSaving ? 'Saving…' : 'Save'"></span>
+            </button>
+          </div>
+        </div>
+        <p x-show="configSaved" class="mb-2 text-xs text-green-600">Config saved.</p>
+        <p x-show="configError" x-text="configError" class="mb-2 text-xs text-red-600"></p>
+        <textarea x-model="clusterConfig" rows="20"
+          class="w-full font-mono text-xs border border-gray-300 rounded p-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          placeholder="No cluster config stored yet. Push from a node or edit directly."></textarea>
+      </div>
     </div>
 
     <div class="space-y-4">
@@ -260,6 +287,11 @@
         logsError: '',
         logsOffset: 0,
         logsLimit: 50,
+        clusterConfig: '',
+        configLoading: false,
+        configSaving: false,
+        configError: '',
+        configSaved: false,
 
         _actions: {
           'delete-failed': {
@@ -342,6 +374,56 @@
           if (!this.resultError) setTimeout(() => this.result = '', 8000);
         },
 
+        async loadClusterConfig() {
+          this.configLoading = true;
+          this.configError = '';
+          this.configSaved = false;
+          try {
+            const resp = await fetch('/admin/config', { headers: this.authHeaders() });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            this.clusterConfig = jsyaml.dump(data.config || {});
+          } catch (e) {
+            this.configError = e.message || 'Failed to load config';
+          } finally {
+            this.configLoading = false;
+          }
+        },
+        async saveClusterConfig() {
+          this.configSaving = true;
+          this.configError = '';
+          this.configSaved = false;
+          try {
+            const parsed = jsyaml.load(this.clusterConfig || '{}') || {};
+            const resp = await fetch('/admin/config', {
+              method: 'POST',
+              headers: this.authHeaders(),
+              body: JSON.stringify({ config: parsed }),
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            this.configSaved = true;
+          } catch (e) {
+            this.configError = e.message || 'Failed to save config';
+          } finally {
+            this.configSaving = false;
+          }
+        },
+        async pushNodeConfig(node) {
+          if (!node) return;
+          this.configError = '';
+          this.configSaved = false;
+          try {
+            const resp = await fetch('/admin/nodes/' + encodeURIComponent(node.node_id) + '/push-config', {
+              method: 'POST',
+              headers: this.authHeaders(),
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            this.configSaved = true;
+            await this.loadClusterConfig();
+          } catch (e) {
+            this.configError = e.message || 'Failed to push config';
+          }
+        },
         async loadClusterLogs() {
           this.logsLoading = true;
           this.logsError = '';
