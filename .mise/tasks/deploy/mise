@@ -22,7 +22,7 @@ for host in $DEPLOY_HOSTS; do
   # shellcheck disable=SC2086
   rsync -az --delete \
     -e "ssh $ssh_opts" \
-    .mise/ "$host:$dir/.mise/" || { failed="$failed $host"; continue; }
+    .mise/ "$ssh_target:$dir/.mise/" || { failed="$failed $host"; continue; }
 done
 
 if [ -n "$failed" ]; then
