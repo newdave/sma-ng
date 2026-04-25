@@ -10,7 +10,7 @@ from resources.daemon.config import _strip_secrets
 from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING
-from resources.daemon.docs_ui import DOCS_DIR, _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _render_markdown_to_html
+from resources.daemon.docs_ui import DOCS_DIR, _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html
 from resources.daemon.routes import dispatch_get, dispatch_post, dispatch_post_job_action
 from resources.daemon.webhook_parsing import parse_generic_webhook_body, parse_radarr_body, parse_sonarr_body
 
@@ -34,7 +34,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
   """HTTP request handler for webhook endpoints."""
 
   # Endpoints that don't require authentication (prefix-matched for /docs/*)
-  PUBLIC_ENDPOINTS = ["/", "/dashboard", "/admin", "/health", "/status", "/docs", "/favicon.png"]
+  PUBLIC_ENDPOINTS = ["/", "/dashboard", "/admin", "/metrics", "/health", "/status", "/docs", "/favicon.png"]
 
   def log_message(self, format, *args):
     self.server.logger.debug("%s - %s" % (self.address_string(), format % args))
@@ -506,6 +506,27 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
   def _get_stats(self, _path, _query):
     self.send_json_response(200, self.server.job_db.get_stats())
+
+  def _get_metrics_api(self, _path, query):
+    if not self.server.job_db.is_distributed:
+      self.send_json_response(
+        503,
+        {
+          "available": False,
+          "reason": "Cluster metrics are only available in distributed (PostgreSQL) mode. Set SMA_DAEMON_DB_URL to enable.",
+          "docs_url": "/docs/daemon",
+        },
+      )
+      return
+    window = query.get("window", ["24h"])[0]
+    if window not in {"24h", "7d", "30d", "all"}:
+      window = "24h"
+    self.send_json_response(200, self.server.job_db.get_metrics(window=window))
+
+  def _get_metrics_page(self, _path, _query):
+    api_key = self.server.api_key or ""
+    key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
+    self.send_html_response(200, _load_metrics_html().replace("</head>", key_script + "</head>", 1))
 
   def _get_favicon(self, _path, _query):
     favicon = os.path.join(SCRIPT_DIR, "logo.png")

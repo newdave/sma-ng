@@ -61,6 +61,8 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `GET`  | `/jobs`               | Yes  | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
 | `GET`  | `/jobs/<id>`          | Yes  | Get specific job (includes `progress` when running)                     |
 | `GET`  | `/configs`            | Yes  | Config mappings and status                                              |
+| `GET`  | `/metrics`            | No   | Cluster metrics web page (PostgreSQL required)                          |
+| `GET`  | `/api/metrics`        | Yes  | Metrics JSON. Query: `?window=24h\|7d\|30d\|all` (PostgreSQL required)  |
 | `GET`  | `/stats`              | Yes  | Job statistics by status                                                |
 | `GET`  | `/scan`               | Yes  | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv`               |
 | `GET`  | `/browse`             | Yes  | List filesystem dirs/files within configured paths. Query: `?path=/dir` |
@@ -143,7 +145,7 @@ curl -H "X-API-Key: SECRET" ...
 curl -H "Authorization: Bearer SECRET" ...
 ```
 
-Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`, `/favicon.png`
+Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/metrics`, `/health`, `/status`, `/docs`, `/favicon.png`
 
 ---
 

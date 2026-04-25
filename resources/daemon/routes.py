@@ -69,6 +69,8 @@ def _get_routes():
     "/cluster/logs": lambda handler, path, query: handler._get_cluster_logs(path, query),
     "/admin/config": lambda handler, path, query: handler._get_admin_config(path, query),
     "/favicon.png": lambda handler, path, query: handler._get_favicon(path, query),
+    "/metrics": lambda handler, path, query: handler._get_metrics_page(path, query),
+    "/api/metrics": lambda handler, path, query: handler._get_metrics_api(path, query),
   }
 
 

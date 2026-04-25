@@ -83,6 +83,7 @@
                 <p class="text-gray-500 dark:text-gray-400 text-sm">Media Conversion Daemon</p>
             </div>
             <div class="flex items-center gap-4">
+                <a href="/metrics" class="text-xs text-purple-400 hover:underline">Metrics</a>
                 <a href="/admin" class="text-xs text-red-400 hover:underline">Admin</a>
                 <a href="/docs" class="text-xs text-blue-400 hover:underline">Docs</a>
                 <button onclick="toggleTheme()" title="Toggle light/dark theme"
@@ -182,6 +183,38 @@
                         <span class="tip" x-text="s.tip"></span>
                     </div>
                 </template>
+            </div>
+        </div>
+
+        <!-- Cluster Metrics KPI Strip -->
+        <div x-show="metricsAvailable" class="mb-6">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Cluster Metrics <span class="text-gray-600 dark:text-gray-600 font-normal normal-case">(24h)</span>
+                </h2>
+                <a href="/metrics" class="text-xs text-purple-400 hover:underline">Full metrics &rarr;</a>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div class="text-xs font-medium uppercase tracking-wider text-indigo-400">Throughput</div>
+                    <div class="text-2xl font-bold text-gray-900 dark:text-white mt-1"
+                        x-text="metrics && metrics.kpis && metrics.kpis.throughput_per_hour !== null ? metrics.kpis.throughput_per_hour.toFixed(1) + '/hr' : '—'"></div>
+                </div>
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div class="text-xs font-medium uppercase tracking-wider text-blue-400">Avg Duration</div>
+                    <div class="text-2xl font-bold text-gray-900 dark:text-white mt-1"
+                        x-text="fmtDuration(metrics && metrics.kpis ? metrics.kpis.avg_duration_seconds : null)"></div>
+                </div>
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div class="text-xs font-medium uppercase tracking-wider text-red-400">Failure Rate</div>
+                    <div class="text-2xl font-bold text-gray-900 dark:text-white mt-1"
+                        x-text="metrics && metrics.kpis && metrics.kpis.failure_rate_pct !== null ? metrics.kpis.failure_rate_pct.toFixed(1) + '%' : '—'"></div>
+                </div>
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div class="text-xs font-medium uppercase tracking-wider text-green-400">Compression</div>
+                    <div class="text-2xl font-bold text-gray-900 dark:text-white mt-1"
+                        x-text="metrics && metrics.kpis && metrics.kpis.avg_compression_pct !== null ? metrics.kpis.avg_compression_pct.toFixed(1) + '%' : '—'"></div>
+                </div>
             </div>
         </div>
 
@@ -624,6 +657,7 @@
         function dashboard() {
             return {
                 health: {}, stats: {}, configs: {}, jobs: [], cluster: null, nodePendingMap: {},
+                metrics: null, metricsAvailable: false,
                 filter: 'all', page: 0, pageSize: 50, threadsTab: 'local', searchQuery: '', searchTimer: null,
                 lastUpdate: '', interval: null,
                 submitPath: '', submitArgs: '', submitFlags: [], submitting: false, submitResult: '', submitError: false,
@@ -659,19 +693,28 @@
                 get activeWorkers() {
                     return Object.values(this.health.active || {}).reduce((sum, jobs) => sum + jobs.length, 0);
                 },
+                fmtDuration(s) {
+                    if (s === null || s === undefined) return '—';
+                    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+                    if (h > 0) return h + 'h ' + m + 'm ' + sec + 's';
+                    if (m > 0) return m + 'm ' + sec + 's';
+                    return sec + 's';
+                },
                 async init() {
                     await this.refresh();
                     this.interval = setInterval(() => this.refresh(), 5000);
                 },
                 async refresh() {
                     try {
-                        const [h, s, c, st] = await Promise.all([
+                        const [h, s, c, st, m] = await Promise.all([
                             fetch('/health', { headers: this.authHeaders() }).then(r => r.json()),
                             fetch('/stats', { headers: this.authHeaders() }).then(r => r.json()),
                             fetch('/configs', { headers: this.authHeaders() }).then(r => r.json()),
                             fetch('/status', { headers: this.authHeaders() }).then(r => r.json()).catch(() => null),
+                            fetch('/api/metrics?window=24h', { headers: this.authHeaders() }).then(r => r.json()).catch(() => null),
                         ]);
                         this.health = h; this.stats = s; this.configs = c;
+                        if (m && m.available) { this.metrics = m; this.metricsAvailable = true; }
                         const hadCluster = this.cluster && this.cluster.cluster && this.cluster.cluster.length > 0;
                         this.cluster = (st && st.cluster) ? st : null;
                         // Auto-switch to cluster tab on first load if cluster data is present

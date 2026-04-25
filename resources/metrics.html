@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>SMA-NG Metrics</title>
+    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/newdave/sma-ng/main/logo.png">
+    <script>tailwind.config = { darkMode: 'class' }</script>
+    <script>
+      (function(){
+        var t = localStorage.getItem('theme');
+        if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+    <style>
+        [x-cloak] { display: none !important }
+        .chart-container { position: relative; height: 260px; }
+    </style>
+</head>
+
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen">
+    <div x-data="metrics()" x-init="init()" x-cloak class="max-w-7xl mx-auto px-4 py-6">
+
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <div class="flex items-center gap-3">
+                    <a href="/dashboard" class="text-xs text-gray-400 hover:text-gray-200">&larr; Dashboard</a>
+                </div>
+                <h1 class="text-2xl font-bold text-gray-900 dark:text-white mt-1">Cluster Metrics</h1>
+                <p class="text-gray-500 dark:text-gray-400 text-sm">Transcoding job statistics</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <!-- Window selector -->
+                <div x-show="available" class="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+                    <template x-for="w in ['24h','7d','30d','all']" :key="w">
+                        <button @click="changeWindow(w)"
+                            :class="selectedWindow === w
+                                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'"
+                            class="px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                            x-text="w"></button>
+                    </template>
+                </div>
+                <span x-show="loading" class="text-xs text-gray-400">Loading…</span>
+            </div>
+        </div>
+
+        <!-- Unavailable state -->
+        <div x-show="!loading && !available"
+             class="rounded-lg border border-yellow-600/40 bg-yellow-950/30 p-8 text-center">
+            <p class="text-yellow-400 font-semibold text-lg">Cluster Metrics Unavailable</p>
+            <p class="mt-2 text-sm text-gray-400" x-text="unavailableReason"></p>
+            <a href="/docs/daemon" class="mt-4 inline-block text-indigo-400 underline text-sm">
+                How to enable cluster metrics &rarr;
+            </a>
+        </div>
+
+        <!-- Metrics content -->
+        <div x-show="!loading && available">
+
+            <!-- KPI cards -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div class="text-xs font-medium uppercase tracking-wider text-indigo-400 mb-1">Throughput</div>
+                    <div class="text-2xl font-bold text-gray-900 dark:text-white"
+                        x-text="kpi('throughput_per_hour') !== null ? kpi('throughput_per_hour').toFixed(1) + '/hr' : '—'"></div>
+                    <div class="text-xs text-gray-500 mt-0.5">jobs completed</div>
+                </div>
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div class="text-xs font-medium uppercase tracking-wider text-blue-400 mb-1">Avg Duration</div>
+                    <div class="text-2xl font-bold text-gray-900 dark:text-white"
+                        x-text="fmt(kpi('avg_duration_seconds'))"></div>
+                    <div class="text-xs text-gray-500 mt-0.5">
+                        <span x-text="'P95: ' + fmt(kpi('p95_duration_seconds'))"></span>
+                    </div>
+                </div>
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div class="text-xs font-medium uppercase tracking-wider text-red-400 mb-1">Failure Rate</div>
+                    <div class="text-2xl font-bold text-gray-900 dark:text-white"
+                        x-text="kpi('failure_rate_pct') !== null ? kpi('failure_rate_pct').toFixed(1) + '%' : '—'"></div>
+                    <div class="text-xs text-gray-500 mt-0.5"
+                        x-text="kpi('failed') + ' failed of ' + (kpi('completed') + kpi('failed')) + ' terminal'"></div>
+                </div>
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div class="text-xs font-medium uppercase tracking-wider text-green-400 mb-1">Compression</div>
+                    <div class="text-2xl font-bold text-gray-900 dark:text-white"
+                        x-text="kpi('avg_compression_pct') !== null ? kpi('avg_compression_pct').toFixed(1) + '%' : '—'"></div>
+                    <div class="text-xs text-gray-500 mt-0.5">avg file size reduction</div>
+                </div>
+            </div>
+
+            <!-- Counts row -->
+            <div class="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-8">
+                <template x-for="s in statusCards()" :key="s.key">
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700 text-center">
+                        <div class="text-xs font-medium uppercase tracking-wider mb-1" :class="s.color" x-text="s.label"></div>
+                        <div class="text-xl font-bold text-gray-900 dark:text-white" x-text="kpi(s.key) ?? 0"></div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Charts grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+
+                <!-- Jobs over time (line chart) — spans 2 cols -->
+                <div x-show="selectedWindow !== 'all'"
+                     class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5">
+                    <h2 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">
+                        Jobs Over Time
+                    </h2>
+                    <div class="chart-container">
+                        <canvas x-ref="jobsCanvas"></canvas>
+                    </div>
+                </div>
+
+                <!-- Status distribution (doughnut) -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5"
+                     :class="selectedWindow === 'all' ? 'lg:col-span-1' : ''">
+                    <h2 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">
+                        Status Distribution
+                    </h2>
+                    <div class="chart-container">
+                        <canvas x-ref="statusCanvas"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Per-node breakdown (bar chart) -->
+            <div x-show="data && data.nodes && data.nodes.length > 0"
+                 class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 mb-8">
+                <h2 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">
+                    Per-Node Throughput
+                </h2>
+                <div class="chart-container">
+                    <canvas x-ref="nodesCanvas"></canvas>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        function authHeaders() {
+            const h = { 'Content-Type': 'application/json' };
+            if (window.SMA_API_KEY) h['X-API-Key'] = window.SMA_API_KEY;
+            return h;
+        }
+
+        function formatDuration(s) {
+            if (s === null || s === undefined) return '—';
+            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+            if (h > 0) return h + 'h ' + m + 'm ' + sec + 's';
+            if (m > 0) return m + 'm ' + sec + 's';
+            return sec + 's';
+        }
+
+        function chartColors() {
+            const st = getComputedStyle(document.documentElement);
+            const get = (v, fallback) => st.getPropertyValue(v).trim() || fallback;
+            return {
+                text:   get('--color-gray-200', '#e5e7eb'),
+                grid:   get('--color-gray-700', '#374151'),
+                border: get('--color-gray-600', '#4b5563'),
+            };
+        }
+
+        function baseOpts(c) {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: c.text, boxWidth: 12 } },
+                    tooltip: { backgroundColor: '#1f2937', titleColor: c.text, bodyColor: c.text, borderColor: c.border, borderWidth: 1 },
+                },
+                scales: {
+                    x: { ticks: { color: c.text, maxRotation: 45 }, grid: { color: c.grid } },
+                    y: { ticks: { color: c.text }, grid: { color: c.grid }, beginAtZero: true },
+                },
+            };
+        }
+
+        function metrics() {
+            // CRITICAL: chart instances OUTSIDE Alpine reactive scope to avoid Proxy conflicts
+            let chartJobs = null;
+            let chartStatus = null;
+            let chartNodes = null;
+
+            return {
+                selectedWindow: '24h',
+                loading: true,
+                available: false,
+                unavailableReason: '',
+                data: null,
+
+                kpi(key) {
+                    return this.data && this.data.kpis ? (this.data.kpis[key] ?? null) : null;
+                },
+
+                fmt(v) { return formatDuration(v); },
+
+                statusCards() {
+                    return [
+                        { key: 'total',     label: 'Total',     color: 'text-gray-400' },
+                        { key: 'pending',   label: 'Pending',   color: 'text-yellow-400' },
+                        { key: 'running',   label: 'Running',   color: 'text-blue-400' },
+                        { key: 'completed', label: 'Completed', color: 'text-green-400' },
+                        { key: 'failed',    label: 'Failed',    color: 'text-red-400' },
+                        { key: 'cancelled', label: 'Cancelled', color: 'text-gray-500' },
+                    ];
+                },
+
+                async init() {
+                    await this.load();
+                },
+
+                async load() {
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/api/metrics?window=' + this.selectedWindow, { headers: authHeaders() });
+                        const json = await res.json();
+                        this.loading = false;
+                        this.available = json.available;
+                        if (!json.available) {
+                            this.unavailableReason = json.reason || 'PostgreSQL is not configured.';
+                            return;
+                        }
+                        this.data = json;
+                        // $nextTick ensures x-show has revealed canvases before Chart.js measures them
+                        this.$nextTick(() => this.renderOrUpdate(json));
+                    } catch (e) {
+                        this.loading = false;
+                        this.available = false;
+                        this.unavailableReason = 'Failed to load metrics: ' + e.message;
+                    }
+                },
+
+                async changeWindow(w) {
+                    this.selectedWindow = w;
+                    await this.load();
+                },
+
+                renderOrUpdate(json) {
+                    const c = chartColors();
+
+                    // Jobs over time (line chart) — only for windowed views
+                    if (json.timeseries && json.timeseries.length > 0 && this.$refs.jobsCanvas) {
+                        const labels = json.timeseries.map(r => {
+                            const d = new Date(r.bucket);
+                            return this.selectedWindow === '24h'
+                                ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                        });
+                        const jobsData = {
+                            labels,
+                            datasets: [
+                                {
+                                    label: 'Completed',
+                                    data: json.timeseries.map(r => r.completed),
+                                    borderColor: '#6366f1', backgroundColor: '#6366f133',
+                                    fill: true, tension: 0.3, pointRadius: 3,
+                                },
+                                {
+                                    label: 'Failed',
+                                    data: json.timeseries.map(r => r.failed),
+                                    borderColor: '#ef4444', backgroundColor: '#ef444433',
+                                    fill: true, tension: 0.3, pointRadius: 3,
+                                },
+                            ],
+                        };
+                        if (!chartJobs) {
+                            chartJobs = new Chart(this.$refs.jobsCanvas, { type: 'line', data: jobsData, options: baseOpts(c) });
+                        } else {
+                            chartJobs.data = jobsData;
+                            chartJobs.update('none');
+                        }
+                    } else if (chartJobs) {
+                        chartJobs.destroy();
+                        chartJobs = null;
+                    }
+
+                    // Status doughnut
+                    if (this.$refs.statusCanvas) {
+                        const kpi = json.kpis;
+                        const statusData = {
+                            labels: ['Completed', 'Failed', 'Pending', 'Running', 'Cancelled'],
+                            datasets: [{
+                                data: [kpi.completed || 0, kpi.failed || 0, kpi.pending || 0, kpi.running || 0, kpi.cancelled || 0],
+                                backgroundColor: ['#22c55e', '#ef4444', '#f59e0b', '#6366f1', '#6b7280'],
+                                borderWidth: 0,
+                            }],
+                        };
+                        const doughnutOpts = {
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: {
+                                legend: { position: 'right', labels: { color: c.text, boxWidth: 12, padding: 12 } },
+                                tooltip: { backgroundColor: '#1f2937', titleColor: c.text, bodyColor: c.text },
+                            },
+                        };
+                        if (!chartStatus) {
+                            chartStatus = new Chart(this.$refs.statusCanvas, { type: 'doughnut', data: statusData, options: doughnutOpts });
+                        } else {
+                            chartStatus.data = statusData;
+                            chartStatus.update('none');
+                        }
+                    }
+
+                    // Per-node bar chart
+                    if (json.nodes && json.nodes.length > 0 && this.$refs.nodesCanvas) {
+                        const nodeData = {
+                            labels: json.nodes.map(n => n.node_name || n.node_id),
+                            datasets: [
+                                {
+                                    label: 'Completed',
+                                    data: json.nodes.map(n => n.completed),
+                                    backgroundColor: '#6366f1',
+                                },
+                                {
+                                    label: 'Failed',
+                                    data: json.nodes.map(n => n.failed),
+                                    backgroundColor: '#ef4444',
+                                },
+                            ],
+                        };
+                        const barOpts = { ...baseOpts(c), indexAxis: 'y' };
+                        if (!chartNodes) {
+                            chartNodes = new Chart(this.$refs.nodesCanvas, { type: 'bar', data: nodeData, options: barOpts });
+                        } else {
+                            chartNodes.data = nodeData;
+                            chartNodes.update('none');
+                        }
+                    }
+                },
+
+                destroy() {
+                    [chartJobs, chartStatus, chartNodes].forEach(ch => { if (ch) ch.destroy(); });
+                    chartJobs = chartStatus = chartNodes = null;
+                },
+            };
+        }
+    </script>
+</body>
+
+</html>
