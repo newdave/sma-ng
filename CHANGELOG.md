@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.35](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.34...sma-ng-v1.6.35) (2026-04-25)
+
+
+### Features
+
+* add WorkerPool drain/pause modes and hwaccel detection for cluster mode ([3f3088e](https://github.com/newdave/sma-ng/commit/3f3088e9de6d8bcf2153117ebc2a0541b6aa3962))
+
 ## [1.6.34](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.33...sma-ng-v1.6.34) (2026-04-25)
 
 
