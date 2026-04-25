@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.41](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.40...sma-ng-v1.6.41) (2026-04-25)
+
+
+### Bug Fixes
+
+* remove .mp4 from sma-ng.yml.sample default media_extensions ([8b153ba](https://github.com/newdave/sma-ng/commit/8b153ba7aacefe32ee99a9d25f081cb8c3684e56))
+
 ## [1.6.40](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.39...sma-ng-v1.6.40) (2026-04-25)
 
 
