@@ -1,7 +1,10 @@
+import copy
 import json
 from contextlib import contextmanager
 
-from resources.daemon.constants import STATUS_COMPLETED, STATUS_FAILED, STATUS_PENDING, STATUS_RUNNING, resolve_node_id
+import yaml as _yaml
+
+from resources.daemon.constants import SECRET_KEYS, STATUS_COMPLETED, STATUS_FAILED, STATUS_PENDING, STATUS_RUNNING, resolve_node_id
 from resources.log import getLogger
 
 log = getLogger("DAEMON")
@@ -192,6 +195,14 @@ class PostgreSQLJobDatabase:
                 """)
         cur.execute("""
                     CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs (timestamp DESC)
+                """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS cluster_config (
+                        id         INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+                        config     TEXT NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_by TEXT
+                    )
                 """)
     self.log.info("PostgreSQL database initialized: %s" % self.db_url)
     self._reset_running_jobs()
@@ -705,6 +716,99 @@ class PostgreSQLJobDatabase:
       with conn.cursor() as cur:
         cur.execute(query, params)
         return [dict(r) for r in cur.fetchall()]
+
+  def get_cluster_config(self):
+    """Return the cluster-wide base config dict, or None if not set."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("SELECT config FROM cluster_config WHERE id = 1")
+        row = cur.fetchone()
+        if row is None:
+          return None
+        return _yaml.safe_load(row["config"]) or {}
+
+  def set_cluster_config(self, config_dict, updated_by=None):
+    """Upsert the cluster-wide base config, stripping secrets from daemon: section."""
+    data = copy.deepcopy(config_dict)
+    daemon = data.get("daemon", {})
+    for key in list(daemon):
+      if key in SECRET_KEYS:
+        del daemon[key]
+    config_str = _yaml.safe_dump(data)
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+          INSERT INTO cluster_config (id, config, updated_at, updated_by)
+          VALUES (1, %s, NOW(), %s)
+          ON CONFLICT (id) DO UPDATE
+              SET config = EXCLUDED.config,
+                  updated_at = NOW(),
+                  updated_by = EXCLUDED.updated_by
+          """,
+          (config_str, updated_by),
+        )
+
+  def expire_offline_nodes(self, expiry_days):
+    """Hard-delete offline nodes whose last_seen is older than expiry_days.
+
+    Cleans up orphaned node_commands rows first.
+    Returns list of deleted node_ids.
+    """
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+          SELECT node_id FROM cluster_nodes
+          WHERE status = 'offline'
+          AND last_seen < NOW() - make_interval(days => %s)
+          """,
+          (expiry_days,),
+        )
+        expired = [r["node_id"] for r in cur.fetchall()]
+    if not expired:
+      return []
+    self.cleanup_orphaned_commands(expired)
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("DELETE FROM cluster_nodes WHERE node_id = ANY(%s)", (expired,))
+    for nid in expired:
+      self.log.info("Expired offline node: %s" % nid)
+    return expired
+
+  def cleanup_orphaned_commands(self, node_ids):
+    """Delete node_commands rows for node_ids that no longer exist in cluster_nodes."""
+    if not node_ids:
+      return 0
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("DELETE FROM node_commands WHERE node_id = ANY(%s)", (node_ids,))
+        return cur.rowcount
+
+  def get_logs_for_archival(self, before_days):
+    """Return log rows older than before_days, ordered by node_id then timestamp."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+          SELECT id, node_id, level, logger, message, timestamp
+          FROM logs
+          WHERE timestamp < NOW() - make_interval(days => %s)
+          ORDER BY node_id, timestamp
+          """,
+          (before_days,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+  def delete_logs_before(self, before_days):
+    """Delete log rows older than before_days. Returns count deleted."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          "DELETE FROM logs WHERE timestamp < NOW() - make_interval(days => %s)",
+          (before_days,),
+        )
+        return cur.rowcount
 
   def requeue_job(self, job_id):
     """Reset a failed job back to pending. Returns True if the job was requeued."""
