@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.40](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.39...sma-ng-v1.6.40) (2026-04-25)
+
+
+### Documentation
+
+* add cluster mode section to daemon.md ([5e05c14](https://github.com/newdave/sma-ng/commit/5e05c14b6ac92c9be8b2d2a0d2ca8ebb43de7abe))
+* update .local.ini references to .local.yml ([122b9f7](https://github.com/newdave/sma-ng/commit/122b9f71b6d0ff28d6fc21088f12386add5b30b4))
+
 ## [1.6.39](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.38...sma-ng-v1.6.39) (2026-04-25)
 
 
