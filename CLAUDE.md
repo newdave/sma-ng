@@ -153,13 +153,13 @@ See [docs/configuration.md](docs/configuration.md) for full reference.
 
 ### Daemon Configuration
 
-`config/daemon.json` (copy from `setup/daemon.json.sample`) controls path-based config routing, API key, PostgreSQL URL, FFmpeg dir, scan paths, and path rewrites.
+`config/sma-ng.yml` (copy from `setup/sma-ng.yml.sample`) controls path-based config routing, API key, PostgreSQL URL, FFmpeg dir, scan paths, and path rewrites via its `daemon:` section.
 
-All daemon settings follow: **CLI flag > environment variable > daemon.json > default**.
+All daemon settings follow: **CLI flag > environment variable > sma-ng.yml > default**.
 
-- API key: `--api-key` / `SMA_DAEMON_API_KEY` / `daemon.json api_key`
-- DB URL: `SMA_DAEMON_DB_URL` / `daemon.json db_url` (no CLI flag — credentials must not appear in `ps`)
-- FFmpeg dir: `--ffmpeg-dir` / `SMA_DAEMON_FFMPEG_DIR` / `daemon.json ffmpeg_dir`
+- API key: `--api-key` / `SMA_DAEMON_API_KEY` / `sma-ng.yml daemon.api_key`
+- DB URL: `SMA_DAEMON_DB_URL` / `sma-ng.yml daemon.db_url` (no CLI flag — credentials must not appear in `ps`)
+- FFmpeg dir: `--ffmpeg-dir` / `SMA_DAEMON_FFMPEG_DIR` / `sma-ng.yml daemon.ffmpeg_dir`
 
 See [docs/daemon.md](docs/daemon.md) for full daemon documentation.
 
@@ -236,8 +236,8 @@ When adding new daemon options:
 
 - Add CLI arg in `daemon.py` `main()`
 - Add env var support with `SMA_DAEMON_*` naming
-- Add to `daemon.json` via `PathConfigManager.load_config()` in `resources/daemon/config.py`
-- Update `setup/daemon.json.sample`
+- Add to `sma-ng.yml` `daemon:` section via `PathConfigManager.load_config()` in `resources/daemon/config.py`
+- Update `setup/sma-ng.yml.sample`
 - Document in `docs/daemon.md`
 
 When adding or modifying `mise` tasks:

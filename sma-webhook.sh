@@ -17,23 +17,23 @@
 #   sma-webhook.sh cleanup [days]                     Remove old completed/failed jobs (default: 30)
 #   sma-webhook.sh requeue                            Requeue all failed/interrupted jobs
 #   sma-webhook.sh requeue 42                         Requeue a specific job by ID
-#   sma-webhook.sh reload                             Reload daemon.json config without restart
+#   sma-webhook.sh reload                             Reload sma-ng.yml config without restart
 #   sma-webhook.sh restart                            Gracefully restart the daemon
 #   sma-webhook.sh shutdown                           Gracefully shut down the daemon
 #
 # Environment variables:
 #   SMA_DAEMON_URL    Base URL (default: http://127.0.0.1:8585)
-#   SMA_API_KEY       API key (overrides config/daemon.json)
+#   SMA_API_KEY       API key (overrides config/sma-ng.yml)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DAEMON_CONFIG="$SCRIPT_DIR/config/daemon.json"
+DAEMON_CONFIG="$SCRIPT_DIR/config/sma-ng.yml"
 
 : "${SMA_DAEMON_URL:=http://127.0.0.1:8585}"
 
 if [[ -z "${SMA_API_KEY:-}" && -f "$DAEMON_CONFIG" ]]; then
-    SMA_API_KEY=$(jq -r '.api_key // empty' "$DAEMON_CONFIG" 2>/dev/null || true)
+    SMA_API_KEY=$(python3 "$SCRIPT_DIR/scripts/local-config.py" "$DAEMON_CONFIG" daemon api_key 2>/dev/null || true)
 fi
 : "${SMA_API_KEY:=}"
 

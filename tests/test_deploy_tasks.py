@@ -496,7 +496,6 @@ class TestDeployLibHelpers:
     config_dir = deploy_dir / "config"
     config_dir.mkdir(parents=True)
     (config_dir / "daemon.env").write_text("# existing\n")
-    (config_dir / "daemon.json").write_text("{}\n")
     services_b64 = b64encode(json.dumps({}).encode()).decode()
     node_name_b64 = b64encode(b"sma-slave0").decode()
 

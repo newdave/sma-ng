@@ -18,7 +18,7 @@
 #
 # Environment variables:
 #   SMA_DAEMON_URL    Base URL (default: http://127.0.0.1:8585)
-#   SMA_API_KEY       API key (overrides config/daemon.json)
+#   SMA_API_KEY       API key (overrides config/sma-ng.yml)
 #
 # Files with these extensions are skipped (already-converted or non-media):
 #   mp4, nfo, txt, log, md, jpg, jpeg, png, gif, xml, srt, ass, vtt, sup, py, pyc, ds_store
@@ -77,9 +77,9 @@ done
 scan_dir="$(cd "$scan_dir" && pwd)"  # canonicalise
 
 # --- Auth headers ---
-DAEMON_CONFIG="$SCRIPT_DIR/../config/daemon.json"
+DAEMON_CONFIG="$SCRIPT_DIR/../config/sma-ng.yml"
 if [[ -z "${SMA_API_KEY:-}" && -f "$DAEMON_CONFIG" ]]; then
-    SMA_API_KEY=$(jq -r '.api_key // empty' "$DAEMON_CONFIG" 2>/dev/null || true)
+    SMA_API_KEY=$(python3 "$SCRIPT_DIR/local-config.py" "$DAEMON_CONFIG" daemon api_key 2>/dev/null || true)
 fi
 : "${SMA_API_KEY:=}"
 auth_headers=()

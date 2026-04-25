@@ -54,8 +54,7 @@ from resources.log import getLogger
 log = getLogger("DAEMON")
 
 _SMOKE_TEST_FIXTURE = os.path.join(SCRIPT_DIR, "tests", "fixtures", "test1.mkv")
-# Backward-compatible module attribute for older tests/extensions that patch it.
-DEFAULT_DAEMON_CONFIG = os.path.join(SCRIPT_DIR, "config", "daemon.json")
+DEFAULT_DAEMON_CONFIG = os.path.join(SCRIPT_DIR, "config", "sma-ng.yml")
 
 
 def _build_db_url_from_env():

@@ -111,7 +111,7 @@ class ScannerThread(_StoppableThread):
 
   def __init__(self, scan_paths, job_db, server, path_config_manager, logger):
     super().__init__()
-    self.scan_paths = scan_paths  # list of dicts from daemon.json
+    self.scan_paths = scan_paths  # list of dicts from sma-ng.yml
     self.job_db = job_db
     self.server = server
     self.path_config_manager = path_config_manager
@@ -238,7 +238,7 @@ class RecycleBinCleanerThread(_StoppableThread):
   NFO, artwork) are left in place so nothing important is silently removed.
 
   ``recycle_bins`` is a list of directory paths to clean.  It is re-read from
-  ``path_config_manager`` on every wake cycle so hot-reloading daemon.json
+  ``path_config_manager`` on every wake cycle so hot-reloading sma-ng.yml
   picks up changes without a restart.
   """
 

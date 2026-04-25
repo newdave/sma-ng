@@ -222,7 +222,7 @@ python daemon.py --api-key YOUR_SECRET_KEY
 SMA_DAEMON_API_KEY=YOUR_SECRET_KEY python daemon.py
 
 # Custom daemon config (for path mappings)
-python daemon.py --daemon-config /path/to/daemon.json --workers 4
+python daemon.py --daemon-config /path/to/sma-ng.yml --workers 4
 
 # Dry-run all configs and exit
 python daemon.py --smoke-test
@@ -251,7 +251,7 @@ curl -X POST http://localhost:8585/shutdown -H "X-API-Key: YOUR_SECRET_KEY"
 - `POST /webhook/sonarr` - Native Sonarr webhook endpoint
 - `POST /webhook/radarr` - Native Radarr webhook endpoint
 - `POST /cleanup` - Remove old completed or failed jobs
-- `POST /reload` - Reload `daemon.json`
+- `POST /reload` - Reload `sma-ng.yml`
 - `POST /restart` - Graceful restart
 - `POST /shutdown` - Graceful shutdown
 - `POST /jobs/<id>/requeue` - Requeue a failed job
@@ -269,7 +269,7 @@ Priority order:
 
 1. `--api-key`
 2. `SMA_DAEMON_API_KEY`
-3. `api_key` in `daemon.json`
+3. `api_key` in `sma-ng.yml` `daemon:` section
 
 Public endpoints: `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`, `/favicon.png`
 
@@ -277,7 +277,7 @@ Public endpoints: `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`, `/
 
 The daemon can use different `autoProcess.ini` files based on the input path. Matching is longest-prefix-first, so more specific paths take priority over broader ones.
 
-Important `daemon.json` keys:
+Important `sma-ng.yml` `daemon:` keys:
 
 - `default_config` - fallback config when no path matches
 - `api_key` - daemon authentication key
@@ -364,14 +364,14 @@ Daemon settings follow:
 
 - CLI flag
 - environment variable
-- `daemon.json`
+- `sma-ng.yml` `daemon:` section
 - default
 
 Examples:
 
-- API key: `--api-key` / `SMA_DAEMON_API_KEY` / `daemon.json api_key`
-- DB URL: `SMA_DAEMON_DB_URL` / `daemon.json db_url`
-- FFmpeg dir: `--ffmpeg-dir` / `SMA_DAEMON_FFMPEG_DIR` / `daemon.json ffmpeg_dir`
+- API key: `--api-key` / `SMA_DAEMON_API_KEY` / `sma-ng.yml daemon.api_key`
+- DB URL: `SMA_DAEMON_DB_URL` / `sma-ng.yml daemon.db_url`
+- FFmpeg dir: `--ffmpeg-dir` / `SMA_DAEMON_FFMPEG_DIR` / `sma-ng.yml daemon.ffmpeg_dir`
 
 ## Project Documentation
 
@@ -538,7 +538,7 @@ When adding new daemon options:
 - add the CLI arg in `daemon.py`
 - add env var support using `SMA_DAEMON_*`
 - add config loading in `resources/daemon/config.py`
-- update `setup/daemon.json.sample`
+- update `setup/sma-ng.yml.sample`
 - update `docs/daemon.md`
 
 When adding or modifying `mise` tasks:
