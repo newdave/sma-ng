@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.48](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.47...sma-ng-v1.6.48) (2026-04-25)
+
+
+### Features
+
+* **ui:** add light/dark theme toggle to web UI ([9b2ea54](https://github.com/newdave/sma-ng/commit/9b2ea546d11ee58705affbf20ed3558570addd51))
+
 ## [1.6.47](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.46...sma-ng-v1.6.47) (2026-04-25)
 
 
