@@ -6,6 +6,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import unquote
 
+from resources.daemon.config import _strip_secrets
 from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING
@@ -438,6 +439,34 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     self.send_json_response(200, {"logs": serialized, "total": len(serialized)})
 
+  def _get_admin_config(self, _path, _query):
+    """Return the cluster-wide base config from the database."""
+    if not self.server.job_db.is_distributed:
+      self.send_json_response(503, {"error": "Cluster config is only available in distributed (PostgreSQL) mode"})
+      return
+    raw = self.server.job_db.get_cluster_config()
+    self.send_json_response(200, {"config": raw or {}})
+
+  def _post_admin_config(self, _path, _query):
+    """Store a cluster-wide base config into the database (secrets are stripped)."""
+    if not self.server.job_db.is_distributed:
+      self.send_json_response(503, {"error": "Cluster config is only available in distributed (PostgreSQL) mode"})
+      return
+    actor = self.headers.get("X-Actor", "admin-ui")
+    content_length = int(self.headers.get("Content-Length", 0))
+    try:
+      body = json.loads(self.rfile.read(content_length) if content_length else b"{}")
+    except (json.JSONDecodeError, ValueError):
+      self.send_json_response(400, {"error": "Invalid JSON body"})
+      return
+    config_dict = body.get("config", body)
+    if not isinstance(config_dict, dict):
+      self.send_json_response(400, {"error": "'config' must be a JSON object"})
+      return
+    clean = _strip_secrets(config_dict)
+    self.server.job_db.set_cluster_config(clean, updated_by=actor)
+    self.send_json_response(200, {"status": "saved"})
+
   def do_HEAD(self):
     """Respond to HEAD requests (used by browsers and health-check tools)."""
     self.send_response(200)
@@ -570,6 +599,19 @@ class WebhookHandler(BaseHTTPRequestHandler):
           "node": updated,
         },
       )
+      return
+
+    if action == "push-config":
+      from resources.yamlconfig import load as _yaml_load
+
+      cfg_file = self.server.path_config_manager._config_file
+      if not cfg_file:
+        self.send_json_response(503, {"error": "No config file loaded on this node"})
+        return
+      data = _yaml_load(cfg_file) or {}
+      clean = _strip_secrets(data)
+      self.server.job_db.set_cluster_config(clean, updated_by=actor)
+      self.send_json_response(200, {"status": "pushed", "node": node_id})
       return
 
     if action in {"restart", "shutdown", "drain", "pause", "resume"}:

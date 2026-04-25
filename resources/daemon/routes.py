@@ -67,6 +67,7 @@ def _get_routes():
     "/browse": lambda handler, path, query: handler._get_browse(query),
     "/logs": lambda handler, path, query: handler._get_logs(),
     "/cluster/logs": lambda handler, path, query: handler._get_cluster_logs(path, query),
+    "/admin/config": lambda handler, path, query: handler._get_admin_config(path, query),
     "/favicon.png": lambda handler, path, query: handler._get_favicon(path, query),
   }
 
@@ -96,6 +97,7 @@ def _post_routes():
     "/jobs/requeue": lambda handler, path, query: handler._post_jobs_requeue_bulk(query),
     "/scan/filter": lambda handler, path, query: handler._post_scan_filter(),
     "/scan/record": lambda handler, path, query: handler._post_scan_record(),
+    "/admin/config": lambda handler, path, query: handler._post_admin_config(path, query),
   }
 
 
