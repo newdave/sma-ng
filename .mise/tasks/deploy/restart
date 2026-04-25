@@ -5,17 +5,20 @@ set -euo pipefail
 
 LOCAL="setup/.local.yml"
 CFG="python3 scripts/local-config.py"
-DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
 
 SHUTDOWN_TIMEOUT=${SHUTDOWN_TIMEOUT:-120}  # seconds to wait for graceful shutdown
 
 failed=""
 for host in $DEPLOY_HOSTS; do
   cfg="$CFG $LOCAL $host"
-  port=$($cfg SSH_PORT 22)
-  key=$($cfg SSH_KEY "")
-  daemon_port=$($cfg DAEMON_PORT 8585)
-  daemon_api_key=$($cfg DAEMON_API_KEY "")
+  port=$($cfg ssh_port 22)
+  key=$($cfg ssh_key "")
+  daemon_port=$($cfg daemon_port 8585)
+  daemon_api_key=$($cfg daemon_api_key "")
+  remote_user=$($cfg user "$(whoami)")
+  remote_address=$($cfg address "")
+  ssh_target="${remote_user}@${remote_address}"
 
   ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
   [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
@@ -34,14 +37,14 @@ for host in $DEPLOY_HOSTS; do
   fi
 
   # shellcheck disable=SC2086,SC2029
-  if ! ssh $ssh_opts "$host" "$remote_shutdown" > /dev/null 2>&1; then
+  if ! ssh $ssh_opts "$ssh_target" "$remote_shutdown" > /dev/null 2>&1; then
     echo "  [$host] daemon not responding to shutdown webhook (already stopped or not yet started), proceeding"
   else
     echo "==> [$host] waiting for sma-daemon to stop (timeout: ${SHUTDOWN_TIMEOUT}s)"
     # Poll /health until the daemon stops responding
     elapsed=0
     # shellcheck disable=SC2086,SC2029
-    while ssh $ssh_opts "$host" "$remote_health" > /dev/null 2>&1; do
+    while ssh $ssh_opts "$ssh_target" "$remote_health" > /dev/null 2>&1; do
       if [ "$elapsed" -ge "$SHUTDOWN_TIMEOUT" ]; then
         echo "  WARNING: [$host] daemon did not stop within ${SHUTDOWN_TIMEOUT}s, forcing restart anyway"
         break
@@ -54,7 +57,7 @@ for host in $DEPLOY_HOSTS; do
 
   echo "==> [$host] restarting sma-daemon"
   # shellcheck disable=SC2086
-  ssh $ssh_opts "$host" "sudo systemctl restart sma-daemon" || { failed="$failed $host"; continue; }
+  ssh $ssh_opts "$ssh_target" "sudo systemctl restart sma-daemon" || { failed="$failed $host"; continue; }
   echo "==> [$host] sma-daemon restarted"
 done
 

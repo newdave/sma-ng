@@ -8,7 +8,7 @@ set -euo pipefail
 # lib.sh is sourced relative to this script's directory at runtime.
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
-ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+ALL_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-120}
@@ -17,12 +17,12 @@ failed=""
 for host in $DEPLOY_HOSTS; do
     cfg="$CFG $LOCAL $host"
     init_docker_host_context "$host"
-    rsync_extra=$($cfg RSYNC_EXTRA "")
-    daemon_port=$($cfg DAEMON_PORT 8585)
-    daemon_api_key=$($cfg DAEMON_API_KEY "")
+    rsync_extra=$($cfg rsync_extra "")
+    daemon_port=$($cfg daemon_port 8585)
+    daemon_api_key=$($cfg daemon_api_key "")
 
     if [ -z "$profile" ]; then
-        echo "ERROR: [$host] DOCKER_PROFILE is not set in $LOCAL — add it to [deploy] or the host section" >&2
+        echo "ERROR: [$host] docker_profile is not set in $LOCAL — add it to [deploy] or the host section" >&2
         failed="$failed $host"
         continue
     fi

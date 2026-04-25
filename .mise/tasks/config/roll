@@ -8,7 +8,7 @@ set -euo pipefail
 # lib.sh is sourced relative to this script's directory at runtime.
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
-ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+ALL_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 
 # Resolve the directory this script lives in so lib/ helpers can be found
@@ -27,13 +27,13 @@ mk_ssh_opts() {
 # Ensure a config file exists on the remote host, creating it from a sample if absent.
 ensure_remote_config() {
     local host="$1" remote_path="$2" sample_path="$3"
-    # shellcheck disable=SC2029  # $remote_path expands client-side (intentional)
-    if ssh "${SSH_OPTS[@]}" "$host" "test -f $remote_path" 2>/dev/null; then
+    # shellcheck disable=SC2029,SC2154  # $remote_path expands client-side; ssh_target/SSH_OPTS/sudo_prefix are set in the outer loop
+    if ssh "${SSH_OPTS[@]}" "$ssh_target" "test -f $remote_path" 2>/dev/null; then
         echo "  exists: $(basename "$remote_path")"
     else
         echo "  creating: $(basename "$remote_path")"
         # shellcheck disable=SC2029  # $sudo_prefix, $sample_path, $remote_path expand client-side (intentional)
-        ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}cp $sample_path $remote_path"
+        ssh "${SSH_OPTS[@]}" "$ssh_target" "${sudo_prefix}cp $sample_path $remote_path"
     fi
 }
 
@@ -41,7 +41,7 @@ ensure_remote_config() {
 detect_remote_gpu() {
     local host="$1"
     # shellcheck disable=SC2087  # heredoc body stays literal until the remote shell runs it
-  ssh "${SSH_OPTS[@]}" "$host" 'bash -s' <<'REMOTE'
+  ssh "${SSH_OPTS[@]}" "$ssh_target" 'bash -s' <<'REMOTE'
     if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
       echo nvenc
     elif command -v vainfo >/dev/null 2>&1 && vainfo 2>&1 | grep -qi intel; then
@@ -72,7 +72,7 @@ sync_config_keys() {
 
     # shellcheck disable=SC2086
     rsync -az -e "ssh ${SSH_OPTS[*]}" \
-    "$host:$dir/config/" "$tmpdir/remote/" \
+    "$ssh_target:$dir/config/" "$tmpdir/remote/" \
     --include='*.yaml' --include='*.yml' --include='*.ini' --exclude='*' 2>/dev/null || true
 
     local changed_files=()
@@ -105,10 +105,10 @@ sync_config_keys() {
     done
 
     if [ "${#changed_files[@]}" -gt 0 ]; then
-        echo "  pushing updated configs to $host:$dir/config/"
+        echo "  pushing updated configs to $ssh_target:$dir/config/"
         # shellcheck disable=SC2086
         rsync -az -e "ssh ${SSH_OPTS[*]}" \
-        "$tmpdir/remote/" "$host:$dir/config/" \
+        "$tmpdir/remote/" "$ssh_target:$dir/config/" \
         --include='*.yaml' --include='*.yml' --include='*.ini' --exclude='*'
     fi
 }
@@ -123,7 +123,7 @@ stamp_credentials() {
     local _svc_b64
     _svc_b64=$(b64enc "$services_json")
     # shellcheck disable=SC2029  # $dir, $use_sudo, $_svc_b64 expand client-side (intentional)
-    ssh "${SSH_OPTS[@]}" "$host" \
+    ssh "${SSH_OPTS[@]}" "$ssh_target" \
     "python3 $dir/.mise/shared/deploy/lib/ini_stamp_credentials.py $dir $use_sudo $_svc_b64"
 }
 
@@ -134,7 +134,7 @@ stamp_ffmpeg_paths() {
     fi
     echo "  setting ffmpeg/ffprobe paths to $ffmpeg_dir in YAML/INI configs"
     # shellcheck disable=SC2029  # $dir, $ffmpeg_dir, $use_sudo expand client-side (intentional)
-    ssh "${SSH_OPTS[@]}" "$host" \
+    ssh "${SSH_OPTS[@]}" "$ssh_target" \
     "python3 $dir/.mise/shared/deploy/lib/stamp_ffmpeg.py $dir $ffmpeg_dir $use_sudo"
 }
 
@@ -161,7 +161,7 @@ stamp_daemon_config() {
     _dbname_b64=$(b64enc "$daemon_db_name")
     _svc_b64=$(b64enc "$services_json")
     # shellcheck disable=SC2029  # $dir and b64-encoded args expand client-side (intentional)
-    ssh "${SSH_OPTS[@]}" "$host" \
+    ssh "${SSH_OPTS[@]}" "$ssh_target" \
     "python3 $dir/.mise/shared/deploy/lib/stamp_daemon.py $dir $_api_b64 $_db_url_b64 $_ffmpeg_b64 $_node_name_b64 $_dbuser_b64 $_dbpw_b64 $_dbname_b64 $_svc_b64"
 }
 
@@ -184,7 +184,7 @@ deploy_post_process() {
     _emby_url_b64=$(b64enc "$emby_url")
     _emby_key_b64=$(b64enc "$emby_apikey")
     # shellcheck disable=SC2029  # $dir and b64-encoded args expand client-side (intentional)
-    ssh "${SSH_OPTS[@]}" "$host" \
+    ssh "${SSH_OPTS[@]}" "$ssh_target" \
     "python3 $dir/.mise/shared/deploy/lib/stamp_postprocess.py $dir $_plex_token_b64 $_plex_user_b64 $_plex_srv_b64 $_jf_url_b64 $_jf_token_b64 $_emby_url_b64 $_emby_key_b64"
 }
 
@@ -192,11 +192,14 @@ deploy_post_process() {
 
 for host in $DEPLOY_HOSTS; do
     cfg="$CFG $LOCAL $host"
-    dir=$($cfg DEPLOY_DIR ~/sma)
-    port=$($cfg SSH_PORT 22)
-    key=$($cfg SSH_KEY "")
-    use_sudo=$($cfg DEPLOY_USE_SUDO "false")
-    ffmpeg_dir=$($cfg FFMPEG_DIR "")
+    dir=$($cfg deploy_dir ~/sma)
+    port=$($cfg ssh_port 22)
+    key=$($cfg ssh_key "")
+    use_sudo=$($cfg use_sudo "false")
+    ffmpeg_dir=$($cfg ffmpeg_dir "")
+    remote_user=$($cfg user "$(whoami)")
+    remote_address=$($cfg address "")
+    ssh_target="${remote_user}@${remote_address}"
 
     mk_ssh_opts "$port" "$key"
 
@@ -217,7 +220,7 @@ for host in $DEPLOY_HOSTS; do
     echo "  checking for missing config files..."
     # sma-ng.yml needs GPU-specific patching after creation.
     # shellcheck disable=SC2029,SC2087  # sudo_prefix/dir/gpu expand locally; heredoc body stays literal until the remote shell runs it.
-  ssh "${SSH_OPTS[@]}" "$host" "${sudo_prefix}bash -s" "$dir" "$gpu" <<'REMOTE'
+  ssh "${SSH_OPTS[@]}" "$ssh_target" "${sudo_prefix}bash -s" "$dir" "$gpu" <<'REMOTE'
     dir="$1" gpu="$2"
     create_config() {
       local dest="$dir/config/$1" sample="$dir/setup/$2" label="$3"
@@ -239,7 +242,7 @@ REMOTE
     # ── back up remote config directory before any mutation ─────────────────
     _backup_ts=$(date +%Y-%m-%dT%H-%M-%S)
     # shellcheck disable=SC2029  # $dir, $_backup_ts expand client-side (intentional)
-    ssh "${SSH_OPTS[@]}" "$host" \
+    ssh "${SSH_OPTS[@]}" "$ssh_target" \
     "mkdir -p $dir/.backup/$_backup_ts && cp -a $dir/config/. $dir/.backup/$_backup_ts/"
 
     # ── sync new config keys from samples into each existing config ──────────
@@ -250,16 +253,16 @@ REMOTE
     # ── stamp service credentials into YAML/INI configs ──────────────────────
     stamp_credentials "$host" "$dir" "$services_json" "$use_sudo"
 
-    # ── apply FFMPEG_DIR to YAML/INI configs if set ──────────────────────────
+    # ── apply ffmpeg_dir to YAML/INI configs if set ──────────────────────────
     stamp_ffmpeg_paths "$host" "$dir" "$ffmpeg_dir" "$use_sudo"
 
     # ── stamp daemon credentials into config/sma-ng.yml and config/daemon.env ──
     daemon_api_key=$("$CFG" "$LOCAL" daemon api_key "")
     daemon_ffmpeg_dir=$("$CFG" "$LOCAL" daemon ffmpeg_dir "")
-    daemon_node_name=$($cfg SMA_NODE_NAME "")
+    daemon_node_name="$host"
     [ -z "$daemon_ffmpeg_dir" ] && daemon_ffmpeg_dir="$ffmpeg_dir"
 
-    docker_profile=$($cfg DOCKER_PROFILE "")
+    docker_profile=$($cfg docker_profile "")
     daemon_db_url=""
     daemon_db_user=""
     daemon_db_pw=""
@@ -268,19 +271,19 @@ REMOTE
     if [[ "$docker_profile" == *-pg ]]; then
         # Bundled postgres: compose builds the URL using sma-pgsql as the hostname.
         # Stamp the credential components so both daemon.env and the postgres container have them.
-        daemon_db_user=$($cfg SMA_DAEMON_DB_USER "sma")
-        daemon_db_pw=$($cfg SMA_DAEMON_DB_PASSWORD "")
-        daemon_db_name=$($cfg SMA_DAEMON_DB_NAME "sma")
+        daemon_db_user=$($cfg db_user "sma")
+        daemon_db_pw=$($cfg db_password "")
+        daemon_db_name=$($cfg db_name "sma")
     else
         # External postgres: [daemon] db_url wins; fall back to building from components.
         daemon_db_url=$("$CFG" "$LOCAL" daemon db_url "")
         if [ -z "$daemon_db_url" ]; then
-            _db_host=$($cfg SMA_DAEMON_DB_HOST "")
+            _db_host=$($cfg db_host "")
             if [ -n "$_db_host" ]; then
-                _db_user=$($cfg SMA_DAEMON_DB_USER "sma")
-                _db_pw=$($cfg SMA_DAEMON_DB_PASSWORD "")
-                _db_port=$($cfg SMA_DAEMON_DB_PORT "5432")
-                _db_name=$($cfg SMA_DAEMON_DB_NAME "sma")
+                _db_user=$($cfg db_user "sma")
+                _db_pw=$($cfg db_password "")
+                _db_port=$($cfg db_port "5432")
+                _db_name=$($cfg db_name "sma")
                 if [ -n "$_db_pw" ]; then
                     daemon_db_url="postgresql://${_db_user}:${_db_pw}@${_db_host}:${_db_port}/${_db_name}"
                 else
@@ -293,13 +296,13 @@ REMOTE
     "$daemon_node_name" "$services_json" "$daemon_db_user" "$daemon_db_pw" "$daemon_db_name"
 
     # ── deploy post-process scripts ──────────────────────────────────────────
-    plex_token=$("$CFG" "$LOCAL" Plex token "")
-    plex_username=$("$CFG" "$LOCAL" Plex username "")
-    plex_servername=$("$CFG" "$LOCAL" Plex servername "")
-    jellyfin_url=$("$CFG" "$LOCAL" Jellyfin url "")
-    jellyfin_token=$("$CFG" "$LOCAL" Jellyfin token "")
-    emby_url=$("$CFG" "$LOCAL" Emby url "")
-    emby_apikey=$("$CFG" "$LOCAL" Emby apikey "")
+    plex_token=$("$CFG" "$LOCAL" plex token "")
+    plex_username=$("$CFG" "$LOCAL" plex username "")
+    plex_servername=$("$CFG" "$LOCAL" plex servername "")
+    jellyfin_url=$("$CFG" "$LOCAL" jellyfin url "")
+    jellyfin_token=$("$CFG" "$LOCAL" jellyfin token "")
+    emby_url=$("$CFG" "$LOCAL" emby url "")
+    emby_apikey=$("$CFG" "$LOCAL" emby apikey "")
     deploy_post_process "$host" "$dir" \
     "$plex_token" "$plex_username" "$plex_servername" \
     "$jellyfin_url" "$jellyfin_token" \

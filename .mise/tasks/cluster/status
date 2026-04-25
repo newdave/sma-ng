@@ -7,7 +7,7 @@ set -euo pipefail
 # lib.sh is sourced relative to this script's directory at runtime.
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
-ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+ALL_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
 if [ -n "${HOSTS:-}" ]; then
     DEPLOY_HOSTS="$HOSTS"
 else
@@ -15,7 +15,7 @@ else
 fi
 
 if [ -z "$DEPLOY_HOSTS" ]; then
-    echo "ERROR: no hosts selected. Set HOST, HOSTS, or deploy.DEPLOY_HOSTS in $LOCAL" >&2
+    echo "ERROR: no hosts selected. Set HOST, HOSTS, or deploy.hosts in $LOCAL" >&2
     exit 1
 fi
 
@@ -25,7 +25,7 @@ for host in $DEPLOY_HOSTS; do
     init_docker_host_context "$host"
 
     if [ -z "$profile" ]; then
-        echo "ERROR: [$host] DOCKER_PROFILE is not set in $LOCAL — add it to [deploy] or the host section" >&2
+        echo "ERROR: [$host] docker_profile is not set in $LOCAL — add it to [deploy] or the host section" >&2
         failed="$failed $host"
         continue
     fi

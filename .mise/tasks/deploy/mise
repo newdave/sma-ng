@@ -7,13 +7,14 @@ set -euo pipefail
 # lib.sh is sourced relative to this script's directory at runtime.
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
-ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+ALL_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 
 failed=""
 for host in $DEPLOY_HOSTS; do
   init_host_context "$host"
 
+  # shellcheck disable=SC2154  # dir, ssh_opts, ssh_target are set by init_host_context above
   echo ""
   echo "==> [$host] syncing .mise control plane to $dir/.mise"
   run_remote_command "$host" "mkdir -p $dir/.mise" || { failed="$failed $host"; continue; }
