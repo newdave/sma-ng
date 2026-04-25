@@ -31,7 +31,7 @@ except ImportError:
       return yaml.safe_load(f) or {}
 
 
-_SERVICE_RE = re.compile(r"^(Sonarr|Radarr|Plex|Jellyfin|Emby|Converter)", re.IGNORECASE)
+_SERVICE_RE = re.compile(r"^(sonarr|radarr|plex|jellyfin|emby|converter)", re.IGNORECASE)
 
 
 def _str(v):
@@ -39,19 +39,30 @@ def _str(v):
     return ""
   if isinstance(v, bool):
     return "true" if v else "false"
+  if isinstance(v, list):
+    return " ".join(str(x) for x in v)
   return str(v)
+
+
+def _iget(d, key):
+  """Case-insensitive dict get."""
+  if not isinstance(d, dict):
+    return None
+  return d.get(key) if key in d else d.get(key.upper()) if key.upper() in d else d.get(key.lower())
 
 
 def resolve(data, section, key, default):
   if section == "daemon":
-    return _str(data.get("daemon", {}).get(key)) or default
+    return _str(_iget(data.get("daemon", {}), key)) or default
   if _SERVICE_RE.match(section):
-    return _str((data.get("services") or {}).get(section, {}).get(key)) or default
+    services = data.get("services") or {}
+    val = _iget(services.get(section) or services.get(section.lower()) or {}, key)
+    return _str(val) or default
   if section == "deploy":
-    return _str((data.get("deploy") or {}).get(key)) or default
+    return _str(_iget(data.get("deploy") or {}, key)) or default
   # Host-specific: host override > deploy default
-  deploy_val = _str((data.get("deploy") or {}).get(key))
-  host_val = _str((data.get("hosts") or {}).get(section, {}).get(key))
+  deploy_val = _str(_iget(data.get("deploy") or {}, key))
+  host_val = _str(_iget((data.get("hosts") or {}).get(section, {}), key))
   if host_val:
     return host_val
   if deploy_val:
