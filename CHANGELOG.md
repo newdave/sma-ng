@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.38](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.37...sma-ng-v1.6.38) (2026-04-25)
+
+
+### Features
+
+* **cluster:** add drain/pause/resume node actions and GET /cluster/logs endpoint ([aed0b30](https://github.com/newdave/sma-ng/commit/aed0b300c3020ebb3eea254cb56355e489c517f1))
+
 ## [1.6.37](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.36...sma-ng-v1.6.37) (2026-04-25)
 
 
