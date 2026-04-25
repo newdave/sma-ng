@@ -79,6 +79,12 @@
                       class="px-2 py-0.5 rounded border border-blue-700 text-blue-300 hover:border-blue-500 disabled:opacity-30">Approve</button>
                     <button @click="nodeAction(node, 'reject')" :disabled="!!nodeBusy[node.node_id]"
                       class="px-2 py-0.5 rounded border border-yellow-700 text-yellow-300 hover:border-yellow-500 disabled:opacity-30">Reject</button>
+                    <button @click="nodeAction(node, 'drain')" :disabled="!!nodeBusy[node.node_id]"
+                      class="px-2 py-0.5 rounded border border-amber-700 text-amber-300 hover:border-amber-500 disabled:opacity-30">Drain</button>
+                    <button @click="nodeAction(node, 'pause')" :disabled="!!nodeBusy[node.node_id]"
+                      class="px-2 py-0.5 rounded border border-orange-700 text-orange-300 hover:border-orange-500 disabled:opacity-30">Pause</button>
+                    <button @click="nodeAction(node, 'resume')" :disabled="!!nodeBusy[node.node_id]"
+                      class="px-2 py-0.5 rounded border border-green-700 text-green-300 hover:border-green-500 disabled:opacity-30">Resume</button>
                     <button @click="nodeAction(node, 'restart')" :disabled="!!nodeBusy[node.node_id]"
                       class="px-2 py-0.5 rounded border border-indigo-700 text-indigo-300 hover:border-indigo-500 disabled:opacity-30">Restart</button>
                     <button @click="nodeAction(node, 'shutdown')" :disabled="!!nodeBusy[node.node_id]"
@@ -94,6 +100,89 @@
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-semibold text-teal-400 uppercase tracking-wider">Cluster Logs</h2>
+        <span x-show="logsLoading" class="text-xs text-gray-500">Loading…</span>
+      </div>
+
+      <div class="flex flex-wrap gap-3 mb-4 items-end">
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Node</label>
+          <select x-model="logsNodeFilter"
+            class="bg-gray-700 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-teal-500">
+            <option value="">All Nodes</option>
+            <template x-for="node in nodes" :key="node.node_id">
+              <option :value="node.node_id" x-text="node.node_id"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Level</label>
+          <select x-model="logsLevelFilter"
+            class="bg-gray-700 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-teal-500">
+            <option value="">ALL</option>
+            <option value="DEBUG">DEBUG</option>
+            <option value="INFO">INFO</option>
+            <option value="WARNING">WARNING</option>
+            <option value="ERROR">ERROR</option>
+          </select>
+        </div>
+        <button @click="logsOffset = 0; loadClusterLogs()" :disabled="logsLoading"
+          class="px-3 py-1 rounded border border-teal-700 text-teal-300 hover:border-teal-500 disabled:opacity-40 text-xs font-medium">
+          Load Logs
+        </button>
+      </div>
+
+      <div x-show="logsError" class="mb-3 text-xs text-red-300" x-text="logsError"></div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-left text-gray-400 border-b border-gray-700">
+              <th class="pb-2 pr-4 font-medium">Timestamp</th>
+              <th class="pb-2 pr-4 font-medium">Node</th>
+              <th class="pb-2 pr-4 font-medium">Level</th>
+              <th class="pb-2 pr-4 font-medium">Logger</th>
+              <th class="pb-2 font-medium">Message</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-700/50">
+            <template x-for="(entry, idx) in clusterLogs" :key="idx">
+              <tr class="hover:bg-gray-700/20">
+                <td class="py-1.5 pr-4 font-mono text-gray-400 whitespace-nowrap" x-text="fmtTime(entry.timestamp)"></td>
+                <td class="py-1.5 pr-4 font-mono text-gray-300 whitespace-nowrap" x-text="entry.node_id || '—'"></td>
+                <td class="py-1.5 pr-4">
+                  <span class="px-1.5 py-0.5 rounded-full text-xs" :class="logsLevelClass(entry.level)"
+                    x-text="entry.level || '—'"></span>
+                </td>
+                <td class="py-1.5 pr-4 text-gray-500 whitespace-nowrap" x-text="entry.logger || '—'"></td>
+                <td class="py-1.5 text-gray-300 break-all" x-text="entry.message || '—'"></td>
+              </tr>
+            </template>
+            <tr x-show="!logsLoading && clusterLogs.length === 0">
+              <td colspan="5" class="py-4 text-center text-gray-500">No log entries. Click Load Logs to fetch.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="flex items-center gap-3 mt-4">
+        <button @click="logsOffset = Math.max(0, logsOffset - logsLimit); loadClusterLogs()"
+          :disabled="logsLoading || logsOffset === 0"
+          class="px-3 py-1 rounded border border-gray-600 text-gray-400 hover:border-gray-400 disabled:opacity-30 text-xs">
+          &larr; Previous
+        </button>
+        <span class="text-xs text-gray-500"
+          x-text="'Showing ' + (logsOffset + 1) + '–' + (logsOffset + clusterLogs.length) + ' (limit ' + logsLimit + ')'"></span>
+        <button @click="logsOffset += logsLimit; loadClusterLogs()"
+          :disabled="logsLoading || clusterLogs.length < logsLimit"
+          class="px-3 py-1 rounded border border-gray-600 text-gray-400 hover:border-gray-400 disabled:opacity-30 text-xs">
+          Next &rarr;
+        </button>
       </div>
     </div>
 
@@ -164,6 +253,13 @@
         nodesLoading: false,
         nodesError: '',
         nodeBusy: {},
+        clusterLogs: [],
+        logsNodeFilter: '',
+        logsLevelFilter: '',
+        logsLoading: false,
+        logsError: '',
+        logsOffset: 0,
+        logsLimit: 50,
 
         _actions: {
           'delete-failed': {
@@ -244,6 +340,34 @@
           delete this.nodeBusy[node.node_id];
           await this.refreshNodes();
           if (!this.resultError) setTimeout(() => this.result = '', 8000);
+        },
+
+        async loadClusterLogs() {
+          this.logsLoading = true;
+          this.logsError = '';
+          try {
+            const params = new URLSearchParams({ limit: this.logsLimit, offset: this.logsOffset });
+            if (this.logsNodeFilter) params.set('node_id', this.logsNodeFilter);
+            if (this.logsLevelFilter) params.set('level', this.logsLevelFilter);
+            const resp = await fetch('/cluster/logs?' + params, { headers: this.authHeaders() });
+            if (!resp.ok) throw new Error(await resp.text());
+            const data = await resp.json();
+            this.clusterLogs = data.logs || [];
+          } catch (e) {
+            this.logsError = e.message;
+          } finally {
+            this.logsLoading = false;
+          }
+        },
+
+        logsLevelClass(level) {
+          switch ((level || '').toUpperCase()) {
+            case 'ERROR': return 'bg-red-900 text-red-300';
+            case 'WARNING': return 'bg-yellow-900 text-yellow-300';
+            case 'INFO': return 'bg-blue-900 text-blue-300';
+            case 'DEBUG': return 'bg-gray-700 text-gray-400';
+            default: return 'bg-gray-700 text-gray-400';
+          }
         },
 
         confirm(action) {
