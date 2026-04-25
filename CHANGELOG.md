@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.34](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.33...sma-ng-v1.6.34) (2026-04-25)
+
+
+### Features
+
+* add node identity cache to constants.py for cluster mode ([e957f15](https://github.com/newdave/sma-ng/commit/e957f15b968ffe51816ccaff6769fd35cd8a9a1e))
+* add node_commands and logs tables; extend heartbeat() for cluster mode (T-001) ([4ea57fb](https://github.com/newdave/sma-ng/commit/4ea57fbccccf019de0f18b6b26b4d9303184307c))
+* UUID persistence and node identity wiring in config.py ([97c8509](https://github.com/newdave/sma-ng/commit/97c8509dd4ee8fe465b0221cd673659f2c758ff9))
+
 ## [1.6.33](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.32...sma-ng-v1.6.33) (2026-04-25)
 
 
