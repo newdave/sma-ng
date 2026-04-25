@@ -3,7 +3,9 @@ import json
 import logging
 import os
 import shlex
+import socket
 import threading
+import uuid
 from logging.handlers import RotatingFileHandler
 
 from resources.daemon.constants import DAEMON_SECTION, DEFAULT_PROCESS_CONFIG, LOGS_DIR, SCRIPT_DIR
@@ -11,6 +13,28 @@ from resources.daemon.context import JobContextFilter
 from resources.log import LOG_BACKUP_COUNT, LOG_MAX_BYTES, JSONFormatter, getLogger
 
 log = getLogger("DAEMON")
+
+
+def _write_node_id_to_yaml(config_file: str, node_id: str) -> None:
+  """Persist node_id into the daemon section of sma-ng.yml using round-trip YAML to preserve comments."""
+  from ruamel.yaml import YAML
+
+  yaml = YAML(typ="rt")
+  yaml.width = 120
+  try:
+    with open(config_file) as f:
+      data = yaml.load(f)
+    if data is None:
+      data = {}
+    if "daemon" not in data:
+      data["daemon"] = {}
+    data["daemon"]["node_id"] = node_id
+    tmp = config_file + ".tmp"
+    with open(tmp, "w") as f:
+      yaml.dump(data, f)
+    os.replace(tmp, config_file)
+  except Exception:
+    pass  # non-fatal — node will still function with hostname fallback
 
 
 class ConfigLockManager:
@@ -193,6 +217,8 @@ class PathConfigManager:
     self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
     self.scan_paths = []  # Can be set from sma-ng.yml Daemon section
     self._config_file = None  # Resolved path of loaded config file
+    self._node_id = None  # UUID-based node identity; generated on first start
+    self._log_ttl_days = 30  # Days to retain cluster log entries in PostgreSQL
 
     if not config_file:
       config_file = os.environ.get("SMA_CONFIG") or DEFAULT_PROCESS_CONFIG
@@ -215,6 +241,7 @@ class PathConfigManager:
           raw = json.load(f)
         parsed = self._parse_config_data(raw)
         self._apply_config_data(parsed)
+        self._ensure_node_id(None)
         return parsed
 
       from resources.yamlconfig import load as _yaml_load
@@ -237,11 +264,34 @@ class PathConfigManager:
       self.log.debug("Path mappings (%d):" % len(self.path_configs))
       for entry in self.path_configs:
         self.log.debug("  %s -> %s" % (entry["path"], entry.get("config") or entry.get("profile")))
+      self._ensure_node_id(config_file)
       return parsed
 
     except Exception as e:
       self.log.exception("Error loading daemon config: %s" % e)
       raise
+
+  def _ensure_node_id(self, config_file):
+    """Generate and persist a UUID node identity if one is not already set."""
+    from resources.daemon.constants import set_node_id_cache
+
+    node_id = self._node_id
+    if not node_id:
+      node_id = str(uuid.uuid4())
+      if config_file:
+        _write_node_id_to_yaml(config_file, node_id)
+      self._node_id = node_id
+    set_node_id_cache(node_id)
+
+  @property
+  def node_id(self) -> str:
+    """Return the UUID node identity, falling back to hostname if not yet set."""
+    return self._node_id or socket.gethostname()
+
+  @property
+  def log_ttl_days(self) -> int:
+    """Return the number of days to retain cluster log entries in PostgreSQL."""
+    return self._log_ttl_days
 
   @staticmethod
   def _parse_args_list(raw_args):
@@ -304,6 +354,8 @@ class PathConfigManager:
       "path_rewrites": path_rewrites,
       "scan_paths": list(config.get("scan_paths", [])),
       "path_configs": path_configs,
+      "node_id": config.get("node_id") or None,
+      "log_ttl_days": int(config.get("log_ttl_days") or 30),
     }
 
   def _apply_config_data(self, parsed):
@@ -322,6 +374,8 @@ class PathConfigManager:
     self.path_rewrites = parsed["path_rewrites"]
     self.scan_paths = parsed["scan_paths"]
     self.path_configs = parsed["path_configs"]
+    self._node_id = parsed.get("node_id") or None
+    self._log_ttl_days = parsed.get("log_ttl_days", 30)
     if self.path_rewrites:
       self.log.debug("Path rewrites (%d):" % len(self.path_rewrites))
       for rewrite in self.path_rewrites:
