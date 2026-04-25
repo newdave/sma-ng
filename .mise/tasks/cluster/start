@@ -7,7 +7,7 @@ set -euo pipefail
 # lib.sh is sourced relative to this script's directory at runtime.
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
-ALL_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
+ALL_HOSTS=$(lc deploy hosts "")
 if [ -n "${HOSTS:-}" ]; then
     DEPLOY_HOSTS="$HOSTS"
 else

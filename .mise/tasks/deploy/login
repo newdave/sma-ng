@@ -6,11 +6,11 @@ set -euo pipefail
 # shellcheck source=../../shared/deploy/lib.sh
 # shellcheck disable=SC1091
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
-ALL_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
+ALL_HOSTS=$(lc deploy hosts "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 
 # ── Resolve GitHub token ─────────────────────────────────────────────────────
-gh_token=$("$CFG" "$LOCAL" deploy gh_token "")
+gh_token=$(lc deploy gh_token "")
 
 if [ -z "$gh_token" ]; then
     if ! command -v gh >/dev/null 2>&1; then
@@ -27,7 +27,7 @@ if [ -z "$gh_token" ]; then
 fi
 
 # ── Resolve GitHub username ──────────────────────────────────────────────────
-gh_user=$("$CFG" "$LOCAL" deploy gh_user "")
+gh_user=$(lc deploy gh_user "")
 
 if [ -z "$gh_user" ]; then
     if command -v gh >/dev/null 2>&1; then
