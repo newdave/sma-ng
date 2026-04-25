@@ -22,7 +22,7 @@ class ReadSettings:
   """
 
   DEFAULTS = {
-    "Converter": {
+    "converter": {
       "ffmpeg": "ffmpeg" if os.name != "nt" else "ffmpeg.exe",
       "ffprobe": "ffprobe" if os.name != "nt" else "ffprobe.exe",
       "threads": 0,
@@ -51,12 +51,12 @@ class ReadSettings:
       "postopts": [],
       "regex-directory-replace": r"[^\w\-_\. ]",
     },
-    "Permissions": {
+    "permissions": {
       "chmod": "0664",
       "uid": -1,
       "gid": -1,
     },
-    "Metadata": {
+    "metadata": {
       "relocate-moov": True,
       "full-path-guess": True,
       "tag": True,
@@ -66,7 +66,7 @@ class ReadSettings:
       "strip-metadata": False,
       "keep-titles": False,
     },
-    "Video": {
+    "video": {
       "gpu": "",
       "codec": ["h265"],
       "max-bitrate": 0,
@@ -87,7 +87,7 @@ class ReadSettings:
       "b-frames": -1,
       "ref-frames": -1,
     },
-    "HDR": {
+    "hdr": {
       "codec": [],
       "pix-fmt": [],
       "space": ["bt2020nc"],
@@ -102,7 +102,7 @@ class ReadSettings:
       "b-frames": -1,
       "ref-frames": -1,
     },
-    "Analyzer": {
+    "analyzer": {
       "enabled": False,
       "backend": "openvino",
       "device": "AUTO",
@@ -116,13 +116,13 @@ class ReadSettings:
       "allow-filter-adjustments": True,
       "allow-force-reencode": True,
     },
-    "Naming": {
+    "naming": {
       "enabled": False,
       "tv-template": "{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle} [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}",
       "tv-airdate-template": "{Series TitleYear} - {Air-Date} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}",
       "movie-template": "{Movie CleanTitle} ({Release Year}) [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}",
     },
-    "Audio": {
+    "audio": {
       "codec": ["ac3"],
       "languages": [],
       "default-language": "",
@@ -145,12 +145,12 @@ class ReadSettings:
       "unique-dispositions": False,
       "stream-codec-combinations": [],
     },
-    "Audio.Sorting": {
+    "audio.sorting": {
       "sorting": ["language", "channels.d", "map", "d.comment"],
       "default-sorting": ["channels.d", "map", "d.comment"],
       "codecs": [],
     },
-    "Universal Audio": {
+    "universal audio": {
       "enabled": False,
       "codec": ["aac"],
       "channel-bitrate": 128,
@@ -160,10 +160,10 @@ class ReadSettings:
       "profile": "",
       "force-filter": False,
     },
-    "Audio.ChannelFilters": {
+    "audio.channelfilters": {
       "6-2": "pan=stereo|FL=0.5*FC+0.707*FL+0.707*BL+0.5*LFE|FR=0.5*FC+0.707*FR+0.707*BR+0.5*LFE",
     },
-    "Subtitle": {
+    "subtitle": {
       "codec": ["mov_text"],
       "codec-image-based": [],
       "languages": [],
@@ -184,30 +184,30 @@ class ReadSettings:
       "attachment-codec": [],
       "remove-bitstream-subs": False,
     },
-    "Subtitle.Sorting": {
+    "subtitle.sorting": {
       "sorting": ["language", "d.comment", "d.default.d", "d.forced.d"],
       "codecs": [],
       "burn-sorting": ["language", "d.comment", "d.default.d", "d.forced.d"],
     },
-    "Subtitle.CleanIt": {
+    "subtitle.cleanit": {
       "enabled": False,
       "config-path": "",
       "tags": [],
     },
-    "Subtitle.FFSubsync": {
+    "subtitle.ffsubsync": {
       "enabled": False,
     },
-    "Subtitle.Subliminal": {
+    "subtitle.subliminal": {
       "download-subs": False,
       "download-forced-subs": False,
       "include-hearing-impaired-subs": False,
       "providers": [],
     },
-    "Subtitle.Subliminal.Auth": {
+    "subtitle.subliminal.auth": {
       "opensubtitles": "",
       "tvsubtitles": "",
     },
-    "Sonarr": {
+    "sonarr": {
       "host": "localhost",
       "port": 8989,
       "apikey": "",
@@ -219,7 +219,7 @@ class ReadSettings:
       "in-progress-check": True,
       "block-reprocess": False,
     },
-    "Radarr": {
+    "radarr": {
       "host": "localhost",
       "port": 7878,
       "apikey": "",
@@ -231,7 +231,7 @@ class ReadSettings:
       "in-progress-check": True,
       "block-reprocess": False,
     },
-    "SABNZBD": {
+    "sabnzbd": {
       "convert": True,
       "sonarr-category": "sonarr",
       "radarr-category": "radarr",
@@ -239,7 +239,7 @@ class ReadSettings:
       "output-directory": "",
       "path-mapping": "",
     },
-    "Deluge": {
+    "deluge": {
       "sonarr-label": "sonarr",
       "radarr-label": "radarr",
       "bypass-label": "bypass",
@@ -252,7 +252,7 @@ class ReadSettings:
       "remove": False,
       "path-mapping": "",
     },
-    "qBittorrent": {
+    "qbittorrent": {
       "sonarr-label": "sonarr",
       "radarr-label": "radarr",
       "bypass-label": "bypass",
@@ -267,7 +267,7 @@ class ReadSettings:
       "output-directory": "",
       "path-mapping": "",
     },
-    "uTorrent": {
+    "utorrent": {
       "sonarr-label": "sonarr",
       "radarr-label": "radarr",
       "bypass-label": "bypass",
@@ -283,7 +283,7 @@ class ReadSettings:
       "output-directory": "",
       "path-mapping": "",
     },
-    "Plex": {
+    "plex": {
       "host": "localhost",
       "port": 32400,
       "refresh": False,
@@ -300,7 +300,7 @@ class ReadSettings:
   RESOURCE_DIRECTORY = "./resources"
   RELATIVE_TO_ROOT = "../"
   ENV_CONFIG_VAR = "SMA_CONFIG"
-  DYNAMIC_SECTIONS = ["Audio.ChannelFilters", "Subtitle.Subliminal.Auth"]
+  DYNAMIC_SECTIONS = ["audio.channelfilters", "subtitle.subliminal.auth"]
 
   @property
   def CONFIG_RELATIVEPATH(self):
@@ -496,7 +496,7 @@ class ReadSettings:
 
   @staticmethod
   def _apply_profile(data, profile):
-    profiles = data.get("Profiles") or {}
+    profiles = data.get("profiles") or {}
     if profile not in profiles:
       raise KeyError("Profile %r not found in config (available: %s)" % (profile, ", ".join(profiles) or "none"))
     for section, overrides in profiles[profile].items():
@@ -574,7 +574,7 @@ class ReadSettings:
         data: A populated configuration dictionary.
     """
     # GPU is in [Video] but affects both converter (hwaccel profile) and video (codec mapping)
-    self.gpu = str(data.get("Video", {}).get("gpu", "")).strip().lower()
+    self.gpu = str(data.get("video", {}).get("gpu", "")).strip().lower()
 
     self._read_converter(data)
     self._read_permissions(data)
@@ -589,7 +589,7 @@ class ReadSettings:
 
   def _read_converter(self, data):
     """Parse ``[Converter]`` and set FFmpeg paths, output format, threading, and file-disposition attributes."""
-    section = "Converter"
+    section = "converter"
     cfg = data[section]
     self.ffmpeg = cfg_getpath(cfg["ffmpeg"])
     self.ffprobe = cfg_getpath(cfg["ffprobe"])
@@ -628,7 +628,7 @@ class ReadSettings:
 
   def _read_permissions(self, data):
     """Parse ``[Permissions]`` and set the ``permissions`` dict (``chmod``, ``uid``, ``gid``)."""
-    section = "Permissions"
+    section = "permissions"
     cfg = data[section]
     self.permissions = {}
     self.permissions["chmod"] = cfg["chmod"]
@@ -642,7 +642,7 @@ class ReadSettings:
 
   def _read_metadata(self, data):
     """Parse ``[Metadata]`` and set tagging, artwork, moov-relocation, and disposition-sanitisation attributes."""
-    section = "Metadata"
+    section = "metadata"
     cfg = data[section]
     self.relocate_moov = cfg["relocate-moov"]
     self.fullpathguess = cfg["full-path-guess"]
@@ -668,7 +668,7 @@ class ReadSettings:
 
   def _read_video(self, data):
     """Parse ``[Video]``, ``[HDR]``, and ``[Naming]`` and set video codec, bitrate, HDR, and naming attributes."""
-    section = "Video"
+    section = "video"
     cfg = data[section]
     self.vcodec = self._as_list(cfg["codec"])
     self.vmaxbitrate = cfg["max-bitrate"]
@@ -690,7 +690,7 @@ class ReadSettings:
     self.ref_frames = cfg["ref-frames"]
 
     # HDR
-    section = "HDR"
+    section = "hdr"
     cfg = data[section]
     self.hdr = {}
     self.hdr["codec"] = self._as_list(cfg["codec"])
@@ -708,7 +708,7 @@ class ReadSettings:
     self.hdr["ref_frames"] = cfg["ref-frames"]
 
     # Naming
-    section = "Naming"
+    section = "naming"
     cfg = data[section]
     self.naming_enabled = cfg["enabled"]
     self.naming_tv_template = cfg["tv-template"]
@@ -772,7 +772,7 @@ class ReadSettings:
 
   def _read_analyzer(self, data):
     """Parse ``[Analyzer]`` and set optional per-job recommendation controls."""
-    section = "Analyzer"
+    section = "analyzer"
     cfg = data[section]
     self.analyzer = {}
     self.analyzer["enabled"] = cfg["enabled"]
@@ -790,7 +790,7 @@ class ReadSettings:
 
   def _read_audio(self, data):
     """Parse ``[Audio]``, ``[Audio.Sorting]``, ``[Audio.ChannelFilters]``, and ``[Universal Audio]`` and set audio codec, language, bitrate, and sorting attributes."""
-    section = "Audio"
+    section = "audio"
     cfg = data[section]
     self.acodec = self._as_list(cfg["codec"])
     self.awl = self._as_list(cfg["languages"])
@@ -814,13 +814,13 @@ class ReadSettings:
     self.unique_audio_dispositions = cfg["unique-dispositions"]
     self.stream_codec_combinations = sorted([x.split(":") for x in self._as_list(cfg["stream-codec-combinations"])], key=lambda x: len(x), reverse=True)
 
-    section = "Audio.Sorting"
+    section = "audio.sorting"
     cfg = data[section]
     self.audio_sorting = self._as_list(cfg["sorting"])
     self.audio_sorting_default = self._as_list(cfg["default-sorting"])
     self.audio_sorting_codecs = self._as_list(cfg["codecs"])
 
-    section = "Audio.ChannelFilters"
+    section = "audio.channelfilters"
     self.afilterchannels = {}
     if section in data:
       for key, value in data.get(section, {}).items():
@@ -833,7 +833,7 @@ class ReadSettings:
             continue
 
     # Universal Audio
-    section = "Universal Audio"
+    section = "universal audio"
     cfg = data[section]
     self.ua_enabled = cfg["enabled"]
     self.ua = self._as_list(cfg["codec"])
@@ -846,7 +846,7 @@ class ReadSettings:
 
   def _read_subtitles(self, data):
     """Parse ``[Subtitle]`` and its sub-sections and set subtitle codec, language, embed, burn, and subliminal download attributes."""
-    section = "Subtitle"
+    section = "subtitle"
     cfg = data[section]
     self.scodec = self._as_list(cfg["codec"])
     self.scodec_image = self._as_list(cfg["codec-image-based"])
@@ -868,30 +868,30 @@ class ReadSettings:
     self.attachmentcodec = self._as_list(cfg["attachment-codec"])
     self.removebvs = cfg["remove-bitstream-subs"]
 
-    section = "Subtitle.Sorting"
+    section = "subtitle.sorting"
     cfg = data[section]
     self.sub_sorting = self._as_list(cfg["sorting"])
     self.sub_sorting_codecs = self._as_list(cfg["codecs"])
     self.burn_sorting = self._as_list(cfg["burn-sorting"])
 
-    section = "Subtitle.CleanIt"
+    section = "subtitle.cleanit"
     cfg = data[section]
     self.cleanit = cfg["enabled"]
     self.cleanit_config = cfg["config-path"]
     self.cleanit_tags = self._as_list(cfg["tags"])
 
-    section = "Subtitle.FFSubsync"
+    section = "subtitle.ffsubsync"
     cfg = data[section]
     self.ffsubsync = cfg["enabled"]
 
-    section = "Subtitle.Subliminal"
+    section = "subtitle.subliminal"
     cfg = data[section]
     self.downloadsubs = cfg["download-subs"]
     self.downloadforcedsubs = cfg["download-forced-subs"]
     self.hearing_impaired = cfg["include-hearing-impaired-subs"]
     self.subproviders = self._as_list(cfg["providers"])
 
-    section = "Subtitle.Subliminal.Auth"
+    section = "subtitle.subliminal.auth"
     self.subproviders_auth = {}
     if section in data:
       for key, value in data.get(section, {}).items():
@@ -913,7 +913,7 @@ class ReadSettings:
     for section in list(data.keys()):
       if section.lower().startswith("sonarr") or section.lower().startswith("radarr"):
         is_sonarr = section.lower().startswith("sonarr")
-        base = "Sonarr" if is_sonarr else "Radarr"
+        base = "sonarr" if is_sonarr else "radarr"
         defaults = self.DEFAULTS[base]
         cfg = data.get(section, {})
         instance = {"section": section}
@@ -939,8 +939,8 @@ class ReadSettings:
     self.sonarr_instances.sort(key=lambda x: len(x.get("path", "")), reverse=True)
     self.radarr_instances.sort(key=lambda x: len(x.get("path", "")), reverse=True)
 
-    self.Sonarr = next((i for i in self.sonarr_instances if i["section"] == "Sonarr"), {})
-    self.Radarr = next((i for i in self.radarr_instances if i["section"] == "Radarr"), {})
+    self.Sonarr = next((i for i in self.sonarr_instances if i["section"] == "sonarr"), {})
+    self.Radarr = next((i for i in self.radarr_instances if i["section"] == "radarr"), {})
 
   def _read_downloader_labels(self, data, section, label_key="label"):
     """Read the common sonarr/radarr/bypass label fields for a downloader section."""
@@ -957,11 +957,11 @@ class ReadSettings:
   def _read_downloaders(self, data):
     """Parse ``[SABNZBD]``, ``[Deluge]``, ``[qBittorrent]``, and ``[uTorrent]`` and set the ``SAB``, ``deluge``, ``qBittorrent``, and ``uTorrent`` dicts."""
     # SAB uses "category" instead of "label"
-    section = "SABNZBD"
+    section = "sabnzbd"
     self.SAB = self._read_downloader_labels(data, section, label_key="category")
 
     # Deluge
-    section = "Deluge"
+    section = "deluge"
     cfg = data[section]
     self.deluge = self._read_downloader_labels(data, section)
     self.deluge["host"] = cfg["host"]
@@ -971,7 +971,7 @@ class ReadSettings:
     self.deluge["remove"] = cfg["remove"]
 
     # qBittorrent
-    section = "qBittorrent"
+    section = "qbittorrent"
     cfg = data[section]
     self.qBittorrent = self._read_downloader_labels(data, section)
     self.qBittorrent["actionbefore"] = cfg["action-before"]
@@ -983,7 +983,7 @@ class ReadSettings:
     self.qBittorrent["password"] = cfg["password"]
 
     # uTorrent
-    section = "uTorrent"
+    section = "utorrent"
     cfg = data[section]
     self.uTorrent = self._read_downloader_labels(data, section)
     self.uTorrent["webui"] = cfg["webui"]
@@ -997,7 +997,7 @@ class ReadSettings:
 
   def _read_plex(self, data):
     """Parse ``[Plex]`` and set the ``Plex`` connection dict and ``plexmatch_enabled`` flag."""
-    section = "Plex"
+    section = "plex"
     cfg = data[section]
     self.Plex = {}
     self.Plex["host"] = cfg["host"]
@@ -1015,7 +1015,7 @@ class ReadSettings:
     """Validate that ffmpeg and ffprobe binaries exist and are executable."""
     for name, path in [("ffmpeg", self.ffmpeg), ("ffprobe", self.ffprobe)]:
       if not path:
-        self.log.error("%s path is not configured. Set it in sma-ng.yml [Converter] section." % name)
+        self.log.error("%s path is not configured. Set it in sma-ng.yml [converter] section." % name)
         sys.exit(1)
       resolved = shutil.which(path)
       if resolved:
@@ -1023,7 +1023,7 @@ class ReadSettings:
       elif os.path.isfile(path) and os.access(path, os.X_OK):
         self.log.debug("%s found at %s" % (name, path))
       else:
-        self.log.error("%s not found: '%s'. Verify the path in sma-ng.yml [Converter] section or ensure it is installed and in PATH." % (name, path))
+        self.log.error("%s not found: '%s'. Verify the path in sma-ng.yml [converter] section or ensure it is installed and in PATH." % (name, path))
         sys.exit(1)
 
   def writeConfig(self, data, cfgfile):
@@ -1037,15 +1037,15 @@ class ReadSettings:
   def migrateFromOld(self, data, configFile):
     try:
       write = False
-      if "sort-streams" in data.get("Converter", {}):
-        if not self._as_bool(data["Converter"].get("sort-streams")):
-          data["Converter"].pop("sort-streams", None)
-          data["Audio.Sorting"]["sorting"] = []
-          data["Subtitle.Sorting"]["sorting"] = []
+      if "sort-streams" in data.get("converter", {}):
+        if not self._as_bool(data["converter"].get("sort-streams")):
+          data["converter"].pop("sort-streams", None)
+          data["audio.sorting"]["sorting"] = []
+          data["subtitle.sorting"]["sorting"] = []
           write = True
-      elif "prefer-more-channels" in data.get("Audio", {}):
-        asorting = self._as_list(data["Audio.Sorting"]["sorting"])
-        if self._as_bool(data["Audio"].get("prefer-more-channels")):
+      elif "prefer-more-channels" in data.get("audio", {}):
+        asorting = self._as_list(data["audio.sorting"]["sorting"])
+        if self._as_bool(data["audio"].get("prefer-more-channels")):
           if "channels" in asorting and "channels.a" not in asorting and "channels.d" not in asorting:
             asorting = ["channels.d" if x == "channels" else x for x in asorting]
             self.log.debug("Replacing channels with channels.d based on deprecated settings [prefer-more-channels: True].")
@@ -1055,13 +1055,13 @@ class ReadSettings:
         else:
           asorting = ["channels.a" if x == "channels.d" else x for x in asorting]
           self.log.debug("Replacing channels.d with channels.a based on deprecated settings [prefer-more-channels: False].")
-        data["Audio"].pop("prefer-more-channels", None)
-        data["Audio.Sorting"]["sorting"] = asorting
+        data["audio"].pop("prefer-more-channels", None)
+        data["audio.sorting"]["sorting"] = asorting
         write = True
 
-      if "default-more-channels" in data.get("Audio", {}):
-        adsorting = self._as_list(data["Audio.Sorting"]["default-sorting"])
-        if self._as_bool(data["Audio"].get("default-more-channels")):
+      if "default-more-channels" in data.get("audio", {}):
+        adsorting = self._as_list(data["audio.sorting"]["default-sorting"])
+        if self._as_bool(data["audio"].get("default-more-channels")):
           if "channels" in adsorting and "channels.a" not in adsorting and "channels.d" not in adsorting:
             adsorting = ["channels.d" if x == "channels" else x for x in adsorting]
             self.log.debug("Replacing channels with channels.d based on deprecated settings [default-more-channels: True].")
@@ -1071,38 +1071,38 @@ class ReadSettings:
         else:
           adsorting = ["channels.a" if x == "channels.d" else x for x in adsorting]
           self.log.debug("Replacing channels.d with channels.a based on deprecated settings [default-more-channels: False].")
-        data["Audio"].pop("default-more-channels", None)
-        data["Audio.Sorting"]["default-sorting"] = adsorting
+        data["audio"].pop("default-more-channels", None)
+        data["audio.sorting"]["default-sorting"] = adsorting
         write = True
 
-      if "final-sort" in data.get("Audio.Sorting", {}) and "sorting" in data.get("Audio.Sorting", {}) and self._as_bool(data["Audio.Sorting"].get("final-sort")):
-        data["Audio.Sorting"].pop("final-sort", None)
-        asort = self._as_list(data["Audio.Sorting"]["sorting"])
+      if "final-sort" in data.get("audio.sorting", {}) and "sorting" in data.get("audio.sorting", {}) and self._as_bool(data["audio.sorting"].get("final-sort")):
+        data["audio.sorting"].pop("final-sort", None)
+        asort = self._as_list(data["audio.sorting"]["sorting"])
         if "map" not in asort:
           asort.append("map")
-          data["Audio.Sorting"]["sorting"] = asort
+          data["audio.sorting"]["sorting"] = asort
           self.log.debug("Final-sort is deprecated, adding to sorting list [audio.sorting-final-sort: True].")
         else:
           self.log.debug("Final-sort is deprecated, removing [audio.sorting-final-sort: True].")
         write = True
-      elif "final-sort" in data.get("Audio.Sorting", {}):
-        data["Audio.Sorting"].pop("final-sort", None)
+      elif "final-sort" in data.get("audio.sorting", {}):
+        data["audio.sorting"].pop("final-sort", None)
         self.log.debug("Final-sort is deprecated, removing [audio.sorting-final-sort: False].")
         write = True
 
-      if "copy-original-before" in data.get("Audio", {}):
-        data["Audio"].pop("copy-original-before", None)
+      if "copy-original-before" in data.get("audio", {}):
+        data["audio"].pop("copy-original-before", None)
         write = True
 
-      if "move-after" in data.get("Universal Audio", {}):
-        data["Universal Audio"].pop("move-after", None)
+      if "move-after" in data.get("universal audio", {}):
+        data["universal audio"].pop("move-after", None)
         write = True
 
-      # gpu moved from [Converter] to [Video]
-      if "gpu" in data.get("Converter", {}):
-        gpu_val = data["Converter"].pop("gpu")
-        if not str(data.get("Video", {}).get("gpu", "")).strip():
-          data.setdefault("Video", {})["gpu"] = gpu_val
+      # gpu moved from [converter] to [video]
+      if "gpu" in data.get("converter", {}):
+        gpu_val = data["converter"].pop("gpu")
+        if not str(data.get("video", {}).get("gpu", "")).strip():
+          data.setdefault("video", {})["gpu"] = gpu_val
         write = True
 
       if write:

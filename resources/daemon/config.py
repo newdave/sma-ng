@@ -393,7 +393,7 @@ class PathConfigManager:
         from resources.yamlconfig import load as _yaml_load
 
         data = _yaml_load(config_path) or {}
-        val = str(data.get("Converter", {}).get("recycle-bin", "")).strip()
+        val = str(data.get("converter", {}).get("recycle-bin", "")).strip()
       else:
         cp = configparser.ConfigParser()
         cp.read(config_path)

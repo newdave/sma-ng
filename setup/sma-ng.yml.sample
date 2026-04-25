@@ -1,4 +1,4 @@
-Converter:
+converter:
   bypass-if-copying-all: true
   copy-to: []
   delete-original: true
@@ -39,12 +39,12 @@ Converter:
   #     qsv: /dev/dri/renderD129
   hwdevices: {}
 
-Permissions:
+permissions:
   chmod: "0664"
   gid: -1
   uid: -1
 
-Metadata:
+metadata:
   download-artwork: poster
   full-path-guess: true
   keep-titles: false
@@ -54,7 +54,7 @@ Metadata:
   tag: true
   tag-language: eng
 
-Video:
+video:
   b-frames: 3
   # codec controls the target video codec priority.
   # The first codec is the encoder target. Later codecs are treated as passthrough-compatible.
@@ -105,10 +105,10 @@ Video:
   profile: []
   ref-frames: 4
 
-HDR:
+hdr:
   b-frames: 3
-  # codec works the same way here as in Video, but only for HDR sources.
-  # Leave blank to inherit the normal Video codec chain.
+  # codec works the same way here as in video, but only for HDR sources.
+  # Leave blank to inherit the normal video codec chain.
   codec:
     - hevc
     - h265
@@ -129,7 +129,7 @@ HDR:
   transfer:
     - smpte2084
 
-Analyzer:
+analyzer:
   # Analyzer is an optional per-job recommendation layer.
   # The current OpenVINO backend mainly validates runtime and device availability
   # (including NPU selectors) and wires analyzer output into preview/planner hooks.
@@ -155,7 +155,7 @@ Analyzer:
   allow-filter-adjustments: true
   allow-force-reencode: true
 
-Naming:
+naming:
   enabled: true
   movie-template: >-
     {Movie CleanTitle} ({Release Year}) {[Custom Formats]} {[Quality Full]}
@@ -170,7 +170,7 @@ Naming:
     {[Custom Formats]} {[Quality Full]} {[MediaInfo AudioCodec}{ MediaInfo AudioChannels]}
     {[MediaInfo VideoDynamicRangeType]} {[MediaInfo VideoCodec]}{-Release Group}
 
-Audio:
+audio:
   # codec controls the target audio codec priority.
   # The first codec is used for encoding new audio tracks.
   # Later codecs are treated as copy-eligible passthrough formats.
@@ -207,7 +207,7 @@ Audio:
   unique-dispositions: false
   variable-bitrate: 0
 
-Audio.Sorting:
+audio.sorting:
   codecs: []
   default-sorting:
     - channels.d
@@ -219,7 +219,7 @@ Audio.Sorting:
     - map
     - d.comment
 
-Universal Audio:
+universal audio:
   # enabled controls whether SMA creates an extra stereo-friendly fallback audio stream.
   # Leave disabled unless you explicitly want an additional universal track.
   enabled: false
@@ -232,9 +232,9 @@ Universal Audio:
   profile:
   variable-bitrate: 0
 
-Audio.ChannelFilters: {}
+audio.channelfilters: {}
 
-Subtitle:
+subtitle:
   # codec controls the text subtitle format written into the output container.
   # For MP4, mov_text is the usual default. Use codec-image-based to keep PGS/VobSub streams.
   codec:
@@ -259,7 +259,7 @@ Subtitle:
   remove-bitstream-subs: true
   unique-dispositions: false
 
-Subtitle.Sorting:
+subtitle.sorting:
   burn-sorting:
     - language
     - d.comment
@@ -272,25 +272,25 @@ Subtitle.Sorting:
     - d.default.d
     - d.forced.d
 
-Subtitle.CleanIt:
+subtitle.cleanit:
   enabled: true
   config-path:
   tags: []
 
-Subtitle.FFSubsync:
+subtitle.ffsubsync:
   enabled: true
 
-Subtitle.Subliminal:
+subtitle.subliminal:
   download-forced-subs: false
   download-subs: false
   include-hearing-impaired-subs: false
   providers: []
 
-Subtitle.Subliminal.Auth:
+subtitle.subliminal.auth:
   opensubtitles:
   tvsubtitles:
 
-Sonarr:
+sonarr:
   apikey:
   host: localhost
   port: 8989
@@ -302,15 +302,15 @@ Sonarr:
   ssl: false
   webroot:
   # For multiple instances add additional top-level sections, e.g.:
-  # Sonarr-4k:
+  # sonarr-4k:
   #   host: sonarr4k.local
   #   port: 8989
   #   path: /media/4k/
 
 # Additional Sonarr instances are discovered automatically when the section
-# name starts with "Sonarr". Use path for longest-prefix matching.
+# name starts with "sonarr". Use path for longest-prefix matching.
 #
-# Sonarr-Kids:
+# sonarr-kids:
 #   apikey:
 #   host: localhost
 #   port: 8990
@@ -322,7 +322,7 @@ Sonarr:
 #   ssl: false
 #   webroot:
 
-Radarr:
+radarr:
   apikey:
   host: localhost
   port: 7878
@@ -335,9 +335,9 @@ Radarr:
   webroot:
 
 # Additional Radarr instances are discovered automatically when the section
-# name starts with "Radarr". Use path for longest-prefix matching.
+# name starts with "radarr". Use path for longest-prefix matching.
 #
-# Radarr-4K:
+# radarr-4k:
 #   apikey:
 #   host: localhost
 #   port: 7879
@@ -352,7 +352,7 @@ Radarr:
 # Download client sections are grouped together here. Configure the one(s)
 # you actually use and leave the others blank.
 
-SABNZBD:
+sabnzbd:
   bypass-category: bypass
   convert: true
   output-directory:
@@ -360,7 +360,7 @@ SABNZBD:
   radarr-category: movies
   sonarr-category: tv
 
-Deluge:
+deluge:
   bypass-label: bypass
   convert: true
   host: localhost
@@ -373,7 +373,7 @@ Deluge:
   sonarr-label: sonarr
   username:
 
-qBittorrent:
+qbittorrent:
   action-after:
   action-before:
   bypass-label: bypass
@@ -388,7 +388,7 @@ qBittorrent:
   ssl: false
   username:
 
-uTorrent:
+utorrent:
   action-after:
   action-before:
   bypass-label: bypass
@@ -404,7 +404,7 @@ uTorrent:
   username:
   webui: false
 
-Plex:
+plex:
   host: localhost
   ignore-certs: true
   path-mapping:
@@ -416,27 +416,27 @@ Plex:
 
 # ── Quality profiles ─────────────────────────────────────────────────
 # Named overrides applied on top of the base settings above.
-# Reference via Daemon.path_configs `profile: rq`.
+# Reference via daemon path_configs `profile: rq`.
 # Only listed keys are overridden; all other base settings apply unchanged.
-Profiles:
+profiles:
   rq:
-    Video:
+    video:
       codec: [h265]
       max-bitrate: 8000
-    Audio:
+    audio:
       codec: [ac3, aac]
   lq:
-    Video:
+    video:
       codec: [h264]
       max-bitrate: 3000
       preset: fast
-    Audio:
+    audio:
       codec: [aac]
       max-channels: 2
 
 # ── Daemon settings ──────────────────────────────────────────────────
 # Only used when running daemon.py. manual.py ignores this section.
-Daemon:
+daemon:
   api_key: null
   username: null
   password: null

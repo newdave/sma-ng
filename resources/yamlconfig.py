@@ -31,10 +31,11 @@ def migrate_ini_to_yaml(ini_path: str, yaml_path: str, bak_path: str, defaults: 
 
   data = {}
   for section in config.sections():
+    section_key = section.lower()
     section_data = {}
-    if section in defaults:
+    if section_key in defaults:
       for key in config.options(section):
-        default_val = defaults[section].get(key)
+        default_val = defaults[section_key].get(key)
         raw = config.get(section, key, fallback=None)
         if raw is None:
           section_data[key] = default_val
@@ -71,7 +72,7 @@ def migrate_ini_to_yaml(ini_path: str, yaml_path: str, bak_path: str, defaults: 
     else:
       for key in config.options(section):
         section_data[key] = config.get(section, key)
-    data[section] = section_data
+    data[section_key] = section_data
 
   write(yaml_path, data)
   os.rename(ini_path, bak_path)

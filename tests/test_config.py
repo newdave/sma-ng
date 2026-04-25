@@ -294,12 +294,12 @@ path-mapping =
     assert len(settings.radarr_instances) == 2
 
     sonarr_sections = [i["section"] for i in settings.sonarr_instances]
-    assert "Sonarr" in sonarr_sections
-    assert "Sonarr-Kids" in sonarr_sections
+    assert "sonarr" in sonarr_sections
+    assert "sonarr-kids" in sonarr_sections
 
     radarr_sections = [i["section"] for i in settings.radarr_instances]
-    assert "Radarr" in radarr_sections
-    assert "Radarr-4K" in radarr_sections
+    assert "radarr" in radarr_sections
+    assert "radarr-4k" in radarr_sections
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
   def test_sorted_by_path_length(self, mock_validate, tmp_ini):

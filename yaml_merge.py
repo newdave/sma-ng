@@ -12,7 +12,7 @@ from ruamel.yaml.comments import CommentedMap
 
 # Sections whose keys are never deprecated or backfilled because they contain
 # user-defined names (Sonarr-*/Radarr-* instance sections, Profiles, Daemon).
-_SKIP_SECTIONS = frozenset({"Profiles", "Daemon"})
+_SKIP_SECTIONS = frozenset({"profiles", "daemon"})
 _WILDCARD_PREFIXES = ("sonarr", "radarr")
 
 

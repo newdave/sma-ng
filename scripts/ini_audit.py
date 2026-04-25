@@ -71,10 +71,14 @@ class Finding:
 
 
 def parse_config_keys(path: str) -> dict:
-  """Load config keys from either YAML or INI."""
+  """Load config keys from either YAML or INI.
+
+  INI section names are normalized to lowercase so they match the canonical
+  lowercase YAML section names used throughout the codebase.
+  """
   if path.endswith((".yaml", ".yml")):
     return parse_yaml_keys(path)
-  return parse_ini_keys(path)
+  return {k.lower(): v for k, v in parse_ini_keys(path).items()}
 
 
 def audit_ini(sample_path: str, live_path: str) -> list[Finding]:
@@ -129,7 +133,7 @@ def audit_ini(sample_path: str, live_path: str) -> list[Finding]:
   # (any prefix of those names is auto-discovered by readsettings) so they are
   # never deprecated — skip them entirely.
   _WILDCARD_PREFIXES = ("sonarr", "radarr")
-  _SKIP_SECTIONS = {"Profiles", "Daemon"}
+  _SKIP_SECTIONS = {"profiles", "daemon"}
 
   for sec in live_secs:
     if sec not in sample_secs:
@@ -156,8 +160,8 @@ def audit_ini(sample_path: str, live_path: str) -> list[Finding]:
 # When the daemon key is an absolute directory path, the INI key must either
 # be a bare name (no path separator) or an absolute path inside that directory.
 CROSS_FILE_RULES: list[tuple[str, str, str]] = [
-  ("ffmpeg_dir", "Converter", "ffmpeg"),
-  ("ffmpeg_dir", "Converter", "ffprobe"),
+  ("ffmpeg_dir", "converter", "ffmpeg"),
+  ("ffmpeg_dir", "converter", "ffprobe"),
 ]
 
 
@@ -182,7 +186,7 @@ def audit_cross_file(
 
   try:
     if daemon_path.endswith((".yaml", ".yml")):
-      daemon_cfg = parse_yaml_keys(daemon_path).get("Daemon", {})
+      daemon_cfg = parse_yaml_keys(daemon_path).get("daemon", {})
     else:
       with open(daemon_path) as f:
         daemon_cfg = json.load(f)
