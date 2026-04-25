@@ -173,7 +173,8 @@ class TestConversionWorkerProcessJob:
     worker._run_conversion = mock.MagicMock(return_value=True)
     job = {"id": 4, "path": str(media), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
-    db.complete_job.assert_called_once_with(4)
+    db.complete_job.assert_called_once()
+    assert db.complete_job.call_args[0][0] == 4
     db.fail_job.assert_not_called()
 
   def test_fails_job_on_failed_conversion(self, tmp_path):
@@ -518,7 +519,8 @@ class TestConversionWorkerRun:
     worker._run_conversion = mock.MagicMock(return_value=True)
     worker.job_event.set()
     worker.run()
-    db.complete_job.assert_called_once_with(99)
+    db.complete_job.assert_called_once()
+    assert db.complete_job.call_args[0][0] == 99
 
   def test_run_skips_claim_when_node_not_approved(self):
     db = mock.MagicMock()

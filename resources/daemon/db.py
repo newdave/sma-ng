@@ -9,6 +9,12 @@ from resources.log import getLogger
 
 log = getLogger("DAEMON")
 
+_METRICS_WINDOW_MAP = {
+  "24h": {"trunc": "hour", "filter": "24 hours", "series_offset": "23 hours", "step": "1 hour", "throughput_hours": 24.0},
+  "7d": {"trunc": "day", "filter": "7 days", "series_offset": "6 days", "step": "1 day", "throughput_hours": 168.0},
+  "30d": {"trunc": "day", "filter": "30 days", "series_offset": "29 days", "step": "1 day", "throughput_hours": 720.0},
+}
+
 
 class PostgreSQLJobDatabase:
   """PostgreSQL-backed job queue for distributed multi-node operation.
@@ -207,6 +213,9 @@ class PostgreSQLJobDatabase:
                         updated_by TEXT
                     )
                 """)
+        cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_size_bytes BIGINT")
+        cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS output_size_bytes BIGINT")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status_completed ON jobs(status, completed_at)")
     self.log.info("PostgreSQL database initialized: %s" % self.db_url)
     self._reset_running_jobs()
 
@@ -345,11 +354,14 @@ class PostgreSQLJobDatabase:
         )
     self.log.debug("Job %d started by worker %d" % (job_id, worker_id))
 
-  def complete_job(self, job_id):
-    """Mark a job as completed."""
+  def complete_job(self, job_id, input_size=None, output_size=None):
+    """Mark a job as completed, optionally recording input/output file sizes."""
     with self._conn() as conn:
       with conn.cursor() as cur:
-        cur.execute("UPDATE jobs SET status = %s, completed_at = NOW() WHERE id = %s", (STATUS_COMPLETED, job_id))
+        cur.execute(
+          "UPDATE jobs SET status = %s, completed_at = NOW(), input_size_bytes = %s, output_size_bytes = %s WHERE id = %s",
+          (STATUS_COMPLETED, input_size, output_size, job_id),
+        )
     self.log.debug("Job %d completed" % job_id)
 
   def fail_job(self, job_id, error=None):
@@ -413,6 +425,147 @@ class PostgreSQLJobDatabase:
         cur.execute("SELECT COUNT(*) AS total FROM jobs")
         stats["total"] = cur.fetchone()["total"]
     return stats
+
+  def get_metrics(self, window: str = "24h") -> dict:
+    """Return cluster-wide job metrics for the requested time window.
+
+    window: "24h" | "7d" | "30d" | "all"
+    Returns a dict with keys: available, window, kpis, timeseries, nodes.
+    """
+    wdef = _METRICS_WINDOW_MAP.get(window)
+    filter_clause = f"AND completed_at >= NOW() - INTERVAL '{wdef['filter']}'" if wdef else ""
+
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        # Snapshot: real-time pending/running/total (no time filter)
+        cur.execute("""
+                    SELECT
+                        COUNT(*) FILTER (WHERE status = 'pending')  AS pending,
+                        COUNT(*) FILTER (WHERE status = 'running')  AS running,
+                        COUNT(*)                                     AS total
+                    FROM jobs
+                """)
+        snap = cur.fetchone()
+
+        # Windowed KPI: completed/failed within the selected window (or all-time)
+        cur.execute(f"""
+                    SELECT
+                        COUNT(*) FILTER (WHERE status = 'completed')                            AS completed,
+                        COUNT(*) FILTER (WHERE status = 'failed')                               AS failed,
+                        COUNT(*) FILTER (WHERE status = 'cancelled')                            AS cancelled,
+                        ROUND(
+                            COUNT(*) FILTER (WHERE status = 'failed')::NUMERIC
+                            / NULLIF(COUNT(*) FILTER (WHERE status IN ('completed', 'failed')), 0) * 100,
+                            2
+                        )                                                                        AS failure_rate_pct,
+                        AVG(
+                            CASE WHEN status = 'completed'
+                                      AND started_at IS NOT NULL
+                                      AND completed_at IS NOT NULL
+                            THEN EXTRACT(EPOCH FROM (completed_at - started_at)) END
+                        )                                                                        AS avg_duration_seconds,
+                        PERCENTILE_CONT(0.95) WITHIN GROUP (
+                            ORDER BY CASE WHEN status = 'completed'
+                                               AND started_at IS NOT NULL
+                                               AND completed_at IS NOT NULL
+                                     THEN EXTRACT(EPOCH FROM (completed_at - started_at)) END
+                        )                                                                        AS p95_duration_seconds,
+                        AVG(
+                            CASE WHEN status = 'completed'
+                                      AND input_size_bytes > 0
+                                      AND output_size_bytes IS NOT NULL
+                            THEN (1.0 - output_size_bytes::FLOAT / input_size_bytes) * 100 END
+                        )                                                                        AS avg_compression_pct
+                    FROM jobs
+                    WHERE 1=1 {filter_clause}
+                """)
+        kpi_row = cur.fetchone()
+
+        # Time-series: zero-filled buckets per hour (24h) or per day (7d/30d)
+        if wdef:
+          trunc = wdef["trunc"]
+          cur.execute(f"""
+                        WITH ts AS (
+                            SELECT generate_series(
+                                date_trunc('{trunc}', NOW()) - INTERVAL '{wdef["series_offset"]}',
+                                date_trunc('{trunc}', NOW()),
+                                INTERVAL '{wdef["step"]}'
+                            ) AS bucket
+                        )
+                        SELECT
+                            ts.bucket,
+                            COALESCE(COUNT(j.id) FILTER (WHERE j.status = 'completed'), 0) AS completed,
+                            COALESCE(COUNT(j.id) FILTER (WHERE j.status = 'failed'),    0) AS failed
+                        FROM ts
+                        LEFT JOIN jobs j
+                            ON  date_trunc('{trunc}', j.completed_at) = ts.bucket
+                            AND j.status IN ('completed', 'failed')
+                        GROUP BY ts.bucket
+                        ORDER BY ts.bucket
+                    """)
+          timeseries = [
+            {
+              "bucket": row["bucket"].isoformat(),
+              "completed": int(row["completed"]),
+              "failed": int(row["failed"]),
+            }
+            for row in cur.fetchall()
+          ]
+        else:
+          timeseries = []
+
+        # Per-node breakdown
+        cur.execute(f"""
+                    SELECT
+                        j.node_id,
+                        COALESCE(n.node_name, j.node_id)                                AS node_name,
+                        COUNT(*) FILTER (WHERE j.status = 'completed')                  AS completed,
+                        COUNT(*) FILTER (WHERE j.status = 'failed')                     AS failed,
+                        AVG(
+                            CASE WHEN j.status = 'completed'
+                                      AND j.started_at IS NOT NULL
+                                      AND j.completed_at IS NOT NULL
+                            THEN EXTRACT(EPOCH FROM (j.completed_at - j.started_at)) END
+                        )                                                                AS avg_duration_seconds
+                    FROM jobs j
+                    LEFT JOIN cluster_nodes n ON n.node_id = j.node_id
+                    WHERE j.node_id IS NOT NULL {filter_clause}
+                    GROUP BY j.node_id, n.node_name
+                    ORDER BY completed DESC
+                """)
+        nodes = [
+          {
+            "node_id": row["node_id"],
+            "node_name": row["node_name"],
+            "completed": int(row["completed"]),
+            "failed": int(row["failed"]),
+            "avg_duration_seconds": float(row["avg_duration_seconds"]) if row["avg_duration_seconds"] is not None else None,
+          }
+          for row in cur.fetchall()
+        ]
+
+    completed = int(kpi_row["completed"] or 0)
+    th_hours = wdef["throughput_hours"] if wdef else None
+    kpis = {
+      "completed": completed,
+      "failed": int(kpi_row["failed"] or 0),
+      "cancelled": int(kpi_row["cancelled"] or 0),
+      "pending": int(snap["pending"] or 0),
+      "running": int(snap["running"] or 0),
+      "total": int(snap["total"] or 0),
+      "failure_rate_pct": float(kpi_row["failure_rate_pct"]) if kpi_row["failure_rate_pct"] is not None else None,
+      "avg_duration_seconds": float(kpi_row["avg_duration_seconds"]) if kpi_row["avg_duration_seconds"] is not None else None,
+      "p95_duration_seconds": float(kpi_row["p95_duration_seconds"]) if kpi_row["p95_duration_seconds"] is not None else None,
+      "avg_compression_pct": float(kpi_row["avg_compression_pct"]) if kpi_row["avg_compression_pct"] is not None else None,
+      "throughput_per_hour": round(completed / th_hours, 2) if th_hours else None,
+    }
+    return {
+      "available": True,
+      "window": window,
+      "kpis": kpis,
+      "timeseries": timeseries,
+      "nodes": nodes,
+    }
 
   def get_running_jobs(self):
     """Get all currently running jobs."""

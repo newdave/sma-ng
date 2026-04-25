@@ -161,9 +161,14 @@ class ConversionWorker(threading.Thread):
       profile = job.get("profile")
       if profile and "--profile" not in args and "-p" not in args:
         args = ["--profile", profile] + args
+      input_size = None
+      try:
+        input_size = os.path.getsize(path)
+      except OSError:
+        self.log.warning("Could not stat input file for job %d: %s" % (job_id, path))
       success = self._run_conversion(job_id, path, config_file, args)
       if success:
-        self.job_db.complete_job(job_id)
+        self.job_db.complete_job(job_id, input_size=input_size)
       else:
         # Don't overwrite a cancelled status set during conversion
         current = self.job_db.get_job(job_id)
