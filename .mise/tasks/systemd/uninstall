@@ -6,7 +6,7 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
-ALL_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
+ALL_HOSTS=$(lc deploy hosts "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 
 for host in $DEPLOY_HOSTS; do

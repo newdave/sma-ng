@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Start the daemon server (requires SMA_DAEMON_DB_URL or db_url in config/daemon.json)"
+#MISE description="Start the daemon server (requires SMA_DAEMON_DB_URL or db_url in config/sma-ng.yml)"
 #MISE aliases=["media:daemon:start"]
 set -euo pipefail
 

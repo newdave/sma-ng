@@ -3,14 +3,12 @@
 set -euo pipefail
 
 LOCAL="setup/.local.yml"
-CFG="python3 scripts/local-config.py"
-
 if [ ! -f "$LOCAL" ]; then
   echo "ERROR: $LOCAL not found. Copy setup/.local.yml.sample to setup/.local.yml and configure it." >&2
   exit 1
 fi
 
-DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+DEPLOY_HOSTS=$(python3 scripts/local-config.py "$LOCAL" deploy DEPLOY_HOSTS "")
 if [ -z "$DEPLOY_HOSTS" ]; then
   echo "ERROR: DEPLOY_HOSTS is not set in the [deploy] section of $LOCAL." >&2
   exit 1

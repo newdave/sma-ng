@@ -7,7 +7,7 @@ set -euo pipefail
 # lib.sh is sourced relative to this script's directory at runtime.
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
-DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
+DEPLOY_HOSTS=$(lc deploy hosts "")
 
 failed=""
 for host in $DEPLOY_HOSTS; do

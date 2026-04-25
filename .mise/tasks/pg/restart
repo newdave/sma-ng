@@ -8,7 +8,7 @@ set -euo pipefail
 # lib.sh is sourced relative to this script's directory at runtime.
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
-ALL_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
+ALL_HOSTS=$(lc deploy hosts "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 PG_HEALTH_TIMEOUT=${PG_HEALTH_TIMEOUT:-120}
 

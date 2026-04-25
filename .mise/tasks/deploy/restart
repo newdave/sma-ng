@@ -3,11 +3,13 @@
 #MISE depends=["deploy:mise"]
 set -euo pipefail
 
-LOCAL="setup/.local.yml"
-CFG="python3 scripts/local-config.py"
-DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
+# shellcheck disable=SC1091
+# lib.sh is sourced relative to this script's directory at runtime.
+source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
+DEPLOY_HOSTS=$(lc deploy hosts "")
 SHUTDOWN_TIMEOUT=${SHUTDOWN_TIMEOUT:-120}  # seconds to wait for graceful shutdown
+daemon_api_key=$(lc daemon api_key "")
 
 failed=""
 for host in $DEPLOY_HOSTS; do
@@ -15,7 +17,6 @@ for host in $DEPLOY_HOSTS; do
   port=$($cfg ssh_port 22)
   key=$($cfg ssh_key "")
   daemon_port=$($cfg daemon_port 8585)
-  daemon_api_key=$($cfg daemon_api_key "")
   remote_user=$($cfg user "$(whoami)")
   remote_address=$($cfg address "")
   ssh_target="${remote_user}@${remote_address}"

@@ -6,14 +6,14 @@ set -euo pipefail
 # shellcheck source=../../shared/deploy/lib.sh
 # shellcheck disable=SC1091
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
-ALL_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
+ALL_HOSTS=$(lc deploy hosts "")
 
 # If HOST is set (e.g. called as a recovery step from deploy:host), scope to
 # that host only so we don't re-probe or re-prompt for unrelated hosts.
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 
 # ── 1. ensure SSH key exists ────────────────────────────────────────────────
-key=$("$CFG" "$LOCAL" deploy ssh_key "")
+key=$(lc deploy ssh_key "")
 if [ -n "$key" ]; then
     keyfile=$(eval echo "$key")
     if [ ! -f "$keyfile" ]; then

@@ -8,7 +8,7 @@ set -euo pipefail
 # lib.sh is sourced relative to this script's directory at runtime.
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
-ALL_HOSTS=$("$CFG" "$LOCAL" deploy hosts "")
+ALL_HOSTS=$(lc deploy hosts "")
 DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
 
 # Resolve the directory this script lives in so lib/ helpers can be found
@@ -257,8 +257,8 @@ REMOTE
     stamp_ffmpeg_paths "$host" "$dir" "$ffmpeg_dir" "$use_sudo"
 
     # ── stamp daemon credentials into config/sma-ng.yml and config/daemon.env ──
-    daemon_api_key=$("$CFG" "$LOCAL" daemon api_key "")
-    daemon_ffmpeg_dir=$("$CFG" "$LOCAL" daemon ffmpeg_dir "")
+    daemon_api_key=$(lc daemon api_key "")
+    daemon_ffmpeg_dir=$(lc daemon ffmpeg_dir "")
     daemon_node_name="$host"
     [ -z "$daemon_ffmpeg_dir" ] && daemon_ffmpeg_dir="$ffmpeg_dir"
 
@@ -276,7 +276,7 @@ REMOTE
         daemon_db_name=$($cfg db_name "sma")
     else
         # External postgres: [daemon] db_url wins; fall back to building from components.
-        daemon_db_url=$("$CFG" "$LOCAL" daemon db_url "")
+        daemon_db_url=$(lc daemon db_url "")
         if [ -z "$daemon_db_url" ]; then
             _db_host=$($cfg db_host "")
             if [ -n "$_db_host" ]; then
@@ -296,13 +296,13 @@ REMOTE
     "$daemon_node_name" "$services_json" "$daemon_db_user" "$daemon_db_pw" "$daemon_db_name"
 
     # ── deploy post-process scripts ──────────────────────────────────────────
-    plex_token=$("$CFG" "$LOCAL" plex token "")
-    plex_username=$("$CFG" "$LOCAL" plex username "")
-    plex_servername=$("$CFG" "$LOCAL" plex servername "")
-    jellyfin_url=$("$CFG" "$LOCAL" jellyfin url "")
-    jellyfin_token=$("$CFG" "$LOCAL" jellyfin token "")
-    emby_url=$("$CFG" "$LOCAL" emby url "")
-    emby_apikey=$("$CFG" "$LOCAL" emby apikey "")
+    plex_token=$(lc plex token "")
+    plex_username=$(lc plex username "")
+    plex_servername=$(lc plex servername "")
+    jellyfin_url=$(lc jellyfin url "")
+    jellyfin_token=$(lc jellyfin token "")
+    emby_url=$(lc emby url "")
+    emby_apikey=$(lc emby apikey "")
     deploy_post_process "$host" "$dir" \
     "$plex_token" "$plex_username" "$plex_servername" \
     "$jellyfin_url" "$jellyfin_token" \
