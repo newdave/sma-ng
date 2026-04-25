@@ -2,6 +2,7 @@ import os
 import threading
 import time
 
+from resources.daemon.log_archiver import LogArchiver
 from resources.log import getLogger
 
 log = getLogger("DAEMON")
@@ -62,6 +63,19 @@ class HeartbeatThread(_StoppableThread):
           self.server.notify_workers()  # Wake workers to pick up requeued jobs
         if self.log_ttl_days > 0:
           self.job_db.cleanup_old_logs(self.log_ttl_days)
+        if self.job_db.is_distributed:
+          expiry_days = self.server.path_config_manager.node_expiry_days
+          if expiry_days > 0:
+            expired = self.job_db.expire_offline_nodes(expiry_days)
+            for nid in expired:
+              self.log.info("Expired offline node: %s" % nid)
+        if self.job_db.is_distributed:
+          archive_dir = self.server.path_config_manager.log_archive_dir
+          archive_after = self.server.path_config_manager.log_archive_after_days
+          delete_after = self.server.path_config_manager.log_delete_after_days
+          if archive_dir and archive_after > 0:
+            archiver = LogArchiver(archive_dir, archive_after, delete_after, self.log)
+            archiver.run(self.job_db)
       except Exception:
         self.log.exception("Heartbeat error")
       self._stop_event.wait(timeout=self.interval)
