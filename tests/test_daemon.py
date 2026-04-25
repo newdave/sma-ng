@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import resources.daemon.constants as _daemon_constants
 from daemon import (
   STATUS_COMPLETED,
   STATUS_FAILED,
@@ -117,11 +118,17 @@ class TestPathConfigManager:
 
 class TestNodeIdResolution:
   def test_resolve_node_id_prefers_sma_node_name_env(self, monkeypatch):
+    import resources.daemon.constants as _constants
+
+    monkeypatch.setattr(_constants, "_node_id_cache", None)
     monkeypatch.setenv("SMA_NODE_NAME", "sma-slave0")
     monkeypatch.setattr("socket.gethostname", lambda: "docker-hostname")
     assert resolve_node_id() == "sma-slave0"
 
   def test_resolve_node_id_falls_back_to_hostname(self, monkeypatch):
+    import resources.daemon.constants as _constants
+
+    monkeypatch.setattr(_constants, "_node_id_cache", None)
     monkeypatch.delenv("SMA_NODE_NAME", raising=False)
     monkeypatch.setattr("socket.gethostname", lambda: "docker-hostname")
     assert resolve_node_id() == "docker-hostname"
@@ -1338,27 +1345,24 @@ class TestPostgreSQLJobDatabase:
     result = db.heartbeat("node1", "host1", 4, datetime.now(UTC))
     assert result is None
 
-  def test_heartbeat_returns_command_and_clears_it(self):
-    from datetime import UTC, datetime
-    from unittest.mock import MagicMock, call
-
-    cur = MagicMock()
-    cur.fetchone.return_value = {"pending_command": "shutdown"}
-    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
-    result = db.heartbeat("node1", "host1", 4, datetime.now(UTC))
-    assert result == "shutdown"
-    # Should clear the command
-    clear_call = cur.execute.call_args_list[-1]
-    assert "NULL" in clear_call[0][0]
-
-  def test_heartbeat_no_row_returns_none(self):
+  def test_heartbeat_returns_none(self):
+    """heartbeat() always returns None; commands are dispatched via node_commands table."""
     from datetime import UTC, datetime
     from unittest.mock import MagicMock
 
     cur = MagicMock()
-    cur.fetchone.return_value = None
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
-    result = db.heartbeat("node1", "host1", 2, datetime.now(UTC))
+    result = db.heartbeat("node1", "host1", 4, datetime.now(UTC))
+    assert result is None
+
+  def test_heartbeat_accepts_version_and_hwaccel(self):
+    """heartbeat() accepts version and hwaccel keyword arguments without error."""
+    from datetime import UTC, datetime
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    result = db.heartbeat("node1", "host1", 4, datetime.now(UTC), version="1.6.33", hwaccel="qsv")
     assert result is None
 
   # ------------------------------------------------------------------
@@ -1482,7 +1486,7 @@ class TestPostgreSQLJobDatabase:
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
     db.send_node_command("n1", "shutdown", requested_by="ops-user")
     sql, params = cur.execute.call_args[0]
-    assert "command_requested_by" in sql
+    assert "issued_by" in sql
     assert "ops-user" in params
 
   def test_send_node_command_broadcasts_when_node_id_is_none(self):
