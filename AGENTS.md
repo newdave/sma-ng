@@ -439,7 +439,7 @@ Plex refresh behavior is configured under `[Plex]`. Disable Plex auto-scanning t
 
 ## Deployment
 
-Remote deployment is built around `mise` tasks and `setup/.local.ini`.
+Remote deployment is built around `mise` tasks and `setup/.local.yml`.
 
 Key tasks:
 

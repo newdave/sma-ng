@@ -1114,32 +1114,32 @@ The deploy tasks push code to remote hosts via SSH/rsync and manage the systemd 
 
 #### Initial setup
 
-1. Copy `setup/.local.ini.sample` to `setup/.local.ini` and configure it (this file is gitignored):
+1. Copy `setup/.local.yml.sample` to `setup/.local.yml` and configure it (this file is gitignored):
 
-```ini
-[deploy]
-DEPLOY_HOSTS = user@server1.example.com user@server2.example.com
-DEPLOY_DIR   = ~/sma
-SSH_KEY      = ~/.ssh/id_ed25519_sma
-FFMPEG_DIR   = /usr/local/bin
+```yaml
+deploy:
+  DEPLOY_HOSTS: "user@server1.example.com user@server2.example.com"
+  DEPLOY_DIR: ~/sma
+  SSH_KEY: ~/.ssh/id_ed25519_sma
+  FFMPEG_DIR: /usr/local/bin
 
-[daemon]
-api_key = your_secret_key
-db_url  =                          # leave blank for SQLite
+daemon:
+  api_key: your_secret_key
+  # db_url:   # leave blank for SQLite
 
-[Sonarr]
-host        = sonarr.example.com
-port        = 443
-ssl         = true
-apikey      = abc123...
-path  = /mnt/media/TV
-profile = rq
-
-[Radarr]
-host        = radarr.example.com
-apikey      = def456...
-path  = /mnt/media/Movies
-profile = rq
+services:
+  Sonarr:
+    host: sonarr.example.com
+    port: 443
+    ssl: true
+    apikey: abc123...
+    path: /mnt/media/TV
+    profile: rq
+  Radarr:
+    host: radarr.example.com
+    apikey: def456...
+    path: /mnt/media/Movies
+    profile: rq
 ```
 
 1. Run first-time setup (generates SSH key, installs apt dependencies, creates deploy directory, installs systemd service):
@@ -1184,7 +1184,7 @@ This task manages config files on remote hosts without overwriting customization
 
 - **Creates missing configs** from samples (auto-detects GPU for `sma-ng.yml`)
 - **Merges new keys** from `sma-ng.yml.sample` into existing YAML configs — new settings added to the sample are propagated without touching existing values
-- **Stamps service credentials** from `[Sonarr]`, `[Radarr]`, `[Plex]` etc. sections in `.local.ini` into `sma-ng.yml`
+- **Stamps service credentials** from `services.Sonarr`, `services.Radarr`, `services.Plex` etc. in `.local.yml` into `sma-ng.yml`
 - **Updates `Daemon:` section in `sma-ng.yml`** with `api_key`, `db_url`, and `path_configs` entries built from `path` + `profile` fields in each service section
 - **Updates `daemon.env`** with `SMA_DAEMON_*` environment variables
 - **Stamps ffmpeg/ffprobe paths** from `FFMPEG_DIR` into YAML configs
@@ -1192,13 +1192,14 @@ This task manages config files on remote hosts without overwriting customization
 
 #### Per-host overrides
 
-Any key from `[deploy]` can be overridden for a specific host:
+Any key from `deploy:` can be overridden for a specific host under `hosts:`:
 
-```ini
-[user@server1.example.com]
-DEPLOY_DIR  = /opt/sma
-SSH_PORT    = 2222
-FFMPEG_DIR  = /opt/ffmpeg/bin
+```yaml
+hosts:
+  "user@server1.example.com":
+    DEPLOY_DIR: /opt/sma
+    SSH_PORT: "2222"
+    FFMPEG_DIR: /opt/ffmpeg/bin
 ```
 
 #### Restarting without deploying
@@ -1221,7 +1222,7 @@ Runs the specified mise task on each host without syncing code first.
 
 | Task             | Description                                                                |
 | ---------------- | -------------------------------------------------------------------------- |
-| `deploy:check`   | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                 |
+| `deploy:check`   | Verify `setup/.local.yml` exists and `DEPLOY_HOSTS` is set                 |
 | `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, systemd install       |
 | `remote:run`     | Sync code + install deps + reload systemd on all hosts                     |
 | `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials            |
