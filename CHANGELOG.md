@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.39](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.38...sma-ng-v1.6.39) (2026-04-25)
+
+
+### Features
+
+* **admin-ui:** add drain/pause/resume buttons and cluster log viewer ([6623898](https://github.com/newdave/sma-ng/commit/662389889f8916fd1cd299bef1ef07d2d23472e7))
+
 ## [1.6.38](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.37...sma-ng-v1.6.38) (2026-04-25)
 
 
