@@ -468,3 +468,8 @@ daemon:
     # - path: /mnt/unionfs/Media/Special
     #   config: /config/autoProcess.special.yaml
   scan_paths: []
+  # node_id is auto-generated as a UUID on first start and persisted here.
+  # Override only if you need a human-readable cluster identity.
+  node_id: null
+  # Number of days to retain cluster log entries in PostgreSQL. 0 disables cleanup.
+  log_ttl_days: 30
