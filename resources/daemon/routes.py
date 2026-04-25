@@ -66,6 +66,7 @@ def _get_routes():
     "/scan": lambda handler, path, query: handler._get_scan(query),
     "/browse": lambda handler, path, query: handler._get_browse(query),
     "/logs": lambda handler, path, query: handler._get_logs(),
+    "/cluster/logs": lambda handler, path, query: handler._get_cluster_logs(path, query),
     "/favicon.png": lambda handler, path, query: handler._get_favicon(path, query),
   }
 

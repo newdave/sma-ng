@@ -408,6 +408,36 @@ class WebhookHandler(BaseHTTPRequestHandler):
     unscanned = self.server.job_db.filter_unscanned(paths)
     self.send_json_response(200, {"unscanned": unscanned, "total": len(paths), "already_scanned": len(paths) - len(unscanned)})
 
+  def _get_cluster_logs(self, _path, query):
+    """Return cluster log entries from the database.
+
+    Query params:
+      node_id=<str>   filter to a specific node (optional)
+      level=<str>     filter to a specific log level (optional)
+      limit=<int>     max entries to return (default 100, max 500)
+      offset=<int>    pagination offset (default 0)
+    """
+    if not self.server.job_db.is_distributed:
+      self.send_json_response(503, {"error": "Cluster logs are only available in distributed (PostgreSQL) mode"})
+      return
+
+    node_id = query.get("node_id", [None])[0] or None
+    level = query.get("level", [None])[0] or None
+    limit = min(int(query.get("limit", [100])[0]), 500)
+    offset = int(query.get("offset", [0])[0])
+
+    logs = self.server.job_db.get_logs(node_id=node_id, level=level, limit=limit, offset=offset)
+
+    serialized = []
+    for entry in logs:
+      row = dict(entry)
+      ts = row.get("timestamp")
+      if ts is not None and hasattr(ts, "isoformat"):
+        row["timestamp"] = ts.isoformat()
+      serialized.append(row)
+
+    self.send_json_response(200, {"logs": serialized, "total": len(serialized)})
+
   def do_HEAD(self):
     """Respond to HEAD requests (used by browsers and health-check tools)."""
     self.send_response(200)
@@ -542,7 +572,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       )
       return
 
-    if action in {"restart", "shutdown"}:
+    if action in {"restart", "shutdown", "drain", "pause", "resume"}:
       targeted = self.server.job_db.send_node_command(node_id, action, requested_by=actor)
       if not targeted:
         self.send_json_response(404, {"error": "Node not found", "node": node_id})
