@@ -9,72 +9,73 @@
 # ── deploy — project-wide defaults and host list ─────────────────────────────
 
 deploy:
-  # Space-separated list of SSH targets (user@host or host).
-  # Hosts are synced in sequence; on-host make calls iterate the same list.
-  DEPLOY_HOSTS: "user@host1 user@host2"
+  # List of host names to deploy to (must match keys under hosts:).
+  # Hosts are synced in sequence; on-host mise tasks iterate the same list.
+  hosts:
+    - user@host1
+    - user@host2
 
-  # Use sudo on the remote host to run make targets.
-  DEPLOY_USE_SUDO: "false"
+  # Use sudo on the remote host to run docker and system commands.
+  use_sudo: false
 
   # Remote directory to sync into.
-  DEPLOY_DIR: /opt/sma
+  deploy_dir: /opt/sma
 
   # SSH port to use for all hosts, unless overridden in a host-specific section.
-  SSH_PORT: "22"
+  ssh_port: 22
 
-  # SSH Key to use for all hosts, unless overridden in a host-specific section.
-  # SSH_KEY: ~/.ssh/id_ed25519_sma
+  # SSH key to use for all hosts, unless overridden in a host-specific section.
+  # ssh_key: ~/.ssh/id_ed25519_sma
 
-  # make target(s) to run on the host after each sync.
-  REMOTE_MAKE: install
-
-  # Directory containing the ffmpeg and ffprobe binaries on the remote host.
-  # FFMPEG_DIR: /usr/local/bin
+  # Default ffmpeg/ffprobe directory on remote hosts (overridden per-host if needed).
+  # ffmpeg_dir: /usr/local/bin
 
   # Database connection details for the daemon (for external PostgreSQL).
-  # SMA_DAEMON_DB_HOST: "db.example.com"
-  # SMA_DAEMON_DB_PORT: "5432"
-  # SMA_DAEMON_DB_USER: sma
-  # SMA_DAEMON_DB_PASSWORD: ""
-  # SMA_DAEMON_DB_NAME: sma
+  # db_host: "db.example.com"
+  # db_port: 5432
+  # db_user: sma
+  # db_password: ""
+  # db_name: sma
 
   # Docker profile to use (e.g. intel, nvenc, intel-pg).
-  # DOCKER_PROFILE: intel
+  # docker_profile: intel
 
-  # Directory containing docker-compose.yml (defaults to $DEPLOY_DIR/docker).
-  # DOCKER_COMPOSE_DIR: /opt/sma/docker
+  # Directory containing docker-compose.yml (defaults to deploy_dir/docker).
+  # docker_compose_dir: /opt/sma/docker
 
   # GitHub user for GHCR image access (auto-detected from 'gh' CLI if omitted).
-  # GH_USER: myuser
+  # gh_user: myuser
 
 # ── per-host overrides ────────────────────────────────────────────────────────
 # Any key from deploy can be overridden for a specific host by adding an entry
-# under hosts whose name matches the SSH target exactly.
+# under hosts: whose name matches an entry in deploy.hosts exactly.
 
 # hosts:
 #   "user@host1":
-#     FFMPEG_DIR: /usr/local/bin
-#     DOCKER_PROFILE: intel-pg
-#     SMA_NODE_NAME: sma-master
+#     address: 192.168.1.10
+#     user: deploy
+#     ffmpeg_dir: /usr/local/bin
+#     docker_profile: intel-pg
 #
 #   "user@host2":
-#     FFMPEG_DIR: /usr/local/bin
-#     DOCKER_PROFILE: intel
-#     SMA_NODE_NAME: sma-slave0
+#     address: 192.168.1.11
+#     user: deploy
+#     ffmpeg_dir: /usr/local/bin
+#     docker_profile: intel
 
 # ── daemon configuration ──────────────────────────────────────────────────────
-# Keys here mirror sma-ng.yml Daemon section fields and are stamped into
+# Keys here mirror sma-ng.yml daemon section fields and are stamped into
 # config/sma-ng.yml by `mise run config:roll`.
 
 daemon:
   # API key for protecting daemon endpoints (SMA_DAEMON_API_KEY).
   # api_key: ""
 
-  # PostgreSQL connection URL — derived automatically from SMA_DAEMON_DB_* if not set.
+  # PostgreSQL connection URL — derived automatically from deploy db_* keys if not set.
   # db_url: ""
 
   # Directory containing ffmpeg/ffprobe binaries (SMA_DAEMON_FFMPEG_DIR).
-  # Overrides the deploy FFMPEG_DIR value if set.
+  # Overrides the deploy ffmpeg_dir value if set.
   # ffmpeg_dir: ""
 
 # ── service credentials ───────────────────────────────────────────────────────
@@ -82,10 +83,10 @@ daemon:
 # `mise run config:roll` stamps these into every config file on remote hosts.
 
 # services:
-#   Converter:
+#   converter:
 #     recycle-bin: /srv/recycle
 #
-#   Sonarr:
+#   sonarr:
 #     host: sonarr.example.com
 #     port: 8989
 #     ssl: false
@@ -94,7 +95,7 @@ daemon:
 #     path: /media/tv
 #     config_file: config/autoProcess.rq.ini
 #
-#   Radarr:
+#   radarr:
 #     host: radarr.example.com
 #     port: 7878
 #     ssl: false
@@ -103,7 +104,7 @@ daemon:
 #     path: /media/movies
 #     config_file: config/autoProcess.rq.ini
 #
-#   Plex:
+#   plex:
 #     host: plex.example.com
 #     port: 32400
 #     ssl: false
@@ -111,11 +112,11 @@ daemon:
 #     username: ""
 #     servername: ""
 #
-#   Jellyfin:
+#   jellyfin:
 #     url: ""
 #     token: ""
 #
-#   Emby:
+#   emby:
 #     url: ""
 #     apikey: ""
 
