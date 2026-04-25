@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.46](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.45...sma-ng-v1.6.46) (2026-04-25)
+
+
+### Documentation
+
+* correct .local.yml.sample host labels and mark address/user as required ([1678c6f](https://github.com/newdave/sma-ng/commit/1678c6feeded56526edd3f67c5eb0bb4b97bc193))
+
 ## [1.6.45](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.44...sma-ng-v1.6.45) (2026-04-25)
 
 
