@@ -12,7 +12,17 @@ STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 
+_node_id_cache: str | None = None
 
-def resolve_node_id():
+
+def set_node_id_cache(value: str) -> None:
+  """Store the resolved node identity so resolve_node_id() returns it without re-deriving."""
+  global _node_id_cache
+  _node_id_cache = value
+
+
+def resolve_node_id() -> str:
   """Return the stable cluster node identifier for this daemon instance."""
+  if _node_id_cache:
+    return _node_id_cache
   return os.environ.get("SMA_NODE_NAME", "").strip() or socket.gethostname()
