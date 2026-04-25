@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-LOCAL="setup/.local.ini"
-CFG="scripts/local-config.sh"
+LOCAL="setup/.local.yml"
+CFG="python3 scripts/local-config.py"
 MISSING_PREREQ_PATTERN='(command not found|No such file or directory|mise.*not found|python3.*not found|python.*not found|rsync.*not found|venv.*not found)'
 
 mk_ssh_opts() {

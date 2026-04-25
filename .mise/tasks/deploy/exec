@@ -54,7 +54,7 @@ detect_remote_gpu() {
 REMOTE
 }
 
-# Build a --force-keys argument from [managed_keys] in .local.ini.
+# Build a --force-keys argument from managed_keys in .local.yml.
 build_force_keys() {
     python3 "$lib/build_force_keys.py" "$LOCAL"
 }

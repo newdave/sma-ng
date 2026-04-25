@@ -1,0 +1,128 @@
+# setup/.local.yml.sample — per-machine deployment configuration template
+#
+# Copy this file to setup/.local.yml and customise it.
+# setup/.local.yml is gitignored and never committed.
+#
+# Resolution order for each key:
+#   host-specific section  >  deploy defaults  >  built-in default
+
+# ── deploy — project-wide defaults and host list ─────────────────────────────
+
+deploy:
+  # Space-separated list of SSH targets (user@host or host).
+  # Hosts are synced in sequence; on-host make calls iterate the same list.
+  DEPLOY_HOSTS: "user@host1 user@host2"
+
+  # Use sudo on the remote host to run make targets.
+  DEPLOY_USE_SUDO: "false"
+
+  # Remote directory to sync into.
+  DEPLOY_DIR: /opt/sma
+
+  # SSH port to use for all hosts, unless overridden in a host-specific section.
+  SSH_PORT: "22"
+
+  # SSH Key to use for all hosts, unless overridden in a host-specific section.
+  # SSH_KEY: ~/.ssh/id_ed25519_sma
+
+  # make target(s) to run on the host after each sync.
+  REMOTE_MAKE: install
+
+  # Directory containing the ffmpeg and ffprobe binaries on the remote host.
+  # FFMPEG_DIR: /usr/local/bin
+
+  # Database connection details for the daemon (for external PostgreSQL).
+  # SMA_DAEMON_DB_HOST: "db.example.com"
+  # SMA_DAEMON_DB_PORT: "5432"
+  # SMA_DAEMON_DB_USER: sma
+  # SMA_DAEMON_DB_PASSWORD: ""
+  # SMA_DAEMON_DB_NAME: sma
+
+  # Docker profile to use (e.g. intel, nvenc, intel-pg).
+  # DOCKER_PROFILE: intel
+
+  # Directory containing docker-compose.yml (defaults to $DEPLOY_DIR/docker).
+  # DOCKER_COMPOSE_DIR: /opt/sma/docker
+
+  # GitHub user for GHCR image access (auto-detected from 'gh' CLI if omitted).
+  # GH_USER: myuser
+
+# ── per-host overrides ────────────────────────────────────────────────────────
+# Any key from deploy can be overridden for a specific host by adding an entry
+# under hosts whose name matches the SSH target exactly.
+
+# hosts:
+#   "user@host1":
+#     FFMPEG_DIR: /usr/local/bin
+#     DOCKER_PROFILE: intel-pg
+#     SMA_NODE_NAME: sma-master
+#
+#   "user@host2":
+#     FFMPEG_DIR: /usr/local/bin
+#     DOCKER_PROFILE: intel
+#     SMA_NODE_NAME: sma-slave0
+
+# ── daemon configuration ──────────────────────────────────────────────────────
+# Keys here mirror sma-ng.yml Daemon section fields and are stamped into
+# config/sma-ng.yml by `mise run config:roll`.
+
+daemon:
+  # API key for protecting daemon endpoints (SMA_DAEMON_API_KEY).
+  # api_key: ""
+
+  # PostgreSQL connection URL — derived automatically from SMA_DAEMON_DB_* if not set.
+  # db_url: ""
+
+  # Directory containing ffmpeg/ffprobe binaries (SMA_DAEMON_FFMPEG_DIR).
+  # Overrides the deploy FFMPEG_DIR value if set.
+  # ffmpeg_dir: ""
+
+# ── service credentials ───────────────────────────────────────────────────────
+# Section names mirror autoProcess.ini / sma-ng.yml service sections exactly.
+# `mise run config:roll` stamps these into every config file on remote hosts.
+
+# services:
+#   Converter:
+#     recycle-bin: /srv/recycle
+#
+#   Sonarr:
+#     host: sonarr.example.com
+#     port: 8989
+#     ssl: false
+#     apikey: ""
+#     webroot: ""
+#     path: /media/tv
+#     config_file: config/autoProcess.rq.ini
+#
+#   Radarr:
+#     host: radarr.example.com
+#     port: 7878
+#     ssl: false
+#     apikey: ""
+#     webroot: ""
+#     path: /media/movies
+#     config_file: config/autoProcess.rq.ini
+#
+#   Plex:
+#     host: plex.example.com
+#     port: 32400
+#     ssl: false
+#     token: ""
+#     username: ""
+#     servername: ""
+#
+#   Jellyfin:
+#     url: ""
+#     token: ""
+#
+#   Emby:
+#     url: ""
+#     apikey: ""
+
+# ── managed_keys — force-overwrite specific keys during config:roll ───────────
+# List which config keys should always be overwritten from the sample during
+# `mise run config:roll`, even when they already exist in the remote config.
+# Format: SectionName: "key1, key2, ..."
+
+# managed_keys:
+#   Video: "gpu"

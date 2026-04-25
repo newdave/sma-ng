@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-scripts/populate-service-configs.py <local-ini> <sample-ini> [--gpu <type>]
+scripts/populate-service-configs.py <local-yml> <sample-ini> [--gpu <type>]
 
-For each service section in <local-ini> that has a config_file key:
+For each service section in <local-yml> that has a config_file key:
   - Create <config_file> from <sample-ini> if it does not already exist.
   - Stamp the service's credentials (host, port, ssl, apikey, webroot) into
     the [Sonarr] or [Radarr] section of that config file.
@@ -11,7 +11,7 @@ For each service section in <local-ini> that has a config_file key:
 Service sections recognised: Sonarr* and Radarr* (case-insensitive prefix).
 Plex credentials are not written to autoProcess.ini files.
 
-Recycle-bin handling: if a [Converter] recycle-bin is set and the service
+Recycle-bin handling: if a Converter recycle-bin is set and the service
 section is known, the per-service recycle-bin is set to <base>/<ServiceName>.
 """
 
@@ -19,27 +19,26 @@ import argparse
 import os
 import re
 
-# Keys that map directly from a service section in .local.ini to the
+try:
+  from ruamel.yaml import YAML as _RuamelYAML
+
+  def _load(path):
+    y = _RuamelYAML()
+    with open(path) as f:
+      return y.load(f) or {}
+
+except ImportError:
+  import yaml
+
+  def _load(path):
+    with open(path) as f:
+      return yaml.safe_load(f) or {}
+
+
+# Keys that map directly from a service section in .local.yml to the
 # corresponding INI section inside each autoProcess file.
 # The INI section for Sonarr* is always "Sonarr"; for Radarr* it is "Radarr".
 SERVICE_CREDENTIAL_KEYS = ("host", "port", "ssl", "apikey", "webroot")
-
-
-def parse_ini(path):
-  """Return {section: {key: value}} preserving case."""
-  sections = {}
-  cur = None
-  with open(path) as f:
-    for line in f:
-      s = line.strip()
-      m = re.match(r"^\[(.+)\]", s)
-      if m:
-        cur = m.group(1)
-        sections.setdefault(cur, {})
-      elif cur and re.match(r"^[^#;].*=", s):
-        k, _, v = s.partition("=")
-        sections[cur][k.strip()] = v.strip()
-  return sections
 
 
 def write_ini_key(lines, section, key, value):
@@ -118,27 +117,30 @@ def stamp_credentials(ini_path, section_name, credentials, recycle_base, service
 
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
-  parser.add_argument("local_ini", help="Path to setup/.local.ini")
+  parser.add_argument("local_config", help="Path to setup/.local.yml")
   parser.add_argument("sample_ini", help="Path to setup/autoProcess.ini.sample")
   parser.add_argument("--gpu", default="", help="GPU type to stamp into new configs (nvenc, qsv, ...)")
   args = parser.parse_args()
 
-  if not os.path.exists(args.local_ini):
-    return  # nothing to do without a local.ini
+  if not os.path.exists(args.local_config):
+    return  # nothing to do without a local config
 
-  local_secs = parse_ini(args.local_ini)
-
-  recycle_base = local_secs.get("Converter", {}).get("recycle-bin", "").strip()
+  data = _load(args.local_config)
+  local_secs = data.get("services") or {}
+  recycle_base = str(local_secs.get("Converter", {}).get("recycle-bin", "") or "").strip()
 
   for sec_name, keys in local_secs.items():
     # Only Sonarr* and Radarr* service sections are stamped into autoProcess files.
-    # Plex/Emby/Jellyfin credentials go into daemon.json / post_process/ scripts.
+    # Plex/Emby/Jellyfin credentials go into sma-ng.yml / post_process/ scripts.
     is_sonarr = re.match(r"^Sonarr", sec_name, re.IGNORECASE)
     is_radarr = re.match(r"^Radarr", sec_name, re.IGNORECASE)
     if not is_sonarr and not is_radarr:
       continue
 
-    config_file = keys.get("config_file", "").strip()
+    if not isinstance(keys, dict):
+      continue
+
+    config_file = str(keys.get("config_file", "") or "").strip()
     if not config_file:
       continue
 
@@ -159,7 +161,7 @@ def main():
     # Collect credential keys to stamp
     credentials = {}
     for k in SERVICE_CREDENTIAL_KEYS:
-      v = keys.get(k, "").strip()
+      v = str(keys.get(k, "") or "").strip()
       if v:
         credentials[k] = v
 

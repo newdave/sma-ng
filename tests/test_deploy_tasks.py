@@ -37,17 +37,18 @@ class TestDeployDockerUpgradeTask:
     assert "SSH_OPTS" not in text
 
   def test_init_helpers_return_success_for_normal_host_context(self, tmp_path):
-    local_ini = tmp_path / ".local.ini"
-    local_ini.write_text(
+    local_yml = tmp_path / ".local.yml"
+    local_yml.write_text(
       textwrap.dedent(
         """
-                [deploy]
-                DEPLOY_DIR = /opt/sma
-                SSH_PORT = 22
-                DOCKER_PROFILE = intel
+                deploy:
+                  DEPLOY_DIR: /opt/sma
+                  SSH_PORT: "22"
+                  DOCKER_PROFILE: intel
 
-                [test@example]
-                DOCKER_COMPOSE_DIR = /opt/sma/docker
+                hosts:
+                  "test@example":
+                    DOCKER_COMPOSE_DIR: /opt/sma/docker
                 """
       ).strip()
       + "\n"
@@ -57,8 +58,9 @@ class TestDeployDockerUpgradeTask:
       f"""
             set -euo pipefail
             cd {PROJECT_ROOT!r}
+            source venv/bin/activate
             source .mise/shared/deploy/lib.sh
-            LOCAL={str(local_ini)!r}
+            LOCAL={str(local_yml)!r}
             init_host_context test@example
             init_docker_host_context test@example
             printf 'dir=%s\ncompose_dir=%s\ncompose_cmd=%s\n' "$dir" "$compose_dir" "$compose_cmd"

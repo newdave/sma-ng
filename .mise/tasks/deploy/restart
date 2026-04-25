@@ -3,8 +3,8 @@
 #MISE depends=["deploy:mise"]
 set -euo pipefail
 
-LOCAL="setup/.local.ini"
-CFG="scripts/local-config.sh"
+LOCAL="setup/.local.yml"
+CFG="python3 scripts/local-config.py"
 DEPLOY_HOSTS=$("$CFG" "$LOCAL" deploy DEPLOY_HOSTS "")
 
 SHUTDOWN_TIMEOUT=${SHUTDOWN_TIMEOUT:-120}  # seconds to wait for graceful shutdown
