@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.47](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.46...sma-ng-v1.6.47) (2026-04-25)
+
+
+### Features
+
+* **cluster:** display node name from SMA_NODE_NAME instead of UUID in admin UI ([b26896e](https://github.com/newdave/sma-ng/commit/b26896e1b5f52d629c86b47c94253a7c03bb278b))
+
 ## [1.6.46](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.45...sma-ng-v1.6.46) (2026-04-25)
 
 
