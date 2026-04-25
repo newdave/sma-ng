@@ -20,6 +20,7 @@ Usage:
 """
 
 import argparse
+import logging
 import os
 import signal
 import sys
@@ -205,6 +206,17 @@ def main():
     sys.exit(1)
   job_db = PostgreSQLJobDatabase(db_url, logger=log)
   db_label = "PostgreSQL: %s" % db_url
+
+  if job_db.is_distributed:
+    from resources.daemon.db_log_handler import PostgreSQLLogHandler
+
+    _db_log_handler = PostgreSQLLogHandler(
+      job_db,
+      path_config_manager.node_id,
+      batch_size=50,
+    )
+    _db_log_handler.setLevel(logging.DEBUG)
+    logging.getLogger("DAEMON").addHandler(_db_log_handler)
 
   log.info("Node: %s" % resolve_node_id())
   log.info("Database: %s" % db_label)
