@@ -7,6 +7,13 @@ import sys
 from datetime import datetime
 from http.server import ThreadingHTTPServer
 
+try:
+  import importlib.metadata as _importlib_metadata
+
+  _VERSION = _importlib_metadata.version("sma-ng")
+except Exception:
+  _VERSION = "unknown"
+
 from resources.daemon.constants import resolve_node_id
 from resources.daemon.threads import HeartbeatThread, RecycleBinCleanerThread, ScannerThread
 from resources.daemon.worker import WorkerPool
@@ -142,6 +149,9 @@ class DaemonServer(ThreadingHTTPServer):
       stale_seconds=stale_seconds,
       logger=logger,
       started_at=self.started_at,
+      version=_VERSION,
+      hwaccel=self.detected_hwaccel,
+      log_ttl_days=self.path_config_manager.log_ttl_days,
     )
     self.heartbeat_thread.start()
     logger.debug("Started heartbeat thread (interval: %ds, stale after: %ds)" % (heartbeat_interval, stale_seconds))
