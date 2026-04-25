@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.44](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.43...sma-ng-v1.6.44) (2026-04-25)
+
+
+### Bug Fixes
+
+* **deploy:** use hosts key in deploy:check to match named-host .local.yml schema ([d47700b](https://github.com/newdave/sma-ng/commit/d47700b00486778019e3788e83a58471fd2b532e))
+
 ## [1.6.43](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.42...sma-ng-v1.6.43) (2026-04-25)
 
 
