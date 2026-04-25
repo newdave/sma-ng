@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.43](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.42...sma-ng-v1.6.43) (2026-04-25)
+
+
+### Bug Fixes
+
+* **deploy:** add lc() helper to lib.sh and fix broken \"\$CFG\" quoting across all mise tasks ([037ec68](https://github.com/newdave/sma-ng/commit/037ec6880ec383785887b0dcc9007748a8e6e63a))
+
+
+### Documentation
+
+* sync .local.yml.sample with named-host schema ([bbe2bcf](https://github.com/newdave/sma-ng/commit/bbe2bcfe8335a5c8e111f7be754a5aa4ded6e82b))
+
 ## [1.6.42](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.41...sma-ng-v1.6.42) (2026-04-25)
 
 
