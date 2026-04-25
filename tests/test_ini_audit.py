@@ -88,13 +88,13 @@ class TestAuditIni:
     missing = [f for f in findings if f.key == "ffprobe"]
     assert len(missing) == 1
     assert missing[0].level == "warning"
-    assert missing[0].section == "Converter"
+    assert missing[0].section == "converter"
 
   def test_yaml_missing_key_as_warning(self, tmp_path):
     s = tmp_path / "sample.yaml"
     l = tmp_path / "live.yaml"
-    _write(s, "Converter:\n  ffmpeg: ffmpeg\n  ffprobe: ffprobe\n")
-    _write(l, "Converter:\n  ffmpeg: ffmpeg\n")
+    _write(s, "converter:\n  ffmpeg: ffmpeg\n  ffprobe: ffprobe\n")
+    _write(l, "converter:\n  ffmpeg: ffmpeg\n")
     findings = audit_ini(str(s), str(l))
     missing = [f for f in findings if f.key == "ffprobe"]
     assert len(missing) == 1
@@ -128,7 +128,7 @@ class TestAuditIni:
     _write(s, SAMPLE_INI)
     _write(l, LIVE_MISSING_SECTION)
     findings = audit_ini(str(s), str(l))
-    missing_secs = [f for f in findings if f.section == "Video" and f.key == ""]
+    missing_secs = [f for f in findings if f.section == "video" and f.key == ""]
     assert len(missing_secs) == 1
     assert missing_secs[0].level == "warning"
 
@@ -240,9 +240,9 @@ class TestAuditCrossFile:
 
   def test_yaml_daemon_cross_file(self, tmp_path):
     daemon = tmp_path / "sma-ng.yml"
-    daemon.write_text("Daemon:\n  ffmpeg_dir: /opt/ffmpeg\n")
+    daemon.write_text("daemon:\n  ffmpeg_dir: /opt/ffmpeg\n")
     config = tmp_path / "live.yaml"
-    config.write_text("Converter:\n  ffmpeg: /usr/bin/ffmpeg\n  ffprobe: ffprobe\n")
+    config.write_text("converter:\n  ffmpeg: /usr/bin/ffmpeg\n  ffprobe: ffprobe\n")
     findings = audit_cross_file(str(daemon), [str(config)])
     conflicts = [f for f in findings if f.key == "ffmpeg"]
     assert len(conflicts) == 1
