@@ -41,15 +41,19 @@ class TestDeployDockerUpgradeTask:
     local_yml.write_text(
       textwrap.dedent(
         """
-                deploy:
-                  DEPLOY_DIR: /opt/sma
-                  SSH_PORT: "22"
-                  DOCKER_PROFILE: intel
+        deploy:
+          hosts:
+            - sma-node1
+          deploy_dir: /opt/sma
+          ssh_port: 22
+          docker_profile: intel
 
-                hosts:
-                  "test@example":
-                    DOCKER_COMPOSE_DIR: /opt/sma/docker
-                """
+        hosts:
+          sma-node1:
+            address: 192.168.1.10
+            user: deploy
+            docker_compose_dir: /opt/sma/docker
+        """
       ).strip()
       + "\n"
     )
@@ -61,8 +65,8 @@ class TestDeployDockerUpgradeTask:
             source venv/bin/activate
             source .mise/shared/deploy/lib.sh
             LOCAL={str(local_yml)!r}
-            init_host_context test@example
-            init_docker_host_context test@example
+            init_host_context sma-node1
+            init_docker_host_context sma-node1
             printf 'dir=%s\ncompose_dir=%s\ncompose_cmd=%s\n' "$dir" "$compose_dir" "$compose_cmd"
             """
     )
@@ -569,7 +573,27 @@ class TestDeployMiseTask:
     text = _read(".mise/tasks/deploy/mise")
     assert '#MISE depends=["deploy:check"]' in text
     assert "mkdir -p $dir/.mise" in text
-    assert '.mise/ "$host:$dir/.mise/"' in text
+    assert '.mise/ "$ssh_target:$dir/.mise/"' in text
+
+  def test_deploy_mise_does_not_use_quoted_cfg_variable(self):
+    text = _read(".mise/tasks/deploy/mise")
+    assert '"$CFG"' not in text
+
+  def test_deploy_restart_sources_shared_lib(self):
+    text = _read(".mise/tasks/deploy/restart")
+    assert 'source "$(dirname "$0")/../../shared/deploy/lib.sh"' in text
+
+  def test_no_task_uses_quoted_cfg_variable(self):
+    task_root = os.path.join(PROJECT_ROOT, ".mise/tasks")
+    offenders = []
+    for dirpath, _, filenames in os.walk(task_root):
+      for filename in filenames:
+        path = os.path.join(dirpath, filename)
+        rel_path = os.path.relpath(path, PROJECT_ROOT)
+        text = _read(rel_path)
+        if '"$CFG"' in text:
+          offenders.append(rel_path)
+    assert offenders == [], f"Tasks still use quoted $CFG: {offenders}"
 
   def test_remote_deploy_tasks_depend_on_deploy_mise(self):
     for rel_path in (
@@ -587,3 +611,262 @@ class TestDeployMiseTask:
     ):
       text = _read(rel_path)
       assert '#MISE depends=["deploy:mise"]' in text, rel_path
+
+
+# ── Shared test fixture ───────────────────────────────────────────────────────
+
+FIXTURE_LOCAL_YML = (
+  textwrap.dedent(
+    """
+  deploy:
+    hosts:
+      - sma-node1
+      - sma-node2
+    deploy_dir: /opt/sma
+    ssh_port: 22
+    docker_profile: intel
+    ffmpeg_dir: /usr/bin
+
+  hosts:
+    sma-node1:
+      address: 192.168.1.10
+      user: deploy
+      docker_profile: intel-pg
+      ffmpeg_dir: /usr/local/bin
+    sma-node2:
+      address: 192.168.1.11
+      user: deploy
+
+  daemon:
+    api_key: test-api-key
+
+  services:
+    sonarr:
+      host: sonarr.example.com
+      apikey: test-sonarr-key
+  """
+  ).strip()
+  + "\n"
+)
+
+
+@pytest.fixture()
+def fixture_local_yml(tmp_path):
+  p = tmp_path / ".local.yml"
+  p.write_text(FIXTURE_LOCAL_YML)
+  return p
+
+
+# ── TestLocalConfig ───────────────────────────────────────────────────────────
+
+
+class TestLocalConfig:
+  """Tests for scripts/local-config.py resolution logic."""
+
+  def _run(self, fixture_local_yml, *args):
+    result = subprocess.run(
+      ["python3", "scripts/local-config.py", str(fixture_local_yml), *args],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+  def test_deploy_hosts_returns_space_separated_list(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "deploy", "hosts", "")
+    assert out == "sma-node1 sma-node2"
+
+  def test_deploy_deploy_dir_returns_global_default(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "deploy", "deploy_dir", "")
+    assert out == "/opt/sma"
+
+  def test_host_inherits_deploy_ffmpeg_dir(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "sma-node2", "ffmpeg_dir", "")
+    assert out == "/usr/bin"
+
+  def test_host_overrides_deploy_ffmpeg_dir(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "sma-node1", "ffmpeg_dir", "")
+    assert out == "/usr/local/bin"
+
+  def test_host_override_docker_profile(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "sma-node1", "docker_profile", "")
+    assert out == "intel-pg"
+
+  def test_host_inherits_docker_profile_from_deploy(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "sma-node2", "docker_profile", "")
+    assert out == "intel"
+
+  def test_daemon_api_key_resolves(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "daemon", "api_key", "")
+    assert out == "test-api-key"
+
+  def test_service_section_resolves_apikey(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "sonarr", "apikey", "")
+    assert out == "test-sonarr-key"
+
+  def test_missing_key_returns_default(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "sma-node1", "ssh_key", "fallback")
+    assert out == "fallback"
+
+  def test_host_address_resolves(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "sma-node1", "address", "")
+    assert out == "192.168.1.10"
+
+  def test_host_user_resolves(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "sma-node1", "user", "")
+    assert out == "deploy"
+
+
+# ── TestInitHostContext ───────────────────────────────────────────────────────
+
+
+class TestInitHostContext:
+  """Tests for init_host_context and init_docker_host_context in lib.sh."""
+
+  def _run_bash(self, fixture_local_yml, script_body):
+    bash_script = textwrap.dedent(
+      f"""
+      set -euo pipefail
+      cd {PROJECT_ROOT!r}
+      source venv/bin/activate
+      source .mise/shared/deploy/lib.sh
+      LOCAL={str(fixture_local_yml)!r}
+      {script_body}
+      """
+    )
+    return subprocess.run(
+      ["bash", "-lc", bash_script],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+
+  def test_ssh_target_resolves_to_user_at_address(self, fixture_local_yml):
+    result = self._run_bash(
+      fixture_local_yml,
+      "init_host_context sma-node1\nprintf '%s' \"$ssh_target\"",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "deploy@192.168.1.10"
+
+  def test_deploy_dir_resolves_from_deploy_section(self, fixture_local_yml):
+    result = self._run_bash(
+      fixture_local_yml,
+      "init_host_context sma-node1\nprintf '%s' \"$dir\"",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "/opt/sma"
+
+  def test_ffmpeg_dir_host_override_takes_precedence(self, fixture_local_yml):
+    result = self._run_bash(
+      fixture_local_yml,
+      "init_host_context sma-node1\nprintf '%s' \"$ffmpeg_dir\"",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "/usr/local/bin"
+
+  def test_ffmpeg_dir_falls_back_to_deploy_default(self, fixture_local_yml):
+    result = self._run_bash(
+      fixture_local_yml,
+      "init_host_context sma-node2\nprintf '%s' \"$ffmpeg_dir\"",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "/usr/bin"
+
+  def test_docker_profile_host_override(self, fixture_local_yml):
+    result = self._run_bash(
+      fixture_local_yml,
+      "init_docker_host_context sma-node1\nprintf '%s' \"$profile\"",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "intel-pg"
+
+  def test_docker_profile_inherits_deploy_default(self, fixture_local_yml):
+    result = self._run_bash(
+      fixture_local_yml,
+      "init_docker_host_context sma-node2\nprintf '%s' \"$profile\"",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "intel"
+
+  def test_second_host_ssh_target_resolves(self, fixture_local_yml):
+    result = self._run_bash(
+      fixture_local_yml,
+      "init_host_context sma-node2\nprintf '%s' \"$ssh_target\"",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "deploy@192.168.1.11"
+
+
+# ── TestLcHelper ─────────────────────────────────────────────────────────────
+
+
+class TestLcHelper:
+  """Tests for the lc() shorthand in lib.sh."""
+
+  def _run_bash(self, fixture_local_yml, script_body):
+    bash_script = textwrap.dedent(
+      f"""
+      set -euo pipefail
+      cd {PROJECT_ROOT!r}
+      source venv/bin/activate
+      source .mise/shared/deploy/lib.sh
+      LOCAL={str(fixture_local_yml)!r}
+      {script_body}
+      """
+    )
+    return subprocess.run(
+      ["bash", "-lc", bash_script],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+
+  def test_lc_resolves_deploy_hosts(self, fixture_local_yml):
+    result = self._run_bash(fixture_local_yml, 'printf "%s" "$(lc deploy hosts "")"')
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "sma-node1 sma-node2"
+
+  def test_lc_resolves_daemon_api_key(self, fixture_local_yml):
+    result = self._run_bash(fixture_local_yml, 'printf "%s" "$(lc daemon api_key "")"')
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "test-api-key"
+
+  def test_lc_returns_default_for_missing_key(self, fixture_local_yml):
+    result = self._run_bash(fixture_local_yml, 'printf "%s" "$(lc deploy nonexistent_key fallback)"')
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "fallback"
+
+
+# ── TestDeployCheck ───────────────────────────────────────────────────────────
+
+
+class TestDeployCheck:
+  """Tests for .mise/tasks/deploy/check."""
+
+  def test_check_fails_when_local_yml_missing(self):
+    text = _read(".mise/tasks/deploy/check")
+    assert '! -f "$LOCAL"' in text
+    assert "exit 1" in text
+
+  def test_check_fails_when_hosts_empty(self):
+    text = _read(".mise/tasks/deploy/check")
+    assert '-z "$DEPLOY_HOSTS"' in text
+    assert "exit 1" in text
+
+  def test_check_prints_deployment_targets(self):
+    text = _read(".mise/tasks/deploy/check")
+    assert "Deployment targets:" in text
+
+  def test_deploy_check_uses_hosts_key_not_deploy_hosts(self):
+    text = _read(".mise/tasks/deploy/check")
+    assert "deploy hosts" in text
+    assert "deploy DEPLOY_HOSTS" not in text
+
+  def test_deploy_check_does_not_use_quoted_cfg(self):
+    text = _read(".mise/tasks/deploy/check")
+    assert '"$CFG"' not in text
