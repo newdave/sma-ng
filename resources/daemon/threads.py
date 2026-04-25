@@ -27,7 +27,7 @@ class HeartbeatThread(_StoppableThread):
   and recovers jobs from nodes that have gone stale.
   """
 
-  def __init__(self, job_db, node_id, host, worker_count, server, interval, stale_seconds, logger, started_at):
+  def __init__(self, job_db, node_id, host, worker_count, server, interval, stale_seconds, logger, started_at, version="", hwaccel="", log_ttl_days=30):
     super().__init__()
     self.job_db = job_db
     self.node_id = node_id
@@ -38,29 +38,64 @@ class HeartbeatThread(_StoppableThread):
     self.stale_seconds = stale_seconds
     self.log = logger
     self.started_at = started_at
+    self.version = version
+    self.hwaccel = hwaccel
+    self.log_ttl_days = log_ttl_days
 
   def run(self):
     if not self.job_db.is_distributed:
       return  # Heartbeat only meaningful for the shared PG backend
     while self.running:
       try:
-        command = self.job_db.heartbeat(self.node_id, self.host, self.worker_count, self.started_at)
-        if command == "restart":
-          self.log.info("Received remote restart command via cluster DB")
-          threading.Thread(target=self.server.graceful_restart, daemon=True).start()
-          return
-        elif command == "shutdown":
-          self.log.info("Received remote shutdown command via cluster DB")
-          threading.Thread(target=self.server.shutdown, daemon=True).start()
-          return
+        self.job_db.heartbeat(self.node_id, self.host, self.worker_count, self.started_at, version=self.version, hwaccel=self.hwaccel)
+        cmd = None
+        if self.job_db.is_distributed:
+          cmd = self.job_db.poll_node_command(self.node_id)
+        if cmd:
+          should_exit = self._execute_command(cmd)
+          if should_exit:
+            return
         recovered = self.job_db.recover_stale_nodes(self.stale_seconds)
         for stale_id, job_count in recovered:
           self.log.warning("Recovered %d jobs from stale node %s" % (job_count, stale_id))
         if any(job_count > 0 for _, job_count in recovered):
           self.server.notify_workers()  # Wake workers to pick up requeued jobs
+        if self.log_ttl_days > 0:
+          self.job_db.cleanup_old_logs(self.log_ttl_days)
       except Exception:
         self.log.exception("Heartbeat error")
       self._stop_event.wait(timeout=self.interval)
+
+  def _execute_command(self, cmd: dict) -> bool:
+    """Execute a cluster command. Returns True if the heartbeat loop should exit."""
+    cmd_id = cmd["id"]
+    command = cmd["command"]
+    try:
+      if command == "drain":
+        self.server.worker_pool.set_drain_mode()
+      elif command == "pause":
+        self.server.worker_pool.set_paused()
+      elif command == "resume":
+        self.server.worker_pool.clear_paused()
+        self.server.worker_pool.clear_drain_mode()
+      elif command == "restart":
+        self.job_db.ack_node_command(cmd_id, "done")
+        threading.Thread(target=self.server.graceful_restart, daemon=True).start()
+        return True
+      elif command == "shutdown":
+        self.job_db.ack_node_command(cmd_id, "done")
+        threading.Thread(target=self.server.shutdown, daemon=True).start()
+        return True
+      else:
+        self.log.warning("Unknown cluster command: %s", command)
+      self.job_db.ack_node_command(cmd_id, "done")
+    except Exception:
+      self.log.exception("Failed to execute cluster command %s", command)
+      try:
+        self.job_db.ack_node_command(cmd_id, "failed")
+      except Exception:
+        pass
+    return False
 
 
 class ScannerThread(_StoppableThread):

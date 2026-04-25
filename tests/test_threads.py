@@ -499,6 +499,7 @@ def _make_heartbeat(job_db=None, server=None, interval=5, stale_seconds=60):
     job_db = mock.MagicMock()
     job_db.is_distributed = True
     job_db.heartbeat.return_value = None
+    job_db.poll_node_command.return_value = None
     job_db.recover_stale_nodes.return_value = []
   if server is None:
     server = mock.MagicMock()
@@ -532,10 +533,11 @@ class TestHeartbeatThread:
 
     call_count = [0]
 
-    def fake_wait(timeout=None):
+    def fake_wait(timeout=None) -> bool:
       call_count[0] += 1
       if call_count[0] >= 2:
         ht.running = False
+      return False
 
     ht._stop_event.wait = fake_wait
     ht.run()
@@ -544,7 +546,8 @@ class TestHeartbeatThread:
   def test_run_triggers_restart_on_restart_command(self):
     db = mock.MagicMock()
     db.is_distributed = True
-    db.heartbeat.return_value = "restart"
+    db.heartbeat.return_value = None
+    db.poll_node_command.return_value = {"id": 1, "command": "restart"}
     db.recover_stale_nodes.return_value = []
     server = mock.MagicMock()
     ht = _make_heartbeat(job_db=db, server=server)
@@ -560,7 +563,8 @@ class TestHeartbeatThread:
   def test_run_triggers_shutdown_on_shutdown_command(self):
     db = mock.MagicMock()
     db.is_distributed = True
-    db.heartbeat.return_value = "shutdown"
+    db.heartbeat.return_value = None
+    db.poll_node_command.return_value = {"id": 2, "command": "shutdown"}
     db.recover_stale_nodes.return_value = []
     server = mock.MagicMock()
     ht = _make_heartbeat(job_db=db, server=server)
@@ -583,9 +587,10 @@ class TestHeartbeatThread:
 
     call_count = [0]
 
-    def fake_wait(timeout=None):
+    def fake_wait(timeout=None) -> bool:
       call_count[0] += 1
       ht.running = False
+      return False
 
     ht._stop_event.wait = fake_wait
     ht.run()
@@ -601,9 +606,10 @@ class TestHeartbeatThread:
 
     call_count = [0]
 
-    def fake_wait(timeout=None):
+    def fake_wait(timeout=None) -> bool:
       call_count[0] += 1
       ht.running = False
+      return False
 
     ht._stop_event.wait = fake_wait
     ht.run()
@@ -617,9 +623,10 @@ class TestHeartbeatThread:
 
     call_count = [0]
 
-    def fake_wait(timeout=None):
+    def fake_wait(timeout=None) -> bool:
       call_count[0] += 1
       ht.running = False
+      return False
 
     ht._stop_event.wait = fake_wait
     ht.run()  # must not raise
@@ -629,6 +636,189 @@ class TestHeartbeatThread:
     ht.stop()
     assert ht.running is False
     assert ht._stop_event.is_set()
+
+  def test_heartbeat_called_with_version_and_hwaccel(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.heartbeat.return_value = None
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = []
+    log = logging.getLogger("test.heartbeat")
+    ht = HeartbeatThread(
+      job_db=db,
+      node_id="test-node",
+      host="127.0.0.1",
+      worker_count=2,
+      server=mock.MagicMock(),
+      interval=5,
+      stale_seconds=60,
+      logger=log,
+      started_at=None,
+      version="1.2.3",
+      hwaccel="nvenc",
+      log_ttl_days=7,
+    )
+
+    def fake_wait(timeout=None) -> bool:
+      ht.running = False
+      return False
+
+    ht._stop_event.wait = fake_wait
+    ht.run()
+    db.heartbeat.assert_called_once_with("test-node", "127.0.0.1", 2, None, version="1.2.3", hwaccel="nvenc")
+
+  def test_cleanup_old_logs_called_when_log_ttl_days_set(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.heartbeat.return_value = None
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = []
+    log = logging.getLogger("test.heartbeat")
+    ht = HeartbeatThread(
+      job_db=db,
+      node_id="test-node",
+      host="127.0.0.1",
+      worker_count=2,
+      server=mock.MagicMock(),
+      interval=5,
+      stale_seconds=60,
+      logger=log,
+      started_at=None,
+      log_ttl_days=14,
+    )
+
+    def fake_wait(timeout=None) -> bool:
+      ht.running = False
+      return False
+
+    ht._stop_event.wait = fake_wait
+    ht.run()
+    db.cleanup_old_logs.assert_called_once_with(14)
+
+  def test_cleanup_old_logs_not_called_when_log_ttl_days_zero(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.heartbeat.return_value = None
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = []
+    log = logging.getLogger("test.heartbeat")
+    ht = HeartbeatThread(
+      job_db=db,
+      node_id="test-node",
+      host="127.0.0.1",
+      worker_count=2,
+      server=mock.MagicMock(),
+      interval=5,
+      stale_seconds=60,
+      logger=log,
+      started_at=None,
+      log_ttl_days=0,
+    )
+
+    def fake_wait(timeout=None) -> bool:
+      ht.running = False
+      return False
+
+    ht._stop_event.wait = fake_wait
+    ht.run()
+    db.cleanup_old_logs.assert_not_called()
+
+  def test_poll_node_command_not_called_when_not_distributed(self):
+    db = mock.MagicMock()
+    db.is_distributed = False
+    db.heartbeat.return_value = None
+    db.recover_stale_nodes.return_value = []
+    ht = _make_heartbeat(job_db=db)
+    ht.run()  # exits immediately
+    db.poll_node_command.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# HeartbeatThread._execute_command
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteCommand:
+  def test_drain_sets_drain_mode(self):
+    server = mock.MagicMock()
+    db = mock.MagicMock()
+    ht = _make_heartbeat(job_db=db, server=server)
+    result = ht._execute_command({"id": 10, "command": "drain"})
+    server.worker_pool.set_drain_mode.assert_called_once()
+    db.ack_node_command.assert_called_once_with(10, "done")
+    assert result is False
+
+  def test_pause_sets_paused(self):
+    server = mock.MagicMock()
+    db = mock.MagicMock()
+    ht = _make_heartbeat(job_db=db, server=server)
+    result = ht._execute_command({"id": 11, "command": "pause"})
+    server.worker_pool.set_paused.assert_called_once()
+    db.ack_node_command.assert_called_once_with(11, "done")
+    assert result is False
+
+  def test_resume_clears_paused_and_drain_mode(self):
+    server = mock.MagicMock()
+    db = mock.MagicMock()
+    ht = _make_heartbeat(job_db=db, server=server)
+    result = ht._execute_command({"id": 12, "command": "resume"})
+    server.worker_pool.clear_paused.assert_called_once()
+    server.worker_pool.clear_drain_mode.assert_called_once()
+    db.ack_node_command.assert_called_once_with(12, "done")
+    assert result is False
+
+  def test_restart_acks_and_returns_true(self):
+    server = mock.MagicMock()
+    db = mock.MagicMock()
+    ht = _make_heartbeat(job_db=db, server=server)
+    with mock.patch("threading.Thread") as mock_thread:
+      mock_thread.return_value = mock.MagicMock()
+      result = ht._execute_command({"id": 13, "command": "restart"})
+    db.ack_node_command.assert_called_once_with(13, "done")
+    assert result is True
+    call_kwargs = mock_thread.call_args[1]
+    assert call_kwargs["target"] == server.graceful_restart
+
+  def test_shutdown_acks_and_returns_true(self):
+    server = mock.MagicMock()
+    db = mock.MagicMock()
+    ht = _make_heartbeat(job_db=db, server=server)
+    with mock.patch("threading.Thread") as mock_thread:
+      mock_thread.return_value = mock.MagicMock()
+      result = ht._execute_command({"id": 14, "command": "shutdown"})
+    db.ack_node_command.assert_called_once_with(14, "done")
+    assert result is True
+    call_kwargs = mock_thread.call_args[1]
+    assert call_kwargs["target"] == server.shutdown
+
+  def test_unknown_command_logs_warning_and_returns_false(self):
+    server = mock.MagicMock()
+    db = mock.MagicMock()
+    log = mock.MagicMock()
+    ht = _make_heartbeat(job_db=db, server=server)
+    ht.log = log
+    result = ht._execute_command({"id": 15, "command": "explode"})
+    log.warning.assert_called_once()
+    db.ack_node_command.assert_called_once_with(15, "done")
+    assert result is False
+
+  def test_exception_acks_failed(self):
+    server = mock.MagicMock()
+    server.worker_pool.set_drain_mode.side_effect = RuntimeError("pool broken")
+    db = mock.MagicMock()
+    ht = _make_heartbeat(job_db=db, server=server)
+    result = ht._execute_command({"id": 16, "command": "drain"})
+    db.ack_node_command.assert_called_once_with(16, "failed")
+    assert result is False
+
+  def test_exception_ack_failure_is_swallowed(self):
+    server = mock.MagicMock()
+    server.worker_pool.set_drain_mode.side_effect = RuntimeError("broken")
+    db = mock.MagicMock()
+    db.ack_node_command.side_effect = RuntimeError("db gone too")
+    ht = _make_heartbeat(job_db=db, server=server)
+    result = ht._execute_command({"id": 17, "command": "drain"})  # must not raise
+    assert result is False
 
 
 # ---------------------------------------------------------------------------
