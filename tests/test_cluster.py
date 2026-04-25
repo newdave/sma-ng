@@ -559,6 +559,23 @@ class TestClusterNodesVersionHwaccel:
     result = job_db.heartbeat(node, "test-host", 2, None, version="1.0", hwaccel="vaapi")
     assert result is None
 
+  def test_heartbeat_stores_node_name(self, job_db):
+    node = self._unique_node()
+    job_db.heartbeat(node, "test-host", 2, None, node_name="sma-node1")
+    nodes = job_db.get_cluster_nodes()
+    match = next((n for n in nodes if n["node_id"] == node), None)
+    assert match is not None
+    assert match["node_name"] == "sma-node1"
+
+  def test_heartbeat_preserves_existing_node_name_when_none_passed(self, job_db):
+    node = self._unique_node()
+    job_db.heartbeat(node, "test-host", 2, None, node_name="sma-node1")
+    job_db.heartbeat(node, "test-host", 2, None, node_name=None)
+    nodes = job_db.get_cluster_nodes()
+    match = next((n for n in nodes if n["node_id"] == node), None)
+    assert match is not None
+    assert match["node_name"] == "sma-node1"
+
 
 # ---------------------------------------------------------------------------
 # TestClusterConfigDB  (requires TEST_DB_URL) — Phase 2

@@ -152,6 +152,7 @@ class DaemonServer(ThreadingHTTPServer):
       version=_VERSION,
       hwaccel=self.detected_hwaccel,
       log_ttl_days=self.path_config_manager.log_ttl_days,
+      node_name=configured_node_name or None,
     )
     self.heartbeat_thread.start()
     logger.debug("Started heartbeat thread (interval: %ds, stale after: %ds)" % (heartbeat_interval, stale_seconds))

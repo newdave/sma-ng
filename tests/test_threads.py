@@ -665,7 +665,7 @@ class TestHeartbeatThread:
 
     ht._stop_event.wait = fake_wait
     ht.run()
-    db.heartbeat.assert_called_once_with("test-node", "127.0.0.1", 2, None, version="1.2.3", hwaccel="nvenc")
+    db.heartbeat.assert_called_once_with("test-node", "127.0.0.1", 2, None, version="1.2.3", hwaccel="nvenc", node_name=None)
 
   def test_cleanup_old_logs_called_when_log_ttl_days_set(self):
     db = mock.MagicMock()

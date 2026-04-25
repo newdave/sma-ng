@@ -166,6 +166,9 @@ class PostgreSQLJobDatabase:
                     ALTER TABLE cluster_nodes ADD COLUMN IF NOT EXISTS hwaccel TEXT
                 """)
         cur.execute("""
+                    ALTER TABLE cluster_nodes ADD COLUMN IF NOT EXISTS node_name TEXT
+                """)
+        cur.execute("""
                     CREATE TABLE IF NOT EXISTS node_commands (
                         id         SERIAL PRIMARY KEY,
                         node_id    TEXT NOT NULL,
@@ -449,7 +452,7 @@ class PostgreSQLJobDatabase:
         cur.execute("SELECT COUNT(*) AS count FROM jobs WHERE status = %s AND config = %s", (STATUS_PENDING, config))
         return cur.fetchone()["count"]
 
-  def heartbeat(self, node_id, host, workers, started_at, version=None, hwaccel=None):
+  def heartbeat(self, node_id, host, workers, started_at, version=None, hwaccel=None, node_name=None):
     """Upsert this node's heartbeat row in cluster_nodes.
 
     started_at is set on INSERT and never overwritten on UPDATE, so it
@@ -466,12 +469,12 @@ class PostgreSQLJobDatabase:
         cur.execute(
           """
                     INSERT INTO cluster_nodes (node_id, host, workers, last_seen, started_at,
-                        status, running_jobs, pending_jobs, version, hwaccel)
+                        status, running_jobs, pending_jobs, version, hwaccel, node_name)
                     VALUES (
                         %s, %s, %s, NOW(), %s, 'online',
                         (SELECT COUNT(*) FROM jobs WHERE status = 'running' AND node_id = %s),
                         (SELECT COUNT(*) FROM jobs WHERE status = 'pending'),
-                        %s, %s
+                        %s, %s, %s
                     )
                     ON CONFLICT (node_id) DO UPDATE SET
                         host         = EXCLUDED.host,
@@ -484,9 +487,10 @@ class PostgreSQLJobDatabase:
                         running_jobs = EXCLUDED.running_jobs,
                         pending_jobs = EXCLUDED.pending_jobs,
                         version      = COALESCE(EXCLUDED.version, cluster_nodes.version),
-                        hwaccel      = COALESCE(EXCLUDED.hwaccel, cluster_nodes.hwaccel)
+                        hwaccel      = COALESCE(EXCLUDED.hwaccel, cluster_nodes.hwaccel),
+                        node_name    = COALESCE(EXCLUDED.node_name, cluster_nodes.node_name)
                 """,
-          (node_id, host, workers, started_at, node_id, version, hwaccel),
+          (node_id, host, workers, started_at, node_id, version, hwaccel, node_name or None),
         )
     return None
 
