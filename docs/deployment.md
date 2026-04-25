@@ -68,7 +68,7 @@ curl https://mise.run | sh
 
 | Task                         | Description                                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------------------------- |
-| `mise run deploy:check`      | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                                  |
+| `mise run deploy:check`      | Verify `setup/.local.yml` exists and `DEPLOY_HOSTS` is set                                  |
 | `mise run deploy:setup`      | First-time host prep: SSH key, apt deps, deploy dir, systemd install                        |
 | `mise run deploy:mise`       | Sync the local `.mise/` deploy control plane to all hosts                                   |
 | `mise run deploy:sync`       | Sync code, install dependencies, and reload systemd on all hosts                            |
@@ -163,28 +163,27 @@ You can run `python manual.py -cl` or inspect config files without starting the 
 Copy the sample and fill in your details:
 
 ```bash
-cp setup/.local.ini.sample setup/.local.ini
+cp setup/.local.yml.sample setup/.local.yml
 ```
 
-`setup/.local.ini` is gitignored. It controls deploy targets, credentials, and per-host overrides:
+`setup/.local.yml` is gitignored. It controls deploy targets, credentials, and per-host overrides:
 
-```ini
-[deploy]
-DEPLOY_HOSTS = user@server1.example.com user@server2.example.com
-DEPLOY_DIR   = ~/sma
-SSH_KEY      = ~/.ssh/id_ed25519_sma
-FFMPEG_DIR   = /usr/local/bin
-SMA_NODE_NAME = sma-default
+```yaml
+deploy:
+  DEPLOY_HOSTS: "user@server1.example.com user@server2.example.com"
+  DEPLOY_DIR: ~/sma
+  SSH_KEY: ~/.ssh/id_ed25519_sma
+  FFMPEG_DIR: /usr/local/bin
 
-[user@server1.example.com]
-SMA_NODE_NAME = sma-master
+hosts:
+  "user@server1.example.com":
+    SMA_NODE_NAME: sma-master
+  "user@server2.example.com":
+    SMA_NODE_NAME: sma-worker-1
 
-[user@server2.example.com]
-SMA_NODE_NAME = sma-worker-1
-
-[daemon]
-api_key = your_secret_key
-db_url  =                    # required for multi-node: postgresql://user:pass@host/db
+daemon:
+  api_key: your_secret_key
+  # db_url:   # required for multi-node: postgresql://user:pass@host/db
 ```
 
 ### Deployment Workflow
@@ -226,7 +225,7 @@ mise run pg:recreate
 `.mise/` helper and task code before any config mutation runs.
 
 For managed deployments, `config:roll` also stamps the host's `SMA_NODE_NAME`
-from `setup/.local.ini` into `config/daemon.env`, and the daemon uses that
+from `setup/.local.yml` into `config/daemon.env`, and the daemon uses that
 value as its cluster node ID.
 
 For each remote host:
@@ -234,7 +233,7 @@ For each remote host:
 1. Detects GPU type remotely and sets `gpu =` in the generated config
 2. Creates missing config files from samples (`sma-ng.yml`, `daemon.env`)
 3. Merges new keys from updated samples into existing configs (non-destructive — existing values preserved)
-4. Stamps service credentials from `setup/.local.ini` into YAML/INI configs
+4. Stamps service credentials from `setup/.local.yml` into YAML/INI configs
 5. Sets `ffmpeg`/`ffprobe` paths from `FFMPEG_DIR` in YAML/INI configs
 6. Stamps daemon credentials (`api_key`, `db_url`, `ffmpeg_dir`) into `Daemon:` in `sma-ng.yml` and `daemon.env`
 7. Deploys post-process scripts with correct interpreter shebang and credentials
@@ -243,7 +242,7 @@ For each remote host:
 
 | Task             | Description                                                                                                                               |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `deploy:check`   | Verify `setup/.local.ini` exists and `DEPLOY_HOSTS` is set                                                                                |
+| `deploy:check`   | Verify `setup/.local.yml` exists and `DEPLOY_HOSTS` is set                                                                                |
 | `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, systemd install                                                                      |
 | `deploy:mise`    | Sync the local `.mise/` deploy control plane to each remote `DEPLOY_DIR`                                                                  |
 | `deploy:sync`    | Sync code + install deps + reload systemd on all hosts                                                                                    |
@@ -259,7 +258,7 @@ Additional Docker lifecycle helper: `deploy:dockerstop` (alias: `deploy:docker:s
 
 All remote-facing deploy/config tasks depend on `deploy:mise`, so the remote `.mise/`
 control plane is refreshed before those wrappers run. The Docker-specific deploy tasks
-require `DOCKER_PROFILE` to be set per host (or in `[deploy]`) in `setup/.local.ini`.
+require `DOCKER_PROFILE` to be set per host (or under `deploy:`) in `setup/.local.yml`.
 Use `HOST=<host>` to target one node, or `HOSTS="<host1> <host2>"` to target multiple nodes.
 The PostgreSQL lifecycle tasks skip hosts that are not using one of the bundled `*-pg`
 profiles.
