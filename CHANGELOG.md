@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.42](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.41...sma-ng-v1.6.42) (2026-04-25)
+
+
+### Features
+
+* **cluster:** add node_expiry_days and log_archive_* settings to sma-ng.yml.sample ([2b4b352](https://github.com/newdave/sma-ng/commit/2b4b352e596fb449f4e715ee4052284eb99416da))
+* **cluster:** admin API endpoints for cluster config ([266c673](https://github.com/newdave/sma-ng/commit/266c6732ac154b05445249605663ed786a6b704e))
+* **cluster:** admin UI — cluster config editor and push-from-node button ([25ad5ab](https://github.com/newdave/sma-ng/commit/25ad5ab0ef28736d7a74968c20af038c79183134))
+* **cluster:** DB config merge in PathConfigManager.load_config ([c51f3c1](https://github.com/newdave/sma-ng/commit/c51f3c19add04c8e3e3c7feaaaba3a74e790a3e2))
+* **cluster:** heartbeat loop — node expiry and log archival triggers ([3e2314a](https://github.com/newdave/sma-ng/commit/3e2314a419475144209b5527228574c22f350437))
+* **cluster:** Phase 2 — cluster_config table, node expiry, log archival DB methods ([ee408c9](https://github.com/newdave/sma-ng/commit/ee408c98c48eac472ecabfe0a2e8d129a3231d61))
+
 ## [1.6.41](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.40...sma-ng-v1.6.41) (2026-04-25)
 
 
