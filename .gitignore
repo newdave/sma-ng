@@ -40,9 +40,11 @@ config/autoProcess.ini
 config/autoProcess.ini-*
 config/autoProcess.ini.*
 config/autoProcess.*.ini
+config/autoProcess.*.ini.bak
 config/sma-ng.yml
 config/sma-ng.yml.*
 config/daemon.json
+config/daemon.json.bak
 config/daemon.env
 config/logging.ini
 !config/custom.py
