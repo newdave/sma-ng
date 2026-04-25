@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.36](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.35...sma-ng-v1.6.36) (2026-04-25)
+
+
+### Features
+
+* add node_id and log_ttl_days to daemon sample config (T-010) ([20e12b7](https://github.com/newdave/sma-ng/commit/20e12b7a9c60d7e6defbf4c777e4c01623048bf2))
+* wire PostgreSQLLogHandler into DAEMON logger when distributed (T-008) ([9a8a366](https://github.com/newdave/sma-ng/commit/9a8a366b76f97c7b09a1140be8c44843fe219887))
+
 ## [1.6.35](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.34...sma-ng-v1.6.35) (2026-04-25)
 
 
