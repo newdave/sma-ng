@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.33](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.32...sma-ng-v1.6.33) (2026-04-25)
+
+
+### Features
+
+* add prepare_models.py to export EfficientNet-B0 to OpenVINO IR ([9b04f1c](https://github.com/newdave/sma-ng/commit/9b04f1cc569cc0dcda88631a3e56e2cda3e3d1e5))
+* implement OpenVINO analyzer with frame extraction and heuristic signals ([98019a5](https://github.com/newdave/sma-ng/commit/98019a55bc4edbdaad1cf687b4067f09ca0f1703))
+
 ## [1.6.32](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.31...sma-ng-v1.6.32) (2026-04-24)
 
 
