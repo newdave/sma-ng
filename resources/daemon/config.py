@@ -1,4 +1,5 @@
 import configparser
+import copy
 import logging
 import os
 import shlex
@@ -7,7 +8,7 @@ import threading
 import uuid
 from logging.handlers import RotatingFileHandler
 
-from resources.daemon.constants import DAEMON_SECTION, DEFAULT_PROCESS_CONFIG, LOGS_DIR, SCRIPT_DIR
+from resources.daemon.constants import DAEMON_SECTION, DEFAULT_PROCESS_CONFIG, LOGS_DIR, SCRIPT_DIR, SECRET_KEYS
 from resources.daemon.context import JobContextFilter
 from resources.log import LOG_BACKUP_COUNT, LOG_MAX_BYTES, JSONFormatter, getLogger
 
@@ -34,6 +35,16 @@ def _write_node_id_to_yaml(config_file: str, node_id: str) -> None:
     os.replace(tmp, config_file)
   except Exception:
     pass  # non-fatal — node will still function with hostname fallback
+
+
+def _strip_secrets(data: dict) -> dict:
+  """Return a deep copy of data with SECRET_KEYS removed from the daemon: section."""
+  result = copy.deepcopy(data)
+  daemon = result.get("daemon", {})
+  for key in list(daemon):
+    if key in SECRET_KEYS:
+      del daemon[key]
+  return result
 
 
 class ConfigLockManager:
@@ -218,6 +229,10 @@ class PathConfigManager:
     self._config_file = None  # Resolved path of loaded config file
     self._node_id = None  # UUID-based node identity; generated on first start
     self._log_ttl_days = 30  # Days to retain cluster log entries in PostgreSQL
+    self._node_expiry_days: int = 0
+    self._log_archive_dir: str | None = None
+    self._log_archive_after_days: int = 0
+    self._log_delete_after_days: int = 0
 
     if not config_file:
       config_file = os.environ.get("SMA_CONFIG") or DEFAULT_PROCESS_CONFIG
@@ -231,7 +246,7 @@ class PathConfigManager:
     else:
       self.log.info("No config found, using defaults for all paths")
 
-  def load_config(self, config_file):
+  def load_config(self, config_file, job_db=None):
     """Load daemon settings from the daemon section of sma-ng.yml."""
     try:
       from resources.yamlconfig import load as _yaml_load
@@ -242,6 +257,21 @@ class PathConfigManager:
       if not daemon_data.get("default_config"):
         parsed["default_config"] = config_file
       self._apply_config_data(parsed)
+
+      # Merge DB base config if distributed.
+      # DB provides shared defaults; only keys *explicitly* set in the local
+      # YAML (present in daemon_data) override DB values.
+      if job_db is not None and getattr(job_db, "is_distributed", False):
+        try:
+          db_raw = job_db.get_cluster_config() or {}
+          db_daemon = db_raw.get("daemon", {}) if db_raw else {}
+          if db_daemon:
+            db_parsed = self._parse_config_data(db_daemon)
+            explicit_local = {k: parsed[k] for k in daemon_data if k in parsed}
+            merged = {**db_parsed, **explicit_local}
+            self._apply_config_data(merged)
+        except Exception:
+          self.log.warning("Failed to fetch cluster config from DB; using local only")
 
       self.log.debug("Loaded config from %s" % config_file)
       self.log.debug("Default config: %s" % self.default_config)
@@ -276,6 +306,26 @@ class PathConfigManager:
   def log_ttl_days(self) -> int:
     """Return the number of days to retain cluster log entries in PostgreSQL."""
     return self._log_ttl_days
+
+  @property
+  def node_expiry_days(self) -> int:
+    """Return days after which offline nodes are hard-deleted (0 = disabled)."""
+    return self._node_expiry_days
+
+  @property
+  def log_archive_dir(self) -> str | None:
+    """Return the directory for archived log files, or None if disabled."""
+    return self._log_archive_dir
+
+  @property
+  def log_archive_after_days(self) -> int:
+    """Return days after which DB logs are archived to filesystem (0 = disabled)."""
+    return self._log_archive_after_days
+
+  @property
+  def log_delete_after_days(self) -> int:
+    """Return days after which archived log files are deleted (0 = disabled)."""
+    return self._log_delete_after_days
 
   @staticmethod
   def _parse_args_list(raw_args):
@@ -340,6 +390,10 @@ class PathConfigManager:
       "path_configs": path_configs,
       "node_id": config.get("node_id") or None,
       "log_ttl_days": int(config.get("log_ttl_days") or 30),
+      "node_expiry_days": int(config.get("node_expiry_days") or 0),
+      "log_archive_dir": config.get("log_archive_dir") or None,
+      "log_archive_after_days": int(config.get("log_archive_after_days") or 0),
+      "log_delete_after_days": int(config.get("log_delete_after_days") or 0),
     }
 
   def _apply_config_data(self, parsed):
@@ -360,6 +414,10 @@ class PathConfigManager:
     self.path_configs = parsed["path_configs"]
     self._node_id = parsed.get("node_id") or None
     self._log_ttl_days = parsed.get("log_ttl_days", 30)
+    self._node_expiry_days = parsed.get("node_expiry_days", 0)
+    self._log_archive_dir = parsed.get("log_archive_dir")
+    self._log_archive_after_days = parsed.get("log_archive_after_days", 0)
+    self._log_delete_after_days = parsed.get("log_delete_after_days", 0)
     if self.path_rewrites:
       self.log.debug("Path rewrites (%d):" % len(self.path_rewrites))
       for rewrite in self.path_rewrites:
