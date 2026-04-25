@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-#MISE description="Verify setup/.local.ini exists and DEPLOY_HOSTS is set"
+#MISE description="Verify setup/.local.yml exists and DEPLOY_HOSTS is set"
 set -euo pipefail
 
-LOCAL="setup/.local.ini"
-CFG="scripts/local-config.sh"
+LOCAL="setup/.local.yml"
+CFG="python3 scripts/local-config.py"
 
 if [ ! -f "$LOCAL" ]; then
-  echo "ERROR: $LOCAL not found. Copy setup/.local.ini.sample to setup/.local.ini and configure it." >&2
+  echo "ERROR: $LOCAL not found. Copy setup/.local.yml.sample to setup/.local.yml and configure it." >&2
   exit 1
 fi
 
