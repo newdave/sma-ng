@@ -6,6 +6,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SMA-NG Admin</title>
   <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/newdave/sma-ng/main/logo.png">
+  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script>
+    (function(){
+      var t = localStorage.getItem('theme');
+      if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/js-yaml@4/dist/js.yaml.min.js"></script>
@@ -16,18 +25,27 @@
   </style>
 </head>
 
-<body class="bg-gray-900 text-gray-100 min-h-screen">
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen">
   <div x-data="adminPage()" x-init="init()" x-cloak class="max-w-7xl mx-auto px-4 py-6">
 
     <div class="flex items-center justify-between mb-8">
       <div>
-        <h1 class="text-2xl font-bold text-white">SMA-NG</h1>
-        <p class="text-gray-400 text-sm">Admin Actions & Node Management</p>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">SMA-NG</h1>
+        <p class="text-gray-500 dark:text-gray-400 text-sm">Admin Actions & Node Management</p>
       </div>
       <div class="flex items-center gap-4">
         <button @click="refreshNodes()" class="text-xs text-blue-300 hover:underline">Refresh Nodes</button>
         <a href="/dashboard" class="text-xs text-blue-400 hover:underline">&larr; Dashboard</a>
         <a href="/docs" class="text-xs text-blue-400 hover:underline">Docs</a>
+        <button onclick="toggleTheme()" title="Toggle light/dark theme"
+            class="p-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+            </svg>
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 block dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+        </button>
       </div>
     </div>
 
@@ -36,10 +54,10 @@
       x-text="result">
     </div>
 
-    <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 mb-8">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-sm font-semibold text-purple-400 uppercase tracking-wider">Cluster Nodes</h2>
-        <span class="text-xs text-gray-500" x-text="nodesLoading ? 'Loading…' : ('Nodes: ' + nodes.length)"></span>
+        <span class="text-xs text-gray-500 dark:text-gray-500" x-text="nodesLoading ? 'Loading…' : ('Nodes: ' + nodes.length)"></span>
       </div>
 
       <div x-show="nodesError" class="mb-3 text-xs text-red-300" x-text="nodesError"></div>
@@ -47,7 +65,7 @@
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="text-left text-gray-400 border-b border-gray-700 text-xs">
+            <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700 text-xs">
               <th class="pb-2 pr-4 font-medium">Node</th>
               <th class="pb-2 pr-4 font-medium">Host</th>
               <th class="pb-2 pr-4 font-medium">Status</th>
@@ -57,17 +75,17 @@
               <th class="pb-2 font-medium">Actions</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-700/50 text-xs">
+          <tbody class="divide-y divide-gray-200/50 dark:divide-gray-700/50 text-xs">
             <template x-for="node in nodes" :key="node.node_id">
-              <tr class="hover:bg-gray-700/20">
+              <tr class="hover:bg-gray-100/50 dark:hover:bg-gray-700/20">
                 <td class="py-2 pr-4">
-                  <div class="font-mono text-gray-200" x-text="node.node_name || node.node_id"></div>
-                  <div x-show="node.node_name" class="font-mono text-gray-600 text-xs" x-text="node.node_id"></div>
+                  <div class="font-mono text-gray-800 dark:text-gray-200" x-text="node.node_name || node.node_id"></div>
+                  <div x-show="node.node_name" class="font-mono text-gray-400 dark:text-gray-600 text-xs" x-text="node.node_id"></div>
                 </td>
-                <td class="py-2 pr-4 font-mono text-gray-400" x-text="node.host || '—'"></td>
+                <td class="py-2 pr-4 font-mono text-gray-500 dark:text-gray-400" x-text="node.host || '—'"></td>
                 <td class="py-2 pr-4">
                   <span class="px-2 py-0.5 rounded-full"
-                    :class="node.status === 'online' ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-400'"
+                    :class="node.status === 'online' ? 'bg-green-900 text-green-300' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'"
                     x-text="node.status || 'unknown'"></span>
                 </td>
                 <td class="py-2 pr-4">
@@ -75,8 +93,8 @@
                     :class="node.approval_status === 'approved' ? 'bg-blue-900 text-blue-300' : (node.approval_status === 'rejected' ? 'bg-red-900 text-red-300' : 'bg-yellow-900 text-yellow-300')"
                     x-text="node.approval_status || 'pending'"></span>
                 </td>
-                <td class="py-2 pr-4 text-gray-500" x-text="node.last_command || '—'"></td>
-                <td class="py-2 pr-4 text-gray-500" x-text="fmtTime(node.last_seen)"></td>
+                <td class="py-2 pr-4 text-gray-500 dark:text-gray-500" x-text="node.last_command || '—'"></td>
+                <td class="py-2 pr-4 text-gray-500 dark:text-gray-500" x-text="fmtTime(node.last_seen)"></td>
                 <td class="py-2">
                   <div class="flex flex-wrap gap-1.5">
                     <button @click="nodeAction(node, 'approve')" :disabled="!!nodeBusy[node.node_id]"
@@ -100,24 +118,24 @@
               </tr>
             </template>
             <tr x-show="!nodesLoading && nodes.length === 0">
-              <td colspan="7" class="py-4 text-center text-gray-500">No nodes found.</td>
+              <td colspan="7" class="py-4 text-center text-gray-500 dark:text-gray-500">No nodes found.</td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 mb-8">
+    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 mb-8">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-sm font-semibold text-teal-400 uppercase tracking-wider">Cluster Logs</h2>
-        <span x-show="logsLoading" class="text-xs text-gray-500">Loading…</span>
+        <span x-show="logsLoading" class="text-xs text-gray-500 dark:text-gray-500">Loading…</span>
       </div>
 
       <div class="flex flex-wrap gap-3 mb-4 items-end">
         <div>
-          <label class="block text-xs text-gray-400 mb-1">Node</label>
+          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Node</label>
           <select x-model="logsNodeFilter"
-            class="bg-gray-700 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-teal-500">
+            class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-teal-500">
             <option value="">All Nodes</option>
             <template x-for="node in nodes" :key="node.node_id">
               <option :value="node.node_id" x-text="node.node_name || node.node_id"></option>
@@ -125,9 +143,9 @@
           </select>
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-1">Level</label>
+          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Level</label>
           <select x-model="logsLevelFilter"
-            class="bg-gray-700 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-teal-500">
+            class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-teal-500">
             <option value="">ALL</option>
             <option value="DEBUG">DEBUG</option>
             <option value="INFO">INFO</option>
@@ -146,7 +164,7 @@
       <div class="overflow-x-auto">
         <table class="w-full text-xs">
           <thead>
-            <tr class="text-left text-gray-400 border-b border-gray-700">
+            <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
               <th class="pb-2 pr-4 font-medium">Timestamp</th>
               <th class="pb-2 pr-4 font-medium">Node</th>
               <th class="pb-2 pr-4 font-medium">Level</th>
@@ -154,21 +172,21 @@
               <th class="pb-2 font-medium">Message</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-700/50">
+          <tbody class="divide-y divide-gray-200/50 dark:divide-gray-700/50">
             <template x-for="(entry, idx) in clusterLogs" :key="idx">
-              <tr class="hover:bg-gray-700/20">
-                <td class="py-1.5 pr-4 font-mono text-gray-400 whitespace-nowrap" x-text="fmtTime(entry.timestamp)"></td>
-                <td class="py-1.5 pr-4 font-mono text-gray-300 whitespace-nowrap" x-text="nodeDisplayName(entry.node_id)"></td>
+              <tr class="hover:bg-gray-100/50 dark:hover:bg-gray-700/20">
+                <td class="py-1.5 pr-4 font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap" x-text="fmtTime(entry.timestamp)"></td>
+                <td class="py-1.5 pr-4 font-mono text-gray-700 dark:text-gray-300 whitespace-nowrap" x-text="nodeDisplayName(entry.node_id)"></td>
                 <td class="py-1.5 pr-4">
                   <span class="px-1.5 py-0.5 rounded-full text-xs" :class="logsLevelClass(entry.level)"
                     x-text="entry.level || '—'"></span>
                 </td>
-                <td class="py-1.5 pr-4 text-gray-500 whitespace-nowrap" x-text="entry.logger || '—'"></td>
-                <td class="py-1.5 text-gray-300 break-all" x-text="entry.message || '—'"></td>
+                <td class="py-1.5 pr-4 text-gray-500 dark:text-gray-500 whitespace-nowrap" x-text="entry.logger || '—'"></td>
+                <td class="py-1.5 text-gray-700 dark:text-gray-300 break-all" x-text="entry.message || '—'"></td>
               </tr>
             </template>
             <tr x-show="!logsLoading && clusterLogs.length === 0">
-              <td colspan="5" class="py-4 text-center text-gray-500">No log entries. Click Load Logs to fetch.</td>
+              <td colspan="5" class="py-4 text-center text-gray-500 dark:text-gray-500">No log entries. Click Load Logs to fetch.</td>
             </tr>
           </tbody>
         </table>
@@ -177,14 +195,14 @@
       <div class="flex items-center gap-3 mt-4">
         <button @click="logsOffset = Math.max(0, logsOffset - logsLimit); loadClusterLogs()"
           :disabled="logsLoading || logsOffset === 0"
-          class="px-3 py-1 rounded border border-gray-600 text-gray-400 hover:border-gray-400 disabled:opacity-30 text-xs">
+          class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 disabled:opacity-30 text-xs">
           &larr; Previous
         </button>
-        <span class="text-xs text-gray-500"
+        <span class="text-xs text-gray-500 dark:text-gray-500"
           x-text="'Showing ' + (logsOffset + 1) + '–' + (logsOffset + clusterLogs.length) + ' (limit ' + logsLimit + ')'"></span>
         <button @click="logsOffset += logsLimit; loadClusterLogs()"
           :disabled="logsLoading || clusterLogs.length < logsLimit"
-          class="px-3 py-1 rounded border border-gray-600 text-gray-400 hover:border-gray-400 disabled:opacity-30 text-xs">
+          class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 disabled:opacity-30 text-xs">
           Next &rarr;
         </button>
       </div>
@@ -192,14 +210,14 @@
       <!-- Cluster Config -->
       <div class="mt-8">
         <div class="flex items-center justify-between mb-3">
-          <h3 class="text-base font-semibold text-gray-900">Cluster Base Config</h3>
+          <h3 class="text-base font-semibold text-gray-900 dark:text-white">Cluster Base Config</h3>
           <div class="flex gap-2">
             <button @click="loadClusterConfig()" :disabled="configLoading"
-              class="px-3 py-1 text-xs rounded bg-gray-100 hover:bg-gray-200 text-gray-700 disabled:opacity-50">
+              class="px-3 py-1 text-xs rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 disabled:opacity-50">
               Refresh
             </button>
             <button @click="nodes[0] && pushNodeConfig(nodes[0])" :disabled="configSaving || !nodes.length"
-              class="px-3 py-1 text-xs rounded bg-blue-100 hover:bg-blue-200 text-blue-700 disabled:opacity-50">
+              class="px-3 py-1 text-xs rounded bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 disabled:opacity-50">
               Push from this node
             </button>
             <button @click="saveClusterConfig()" :disabled="configSaving"
@@ -208,20 +226,20 @@
             </button>
           </div>
         </div>
-        <p x-show="configSaved" class="mb-2 text-xs text-green-600">Config saved.</p>
-        <p x-show="configError" x-text="configError" class="mb-2 text-xs text-red-600"></p>
+        <p x-show="configSaved" class="mb-2 text-xs text-green-600 dark:text-green-400">Config saved.</p>
+        <p x-show="configError" x-text="configError" class="mb-2 text-xs text-red-600 dark:text-red-400"></p>
         <textarea x-model="clusterConfig" rows="20"
-          class="w-full font-mono text-xs border border-gray-300 rounded p-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          class="w-full font-mono text-xs bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded p-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
           placeholder="No cluster config stored yet. Push from a node or edit directly."></textarea>
       </div>
     </div>
 
     <div class="space-y-4">
-      <div class="bg-gray-800 rounded-lg border border-gray-700 p-5">
+      <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5">
         <div class="flex items-center justify-between">
           <div>
             <h2 class="text-sm font-semibold text-red-400">Remove All Failed Jobs</h2>
-            <p class="text-xs text-gray-500 mt-1">Permanently deletes every failed job from the database.</p>
+            <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Permanently deletes every failed job from the database.</p>
           </div>
           <button @click="confirm('delete-failed')" :disabled="busy"
             class="ml-6 flex-shrink-0 px-4 py-2 rounded-lg border border-red-700 text-red-400 hover:border-red-500 disabled:opacity-40 text-sm font-medium"
@@ -229,11 +247,11 @@
         </div>
       </div>
 
-      <div class="bg-gray-800 rounded-lg border border-gray-700 p-5">
+      <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5">
         <div class="flex items-center justify-between">
           <div>
             <h2 class="text-sm font-semibold text-yellow-400">Remove All Offline Hosts</h2>
-            <p class="text-xs text-gray-500 mt-1">Removes stale cluster node records where status is not online.</p>
+            <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Removes stale cluster node records where status is not online.</p>
           </div>
           <button @click="confirm('delete-offline-nodes')" :disabled="busy"
             class="ml-6 flex-shrink-0 px-4 py-2 rounded-lg border border-yellow-700 text-yellow-400 hover:border-yellow-500 disabled:opacity-40 text-sm font-medium"
@@ -241,11 +259,11 @@
         </div>
       </div>
 
-      <div class="bg-gray-800 rounded-lg border border-red-900 p-5">
+      <div class="bg-white dark:bg-gray-800 rounded-lg border border-red-900 p-5">
         <div class="flex items-center justify-between">
           <div>
             <h2 class="text-sm font-semibold text-red-500">Wipe Entire Job Database</h2>
-            <p class="text-xs text-gray-500 mt-1">Deletes every job from the database. This cannot be undone.</p>
+            <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Deletes every job from the database. This cannot be undone.</p>
           </div>
           <button @click="confirm('delete-all-jobs')" :disabled="busy"
             class="ml-6 flex-shrink-0 px-4 py-2 rounded-lg border border-red-800 bg-red-900/30 text-red-400 hover:border-red-600 disabled:opacity-40 text-sm font-medium"
@@ -256,12 +274,12 @@
 
     <div x-show="confirmAction" x-cloak class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
       @keydown.escape.window="confirmAction = null">
-      <div class="bg-gray-800 border border-gray-600 rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl">
-        <h3 class="text-base font-semibold text-white mb-2" x-text="confirmTitle"></h3>
-        <p class="text-sm text-gray-400 mb-5" x-text="confirmMessage"></p>
+      <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl">
+        <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-2" x-text="confirmTitle"></h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-5" x-text="confirmMessage"></p>
         <div class="flex gap-3 justify-end">
           <button @click="confirmAction = null"
-            class="px-4 py-2 rounded-lg border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 text-sm">Cancel</button>
+            class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400 hover:text-gray-800 dark:hover:text-gray-200 text-sm">Cancel</button>
           <button @click="execute()"
             class="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white text-sm font-medium">Confirm</button>
         </div>
@@ -456,8 +474,8 @@
             case 'ERROR': return 'bg-red-900 text-red-300';
             case 'WARNING': return 'bg-yellow-900 text-yellow-300';
             case 'INFO': return 'bg-blue-900 text-blue-300';
-            case 'DEBUG': return 'bg-gray-700 text-gray-400';
-            default: return 'bg-gray-700 text-gray-400';
+            case 'DEBUG': return 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400';
+            default: return 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400';
           }
         },
 
