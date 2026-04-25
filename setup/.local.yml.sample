@@ -4,40 +4,44 @@
 # setup/.local.yml is gitignored and never committed.
 #
 # Resolution order for each key:
-#   host-specific section  >  deploy defaults  >  built-in default
+#   hosts.<name>.<key>  >  deploy.<key>  >  built-in default
+#
+# deploy.hosts is a list of logical host labels.
+# Each label must have a matching entry under the top-level hosts: section
+# that provides at minimum an address: (IP or hostname) and user: (SSH user).
+# Any key from deploy: can be overridden per-host in that entry.
 
 # ── deploy — project-wide defaults and host list ─────────────────────────────
 
 deploy:
-  # List of host names to deploy to (must match keys under hosts:).
-  # Hosts are synced in sequence; on-host mise tasks iterate the same list.
+  # Logical labels for each remote host. These must match keys under hosts:.
   hosts:
-    - user@host1
-    - user@host2
+    - sma-node1
+    - sma-node2
 
-  # Use sudo on the remote host to run docker and system commands.
+  # Use sudo on the remote host for docker and system commands.
   use_sudo: false
 
   # Remote directory to sync into.
   deploy_dir: /opt/sma
 
-  # SSH port to use for all hosts, unless overridden in a host-specific section.
+  # SSH port (can be overridden per-host).
   ssh_port: 22
 
-  # SSH key to use for all hosts, unless overridden in a host-specific section.
+  # SSH key to use (can be overridden per-host).
   # ssh_key: ~/.ssh/id_ed25519_sma
 
-  # Default ffmpeg/ffprobe directory on remote hosts (overridden per-host if needed).
+  # Default ffmpeg/ffprobe directory on remote hosts.
   # ffmpeg_dir: /usr/local/bin
 
-  # Database connection details for the daemon (for external PostgreSQL).
+  # Database connection details (for external PostgreSQL).
   # db_host: "db.example.com"
   # db_port: 5432
   # db_user: sma
   # db_password: ""
   # db_name: sma
 
-  # Docker profile to use (e.g. intel, nvenc, intel-pg).
+  # Docker Compose profile to use (e.g. intel, nvenc, intel-pg).
   # docker_profile: intel
 
   # Directory containing docker-compose.yml (defaults to deploy_dir/docker).
@@ -46,41 +50,41 @@ deploy:
   # GitHub user for GHCR image access (auto-detected from 'gh' CLI if omitted).
   # gh_user: myuser
 
-# ── per-host overrides ────────────────────────────────────────────────────────
-# Any key from deploy can be overridden for a specific host by adding an entry
-# under hosts: whose name matches an entry in deploy.hosts exactly.
+# ── per-host entries ──────────────────────────────────────────────────────────
+# One entry per label in deploy.hosts.
+# address: and user: are required for SSH — all other keys are optional overrides.
+# Any key from deploy: can be overridden here.
 
-# hosts:
-#   "user@host1":
-#     address: 192.168.1.10
-#     user: deploy
-#     ffmpeg_dir: /usr/local/bin
-#     docker_profile: intel-pg
-#
-#   "user@host2":
-#     address: 192.168.1.11
-#     user: deploy
-#     ffmpeg_dir: /usr/local/bin
-#     docker_profile: intel
+hosts:
+  sma-node1:
+    address: 192.168.1.10    # IP or hostname to SSH to
+    user: deploy             # SSH user on the remote host
+    docker_profile: intel-pg # override deploy.docker_profile for this host
+    ffmpeg_dir: /usr/local/bin
+
+  sma-node2:
+    address: 192.168.1.11
+    user: deploy
+    docker_profile: intel
+    ffmpeg_dir: /usr/local/bin
 
 # ── daemon configuration ──────────────────────────────────────────────────────
-# Keys here mirror sma-ng.yml daemon section fields and are stamped into
-# config/sma-ng.yml by `mise run config:roll`.
+# Stamped into config/sma-ng.yml by `mise run config:roll`.
+# These are global — not per-host.
 
 daemon:
   # API key for protecting daemon endpoints (SMA_DAEMON_API_KEY).
   # api_key: ""
 
-  # PostgreSQL connection URL — derived automatically from deploy db_* keys if not set.
+  # PostgreSQL connection URL — derived from deploy db_* keys if not set.
   # db_url: ""
 
-  # Directory containing ffmpeg/ffprobe binaries (SMA_DAEMON_FFMPEG_DIR).
-  # Overrides the deploy ffmpeg_dir value if set.
+  # ffmpeg/ffprobe directory (SMA_DAEMON_FFMPEG_DIR). Overrides deploy.ffmpeg_dir.
   # ffmpeg_dir: ""
 
 # ── service credentials ───────────────────────────────────────────────────────
-# Section names mirror autoProcess.ini / sma-ng.yml service sections exactly.
-# `mise run config:roll` stamps these into every config file on remote hosts.
+# Section names mirror sma-ng.yml / autoProcess.ini service sections.
+# Stamped into every config file on remote hosts by `mise run config:roll`.
 
 # services:
 #   converter:
@@ -121,8 +125,6 @@ daemon:
 #     apikey: ""
 
 # ── managed_keys — force-overwrite specific keys during config:roll ───────────
-# List which config keys should always be overwritten from the sample during
-# `mise run config:roll`, even when they already exist in the remote config.
 # Format: SectionName: "key1, key2, ..."
 
 # managed_keys:
