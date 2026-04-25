@@ -472,3 +472,15 @@ daemon:
   node_id: null
   # Number of days to retain cluster log entries in PostgreSQL. 0 disables cleanup.
   log_ttl_days: 30
+  # Days after which offline nodes are hard-deleted from the registry.
+  # Set to 0 to disable automatic node expiry.
+  node_expiry_days: 0
+  # Directory for archived cluster log files (gzipped JSONL, one per node per day).
+  # Set to null to disable log archival.
+  log_archive_dir: null
+  # Move cluster logs older than this many days from DB to log_archive_dir.
+  # Set to 0 to disable archival (logs are deleted per log_ttl_days instead).
+  log_archive_after_days: 0
+  # Delete archived log files older than this many days from log_archive_dir.
+  # Set to 0 to disable archive file pruning.
+  log_delete_after_days: 0
