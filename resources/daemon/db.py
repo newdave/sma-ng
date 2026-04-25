@@ -156,6 +156,43 @@ class PostgreSQLJobDatabase:
                         scanned_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
+        cur.execute("""
+                    ALTER TABLE cluster_nodes ADD COLUMN IF NOT EXISTS version TEXT
+                """)
+        cur.execute("""
+                    ALTER TABLE cluster_nodes ADD COLUMN IF NOT EXISTS hwaccel TEXT
+                """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS node_commands (
+                        id         SERIAL PRIMARY KEY,
+                        node_id    TEXT NOT NULL,
+                        command    TEXT NOT NULL,
+                        issued_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        status     TEXT NOT NULL DEFAULT 'pending',
+                        issued_by  TEXT
+                    )
+                """)
+        cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_node_commands_node_pending
+                        ON node_commands (node_id, status)
+                        WHERE status = 'pending'
+                """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS logs (
+                        id        BIGSERIAL PRIMARY KEY,
+                        node_id   TEXT NOT NULL,
+                        level     TEXT NOT NULL,
+                        logger    TEXT,
+                        message   TEXT NOT NULL,
+                        timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+        cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_logs_node_ts ON logs (node_id, timestamp DESC)
+                """)
+        cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs (timestamp DESC)
+                """)
     self.log.info("PostgreSQL database initialized: %s" % self.db_url)
     self._reset_running_jobs()
 
@@ -401,51 +438,46 @@ class PostgreSQLJobDatabase:
         cur.execute("SELECT COUNT(*) AS count FROM jobs WHERE status = %s AND config = %s", (STATUS_PENDING, config))
         return cur.fetchone()["count"]
 
-  def heartbeat(self, node_id, host, workers, started_at):
+  def heartbeat(self, node_id, host, workers, started_at, version=None, hwaccel=None):
     """Upsert this node's heartbeat row in cluster_nodes.
 
     started_at is set on INSERT and never overwritten on UPDATE, so it
     always reflects when this daemon process started. A change in
     started_at between heartbeats indicates the node was restarted.
 
-    Returns any pending_command that was set for this node (and clears it),
-    or None if there is no pending command.
+    Preserves 'draining' and 'paused' status on conflict — only resets to
+    'online' if the node was in a neutral state.
+
+    Returns None. Commands are now dispatched via the node_commands table.
     """
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
           """
-                    INSERT INTO cluster_nodes (node_id, host, workers, last_seen, started_at, status, running_jobs, pending_jobs)
+                    INSERT INTO cluster_nodes (node_id, host, workers, last_seen, started_at,
+                        status, running_jobs, pending_jobs, version, hwaccel)
                     VALUES (
                         %s, %s, %s, NOW(), %s, 'online',
                         (SELECT COUNT(*) FROM jobs WHERE status = 'running' AND node_id = %s),
-                        (SELECT COUNT(*) FROM jobs WHERE status = 'pending')
+                        (SELECT COUNT(*) FROM jobs WHERE status = 'pending'),
+                        %s, %s
                     )
                     ON CONFLICT (node_id) DO UPDATE SET
-                        host            = EXCLUDED.host,
-                        workers         = EXCLUDED.workers,
-                        last_seen       = NOW(),
-                        status          = 'online',
-                        running_jobs    = EXCLUDED.running_jobs,
-                        pending_jobs    = EXCLUDED.pending_jobs
-                    RETURNING pending_command
+                        host         = EXCLUDED.host,
+                        workers      = EXCLUDED.workers,
+                        last_seen    = NOW(),
+                        status       = CASE
+                            WHEN cluster_nodes.status IN ('draining', 'paused') THEN cluster_nodes.status
+                            ELSE 'online'
+                        END,
+                        running_jobs = EXCLUDED.running_jobs,
+                        pending_jobs = EXCLUDED.pending_jobs,
+                        version      = COALESCE(EXCLUDED.version, cluster_nodes.version),
+                        hwaccel      = COALESCE(EXCLUDED.hwaccel, cluster_nodes.hwaccel)
                 """,
-          (node_id, host, workers, started_at, node_id),
+          (node_id, host, workers, started_at, node_id, version, hwaccel),
         )
-        row = cur.fetchone()
-        command = row["pending_command"] if row else None
-        if command:
-          cur.execute(
-            """
-            UPDATE cluster_nodes
-            SET pending_command = NULL,
-                last_command = %s,
-                last_command_at = NOW()
-            WHERE node_id = %s
-            """,
-            (command, node_id),
-          )
-        return command
+    return None
 
   def is_node_approved(self, node_id):
     """Return True when node approval_status is approved."""
@@ -563,10 +595,11 @@ class PostgreSQLJobDatabase:
       self.log.info("Removed node %s from cluster registry" % node_id)
 
   def send_node_command(self, node_id, command, requested_by=None):
-    """Set pending_command on one or all online nodes.
+    """Insert a command into node_commands for one or all online nodes.
 
     node_id may be a specific node ID string, or None to broadcast to all
-    online nodes. command should be 'restart' or 'shutdown'.
+    online nodes. command should be 'restart', 'shutdown', 'drain', 'pause',
+    or 'resume'.
     Returns the list of node_ids that were targeted.
     """
     with self._conn() as conn:
@@ -574,28 +607,104 @@ class PostgreSQLJobDatabase:
         if node_id:
           cur.execute(
             """
-            UPDATE cluster_nodes
-            SET pending_command = %s,
-                command_requested_at = NOW(),
-                command_requested_by = %s
-            WHERE node_id = %s
-            RETURNING node_id
+            INSERT INTO node_commands (node_id, command, issued_by)
+            VALUES (%s, %s, %s)
             """,
-            (command, requested_by, node_id),
+            (node_id, command, requested_by),
           )
+          return [node_id]
         else:
           cur.execute(
-            """
-            UPDATE cluster_nodes
-            SET pending_command = %s,
-                command_requested_at = NOW(),
-                command_requested_by = %s
-            WHERE status = 'online'
-            RETURNING node_id
-            """,
-            (command, requested_by),
+            "SELECT node_id FROM cluster_nodes WHERE status = 'online'",
           )
-        return [r["node_id"] for r in cur.fetchall()]
+          targets = [r["node_id"] for r in cur.fetchall()]
+          if targets:
+            cur.executemany(
+              "INSERT INTO node_commands (node_id, command, issued_by) VALUES (%s, %s, %s)",
+              [(nid, command, requested_by) for nid in targets],
+            )
+          return targets
+
+  def poll_node_command(self, node_id):
+    """Claim the oldest pending command for node_id, marking it 'executing'.
+
+    Uses SELECT FOR UPDATE SKIP LOCKED so concurrent callers cannot claim
+    the same row. Returns the claimed row as a dict, or None if no pending
+    command exists.
+    """
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+          SELECT * FROM node_commands
+          WHERE node_id = %s AND status = 'pending'
+          ORDER BY issued_at ASC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+          """,
+          (node_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+          return None
+        cur.execute(
+          "UPDATE node_commands SET status = 'executing' WHERE id = %s",
+          (row["id"],),
+        )
+        return dict(row)
+
+  def ack_node_command(self, cmd_id, status):
+    """Update the status of a node_commands row by id."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          "UPDATE node_commands SET status = %s WHERE id = %s",
+          (status, cmd_id),
+        )
+
+  def insert_logs(self, records):
+    """Bulk insert log records into the logs table.
+
+    Each record is a dict with keys: node_id, level, logger, message.
+    """
+    if not records:
+      return
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.executemany(
+          "INSERT INTO logs (node_id, level, logger, message) VALUES (%s, %s, %s, %s)",
+          [(r["node_id"], r["level"], r.get("logger"), r["message"]) for r in records],
+        )
+
+  def cleanup_old_logs(self, days):
+    """Delete log entries older than *days* days. Returns count deleted."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          "DELETE FROM logs WHERE timestamp < NOW() - make_interval(days => %s)",
+          (days,),
+        )
+        return cur.rowcount
+
+  def get_logs(self, node_id=None, level=None, limit=100, offset=0):
+    """Return log entries with optional node_id and level filters.
+
+    Results are ordered newest-first. limit and offset support pagination.
+    """
+    query = "SELECT id, node_id, level, logger, message, timestamp FROM logs WHERE 1=1"
+    params = []
+    if node_id:
+      query += " AND node_id = %s"
+      params.append(node_id)
+    if level:
+      query += " AND level = %s"
+      params.append(level)
+    query += " ORDER BY timestamp DESC LIMIT %s OFFSET %s"
+    params.extend([limit, offset])
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(query, params)
+        return [dict(r) for r in cur.fetchall()]
 
   def requeue_job(self, job_id):
     """Reset a failed job back to pending. Returns True if the job was requeued."""
