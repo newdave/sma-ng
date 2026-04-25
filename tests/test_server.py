@@ -8,6 +8,14 @@ from http.server import BaseHTTPRequestHandler
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from ruamel.yaml import YAML as _YAML
+
+
+def _dump_daemon_yaml(path: str, daemon_data: dict) -> None:
+  y = _YAML()
+  with open(path, "w") as f:
+    y.dump({"daemon": daemon_data}, f)
+
 
 from resources.daemon.server import DaemonServer, _validate_hwaccel
 from resources.daemon.worker import ConversionWorker, WorkerPool
@@ -409,8 +417,8 @@ class _BlockingHealthHandler(BaseHTTPRequestHandler):
 
 class TestDaemonServerReloadConfig:
   def _make_reloadable_server(self, tmp_path):
-    cfg = tmp_path / "daemon.json"
-    cfg.write_text('{"default_config": "config/autoProcess.ini"}')
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {"default_config": "config/autoProcess.ini"})
 
     job_db = MagicMock()
     job_db.pending_count.return_value = 0

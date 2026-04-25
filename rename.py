@@ -4,7 +4,7 @@
 Supports single files and recursive directory trees.  Optionally updates
 .plexmatch sidecars and triggers a Plex library refresh after renaming.
 
-When no ``-c`` config is given, reads ``daemon.json`` (if present) to route
+When no ``-c`` config is given, reads ``sma-ng.yml`` (if present) to route
 each file to the correct per-directory ``autoProcess.ini``, matching the
 same logic the daemon uses for conversions.
 """
@@ -46,16 +46,16 @@ def _print_results(results):
 
 
 def _load_path_config_manager():
-  """Try to load PathConfigManager from daemon.json. Returns instance or None."""
+  """Try to load PathConfigManager from sma-ng.yml. Returns instance or None."""
   try:
     from resources.daemon.config import PathConfigManager
 
     pcm = PathConfigManager()
     if pcm.path_configs:
-      log.debug("Loaded daemon.json path routing (%d path(s))" % len(pcm.path_configs))
+      log.debug("Loaded sma-ng.yml path routing (%d path(s))" % len(pcm.path_configs))
       return pcm
   except Exception:
-    log.debug("daemon.json not available; using single config for all paths")
+    log.debug("sma-ng.yml not available; using single config for all paths")
   return None
 
 
@@ -83,7 +83,7 @@ def main():
   parser.add_argument("--dry-run", action="store_true", help="Print what would be renamed; make no changes")
   parser.add_argument("--no-plexmatch", action="store_true", help="Skip .plexmatch updates")
   parser.add_argument("--no-plex", action="store_true", help="Skip Plex library refresh")
-  parser.add_argument("-c", "--config", metavar="PATH", help="Alternate autoProcess.ini path (disables daemon.json routing)")
+  parser.add_argument("-c", "--config", metavar="PATH", help="Alternate autoProcess.ini path (disables sma-ng.yml routing)")
   parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
 
   args = parser.parse_args()
@@ -98,7 +98,7 @@ def main():
       sys.exit(1)
 
     # When an explicit config is given, use it for everything (old behaviour).
-    # Otherwise try to load daemon.json for per-file path routing.
+    # Otherwise try to load sma-ng.yml for per-file path routing.
     pcm = None if args.config else _load_path_config_manager()
 
     # Cache ReadSettings + RenameProcessor instances by resolved config path
@@ -115,7 +115,7 @@ def main():
         _rp_cache[cfg] = RenameProcessor(ReadSettings(cfg), logger=log)
       return _rp_cache[cfg]
 
-    # Explicit --movie / --tv overrides daemon.json default_args.
+    # Explicit --movie / --tv overrides sma-ng.yml default_args.
     explicit_type_hint = None
     if args.movie:
       explicit_type_hint = "movie"
@@ -123,7 +123,7 @@ def main():
       explicit_type_hint = "tv"
 
     def _type_hint_for(filepath):
-      """Resolve type_hint: explicit CLI flag > daemon.json default_args."""
+      """Resolve type_hint: explicit CLI flag > sma-ng.yml default_args."""
       if explicit_type_hint:
         return explicit_type_hint
       if pcm:

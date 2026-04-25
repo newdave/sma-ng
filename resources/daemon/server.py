@@ -199,7 +199,7 @@ class DaemonServer(ThreadingHTTPServer):
     return self.job_db.cancel_job(job_id)
 
   def reload_config(self):
-    """Reload daemon.json in-place without stopping workers or active conversions."""
+    """Reload sma-ng.yml in-place without stopping workers or active conversions."""
     if not self.path_config_manager._config_file:
       self.logger.warning("No daemon config file to reload.")
       return False

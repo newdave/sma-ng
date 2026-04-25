@@ -6,6 +6,16 @@ import urllib.error
 import urllib.request
 from unittest.mock import MagicMock, patch
 
+from ruamel.yaml import YAML as _YAML
+
+
+def _dump_daemon_yaml(path: str, daemon_data: dict) -> None:
+  """Write a sma-ng.yml test fixture with the given daemon section content."""
+  y = _YAML()
+  with open(path, "w") as f:
+    y.dump({"daemon": daemon_data}, f)
+
+
 import pytest
 
 import resources.daemon.constants as _daemon_constants
@@ -36,82 +46,78 @@ class TestPathConfigManager:
   """Test path-to-config matching."""
 
   def test_exact_match(self, tmp_path):
-    config_file = str(tmp_path / "daemon.json")
+    config_file = str(tmp_path / "sma-ng.yml")
     ini_file = str(tmp_path / "autoProcess.ini")
     tv_ini = str(tmp_path / "tv.ini")
     for f in [ini_file, tv_ini]:
       open(f, "w").close()
-    with open(config_file, "w") as f:
-      json.dump({"default_config": ini_file, "path_configs": [{"path": "/mnt/media/TV", "config": tv_ini}]}, f)
+    _dump_daemon_yaml(config_file, {"default_config": ini_file, "path_configs": [{"path": "/mnt/media/TV", "config": tv_ini}]})
     pcm = PathConfigManager(config_file)
     assert pcm.get_config_for_path("/mnt/media/TV/show/ep.mkv") == tv_ini
 
   def test_longest_prefix_wins(self, tmp_path):
-    config_file = str(tmp_path / "daemon.json")
+    config_file = str(tmp_path / "sma-ng.yml")
     ini_file = str(tmp_path / "default.ini")
     movies_ini = str(tmp_path / "movies.ini")
     movies4k_ini = str(tmp_path / "movies4k.ini")
     for f in [ini_file, movies_ini, movies4k_ini]:
       open(f, "w").close()
-    with open(config_file, "w") as f:
-      json.dump(
-        {
-          "default_config": ini_file,
-          "path_configs": [
-            {"path": "/mnt/media/Movies", "config": movies_ini},
-            {"path": "/mnt/media/Movies/4K", "config": movies4k_ini},
-          ],
-        },
-        f,
-      )
+    _dump_daemon_yaml(
+      config_file,
+      {
+        "default_config": ini_file,
+        "path_configs": [
+          {"path": "/mnt/media/Movies", "config": movies_ini},
+          {"path": "/mnt/media/Movies/4K", "config": movies4k_ini},
+        ],
+      },
+    )
     pcm = PathConfigManager(config_file)
     assert pcm.get_config_for_path("/mnt/media/Movies/4K/film.mkv") == movies4k_ini
     assert pcm.get_config_for_path("/mnt/media/Movies/regular.mkv") == movies_ini
 
   def test_rewrite_match_uses_rewritten_path_config(self, tmp_path):
-    config_file = str(tmp_path / "daemon.json")
+    config_file = str(tmp_path / "sma-ng.yml")
     default_ini = str(tmp_path / "default.ini")
     tv1080_ini = str(tmp_path / "tv1080.ini")
     for f in [default_ini, tv1080_ini]:
       open(f, "w").close()
-    with open(config_file, "w") as f:
-      json.dump(
-        {
-          "default_config": default_ini,
-          "path_rewrites": [
-            {"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"},
-          ],
-          "path_configs": [
-            {"path": "/mnt/unionfs/Media/TV/1080P", "config": tv1080_ini},
-          ],
-        },
-        f,
-      )
+    _dump_daemon_yaml(
+      config_file,
+      {
+        "default_config": default_ini,
+        "path_rewrites": [
+          {"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"},
+        ],
+        "path_configs": [
+          {"path": "/mnt/unionfs/Media/TV/1080P", "config": tv1080_ini},
+        ],
+      },
+    )
     pcm = PathConfigManager(config_file)
     assert pcm.get_config_for_path("/mnt/local/Media/TV/1080P/TV Show/Season 01/episode.mkv") == tv1080_ini
 
   def test_longest_rewrite_prefix_wins(self, tmp_path):
-    config_file = str(tmp_path / "daemon.json")
+    config_file = str(tmp_path / "sma-ng.yml")
     default_ini = str(tmp_path / "default.ini")
     general_ini = str(tmp_path / "general.ini")
     specific_ini = str(tmp_path / "specific.ini")
     for f in [default_ini, general_ini, specific_ini]:
       open(f, "w").close()
-    with open(config_file, "w") as f:
-      json.dump(
-        {
-          "default_config": default_ini,
-          "path_rewrites": [
-            {"from": "/mnt/local", "to": "/mnt/general"},
-            {"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"},
-          ],
-          "path_configs": [
-            {"path": "/mnt/general/TV/1080P", "config": general_ini},
-            {"path": "/mnt/unionfs/Media/TV/1080P", "config": specific_ini},
-          ],
-        },
-        f,
-      )
+    _dump_daemon_yaml(
+      config_file,
+      {
+        "default_config": default_ini,
+        "path_rewrites": [
+          {"from": "/mnt/local", "to": "/mnt/general"},
+          {"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"},
+        ],
+        "path_configs": [
+          {"path": "/mnt/general/TV/1080P", "config": general_ini},
+          {"path": "/mnt/unionfs/Media/TV/1080P", "config": specific_ini},
+        ],
+      },
+    )
     pcm = PathConfigManager(config_file)
     assert pcm.get_config_for_path("/mnt/local/Media/TV/1080P/show.mkv") == specific_ini
 
@@ -134,34 +140,31 @@ class TestNodeIdResolution:
     assert resolve_node_id() == "docker-hostname"
 
   def test_no_match_uses_default(self, tmp_path):
-    config_file = str(tmp_path / "daemon.json")
+    config_file = str(tmp_path / "sma-ng.yml")
     ini_file = str(tmp_path / "default.ini")
     open(ini_file, "w").close()
-    with open(config_file, "w") as f:
-      json.dump({"default_config": ini_file, "path_configs": [{"path": "/mnt/media/TV", "config": str(tmp_path / "tv.ini")}]}, f)
     open(str(tmp_path / "tv.ini"), "w").close()
+    _dump_daemon_yaml(config_file, {"default_config": ini_file, "path_configs": [{"path": "/mnt/media/TV", "config": str(tmp_path / "tv.ini")}]})
     pcm = PathConfigManager(config_file)
     assert pcm.get_config_for_path("/completely/different/path.mkv") == ini_file
 
   def test_get_all_configs(self, tmp_path):
-    config_file = str(tmp_path / "daemon.json")
+    config_file = str(tmp_path / "sma-ng.yml")
     ini_file = str(tmp_path / "default.ini")
     tv_ini = str(tmp_path / "tv.ini")
     for f in [ini_file, tv_ini]:
       open(f, "w").close()
-    with open(config_file, "w") as f:
-      json.dump({"default_config": ini_file, "path_configs": [{"path": "/tv", "config": tv_ini}]}, f)
+    _dump_daemon_yaml(config_file, {"default_config": ini_file, "path_configs": [{"path": "/tv", "config": tv_ini}]})
     pcm = PathConfigManager(config_file)
     all_configs = pcm.get_all_configs()
     assert ini_file in all_configs
     assert tv_ini in all_configs
 
   def test_quoted_default_args_are_preserved(self, tmp_path):
-    config_file = str(tmp_path / "daemon.json")
+    config_file = str(tmp_path / "sma-ng.yml")
     ini_file = str(tmp_path / "default.ini")
     open(ini_file, "w").close()
-    with open(config_file, "w") as f:
-      json.dump({"default_config": ini_file, "default_args": '--label "Director Cut"'}, f)
+    _dump_daemon_yaml(config_file, {"default_config": ini_file, "default_args": '--label "Director Cut"'})
     pcm = PathConfigManager(config_file)
     assert pcm.default_args == ["--label", "Director Cut"]
 
@@ -757,60 +760,30 @@ class TestConfigLogManager:
 
 
 class TestPathConfigManagerExtended:
-  """Test PathConfigManager reads db_url and ffmpeg_dir from daemon.json."""
+  """Test PathConfigManager reads db_url and ffmpeg_dir from sma-ng.yml."""
 
-  def test_db_url_from_json(self, tmp_path):
-    cfg = tmp_path / "daemon.json"
-    cfg.write_text(
-      json.dumps(
-        {
-          "default_config": "config/autoProcess.ini",
-          "db_url": "postgresql://sma:pw@db/sma",
-        }
-      )
-    )
-    mgr = PathConfigManager(str(cfg))
+  def test_db_url_from_yaml(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {"default_config": "config/autoProcess.ini", "db_url": "postgresql://sma:pw@db/sma"})
+    mgr = PathConfigManager(cfg)
     assert mgr.db_url == "postgresql://sma:pw@db/sma"
 
-  def test_ffmpeg_dir_from_json(self, tmp_path):
-    cfg = tmp_path / "daemon.json"
-    cfg.write_text(
-      json.dumps(
-        {
-          "default_config": "config/autoProcess.ini",
-          "ffmpeg_dir": "/usr/local/bin",
-        }
-      )
-    )
-    mgr = PathConfigManager(str(cfg))
+  def test_ffmpeg_dir_from_yaml(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {"default_config": "config/autoProcess.ini", "ffmpeg_dir": "/usr/local/bin"})
+    mgr = PathConfigManager(cfg)
     assert mgr.ffmpeg_dir == "/usr/local/bin"
 
-  def test_api_key_from_json(self, tmp_path):
-    cfg = tmp_path / "daemon.json"
-    cfg.write_text(
-      json.dumps(
-        {
-          "default_config": "config/autoProcess.ini",
-          "api_key": "supersecret",
-        }
-      )
-    )
-    mgr = PathConfigManager(str(cfg))
+  def test_api_key_from_yaml(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {"default_config": "config/autoProcess.ini", "api_key": "supersecret"})
+    mgr = PathConfigManager(cfg)
     assert mgr.api_key == "supersecret"
 
   def test_null_values_remain_none(self, tmp_path):
-    cfg = tmp_path / "daemon.json"
-    cfg.write_text(
-      json.dumps(
-        {
-          "default_config": "config/autoProcess.ini",
-          "db_url": None,
-          "ffmpeg_dir": None,
-          "api_key": None,
-        }
-      )
-    )
-    mgr = PathConfigManager(str(cfg))
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {"default_config": "config/autoProcess.ini", "db_url": None, "ffmpeg_dir": None, "api_key": None})
+    mgr = PathConfigManager(cfg)
     assert mgr.db_url is None
     assert mgr.ffmpeg_dir is None
     assert mgr.api_key is None
@@ -818,8 +791,8 @@ class TestPathConfigManagerExtended:
   def test_no_config_file_defaults(self):
     from unittest.mock import patch
 
-    with patch("daemon.DEFAULT_DAEMON_CONFIG", "/nonexistent/default.json"):
-      mgr = PathConfigManager("/nonexistent/daemon.json")
+    with patch("daemon.DEFAULT_DAEMON_CONFIG", "/nonexistent/default.yml"):
+      mgr = PathConfigManager("/nonexistent/sma-ng.yml")
     assert mgr.db_url is None
     assert mgr.ffmpeg_dir is None
     assert mgr.api_key is None
@@ -2144,32 +2117,20 @@ class TestPathConfigManagerUtils:
   """Tests for get_args_for_path, rewrite_path."""
 
   def _make_mgr(self, tmp_path):
-    cfg = tmp_path / "daemon.json"
-    import json as _json
-
-    cfg.write_text(
-      _json.dumps(
-        {
-          "default_config": "config/autoProcess.ini",
-          "default_args": ["-nt"],
-          "path_configs": [
-            {
-              "path": str(tmp_path / "TV"),
-              "config": "config/autoProcess.ini",
-              "default_args": ["-tvdb", "1234"],
-            },
-            {
-              "path": str(tmp_path / "Movies"),
-              "config": "config/autoProcess.ini",
-            },
-          ],
-          "path_rewrites": [
-            {"from": "/mnt/local", "to": "/mnt/union"},
-          ],
-        }
-      )
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(
+      cfg,
+      {
+        "default_config": "config/autoProcess.ini",
+        "default_args": ["-nt"],
+        "path_configs": [
+          {"path": str(tmp_path / "TV"), "config": "config/autoProcess.ini", "default_args": ["-tvdb", "1234"]},
+          {"path": str(tmp_path / "Movies"), "config": "config/autoProcess.ini"},
+        ],
+        "path_rewrites": [{"from": "/mnt/local", "to": "/mnt/union"}],
+      },
     )
-    return PathConfigManager(str(cfg))
+    return PathConfigManager(cfg)
 
   def test_get_args_for_matched_path(self, tmp_path):
     mgr = self._make_mgr(tmp_path)
@@ -2208,28 +2169,17 @@ class TestPathConfigManagerUtils:
     assert result == "/mnt/local2/file.mkv"
 
   def test_get_args_for_rewritten_path(self, tmp_path):
-    cfg = tmp_path / "daemon.json"
-    import json as _json
-
-    cfg.write_text(
-      _json.dumps(
-        {
-          "default_config": "config/autoProcess.ini",
-          "default_args": ["-nt"],
-          "path_rewrites": [
-            {"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"},
-          ],
-          "path_configs": [
-            {
-              "path": "/mnt/unionfs/Media/TV/1080P",
-              "config": "config/autoProcess.rq.ini",
-              "default_args": ["--tv"],
-            }
-          ],
-        }
-      )
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(
+      cfg,
+      {
+        "default_config": "config/autoProcess.ini",
+        "default_args": ["-nt"],
+        "path_rewrites": [{"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"}],
+        "path_configs": [{"path": "/mnt/unionfs/Media/TV/1080P", "config": "config/autoProcess.rq.ini", "default_args": ["--tv"]}],
+      },
     )
-    mgr = PathConfigManager(str(cfg))
+    mgr = PathConfigManager(cfg)
     assert mgr.get_args_for_path("/mnt/local/Media/TV/1080P/Show/episode.mkv") == ["--tv"]
 
 

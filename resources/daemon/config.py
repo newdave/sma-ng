@@ -1,5 +1,4 @@
 import configparser
-import json
 import logging
 import os
 import shlex
@@ -233,30 +232,15 @@ class PathConfigManager:
       self.log.info("No config found, using defaults for all paths")
 
   def load_config(self, config_file):
-    """Load daemon settings from sma-ng.yml, with daemon.json fallback."""
+    """Load daemon settings from the daemon section of sma-ng.yml."""
     try:
-      if config_file.endswith(".json"):
-        self.log.warning("daemon.json is deprecated; move settings to sma-ng.yml Daemon section")
-        with open(config_file, "r", encoding="utf-8") as f:
-          raw = json.load(f)
-        parsed = self._parse_config_data(raw)
-        self._apply_config_data(parsed)
-        self._ensure_node_id(None)
-        return parsed
-
       from resources.yamlconfig import load as _yaml_load
 
       data = _yaml_load(config_file) or {}
       daemon_data = data.get(DAEMON_SECTION) or {}
-
-      daemon_json = os.path.join(os.path.dirname(config_file), "daemon.json")
-      if not daemon_data and os.path.isfile(daemon_json):
-        self.log.warning("No Daemon section in %s; reading daemon.json (deprecated)" % config_file)
-        with open(daemon_json, "r", encoding="utf-8") as f:
-          daemon_data = json.load(f)
-
       parsed = self._parse_config_data(daemon_data)
-      parsed["default_config"] = config_file
+      if not daemon_data.get("default_config"):
+        parsed["default_config"] = config_file
       self._apply_config_data(parsed)
 
       self.log.debug("Loaded config from %s" % config_file)
