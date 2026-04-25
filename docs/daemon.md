@@ -657,6 +657,119 @@ duplicate deletions.
 
 Set `log_ttl_days: 0` in `sma-ng.yml` to disable automatic cleanup entirely.
 
+### Centralised Base Config
+
+When multiple nodes share a PostgreSQL backend, you can push a shared base configuration to the
+database so every node uses consistent defaults without duplicating `sma-ng.yml` files.
+
+**How it works:**
+
+- One node pushes its current config to the shared `cluster_config` table via the admin UI or API.
+- On each config reload, every node fetches the DB base config and merges it with its local
+  `sma-ng.yml`. Local values always win — the DB config is a source of shared defaults, not
+  an override.
+- Secrets (`api_key`, `db_url`, `username`, `password`, `node_id`) are stripped before writing
+  to the database and never replicated to other nodes.
+
+**Push from the admin UI:**
+
+Open the **Cluster** tab in the admin UI. Click **Push config from this node** to write the
+current node's `sma-ng.yml` to the database (secrets stripped). All nodes will pick it up on
+their next config reload or heartbeat tick.
+
+**Read/write via API:**
+
+```bash
+# Read the current DB base config
+curl -H "X-API-Key: SECRET" http://localhost:8585/admin/config
+
+# Write a new base config (YAML body as JSON-encoded string)
+curl -X POST -H "X-API-Key: SECRET" -H "Content-Type: application/json" \
+  -d '{"config": {"video": {"preset": "fast"}, "daemon": {"log_ttl_days": 14}}}' \
+  http://localhost:8585/admin/config
+```
+
+The `GET /admin/config` endpoint returns `{"config": {...}}` as a parsed dict or `null` when
+no cluster config has been stored yet. `POST /admin/config` accepts the same shape.
+
+**Merge semantics:**
+
+1. Local `sma-ng.yml` is parsed first and applied.
+2. If a distributed DB is configured, the DB base config is fetched.
+3. Only keys *explicitly present* in the local `sma-ng.yml` override DB values. Keys absent
+   from the local file fall through to the DB-provided value.
+4. If the DB fetch fails, the node continues with local settings and logs a warning.
+
+### Node Expiry
+
+Offline nodes remain in the `cluster_nodes` table until explicitly deleted or until the
+automatic expiry TTL elapses. Expiry is useful for long-running clusters where decommissioned
+nodes accumulate over time.
+
+Configure the expiry threshold in `sma-ng.yml`:
+
+```yaml
+daemon:
+  # Days after which offline nodes are hard-deleted from the registry.
+  # Set to 0 to disable automatic node expiry.
+  node_expiry_days: 0
+```
+
+When a node's `last_seen` timestamp is older than `node_expiry_days`, the node row and all
+its pending `node_commands` rows are deleted on the next heartbeat tick of any running node.
+
+Only nodes in `offline` status are eligible for expiry. Online, paused, draining, and idle
+nodes are never expired automatically regardless of the threshold.
+
+### Log Archival
+
+By default, log rows older than `log_ttl_days` are deleted from PostgreSQL. Log archival
+provides an alternative: aged rows are moved to compressed JSONL files on the local filesystem
+before being removed from the database.
+
+Configure archival in `sma-ng.yml`:
+
+```yaml
+daemon:
+  # Directory for archived cluster log files (gzipped JSONL, one per node per day).
+  # Set to null to disable log archival.
+  log_archive_dir: /mnt/logs/sma-archive
+
+  # Move cluster logs older than this many days from DB to log_archive_dir.
+  # Set to 0 to disable archival (logs are deleted per log_ttl_days instead).
+  log_archive_after_days: 7
+
+  # Delete archived log files older than this many days from log_archive_dir.
+  # Set to 0 to disable archive file pruning.
+  log_delete_after_days: 90
+```
+
+**Archive layout:**
+
+```text
+log_archive_dir/
+  <node_id>/
+    2025-01-14.jsonl.gz   # one file per node per day
+    2025-01-15.jsonl.gz
+  <other-node-id>/
+    2025-01-14.jsonl.gz
+```
+
+Each `.jsonl.gz` file contains newline-delimited JSON records with fields `node_id`, `level`,
+`logger`, `message`, and `timestamp`.
+
+**Archival guarantees:**
+
+- Files are written atomically (`.tmp` + `os.replace`). A partial write never replaces an
+  existing archive.
+- DB rows are only deleted after all files for the same archival batch have been successfully
+  written. If any write fails, the DB rows are kept and the next run retries.
+- Pruning old archive files (`log_delete_after_days`) runs independently and only after
+  archival succeeds for the current batch.
+
+Archival runs on every heartbeat tick of every node. Because the DB deletion is idempotent
+(`DELETE WHERE timestamp < cutoff`), concurrent archival across nodes produces no data loss.
+
 ### Cluster Configuration Reference
 
 Add these fields to the `daemon:` section of `sma-ng.yml`:
@@ -665,6 +778,10 @@ Add these fields to the `daemon:` section of `sma-ng.yml`:
 | --- | --- | --- |
 | `daemon.node_id` | *(auto-generated UUID)* | Unique node identity. Generated on first start and persisted. Override with `SMA_NODE_NAME` or by setting this field explicitly. |
 | `daemon.log_ttl_days` | `30` | Days to retain cluster log entries in PostgreSQL. Set to `0` to disable TTL cleanup. |
+| `daemon.node_expiry_days` | `0` | Days after which offline nodes are hard-deleted. Set to `0` to disable automatic expiry. |
+| `daemon.log_archive_dir` | `null` | Filesystem path for gzipped JSONL log archives. Set to `null` to disable archival. |
+| `daemon.log_archive_after_days` | `0` | Move DB log rows older than this many days to `log_archive_dir`. Set to `0` to disable archival. |
+| `daemon.log_delete_after_days` | `0` | Delete archive files older than this many days from `log_archive_dir`. Set to `0` to keep archives indefinitely. |
 
 ```yaml
 daemon:
@@ -673,4 +790,16 @@ daemon:
   node_id: null
   # Number of days to retain cluster log entries in PostgreSQL. 0 disables cleanup.
   log_ttl_days: 30
+  # Days after which offline nodes are hard-deleted from the registry.
+  # Set to 0 to disable automatic node expiry.
+  node_expiry_days: 0
+  # Directory for archived cluster log files (gzipped JSONL, one per node per day).
+  # Set to null to disable log archival.
+  log_archive_dir: null
+  # Move cluster logs older than this many days from DB to log_archive_dir.
+  # Set to 0 to disable archival (logs are deleted per log_ttl_days instead).
+  log_archive_after_days: 0
+  # Delete archived log files older than this many days from log_archive_dir.
+  # Set to 0 to disable archive file pruning.
+  log_delete_after_days: 0
 ```
