@@ -10,6 +10,7 @@ DOCS_DIR = os.path.join(SCRIPT_DIR, "docs")
 DOCS_TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "resources", "docs.html")
 DASHBOARD_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "dashboard.html")
 ADMIN_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "admin.html")
+METRICS_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "metrics.html")
 
 # Ordered list of doc pages: (slug, title). The slug maps to docs/<slug>.md.
 # "index" maps to docs/README.md.
@@ -107,6 +108,11 @@ def _load_dashboard_html():
 
 def _load_admin_html():
   with open(ADMIN_HTML_PATH, "r", encoding="utf-8") as f:
+    return f.read()
+
+
+def _load_metrics_html():
+  with open(METRICS_HTML_PATH, "r", encoding="utf-8") as f:
     return f.read()
 
 
