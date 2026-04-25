@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.37](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.36...sma-ng-v1.6.37) (2026-04-25)
+
+
+### Features
+
+* extend HeartbeatThread for cluster command polling and metrics (T-005) ([b9b95f6](https://github.com/newdave/sma-ng/commit/b9b95f63146fb3907d05df0fd5b16cc2b178a534))
+
 ## [1.6.36](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.35...sma-ng-v1.6.36) (2026-04-25)
 
 
