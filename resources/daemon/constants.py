@@ -14,6 +14,8 @@ STATUS_FAILED = "failed"
 
 _node_id_cache: str | None = None
 
+SECRET_KEYS: frozenset = frozenset({"api_key", "db_url", "username", "password", "node_id"})
+
 
 def set_node_id_cache(value: str) -> None:
   """Store the resolved node identity so resolve_node_id() returns it without re-deriving."""
