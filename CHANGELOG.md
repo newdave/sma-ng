@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.51](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.50...sma-ng-v1.6.51) (2026-04-26)
+
+
+### Features
+
+* **config:** schema-driven sma-ng.yml.sample generator ([50b5f4d](https://github.com/newdave/sma-ng/commit/50b5f4de460c834a9a871cd3f7037dc0a5b0e1a2))
+
 ## [1.6.50](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.49...sma-ng-v1.6.50) (2026-04-26)
 
 ### Features
