@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.72](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.71...sma-ng-v1.6.72) (2026-04-26)
+
+
+### Bug Fixes
+
+* **daemon:** SMA_NODE_NAME wins over generated UUID for node identity ([569d463](https://github.com/newdave/sma-ng/commit/569d4636665af8a20c64e40b5df6161742256d40))
+
 ## [1.6.71](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.70...sma-ng-v1.6.71) (2026-04-26)
 
 
