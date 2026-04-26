@@ -640,11 +640,16 @@ def processFile(
       except Exception:
         log.exception("Error updating .plexmatch")
 
-    if mp.settings.postprocess:
-      if tagdata:
-        mp.post(output_files, tagdata.mediatype, tmdbid=tagdata.tmdbid, season=tagdata.season, episode=tagdata.episodes or tagdata.episode)
-      elif type_hint:
-        mp.post(output_files, type_hint, tmdbid=tmdbid, season=season, episode=episode)
+    # mp.post() runs both the post-process scripts (gated on
+    # settings.postprocess) and the Plex refresh (gated on Plex.refresh)
+    # — call it whenever we have media metadata so each notification can
+    # decide for itself whether to fire. Gating the whole call on
+    # settings.postprocess hid the Plex refresh whenever post-process
+    # scripts were disabled, which is the default.
+    if tagdata:
+      mp.post(output_files, tagdata.mediatype, tmdbid=tagdata.tmdbid, season=tagdata.season, episode=tagdata.episodes or tagdata.episode)
+    elif type_hint:
+      mp.post(output_files, type_hint, tmdbid=tmdbid, season=season, episode=episode)
     addtoProcessedArchive(output_files + [output["input"]] if not output["input_deleted"] else output_files, processedList, processedArchive)
 
     # Trigger rescan on matching Sonarr/Radarr instance; may also rename
