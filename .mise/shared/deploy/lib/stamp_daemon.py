@@ -5,10 +5,14 @@ Usage::
 
     python3 stamp_daemon.py <deploy_dir> <api_key_b64> <db_url_b64>
         <ffmpeg_dir_b64> <node_name_b64> <db_user_b64> <db_pw_b64>
-        <db_name_b64> <services_b64>
+        <db_name_b64> <services_b64> [<base_overrides_b64>]
 
 All credential arguments are base64-encoded to safely handle special
-characters; pass an empty string for unused arguments.
+characters; pass an empty string for unused arguments. ``base_overrides``
+is the JSON-encoded ``base:`` block from ``setup/.local.yml`` (emitted
+by ``scripts/local-section-json.py``); it is deep-merged into
+``base:`` on every roll so per-deployment defaults like
+``base.video.gpu`` survive.
 
 The four-bucket sma-ng.yml schema lives under lowercase top-level keys
 (``daemon`` / ``base`` / ``profiles`` / ``services``) with kebab-case
@@ -75,6 +79,24 @@ db_user = _b64arg(6)
 db_pw = _b64arg(7)
 db_name = _b64arg(8)
 services = json.loads(base64.b64decode(sys.argv[9]).decode()) if len(sys.argv) > 9 else {}
+base_overrides = json.loads(base64.b64decode(sys.argv[10]).decode()) if len(sys.argv) > 10 and sys.argv[10] else {}
+
+
+def _deep_merge(dst, src, path=""):
+  """Shallow-recursive merge of ``src`` into ``dst``. Lists and scalars
+  in ``src`` overwrite ``dst``; dicts recurse. Returns the list of
+  ``(path, old, new)`` triples for changed leaves so the caller can log."""
+  changes = []
+  for key, new_val in src.items():
+    here = f"{path}.{key}" if path else key
+    if isinstance(new_val, dict) and isinstance(dst.get(key), dict):
+      changes.extend(_deep_merge(dst[key], new_val, here))
+    else:
+      old_val = dst.get(key)
+      if old_val != new_val:
+        changes.append((here, old_val, new_val))
+        dst[key] = new_val
+  return changes
 
 
 # ── sma-ng.yml ────────────────────────────────────────────────────────────
@@ -86,6 +108,13 @@ if os.path.exists(yaml_path):
     root = yaml.load(f) or {}
 
   changed = False
+
+  # base overrides from .local.yml (deep-merge, scalars/lists overwrite)
+  if base_overrides:
+    base_block = root.setdefault("base", {})
+    for path_, old, new in _deep_merge(base_block, base_overrides):
+      print(f"  sma-ng.yml base.{path_}: {old!r} -> {new!r}")
+      changed = True
 
   # daemon credentials
   daemon_block = root.setdefault("daemon", {})
