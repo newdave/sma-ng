@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.69](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.68...sma-ng-v1.6.69) (2026-04-26)
+
+
+### Features
+
+* **config:** drop .mp4 from default media-extensions ([856625b](https://github.com/newdave/sma-ng/commit/856625baa0fcfa96724184a8503e6d7d13edfae1))
+
 ## [1.6.68](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.67...sma-ng-v1.6.68) (2026-04-26)
 
 
