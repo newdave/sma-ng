@@ -78,7 +78,6 @@ curl https://mise.run | sh
 | `mise run deploy:docker`     | Rsync code to Docker hosts, pull latest image, and recreate the SMA container               |
 | `mise run pg:restart`        | Restart bundled PostgreSQL on hosts using `*-pg` Docker profiles                            |
 | `mise run pg:recreate`       | Remove and recreate bundled PostgreSQL (destructive — removes `sma-pgdata` volume)          |
-| `mise run deploy:exec`       | Run an arbitrary mise task on all hosts (`REMOTE_TASK=test mise run deploy:exec`)           |
 | `mise run deploy:login`      | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token                              |
 | `mise run systemd:install`   | Install and enable the systemd service (respects `SMA_INSTALL_DIR`, defaults to `/opt/sma`) |
 | `mise run systemd:restart`   | Restart the `sma-daemon` systemd service immediately (force-kill then start)                |
@@ -135,15 +134,6 @@ IMAGE=ghcr.io/myorg/sma-ng:2.0.0 mise run build:push
 
 Builds for both `linux/amd64` and `linux/arm64` via `docker buildx` and pushes both manifests.
 Requires `docker buildx` and registry credentials.
-
-### Run the test suite on all remote hosts
-
-```bash
-REMOTE_TASK=test mise run deploy:exec
-```
-
-SSHes into every host in `DEPLOY_HOSTS` and runs `mise run test` in `DEPLOY_DIR`.
-Useful for verifying a code deployment before switching over.
 
 ### Open a shell in the Docker image for debugging
 
@@ -252,7 +242,6 @@ For each remote host:
 | `deploy:docker`  | Rsync the local codebase to each Docker host, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
 | `pg:restart`     | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg`                                                                  |
 | `pg:recreate`    | Stop bundled PostgreSQL, remove its Docker volume, and recreate it on hosts whose `DOCKER_PROFILE` ends in `-pg`                          |
-| `deploy:exec`    | Run an arbitrary mise task on all hosts (`REMOTE_TASK=test mise run deploy:exec`)                                                         |
 
 Additional Docker lifecycle helper: `deploy:dockerstop` (alias: `deploy:docker:stop`) stops services on selected hosts.
 
