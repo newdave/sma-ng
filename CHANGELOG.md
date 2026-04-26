@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.74](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.73...sma-ng-v1.6.74) (2026-04-26)
+
+
+### Features
+
+* **log:** SingleLineFormatter + RedactingFilter ([1838bbc](https://github.com/newdave/sma-ng/commit/1838bbccae41097385af09306e38ba3c1b140377))
+
+
+### Documentation
+
+* **brainstorm:** logging refactor session notes ([45c6ad4](https://github.com/newdave/sma-ng/commit/45c6ad484d31266eda00026f3bfdc92f22fbf9d5))
+
 ## [1.6.73](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.72...sma-ng-v1.6.73) (2026-04-26)
 
 
