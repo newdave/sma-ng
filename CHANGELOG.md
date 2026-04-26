@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.78](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.77...sma-ng-v1.6.78) (2026-04-26)
+
+
+### Bug Fixes
+
+* **deploy:** pass use_sudo flag instead of prefix string in ensure_remote_node_name ([7f63332](https://github.com/newdave/sma-ng/commit/7f63332ebd71d7c50c9ed9ef0b70db17d895b40f))
+
 ## [1.6.77](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.76...sma-ng-v1.6.77) (2026-04-26)
 
 
