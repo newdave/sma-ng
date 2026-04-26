@@ -5,14 +5,17 @@ Usage::
 
     python3 stamp_daemon.py <deploy_dir> <api_key_b64> <db_url_b64>
         <ffmpeg_dir_b64> <node_name_b64> <db_user_b64> <db_pw_b64>
-        <db_name_b64> <services_b64> [<base_overrides_b64>]
+        <db_name_b64> <services_b64> [<base_overrides_b64>
+        [<profiles_overrides_b64>]]
 
 All credential arguments are base64-encoded to safely handle special
-characters; pass an empty string for unused arguments. ``base_overrides``
-is the JSON-encoded ``base:`` block from ``setup/.local.yml`` (emitted
-by ``scripts/local-section-json.py``); it is deep-merged into
-``base:`` on every roll so per-deployment defaults like
-``base.video.gpu`` survive.
+characters; pass an empty string for unused arguments.
+``base_overrides`` and ``profiles_overrides`` are JSON-encoded blocks
+from ``setup/.local.yml`` (emitted by ``scripts/local-section-json.py``)
+and are deep-merged into ``base:`` and ``profiles:`` respectively on
+every roll, so per-deployment defaults like ``base.video.gpu`` and
+quality-profile overlays like ``profiles.rq.video.crf-profiles``
+survive subsequent re-rolls.
 
 The four-bucket sma-ng.yml schema lives under lowercase top-level keys
 (``daemon`` / ``base`` / ``profiles`` / ``services``) with kebab-case
@@ -80,6 +83,7 @@ db_pw = _b64arg(7)
 db_name = _b64arg(8)
 services = json.loads(base64.b64decode(sys.argv[9]).decode()) if len(sys.argv) > 9 else {}
 base_overrides = json.loads(base64.b64decode(sys.argv[10]).decode()) if len(sys.argv) > 10 and sys.argv[10] else {}
+profiles_overrides = json.loads(base64.b64decode(sys.argv[11]).decode()) if len(sys.argv) > 11 and sys.argv[11] else {}
 
 
 def _deep_merge(dst, src, path=""):
@@ -114,6 +118,13 @@ if os.path.exists(yaml_path):
     base_block = root.setdefault("base", {})
     for path_, old, new in _deep_merge(base_block, base_overrides):
       print(f"  sma-ng.yml base.{path_}: {old!r} -> {new!r}")
+      changed = True
+
+  # profiles overrides from .local.yml (same merge semantics)
+  if profiles_overrides:
+    profiles_block = root.setdefault("profiles", {})
+    for path_, old, new in _deep_merge(profiles_block, profiles_overrides):
+      print(f"  sma-ng.yml profiles.{path_}: {old!r} -> {new!r}")
       changed = True
 
   # daemon credentials
