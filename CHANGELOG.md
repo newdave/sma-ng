@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.67](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.66...sma-ng-v1.6.67) (2026-04-26)
+
+
+### Bug Fixes
+
+* **webhook:** resolve api key from the same source the daemon uses ([e7dd8fe](https://github.com/newdave/sma-ng/commit/e7dd8fed4ac55672d6ed216bf9a88ddc0086d323))
+
 ## [1.6.66](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.65...sma-ng-v1.6.66) (2026-04-26)
 
 
