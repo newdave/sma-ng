@@ -214,13 +214,17 @@ class TestValidLanguageLegacy:
 class TestIsValidSource:
   """Test source file validation."""
 
+  @pytest.fixture(autouse=True)
+  def _yaml_cfg(self, tmp_yaml):
+    self._cfg = tmp_yaml()
+
   def _make_processor(self):
     with patch("resources.mediaprocessor.Converter"):
       with patch("resources.readsettings.ReadSettings._validate_binaries"):
         from resources.mediaprocessor import MediaProcessor
         from resources.readsettings import ReadSettings
 
-        settings = ReadSettings()
+        settings = ReadSettings(self._cfg)
         return MediaProcessor(settings)
 
   def test_nonexistent_file_returns_none(self):
@@ -244,13 +248,17 @@ class TestIsValidSource:
 class TestParseFile:
   """Test filename parsing utility."""
 
+  @pytest.fixture(autouse=True)
+  def _yaml_cfg(self, tmp_yaml):
+    self._cfg = tmp_yaml()
+
   def _make_processor(self):
     with patch("resources.mediaprocessor.Converter"):
       with patch("resources.readsettings.ReadSettings._validate_binaries"):
         from resources.mediaprocessor import MediaProcessor
         from resources.readsettings import ReadSettings
 
-        settings = ReadSettings()
+        settings = ReadSettings(self._cfg)
         return MediaProcessor(settings)
 
   def test_parse_simple_path(self):
@@ -1047,12 +1055,12 @@ class TestScanForExternalMetadata:
 class TestMaxBitrateVBV:
   """Test that vmaxbitrate populates VBV maxrate/bufsize in video_settings."""
 
-  def _make_mp(self, tmp_ini, vmaxbitrate):
+  def _make_mp(self, tmp_yaml, vmaxbitrate):
     with patch("resources.readsettings.ReadSettings._validate_binaries"):
       from resources.mediaprocessor import MediaProcessor
       from resources.readsettings import ReadSettings
 
-      settings = ReadSettings(tmp_ini())
+      settings = ReadSettings(tmp_yaml())
       settings.vcodec = ["h264"]
       settings.vmaxbitrate = vmaxbitrate
 
@@ -1074,8 +1082,8 @@ class TestMaxBitrateVBV:
     mp.subtitles = SubtitleProcessor(mp)
     return mp
 
-  def test_vmaxbitrate_sets_maxrate_and_bufsize(self, tmp_ini, make_media_info):
-    mp = self._make_mp(tmp_ini, vmaxbitrate=8000)
+  def test_vmaxbitrate_sets_maxrate_and_bufsize(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, vmaxbitrate=8000)
     info = make_media_info(video_codec="h264", video_bitrate=10000000, total_bitrate=10128000, audio_bitrate=128000)
     with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
       options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
@@ -1083,8 +1091,8 @@ class TestMaxBitrateVBV:
     assert options["video"]["maxrate"] == "8000k"
     assert options["video"]["bufsize"] == "16000k"
 
-  def test_zero_vmaxbitrate_leaves_vbv_unset(self, tmp_ini, make_media_info):
-    mp = self._make_mp(tmp_ini, vmaxbitrate=0)
+  def test_zero_vmaxbitrate_leaves_vbv_unset(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, vmaxbitrate=0)
     info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
     with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
       options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
@@ -1094,12 +1102,12 @@ class TestMaxBitrateVBV:
 
 
 class TestAnalyzerProcessorIntegration:
-  def _make_mp(self, tmp_ini):
+  def _make_mp(self, tmp_yaml):
     with patch("resources.readsettings.ReadSettings._validate_binaries"):
       from resources.mediaprocessor import MediaProcessor
       from resources.readsettings import ReadSettings
 
-      settings = ReadSettings(tmp_ini())
+      settings = ReadSettings(tmp_yaml())
       settings.vcodec = ["h264", "av1"]
       settings.acodec = ["aac"]
       settings.scodec = ["mov_text"]
@@ -1135,8 +1143,8 @@ class TestAnalyzerProcessorIntegration:
     mp.subtitles = SubtitleProcessor(mp)
     return mp
 
-  def test_get_analyzer_recommendations_passes_npu_config_to_backend(self, tmp_ini, make_media_info):
-    mp = self._make_mp(tmp_ini)
+  def test_get_analyzer_recommendations_passes_npu_config_to_backend(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml)
     info = make_media_info()
 
     with (
@@ -1153,8 +1161,8 @@ class TestAnalyzerProcessorIntegration:
     mock_build.assert_called_once_with(backend_instance.analyze.return_value, mp.settings.analyzer)
     assert recommendations.force_reencode is True
 
-  def test_generate_options_applies_analyzer_video_overrides(self, tmp_ini, make_media_info):
-    mp = self._make_mp(tmp_ini)
+  def test_generate_options_applies_analyzer_video_overrides(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml)
     info = make_media_info(video_codec="h264", video_bitrate=4000000, total_bitrate=4128000, audio_bitrate=128000)
 
     recommendations = AnalyzerRecommendations(
@@ -1184,8 +1192,8 @@ class TestAnalyzerProcessorIntegration:
     assert ".analyzer-filter" in options["video"]["debug"]
     assert ".analyzer-preset" in options["video"]["debug"]
 
-  def test_generate_options_logs_structured_analyzer_recommendations(self, tmp_ini, make_media_info):
-    mp = self._make_mp(tmp_ini)
+  def test_generate_options_logs_structured_analyzer_recommendations(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml)
     info = make_media_info()
 
     recommendations = AnalyzerRecommendations(
@@ -1206,8 +1214,8 @@ class TestAnalyzerProcessorIntegration:
     assert any("Analyzer recommendations:" in message for message in logged_messages)
     assert any('"filters": ["bwdif"]' in message for message in logged_messages)
 
-  def test_analyzer_codec_reorder_preserves_hw_encoder_priority_within_family(self, tmp_ini, make_media_info):
-    mp = self._make_mp(tmp_ini)
+  def test_analyzer_codec_reorder_preserves_hw_encoder_priority_within_family(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml)
     mp.settings.vcodec = ["h265qsv", "h265"]
     info = make_media_info(video_codec="vp9", video_bitrate=4000000, total_bitrate=4128000, audio_bitrate=128000)
 
@@ -2427,12 +2435,12 @@ class TestMatchBitrateProfile:
 class TestBitrateProfileIntegration:
   """Test that a matching crf-profile forces transcode and sets vbitrate/maxrate/bufsize."""
 
-  def _make_mp(self, tmp_ini, vbitrate_profiles, vmaxbitrate=0):
+  def _make_mp(self, tmp_yaml, vbitrate_profiles, vmaxbitrate=0):
     with patch("resources.readsettings.ReadSettings._validate_binaries"):
       from resources.mediaprocessor import MediaProcessor
       from resources.readsettings import ReadSettings
 
-      settings = ReadSettings(tmp_ini())
+      settings = ReadSettings(tmp_yaml())
       settings.vcodec = ["h264"]
       settings.vmaxbitrate = vmaxbitrate
       settings.vbitrate_profiles = vbitrate_profiles
@@ -2455,9 +2463,9 @@ class TestBitrateProfileIntegration:
     mp.subtitles = SubtitleProcessor(mp)
     return mp
 
-  def test_profile_match_sets_vbitrate_maxrate_bufsize(self, tmp_ini, make_media_info):
+  def test_profile_match_sets_vbitrate_maxrate_bufsize(self, tmp_yaml, make_media_info):
     profiles = [{"source_kbps": 0, "target": 3000, "maxrate": 6000}]
-    mp = self._make_mp(tmp_ini, vbitrate_profiles=profiles)
+    mp = self._make_mp(tmp_yaml, vbitrate_profiles=profiles)
     info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
     with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
       options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
@@ -2466,17 +2474,17 @@ class TestBitrateProfileIntegration:
     assert options["video"]["maxrate"] == "6000k"
     assert options["video"]["bufsize"] == "12000k"
 
-  def test_profile_match_forces_transcode(self, tmp_ini, make_media_info):
+  def test_profile_match_forces_transcode(self, tmp_yaml, make_media_info):
     profiles = [{"source_kbps": 0, "target": 3000, "maxrate": 6000}]
-    mp = self._make_mp(tmp_ini, vbitrate_profiles=profiles)
+    mp = self._make_mp(tmp_yaml, vbitrate_profiles=profiles)
     info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
     with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
       options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
     assert options is not None
     assert options["video"]["codec"] != "copy"
 
-  def test_no_profiles_leaves_vbv_unset_without_maxbitrate(self, tmp_ini, make_media_info):
-    mp = self._make_mp(tmp_ini, vbitrate_profiles=[], vmaxbitrate=0)
+  def test_no_profiles_leaves_vbv_unset_without_maxbitrate(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, vbitrate_profiles=[], vmaxbitrate=0)
     info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
     with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
       options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
@@ -2490,14 +2498,14 @@ class TestBitrateProfileIntegration:
 # ===========================================================================
 
 
-def _build_mp_with_real_settings(tmp_ini_factory):
+def _build_mp_with_real_settings(tmp_yaml_factory):
   """Build a MediaProcessor with real ReadSettings and a mocked Converter."""
   with patch("resources.readsettings.ReadSettings._validate_binaries"):
     from resources.mediaprocessor import MediaProcessor
     from resources.readsettings import ReadSettings
     from resources.subtitles import SubtitleProcessor
 
-    settings = ReadSettings(tmp_ini_factory())
+    settings = ReadSettings(tmp_yaml_factory())
 
   mock_converter = MagicMock()
   mock_converter.ffmpeg.codecs = {
@@ -4350,14 +4358,14 @@ class TestWarnUnsupportedEncoders:
 # ===========================================================================
 
 
-def _build_mp_with_real_settings(tmp_ini_factory):
+def _build_mp_with_real_settings(tmp_yaml_factory):
   """Build a MediaProcessor with real ReadSettings and a mocked Converter."""
   with patch("resources.readsettings.ReadSettings._validate_binaries"):
     from resources.mediaprocessor import MediaProcessor
     from resources.readsettings import ReadSettings
     from resources.subtitles import SubtitleProcessor
 
-    settings = ReadSettings(tmp_ini_factory())
+    settings = ReadSettings(tmp_yaml_factory())
 
   mock_converter = MagicMock()
   mock_converter.ffmpeg.codecs = {

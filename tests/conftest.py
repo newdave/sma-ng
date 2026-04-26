@@ -92,272 +92,94 @@ def make_media_info(make_stream, make_format):
 
 
 @pytest.fixture
-def tmp_ini(tmp_path):
-  """Create a temporary autoProcess.ini with minimal valid config."""
+def tmp_yaml(tmp_path):
+  """Create a temporary ``sma-ng.yml`` for tests.
 
-  def _make(content=None, gpu=None):
-    if content is None:
-      content = """[Converter]
-ffmpeg = ffmpeg
-ffprobe = ffprobe
-threads = 0
-hwaccels =
-hwaccel-decoders =
-hwdevices =
-hwaccel-output-format =
-output-directory =
-output-format = mp4
-output-extension = mp4
-temp-extension =
-minimum-size = 0
-ignored-extensions = nfo, ds_store
-copy-to =
-move-to =
-delete-original = true
-process-same-extensions = false
-bypass-if-copying-all = false
-force-convert = false
-post-process = false
-wait-post-process = false
-detailed-progress = false
-opts-separator = ,
-preopts =
-postopts =
-regex-directory-replace = [^\\w\\-_\\. ]
-output-directory-space-ratio = 0.0
+  Returns a callable accepting:
 
-[Permissions]
-chmod = 0664
-uid = -1
-gid = -1
+  * ``overrides``: a nested dict deep-merged onto the four-bucket default
+    YAML (e.g. ``{"base": {"video": {"codec": ["h264"]}}}``).
+  * ``gpu``: shorthand for ``overrides={"base": {"video": {"gpu": ...}}}``.
 
-[Metadata]
-relocate-moov = true
-full-path-guess = true
-tag = true
-tag-language = eng
-download-artwork = false
-sanitize-disposition =
-strip-metadata = true
-keep-titles = false
+  Defaults mirror the legacy ``tmp_yaml`` fixture's expectations so existing
+  test assertions continue to hold (audio.codec=[aac], universal audio
+  enabled, single-instance Sonarr/Radarr/Plex with localhost credentials,
+  etc.).
+  """
 
-[Video]
-gpu =
-codec = h265, h264
-max-bitrate = 0
-preset = medium
-dynamic-parameters = false
-profile =
-prioritize-source-pix-fmt = true
-max-width = 0
-pix-fmt =
-max-level = 0
-filter =
-force-filter = false
-bitrate-ratio =
-codec-parameters =
+  def _deep_merge(dst: dict, src: dict) -> None:
+    for k, v in src.items():
+      if isinstance(v, dict) and isinstance(dst.get(k), dict):
+        _deep_merge(dst[k], v)
+      else:
+        dst[k] = v
 
-[HDR]
-codec =
-pix-fmt =
-space = bt2020nc
-transfer = smpte2084
-primaries = bt2020
-preset =
-codec-parameters =
-filter =
-force-filter = false
-profile =
+  def _make(overrides=None, gpu=None, content=None):
+    if content is not None:
+      raise TypeError("tmp_yaml no longer accepts an INI string `content`. Pass `overrides=` (nested dict) instead, or build YAML inline.")
 
-[Audio]
-codec = aac
-languages =
-default-language = eng
-first-stream-of-language = false
-allow-language-relax = true
-channel-bitrate = 128
-variable-bitrate = 0
-max-bitrate = 0
-max-channels = 0
-filter =
-profile =
-force-filter = false
-sample-rates =
-sample-format =
-copy-original = false
-aac-adtstoasc = true
-ignored-dispositions =
-unique-dispositions = false
-stream-codec-combinations =
-ignore-trudhd = true
-relax-to-default = false
-force-default = false
-include-original-language = false
-atmos-force-copy = false
+    data: dict = {
+      "daemon": {},
+      "base": {
+        "converter": {
+          "ffmpeg": "ffmpeg",
+          "ffprobe": "ffprobe",
+          "output-format": "mp4",
+          "output-extension": "mp4",
+          "ignored-extensions": ["nfo", "ds_store"],
+          "delete-original": True,
+          "regex-directory-replace": r"[^\w\-_\. ]",
+        },
+        "permissions": {"chmod": "0664", "uid": -1, "gid": -1},
+        "metadata": {
+          "tag": True,
+          "tag-language": "eng",
+          "download-artwork": "false",
+          "strip-metadata": True,
+        },
+        "video": {
+          "codec": ["h265", "h264"],
+          "preset": "medium",
+          "prioritize-source-pix-fmt": True,
+        },
+        "hdr": {
+          "space": ["bt2020nc"],
+          "transfer": ["smpte2084"],
+          "primaries": ["bt2020"],
+        },
+        "audio": {
+          "codec": ["aac"],
+          "default-language": "eng",
+          "channel-bitrate": 128,
+          "aac-adtstoasc": True,
+          "universal": {
+            "enabled": True,
+            "first-stream-only": True,
+          },
+        },
+        "subtitle": {
+          "codec": ["mov_text"],
+          "default-language": "eng",
+          "embed-subs": True,
+        },
+      },
+      "services": {
+        "sonarr": {"main": {"url": "http://localhost:8989", "apikey": ""}},
+        "radarr": {"main": {"url": "http://localhost:7878", "apikey": ""}},
+        "plex": {"main": {"url": "http://localhost:32400", "token": ""}},
+      },
+    }
 
-[Audio.Sorting]
-sorting = language, channels.d, map, d.comment
-default-sorting = channels.d, map, d.comment
-codecs =
+    if gpu:
+      data["base"]["video"]["gpu"] = gpu
+    if overrides:
+      _deep_merge(data, overrides)
 
-[Universal Audio]
-enabled = true
-codec =
-channel-bitrate = 128
-variable-bitrate = 0
-first-stream-only = true
-filter =
-profile =
-force-filter = false
+    from resources import yamlconfig
 
-[Audio.ChannelFilters]
-
-[Naming]
-enabled = false
-tv-template = {Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle} [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}
-movie-template = {Movie CleanTitle} ({Release Year}) [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}
-
-[Subtitle]
-codec = mov_text
-codec-image-based =
-languages =
-default-language = eng
-first-stream-of-language = false
-encoding =
-burn-subtitles = false
-burn-dispositions =
-embed-subs = true
-embed-image-subs = false
-embed-only-internal-subs = false
-filename-dispositions =
-ignore-embedded-subs = false
-ignored-dispositions =
-unique-dispositions = false
-attachment-codec =
-remove-bitstream-subs = true
-force-default = false
-include-original-language = false
-
-[Subtitle.Sorting]
-sorting = language, d.forced.d, d.comment, d.default.d
-codecs =
-burn-sorting = language, d.forced.d, d.comment, d.default.d
-
-[Subtitle.CleanIt]
-enabled = false
-config-path =
-tags = default
-
-[Subtitle.Subliminal]
-download-subs = false
-download-hearing-impaired-subs = false
-providers =
-download-forced-subs = false
-include-hearing-impaired-subs = false
-
-[Subtitle.Subliminal.Auth]
-
-[Subtitle.FFSubsync]
-enabled = false
-
-[Sonarr]
-host = localhost
-port = 8989
-apikey =
-ssl = false
-webroot =
-path = /tv
-force-rename = false
-rescan = true
-block-reprocess = false
-in-progress-check = true
-
-[Radarr]
-host = localhost
-port = 7878
-apikey =
-ssl = false
-webroot =
-path = /movies
-force-rename = false
-rescan = true
-block-reprocess = false
-in-progress-check = true
-
-[SABNZBD]
-convert = true
-sonarr-category = sonarr
-radarr-category = radarr
-bypass-category = bypass
-output-directory =
-path-mapping =
-
-[Deluge]
-
-
-sonarr-label = sonarr
-radarr-label = radarr
-bypass-label = bypass
-convert = true
-host = localhost
-port = 58846
-username =
-password =
-output-directory =
-remove = false
-path-mapping =
-
-[qBittorrent]
-
-
-sonarr-label = sonarr
-radarr-label = radarr
-bypass-label = bypass
-convert = true
-action-before =
-action-after =
-host = localhost
-port = 8080
-ssl = false
-username =
-password =
-output-directory =
-path-mapping =
-
-[uTorrent]
-
-
-sonarr-label = sonarr
-radarr-label = radarr
-bypass-label = bypass
-convert = true
-webui = false
-action-before =
-action-after =
-host = localhost
-ssl = false
-port = 8080
-username =
-password =
-output-directory =
-path-mapping =
-
-[Plex]
-host = localhost
-port = 32400
-refresh = false
-token =
-ssl = false
-ignore-certs = false
-path-mapping =
-plexmatch = true
-"""
-    if gpu is not None:
-      content = content.replace("gpu =\n", "gpu = %s\n" % gpu)
-    ini_path = str(tmp_path / "autoProcess.ini")
-    with open(ini_path, "w") as f:
-      f.write(content)
-    return ini_path
+    yaml_path = str(tmp_path / "sma-ng.yml")
+    yamlconfig.write(yaml_path, data)
+    return yaml_path
 
   return _make
 
