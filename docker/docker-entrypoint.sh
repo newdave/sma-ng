@@ -67,12 +67,15 @@ FFPROBE="${SMA_FFPROBE:-/usr/local/bin/ffprobe}"
 
 CONFIG="$CONFIG_DIR/sma-ng.yml"
 
-# sed -i is not POSIX; use a temp file for portability across BusyBox/GNU
+# sed -i is not POSIX; use a temp file for portability across BusyBox/GNU.
+# The schema-generated sample puts ffmpeg/ffprobe under base.converter, i.e.
+# four spaces of indentation. Only patch lines that still hold the bare
+# default — user-defined absolute paths are left alone.
 _patch_yaml() {
     key="$1"; val="$2"
     tmp="${CONFIG}.patching"
-    sed "s|^  ${key}: ffmpeg\$|  ${key}: ${val}|; \
-         s|^  ${key}: ffprobe\$|  ${key}: ${val}|" \
+    sed "s|^    ${key}: ffmpeg\$|    ${key}: ${val}|; \
+         s|^    ${key}: ffprobe\$|    ${key}: ${val}|" \
         "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
 }
 
@@ -86,12 +89,12 @@ log "FFmpeg: $FFMPEG  FFprobe: $FFPROBE"
 if [ -n "${SMA_GPU:-}" ]; then
     GPU="$SMA_GPU"
     tmp="${CONFIG}.patching"
-    sed "s|^  gpu:.*|  gpu: ${GPU}|" "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
+    sed "s|^    gpu:.*|    gpu: ${GPU}|" "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
     log "GPU: ${GPU} (from SMA_GPU)"
 elif [ "$_config_is_new" = "true" ]; then
     GPU="$(/app/scripts/detect-gpu.sh 2>/dev/null || echo software)"
     tmp="${CONFIG}.patching"
-    sed "s|^  gpu:.*|  gpu: ${GPU}|" "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
+    sed "s|^    gpu:.*|    gpu: ${GPU}|" "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
     log "GPU: ${GPU} (auto-detected)"
 fi
 

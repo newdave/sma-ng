@@ -154,7 +154,7 @@ class TestFirstRunSeeding:
     sample = open(os.path.join(SETUP_DIR, "sma-ng.yml.sample")).read()
     # Strip lines patched by the entrypoint on first run: ffmpeg/ffprobe
     # paths and the gpu= value (set by detect-gpu.sh).
-    _pat = re.compile(r"^  (ffmpeg|ffprobe|gpu): .*", re.M)
+    _pat = re.compile(r"^    (ffmpeg|ffprobe|gpu): .*", re.M)
     assert _pat.sub("", seeded) == _pat.sub("", sample)
 
   def test_seeded_env_is_readable(self, empty_config):
@@ -231,30 +231,33 @@ class TestDefaultsDirectory:
 
 
 class TestFFmpegPatching:
+  # Four-bucket sma-ng.yml puts ffmpeg/ffprobe under base.converter, so the
+  # entrypoint sed and these assertions both anchor on a 4-space indent.
+
   def test_default_ffmpeg_path_written_to_yaml(self, empty_config):
     _run(empty_config)
     config = open(os.path.join(empty_config, "sma-ng.yml")).read()
-    assert "  ffmpeg: /usr/local/bin/ffmpeg" in config
+    assert "    ffmpeg: /usr/local/bin/ffmpeg" in config
 
   def test_default_ffprobe_path_written_to_yaml(self, empty_config):
     _run(empty_config)
     config = open(os.path.join(empty_config, "sma-ng.yml")).read()
-    assert "  ffprobe: /usr/local/bin/ffprobe" in config
+    assert "    ffprobe: /usr/local/bin/ffprobe" in config
 
   def test_custom_ffmpeg_path_via_env(self, empty_config):
     _run(empty_config, env_extra={"SMA_FFMPEG": "/opt/bin/ffmpeg"})
     config = open(os.path.join(empty_config, "sma-ng.yml")).read()
-    assert "  ffmpeg: /opt/bin/ffmpeg" in config
+    assert "    ffmpeg: /opt/bin/ffmpeg" in config
 
   def test_custom_ffprobe_path_via_env(self, empty_config):
     _run(empty_config, env_extra={"SMA_FFPROBE": "/opt/bin/ffprobe"})
     config = open(os.path.join(empty_config, "sma-ng.yml")).read()
-    assert "  ffprobe: /opt/bin/ffprobe" in config
+    assert "    ffprobe: /opt/bin/ffprobe" in config
 
   def test_user_custom_ffmpeg_path_preserved(self, populated_config):
     """If the user has already set a custom path, the patch must not change it."""
     config_path = os.path.join(populated_config, "sma-ng.yml")
-    open(config_path, "w").write("Converter:\n  ffmpeg: /my/custom/ffmpeg\n  ffprobe: /my/custom/ffprobe\n")
+    open(config_path, "w").write("base:\n  converter:\n    ffmpeg: /my/custom/ffmpeg\n    ffprobe: /my/custom/ffprobe\n")
     _run(populated_config)
     config = open(config_path).read()
     # The sed rule only replaces bare ffmpeg/ffprobe values, not absolute paths.
