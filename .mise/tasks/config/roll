@@ -96,18 +96,18 @@ stamp_daemon_config() {
     local host="$1" dir="$2" daemon_api_key="$3" daemon_db_url="$4" \
         daemon_ffmpeg_dir="$5" daemon_node_name="$6" services_json="$7" \
         daemon_db_user="${8:-}" daemon_db_pw="${9:-}" daemon_db_name="${10:-}" \
-        base_json="${11:-{\}}"
+        base_json="${11:-{\}}" profiles_json="${12:-{\}}"
 
     if [ -z "$daemon_api_key" ] && [ -z "$daemon_db_url" ] && \
        [ -z "$daemon_ffmpeg_dir" ] && [ -z "$daemon_node_name" ] && [ "$services_json" = "{}" ] && \
        [ -z "$daemon_db_user" ] && [ -z "$daemon_db_pw" ] && [ -z "$daemon_db_name" ] && \
-       [ "$base_json" = "{}" ]; then
-        echo "  no daemon, services, or base overrides configured in $LOCAL, skipping"
+       [ "$base_json" = "{}" ] && [ "$profiles_json" = "{}" ]; then
+        echo "  no daemon, services, base, or profiles overrides configured in $LOCAL, skipping"
         return
     fi
 
-    echo "  stamping daemon + service + base overrides into config/sma-ng.yml and config/daemon.env"
-    local _api_b64 _db_url_b64 _ffmpeg_b64 _node_name_b64 _dbuser_b64 _dbpw_b64 _dbname_b64 _svc_b64 _base_b64
+    echo "  stamping daemon + service + base + profiles overrides into config/sma-ng.yml and config/daemon.env"
+    local _api_b64 _db_url_b64 _ffmpeg_b64 _node_name_b64 _dbuser_b64 _dbpw_b64 _dbname_b64 _svc_b64 _base_b64 _prof_b64
     _api_b64=$(b64enc "$daemon_api_key")
     _db_url_b64=$(b64enc "$daemon_db_url")
     _ffmpeg_b64=$(b64enc "$daemon_ffmpeg_dir")
@@ -117,9 +117,10 @@ stamp_daemon_config() {
     _dbname_b64=$(b64enc "$daemon_db_name")
     _svc_b64=$(b64enc "$services_json")
     _base_b64=$(b64enc "$base_json")
+    _prof_b64=$(b64enc "$profiles_json")
     # shellcheck disable=SC2029  # $dir and b64-encoded args expand client-side (intentional)
     ssh "${SSH_OPTS[@]}" "$ssh_target" \
-        "python3 $dir/.mise/shared/deploy/lib/stamp_daemon.py $dir $_api_b64 $_db_url_b64 $_ffmpeg_b64 $_node_name_b64 $_dbuser_b64 $_dbpw_b64 $_dbname_b64 $_svc_b64 $_base_b64"
+        "python3 $dir/.mise/shared/deploy/lib/stamp_daemon.py $dir $_api_b64 $_db_url_b64 $_ffmpeg_b64 $_node_name_b64 $_dbuser_b64 $_dbpw_b64 $_dbname_b64 $_svc_b64 $_base_b64 $_prof_b64"
 }
 
 # Copy and stamp post-process scripts; also update shebangs in root entry points.
@@ -163,6 +164,7 @@ for host in $DEPLOY_HOSTS; do
 
     services_json=$(python3 scripts/services-json.py "$LOCAL")
     base_overrides_json=$(python3 scripts/local-section-json.py "$LOCAL" base)
+    profiles_overrides_json=$(python3 scripts/local-section-json.py "$LOCAL" profiles)
 
     echo ""
     echo "==> [$host] rolling config in $dir/config"
@@ -236,7 +238,7 @@ REMOTE
     fi
     stamp_daemon_config "$host" "$dir" "$daemon_api_key" "$daemon_db_url" "$daemon_ffmpeg_dir" \
         "$daemon_node_name" "$services_json" "$daemon_db_user" "$daemon_db_pw" "$daemon_db_name" \
-        "$base_overrides_json"
+        "$base_overrides_json" "$profiles_overrides_json"
 
     plex_token=$(lc plex token "")
     plex_username=$(lc plex username "")
