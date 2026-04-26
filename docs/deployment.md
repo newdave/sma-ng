@@ -305,7 +305,7 @@ For each remote host:
 | `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials                                                                           |
 | `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container                                                                |
 | `config:audit`   | Audit local configs                                                                                                                       |
-| `deploy:docker`  | Rsync the local codebase to each Docker host, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
+| `deploy:docker`  | Rsync the local codebase to each Docker host, stamp `SMA_NODE_NAME` into `daemon.env`, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
 | `pg:restart`     | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg`                                                                  |
 | `pg:recreate`    | Stop bundled PostgreSQL, remove its Docker volume, and recreate it on hosts whose `DOCKER_PROFILE` ends in `-pg`                          |
 

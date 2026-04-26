@@ -38,6 +38,17 @@ for host in $DEPLOY_HOSTS; do
         continue
     fi
 
+    # Pin the cluster identity into daemon.env before recreating the
+    # container. Without this, a host whose daemon.env was seeded but never
+    # passed through config:roll comes up with no SMA_NODE_NAME, the daemon
+    # generates a fresh UUID, and the previously-approved node row gets
+    # replaced by a new pending one on every redeploy.
+    if ! ensure_remote_node_name "$host"; then
+        echo "ERROR: [$host] could not stamp SMA_NODE_NAME into daemon.env" >&2
+        failed="$failed $host"
+        continue
+    fi
+
     # Make sure Docker itself is on the host before any compose call.
     if ! ensure_remote_docker "$host"; then
         echo "ERROR: [$host] Docker installation failed — aborting" >&2
