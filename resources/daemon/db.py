@@ -280,12 +280,38 @@ class PostgreSQLJobDatabase:
     jobs for those configs are skipped so a free worker can pick up work
     for a different config rather than blocking on a locked one.
 
+    Load balancing: if this node already has a running job AND another
+    online+approved peer node has zero running jobs (with at least one
+    worker), this call returns None so the idle peer can claim the job
+    on its next poll instead. With only one node, the check is a no-op.
+
     This is the key distributed-safe operation: the SELECT and UPDATE happen in
     a single transaction. Any other node/worker that tries to claim the same row
     will skip it instantly due to SKIP LOCKED, preventing duplicate processing.
     """
     with self._conn() as conn:
       with conn.cursor() as cur:
+        cur.execute(
+          """
+          SELECT
+            (SELECT COUNT(*) FROM jobs WHERE status = 'running' AND node_id = %s) AS my_running,
+            EXISTS (
+              SELECT 1 FROM cluster_nodes cn
+              WHERE cn.node_id <> %s
+                AND cn.status = 'online'
+                AND cn.approval_status = 'approved'
+                AND cn.workers > 0
+                AND NOT EXISTS (
+                  SELECT 1 FROM jobs WHERE status = 'running' AND node_id = cn.node_id
+                )
+            ) AS idle_peer
+          """,
+          (node_id, node_id),
+        )
+        balance = cur.fetchone()
+        if balance and balance.get("my_running", 0) > 0 and balance.get("idle_peer"):
+          return None
+
         if exclude_configs:
           cur.execute(
             """
