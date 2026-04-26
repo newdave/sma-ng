@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.61](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.60...sma-ng-v1.6.61) (2026-04-26)
+
+
+### Features
+
+* **daemon:** prefer idle peer nodes when claiming pending jobs ([0c902d7](https://github.com/newdave/sma-ng/commit/0c902d7fec93ef13ad3443cb3a98b75f110358cd))
+
+
+### Bug Fixes
+
+* **dashboard:** rebuild Config Mappings panel for routing rules ([1bf6aec](https://github.com/newdave/sma-ng/commit/1bf6aec801e5f3ea7f549c30f884536d01e570d0))
+
 ## [1.6.60](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.59...sma-ng-v1.6.60) (2026-04-26)
 
 
