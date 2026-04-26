@@ -76,8 +76,8 @@ hosts:
     ffmpeg_dir: /usr/local/bin
 
 # ── daemon configuration ──────────────────────────────────────────────────────
-# Stamped into config/sma-ng.yml (Daemon section) and config/daemon.env by
-# `mise run config:roll`. These are global — not per-host.
+# Stamped into config/sma-ng.yml (daemon block, kebab-case) and
+# config/daemon.env by `mise run config:roll`. These are global — not per-host.
 
 daemon:
   # API key for protecting daemon endpoints (SMA_DAEMON_API_KEY).
@@ -90,46 +90,51 @@ daemon:
   # ffmpeg/ffprobe directory (SMA_DAEMON_FFMPEG_DIR). Overrides deploy.ffmpeg_dir.
   # ffmpeg_dir: ""
 
-# ── service credentials ───────────────────────────────────────────────────────
-# Section names must match the regex (sonarr|radarr|plex|jellyfin|emby|converter)
-# and are case-insensitive. Use suffixed names (Sonarr2, RadarrKids, …) for
-# multiple instances of the same service type.
+# ── services ─────────────────────────────────────────────────────────────────
+# Mirrors the `services:` block in sma-ng.yml exactly:
+#   services.<type>.<instance>.<field>
+# where <type> is one of sonarr, radarr, plex, jellyfin, emby and <instance>
+# is any name you choose (e.g. main, kids, 4k).
 #
-# Stamped into config/sma-ng.yml on remote hosts by `mise run config:roll`.
-#
-# Sonarr/Radarr/Plex/Jellyfin/Emby all use a single `url:` key.
-# Routing uses `path:` + `profile:` (a profile name defined under `profiles:`
-# in sma-ng.yml.sample, e.g. `rq` or `lq`).
+# `mise run config:roll` stamps each instance into sma-ng.yml under
+# `services.<type>.<instance>` and rebuilds `daemon.routing` from every
+# instance that defines both `path:` and `profile:`. The `path` and
+# `profile` keys live here only so routing can be derived; they are not
+# copied into the service block.
 
 # services:
 #   sonarr:
-#     url: http://sonarr.example.com:8989
-#     apikey: ""
-#     path: /media/tv
-#     profile: rq
-#
-#   sonarrkids:
-#     url: http://sonarr.example.com:8990
-#     apikey: ""
-#     path: /media/tv/Kids
-#     profile: lq
+#     main:
+#       url: http://sonarr.example.com:8989
+#       apikey: ""
+#       path: /media/tv
+#       profile: rq
+#     kids:
+#       url: http://sonarr.example.com:8990
+#       apikey: ""
+#       path: /media/tv/Kids
+#       profile: lq
 #
 #   radarr:
-#     url: http://radarr.example.com:7878
-#     apikey: ""
-#     path: /media/movies
-#     profile: rq
+#     main:
+#       url: http://radarr.example.com:7878
+#       apikey: ""
+#       path: /media/movies
+#       profile: rq
 #
 #   plex:
-#     url: http://plex.example.com:32400
-#     token: ""
-#     username: ""
-#     servername: ""
+#     main:
+#       url: http://plex.example.com:32400
+#       token: ""
+#       username: ""
+#       servername: ""
 #
 #   jellyfin:
-#     url: ""
-#     token: ""
+#     main:
+#       url: ""
+#       token: ""
 #
 #   emby:
-#     url: ""
-#     apikey: ""
+#     main:
+#       url: ""
+#       apikey: ""

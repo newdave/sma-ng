@@ -1,27 +1,34 @@
-"""Stamp daemon credentials into sma-ng.yml Daemon section and config/daemon.env.
+"""Stamp daemon settings, routing rules, and service credentials into
+``config/sma-ng.yml`` and ``config/daemon.env``.
 
-Usage: python3 stamp_daemon.py <deploy_dir> <api_key_b64> <db_url_b64>
-           <ffmpeg_dir_b64> <node_name_b64> <db_user_b64> <db_pw_b64>
-           <db_name_b64> <services_b64>
+Usage::
 
-All credential arguments are base64-encoded to safely handle special characters.
-Pass an empty base64 value ("") for unused arguments.
+    python3 stamp_daemon.py <deploy_dir> <api_key_b64> <db_url_b64>
+        <ffmpeg_dir_b64> <node_name_b64> <db_user_b64> <db_pw_b64>
+        <db_name_b64> <services_b64>
 
-  deploy_dir    - absolute path to the SMA deployment directory
-  api_key_b64   - base64(daemon API key)
-  db_url_b64    - base64(PostgreSQL connection URL)
-  ffmpeg_dir_b64 - base64(ffmpeg binary directory)
-  node_name_b64 - base64(cluster node identifier / SMA_NODE_NAME)
-  db_user_b64   - base64(PostgreSQL username, for -pg profiles)
-  db_pw_b64     - base64(PostgreSQL password, for -pg profiles)
-  db_name_b64   - base64(PostgreSQL database name, for -pg profiles)
-  services_b64  - base64(JSON services dict from services-json.py)
+All credential arguments are base64-encoded to safely handle special
+characters; pass an empty string for unused arguments.
+
+The four-bucket sma-ng.yml schema lives under lowercase top-level keys
+(``daemon`` / ``base`` / ``profiles`` / ``services``) with kebab-case
+field names. ``services_b64`` is the JSON emitted by
+``scripts/services-json.py`` — a nested ``{type: {instance: {fields}}}``
+mapping that mirrors ``services:`` in sma-ng.yml exactly. We:
+
+* write daemon credentials into ``daemon.api-key`` / ``daemon.db-url`` /
+  ``daemon.ffmpeg-dir``;
+* rebuild ``daemon.routing`` from every instance that carries both a
+  ``path`` and a ``profile`` (longest-match-first so the daemon's
+  prefix matcher picks the most specific rule);
+* stamp service credentials into ``services.<type>.<instance>``,
+  filtering out routing-only metadata (``path``, ``profile``) which
+  belongs in routing rules, not the service block.
 """
 
 import base64
 import json
 import os
-import re
 import sys
 
 from ruamel.yaml import YAML
@@ -36,6 +43,29 @@ def _b64arg(n, default=""):
   return default
 
 
+# Keys that describe routing, not service identity — never stamped into
+# services.<type>.<instance>.
+ROUTING_ONLY_KEYS = {"path", "profile"}
+
+# Boolean fields per service type (used to coerce JSON string values back
+# to YAML bools so the schema validator doesn't complain).
+BOOLEAN_FIELDS = {
+  "sonarr": {"force-rename", "rescan", "in-progress-check", "block-reprocess"},
+  "radarr": {"force-rename", "rescan", "in-progress-check", "block-reprocess"},
+  "plex": {"refresh", "ignore-certs", "plexmatch"},
+}
+
+
+def _coerce(stype, key, raw):
+  if key in BOOLEAN_FIELDS.get(stype, set()):
+    return raw.lower() in ("1", "true", "yes", "on")
+  return raw
+
+
+def _kebab(key):
+  return key.replace("_", "-")
+
+
 deploy_dir = sys.argv[1]
 api_key = _b64arg(2)
 db_url = _b64arg(3)
@@ -46,50 +76,64 @@ db_pw = _b64arg(7)
 db_name = _b64arg(8)
 services = json.loads(base64.b64decode(sys.argv[9]).decode()) if len(sys.argv) > 9 else {}
 
-# ── sma-ng.yml Daemon section ─────────────────────────────────────────────
+
+# ── sma-ng.yml ────────────────────────────────────────────────────────────
 yaml_path = os.path.join(deploy_dir, "config", "sma-ng.yml")
 if os.path.exists(yaml_path):
   yaml = YAML(typ="rt")
   yaml.width = 120
   with open(yaml_path) as f:
     root = yaml.load(f) or {}
-  cfg = root.setdefault("Daemon", {})
+
   changed = False
-  for field, val in [("api_key", api_key), ("db_url", db_url), ("ffmpeg_dir", ffmpeg_dir)]:
-    if val and cfg.get(field) != val:
-      print(f"  sma-ng.yml Daemon.{field}: {cfg.get(field)!r} -> {val!r}")
-      cfg[field] = val
+
+  # daemon credentials
+  daemon_block = root.setdefault("daemon", {})
+  for field, val in (("api-key", api_key), ("db-url", db_url), ("ffmpeg-dir", ffmpeg_dir)):
+    if val and daemon_block.get(field) != val:
+      print(f"  sma-ng.yml daemon.{field}: {daemon_block.get(field)!r} -> {val!r}")
+      daemon_block[field] = val
       changed = True
 
-  # Rebuild path_configs from service sections that have path + profile.
-  # Entries are sorted longest-path-first so the daemon's prefix matching works
-  # correctly (more specific paths take priority).
-  path_entries = []
-  for sec, keys in services.items():
-    path = keys.get("path", "").strip()
-    profile = keys.get("profile", "").strip()
-    config_file = keys.get("config_file", "").strip()
-    if path and (profile or config_file):
-      entry = {"path": path}
-      if profile:
-        entry["profile"] = profile
-      else:
-        basename = os.path.basename(config_file)
-        if basename == "autoProcess.lq.ini":
-          entry["profile"] = "lq"
-        elif basename == "autoProcess.rq.ini":
-          entry["profile"] = "rq"
-        else:
-          entry["config"] = config_file.replace(".ini", ".yaml")
-      path_entries.append(entry)
-  if path_entries:
-    path_entries.sort(key=lambda e: len(e["path"]), reverse=True)
-    old = cfg.get("path_configs", [])
-    if old != path_entries:
-      print(f"  sma-ng.yml Daemon.path_configs: rebuilding {len(path_entries)} entries")
-      for e in path_entries:
-        print(f"    {e['path']} -> {e.get('config') or e.get('profile')}")
-      cfg["path_configs"] = path_entries
+  # service credentials (skip routing-only keys)
+  if services:
+    services_block = root.setdefault("services", {})
+    for stype, instances in services.items():
+      type_block = services_block.setdefault(stype, {})
+      for inst_name, fields in instances.items():
+        inst_block = type_block.setdefault(inst_name, {})
+        for raw_key, raw_val in fields.items():
+          if raw_key in ROUTING_ONLY_KEYS:
+            continue
+          yaml_key = _kebab(raw_key)
+          new_val = _coerce(stype, yaml_key, raw_val)
+          if inst_block.get(yaml_key) != new_val:
+            print(f"  sma-ng.yml services.{stype}.{inst_name}.{yaml_key}: {new_val!r}")
+            inst_block[yaml_key] = new_val
+            changed = True
+
+  # routing rules built from every instance carrying path + profile,
+  # sorted longest-match-first.
+  routing_entries = []
+  for stype, instances in services.items():
+    for inst_name, fields in instances.items():
+      path = fields.get("path", "").strip()
+      profile = fields.get("profile", "").strip()
+      if path and profile:
+        routing_entries.append(
+          {
+            "match": path,
+            "profile": profile,
+            "services": [f"{stype}.{inst_name}"],
+          }
+        )
+  if routing_entries:
+    routing_entries.sort(key=lambda e: len(e["match"]), reverse=True)
+    if daemon_block.get("routing") != routing_entries:
+      print(f"  sma-ng.yml daemon.routing: rebuilding {len(routing_entries)} rules")
+      for e in routing_entries:
+        print(f"    {e['match']} -> profile={e['profile']} services={e['services']}")
+      daemon_block["routing"] = routing_entries
       changed = True
 
   if changed:
@@ -97,6 +141,7 @@ if os.path.exists(yaml_path):
       yaml.dump(root, f)
 else:
   print("  WARNING: config/sma-ng.yml not found, skipping daemon YAML stamping")
+
 
 # ── daemon.env ────────────────────────────────────────────────────────────
 env_path = os.path.join(deploy_dir, "config", "daemon.env")
@@ -112,6 +157,9 @@ if os.path.exists(env_path):
   }
   with open(env_path) as f:
     lines = f.readlines()
+
+  import re
+
   out = []
   seen = set()
   for line in lines:
@@ -126,7 +174,6 @@ if os.path.exists(env_path):
           print(f"  daemon.env {var}: updated")
         seen.add(var)
     out.append(line)
-  # append any vars not already present in the file
   for var, val in env_vars.items():
     if val and var not in seen:
       print(f"  daemon.env {var}: added")

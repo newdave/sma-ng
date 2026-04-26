@@ -323,8 +323,6 @@ class TestDeployConfigTask:
   def test_deploy_config_uses_lib_helpers_for_python(self):
     """deploy/config must delegate Python work via lib/ helper files."""
     text = _read(".mise/tasks/config/roll")
-    assert "lib/build_force_keys.py" in text
-    assert "lib/ini_stamp_credentials.py" in text
     assert "lib/stamp_ffmpeg.py" in text
     assert "lib/stamp_daemon.py" in text
     assert "lib/stamp_postprocess.py" in text
@@ -339,229 +337,117 @@ class TestDeployConfigTask:
     text = _read(".mise/tasks/config/roll")
     assert ".backup/" in text
 
-  def test_ini_merge_called_with_sort_and_deprecate(self):
-    """sync_ini_keys must pass --sort and --deprecate to ini_merge.py."""
+  def test_yaml_merge_called_with_sort_and_deprecate(self):
+    """sync_yaml_keys must pass --sort and --deprecate to yaml_merge.py."""
     text = _read(".mise/tasks/config/roll")
+    assert "yaml_merge.py" in text
     assert "--sort" in text
     assert "--deprecate" in text
+    assert "--additions" in text
 
 
 class TestDeployLibHelpers:
-  def test_ini_stamp_credentials_uses_service_specific_sonarr_overrides(self, tmp_path):
+  def _run_stamp_daemon(self, deploy_dir, services, *, api_key="", db_url="", ffmpeg_dir="", node_name=""):
+    services_b64 = b64encode(json.dumps(services).encode()).decode()
+    args = [
+      PYTHON,
+      ".mise/shared/deploy/lib/stamp_daemon.py",
+      str(deploy_dir),
+      b64encode(api_key.encode()).decode() if api_key else "",
+      b64encode(db_url.encode()).decode() if db_url else "",
+      b64encode(ffmpeg_dir.encode()).decode() if ffmpeg_dir else "",
+      b64encode(node_name.encode()).decode() if node_name else "",
+      "",
+      "",
+      "",
+      services_b64,
+    ]
+    return subprocess.run(args, cwd=PROJECT_ROOT, capture_output=True, text=True, check=False)
+
+  def test_stamp_daemon_writes_kebab_case_credentials(self, tmp_path):
     deploy_dir = tmp_path / "deploy"
     config_dir = deploy_dir / "config"
     config_dir.mkdir(parents=True)
-    ini_path = config_dir / "autoProcess.sonarr-kids.ini"
-    ini_path.write_text(
-      textwrap.dedent(
-        """
-        [Sonarr]
-        host = old-host
-        port = 8989
-        apikey = old-key
-        webroot =
+    (config_dir / "sma-ng.yml").write_text("daemon: {}\n")
+    (config_dir / "daemon.env").write_text("# existing\n")
 
-        [Converter]
-        recycle-bin = /old/recycle
-        """
-      ).strip()
-      + "\n"
-    )
-
-    services = {
-      "Converter": {"recycle-bin": "/srv/recycle"},
-      "Sonarr-Kids": {
-        "host": "kids-sonarr.local",
-        "port": "9898",
-        "apikey": "kids-key",
-        "webroot": "/kids",
-        "config_file": "config/autoProcess.sonarr-kids.ini",
-      },
-    }
-    services_b64 = b64encode(json.dumps(services).encode()).decode()
-
-    result = subprocess.run(
-      [
-        PYTHON,
-        ".mise/shared/deploy/lib/ini_stamp_credentials.py",
-        str(deploy_dir),
-        "false",
-        services_b64,
-      ],
-      cwd=PROJECT_ROOT,
-      capture_output=True,
-      text=True,
-      check=False,
-    )
-
+    result = self._run_stamp_daemon(deploy_dir, {}, api_key="abc123", db_url="postgresql://x", ffmpeg_dir="/usr/local/bin")
     assert result.returncode == 0, result.stderr or result.stdout
-    content = ini_path.read_text()
-    assert "host = kids-sonarr.local" in content
-    assert "port = 9898" in content
-    assert "apikey = kids-key" in content
-    assert "webroot = /kids" in content
-    assert "recycle-bin = /srv/recycle/Sonarr-Kids" in content
+    content = (config_dir / "sma-ng.yml").read_text()
+    assert "api-key: abc123" in content
+    assert "db-url: postgresql://x" in content
+    assert "ffmpeg-dir: /usr/local/bin" in content
 
-  def test_ini_stamp_credentials_adds_multiple_arr_sections_to_shared_config(self, tmp_path):
+  def test_stamp_daemon_writes_nested_service_credentials(self, tmp_path):
     deploy_dir = tmp_path / "deploy"
     config_dir = deploy_dir / "config"
     config_dir.mkdir(parents=True)
-    ini_path = config_dir / "autoProcess.shared.ini"
-    ini_path.write_text("[Converter]\nrecycle-bin = /shared/recycle\n")
+    (config_dir / "sma-ng.yml").write_text("daemon: {}\nservices: {}\n")
+    (config_dir / "daemon.env").write_text("# existing\n")
 
     services = {
-      "Sonarr": {
-        "host": "sonarr.local",
-        "port": "8989",
-        "apikey": "tv-key",
-        "config_file": "config/autoProcess.shared.ini",
+      "sonarr": {
+        "main": {"url": "http://sonarr.example.com", "apikey": "tv-key", "path": "/media/tv", "profile": "rq"},
+        "kids": {"url": "http://sonarr-kids.example.com", "apikey": "kids-key", "path": "/media/tv/Kids", "profile": "lq"},
       },
-      "Radarr-4K": {
-        "host": "radarr4k.local",
-        "port": "7879",
-        "apikey": "movies4k-key",
-        "webroot": "/4k",
-        "config_file": "config/autoProcess.shared.ini",
+      "plex": {
+        "main": {"url": "http://plex.example.com:32400", "token": "plex-token"},
       },
     }
-    services_b64 = b64encode(json.dumps(services).encode()).decode()
-
-    result = subprocess.run(
-      [
-        PYTHON,
-        ".mise/shared/deploy/lib/ini_stamp_credentials.py",
-        str(deploy_dir),
-        "false",
-        services_b64,
-      ],
-      cwd=PROJECT_ROOT,
-      capture_output=True,
-      text=True,
-      check=False,
-    )
-
+    result = self._run_stamp_daemon(deploy_dir, services)
     assert result.returncode == 0, result.stderr or result.stdout
-    content = ini_path.read_text()
-    assert "[Sonarr]" in content
-    assert "host = sonarr.local" in content
-    assert "apikey = tv-key" in content
-    assert "[Radarr-4K]" in content
-    assert "host = radarr4k.local" in content
-    assert "port = 7879" in content
-    assert "apikey = movies4k-key" in content
-    assert "webroot = /4k" in content
+    content = (config_dir / "sma-ng.yml").read_text()
 
-  def test_ini_ensure_services_creates_suffixed_arr_section(self, tmp_path):
+    # Service blocks must end up under services.<type>.<instance>, not at the root.
+    assert "services:" in content
+    assert "sonarr:" in content
+    assert "main:" in content
+    assert "url: http://sonarr.example.com" in content
+    assert "apikey: tv-key" in content
+    assert "kids:" in content
+    assert "apikey: kids-key" in content
+    assert "token: plex-token" in content
+    # Routing-only metadata must NOT leak into the service block.
+    assert "path: /media/tv\n" not in content.split("services:")[1]
+    # ...but it MUST appear in the routing rules below.
+    assert "match: /media/tv" in content
+    assert "match: /media/tv/Kids" in content
+
+  def test_stamp_daemon_builds_routing_longest_match_first(self, tmp_path):
     deploy_dir = tmp_path / "deploy"
-    setup_dir = deploy_dir / "setup"
-    setup_dir.mkdir(parents=True)
-    (setup_dir / "autoProcess.ini.sample").write_text("[Converter]\nrecycle-bin =\n")
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "sma-ng.yml").write_text("daemon: {}\nservices: {}\n")
+    (config_dir / "daemon.env").write_text("# existing\n")
 
     services = {
-      "Converter": {"recycle-bin": "/srv/recycle"},
-      "Sonarr-Kids": {
-        "host": "kids-sonarr.local",
-        "port": "9898",
-        "apikey": "kids-key",
-        "config_file": "config/autoProcess.kids.ini",
+      "sonarr": {
+        "main": {"url": "http://x", "path": "/media/tv", "profile": "rq"},
+        "kids": {"url": "http://y", "path": "/media/tv/Kids", "profile": "lq"},
       },
     }
-    services_b64 = b64encode(json.dumps(services).encode()).decode()
-
-    result = subprocess.run(
-      [
-        PYTHON,
-        ".mise/shared/deploy/lib/ini_ensure_services.py",
-        str(deploy_dir),
-        "software",
-        "false",
-        services_b64,
-      ],
-      cwd=PROJECT_ROOT,
-      capture_output=True,
-      text=True,
-      check=False,
-    )
-
+    result = self._run_stamp_daemon(deploy_dir, services)
     assert result.returncode == 0, result.stderr or result.stdout
-    content = (deploy_dir / "config" / "autoProcess.kids.ini").read_text()
-    assert "[Sonarr-Kids]" in content
-    assert "host = kids-sonarr.local" in content
-    assert "port = 9898" in content
-    assert "apikey = kids-key" in content
-    assert "recycle-bin = /srv/recycle/Sonarr-Kids" in content
+
+    content = (config_dir / "sma-ng.yml").read_text()
+    # The longer prefix must appear in the routing list before the shorter one.
+    kids_idx = content.find("/media/tv/Kids")
+    tv_idx = content.find("match: /media/tv\n")
+    assert kids_idx != -1 and tv_idx != -1
+    assert kids_idx < tv_idx, "longest-match routing rule must be listed first"
+    # The routing entry must reference services as <type>.<instance>.
+    assert "- sonarr.main" in content
+    assert "- sonarr.kids" in content
 
   def test_stamp_daemon_writes_sma_node_name_to_daemon_env(self, tmp_path):
     deploy_dir = tmp_path / "deploy"
     config_dir = deploy_dir / "config"
     config_dir.mkdir(parents=True)
     (config_dir / "daemon.env").write_text("# existing\n")
-    services_b64 = b64encode(json.dumps({}).encode()).decode()
-    node_name_b64 = b64encode(b"sma-slave0").decode()
-
-    result = subprocess.run(
-      [
-        PYTHON,
-        ".mise/shared/deploy/lib/stamp_daemon.py",
-        str(deploy_dir),
-        "",
-        "",
-        "",
-        node_name_b64,
-        "",
-        "",
-        "",
-        services_b64,
-      ],
-      cwd=PROJECT_ROOT,
-      capture_output=True,
-      text=True,
-      check=False,
-    )
-
+    result = self._run_stamp_daemon(deploy_dir, {}, node_name="sma-slave0")
     assert result.returncode == 0, result.stderr or result.stdout
     content = (config_dir / "daemon.env").read_text()
     assert "SMA_NODE_NAME=sma-slave0" in content
-
-  def test_stamp_daemon_builds_profile_path_configs(self, tmp_path):
-    deploy_dir = tmp_path / "deploy"
-    config_dir = deploy_dir / "config"
-    config_dir.mkdir(parents=True)
-    (config_dir / "sma-ng.yml").write_text("Daemon:\n  path_configs: []\n")
-    (config_dir / "daemon.env").write_text("# existing\n")
-    services = {
-      "Sonarr": {"path": "/media/tv", "profile": "rq"},
-      "Radarr-LQ": {"path": "/media/movies/mobile", "profile": "lq"},
-    }
-    services_b64 = b64encode(json.dumps(services).encode()).decode()
-
-    result = subprocess.run(
-      [
-        PYTHON,
-        ".mise/shared/deploy/lib/stamp_daemon.py",
-        str(deploy_dir),
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        services_b64,
-      ],
-      cwd=PROJECT_ROOT,
-      capture_output=True,
-      text=True,
-      check=False,
-    )
-
-    assert result.returncode == 0, result.stderr or result.stdout
-    content = (config_dir / "sma-ng.yml").read_text()
-    assert "path: /media/movies/mobile" in content
-    assert "profile: lq" in content
-    assert "path: /media/tv" in content
-    assert "profile: rq" in content
-    assert "config:" not in content
 
 
 class TestDeployMiseTask:
@@ -600,7 +486,6 @@ class TestDeployMiseTask:
       ".mise/tasks/cluster/start",
       ".mise/tasks/cluster/restart",
       ".mise/tasks/deploy/restart",
-      ".mise/tasks/deploy/exec",
       ".mise/tasks/deploy/login",
       ".mise/tasks/pg/restart",
       ".mise/tasks/pg/recreate",
@@ -638,8 +523,20 @@ FIXTURE_LOCAL_YML = (
 
   services:
     sonarr:
-      host: sonarr.example.com
-      apikey: test-sonarr-key
+      main:
+        url: http://sonarr.example.com
+        apikey: test-sonarr-key
+        path: /media/tv
+        profile: rq
+      kids:
+        url: http://sonarr-kids.example.com
+        apikey: test-kids-key
+        path: /media/tv/Kids
+        profile: lq
+    plex:
+      main:
+        url: http://plex.example.com:32400
+        token: test-plex-token
   """
   ).strip()
   + "\n"
@@ -698,9 +595,17 @@ class TestLocalConfig:
     out = self._run(fixture_local_yml, "daemon", "api_key", "")
     assert out == "test-api-key"
 
-  def test_service_section_resolves_apikey(self, fixture_local_yml):
+  def test_service_section_resolves_main_instance_by_default(self, fixture_local_yml):
     out = self._run(fixture_local_yml, "sonarr", "apikey", "")
     assert out == "test-sonarr-key"
+
+  def test_service_section_resolves_named_instance_via_dot(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "sonarr.kids", "apikey", "")
+    assert out == "test-kids-key"
+
+  def test_service_section_resolves_plex_token(self, fixture_local_yml):
+    out = self._run(fixture_local_yml, "plex", "token", "")
+    assert out == "test-plex-token"
 
   def test_missing_key_returns_default(self, fixture_local_yml):
     out = self._run(fixture_local_yml, "sma-node1", "ssh_key", "fallback")
