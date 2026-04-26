@@ -2,7 +2,17 @@
 
 from unittest.mock import MagicMock, patch
 
-from resources.mediamanager import api_command, api_get, api_put, build_api, rename, rename_via_arr, rescan, wait_for_command
+from resources.mediamanager import (
+  api_command,
+  api_get,
+  api_put,
+  build_api,
+  rename,
+  rename_via_arr,
+  rescan,
+  rescan_via_arr,
+  wait_for_command,
+)
 
 
 class TestBuildApi:
@@ -235,3 +245,43 @@ class TestRenameViaArr:
     log = MagicMock()
     result = rename_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log)
     assert result is None
+
+
+class TestRescanViaArr:
+  @patch("resources.mediamanager.requests.post")
+  @patch("resources.mediamanager.requests.get")
+  def test_sonarr_issues_rescan_series(self, mock_get, mock_post):
+    mock_get.return_value = _make_response({"series": {"id": 10, "title": "Show"}})
+    mock_post.return_value = _make_response({"id": 99, "status": "queued"})
+    log = MagicMock()
+    cmd_id = rescan_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mkv", log)
+    assert cmd_id == 99
+    body = mock_post.call_args[1]["json"]
+    assert body["name"] == "RescanSeries"
+    assert body["seriesId"] == 10
+
+  @patch("resources.mediamanager.requests.post")
+  @patch("resources.mediamanager.requests.get")
+  def test_radarr_issues_rescan_movie(self, mock_get, mock_post):
+    mock_get.return_value = _make_response({"movie": {"id": 42, "title": "Film"}})
+    mock_post.return_value = _make_response({"id": 17, "status": "queued"})
+    log = MagicMock()
+    cmd_id = rescan_via_arr("http://localhost:7878", {}, "radarr", "/movies/Film/Film.mkv", log)
+    assert cmd_id == 17
+    body = mock_post.call_args[1]["json"]
+    assert body["name"] == "RescanMovie"
+    assert body["movieIds"] == [42]
+
+  @patch("resources.mediamanager.requests.post")
+  @patch("resources.mediamanager.requests.get")
+  def test_sonarr_unmatched_series_returns_none(self, mock_get, mock_post):
+    mock_get.return_value = _make_response({"series": None})
+    log = MagicMock()
+    assert rescan_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Unknown.mkv", log) is None
+    mock_post.assert_not_called()
+
+  @patch("resources.mediamanager.requests.get")
+  def test_exception_returns_none(self, mock_get):
+    mock_get.side_effect = Exception("network error")
+    log = MagicMock()
+    assert rescan_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mkv", log) is None
