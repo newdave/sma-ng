@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Gracefully shut down sma-daemon on all DEPLOY_HOSTS, then restart via systemctl"
+#MISE description="Gracefully shut down sma-daemon on all deploy.hosts via webhook, then restart its Docker container"
 #MISE depends=["deploy:mise"]
 set -euo pipefail
 
@@ -13,16 +13,15 @@ daemon_api_key=$(lc daemon api_key "")
 
 failed=""
 for host in $DEPLOY_HOSTS; do
-  cfg="$CFG $LOCAL $host"
-  port=$($cfg ssh_port 22)
-  key=$($cfg ssh_key "")
+  init_docker_host_context "$host"
+  # shellcheck disable=SC2154  # cfg/profile/ssh_opts/ssh_target/sudo_prefix populated by init_docker_host_context above
   daemon_port=$($cfg daemon_port 8585)
-  remote_user=$($cfg user "$(whoami)")
-  remote_address=$($cfg address "")
-  ssh_target="${remote_user}@${remote_address}"
 
-  ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-  [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
+  if [ -z "$profile" ]; then
+    echo "ERROR: [$host] docker_profile is not set in $LOCAL — add it to deploy: or the host: entry" >&2
+    failed="$failed $host"
+    continue
+  fi
 
   echo "==> [$host] sending shutdown webhook"
 
@@ -37,14 +36,14 @@ for host in $DEPLOY_HOSTS; do
     remote_health="curl -sf ${daemon_url}/health"
   fi
 
-  # shellcheck disable=SC2086,SC2029
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target are populated by init_docker_host_context above; ssh_opts must word-split for ssh
   if ! ssh $ssh_opts "$ssh_target" "$remote_shutdown" > /dev/null 2>&1; then
     echo "  [$host] daemon not responding to shutdown webhook (already stopped or not yet started), proceeding"
   else
     echo "==> [$host] waiting for sma-daemon to stop (timeout: ${SHUTDOWN_TIMEOUT}s)"
     # Poll /health until the daemon stops responding
     elapsed=0
-    # shellcheck disable=SC2086,SC2029
+    # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target are populated by init_docker_host_context above; ssh_opts must word-split for ssh
     while ssh $ssh_opts "$ssh_target" "$remote_health" > /dev/null 2>&1; do
       if [ "$elapsed" -ge "$SHUTDOWN_TIMEOUT" ]; then
         echo "  WARNING: [$host] daemon did not stop within ${SHUTDOWN_TIMEOUT}s, forcing restart anyway"
@@ -56,9 +55,12 @@ for host in $DEPLOY_HOSTS; do
     echo "==> [$host] daemon stopped (${elapsed}s)"
   fi
 
-  echo "==> [$host] restarting sma-daemon"
-  # shellcheck disable=SC2086
-  ssh $ssh_opts "$ssh_target" "sudo systemctl restart sma-daemon" || { failed="$failed $host"; continue; }
+  echo "==> [$host] restarting sma-daemon container (profile: $profile)"
+  if ! run_remote_compose "$host" "--profile $profile restart sma"; then
+    echo "ERROR: [$host] docker compose restart sma failed" >&2
+    failed="$failed $host"
+    continue
+  fi
   echo "==> [$host] sma-daemon restarted"
 done
 

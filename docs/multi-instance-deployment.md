@@ -120,7 +120,7 @@ On a single machine, run each instance with its own:
 - `sma-ng.yml` set
 - port
 - logs directory
-- systemd unit name or container name
+- container name
 
 Example layout:
 

@@ -178,11 +178,12 @@ class TestMiseTaskLayout:
     assert "deploy:docker:pg:recreate" not in tasks
     assert "deploy:docker:pg:recreate" in tasks["pg:recreate"]
 
-    assert "systemd:restart" in tasks
-    assert "systemd:force:restart" not in tasks
-    assert "systemd:force:restart" in tasks["systemd:restart"]
-
     assert "setup:deps" in tasks["setup:deps:base"]
+
+    # systemd-related tasks have been removed in favour of Docker-only deployments.
+    assert "systemd:restart" not in tasks
+    assert "systemd:install" not in tasks
+    assert "systemd:uninstall" not in tasks
 
   def test_nested_task_names_are_exposed_to_completion(self, tmp_path):
     if not shutil.which("usage"):

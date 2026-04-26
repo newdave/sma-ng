@@ -187,7 +187,7 @@ Full documentation is in [docs/](docs/) and served at `http://localhost:8585/doc
 - [docs/daemon.md](docs/daemon.md) — Daemon mode, API, clustering
 - [docs/integrations.md](docs/integrations.md) — Sonarr, Radarr, download clients
 - [docs/hardware-acceleration.md](docs/hardware-acceleration.md) — GPU config
-- [docs/deployment.md](docs/deployment.md) — mise tasks, systemd, Docker, CI/release
+- [docs/deployment.md](docs/deployment.md) — mise tasks, Docker, CI/release
 - [docs/troubleshooting.md](docs/troubleshooting.md) — Logs, common issues
 
 ## CI / Release

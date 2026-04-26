@@ -730,7 +730,7 @@ Send `POST /shutdown` to drain in-progress conversions before stopping:
 curl -X POST http://localhost:8585/shutdown -H "X-API-Key: SECRET"
 ```
 
-The daemon stops accepting new jobs immediately, waits for all active conversions to finish, then exits. The systemd unit uses `KillMode=mixed` and `TimeoutStopSec=infinity` so SIGTERM triggers the same graceful drain.
+The daemon stops accepting new jobs immediately, waits for all active conversions to finish, then exits. The Docker entrypoint forwards SIGTERM to the daemon, so `docker compose stop` triggers the same graceful drain.
 
 ---
 
@@ -1110,7 +1110,7 @@ mise run test:smoke       # Smoke-test imports and ffmpeg
 
 ### Deployment System
 
-The deploy tasks push code to remote hosts via SSH/rsync and manage the systemd service.
+The deploy tasks push code to remote hosts via SSH/rsync and manage the Docker stack.
 
 #### Initial setup
 
@@ -1167,7 +1167,7 @@ services:                        # nested <type>.<instance>; auto-builds daemon.
       profile: rq
 ```
 
-1. Run first-time setup (generates SSH key, installs apt dependencies, creates deploy directory, installs systemd service):
+1. Run first-time setup (generates SSH key, installs apt dependencies, installs Docker, creates deploy directory):
 
 ```bash
 mise run deploy:setup
@@ -1176,7 +1176,7 @@ mise run deploy:setup
 #### Deploying code
 
 ```bash
-# Sync code, install dependencies, reload systemd unit
+# Sync code and install dependencies
 mise run deploy:sync
 
 # Then restart the service
@@ -1193,8 +1193,6 @@ HOSTS="sma-master sma-worker-1" mise run deploy:dockerstop
 
 - rsyncs the repo (excluding `venv/`, `config/`, `logs/`, `__pycache__/`)
 - creates or repairs the virtualenv and installs base Python dependencies
-- updates `User=` / `Group=` in the systemd unit file to match the SSH user
-- runs `systemctl daemon-reload`
 
 If dependency installation fails due to missing prerequisites (Python, `rsync`, or `venv` support), it automatically
 runs `deploy:setup` for that host and retries.
@@ -1244,18 +1242,18 @@ hosts:
 mise run deploy:restart
 ```
 
-Runs `sudo systemctl restart sma-daemon` on each host.
+Sends a graceful shutdown webhook to each host, waits for the daemon to drain, then runs `docker compose --profile <docker_profile> restart sma`.
 
 #### Summary of deploy tasks
 
 | Task             | Description                                                                |
 | ---------------- | -------------------------------------------------------------------------- |
 | `deploy:check`   | Verify `setup/local.yml` exists and `deploy.hosts` is set                  |
-| `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, systemd install       |
+| `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, Docker install       |
 | `deploy:mise`    | Sync the local `.mise/` deploy control plane to each remote `deploy_dir`   |
-| `deploy:sync`    | Sync code + install deps + reload systemd on all hosts                     |
+| `deploy:sync`    | Sync code and install deps on all hosts                     |
 | `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials & overlays |
-| `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl |
+| `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container |
 | `deploy:docker`  | Rsync the local code to Docker hosts, pull the latest image, recreate SMA  |
 | `pg:restart`     | Restart bundled PostgreSQL on hosts whose `docker_profile` ends in `-pg`   |
 | `pg:recreate`    | Stop bundled PostgreSQL, remove its Docker volume, and recreate            |
@@ -1269,7 +1267,7 @@ services for selected hosts using each host's configured `DOCKER_PROFILE`.
 
 ### Logs
 
-All SMA-NG output goes to stdout/stderr. When running as a systemd service, use `journalctl`:
+All SMA-NG output goes to stdout/stderr. For Docker deployments, follow the container logs:
 
 ```bash
 journalctl -u sma-daemon -f
@@ -1315,10 +1313,12 @@ The daemon also writes per-config rotating log files in `logs/`:
 - Verify `apikey` is set and `rescan = true`
 - Check the file path starts with the configured `path` prefix
 
-#### `systemd`: "Read-only file system" errors
+#### Docker: "Read-only file system" errors
 
-- Check `ReadWritePaths` in the systemd unit includes all paths FFmpeg writes to (temp dir, output dir, media mounts)
-- Default unit includes `/opt/sma/config /opt/sma/logs /transcodes /mnt` — add any additional paths
+- Verify every path FFmpeg writes to (output dir, temp dir, media mounts) is bind-mounted
+  read-write into the `sma` service in `docker/docker-compose.yml`
+- The bundled compose file mounts `/opt/sma/config`, `/opt/sma/logs`, and `/transcodes` by
+  default — extend `volumes:` for any additional paths your setup needs
 
 ### Environment Variables
 

@@ -69,19 +69,16 @@ curl https://mise.run | sh
 | Task                         | Description                                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------------------------- |
 | `mise run deploy:check`      | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                  |
-| `mise run deploy:setup`      | First-time host prep: SSH key, apt deps, deploy dir, systemd install                        |
+| `mise run deploy:setup`      | First-time host prep: SSH key, apt deps, deploy dir, Docker install                        |
 | `mise run deploy:mise`       | Sync the local `.mise/` deploy control plane to all hosts                                   |
-| `mise run deploy:sync`       | Sync code, install dependencies, and reload systemd on all hosts                            |
+| `mise run deploy:sync`       | Sync code and install dependencies on all hosts                            |
 | `mise run config:roll`       | Roll configs to remote hosts: create missing files, merge new keys, stamp credentials       |
-| `mise run deploy:restart`    | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl                  |
+| `mise run deploy:restart`    | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container                  |
 | `mise run config:audit`      | Audit local configs                                                                         |
 | `mise run deploy:docker`     | Rsync code to Docker hosts, pull latest image, and recreate the SMA container               |
 | `mise run pg:restart`        | Restart bundled PostgreSQL on hosts using `*-pg` Docker profiles                            |
 | `mise run pg:recreate`       | Remove and recreate bundled PostgreSQL (destructive — removes `sma-pgdata` volume)          |
 | `mise run deploy:login`      | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token                              |
-| `mise run systemd:install`   | Install and enable the systemd service (respects `SMA_INSTALL_DIR`, defaults to `/opt/sma`) |
-| `mise run systemd:restart`   | Restart the `sma-daemon` systemd service immediately (force-kill then start)                |
-| `mise run systemd:uninstall` | Disable and remove the systemd service (leaves config and data untouched)                   |
 
 Also available: `mise run deploy:dockerstop` to stop Docker services on selected nodes.
 Use `HOST=<host>` for one node or `HOSTS="<host1> <host2>"` for multiple nodes.
@@ -238,13 +235,13 @@ unless you also set it under `profiles:`.
 ### Deployment Workflow
 
 ```bash
-# 1. First-time: SSH key, apt deps, deploy dir, systemd install
+# 1. First-time: SSH key, apt deps, install Docker, deploy dir
 mise run deploy:setup
 
 # 2. Optional: sync only the remote .mise task/control-plane code
 mise run deploy:mise
 
-# 3. Sync code, install deps, reload systemd
+# 3. Sync code and install deps
 mise run deploy:sync
 
 # 4. Push configs (create missing, merge new keys, stamp credentials)
@@ -302,11 +299,11 @@ For each remote host:
 | Task             | Description                                                                                                                               |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `deploy:check`   | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                                                                |
-| `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, systemd install                                                                      |
+| `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, Docker install                                                                      |
 | `deploy:mise`    | Sync the local `.mise/` deploy control plane to each remote `DEPLOY_DIR`                                                                  |
-| `deploy:sync`    | Sync code + install deps + reload systemd on all hosts                                                                                    |
+| `deploy:sync`    | Sync code and install deps on all hosts                                                                                                   |
 | `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials                                                                           |
-| `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl                                                                |
+| `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container                                                                |
 | `config:audit`   | Audit local configs                                                                                                                       |
 | `deploy:docker`  | Rsync the local codebase to each Docker host, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
 | `pg:restart`     | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg`                                                                  |
@@ -321,35 +318,6 @@ Use `HOST=<host>` to target one node, or `HOSTS="<host1> <host2>"` to target mul
 The PostgreSQL lifecycle tasks skip hosts that are not using one of the bundled `*-pg`
 profiles.
 Use `pg:recreate` only when you intentionally want a fresh bundled PostgreSQL data directory on the remote host; it removes the compose-managed `sma-pgdata` volume before bringing the service back.
-
----
-
-## Systemd Service
-
-The daemon can be installed as a systemd service:
-
-```bash
-# Install and enable locally
-make systemd-install
-
-# Or via mise (deploys to all remote hosts)
-mise run deploy:sync
-```
-
-Service unit: `setup/sma-daemon.service`
-
-Key settings:
-
-- Loads `config/daemon.env` for environment overrides
-- `TimeoutStopSec=10` — sends SIGKILL 10 seconds after SIGTERM if the process has not exited
-- `KillMode=mixed` — SIGTERM triggers graceful drain
-- Default `ReadWritePaths`: `/opt/sma/config /opt/sma/logs /transcodes /mnt` — add any additional paths your setup needs
-
-Override the service user:
-
-```bash
-SERVICE_USER=myuser make systemd-install
-```
 
 ---
 

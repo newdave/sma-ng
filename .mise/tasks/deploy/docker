@@ -38,6 +38,13 @@ for host in $DEPLOY_HOSTS; do
         continue
     fi
 
+    # Make sure Docker itself is on the host before any compose call.
+    if ! ensure_remote_docker "$host"; then
+        echo "ERROR: [$host] Docker installation failed — aborting" >&2
+        failed="$failed $host"
+        continue
+    fi
+
     # Pull the latest image for this profile
     echo "==> [$host] pulling latest image"
     if ! run_remote_compose "$host" "--profile $profile pull"; then

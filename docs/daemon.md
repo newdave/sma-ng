@@ -25,7 +25,7 @@ All options can also be set via environment variables — see [Environment Varia
 
 | Flag                     | Default | Description                                                                                                                     |
 | ------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `--smoke-test`           |         | Run a dry-run option-generation check against all configs then exit. Safe pre-flight before systemd considers the unit started. |
+| `--smoke-test`           |         | Run a dry-run option-generation check against all configs then exit. Safe pre-flight before the container is marked healthy. |
 | `--job-timeout SECONDS`  | `0`     | Kill a conversion job after this many seconds (0 = no timeout). Also settable via `Daemon.job_timeout_seconds` in `sma-ng.yml`.       |
 | `--heartbeat-interval N` | `30`    | Seconds between PostgreSQL cluster heartbeat updates                                                                            |
 | `--stale-seconds N`      | `120`   | Seconds without a heartbeat before a node's running jobs are requeued                                                           |

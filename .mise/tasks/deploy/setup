@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Prepare remote hosts: generate SSH key, update ~/.ssh/config, copy key, install apt deps, create deploy_dir, install systemd unit, verify ffmpeg"
+#MISE description="Prepare remote hosts: SSH key + ~/.ssh/config + ssh-copy-id, install apt deps + Docker + mise, create deploy_dir, sync code"
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
@@ -98,7 +98,7 @@ for host in $DEPLOY_HOSTS; do
     [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
 
     echo "==> [$host] installing apt prerequisites: $APT_PACKAGES"
-    # shellcheck disable=SC2029,SC2087  # sudo_prefix expands client-side; the heredoc body stays literal until the remote shell runs it.
+    # shellcheck disable=SC2029,SC2087,SC2153  # sudo_prefix expands client-side; the heredoc body stays literal until the remote shell runs it; SSH_OPTS is the array set by mk_ssh_opts above.
   ssh "${SSH_OPTS[@]}" "$ssh_target" "${sudo_prefix}bash -s" <<'REMOTE'
     if ! command -v apt-get >/dev/null 2>&1; then
       echo '  SKIP: apt-get not found'
@@ -113,41 +113,34 @@ for host in $DEPLOY_HOSTS; do
     cfg="$CFG $LOCAL $host"
     port=$($cfg ssh_port 22)
     key=$($cfg ssh_key "")
-    use_sudo=$($cfg use_sudo "false")
 
     remote_user=$($cfg user "$(whoami)")
     remote_address=$($cfg address "")
     ssh_target="${remote_user}@${remote_address}"
 
-    mk_ssh_opts "$port" "$key"
+    ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+    [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
 
-    sudo_prefix=""
-    [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
-
-    echo "==> [$host] installing Docker via apt"
-    # shellcheck disable=SC2029,SC2087  # sudo_prefix expands client-side; the heredoc body stays literal until the remote shell runs it.
-    ssh "${SSH_OPTS[@]}" "$ssh_target" "${sudo_prefix}bash -s" <<'REMOTE'
-    if command -v docker >/dev/null 2>&1; then
-      echo '  SKIP: docker already installed'
-      exit 0
-    fi
-    if ! command -v apt-get >/dev/null 2>&1; then
-      echo '  SKIP: apt-get not found'
-      exit 0
-    fi
-    apt-get install -y ca-certificates curl
-    install -m 0755 -d /etc/apt/keyrings
-    . /etc/os-release
-    curl -fsSL "https://download.docker.com/linux/${ID}/gpg" -o /etc/apt/keyrings/docker.asc
-    chmod a+r /etc/apt/keyrings/docker.asc
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${ID} ${VERSION_CODENAME:-${UBUNTU_CODENAME}} stable" \
-      | tee /etc/apt/sources.list.d/docker.list > /dev/null
-    apt-get update
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-REMOTE
+    ensure_remote_docker "$host"
 done
 
-# ── 6. create deploy_dir on each host ──────────────────────────────────────
+# ── 6. install mise on each host (drives all remote .mise/tasks/* helpers) ──
+for host in $DEPLOY_HOSTS; do
+    cfg="$CFG $LOCAL $host"
+    port=$($cfg ssh_port 22)
+    key=$($cfg ssh_key "")
+
+    remote_user=$($cfg user "$(whoami)")
+    remote_address=$($cfg address "")
+    ssh_target="${remote_user}@${remote_address}"
+
+    ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+    [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
+
+    ensure_remote_mise "$host"
+done
+
+# ── 7. create deploy_dir on each host ──────────────────────────────────────
 for host in $DEPLOY_HOSTS; do
     cfg="$CFG $LOCAL $host"
     dir=$($cfg deploy_dir ~/sma)
@@ -171,7 +164,7 @@ for host in $DEPLOY_HOSTS; do
     fi
 done
 
-# ── 7. sync code and install systemd service on each host ─────────────────
+# ── 8. sync code and seed config/ + logs/ on each host ───────────────────
 for host in $DEPLOY_HOSTS; do
     cfg="$CFG $LOCAL $host"
     dir=$($cfg deploy_dir ~/sma)
@@ -201,8 +194,8 @@ for host in $DEPLOY_HOSTS; do
     . "$ssh_target:$dir"
 
     install_dir=$($cfg sma_install_dir "/opt/sma")
-    echo "==> [$host] installing sma-daemon service (user: $remote_user, dir: $install_dir)"
-    # shellcheck disable=SC2029,SC2087  # dir/remote_user/install_dir expand client-side; heredoc body stays literal until the remote shell runs it.
+    echo "==> [$host] seeding ${install_dir}/{config,logs} (owner: $remote_user)"
+    # shellcheck disable=SC2029,SC2087  # remote_user/install_dir expand client-side; heredoc stays literal until the remote shell runs it.
     ssh "${SSH_OPTS[@]}" "$ssh_target" 'bash -s' "$dir" "$remote_user" "$install_dir" <<'REMOTE'
       set -euo pipefail
       dir="$1"
@@ -216,11 +209,5 @@ for host in $DEPLOY_HOSTS; do
       if [ ! -f "${install_dir}/config/daemon.env" ]; then
         sudo install -o "$service_user" -m 640 setup/daemon.env.sample "${install_dir}/config/daemon.env"
       fi
-
-      sudo chmod 755 setup/sma-daemon-start.sh
-      sed "s/^User=.*/User=${service_user}/; s/^Group=.*/Group=${service_user}/; s|/opt/sma|${install_dir}|g" setup/sma-daemon.service \
-        | sudo tee /etc/systemd/system/sma-daemon.service > /dev/null
-      sudo systemctl daemon-reload
-#      sudo systemctl enable --now sma-daemon  # (removed: do not enable/start by default)
 REMOTE
 done
