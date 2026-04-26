@@ -3,13 +3,21 @@
 
 Read a key from setup/.local.yml.
 
-Values are resolved in two passes:
-  1. deploy section — provides project-wide defaults
-  2. hosts[section] — host-specific overrides win over deploy
+Sections resolve as:
 
-The daemon section is looked up directly under daemon[key].
-Service sections (Sonarr*, Radarr*, Plex, Jellyfin, Emby, Converter)
-are looked up under services[section][key].
+  daemon          → daemon[key]
+  deploy          → deploy[key]
+  sonarr|radarr|plex|jellyfin|emby
+                  → services[type][instance][key]
+                    (instance defaults to ``main``; falls back to the
+                    first instance defined)
+  <anything else> → host-specific lookup: hosts[section][key]
+                    falling back to deploy[key]
+
+The instance fallback exists so callers that just want "the Plex token"
+or "the Sonarr API key" continue to work without naming an instance.
+For multi-instance lookups, pass ``<type>.<instance>`` as the section
+(e.g. ``sonarr.kids``).
 """
 
 import re
@@ -31,7 +39,8 @@ except ImportError:
       return yaml.safe_load(f) or {}
 
 
-_SERVICE_RE = re.compile(r"^(sonarr|radarr|plex|jellyfin|emby|converter)", re.IGNORECASE)
+KNOWN_SERVICE_TYPES = ("sonarr", "radarr", "plex", "jellyfin", "emby")
+_SERVICE_RE = re.compile(rf"^({'|'.join(KNOWN_SERVICE_TYPES)})(\.(.+))?$", re.IGNORECASE)
 
 
 def _str(v):
@@ -48,16 +57,44 @@ def _iget(d, key):
   """Case-insensitive dict get."""
   if not isinstance(d, dict):
     return None
-  return d.get(key) if key in d else d.get(key.upper()) if key.upper() in d else d.get(key.lower())
+  if key in d:
+    return d[key]
+  for variant in (key.lower(), key.upper()):
+    if variant in d:
+      return d[variant]
+  return None
+
+
+def _resolve_service(services, stype, instance, key):
+  type_block = _iget(services, stype)
+  if not isinstance(type_block, dict):
+    return ""
+  if instance:
+    inst = _iget(type_block, instance)
+    return _str(_iget(inst, key)) if isinstance(inst, dict) else ""
+  # No instance specified — prefer "main", else first defined.
+  ordered = []
+  if "main" in type_block:
+    ordered.append("main")
+  ordered.extend(name for name in type_block if name not in ordered)
+  for name in ordered:
+    inst = type_block.get(name)
+    if isinstance(inst, dict):
+      val = _iget(inst, key)
+      if val not in (None, ""):
+        return _str(val)
+  return ""
 
 
 def resolve(data, section, key, default):
   if section == "daemon":
     return _str(_iget(data.get("daemon", {}), key)) or default
-  if _SERVICE_RE.match(section):
+  service_match = _SERVICE_RE.match(section)
+  if service_match:
+    stype = service_match.group(1).lower()
+    instance = service_match.group(3)
     services = data.get("services") or {}
-    val = _iget(services.get(section) or services.get(section.lower()) or {}, key)
-    return _str(val) or default
+    return _resolve_service(services, stype, instance, key) or default
   if section == "deploy":
     return _str(_iget(data.get("deploy") or {}, key)) or default
   # Host-specific: host override > deploy default

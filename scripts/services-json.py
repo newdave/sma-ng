@@ -1,14 +1,29 @@
 #!/usr/bin/env python3
 """scripts/services-json.py <local-yml>
 
-Read all service entries (Sonarr*, Radarr*, Plex*, Converter) from setup/.local.yml
-and print a JSON object mapping section name -> {key: value, ...}.
-Only sections whose names match the service pattern are included.
-Only non-empty values are emitted (blank values are skipped).
+Read the nested ``services`` block from setup/.local.yml and print it as
+JSON, mirroring the four-bucket sma-ng.yml schema:
+
+    services:
+      sonarr:
+        main:
+          url: ...
+          apikey: ...
+          path: ...
+          profile: rq
+
+becomes::
+
+    {"sonarr": {"main": {"url": "...", "apikey": "...",
+                          "path": "...", "profile": "rq"}}, ...}
+
+Only known service types are emitted (sonarr, radarr, plex, jellyfin, emby).
+Empty instances are dropped so downstream stampers can rely on truthiness
+checks. Booleans are stringified ("true"/"false") to keep JSON consumers
+that expect string values working.
 """
 
 import json
-import re
 import sys
 
 try:
@@ -27,28 +42,40 @@ except ImportError:
       return yaml.safe_load(f) or {}
 
 
-SERVICE_PATTERN = re.compile(r"^(Sonarr|Radarr|Plex|Converter)", re.IGNORECASE)
+KNOWN_TYPES = ("sonarr", "radarr", "plex", "jellyfin", "emby")
+
+
+def _stringify(v):
+  if isinstance(v, bool):
+    return "true" if v else "false"
+  return str(v)
+
+
+def _normalise_instance(inst):
+  if not isinstance(inst, dict):
+    return {}
+  return {k: _stringify(v) for k, v in inst.items() if v is not None and str(v) != ""}
+
 
 path = sys.argv[1] if len(sys.argv) > 1 else "setup/.local.yml"
 
-services = {}
+out = {}
 try:
   data = _load(path)
-  for name, keys in (data.get("services") or {}).items():
-    if not SERVICE_PATTERN.match(name):
+  services = data.get("services") or {}
+  for stype, instances in services.items():
+    if stype.lower() not in KNOWN_TYPES:
       continue
-    if not isinstance(keys, dict):
+    if not isinstance(instances, dict):
       continue
-
-    def _sv(v):
-      if isinstance(v, bool):
-        return "true" if v else "false"
-      return str(v)
-
-    entry = {k: _sv(v) for k, v in keys.items() if v is not None and str(v)}
-    if entry:
-      services[name] = entry
+    type_out = {}
+    for inst_name, inst_data in instances.items():
+      norm = _normalise_instance(inst_data)
+      if norm:
+        type_out[inst_name] = norm
+    if type_out:
+      out[stype.lower()] = type_out
 except FileNotFoundError:
   pass
 
-print(json.dumps(services))
+print(json.dumps(out))
