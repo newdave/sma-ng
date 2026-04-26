@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.56](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.55...sma-ng-v1.6.56) (2026-04-26)
+
+
+### Features
+
+* **deploy:** stamp .local.yml base: overrides into sma-ng.yml ([38afc94](https://github.com/newdave/sma-ng/commit/38afc9473ce5c0aeacf3916816dbd7aa0e747f7e))
+
 ## [1.6.55](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.54...sma-ng-v1.6.55) (2026-04-26)
 
 
