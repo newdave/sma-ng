@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.62](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.61...sma-ng-v1.6.62) (2026-04-26)
+
+
+### Bug Fixes
+
+* **release:** add build to dev deps so build:dist task works ([a7e89e7](https://github.com/newdave/sma-ng/commit/a7e89e759d47762a150d9c1d9fc2d5b11ea39973))
+* **tests:** use sys.executable in local-config subprocess invocations ([acd6437](https://github.com/newdave/sma-ng/commit/acd6437b2c3b23dd53b986e5540fb6d5b2d1e6d4))
+
 ## [1.6.61](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.60...sma-ng-v1.6.61) (2026-04-26)
 
 
