@@ -98,6 +98,7 @@ sync_yaml_keys() {
         rsync -az -e "ssh ${SSH_OPTS[*]}" \
             "$tmpdir/remote/" "$ssh_target:$dir/config/" \
             --include='*.yaml' --include='*.yml' --exclude='*'
+        chown_remote_path_to_ssh_user "$host" "$dir/config"
     fi
 }
 
@@ -226,11 +227,13 @@ for host in $DEPLOY_HOSTS; do
 REMOTE
     ensure_remote_config "$host" "$dir/config/sma-ng.yml" "$dir/setup/sma-ng.yml.sample"
     ensure_remote_config "$host" "$dir/config/daemon.env" "$dir/setup/daemon.env.sample"
+    chown_remote_path_to_ssh_user "$host" "$dir/config"
 
     _backup_ts=$(date +%Y-%m-%dT%H-%M-%S)
     # shellcheck disable=SC2029  # $dir, $_backup_ts expand client-side (intentional)
     ssh "${SSH_OPTS[@]}" "$ssh_target" \
         "mkdir -p $dir/.backup/$_backup_ts && cp -a $dir/config/. $dir/.backup/$_backup_ts/"
+    chown_remote_path_to_ssh_user "$host" "$dir/.backup"
 
     tmpdir=$(mktemp -d)
     trap 'rm -rf "$tmpdir"' EXIT
@@ -285,6 +288,11 @@ REMOTE
         "$plex_token" "$plex_username" "$plex_servername" \
         "$jellyfin_url" "$jellyfin_token" \
         "$emby_url" "$emby_apikey"
+
+    # Final sweep: catch any root-owned files the stamper helpers may have
+    # written via their own sudo paths (stamp_ffmpeg, ini_stamp_credentials,
+    # etc.). No-op when deploy.use_sudo is false.
+    chown_remote_path_to_ssh_user "$host" "$dir/config"
 
     echo "  done"
 done
