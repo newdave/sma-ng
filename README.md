@@ -38,7 +38,7 @@ Full documentation is in [docs/](docs/) and served at `http://localhost:8585/doc
 | [Environment Architecture](docs/environment-architecture.md) | Deployment-specific storage and virtualization design notes |
 | [Integrations](docs/integrations.md) | Sonarr, Radarr, Plex, NZBGet, SABnzbd, qBittorrent, Deluge |
 | [Hardware Acceleration](docs/hardware-acceleration.md) | QSV, VAAPI, NVENC, VideoToolbox, auto-detection |
-| [Deployment](docs/deployment.md) | mise tasks, remote deploy, systemd service, Docker, CI/release |
+| [Deployment](docs/deployment.md) | mise tasks, remote deploy, Docker, CI/release |
 | [Multi-Instance Deployment](docs/multi-instance-deployment.md) | Running multiple SMA-NG daemons on one host or across multiple hosts |
 | [Troubleshooting](docs/troubleshooting.md) | Logs, common issues, environment variables |
 

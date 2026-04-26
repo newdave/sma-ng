@@ -2,7 +2,7 @@
 
 ## Logs
 
-The daemon writes rotating log files to `logs/daemon.log` and per-config log files in `logs/`. When running as a systemd service, recent output is also available via journald:
+The daemon writes rotating log files to `logs/daemon.log` and per-config log files in `logs/`. For Docker deployments, container output is available via `docker compose logs`:
 
 ```bash
 journalctl -u sma-daemon -f
@@ -67,14 +67,16 @@ curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?level=ERROR"
 - Verify `apikey` is correct and `rescan = true`
 - Verify the output file path starts with the configured `path` prefix
 
-### systemd: "Read-only file system" errors
+### Docker: "Read-only file system" errors
 
-- Check `ReadWritePaths` in the systemd unit includes all paths FFmpeg writes to (temp dir, output dir, media mounts)
-- Default unit includes `/opt/sma/config /opt/sma/logs /transcodes /mnt` — add any additional paths
+- Verify every path FFmpeg writes to (output dir, temp dir, media mounts) is bind-mounted
+  read-write into the `sma` service in `docker/docker-compose.yml`
+- The bundled compose file mounts `/opt/sma/config`, `/opt/sma/logs`, and `/transcodes` by
+  default — extend `volumes:` for any additional paths your setup needs
 
 ### Daemon doesn't start after restart
 
-- Check `journalctl -u sma-daemon --no-pager -n 50` for the error
+- Check `docker compose logs sma --no-color | tail -50` for the error
 - Verify `config/sma-ng.yml` is valid YAML.
 - Verify `config/sma-ng.yml` exists
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Sync code to all DEPLOY_HOSTS, install dependencies, and reload systemd"
+#MISE description="Sync code to all deploy.hosts and install dependencies"
 #MISE depends=["deploy:mise"]
 set -euo pipefail
 
@@ -15,9 +15,6 @@ for host in $DEPLOY_HOSTS; do
   init_host_context "$host"
   branch=$($cfg deploy_branch "")
   rsync_extra=$($cfg rsync_extra "")
-  # shellcheck disable=SC2154  # remote_user is set by init_host_context above
-  remote_user_for_host="$remote_user"
-  deploy_dir=$($cfg deploy_dir ~/sma)
 
   _run_install() {
     install_remote_base_deps "$host"
@@ -39,18 +36,6 @@ for host in $DEPLOY_HOSTS; do
     failed="$failed $host"
     continue
   }
-
-  echo "==> [$host] updating systemd unit user to $remote_user_for_host"
-  run_remote_command "$host" "
-    if [ -f /etc/systemd/system/sma-daemon.service ]; then
-      sed 's/^User=.*/User=$remote_user_for_host/; s/^Group=.*/Group=$remote_user_for_host/' \
-        $deploy_dir/setup/sma-daemon.service \
-        | sudo tee /etc/systemd/system/sma-daemon.service > /dev/null
-    fi
-  " || { failed="$failed $host"; continue; }
-
-  echo "==> [$host] reloading systemd unit"
-  run_remote_command "$host" "sudo systemctl daemon-reload" || { failed="$failed $host"; continue; }
 done
 
 if [ -n "$failed" ]; then

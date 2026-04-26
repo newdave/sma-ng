@@ -383,7 +383,7 @@ Main documentation lives in `docs/` and is also served at `http://localhost:8585
 - `docs/daemon.md` - daemon mode, API, clustering
 - `docs/integrations.md` - Sonarr, Radarr, and downloader integrations
 - `docs/hardware-acceleration.md` - GPU configuration
-- `docs/deployment.md` - mise tasks, systemd, Docker, CI, release
+- `docs/deployment.md` - mise tasks, Docker, CI, release
 - `docs/troubleshooting.md` - logs and common issues
 
 When changing functionality, keep `docs/`, `resources/docs.html`, and the wiki copy in sync.
@@ -444,7 +444,7 @@ Remote deployment is built around `mise` tasks and `setup/local.yml`.
 Key tasks:
 
 - `mise run deploy:setup` - first-time host prep
-- `mise run remote:run` - sync code, install deps, reload systemd
+- `mise run deploy:sync` - sync code, install deps
 - `mise run config:roll` - create missing configs, merge new keys, stamp credentials
 - `mise run deploy:restart` - restart `sma-daemon` on all hosts
 
@@ -498,7 +498,7 @@ When diagnosing runtime issues, check:
 
 - `logs/daemon.log`
 - per-config logs in `logs/`
-- `journalctl -u sma-daemon -f` for systemd deployments
+- docker compose logs sma -f
 
 Useful environment variables:
 

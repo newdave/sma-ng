@@ -249,3 +249,66 @@ ensure_venv_ready() {
     run_with_prereq_retry "$host" "pre-req missing — running deploy:setup then retrying venv recreation" "" recreate_venv
   fi
 }
+
+# Idempotently install Docker (Engine + Compose plugin + buildx) on a remote
+# host via the official Docker apt repo when `docker` is not on PATH. Returns
+# 0 if Docker is already installed or installs successfully; 1 on failure.
+# Requires `init_host_context` (or equivalent) to have run first so ssh_opts
+# and ssh_target are populated for this host. Each command inside the install
+# heredoc carries an explicit `sudo` so the helper works regardless of how
+# the calling task invokes the remote shell.
+ensure_remote_docker() {
+  local host="$1"
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by the caller
+  if ssh $ssh_opts "$ssh_target" "command -v docker >/dev/null 2>&1"; then
+    return 0
+  fi
+  echo "==> [$host] docker not found — installing via the official Docker apt repo"
+  # shellcheck disable=SC2086,SC2029  # ssh_opts must word-split for ssh
+  ssh $ssh_opts "$ssh_target" "bash -s" <<'REMOTE'
+    set -euo pipefail
+    if ! command -v apt-get >/dev/null 2>&1; then
+      echo '  ERROR: apt-get not found — cannot install Docker on this host' >&2
+      exit 1
+    fi
+    sudo apt-get install -y ca-certificates curl
+    sudo install -m 0755 -d /etc/apt/keyrings
+    . /etc/os-release
+    sudo curl -fsSL "https://download.docker.com/linux/${ID}/gpg" -o /etc/apt/keyrings/docker.asc
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${ID} ${VERSION_CODENAME:-${UBUNTU_CODENAME}} stable" \
+      | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    sudo apt-get update
+    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+REMOTE
+}
+
+# Idempotently install mise on a remote host via the official install script
+# (https://mise.run). Symlinks ~/.local/bin/mise to /usr/local/bin/mise so the
+# binary is available to non-interactive SSH sessions without requiring shell
+# init (.bashrc/.zshrc). Returns 0 if mise is already installed or installs
+# successfully; 1 on failure. Same SSH context requirements as
+# ensure_remote_docker.
+ensure_remote_mise() {
+  local host="$1"
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by the caller
+  if ssh $ssh_opts "$ssh_target" "command -v mise >/dev/null 2>&1 || test -x \$HOME/.local/bin/mise"; then
+    echo "==> [$host] mise already installed"
+    # shellcheck disable=SC2086,SC2029  # ssh_opts must word-split for ssh
+    ssh $ssh_opts "$ssh_target" "command -v mise >/dev/null 2>&1 || sudo ln -sf \$HOME/.local/bin/mise /usr/local/bin/mise"
+    return 0
+  fi
+  echo "==> [$host] mise not found — installing via https://mise.run"
+  # shellcheck disable=SC2086,SC2029  # ssh_opts must word-split for ssh
+  ssh $ssh_opts "$ssh_target" "bash -s" <<'REMOTE'
+    set -euo pipefail
+    if ! command -v curl >/dev/null 2>&1; then
+      sudo apt-get install -y curl
+    fi
+    curl -fsSL https://mise.run | sh
+    if [ -x "$HOME/.local/bin/mise" ] && ! command -v mise >/dev/null 2>&1; then
+      sudo ln -sf "$HOME/.local/bin/mise" /usr/local/bin/mise
+    fi
+    /usr/local/bin/mise --version 2>/dev/null || "$HOME/.local/bin/mise" --version
+REMOTE
+}

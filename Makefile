@@ -3,7 +3,7 @@
 # Local development tasks (install, test, deploy, etc.) are managed by mise.
 # Run `mise tasks` to list them, or `mise run <task>` to execute.
 
-.PHONY: help install install-dev install-all clean config systemd-install restart install-mise venv \
+.PHONY: help install install-dev install-all clean config install-mise venv \
         lint lint-fix test test-cov detect-gpu daemon convert codecs preview rename \
         deploy-check deploy-setup deploy remote-task remote-make \
         docker-build docker-run docker-shell docker-smoke
@@ -49,22 +49,6 @@ install-all: install ## Install all optional dependencies
 	  $(PIP) install -r setup/requirements-qbittorrent.txt; \
 	  $(PIP) install -r setup/requirements-deluge.txt; \
 	  $(PIP) install -e ".[dev]")
-
-restart: ## Restart the sma-daemon systemd service
-	$(call MISE_OR_DIRECT,systemd:restart,sudo systemctl restart sma-daemon)
-
-SERVICE_USER ?= $(shell whoami)
-
-systemd-install: ## Install and enable the sma-daemon systemd service (SERVICE_USER=<user> to override)
-	$(call MISE_OR_DIRECT,systemd:install, \
-	  sudo mkdir -p /opt/sma/config /opt/sma/logs; \
-	  sudo chown -R $(SERVICE_USER): /opt/sma/config /opt/sma/logs; \
-	  test -f /opt/sma/config/daemon.env || sudo install -o $(SERVICE_USER) -m 640 setup/daemon.env.sample /opt/sma/config/daemon.env; \
-	  sudo chmod 755 setup/sma-daemon-start.sh; \
-	  sed 's/^User=.*/User=$(SERVICE_USER)/; s/^Group=.*/Group=$(SERVICE_USER)/' setup/sma-daemon.service \
-	    | sudo tee /etc/systemd/system/sma-daemon.service > /dev/null; \
-	  sudo systemctl daemon-reload; \
-	  sudo systemctl enable --now sma-daemon)
 
 GPU ?= $(shell ./scripts/detect-gpu.sh)
 

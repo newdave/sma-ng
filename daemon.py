@@ -79,7 +79,7 @@ def run_smoke_test(path_config_manager, ffmpeg_dir, logger):
 
   Uses MediaProcessor.jsonDump() which runs ffprobe on the fixture file and
   builds the full FFmpeg command string, but does not execute FFmpeg.  Exits
-  with code 1 if any config fails so systemd can abort the start.
+  with code 1 if any config fails so the container start aborts.
 
   Args:
       path_config_manager: PathConfigManager with the loaded daemon configuration.
