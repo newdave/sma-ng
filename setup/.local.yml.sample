@@ -34,12 +34,18 @@ deploy:
   # Default ffmpeg/ffprobe directory on remote hosts.
   # ffmpeg_dir: /usr/local/bin
 
+  # Virtualenv management on remote hosts.
+  # auto_create_venv: true            # recreate venv if missing/unhealthy
+  # venv_dir: venv                    # path is relative to deploy_dir
+  # python_bin: /usr/bin/python3      # interpreter used to build the venv
+
   # Database connection details (for external PostgreSQL).
   # db_host: "db.example.com"
   # db_port: 5432
   # db_user: sma
   # db_password: ""
   # db_name: sma
+  # db_url: ""                        # full URL; overrides the components above
 
   # Docker Compose profile to use (e.g. intel, nvenc, intel-pg).
   # docker_profile: intel
@@ -47,8 +53,9 @@ deploy:
   # Directory containing docker-compose.yml (defaults to deploy_dir/docker).
   # docker_compose_dir: /opt/sma/docker
 
-  # GitHub user for GHCR image access (auto-detected from 'gh' CLI if omitted).
+  # GitHub user / token for GHCR image access (auto-detected from 'gh' CLI if omitted).
   # gh_user: myuser
+  # gh_token: ""
 
 # ── per-host entries ──────────────────────────────────────────────────────────
 # One entry per label in deploy.hosts.
@@ -69,49 +76,52 @@ hosts:
     ffmpeg_dir: /usr/local/bin
 
 # ── daemon configuration ──────────────────────────────────────────────────────
-# Stamped into config/sma-ng.yml by `mise run config:roll`.
-# These are global — not per-host.
+# Stamped into config/sma-ng.yml (Daemon section) and config/daemon.env by
+# `mise run config:roll`. These are global — not per-host.
 
 daemon:
   # API key for protecting daemon endpoints (SMA_DAEMON_API_KEY).
   # api_key: ""
 
   # PostgreSQL connection URL — derived from deploy db_* keys if not set.
+  # Ignored when the host's docker_profile ends in `-pg` (bundled postgres).
   # db_url: ""
 
   # ffmpeg/ffprobe directory (SMA_DAEMON_FFMPEG_DIR). Overrides deploy.ffmpeg_dir.
   # ffmpeg_dir: ""
 
 # ── service credentials ───────────────────────────────────────────────────────
-# Section names mirror sma-ng.yml / autoProcess.ini service sections.
-# Stamped into every config file on remote hosts by `mise run config:roll`.
+# Section names must match the regex (sonarr|radarr|plex|jellyfin|emby|converter)
+# and are case-insensitive. Use suffixed names (Sonarr2, RadarrKids, …) for
+# multiple instances of the same service type.
+#
+# Stamped into config/sma-ng.yml on remote hosts by `mise run config:roll`.
+#
+# Sonarr/Radarr/Plex/Jellyfin/Emby all use a single `url:` key.
+# Routing uses `path:` + `profile:` (a profile name defined under `profiles:`
+# in sma-ng.yml.sample, e.g. `rq` or `lq`).
 
 # services:
-#   converter:
-#     recycle-bin: /srv/recycle
-#
 #   sonarr:
-#     host: sonarr.example.com
-#     port: 8989
-#     ssl: false
+#     url: http://sonarr.example.com:8989
 #     apikey: ""
-#     webroot: ""
 #     path: /media/tv
-#     config_file: config/autoProcess.rq.ini
+#     profile: rq
+#
+#   sonarrkids:
+#     url: http://sonarr.example.com:8990
+#     apikey: ""
+#     path: /media/tv/Kids
+#     profile: lq
 #
 #   radarr:
-#     host: radarr.example.com
-#     port: 7878
-#     ssl: false
+#     url: http://radarr.example.com:7878
 #     apikey: ""
-#     webroot: ""
 #     path: /media/movies
-#     config_file: config/autoProcess.rq.ini
+#     profile: rq
 #
 #   plex:
-#     host: plex.example.com
-#     port: 32400
-#     ssl: false
+#     url: http://plex.example.com:32400
 #     token: ""
 #     username: ""
 #     servername: ""
@@ -123,9 +133,3 @@ daemon:
 #   emby:
 #     url: ""
 #     apikey: ""
-
-# ── managed_keys — force-overwrite specific keys during config:roll ───────────
-# Format: SectionName: "key1, key2, ..."
-
-# managed_keys:
-#   Video: "gpu"
