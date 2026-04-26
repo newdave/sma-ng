@@ -345,7 +345,11 @@ class TestComposeGpuProfiles:
     assert "sma-intel-pg" in compose["services"]
     assert "intel-pg" in compose["services"]["sma-intel-pg"]["profiles"]
 
-  def test_daemon_services_do_not_override_container_hostname(self, compose):
+  def test_daemon_services_pin_stable_hostname(self, compose):
+    # Each profile must declare an explicit hostname so the daemon's
+    # node_id (resolved from socket.gethostname()) survives container
+    # recreate. The hostname defaults to a profile-specific value but
+    # honors SMA_NODE_NAME for per-host overrides.
     for service_name in (
       "sma-software",
       "sma-software-pg",
@@ -354,7 +358,9 @@ class TestComposeGpuProfiles:
       "sma-intel",
       "sma-intel-pg",
     ):
-      assert "hostname" not in compose["services"][service_name]
+      hostname = compose["services"][service_name].get("hostname")
+      assert hostname, f"{service_name} is missing a hostname pin"
+      assert "${SMA_NODE_NAME" in hostname, f"{service_name} hostname must allow SMA_NODE_NAME override, got {hostname!r}"
 
   def test_intel_exposes_render_node(self, compose):
     # Only the render node is needed for headless QSV/VAAPI encoding.
