@@ -6,13 +6,32 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-toml
+      - id: check-json
       - id: check-merge-conflict
+      - id: check-case-conflict
       - id: check-added-large-files
         args: [--maxkb=1000]
       - id: check-ast          # catch Python syntax errors before commit
       - id: debug-statements   # catch leftover pdb/breakpoint calls
+      - id: detect-private-key
+      - id: check-executables-have-shebangs
+        files: ^(\.mise/tasks/|\.mise/shared/.*\.sh$|scripts/.*\.sh$|docker/docker-entrypoint\.sh$|setup/sma-(daemon-start|healthcheck)\.sh$)
+      - id: check-shebang-scripts-are-executable
+        files: ^(\.mise/tasks/|\.mise/shared/.*\.sh$|scripts/.*\.sh$|docker/docker-entrypoint\.sh$|setup/sma-(daemon-start|healthcheck)\.sh$)
       - id: mixed-line-ending
         args: [--fix=lf]
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        files: ^(\.mise/tasks/|\.mise/shared/.*\.sh$|scripts/.*\.sh$|docker/docker-entrypoint\.sh$|setup/sma-(daemon-start|healthcheck)\.sh$)
+
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.17.2
+    hooks:
+      - id: markdownlint-cli2
+        files: ^(README\.md|CHANGELOG\.md|CONTRIBUTING\.md|docs/(README|configuration|daemon|deployment|docker-compose-quickstart|getting-started|hardware-acceleration|integrations|migration|multi-instance-deployment|troubleshooting)\.md|post_process/post_process\.md|triggers/README\.md)$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.11.4
@@ -20,3 +39,17 @@ repos:
       - id: ruff               # lint + auto-fix safe rules
         args: [--fix]
       - id: ruff-format        # consistent formatting
+
+  - repo: local
+    hooks:
+      - id: bash-syntax
+        name: bash syntax check
+        language: system
+        entry: bash -c 'for f in "$@"; do bash -n "$f" || exit 1; done' --
+        files: ^(\.mise/tasks/|\.mise/shared/.*\.sh$|scripts/.*\.sh$|docker/docker-entrypoint\.sh$|setup/sma-(daemon-start|healthcheck)\.sh$)
+
+      - id: no-inline-python-in-shell
+        name: no inline Python in shell scripts
+        language: system
+        entry: bash -c 'if rg -n "python3?\\s+(-c|<<)" "$@"; then exit 1; fi' --
+        files: ^(\.mise/tasks/|\.mise/shared/.*\.sh$|scripts/.*\.sh$|docker/docker-entrypoint\.sh$|setup/sma-(daemon-start|healthcheck)\.sh$)
