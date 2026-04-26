@@ -61,6 +61,52 @@ def rescan(base_url, headers, command_name, id_field, media_id, log):
   return wait_for_command(base_url, headers, cmd["id"], log)
 
 
+def rescan_via_arr(base_url, headers, arr_type, file_path, log):
+  """Trigger Sonarr/Radarr to re-read an existing library file after in-place conversion.
+
+  Looks up the series/movie ID via ``/api/v3/parse`` (matching on the file's
+  basename), then issues ``RescanSeries`` (Sonarr) or ``RescanMovie`` (Radarr)
+  for that ID. This is the correct command for files already imported into the
+  library — ``DownloadedEpisodesScan`` / ``DownloadedMoviesScan`` are scoped to
+  download-client folders and silently no-op on library paths.
+
+  Returns the command ID on success, or None on lookup failure / API error.
+  The caller decides whether to wait for completion (e.g. before issuing a
+  follow-up RenameFiles command).
+  """
+  import os
+
+  try:
+    parse_resp = requests.get(
+      base_url + "/api/v3/parse",
+      headers=headers,
+      params={"title": os.path.basename(file_path)},
+      timeout=10,
+    )
+    parse_data = parse_resp.json()
+    if arr_type == "sonarr":
+      media = parse_data.get("series") or {}
+      media_id = media.get("id")
+      if not media_id:
+        log.warning("rescan_via_arr: Sonarr could not parse series for %s" % file_path)
+        return None
+      payload = {"name": "RescanSeries", "seriesId": media_id}
+    else:
+      media = parse_data.get("movie") or {}
+      media_id = media.get("id")
+      if not media_id:
+        log.warning("rescan_via_arr: Radarr could not parse movie for %s" % file_path)
+        return None
+      payload = {"name": "RescanMovie", "movieIds": [media_id]}
+
+    log.info("rescan_via_arr: triggering %s for id=%s" % (payload["name"], media_id))
+    cmd = api_command(base_url, headers, payload, log)
+    return cmd.get("id")
+  except Exception:
+    log.exception("rescan_via_arr: unexpected error for %s" % file_path)
+    return None
+
+
 def rename(base_url, headers, file_id, command_name_files, command_name_all, id_field, media_id, log):
   """Trigger a rename command."""
   if file_id:

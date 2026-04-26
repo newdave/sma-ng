@@ -361,7 +361,14 @@ def _find_arr_instance(filepath, settings):
 def triggerRescan(filepath, settings):
   """Trigger a rescan on the matching Sonarr/Radarr instance based on file path.
 
-  When the matched instance has ``force-rename = True``, waits for the import
+  Issues ``RescanSeries`` / ``RescanMovie`` keyed on the resolved series/movie
+  ID — this is the correct command for files that have just been converted
+  in-place inside the library. ``DownloadedEpisodesScan`` /
+  ``DownloadedMoviesScan`` are scoped to download-client folders and silently
+  no-op on library paths, which is why earlier versions appeared to "do
+  nothing".
+
+  When the matched instance has ``force-rename = True``, waits for the rescan
   command to complete, then calls Sonarr/Radarr's RenameFiles command.
 
   Returns the new file path if arr renamed the file, otherwise None.
@@ -383,25 +390,19 @@ def triggerRescan(filepath, settings):
   protocol = "https://" if instance.get("ssl") else "http://"
   base_url = protocol + instance["host"] + ":" + str(instance["port"]) + instance["webroot"]
   headers = {"X-Api-Key": instance["apikey"], "User-Agent": "SMA-NG - manual"}
-  dirpath = os.path.dirname(filepath)
-
-  if arr_type == "sonarr":
-    payload = {"name": "DownloadedEpisodesScan", "path": dirpath}
-  else:
-    payload = {"name": "DownloadedMoviesScan", "path": dirpath}
 
   try:
-    from resources.mediamanager import api_command, rename_via_arr, wait_for_command
+    from resources.mediamanager import rename_via_arr, rescan_via_arr, wait_for_command
 
-    log.info("Requesting %s [%s] to rescan '%s'." % (arr_type.title(), instance["section"], dirpath))
-    cmd = api_command(base_url, headers, payload, log)
-    command_id = cmd.get("id")
+    log.info("Requesting %s [%s] to rescan library for '%s'." % (arr_type.title(), instance["section"], os.path.basename(filepath)))
+    command_id = rescan_via_arr(base_url, headers, arr_type, filepath, log)
 
     if instance.get("rename") and command_id:
-      # Wait for the import to complete before triggering rename
+      # Wait for the rescan to complete before triggering rename so that the
+      # series/movie file record reflects the converted file's new size/codec.
       completed = wait_for_command(base_url, headers, command_id, log)
       if not completed:
-        log.warning("%s [%s] import command did not complete; skipping arr rename." % (arr_type.title(), instance["section"]))
+        log.warning("%s [%s] rescan command did not complete; skipping arr rename." % (arr_type.title(), instance["section"]))
         return None
       new_path = rename_via_arr(base_url, headers, arr_type, filepath, log)
       if new_path:

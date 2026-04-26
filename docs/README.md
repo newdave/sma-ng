@@ -1021,7 +1021,7 @@ Plex library refresh via PlexAPI with path mapping support.
 
 ### resources/mediamanager.py
 
-Shared Sonarr/Radarr API helpers used by trigger scripts to post `DownloadedEpisodesScan` / `DownloadedMoviesScan` commands.
+Shared Sonarr/Radarr API helpers. After in-place conversion the daemon issues `RescanSeries` (Sonarr) / `RescanMovie` (Radarr) keyed on the series/movie ID resolved via `/api/v3/parse`, then optionally chains a `RenameFiles` command when the instance has `force-rename: true`. The legacy `DownloadedEpisodesScan` / `DownloadedMoviesScan` commands are intentionally not used — they only operate on download-client folders and silently no-op for files that already live in the library.
 
 ---
 
