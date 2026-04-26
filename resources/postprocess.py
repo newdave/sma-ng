@@ -118,9 +118,9 @@ class PostProcessor:
     for the process to exit before continuing. Exceptions are caught and
     logged so that one failing script does not block the rest.
     """
-    self.log.debug("Running scripts.")
-    self.log.debug("Environment variables:")
-    self.log.debug(json.dumps(self.post_process_environment, indent=4))
+    # Compact JSON on a single line; SingleLineFormatter handles redaction
+    # of any secrets that might end up in the post-process environment.
+    self.log.debug("Running scripts. environment=%s", json.dumps(self.post_process_environment, default=str))
     for script in self.scripts:
       try:
         command = self.run_script_command(script)

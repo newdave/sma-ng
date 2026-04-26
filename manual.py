@@ -609,7 +609,13 @@ def processFile(
       output["external_subs"][i] = mp.restoreFromOutput(inputfile, sub)
 
     output_files = mp.replicate(output["output"], relativePath=relativePath)
-    print(json.dumps(output, indent=4))
+    # Conversion result, surfaced through the logger so it goes through
+    # SingleLineFormatter (one line, JSON compacted, secrets redacted)
+    # and lands in the per-config log file rather than stdout. Previously
+    # this was a `print(json.dumps(..., indent=4))` that polluted both
+    # the worker's captured stdout and the per-config log with a
+    # multi-line blob.
+    log.debug("conversion result: %s", json.dumps(output, default=str))
     for sub in [x for x in output["external_subs"] if os.path.exists(x)]:
       output_files.extend(mp.replicate(sub, relativePath=relativePath))
     for file in output_files:
