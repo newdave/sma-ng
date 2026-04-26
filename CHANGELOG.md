@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.71](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.70...sma-ng-v1.6.71) (2026-04-26)
+
+
+### Bug Fixes
+
+* **plex:** refresh library independently of post-process scripts ([523196a](https://github.com/newdave/sma-ng/commit/523196aab7ecd951b60026c78593b8be37ce85c5))
+
 ## [1.6.70](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.69...sma-ng-v1.6.70) (2026-04-26)
 
 
