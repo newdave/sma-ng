@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.55](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.54...sma-ng-v1.6.55) (2026-04-26)
+
+
+### Documentation
+
+* **deployment:** drop deploy:exec references ([81b9315](https://github.com/newdave/sma-ng/commit/81b93150cba147292b35372d5a4d2fcee2e67dc6))
+
 ## [1.6.54](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.53...sma-ng-v1.6.54) (2026-04-26)
 
 
