@@ -148,6 +148,49 @@ class TestNodeIdResolution:
     monkeypatch.setattr("socket.gethostname", lambda: "docker-hostname")
     assert resolve_node_id() == "docker-hostname"
 
+  def test_ensure_node_id_prefers_env_over_yaml_uuid(self, tmp_path, monkeypatch):
+    """SMA_NODE_NAME is the deploy-stamped per-host identity and must win.
+
+    Without this, every container restart on a host that already has
+    daemon.node_id in sma-ng.yml would still re-use the UUID, but a
+    fresh host with a read-only config dir would silently regenerate a
+    new UUID per startup and pile up pending rows in cluster_nodes.
+    """
+    import resources.daemon.constants as _constants
+
+    monkeypatch.setattr(_constants, "_node_id_cache", None)
+    monkeypatch.setenv("SMA_NODE_NAME", "sma-node1")
+
+    config_file = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(config_file, {"node_id": "76534590-2fae-4512-9b2d-dad77b5d015e"})
+    pcm = PathConfigManager(config_file)
+    assert pcm.node_id == "sma-node1"
+    assert resolve_node_id() == "sma-node1"
+
+  def test_ensure_node_id_uses_yaml_uuid_when_no_env(self, tmp_path, monkeypatch):
+    import resources.daemon.constants as _constants
+
+    monkeypatch.setattr(_constants, "_node_id_cache", None)
+    monkeypatch.delenv("SMA_NODE_NAME", raising=False)
+
+    config_file = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(config_file, {"node_id": "76534590-2fae-4512-9b2d-dad77b5d015e"})
+    PathConfigManager(config_file)
+    assert resolve_node_id() == "76534590-2fae-4512-9b2d-dad77b5d015e"
+
+  def test_ensure_node_id_generates_uuid_when_no_env_and_no_yaml(self, tmp_path, monkeypatch):
+    import resources.daemon.constants as _constants
+
+    monkeypatch.setattr(_constants, "_node_id_cache", None)
+    monkeypatch.delenv("SMA_NODE_NAME", raising=False)
+
+    config_file = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(config_file, {})
+    PathConfigManager(config_file)
+    resolved = resolve_node_id()
+    # Fallback path: a UUID was generated and cached (not the hostname).
+    assert "-" in resolved and len(resolved) == 36
+
   def test_no_match_returns_loaded_config(self, tmp_path):
     config_file = str(tmp_path / "sma-ng.yml")
     _dump_daemon_yaml(config_file, {"routing": [{"match": "/mnt/media/TV", "profile": "rq"}]})

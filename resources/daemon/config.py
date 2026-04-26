@@ -17,7 +17,14 @@ log = getLogger("DAEMON")
 
 
 def _write_node_id_to_yaml(config_file: str, node_id: str) -> None:
-  """Persist node_id into the daemon section of sma-ng.yml using round-trip YAML to preserve comments."""
+  """Persist node_id into the daemon section of sma-ng.yml using round-trip YAML to preserve comments.
+
+  Failures are logged but not raised — the daemon will still run with the
+  in-memory UUID. Surfacing the warning matters: if the config directory
+  is read-only, every restart generates a new UUID, which spams
+  ``cluster_nodes`` with new pending rows. Set ``SMA_NODE_NAME`` to side-
+  step UUID generation entirely.
+  """
   from ruamel.yaml import YAML
 
   from resources.yamlconfig import _load_with_dedup
@@ -36,7 +43,13 @@ def _write_node_id_to_yaml(config_file: str, node_id: str) -> None:
       yaml.dump(data, f)
     os.replace(tmp, config_file)
   except Exception:
-    pass  # non-fatal — node will still function with hostname fallback
+    log.warning(
+      "Could not persist generated node_id to %s — daemon will keep its in-memory UUID this run, "
+      "but a future restart will generate a new one and register a new pending node. "
+      "Set SMA_NODE_NAME in config/daemon.env to use a stable identity instead.",
+      config_file,
+      exc_info=True,
+    )
 
 
 def _strip_secrets(data: dict) -> dict:
@@ -382,15 +395,38 @@ class PathConfigManager:
         self.log.debug("  %s -> %s" % (rewrite["from"], rewrite["to"]))
 
   def _ensure_node_id(self, config_file):
-    """Generate and persist a UUID node identity if one is not already set."""
+    """Resolve and cache the cluster node identity.
+
+    Priority order:
+
+    1. ``SMA_NODE_NAME`` env var — set per host by ``mise run config:roll``
+       and the canonical deploy-time identity. Stable across container
+       recreates, the same value across daemon restarts, and meaningful
+       to humans (matches the host's name in ``setup/local.yml``).
+    2. ``daemon.node_id`` already persisted in ``sma-ng.yml`` — preserves
+       any UUID an earlier daemon generated so existing approved rows
+       in ``cluster_nodes`` stay attached to this node.
+    3. Generate a fresh UUID and try to persist it to ``sma-ng.yml``.
+
+    Previously this function only consulted (2) and (3), so a config dir
+    bind-mounted read-only (or owned by a different uid) made every
+    daemon restart generate a new UUID and register a new pending row
+    in ``cluster_nodes``.
+    """
     from resources.daemon.constants import set_node_id_cache
 
-    node_id = self._node_id
-    if not node_id:
+    env_name = os.environ.get("SMA_NODE_NAME", "").strip()
+    if env_name:
+      node_id = env_name
+    elif self._node_id:
+      node_id = self._node_id
+    else:
       node_id = str(uuid.uuid4())
       if config_file:
         _write_node_id_to_yaml(config_file, node_id)
-      self._node_id = node_id
+    # Keep self._node_id in sync with the resolved identity so the
+    # ``node_id`` property and resolve_node_id() agree.
+    self._node_id = node_id
     set_node_id_cache(node_id)
 
   @property
