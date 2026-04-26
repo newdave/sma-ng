@@ -82,7 +82,7 @@ SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
 
 - small single-host setup: PostgreSQL on the same machine
 - multi-host cluster: PostgreSQL on a stable host or managed service
-- avoid SQLite for clustered deployments; it is not the distributed backend
+- PostgreSQL is required for every deployment — single-node and clustered alike. There is no embedded SQLite fallback.
 
 ## Path Strategy
 

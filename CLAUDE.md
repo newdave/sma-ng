@@ -128,10 +128,13 @@ The daemon is a package under `resources/daemon/`. `daemon.py` at project root i
 #### `resources/`
 
 - `mediaprocessor.py` - Central class `MediaProcessor` handling the full conversion pipeline
-- `readsettings.py` - `ReadSettings` class parses `autoProcess.ini`, defines all defaults in `DEFAULTS` dict
+- `config_schema.py` - Pydantic `SmaConfig` model — single source of truth for `sma-ng.yml` defaults and validation
+- `config_loader.py` - Loads + validates `sma-ng.yml` against the schema
+- `readsettings.py` - `ReadSettings` adapter — flattens the validated YAML tree onto the `settings.*` attributes the rest of the codebase reads
+- `yamlconfig.py` - Shared YAML I/O (`_load_with_dedup` for self-healing duplicate-key configs, plus path/extension normalisers)
 - `metadata.py` - `Metadata` class fetches and writes tags from TMDB using `tmdbsimple` and `mutagen`
 - `postprocess.py` - Runs custom post-process scripts from `post_process/` directory
-- `extensions.py` - Contains TMDB API key and file extension definitions
+- `extensions.py` - File extension definitions
 
 #### `converter/`
 
@@ -145,9 +148,16 @@ The daemon is a package under `resources/daemon/`. `daemon.py` at project root i
 
 ### Configuration
 
-The main config file is `config/autoProcess.ini` (copy from `setup/autoProcess.ini.sample`). Override location via `SMA_CONFIG` environment variable.
+The main config file is `config/sma-ng.yml` (copy from `setup/sma-ng.yml.sample`). Override location via `SMA_CONFIG` environment variable. The legacy `autoProcess.ini` format is no longer supported — pointing `SMA_CONFIG` at a `.ini` file is rejected at startup.
 
-Key sections: `[Converter]`, `[Video]`, `[HDR]`, `[Audio]`, `[Subtitle]`, `[Metadata]`, `[Sonarr]`, `[Radarr]`, `[Plex]`
+Top-level YAML buckets:
+
+- `daemon:` — daemon-only settings (api_key, db_url, ffmpeg_dir, routing, scan_paths, path_rewrites, media_extensions, node_id)
+- `base:` — conversion defaults (`base.converter`, `base.video`, `base.hdr`, `base.audio`, `base.subtitle`, `base.metadata`, `base.permissions`, `base.naming`, etc.)
+- `profiles:` — named overlays referenced from `daemon.routing[].profile` or `manual.py --profile <name>` (e.g. `profiles.rq`, `profiles.lq`)
+- `services:` — per-instance media manager and download client config (`services.sonarr.<name>`, `services.radarr.<name>`, `services.plex.<name>`, `services.sabnzbd`, `services.deluge`, `services.qbittorrent`, `services.utorrent`)
+
+The schema accepts both `kebab-case` (canonical YAML form) and `snake_case` (Python form) field names — pydantic uses `populate_by_name=True` with an `alias_generator` that maps between them. Use kebab-case in hand-written YAML.
 
 See [docs/configuration.md](docs/configuration.md) for full reference.
 
@@ -165,7 +175,7 @@ See [docs/daemon.md](docs/daemon.md) for full daemon documentation.
 
 ### Recycle Bin
 
-When `delete-original = True`, set `recycle-bin` in `[Converter]` to copy the original to a directory before deletion. Uses atomic copy + `.2`/`.3` suffix collision handling.
+When `base.converter.delete-original` is `true`, set `base.converter.recycle-bin` to copy the original to a directory before deletion. Uses atomic copy + `.2`/`.3` suffix collision handling.
 
 ### Processing Flow
 
@@ -183,7 +193,7 @@ Full documentation is in [docs/](docs/) and served at `http://localhost:8585/doc
 
 - [docs/README.md](docs/README.md) — Architecture and module reference
 - [docs/getting-started.md](docs/getting-started.md) — Installation, quick start, CLI
-- [docs/configuration.md](docs/configuration.md) — `autoProcess.ini` reference
+- [docs/configuration.md](docs/configuration.md) — `sma-ng.yml` reference
 - [docs/daemon.md](docs/daemon.md) — Daemon mode, API, clustering
 - [docs/integrations.md](docs/integrations.md) — Sonarr, Radarr, download clients
 - [docs/hardware-acceleration.md](docs/hardware-acceleration.md) — GPU config
@@ -219,8 +229,9 @@ When adding new codec support:
 
 When adding new settings:
 
-- `resources/readsettings.py` - Add to `DEFAULTS` dict and `readConfig()` method
-- `setup/autoProcess.ini.sample` - Add default value
+- `resources/config_schema.py` - Add the field to the relevant pydantic model (single source of truth for defaults + validation)
+- `setup/sma-ng.yml.sample` - regenerate via `mise run config:sample` so the sample stays in lockstep with the schema
+- `resources/readsettings.py` - if the new field needs a flat `settings.<name>` attribute for legacy consumers, add the projection there
 
 When adding new API endpoints to the daemon:
 
@@ -230,7 +241,7 @@ When adding new downloader/manager integration:
 
 - Create new bash script in `triggers/` (usenet/, torrents/, or media_managers/)
 - Do not embed inline Python in the shell entrypoint; place Python logic in a standalone helper module and invoke it
-- Add settings section in `readsettings.py` if config support is needed
+- Add the service block to `resources/config_schema.py` (under `Services`) and a sample stanza to `setup/sma-ng.yml.sample` so deploys can stamp it
 
 When adding new daemon options:
 

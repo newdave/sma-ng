@@ -91,7 +91,7 @@ Key implications:
 - **The daemon must be running** before any trigger fires. Start it once; it persists in the background.
 - Conversion is non-blocking. The trigger returns immediately after the job is accepted.
 - Up to `--workers N` conversions can run in parallel.
-- Jobs survive daemon restarts (SQLite by default; optional PostgreSQL for multi-node).
+- Jobs survive daemon restarts via PostgreSQL, which is required for both single-node and multi-node setups.
 
 ### Starting the daemon
 
