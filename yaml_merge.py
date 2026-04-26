@@ -36,10 +36,23 @@ def _to_plain(obj) -> dict:
 
 
 def _load(path: str) -> CommentedMap:
-  y = _make_yaml()
-  with open(path) as fh:
-    data = y.load(fh)
+  # Delegate to the shared dedup-aware loader so duplicate top-level keys
+  # in hand-edited or stamped-twice configs collapse to a single block on
+  # round-trip instead of failing the merge or being preserved as dups.
+  from resources.yamlconfig import _load_with_dedup
+
+  data = _load_with_dedup(path)
   return data if data is not None else CommentedMap()
+
+
+def _had_duplicate_top_level_keys(path: str) -> bool:
+  """Return True if the file on disk has duplicate top-level mapping keys."""
+  import re
+
+  with open(path) as fh:
+    raw = fh.read()
+  keys = re.findall(r"(?m)^([A-Za-z_][\w-]*):", raw)
+  return len(keys) != len(set(keys))
 
 
 def parse_keys(path: str) -> dict:
@@ -53,10 +66,16 @@ def add_missing(live_path: str, sample_path: str, dry_run: bool = False) -> None
 
   Preserves live values and comments.  Skip sections defined in
   ``_SKIP_SECTIONS`` and sections whose names start with a wildcard prefix.
+
+  If ``live_path`` contains duplicate top-level keys, the dedup-aware loader
+  collapses them into a single block — we always rewrite in that case so
+  the file is normalized on disk, not just in memory.
   """
   live = _load(live_path)
   sample = _load(sample_path)
-  changed = False
+  changed = _had_duplicate_top_level_keys(live_path)
+  if changed:
+    print(f"  ! {live_path}: deduplicated duplicate top-level keys")
 
   for section, s_keys in sample.items():
     if _should_skip(section):

@@ -20,11 +20,12 @@ def _write_node_id_to_yaml(config_file: str, node_id: str) -> None:
   """Persist node_id into the daemon section of sma-ng.yml using round-trip YAML to preserve comments."""
   from ruamel.yaml import YAML
 
+  from resources.yamlconfig import _load_with_dedup
+
   yaml = YAML(typ="rt")
   yaml.width = 120
   try:
-    with open(config_file) as f:
-      data = yaml.load(f)
+    data = _load_with_dedup(config_file)
     if data is None:
       data = {}
     if "daemon" not in data:
