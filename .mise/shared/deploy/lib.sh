@@ -312,3 +312,32 @@ ensure_remote_mise() {
     /usr/local/bin/mise --version 2>/dev/null || "$HOME/.local/bin/mise" --version
 REMOTE
 }
+
+# Ensure ruamel.yaml is importable by python3 on a remote host. The deploy
+# stampers (stamp_daemon.py / stamp_ffmpeg.py / stamp_postprocess.py) all
+# import it. Tries the project venv first; falls back to apt-installing the
+# distro package (python3-ruamel.yaml on Debian/Ubuntu) so the system python3
+# satisfies the import even when the venv has not yet been created.
+# Same SSH context requirements as ensure_remote_docker.
+ensure_remote_python_deps() {
+  local host="$1" dir="$2"
+  local probe="$dir/.mise/shared/deploy/lib/probe_ruamel.py"
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by the caller
+  if ssh $ssh_opts "$ssh_target" "[ -x $dir/venv/bin/python3 ] && $dir/venv/bin/python3 $probe 2>/dev/null"; then
+    return 0
+  fi
+  # shellcheck disable=SC2086,SC2029
+  if ssh $ssh_opts "$ssh_target" "command -v python3 >/dev/null 2>&1 && python3 $probe 2>/dev/null"; then
+    return 0
+  fi
+  echo "==> [$host] installing python3-ruamel.yaml so the deploy stampers can run"
+  # shellcheck disable=SC2086,SC2029
+  ssh $ssh_opts "$ssh_target" "bash -s" <<'REMOTE'
+    set -euo pipefail
+    if ! command -v apt-get >/dev/null 2>&1; then
+      echo '  ERROR: apt-get not found — install ruamel.yaml manually on this host' >&2
+      exit 1
+    fi
+    sudo apt-get install -y python3-ruamel.yaml
+REMOTE
+}

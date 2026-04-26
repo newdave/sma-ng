@@ -192,6 +192,14 @@ for host in $DEPLOY_HOSTS; do
     base_overrides_json=$("$LOCAL_PY" scripts/local-section-json.py "$LOCAL" base)
     profiles_overrides_json=$("$LOCAL_PY" scripts/local-section-json.py "$LOCAL" profiles)
 
+    # Make sure ruamel.yaml is importable on the host before any helper runs.
+    ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+    [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
+    ensure_remote_python_deps "$host" "$dir" || {
+        echo "ERROR: [$host] could not provide ruamel.yaml — aborting" >&2
+        continue
+    }
+
     echo ""
     echo "==> [$host] rolling config in $dir/config"
 
