@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.75](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.74...sma-ng-v1.6.75) (2026-04-26)
+
+
+### Bug Fixes
+
+* **log:** drop multi-line offenders the formatter can't reach ([bd30db7](https://github.com/newdave/sma-ng/commit/bd30db700ec8abb49df231d7a207f1fdb0ad8c5f))
+
 ## [1.6.74](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.73...sma-ng-v1.6.74) (2026-04-26)
 
 
