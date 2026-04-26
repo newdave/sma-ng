@@ -74,14 +74,20 @@ def _make_server(
   server.config_log_manager.logs_dir = "/logs"
 
   # path_config_manager
-  server.path_config_manager.path_configs = []
-  server.path_config_manager.default_config = "/config/autoProcess.ini"
+  server.path_config_manager.default_config = "/config/sma-ng.yml"
   server.path_config_manager.default_args = []
   server.path_config_manager.media_extensions = {".mkv", ".mp4", ".avi"}
-  server.path_config_manager.get_config_for_path.return_value = "/config/autoProcess.ini"
+  server.path_config_manager.scan_paths = []
+  server.path_config_manager.get_config_for_path.return_value = "/config/sma-ng.yml"
   server.path_config_manager.rewrite_path.side_effect = lambda p: p
   server.path_config_manager.is_recycle_bin_path.return_value = False
   server.path_config_manager.get_args_for_path.return_value = []
+  # New routing-engine API surfaces — return JSON-friendly defaults so
+  # /configs and /browse responses serialize cleanly.
+  server.path_config_manager.routing_rules_admin.return_value = []
+  server.path_config_manager.routing_match_paths.return_value = []
+  server.path_config_manager.get_profile_for_path.return_value = None
+  server.path_config_manager.get_services_for_path.return_value = []
 
   # server methods
   server.notify_workers.return_value = None
@@ -459,14 +465,15 @@ class TestGetConfigs:
     h = _make_handler()
     h._get_configs()
     body = _get_response_body(h)
-    assert body["default_config"] == "/config/autoProcess.ini"
+    assert body["default_config"] == "/config/sma-ng.yml"
 
-  def test_returns_path_configs(self):
+  def test_returns_routing_list(self):
+    """Four-bucket schema renamed path_configs → routing."""
     h = _make_handler()
     h._get_configs()
     body = _get_response_body(h)
-    assert "path_configs" in body
-    assert isinstance(body["path_configs"], list)
+    assert "routing" in body
+    assert isinstance(body["routing"], list)
 
   def test_returns_200(self):
     h = _make_handler()
@@ -1240,7 +1247,7 @@ class TestQueueDirectory:
   def test_resolve_config_falls_back_when_override_missing(self):
     h = _make_handler()
     resolved = h._resolve_config("/media/movie.mkv", "/missing/config.ini")
-    assert resolved == "/config/autoProcess.ini"
+    assert resolved == "/config/sma-ng.yml"
     h.server.path_config_manager.get_config_for_path.assert_called_once_with("/media/movie.mkv")
 
 
@@ -1723,9 +1730,12 @@ class TestWalkMediaFiles:
 
 
 class TestGetBrowse:
+  """/browse derives its allowed-roots set from daemon.routing[].match prefixes
+  (and scan_paths). path_configs no longer exists."""
+
   def test_no_path_returns_configured_roots(self, tmp_path):
     h = _make_handler()
-    h.server.path_config_manager.path_configs = [{"path": str(tmp_path)}]
+    h.server.path_config_manager.routing_match_paths.return_value = [str(tmp_path)]
     h._get_browse({})
     body = _get_response_body(h)
     assert "dirs" in body
@@ -1733,7 +1743,7 @@ class TestGetBrowse:
 
   def test_path_outside_allowed_roots_returns_403(self, tmp_path):
     h = _make_handler()
-    h.server.path_config_manager.path_configs = [{"path": str(tmp_path / "media")}]
+    h.server.path_config_manager.routing_match_paths.return_value = [str(tmp_path / "media")]
     h._get_browse({"path": ["/completely/other/path"]})
     assert h._response_code == 403
 
@@ -1741,7 +1751,7 @@ class TestGetBrowse:
     allowed = tmp_path / "media"
     allowed.mkdir()
     h = _make_handler()
-    h.server.path_config_manager.path_configs = [{"path": str(allowed)}]
+    h.server.path_config_manager.routing_match_paths.return_value = [str(allowed)]
     h._get_browse({"path": [str(allowed / "nonexistent")]})
     assert h._response_code == 404
 
@@ -1753,7 +1763,7 @@ class TestGetBrowse:
     (allowed / "movie.mkv").write_text("x")
     (allowed / "readme.txt").write_text("x")
     h = _make_handler()
-    h.server.path_config_manager.path_configs = [{"path": str(allowed)}]
+    h.server.path_config_manager.routing_match_paths.return_value = [str(allowed)]
     h._get_browse({"path": [str(allowed)]})
     body = _get_response_body(h)
     assert any("subdir" in d for d in body["dirs"])

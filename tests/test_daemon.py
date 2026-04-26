@@ -9,11 +9,34 @@ from unittest.mock import MagicMock, patch
 from ruamel.yaml import YAML as _YAML
 
 
-def _dump_daemon_yaml(path: str, daemon_data: dict) -> None:
-  """Write a sma-ng.yml test fixture with the given daemon section content."""
+def _dump_daemon_yaml(path: str, daemon_data: dict, profiles: dict | None = None, services: dict | None = None) -> None:
+  """Write a sma-ng.yml test fixture with the given daemon section content.
+
+  Routing rules in ``daemon_data`` cross-reference profiles and services;
+  the schema validator rejects unknown names. The helper auto-derives
+  empty ``profiles`` / ``services`` entries for every name referenced from
+  routing so tests don't have to declare them explicitly.
+  """
+  derived_profiles: dict = dict(profiles or {})
+  derived_services: dict = {"sonarr": {}, "radarr": {}, "plex": {}}
+  if services:
+    for k, v in services.items():
+      derived_services.setdefault(k, {}).update(v)
+  for rule in daemon_data.get("routing", []):
+    p = rule.get("profile")
+    if p and p not in derived_profiles:
+      derived_profiles[p] = {}
+    for ref in rule.get("services", []) or []:
+      if "." in ref:
+        stype, sname = ref.split(".", 1)
+        derived_services.setdefault(stype, {}).setdefault(sname, {"url": "http://localhost"})
+
+  payload: dict = {"daemon": daemon_data, "services": derived_services}
+  if derived_profiles:
+    payload["profiles"] = derived_profiles
   y = _YAML()
   with open(path, "w") as f:
-    y.dump({"daemon": daemon_data}, f)
+    y.dump(payload, f)
 
 
 import pytest
@@ -43,83 +66,69 @@ ADMIN_HTML = _load_admin_html()
 
 
 class TestPathConfigManager:
-  """Test path-to-config matching."""
+  """Path-to-profile resolution via daemon.routing.
+
+  The pre-cutover ``path_configs`` model (per-rule external config files)
+  was replaced by ``daemon.routing`` rules pointing at named ``profiles``.
+  ``get_config_for_path`` now always returns the single loaded sma-ng.yml;
+  routing-derived profile selection lives in ``get_profile_for_path``.
+  """
+
+  def _yaml(self, tmp_path, body: dict) -> str:
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, body)
+    return cfg
 
   def test_exact_match(self, tmp_path):
-    config_file = str(tmp_path / "sma-ng.yml")
-    ini_file = str(tmp_path / "autoProcess.ini")
-    tv_ini = str(tmp_path / "tv.ini")
-    for f in [ini_file, tv_ini]:
-      open(f, "w").close()
-    _dump_daemon_yaml(config_file, {"default_config": ini_file, "path_configs": [{"path": "/mnt/media/TV", "config": tv_ini}]})
-    pcm = PathConfigManager(config_file)
-    assert pcm.get_config_for_path("/mnt/media/TV/show/ep.mkv") == tv_ini
+    cfg = self._yaml(
+      tmp_path,
+      {"routing": [{"match": "/mnt/media/TV", "profile": "rq"}]},
+    )
+    pcm = PathConfigManager(cfg)
+    assert pcm.get_config_for_path("/mnt/media/TV/show/ep.mkv") == cfg
+    assert pcm.get_profile_for_path("/mnt/media/TV/show/ep.mkv") == "rq"
 
   def test_longest_prefix_wins(self, tmp_path):
-    config_file = str(tmp_path / "sma-ng.yml")
-    ini_file = str(tmp_path / "default.ini")
-    movies_ini = str(tmp_path / "movies.ini")
-    movies4k_ini = str(tmp_path / "movies4k.ini")
-    for f in [ini_file, movies_ini, movies4k_ini]:
-      open(f, "w").close()
-    _dump_daemon_yaml(
-      config_file,
+    cfg = self._yaml(
+      tmp_path,
       {
-        "default_config": ini_file,
-        "path_configs": [
-          {"path": "/mnt/media/Movies", "config": movies_ini},
-          {"path": "/mnt/media/Movies/4K", "config": movies4k_ini},
+        "routing": [
+          {"match": "/mnt/media/Movies", "profile": "movies"},
+          {"match": "/mnt/media/Movies/4K", "profile": "movies4k"},
         ],
       },
     )
-    pcm = PathConfigManager(config_file)
-    assert pcm.get_config_for_path("/mnt/media/Movies/4K/film.mkv") == movies4k_ini
-    assert pcm.get_config_for_path("/mnt/media/Movies/regular.mkv") == movies_ini
+    pcm = PathConfigManager(cfg)
+    assert pcm.get_profile_for_path("/mnt/media/Movies/4K/film.mkv") == "movies4k"
+    assert pcm.get_profile_for_path("/mnt/media/Movies/regular.mkv") == "movies"
 
-  def test_rewrite_match_uses_rewritten_path_config(self, tmp_path):
-    config_file = str(tmp_path / "sma-ng.yml")
-    default_ini = str(tmp_path / "default.ini")
-    tv1080_ini = str(tmp_path / "tv1080.ini")
-    for f in [default_ini, tv1080_ini]:
-      open(f, "w").close()
-    _dump_daemon_yaml(
-      config_file,
+  def test_rewrite_match_uses_rewritten_path(self, tmp_path):
+    cfg = self._yaml(
+      tmp_path,
       {
-        "default_config": default_ini,
-        "path_rewrites": [
-          {"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"},
-        ],
-        "path_configs": [
-          {"path": "/mnt/unionfs/Media/TV/1080P", "config": tv1080_ini},
-        ],
+        "path_rewrites": [{"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"}],
+        "routing": [{"match": "/mnt/unionfs/Media/TV/1080P", "profile": "tv1080"}],
       },
     )
-    pcm = PathConfigManager(config_file)
-    assert pcm.get_config_for_path("/mnt/local/Media/TV/1080P/TV Show/Season 01/episode.mkv") == tv1080_ini
+    pcm = PathConfigManager(cfg)
+    assert pcm.get_profile_for_path("/mnt/local/Media/TV/1080P/TV Show/Season 01/episode.mkv") == "tv1080"
 
   def test_longest_rewrite_prefix_wins(self, tmp_path):
-    config_file = str(tmp_path / "sma-ng.yml")
-    default_ini = str(tmp_path / "default.ini")
-    general_ini = str(tmp_path / "general.ini")
-    specific_ini = str(tmp_path / "specific.ini")
-    for f in [default_ini, general_ini, specific_ini]:
-      open(f, "w").close()
-    _dump_daemon_yaml(
-      config_file,
+    cfg = self._yaml(
+      tmp_path,
       {
-        "default_config": default_ini,
         "path_rewrites": [
           {"from": "/mnt/local", "to": "/mnt/general"},
           {"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"},
         ],
-        "path_configs": [
-          {"path": "/mnt/general/TV/1080P", "config": general_ini},
-          {"path": "/mnt/unionfs/Media/TV/1080P", "config": specific_ini},
+        "routing": [
+          {"match": "/mnt/general/TV/1080P", "profile": "general"},
+          {"match": "/mnt/unionfs/Media/TV/1080P", "profile": "specific"},
         ],
       },
     )
-    pcm = PathConfigManager(config_file)
-    assert pcm.get_config_for_path("/mnt/local/Media/TV/1080P/show.mkv") == specific_ini
+    pcm = PathConfigManager(cfg)
+    assert pcm.get_profile_for_path("/mnt/local/Media/TV/1080P/show.mkv") == "specific"
 
 
 class TestNodeIdResolution:
@@ -139,32 +148,25 @@ class TestNodeIdResolution:
     monkeypatch.setattr("socket.gethostname", lambda: "docker-hostname")
     assert resolve_node_id() == "docker-hostname"
 
-  def test_no_match_uses_default(self, tmp_path):
+  def test_no_match_returns_loaded_config(self, tmp_path):
     config_file = str(tmp_path / "sma-ng.yml")
-    ini_file = str(tmp_path / "default.ini")
-    open(ini_file, "w").close()
-    open(str(tmp_path / "tv.ini"), "w").close()
-    _dump_daemon_yaml(config_file, {"default_config": ini_file, "path_configs": [{"path": "/mnt/media/TV", "config": str(tmp_path / "tv.ini")}]})
+    _dump_daemon_yaml(config_file, {"routing": [{"match": "/mnt/media/TV", "profile": "rq"}]})
     pcm = PathConfigManager(config_file)
-    assert pcm.get_config_for_path("/completely/different/path.mkv") == ini_file
+    # Single-config model: get_config_for_path always returns the loaded yml.
+    assert pcm.get_config_for_path("/completely/different/path.mkv") == config_file
+    # No matching routing rule → no profile.
+    assert pcm.get_profile_for_path("/completely/different/path.mkv") is None
 
   def test_get_all_configs(self, tmp_path):
     config_file = str(tmp_path / "sma-ng.yml")
-    ini_file = str(tmp_path / "default.ini")
-    tv_ini = str(tmp_path / "tv.ini")
-    for f in [ini_file, tv_ini]:
-      open(f, "w").close()
-    _dump_daemon_yaml(config_file, {"default_config": ini_file, "path_configs": [{"path": "/tv", "config": tv_ini}]})
+    _dump_daemon_yaml(config_file, {"routing": [{"match": "/tv", "profile": "rq"}]})
     pcm = PathConfigManager(config_file)
-    all_configs = pcm.get_all_configs()
-    assert ini_file in all_configs
-    assert tv_ini in all_configs
+    # Multi-config support was removed; the single loaded yml is the only entry.
+    assert pcm.get_all_configs() == [config_file]
 
   def test_quoted_default_args_are_preserved(self, tmp_path):
     config_file = str(tmp_path / "sma-ng.yml")
-    ini_file = str(tmp_path / "default.ini")
-    open(ini_file, "w").close()
-    _dump_daemon_yaml(config_file, {"default_config": ini_file, "default_args": '--label "Director Cut"'})
+    _dump_daemon_yaml(config_file, {"default_args": '--label "Director Cut"'})
     pcm = PathConfigManager(config_file)
     assert pcm.default_args == ["--label", "Director Cut"]
 
@@ -1973,17 +1975,22 @@ class TestHTTPEndpoints:
 
 
 class TestRecycleBinDetection:
-  """Unit tests for PathConfigManager.is_recycle_bin_path."""
+  """Unit tests for PathConfigManager.is_recycle_bin_path.
+
+  The recycle-bin path now lives under ``base.converter.recycle-bin`` in
+  the four-bucket sma-ng.yml; INI fallback was removed in WP-2.
+  """
 
   def _make_mgr(self, tmp_path, recycle_bin=None):
-    ini = tmp_path / "autoProcess.ini"
-    content = "[Converter]\n"
+    yml = tmp_path / "sma-ng.yml"
+    base_converter: dict = {}
     if recycle_bin:
-      content += "recycle-bin = %s\n" % recycle_bin
-    ini.write_text(content)
-    mgr = PathConfigManager()
-    mgr.default_config = str(ini)
-    return mgr
+      base_converter["recycle-bin"] = recycle_bin
+    payload = {"base": {"converter": base_converter}, "services": {"sonarr": {}, "radarr": {}, "plex": {}}}
+    y = _YAML()
+    with open(yml, "w") as f:
+      y.dump(payload, f)
+    return PathConfigManager(str(yml))
 
   def test_path_inside_recycle_bin(self, tmp_path):
     recycle = tmp_path / "recycle"
@@ -2114,38 +2121,40 @@ class TestScanOperations:
 
 
 class TestPathConfigManagerUtils:
-  """Tests for get_args_for_path, rewrite_path."""
+  """Tests for get_args_for_path, rewrite_path.
+
+  Per-routing-rule ``default_args`` was dropped in the four-bucket
+  cutover; only the global ``daemon.default_args`` survives, so
+  ``get_args_for_path`` returns the same list for every path.
+  """
 
   def _make_mgr(self, tmp_path):
     cfg = str(tmp_path / "sma-ng.yml")
     _dump_daemon_yaml(
       cfg,
       {
-        "default_config": "config/autoProcess.ini",
         "default_args": ["-nt"],
-        "path_configs": [
-          {"path": str(tmp_path / "TV"), "config": "config/autoProcess.ini", "default_args": ["-tvdb", "1234"]},
-          {"path": str(tmp_path / "Movies"), "config": "config/autoProcess.ini"},
-        ],
         "path_rewrites": [{"from": "/mnt/local", "to": "/mnt/union"}],
+        "routing": [
+          {"match": str(tmp_path / "TV"), "profile": "tv"},
+          {"match": str(tmp_path / "Movies"), "profile": "movies"},
+        ],
       },
     )
     return PathConfigManager(cfg)
 
-  def test_get_args_for_matched_path(self, tmp_path):
+  def test_get_args_returns_global_default_for_matched_path(self, tmp_path):
     mgr = self._make_mgr(tmp_path)
-    args = mgr.get_args_for_path(str(tmp_path / "TV" / "show.mkv"))
-    assert args == ["-tvdb", "1234"]
+    assert mgr.get_args_for_path(str(tmp_path / "TV" / "show.mkv")) == ["-nt"]
 
   def test_get_args_for_unmatched_path_returns_default(self, tmp_path):
     mgr = self._make_mgr(tmp_path)
-    args = mgr.get_args_for_path("/unrelated/movie.mkv")
-    assert args == ["-nt"]
+    assert mgr.get_args_for_path("/unrelated/movie.mkv") == ["-nt"]
 
-  def test_get_args_for_path_without_default_args(self, tmp_path):
+  def test_get_args_returns_global_default_regardless_of_rule(self, tmp_path):
     mgr = self._make_mgr(tmp_path)
-    args = mgr.get_args_for_path(str(tmp_path / "Movies" / "film.mkv"))
-    assert args == []
+    # No per-rule default_args exists anymore — every path gets the global list.
+    assert mgr.get_args_for_path(str(tmp_path / "Movies" / "film.mkv")) == ["-nt"]
 
   def test_rewrite_path_matching_prefix(self, tmp_path):
     mgr = self._make_mgr(tmp_path)
@@ -2168,19 +2177,22 @@ class TestPathConfigManagerUtils:
     result = mgr.rewrite_path("/mnt/local2/file.mkv")
     assert result == "/mnt/local2/file.mkv"
 
-  def test_get_args_for_rewritten_path(self, tmp_path):
+  def test_get_args_returns_global_default_after_rewrite(self, tmp_path):
+    """Per-rule default_args was dropped; the rewrite still applies to
+    routing but the returned args are the global ``daemon.default_args``."""
     cfg = str(tmp_path / "sma-ng.yml")
     _dump_daemon_yaml(
       cfg,
       {
-        "default_config": "config/autoProcess.ini",
         "default_args": ["-nt"],
         "path_rewrites": [{"from": "/mnt/local/Media", "to": "/mnt/unionfs/Media"}],
-        "path_configs": [{"path": "/mnt/unionfs/Media/TV/1080P", "config": "config/autoProcess.rq.ini", "default_args": ["--tv"]}],
+        "routing": [{"match": "/mnt/unionfs/Media/TV/1080P", "profile": "rq"}],
       },
     )
     mgr = PathConfigManager(cfg)
-    assert mgr.get_args_for_path("/mnt/local/Media/TV/1080P/Show/episode.mkv") == ["--tv"]
+    assert mgr.get_args_for_path("/mnt/local/Media/TV/1080P/Show/episode.mkv") == ["-nt"]
+    # Routing/rewrite still resolves to the matched profile.
+    assert mgr.get_profile_for_path("/mnt/local/Media/TV/1080P/Show/episode.mkv") == "rq"
 
 
 # ---------------------------------------------------------------------------
