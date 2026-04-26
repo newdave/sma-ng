@@ -73,7 +73,7 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `POST` | `/webhook/sonarr`     | Yes  | Native Sonarr webhook endpoint (On Download/Upgrade)                    |
 | `POST` | `/webhook/radarr`     | Yes  | Native Radarr webhook endpoint (On Download/Upgrade)                    |
 | `POST` | `/cleanup`            | Yes  | Remove old jobs. Query: `?days=30`                                      |
-| `POST` | `/reload`             | Yes  | Reload `Daemon:` section in `sma-ng.yml` without restarting                                 |
+| `POST` | `/reload`             | Yes  | Reload `daemon:` section in `sma-ng.yml` without restarting                                 |
 | `POST` | `/restart`            | Yes  | Graceful restart. Query: `?node=<id>` for remote node (PostgreSQL)      |
 | `POST` | `/shutdown`           | Yes  | Graceful shutdown. Query: `?node=<id>` for remote node (PostgreSQL)     |
 | `POST` | `/jobs/<id>/requeue`  | Yes  | Requeue a specific failed job                                           |
@@ -130,7 +130,7 @@ API key priority order:
 flowchart LR
     A["--api-key\nCLI flag"] -->|highest priority| V["Resolved\nAPI Key"]
     B["SMA_DAEMON_API_KEY\nenv var"] --> V
-    C["api_key\n`Daemon:` section in `sma-ng.yml`"] --> V
+    C["api_key\n`daemon:` section in `sma-ng.yml`"] --> V
     D["none\nauth disabled"] -->|lowest priority| V
     A -.->|overrides| B -.->|overrides| C -.->|overrides| D
 ```
@@ -149,12 +149,15 @@ Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/metrics`, `/
 
 ---
 
-## Path-Based Configuration
+## Path Routing
 
-Configure the `Daemon:` section in `config/sma-ng.yml` to route files by path, apply profiles, and set daemon runtime options.
+The daemon resolves each inbound file's path through `daemon.routing`
+to pick a profile (overlaid onto `base`) and a list of services to
+notify after conversion. The whole `daemon` block lives at the top
+level of `config/sma-ng.yml`:
 
 ```yaml
-Daemon:
+daemon:
   api_key: your_secret_key
   db_url: null
   ffmpeg_dir: null
@@ -168,44 +171,80 @@ Daemon:
       rewrite_from: /mnt/local/Media
       rewrite_to: /mnt/unionfs/Media
       enabled: true
-  path_configs:
-    - path: /mnt/media/TV
+  default_args: []
+  routing:
+    - match: /mnt/media/TV
       profile: rq
-      default_args: [--tv]
-    - path: /mnt/media/Movies/Kids
+      services: [sonarr.main]
+    - match: /mnt/media/TV/Kids
       profile: lq
-      default_args: [--movie]
-    - path: /mnt/media/Special
-      config: config/autoProcess.special.yaml
+      services: [sonarr.kids]
+    - match: /mnt/media/Movies
+      profile: rq
+      services: [radarr.main, plex.main]
 ```
 
-### Top-Level Keys
+### Resolution semantics
 
-| Key                        | Description                                                                                                                          |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `api_key`                  | API authentication key                                                                                                               |
-| `db_url`                   | PostgreSQL URL for distributed mode                                                                                                  |
-| `ffmpeg_dir`               | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion                                              |
-| `media_extensions`         | File extensions considered media for directory scanning and `/browse`                                                                |
-| `path_rewrites`            | Prefix substitutions applied to incoming webhook paths before config matching; overlapping rewrites are matched longest-prefix-first |
-| `scan_paths`               | Directories for scheduled background scanning                                                                                        |
-| `path_configs`             | Per-directory routing entries. Use `profile` for named profiles in this file or `config` for an external YAML config                |
-| `smoke_test`               | Run option-generation dry-run against all configs at startup. Exits 1 on failure.                                                    |
-| `job_timeout_seconds`      | Maximum seconds a conversion may run (0 = no timeout)                                                                                |
-| `recycle_bin_max_age_days` | Delete recycle-bin media files older than this many days (default: `3`, `0` = disabled)                                              |
-| `recycle_bin_min_free_gb`  | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled)               |
+1. `path_rewrites` are applied longest-prefix-first to normalise the
+   incoming path (e.g. `/mnt/local/...` → `/mnt/unionfs/...`).
+2. `routing` rules are scanned **longest-match-first** against the
+   normalised path. The first matching rule wins —
+   `/mnt/media/TV/Kids/show.mkv` picks the `TV/Kids` rule, not `TV`.
+3. The matched rule's `profile` is shallow-merged onto `base` (per the
+   profile semantics in [configuration.md](configuration.md#profiles)).
+4. The matched rule's `services` list is parsed as
+   `<type>.<instance>` references and the corresponding instances under
+   `services.sonarr` / `services.radarr` / `services.plex` are notified
+   after conversion.
+5. **No matching rule** → conversion runs against bare `base` with no
+   profile and no service notification (silent passthrough).
 
-Matching is longest-prefix-first: `/mnt/media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`. If `path_rewrites` overlap, the most specific rewrite is applied before config matching.
+`services:` is optional on a routing rule — omitting it converts
+matching files but skips notifications.
 
-### Per-Path Default Args
+`profile:` is optional too — a rule that names only `match` and
+`services` keeps the default `base` settings while still notifying the
+listed instances.
 
-Each `path_configs` entry can include `default_args` to prepend args to every job submitted from that path:
+Validation: every `<type>.<instance>` ref must resolve to a defined
+instance in `services.<type>.<instance>`, and every named `profile:`
+must exist under `profiles:`. Both are checked at startup; typos fail
+fast.
 
-```yaml
-path: /mnt/media/TV
-profile: rq
-default_args: [--tv]
-```
+`manual.py` reuses the same routing engine for input paths, so the same
+auto-profile selection happens for one-shot conversions. Pass
+`--profile <name>` to override.
+
+### Top-Level `daemon` Keys
+
+| Key                         | Description                                                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `host` / `port` / `workers` | HTTP listen address and worker pool size                                                                                             |
+| `api_key`                   | API authentication key                                                                                                               |
+| `username` / `password`     | Optional HTTP-basic credentials for the web dashboard                                                                                |
+| `db_url`                    | PostgreSQL URL for distributed mode (env-only also supported via `SMA_DAEMON_DB_URL`)                                                |
+| `ffmpeg_dir`                | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion                                              |
+| `node_id`                   | Stable identity in cluster mode (auto-generated UUID on first start; override for human-readable identity)                           |
+| `media_extensions`          | File extensions considered media for directory scanning and `/browse`                                                                |
+| `path_rewrites`             | Prefix substitutions applied to incoming webhook paths before routing; overlapping rewrites are matched longest-prefix-first         |
+| `scan_paths`                | Directories for scheduled background scanning                                                                                        |
+| `routing`                   | Path-to-profile / path-to-services mapping (see above)                                                                               |
+| `default_args`              | Args prepended to every conversion regardless of which routing rule matched                                                          |
+| `smoke_test`                | Run option-generation dry-run against the loaded config at startup. Exits 1 on failure.                                              |
+| `job_timeout_seconds`       | Maximum seconds a conversion may run (0 = no timeout)                                                                                |
+| `progress_log_interval`     | Seconds between progress log lines for in-flight conversions                                                                         |
+| `recycle_bin_max_age_days`  | Delete recycle-bin media files older than this many days (default: `30`, `0` = disabled)                                             |
+| `recycle_bin_min_free_gb`   | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled)               |
+| `log_ttl_days`              | Cluster-mode: retention for log entries in PostgreSQL                                                                                |
+| `node_expiry_days`          | Cluster-mode: hard-delete offline nodes after this many days (`0` = disabled)                                                        |
+| `log_archive_dir`           | Cluster-mode: directory for gzipped JSONL archive of cluster logs                                                                    |
+| `log_archive_after_days`    | Cluster-mode: move logs older than this many days from DB to `log_archive_dir`                                                       |
+| `log_delete_after_days`     | Cluster-mode: prune archived log files older than this many days                                                                     |
+
+The `default_args` list is global only — there is no per-routing-rule
+override. Per-rule customisation is expressed by selecting a different
+`profile` for that rule.
 
 ---
 
@@ -406,7 +445,7 @@ stateDiagram-v2
 
 ## Job Persistence
 
-Jobs are stored in a PostgreSQL database configured via `SMA_DAEMON_DB_URL` or `db_url` in `Daemon:` section in `sma-ng.yml`. The database provides restart recovery, job history, cluster coordination, and deduplication across nodes.
+Jobs are stored in a PostgreSQL database configured via `SMA_DAEMON_DB_URL` or `db_url` in `daemon:` section in `sma-ng.yml`. The database provides restart recovery, job history, cluster coordination, and deduplication across nodes.
 
 ```bash
 curl http://localhost:8585/stats
@@ -435,7 +474,7 @@ For multi-node deployments, configure a shared PostgreSQL database so no two nod
 2. `Daemon.db_url` in `sma-ng.yml`
 
 ```yaml
-Daemon:
+daemon:
   db_url: postgresql://sma:password@db-host:5432/sma
 ```
 
@@ -497,7 +536,7 @@ Reload daemon config without restarting the daemon or interrupting active conver
 curl -X POST http://localhost:8585/reload -H "X-API-Key: SECRET"
 ```
 
-Reloaded immediately: `path_configs`, `path_rewrites`, `scan_paths`, `api_key`, `media_extensions`, `default_args`, `ffmpeg_dir`, `job_timeout_seconds`, `progress_log_interval`.
+Reloaded immediately: `routing`, `path_rewrites`, `scan_paths`, `api_key`, `media_extensions`, `default_args`, `ffmpeg_dir`, `job_timeout_seconds`, `progress_log_interval`.
 
 Not reloaded (require full restart): `--host`, `--port`, `--workers`.
 
