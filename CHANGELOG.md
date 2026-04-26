@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.54](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.53...sma-ng-v1.6.54) (2026-04-26)
+
+
+### Documentation
+
+* **deploy:** refresh .local.yml.sample for four-bucket sma-ng.yml ([cff58e9](https://github.com/newdave/sma-ng/commit/cff58e9d3c90d47f4eb1a4f1f4578f25a93167f5))
+
 ## [1.6.53](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.52...sma-ng-v1.6.53) (2026-04-26)
 
 
