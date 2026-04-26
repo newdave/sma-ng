@@ -15,317 +15,82 @@ class TestReadSettingsMultiInstance:
   """Test multi-instance Sonarr/Radarr discovery."""
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_discovers_sonarr_instances(self, mock_validate, tmp_ini):
-    ini = tmp_ini("""[Converter]
-ffmpeg = ffmpeg
-ffprobe = ffprobe
-threads = 0
-hwaccels =
-hwaccel-decoders =
-hwdevices =
-hwaccel-output-format =
-output-directory =
-output-format = mp4
-output-extension = mp4
-temp-extension =
-minimum-size = 0
-ignored-extensions =
-copy-to =
-move-to =
-delete-original = true
-process-same-extensions = false
-bypass-if-copying-all = false
-force-convert = false
-post-process = false
-wait-post-process = false
-detailed-progress = false
-opts-separator = ,
-preopts =
-postopts =
-regex-directory-replace = x
-output-directory-space-ratio = 0.0
-
-[Permissions]
-chmod = 0664
-uid = -1
-gid = -1
-
-[Metadata]
-relocate-moov = true
-full-path-guess = true
-tag = true
-tag-language = eng
-download-artwork = false
-sanitize-disposition =
-strip-metadata = true
-keep-titles = false
-
-[Video]
-gpu =
-codec = h265
-max-bitrate = 0
-preset = medium
-dynamic-parameters = false
-profile =
-prioritize-source-pix-fmt = true
-max-width = 0
-pix-fmt =
-max-level = 0
-filter =
-force-filter = false
-bitrate-ratio =
-codec-parameters =
-
-[HDR]
-codec =
-pix-fmt =
-space =
-transfer =
-primaries =
-preset =
-codec-parameters =
-filter =
-force-filter = false
-profile =
-
-[Audio]
-codec = aac
-languages =
-default-language = eng
-first-stream-of-language = false
-allow-language-relax = true
-channel-bitrate = 128
-variable-bitrate = 0
-max-bitrate = 0
-max-channels = 0
-filter =
-profile =
-force-filter = false
-sample-rates =
-sample-format =
-copy-original = false
-aac-adtstoasc = true
-ignored-dispositions =
-unique-dispositions = false
-stream-codec-combinations =
-ignore-trudhd = true
-relax-to-default = false
-force-default = false
-include-original-language = false
-atmos-force-copy = false
-
-[Audio.Sorting]
-sorting = language
-default-sorting = channels.d
-codecs =
-
-[Universal Audio]
-enabled = true
-codec =
-channel-bitrate = 128
-variable-bitrate = 0
-first-stream-only = true
-filter =
-profile =
-force-filter = false
-
-[Audio.ChannelFilters]
-
-[Subtitle]
-codec = mov_text
-codec-image-based =
-languages =
-default-language = eng
-first-stream-of-language = false
-encoding =
-burn-subtitles = false
-burn-dispositions =
-embed-subs = true
-embed-image-subs = false
-embed-only-internal-subs = false
-filename-dispositions =
-ignore-embedded-subs = false
-ignored-dispositions =
-unique-dispositions = false
-attachment-codec =
-remove-bitstream-subs = true
-force-default = false
-include-original-language = false
-
-[Subtitle.Sorting]
-sorting = language
-codecs =
-burn-sorting = language
-
-[Subtitle.CleanIt]
-enabled = false
-config-path =
-tags = default
-
-[Subtitle.Subliminal]
-download-subs = false
-download-hearing-impaired-subs = false
-providers =
-download-forced-subs = false
-include-hearing-impaired-subs = false
-
-[Subtitle.Subliminal.Auth]
-
-[Subtitle.FFSubsync]
-enabled = false
-
-[Sonarr]
-host = sonarr.local
-port = 8989
-apikey = abc123
-ssl = false
-webroot =
-path = /tv
-force-rename = false
-rescan = true
-block-reprocess = false
-in-progress-check = true
-
-[Sonarr-Kids]
-host = sonarr-kids.local
-port = 8989
-apikey = def456
-ssl = false
-webroot =
-path = /tv-kids
-force-rename = false
-rescan = true
-block-reprocess = false
-in-progress-check = true
-
-[Radarr]
-host = radarr.local
-port = 7878
-apikey = ghi789
-ssl = false
-webroot =
-path = /movies
-force-rename = false
-rescan = true
-block-reprocess = false
-in-progress-check = true
-
-[Radarr-4K]
-host = radarr-4k.local
-port = 7878
-apikey = jkl012
-ssl = false
-webroot =
-path = /movies/4k
-force-rename = false
-rescan = true
-block-reprocess = false
-in-progress-check = true
-
-[SABNZBD]
-convert = true
-sonarr-category = sonarr
-radarr-category = radarr
-bypass-category = bypass
-output-directory =
-path-mapping =
-
-[Deluge]
-
-
-sonarr-label = sonarr
-radarr-label = radarr
-bypass-label = bypass
-convert = true
-host = localhost
-port = 58846
-username =
-password =
-output-directory =
-remove = false
-path-mapping =
-
-[qBittorrent]
-
-
-sonarr-label = sonarr
-radarr-label = radarr
-bypass-label = bypass
-convert = true
-action-before =
-action-after =
-host = localhost
-port = 8080
-ssl = false
-username =
-password =
-output-directory =
-path-mapping =
-
-[uTorrent]
-
-
-sonarr-label = sonarr
-radarr-label = radarr
-bypass-label = bypass
-convert = true
-webui = false
-action-before =
-action-after =
-host = localhost
-ssl = false
-port = 8080
-username =
-password =
-output-directory =
-path-mapping =
-
-[Plex]
-host = localhost
-port = 32400
-refresh = false
-token =
-ssl = false
-ignore-certs = false
-path-mapping =
-""")
-    settings = ReadSettings(ini)
+  def test_discovers_sonarr_instances(self, mock_validate, tmp_yaml):
+    yml = tmp_yaml(
+      overrides={
+        "services": {
+          "sonarr": {
+            "main": {"url": "http://sonarr.local:8989", "apikey": "abc123"},
+            "kids": {"url": "http://sonarr-kids.local:8989", "apikey": "def456"},
+          },
+          "radarr": {
+            "main": {"url": "http://radarr.local:7878", "apikey": "ghi789"},
+            "4k": {"url": "http://radarr-4k.local:7878", "apikey": "jkl012"},
+          },
+        },
+        "daemon": {
+          "routing": [
+            {"match": "/tv", "services": ["sonarr.main"]},
+            {"match": "/tv-kids", "services": ["sonarr.kids"]},
+            {"match": "/movies", "services": ["radarr.main"]},
+            {"match": "/movies/4k", "services": ["radarr.4k"]},
+          ],
+        },
+      }
+    )
+    settings = ReadSettings(yml)
     assert len(settings.sonarr_instances) == 2
     assert len(settings.radarr_instances) == 2
 
     sonarr_sections = [i["section"] for i in settings.sonarr_instances]
-    assert "sonarr" in sonarr_sections
+    assert "main" in sonarr_sections
     assert "sonarr-kids" in sonarr_sections
 
     radarr_sections = [i["section"] for i in settings.radarr_instances]
-    assert "radarr" in radarr_sections
+    assert "main" in radarr_sections
     assert "radarr-4k" in radarr_sections
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_sorted_by_path_length(self, mock_validate, tmp_ini):
-    """Instances should be sorted longest-path-first."""
-    ini = tmp_ini()
-    settings = ReadSettings(ini)
-    for instances in [settings.sonarr_instances, settings.radarr_instances]:
-      paths = [i.get("path", "") for i in instances]
-      path_lens = [len(p) for p in paths]
-      assert path_lens == sorted(path_lens, reverse=True)
+  def test_sorted_by_path_length(self, mock_validate, tmp_yaml):
+    """Instances should be sorted longest-path-first when multiple routing
+    rules contribute paths to the same instance."""
+    yml = tmp_yaml(
+      overrides={
+        "services": {
+          "sonarr": {
+            "main": {"url": "http://localhost:8989", "apikey": "x"},
+            "kids": {"url": "http://localhost:8990", "apikey": "y"},
+          },
+        },
+        "daemon": {
+          "routing": [
+            {"match": "/tv", "services": ["sonarr.main"]},
+            {"match": "/tv/kids", "services": ["sonarr.kids"]},
+          ],
+        },
+      }
+    )
+    settings = ReadSettings(yml)
+    paths = [i.get("path", "") for i in settings.sonarr_instances]
+    assert [len(p) for p in paths] == sorted([len(p) for p in paths], reverse=True)
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_backward_compat(self, mock_validate, tmp_ini):
-    """self.Sonarr and self.Radarr should still reference base instances."""
-    ini = tmp_ini()
-    settings = ReadSettings(ini)
-    assert settings.Sonarr.get("host") == "localhost"
-    assert settings.Radarr.get("host") == "localhost"
+  def test_backward_compat(self, mock_validate, tmp_yaml):
+    """self.Sonarr / self.Radarr remain on the instance for compatibility but
+    are now empty (no consumer reads them; routing-derived data lives in
+    sonarr_instances/radarr_instances)."""
+    yml = tmp_yaml()
+    settings = ReadSettings(yml)
+    assert settings.Sonarr == {}
+    assert settings.Radarr == {}
 
 
 class TestGpuProfile:
   """Test gpu shorthand auto-derives all HW acceleration settings."""
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_qsv_profile(self, mock_validate, tmp_ini):
-    settings = ReadSettings(tmp_ini(gpu="qsv"))
+  def test_qsv_profile(self, mock_validate, tmp_yaml):
+    settings = ReadSettings(tmp_yaml(gpu="qsv"))
     assert settings.gpu == "qsv"
     assert "qsv" in settings.hwaccels
     assert "hevc_qsv" in settings.hwaccel_decoders
@@ -334,8 +99,8 @@ class TestGpuProfile:
     assert settings.hwoutputfmt.get("qsv") == "qsv"
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_nvenc_profile(self, mock_validate, tmp_ini):
-    settings = ReadSettings(tmp_ini(gpu="nvenc"))
+  def test_nvenc_profile(self, mock_validate, tmp_yaml):
+    settings = ReadSettings(tmp_yaml(gpu="nvenc"))
     assert settings.gpu == "nvenc"
     assert "cuda" in settings.hwaccels
     assert "hevc_cuvid" in settings.hwaccel_decoders
@@ -343,8 +108,8 @@ class TestGpuProfile:
     assert settings.hwoutputfmt.get("cuda") == "cuda"
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_vaapi_profile(self, mock_validate, tmp_ini):
-    settings = ReadSettings(tmp_ini(gpu="vaapi"))
+  def test_vaapi_profile(self, mock_validate, tmp_yaml):
+    settings = ReadSettings(tmp_yaml(gpu="vaapi"))
     assert settings.gpu == "vaapi"
     assert "vaapi" in settings.hwaccels
     assert "hevc_vaapi" in settings.hwaccel_decoders
@@ -352,42 +117,37 @@ class TestGpuProfile:
     assert settings.hwoutputfmt.get("vaapi") == "vaapi"
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_videotoolbox_profile(self, mock_validate, tmp_ini):
-    settings = ReadSettings(tmp_ini(gpu="videotoolbox"))
+  def test_videotoolbox_profile(self, mock_validate, tmp_yaml):
+    settings = ReadSettings(tmp_yaml(gpu="videotoolbox"))
     assert settings.gpu == "videotoolbox"
     assert "videotoolbox" in settings.hwaccels
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_no_gpu(self, mock_validate, tmp_ini):
+  def test_no_gpu(self, mock_validate, tmp_yaml):
     """Empty gpu should not populate any HW settings."""
-    settings = ReadSettings(tmp_ini())
+    settings = ReadSettings(tmp_yaml())
     assert settings.gpu == ""
     assert settings.hwaccels == []
     assert settings.hwaccel_decoders == []
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_explicit_override_preserved(self, mock_validate, tmp_ini):
+  def test_explicit_override_preserved(self, mock_validate, tmp_yaml):
     """If user explicitly sets hwaccels alongside gpu, the explicit value wins."""
-    ini = tmp_ini(gpu="qsv")
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("hwaccels =\n", "hwaccels = cuda\n")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
+    yml = tmp_yaml(
+      gpu="qsv",
+      overrides={"base": {"converter": {"hwaccels": ["cuda"]}}},
+    )
+    settings = ReadSettings(yml)
     assert "cuda" in settings.hwaccels
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_codec_mapping_qsv(self, mock_validate, tmp_ini):
+  def test_codec_mapping_qsv(self, mock_validate, tmp_yaml):
     """gpu=qsv should map hevc→h265qsv with software fallback."""
-    ini = tmp_ini(gpu="qsv")
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("codec = h265, h264", "codec = hevc, h264")
-    with open(ini, "w") as f:
-      f.write(content)
-
-    settings = ReadSettings(ini)
+    yml = tmp_yaml(
+      gpu="qsv",
+      overrides={"base": {"video": {"codec": ["hevc", "h264"]}}},
+    )
+    settings = ReadSettings(yml)
     assert "h265qsv" in settings.vcodec
     assert "hevc" in settings.vcodec
     assert "h264qsv" in settings.vcodec
@@ -395,16 +155,13 @@ class TestGpuProfile:
     assert settings.vcodec.index("h265qsv") < settings.vcodec.index("hevc")
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_codec_mapping_vaapi(self, mock_validate, tmp_ini):
+  def test_codec_mapping_vaapi(self, mock_validate, tmp_yaml):
     """gpu=vaapi should map hevc→h265vaapi."""
-    ini = tmp_ini(gpu="vaapi")
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("codec = h265, h264", "codec = hevc")
-    with open(ini, "w") as f:
-      f.write(content)
-
-    settings = ReadSettings(ini)
+    yml = tmp_yaml(
+      gpu="vaapi",
+      overrides={"base": {"video": {"codec": ["hevc"]}}},
+    )
+    settings = ReadSettings(yml)
     assert "h265vaapi" in settings.vcodec
     assert "hevc" in settings.vcodec
 
@@ -413,17 +170,17 @@ class TestValidateBinaries:
   """Test FFmpeg/FFprobe binary validation."""
 
   @patch("shutil.which", return_value="/usr/bin/ffmpeg")
-  def test_valid_binary_in_path(self, mock_which, tmp_ini):
+  def test_valid_binary_in_path(self, mock_which, tmp_yaml):
     """Should not exit when binary is found via which."""
-    ini = tmp_ini()
+    ini = tmp_yaml()
     # Should not raise
     ReadSettings(ini)
 
   @patch("shutil.which", return_value=None)
   @patch("os.path.isfile", return_value=False)
-  def test_missing_binary_exits(self, mock_isfile, mock_which, tmp_ini):
+  def test_missing_binary_exits(self, mock_isfile, mock_which, tmp_yaml):
     """Should sys.exit when binary not found."""
-    ini = tmp_ini()
+    ini = tmp_yaml()
     with pytest.raises(SystemExit):
       ReadSettings(ini)
 
@@ -449,199 +206,78 @@ class TestMapCodecsWithFallback:
     assert "hevc" in result
 
 
-class TestWriteConfig:
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_writes_config_file(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    settings = ReadSettings(ini)
-    new_path = ini + ".new"
-    settings.writeConfig(settings._config, new_path)
-    assert os.path.exists(new_path)
-
-
 class TestForceConvertOverride:
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_force_convert_sets_process_same(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("force-convert = false", "force-convert = true")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
+  def test_force_convert_sets_process_same(self, mock_validate, tmp_yaml):
+    yml = tmp_yaml(overrides={"base": {"converter": {"force-convert": True}}})
+    settings = ReadSettings(yml)
     assert settings.force_convert is True
     assert settings.process_same_extensions is True
 
 
 class TestArtworkParsing:
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_poster_artwork(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    settings = ReadSettings(ini)
-    # Default is 'false' in conftest
+  def test_poster_artwork(self, mock_validate, tmp_yaml):
+    settings = ReadSettings(tmp_yaml())
+    # Default is 'false' in the test fixture
     assert settings.thumbnail is False
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_thumbnail_artwork(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("download-artwork = false", "download-artwork = thumbnail")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
+  def test_thumbnail_artwork(self, mock_validate, tmp_yaml):
+    yml = tmp_yaml(overrides={"base": {"metadata": {"download-artwork": "thumbnail"}}})
+    settings = ReadSettings(yml)
     assert settings.artwork is True
     assert settings.thumbnail is True
 
 
 class TestPermissionsParsing:
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_invalid_chmod_defaults_to_664(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("chmod = 0664", "chmod = notoctal")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
+  def test_invalid_chmod_defaults_to_664(self, mock_validate, tmp_yaml):
+    yml = tmp_yaml(overrides={"base": {"permissions": {"chmod": "notoctal"}}})
+    settings = ReadSettings(yml)
     assert settings.permissions["chmod"] == 0o664
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_valid_chmod_is_parsed(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("chmod = 0664", "chmod = 0755")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
+  def test_valid_chmod_is_parsed(self, mock_validate, tmp_yaml):
+    yml = tmp_yaml(overrides={"base": {"permissions": {"chmod": "0755"}}})
+    settings = ReadSettings(yml)
     assert settings.permissions["chmod"] == 0o755
 
 
 class TestArtworkParsingExtended:
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_poster_value(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("download-artwork = false", "download-artwork = poster")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
+  def test_poster_value(self, mock_validate, tmp_yaml):
+    yml = tmp_yaml(overrides={"base": {"metadata": {"download-artwork": "poster"}}})
+    settings = ReadSettings(yml)
     assert settings.artwork is True
     assert settings.thumbnail is False
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_invalid_artwork_value_defaults_to_true(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("download-artwork = false", "download-artwork = maybe")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
+  def test_invalid_artwork_value_defaults_to_true(self, mock_validate, tmp_yaml):
+    yml = tmp_yaml(overrides={"base": {"metadata": {"download-artwork": "maybe"}}})
+    settings = ReadSettings(yml)
     assert settings.artwork is True
-
-
-class TestMigrateFromOld:
-  """Test migrateFromOld() handles deprecated config options."""
-
-  def _make_settings_and_config(self, tmp_ini, extra_options=""):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    if extra_options:
-      content = content.replace("[Audio]\ncodec = aac", "[Audio]\ncodec = aac\n" + extra_options)
-    with open(ini, "w") as f:
-      f.write(content)
-    return ini
-
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_sort_streams_false_clears_sorting(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("[Converter]\nffmpeg", "[Converter]\nsort-streams = false\nffmpeg")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
-    assert settings.audio_sorting == []
-
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_prefer_more_channels_true_replaces_channels(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    # Add deprecated option and a sorting value that uses 'channels'
-    content = content.replace("sorting = language, channels.d, map, d.comment", "sorting = language, channels, map, d.comment")
-    content = content.replace("[Audio]\ncodec = aac", "[Audio]\ncodec = aac\nprefer-more-channels = true")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
-    assert "channels.d" in settings.audio_sorting
-
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_prefer_more_channels_false_uses_channels_a(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("[Audio]\ncodec = aac", "[Audio]\ncodec = aac\nprefer-more-channels = false")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
-    assert "channels.a" in settings.audio_sorting
-
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_gpu_moved_from_converter_to_video(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("[Converter]\nffmpeg", "[Converter]\ngpu = nvenc\nffmpeg")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
-    assert settings.gpu == "nvenc"
-
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_final_sort_with_map_not_already_present(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("sorting = language, channels.d, map, d.comment", "sorting = language, channels.d, d.comment")
-    content = content.replace("[Audio.Sorting]", "[Audio.Sorting]\nfinal-sort = true")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
-    assert "map" in settings.audio_sorting
-
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_copy_original_before_removed(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("[Audio]\ncodec = aac", "[Audio]\ncodec = aac\ncopy-original-before = true")
-    with open(ini, "w") as f:
-      f.write(content)
-    # Should not raise — deprecated option is silently removed
-    settings = ReadSettings(ini)
-    assert settings is not None
 
 
 class TestReadSettingsUniversalAudio:
   """Test Universal Audio config parsing."""
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_universal_audio_enabled_flag_defaults_false(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("[Universal Audio]\nenabled = true", "[Universal Audio]\nenabled = false")
-    content = content.replace("[Universal Audio]\nenabled = false\ncodec =", "[Universal Audio]\nenabled = false\ncodec = aac")
-    with open(ini, "w") as f:
-      f.write(content)
-
-    settings = ReadSettings(ini)
-
+  def test_universal_audio_enabled_flag_defaults_false(self, mock_validate, tmp_yaml):
+    yml = tmp_yaml(
+      overrides={
+        "base": {
+          "audio": {
+            "universal": {
+              "enabled": False,
+              "codec": ["aac"],
+              "first-stream-only": True,
+            }
+          }
+        }
+      }
+    )
+    settings = ReadSettings(yml)
     assert settings.ua_enabled is False
     assert settings.ua == ["aac"]
     assert settings.ua_first_only is True
@@ -651,8 +287,8 @@ class TestReadSettingsAnalyzer:
   """Test Analyzer config parsing."""
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_analyzer_defaults_are_backfilled(self, mock_validate, tmp_ini):
-    settings = ReadSettings(tmp_ini())
+  def test_analyzer_defaults_are_backfilled(self, mock_validate, tmp_yaml):
+    settings = ReadSettings(tmp_yaml())
 
     assert settings.analyzer == {
       "enabled": False,
@@ -670,32 +306,30 @@ class TestReadSettingsAnalyzer:
     }
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_analyzer_custom_values_are_parsed(self, mock_validate, tmp_ini, tmp_path):
-    ini = tmp_ini()
+  def test_analyzer_custom_values_are_parsed(self, mock_validate, tmp_yaml, tmp_path):
     model_dir = tmp_path / "models"
     cache_dir = tmp_path / "cache"
-    with open(ini, "a") as f:
-      f.write(
-        """
-
-[Analyzer]
-enabled = true
-backend = openvino
-device = NPU
-model-dir = %s
-cache-dir = %s
-max-frames = 24
-target-width = 1280
-allow-codec-reorder = false
-allow-bitrate-adjustments = false
-allow-preset-adjustments = false
-allow-filter-adjustments = false
-allow-force-reencode = false
-"""
-        % (model_dir, cache_dir)
-      )
-
-    settings = ReadSettings(ini)
+    yml = tmp_yaml(
+      overrides={
+        "base": {
+          "analyzer": {
+            "enabled": True,
+            "backend": "openvino",
+            "device": "NPU",
+            "model-dir": str(model_dir),
+            "cache-dir": str(cache_dir),
+            "max-frames": 24,
+            "target-width": 1280,
+            "allow-codec-reorder": False,
+            "allow-bitrate-adjustments": False,
+            "allow-preset-adjustments": False,
+            "allow-filter-adjustments": False,
+            "allow-force-reencode": False,
+          }
+        }
+      }
+    )
+    settings = ReadSettings(yml)
 
     assert settings.analyzer == {
       "enabled": True,
@@ -772,19 +406,14 @@ class TestBitrateProfiles:
     assert result == []
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_vbitrate_profiles_empty_when_not_configured(self, mock_validate, tmp_ini):
-    settings = ReadSettings(tmp_ini())
+  def test_vbitrate_profiles_empty_when_not_configured(self, mock_validate, tmp_yaml):
+    settings = ReadSettings(tmp_yaml())
     assert settings.vbitrate_profiles == []
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_vbitrate_profiles_parsed_when_configured(self, mock_validate, tmp_ini):
-    ini = tmp_ini()
-    with open(ini, "r") as f:
-      content = f.read()
-    content = content.replace("codec-parameters =\n\n[HDR]", "codec-parameters =\ncrf-profiles = 0:22:2M:4M,4000:22:3M:6M\n\n[HDR]")
-    with open(ini, "w") as f:
-      f.write(content)
-    settings = ReadSettings(ini)
+  def test_vbitrate_profiles_parsed_when_configured(self, mock_validate, tmp_yaml):
+    yml = tmp_yaml(overrides={"base": {"video": {"crf-profiles": "0:22:2M:4M,4000:22:3M:6M"}}})
+    settings = ReadSettings(yml)
     assert len(settings.vbitrate_profiles) == 2
     assert settings.vbitrate_profiles[0] == {"source_kbps": 0, "target": 2000, "maxrate": 4000}
     assert settings.vbitrate_profiles[1] == {"source_kbps": 4000, "target": 3000, "maxrate": 6000}
