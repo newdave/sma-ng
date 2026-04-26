@@ -38,10 +38,11 @@ def write_yaml(path, data):
 config_dir = os.path.join(deploy_dir, "config")
 yaml_files = sorted(os.path.join(config_dir, f) for f in os.listdir(config_dir) if f.endswith((".yaml", ".yml")))
 
+sys.path.insert(0, deploy_dir)
+from resources.yamlconfig import _load_with_dedup  # noqa: E402
+
 for yaml_path in yaml_files:
-  yaml = YAML(typ="rt")
-  with open(yaml_path) as f:
-    data = yaml.load(f) or {}
+  data = _load_with_dedup(yaml_path) or {}
   base = data.setdefault("base", {})
   converter = base.setdefault("converter", {})
   changed = False

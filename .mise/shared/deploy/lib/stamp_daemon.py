@@ -108,8 +108,14 @@ yaml_path = os.path.join(deploy_dir, "config", "sma-ng.yml")
 if os.path.exists(yaml_path):
   yaml = YAML(typ="rt")
   yaml.width = 120
-  with open(yaml_path) as f:
-    root = yaml.load(f) or {}
+  yaml.allow_duplicate_keys = True
+  # Use the dedup-aware loader so any pre-existing duplicate top-level
+  # keys are merged before we modify and write back; otherwise we'd
+  # update the first copy and leave duplicate keys in place.
+  sys.path.insert(0, deploy_dir)
+  from resources.yamlconfig import _load_with_dedup  # noqa: E402
+
+  root = _load_with_dedup(yaml_path) or {}
 
   changed = False
 
