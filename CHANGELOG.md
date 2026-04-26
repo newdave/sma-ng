@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.52](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.51...sma-ng-v1.6.52) (2026-04-26)
+
+
+### Documentation
+
+* restructure configuration + daemon reference for four-bucket sma-ng.yml ([b1a3d5d](https://github.com/newdave/sma-ng/commit/b1a3d5d967e27abd5d010511520ab23eeac909a2))
+
 ## [1.6.51](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.50...sma-ng-v1.6.51) (2026-04-26)
 
 
