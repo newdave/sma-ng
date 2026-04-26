@@ -1,4 +1,3 @@
-import configparser
 import os
 
 from ruamel.yaml import YAML
@@ -21,61 +20,6 @@ def write(path: str, data: dict) -> None:
   os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
   with open(path, "w") as f:
     yaml.dump(data, f)
-
-
-def migrate_ini_to_yaml(ini_path: str, yaml_path: str, bak_path: str, defaults: dict) -> None:
-  config = configparser.ConfigParser(strict=False)
-  config.read(ini_path)
-
-  separator = config.get("Converter", "opts-separator", fallback=",")
-
-  data = {}
-  for section in config.sections():
-    section_key = section.lower()
-    section_data = {}
-    if section_key in defaults:
-      for key in config.options(section):
-        default_val = defaults[section_key].get(key)
-        raw = config.get(section, key, fallback=None)
-        if raw is None:
-          section_data[key] = default_val
-          continue
-        if isinstance(default_val, bool):
-          section_data[key] = config.getboolean(section, key, fallback=default_val)
-        elif isinstance(default_val, int):
-          section_data[key] = config.getint(section, key, fallback=default_val)
-        elif isinstance(default_val, float):
-          section_data[key] = config.getfloat(section, key, fallback=default_val)
-        elif isinstance(default_val, list):
-          if key in ("preopts", "postopts"):
-            parts = raw.split(separator)
-          else:
-            parts = raw.split(",")
-          section_data[key] = [p.strip() for p in parts if p.strip()]
-        elif isinstance(default_val, dict):
-          result = {}
-          for pair in raw.split(","):
-            pair = pair.strip()
-            if ":" in pair:
-              k, v = pair.split(":", 1)
-              k, v = k.strip(), v.strip()
-              if key == "bitrate-ratio":
-                try:
-                  result[k] = float(v)
-                except ValueError:
-                  result[k] = v
-              else:
-                result[k] = v
-          section_data[key] = result
-        else:
-          section_data[key] = config.get(section, key, fallback=str(default_val) if default_val is not None else "")
-    else:
-      for key in config.options(section):
-        section_data[key] = config.get(section, key)
-    data[section_key] = section_data
-
-  write(yaml_path, data)
-  os.rename(ini_path, bak_path)
 
 
 def cfg_getpath(val) -> str | None:
