@@ -59,37 +59,48 @@ SMA-NG extracts `movieFile.path` and `movie.tmdbId` (or `imdbId` as fallback) an
 
 ### Multiple Instances
 
-Any config section starting with `Sonarr` or `Radarr` is discovered automatically. Each instance needs a `path` field for directory-based matching:
+Sonarr and Radarr each support arbitrary named instances under `services.sonarr.<name>` / `services.radarr.<name>` in `sma-ng.yml`. The instance used for a given file is decided by `daemon.routing` rules — the longest matching `match` prefix wins.
 
-```ini
-[Sonarr]
-path = /mnt/media/TV
-host = sonarr.example.com
-apikey = abc123
+```yaml
+services:
+  sonarr:
+    main:
+      host: sonarr.example.com
+      apikey: abc123
+    kids:
+      host: sonarr-kids.example.com
+      apikey: def456
+  radarr:
+    main:
+      host: radarr.example.com
+      apikey: ghi789
+    4k:
+      host: radarr-4k.example.com
+      apikey: jkl012
 
-[Sonarr-Kids]
-path = /mnt/media/TV-Kids
-host = sonarr-kids.example.com
-apikey = def456
-
-[Radarr]
-path = /mnt/media/Movies
-host = radarr.example.com
-apikey = ghi789
-
-[Radarr-4K]
-path = /mnt/media/Movies/4K
-host = radarr-4k.example.com
-apikey = jkl012
+daemon:
+  routing:
+    - match: /mnt/media/TV
+      profile: rq
+      services: [sonarr.main]
+    - match: /mnt/media/TV-Kids
+      profile: lq
+      services: [sonarr.kids]
+    - match: /mnt/media/Movies
+      profile: rq
+      services: [radarr.main]
+    - match: /mnt/media/Movies/4K
+      profile: rq
+      services: [radarr.4k]
 ```
 
-When `manual.py` processes `/mnt/media/Movies/4K/film.mp4`, it matches `Radarr-4K` (longest prefix) and triggers a rescan on that instance.
+When `manual.py` processes `/mnt/media/Movies/4K/film.mkv`, the matcher picks the `/mnt/media/Movies/4K` rule (longest prefix) and triggers a rescan on `radarr.4k`.
 
-The sample config also includes commented examples directly under the primary `[Sonarr]` and `[Radarr]` sections so the intended grouping is visible in-place.
+The deploy tooling stamps these rules automatically: list each instance with `path` + `profile` under `services.sonarr` / `services.radarr` in `setup/local.yml` and `mise run config:roll` rebuilds `daemon.routing` longest-prefix-first on every roll. See [Deployment](deployment.md).
 
 ### Plex
 
-Configure `[Plex]` section. SMA-NG refreshes the matching library section after conversion. Use `path-mapping` if Plex sees files at different mount points.
+Configure `services.plex.<name>` in `sma-ng.yml`. SMA-NG refreshes the matching library section after conversion. Use `base.path-mapping` if Plex sees files at different mount points.
 
 1. Disable automatic library scanning in Plex to prevent Plex from scanning files mid-conversion
 2. Connect directly to the Plex server using its local hostname or IP on port `32400` (or your custom port) and set `token` plus `refresh = true` in `[Plex]`

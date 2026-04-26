@@ -580,10 +580,10 @@ All CLI flags (`--host`, `--port`, `--workers`, etc.) are preserved across resta
 
 ## Cluster Mode
 
-Cluster mode extends multi-node PostgreSQL deployments with unique node identity, coordinated
-fleet management, and aggregated log visibility. All cluster features require `db_url` to point
-at a shared PostgreSQL instance. Single-node SQLite setups are unaffected — all cluster code
-paths are gated on the distributed flag.
+Cluster mode adds unique node identity, coordinated fleet management, and aggregated log
+visibility on top of the daemon's PostgreSQL backend. PostgreSQL is mandatory regardless of
+node count, so any deployment can opt in by simply pointing additional daemons at the same
+`db_url`. Single-node deployments operate as a one-node cluster.
 
 ### Node Identity
 

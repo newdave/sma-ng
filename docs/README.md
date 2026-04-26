@@ -21,8 +21,7 @@ Automated media conversion, tagging, and integration pipeline. Converts media fi
   - [Path-Based Configuration](#path-based-configuration)
   - [Per-Config Logging](#per-config-logging)
   - [Scheduled Directory Scanning](#scheduled-directory-scanning)
-  - [SQLite Persistence](#sqlite-persistence)
-  - [PostgreSQL (Distributed / Multi-Node)](#postgresql-distributed--multi-node)
+  - [Job Persistence (PostgreSQL)](#job-persistence-postgresql)
   - [Graceful Shutdown](#graceful-shutdown)
 - [Media Manager Integration](#media-manager-integration)
 - [Download Client Integration](#download-client-integration)
@@ -475,7 +474,6 @@ python daemon.py \
   --api-key YOUR_SECRET_KEY \
   --daemon-config config/sma-ng.yml \
   --logs-dir logs/ \
-  --db config/daemon.db \
   --ffmpeg-dir /usr/local/bin
 ```
 
@@ -516,7 +514,7 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `GET`  | `/`                  | No   | Redirects to `/dashboard`                                               |
 | `GET`  | `/dashboard`         | No   | Web dashboard                                                           |
 | `GET`  | `/health`            | No   | Health check with job stats (local node)                                |
-| `GET`  | `/status`            | No   | Cluster-wide status (PostgreSQL) or local health (SQLite)               |
+| `GET`  | `/status`            | No   | Cluster-wide status across all nodes                                    |
 | `GET`  | `/docs`              | No   | Rendered documentation                                                  |
 | `GET`  | `/jobs`              | Yes  | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
 | `GET`  | `/jobs/<id>`         | Yes  | Get specific job                                                        |
@@ -679,9 +677,32 @@ curl -X POST http://localhost:8585/scan/record \
   -d '{"paths": ["/mnt/media/film1.mkv"]}'
 ```
 
-### SQLite Persistence
+### Job Persistence (PostgreSQL)
 
-Jobs are stored in `config/daemon.db` (SQLite). This provides restart recovery, job history, and filtering.
+The daemon uses PostgreSQL exclusively. Jobs, scanned-files state, cluster nodes, and per-config logs all live in the database, so any number of daemons can share the same backend and split work across the cluster. Single-node deployments still need PostgreSQL — there is no embedded SQLite fallback.
+
+Configure the connection via either:
+
+```yaml
+# config/sma-ng.yml
+daemon:
+  db_url: postgresql://sma:secret@db.example.com:5432/sma
+```
+
+Or via the environment (preferred when running under Docker, since secrets stay out of `ps` output):
+
+```bash
+SMA_DAEMON_DB_URL=postgresql://sma:secret@db.example.com:5432/sma python daemon.py
+# or split into parts and let the daemon assemble the URL
+SMA_DAEMON_DB_HOST=db.example.com
+SMA_DAEMON_DB_USER=sma
+SMA_DAEMON_DB_PASSWORD=secret
+SMA_DAEMON_DB_NAME=sma
+```
+
+There is no `--db-url` CLI flag — credentials must not appear in `ps`. The daemon's startup order is `SMA_DAEMON_DB_URL` env → assembled `SMA_DAEMON_DB_*` parts → `daemon.db_url` in `sma-ng.yml`. If none is set, startup fails fast with an error.
+
+Common queries (all hit the same Postgres instance):
 
 ```bash
 # View statistics
@@ -694,33 +715,17 @@ curl "http://localhost:8585/jobs?status=pending"
 curl -X POST "http://localhost:8585/cleanup?days=7"
 ```
 
-Use `--db /path/to/daemon.db` to customize database location.
-
-**Database schema:**
+**Schema (managed by the daemon on startup):**
 
 ```sql
-jobs(id, path, config, args, status, worker_id, node_id, error, created_at, started_at, completed_at)
+jobs(id, path, config, args, status, worker_id, node_id, error, created_at, started_at, completed_at, ...)
 scanned_files(path, scanned_at)
+cluster_nodes(node_id, host, workers, last_seen, started_at, status, approval_status, ...)
+node_commands(id, node_id, command, status, ...)
+logs(id, config, node_id, level, message, timestamp)
 ```
 
-The `scanned_files` table tracks paths submitted by directory scanning to prevent duplicate submissions on re-scan. The `node_id` column records which daemon node claimed a job (relevant in distributed mode).
-
-### PostgreSQL (Distributed / Multi-Node)
-
-For multi-node deployments, configure a shared PostgreSQL database:
-
-```bash
-# CLI
-python daemon.py --db-url postgresql://user:pass@host/sma
-
-# Environment variable
-SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma python daemon.py
-
-# sma-ng.yml Daemon section
-{ "db_url": "postgresql://user:pass@host/sma" }
-```
-
-When `db_url` is set, `--db` (SQLite path) is ignored. The `/health` endpoint shows cluster-wide status.
+The `scanned_files` table prevents duplicate submissions across scanner restarts. `cluster_nodes` is the source of truth for the dashboard's node list and the heartbeat/approval flow. `node_commands` is the durable channel daemons use to broadcast control operations (reload, restart, drain) across the cluster.
 
 ### Graceful Shutdown
 
@@ -1331,8 +1336,14 @@ The daemon also writes per-config rotating log files in `logs/`:
 | `SMA_DAEMON_HOST`       | Daemon bind host (Docker default: empty = 0.0.0.0)                          |
 | `SMA_DAEMON_PORT`       | Daemon port (Docker default: 8585)                                          |
 | `SMA_DAEMON_WORKERS`    | Number of concurrent workers (Docker default: 4)                            |
-| `SMA_DAEMON_CONFIG`     | Path to daemon config, normally `config/sma-ng.yml`                   |
-| `SMA_DAEMON_DB`         | Path to SQLite database file                                                |
+| `SMA_DAEMON_CONFIG`     | Path to daemon config, normally `config/sma-ng.yml`                         |
+| `SMA_DAEMON_API_KEY`    | API key (overrides `daemon.api_key` in `sma-ng.yml`)                        |
+| `SMA_DAEMON_DB_HOST`    | PostgreSQL host (used when `SMA_DAEMON_DB_URL` is not set)                  |
+| `SMA_DAEMON_DB_USER`    | PostgreSQL user (used with `SMA_DAEMON_DB_HOST`)                            |
+| `SMA_DAEMON_DB_PASSWORD`| PostgreSQL password (used with `SMA_DAEMON_DB_HOST`)                        |
+| `SMA_DAEMON_DB_NAME`    | PostgreSQL database name (default: `sma`)                                   |
+| `SMA_DAEMON_DB_PORT`    | PostgreSQL port (default: `5432`)                                           |
+| `SMA_NODE_NAME`         | Cluster node identity (overrides `socket.gethostname()`)                    |
 | `SMA_DAEMON_LOGS_DIR`   | Directory for per-config log files                                          |
 
 ---
