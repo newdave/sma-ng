@@ -33,7 +33,19 @@ DAEMON_CONFIG="$SCRIPT_DIR/config/sma-ng.yml"
 : "${SMA_DAEMON_URL:=http://127.0.0.1:8585}"
 
 if [[ -z "${SMA_API_KEY:-}" && -f "$DAEMON_CONFIG" ]]; then
-    SMA_API_KEY=$(python3 "$SCRIPT_DIR/scripts/local-config.py" "$DAEMON_CONFIG" daemon api_key 2>/dev/null || true)
+    # local-config.py needs ruamel.yaml or PyYAML; prefer the project venv
+    # interpreter where they're guaranteed to be installed.
+    if [[ -x "$SCRIPT_DIR/venv/bin/python" ]]; then
+        py="$SCRIPT_DIR/venv/bin/python"
+    else
+        py="python3"
+    fi
+    if ! SMA_API_KEY=$("$py" "$SCRIPT_DIR/scripts/local-config.py" "$DAEMON_CONFIG" daemon api_key 2>&1); then
+        echo "Warning: failed to read daemon.api_key from $DAEMON_CONFIG:" >&2
+        echo "$SMA_API_KEY" | sed 's/^/  /' >&2
+        echo "  Set SMA_API_KEY in the environment to bypass." >&2
+        SMA_API_KEY=""
+    fi
 fi
 : "${SMA_API_KEY:=}"
 
