@@ -29,7 +29,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DAEMON_ENV="$SCRIPT_DIR/config/daemon.env"
-LOCAL_YML="$SCRIPT_DIR/setup/local.yml"
 DAEMON_CONFIG="$SCRIPT_DIR/config/sma-ng.yml"
 
 : "${SMA_DAEMON_URL:=http://127.0.0.1:8585}"
@@ -43,34 +42,22 @@ fi
 # Resolve the API key by priority:
 #   1. SMA_API_KEY env (explicit override)
 #   2. config/daemon.env SMA_DAEMON_API_KEY (what the daemon actually loads)
-#   3. setup/local.yml daemon.api_key (canonical deploy source)
-#   4. config/sma-ng.yml daemon.api_key (stamped by deploy)
-# Mismatches between (4) and the daemon's effective key — common when
-# duplicate top-level keys leave sma-ng.yml's daemon.api-key empty —
-# would otherwise produce a confusing 401.
+#   3. config/sma-ng.yml daemon.api_key (stamped by deploy)
+# setup/local.yml is intentionally excluded — it's a developer-side file
+# and is not synced to deploy hosts.
 if [[ -z "${SMA_API_KEY:-}" && -f "$DAEMON_ENV" ]]; then
     # daemon.env is shell-style KEY=VALUE; tolerate quoting and inline comments.
     _val=$(grep -E '^[[:space:]]*SMA_DAEMON_API_KEY[[:space:]]*=' "$DAEMON_ENV" | tail -n1 | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*#.*$//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/')
     [[ -n "$_val" ]] && SMA_API_KEY="$_val"
 fi
 
-resolve_yaml_key() {
-    local file="$1"
-    [[ -f "$file" ]] || return 0
-    local out
-    if ! out=$("$SMA_PY" "$SCRIPT_DIR/scripts/local-config.py" "$file" daemon api_key 2>&1); then
-        echo "Warning: failed to read daemon.api_key from $file:" >&2
-        echo "$out" | sed 's/^/  /' >&2
-        return 0
+if [[ -z "${SMA_API_KEY:-}" && -f "$DAEMON_CONFIG" ]]; then
+    if ! SMA_API_KEY=$("$SMA_PY" "$SCRIPT_DIR/scripts/local-config.py" "$DAEMON_CONFIG" daemon api_key 2>&1); then
+        echo "Warning: failed to read daemon.api_key from $DAEMON_CONFIG:" >&2
+        echo "$SMA_API_KEY" | sed 's/^/  /' >&2
+        echo "  Set SMA_API_KEY in the environment to bypass." >&2
+        SMA_API_KEY=""
     fi
-    [[ -n "$out" ]] && echo "$out"
-}
-
-if [[ -z "${SMA_API_KEY:-}" ]]; then
-    SMA_API_KEY=$(resolve_yaml_key "$LOCAL_YML")
-fi
-if [[ -z "${SMA_API_KEY:-}" ]]; then
-    SMA_API_KEY=$(resolve_yaml_key "$DAEMON_CONFIG")
 fi
 : "${SMA_API_KEY:=}"
 
