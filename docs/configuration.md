@@ -1,14 +1,61 @@
 # Configuration Reference
 
-Configuration lives in `config/sma-ng.yml` (YAML format). Copy from `setup/sma-ng.yml.sample` or generate it with `make config` or `mise run config:generate`.
+Configuration lives in `config/sma-ng.yml` (YAML). Copy from
+`setup/sma-ng.yml.sample` or generate it with `make config` /
+`mise run config:generate`. Override the path via the `SMA_CONFIG`
+environment variable.
 
-On first startup, if `sma-ng.yml` is missing and a legacy sibling `autoProcess.ini` exists, SMA-NG migrates the INI file to YAML and keeps the original as `autoProcess.ini.bak`.
+The legacy `autoProcess.ini` format is no longer supported. Pointing
+SMA-NG at a `.ini` file or a flat-shape YAML (top-level `converter:`,
+`video:`, etc.) fails fast at startup with a pointer to this document.
 
-Override path via `SMA_CONFIG` environment variable.
+## Four-bucket layout
+
+`sma-ng.yml` has exactly four top-level keys:
+
+```yaml
+daemon:    # daemon-only runtime settings (host, port, db_url, routing, …)
+base:      # default media-conversion settings (converter, video, audio, …)
+profiles:  # named per-section overlays applied on top of base
+services:  # Sonarr / Radarr / Plex instances, keyed by name
+```
+
+`manual.py` reads only `base`, `profiles`, and `services` (it ignores
+the `daemon` block). The daemon reads everything.
+
+Routing rules under `daemon.routing` map a file's path to a profile name
+and to one or more service instances; full semantics are in the
+[Daemon Mode reference](daemon.md#path-routing). Quick example:
+
+```yaml
+daemon:
+  routing:
+    - match: /mnt/media/TV
+      profile: rq
+      services: [sonarr.main]
+    - match: /mnt/media/TV/Kids
+      profile: lq
+      services: [sonarr.kids]
+```
+
+The longest matching prefix wins; an unmatched path falls through to
+`base` with no profile and no service notification.
+
+The schema is the single source of truth for defaults and types; every
+YAML key is validated by pydantic at load. Unknown keys are accepted
+but logged as `WARNING Unknown config key: <dotted.path>` so typos
+surface immediately. Sample regeneration (`mise run config:generate-sample`)
+and the `config-sample-consistency` CI job keep the committed sample
+locked to the schema.
+
+The downloader sections (`SABNZBD`, `Deluge`, `qBittorrent`, `uTorrent`)
+that used to live here are removed — those integrations are now
+shell-trigger-only and configured in `triggers/`. See
+[Integrations](integrations.md).
 
 ---
 
-## [Converter]
+## base.converter
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -36,7 +83,7 @@ Override path via `SMA_CONFIG` environment variable.
 
 ---
 
-## [Video]
+## base.video
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -64,7 +111,7 @@ Override path via `SMA_CONFIG` environment variable.
 
 ---
 
-## [HDR]
+## base.hdr
 
 Override video settings for HDR content (detected automatically).
 
@@ -86,7 +133,7 @@ Override video settings for HDR content (detected automatically).
 
 ---
 
-## [Analyzer]
+## base.analyzer
 
 Optional per-job planning layer for analyzer-assisted transcoding decisions.
 
@@ -124,19 +171,20 @@ Current backend status:
 Example:
 
 ```yaml
-Analyzer:
-  enabled: true
-  backend: openvino
-  device: AUTO:NPU,CPU
-  model-dir: ""
-  cache-dir: /var/cache/sma-openvino
-  max-frames: 12
-  target-width: 960
-  allow-codec-reorder: true
-  allow-bitrate-adjustments: true
-  allow-preset-adjustments: true
-  allow-filter-adjustments: true
-  allow-force-reencode: true
+base:
+  analyzer:
+    enabled: true
+    backend: openvino
+    device: AUTO:NPU,CPU
+    model-dir: ""
+    cache-dir: /var/cache/sma-openvino
+    max-frames: 12
+    target-width: 960
+    allow-codec-reorder: true
+    allow-bitrate-adjustments: true
+    allow-preset-adjustments: true
+    allow-filter-adjustments: true
+    allow-force-reencode: true
 ```
 
 ### OpenVINO notes
@@ -147,7 +195,7 @@ Analyzer:
 
 ---
 
-## [Audio]
+## base.audio
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -171,7 +219,7 @@ Analyzer:
 | `force-default` | bool | `false` | Override source default stream |
 | `relax-to-default` | bool | `false` | If preferred language absent, default to any |
 
-### [Audio.Sorting]
+### base.audio.sorting
 
 | Option | Type | Description |
 | --- | --- | --- |
@@ -179,7 +227,7 @@ Analyzer:
 | `default-sorting` | list | Sort order for default stream selection |
 | `codecs` | list | Codec priority for sorting |
 
-### [Universal Audio]
+### base.audio.universal
 
 Generates an additional stereo AAC stream for device compatibility.
 
@@ -191,7 +239,7 @@ Generates an additional stereo AAC stream for device compatibility.
 
 ---
 
-## [Subtitle]
+## base.subtitle
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -209,7 +257,7 @@ Generates an additional stereo AAC stream for device compatibility.
 | `remove-bitstream-subs` | list | `true` | Remove bitstream subtitle formats |
 | `include-original-language` | bool | `false` | Include original language subs |
 
-### [Subtitle.CleanIt]
+### base.subtitle.cleanit
 
 | Option | Type | Description |
 | --- | --- | --- |
@@ -217,13 +265,13 @@ Generates an additional stereo AAC stream for device compatibility.
 | `config-path` | path | Custom cleanit config |
 | `tags` | list | Cleanit tag sets: `default, no-style` |
 
-### [Subtitle.FFSubsync]
+### base.subtitle.ffsubsync
 
 | Option | Type | Description |
 | --- | --- | --- |
 | `enabled` | bool | Enable subtitle sync via ffsubsync |
 
-### [Subtitle.Subliminal]
+### base.subtitle.subliminal
 
 | Option | Type | Description |
 | --- | --- | --- |
@@ -234,7 +282,7 @@ Generates an additional stereo AAC stream for device compatibility.
 
 ---
 
-## [Metadata]
+## base.metadata
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -248,7 +296,7 @@ Generates an additional stereo AAC stream for device compatibility.
 
 ---
 
-## [Permissions]
+## base.permissions
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -258,74 +306,130 @@ Generates an additional stereo AAC stream for device compatibility.
 
 ---
 
-## [Sonarr] / [Radarr] / Multi-Instance
+## profiles
 
-Multiple instances are supported. Any section whose name starts with `Sonarr` or `Radarr` is loaded automatically, for example `[Sonarr-Kids]` or `[Radarr-4K]`.
+Named overlays applied per-section on top of `base`. Sections the
+profile does not mention pass through unchanged. Profiles are applied
+either via `manual.py --profile <name>` or auto-resolved from a
+`daemon.routing[].profile` field for a given input path.
 
-In the sample config, the `*arr` sections are grouped together, followed by the download client sections. Keep extra `Sonarr*` / `Radarr*` sections alongside the primary ones so the layout stays predictable.
+```yaml
+profiles:
+  rq:
+    video:
+      codec: [h265]
+      max-bitrate: 8000
+    audio:
+      codec: [ac3, aac]
+  lq:
+    video:
+      codec: [h264]
+      max-bitrate: 3000
+      preset: fast
+    audio:
+      codec: [aac]
+      max-channels: 2
+```
+
+Overlay semantics are shallow per top-level section: the overlay's
+`video:` block replaces only the keys it sets (others come from
+`base.video`); the overlay's `audio:` block similarly replaces only its
+own keys. Sections the profile omits inherit from `base` untouched.
+
+---
+
+## services.sonarr / services.radarr
+
+Each service type is a map keyed by instance name. The instance name is
+referenced from `daemon.routing[].services` as `<type>.<instance>` —
+e.g. `sonarr.kids`, `radarr.4k`. The path-prefix derivation that drove
+multi-instance matching in the old INI shape is now expressed
+explicitly in routing rules.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `host` | string | `localhost` | API hostname |
-| `port` | int | `8989`/`7878` | API port |
+| `url` | string | required | Full base URL including scheme and port (e.g. `http://sonarr.local:8989`) |
 | `apikey` | string | | API key |
-| `ssl` | bool | `false` | Use HTTPS |
-| `webroot` | string | | URL base path |
-| `path` | string | | Media root path for instance matching |
 | `force-rename` | bool | `false` | After import, trigger Sonarr/Radarr's own RenameFiles command. When enabled, SMA's naming templates are skipped and the arr instance applies its configured naming format instead. Requires `rescan = true`. |
 | `rescan` | bool | `true` | Trigger library rescan after processing |
 | `block-reprocess` | bool | `false` | Prevent reprocessing same-extension files |
 | `in-progress-check` | bool | `true` | Wait for in-progress scans before rescanning |
 
-Instances are matched by `path` using longest-prefix matching.
-
-```ini
-[Sonarr]
-path = /mnt/media/TV
-host = sonarr.example.com
-apikey = abc123
-
-[Sonarr-Kids]
-path = /mnt/media/TV-Kids
-host = sonarr-kids.example.com
-apikey = def456
-
-[Radarr]
-path = /mnt/media/Movies
-host = radarr.example.com
-apikey = ghi789
-
-[Radarr-4K]
-path = /mnt/media/Movies/4K
-host = radarr-4k.example.com
-apikey = jkl012
+```yaml
+services:
+  sonarr:
+    main:
+      url: http://sonarr.example.com:8989
+      apikey: abc123
+    kids:
+      url: http://sonarr-kids.example.com:8989
+      apikey: def456
+  radarr:
+    main:
+      url: http://radarr.example.com:7878
+      apikey: ghi789
+    4k:
+      url: http://radarr-4k.example.com:7878
+      apikey: jkl012
 ```
 
-Important notes:
+Hook each instance into routing:
 
-- `path` should be set for every additional `Sonarr*` or `Radarr*` instance so longest-prefix matching can pick the right manager.
-- The base sections `[Sonarr]` and `[Radarr]` are not special beyond their names; they are just the default first instances.
-- Download client sections such as `[SABNZBD]`, `[Deluge]`, `[qBittorrent]`, and `[uTorrent]` are separate and should stay grouped after the `*arr` sections.
+```yaml
+daemon:
+  routing:
+    - match: /mnt/media/TV
+      services: [sonarr.main]
+    - match: /mnt/media/TV-Kids
+      services: [sonarr.kids]
+    - match: /mnt/media/Movies
+      services: [radarr.main]
+    - match: /mnt/media/Movies/4K
+      services: [radarr.4k]
+```
+
+A service instance not referenced from any routing rule is still loaded
+and addressable from CLI tools, but no automatic notify happens for it
+(routing is the trigger).
+
+Validation: every `<type>.<instance>` reference in routing must resolve
+to an existing entry in `services.<type>.<instance>`. A typo
+(`sonarr.kid` vs `sonarr.kids`) fails fast at startup.
 
 ---
 
-## [Plex]
+## services.plex
+
+Plex instances follow the same map-by-name shape. The first instance
+named `main` (or otherwise the first defined) is what the conversion
+pipeline notifies.
 
 | Option | Type | Description |
 | --- | --- | --- |
-| `host` | string | Plex server hostname |
-| `port` | int | Plex server port (default 32400) |
-| `refresh` | bool | Trigger library refresh after processing |
+| `url` | string | Full base URL including scheme and port (e.g. `http://plex.local:32400`) |
 | `token` | string | Plex authentication token |
-| `ssl` | bool | Use HTTPS |
+| `refresh` | bool | Trigger library refresh after processing |
 | `ignore-certs` | bool | Skip SSL certificate verification |
-| `path-mapping` | dict | Map SMA-NG paths to Plex library paths (`=` delimited) |
+| `path-mapping` | string | Map SMA-NG paths to Plex library paths (`local=remote`, comma-separated) |
+| `plexmatch` | bool | Write `.plexmatch` files for matched media |
+
+```yaml
+services:
+  plex:
+    main:
+      url: http://plex.example.com:32400
+      token: xxxxxxxxxxxxxxxxxxxx
+      refresh: true
+```
 
 ---
 
-## [SABNZBD] / [Deluge] / [qBittorrent] / [uTorrent]
+## Downloader integrations
 
-Download client integration settings. Each has category/label mappings for routing downloads to the correct media manager. See [Integrations](integrations.md) for setup instructions.
+Downloader integration (SABnzbd / Deluge / qBittorrent / uTorrent) is
+shell-trigger-only and configured under `triggers/`. There is no
+corresponding Python config block in `sma-ng.yml`. See
+[Integrations](integrations.md) for the trigger setup.
 
 ---
 
