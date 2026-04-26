@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.64](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.63...sma-ng-v1.6.64) (2026-04-26)
+
+
+### Bug Fixes
+
+* **ci:** exclude auto-generated CHANGELOG.md from markdownlint ([d70de92](https://github.com/newdave/sma-ng/commit/d70de92f2bb0b78cac97e66c9a29de09a0515dfd))
+
 ## [1.6.63](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.62...sma-ng-v1.6.63) (2026-04-26)
 
 
