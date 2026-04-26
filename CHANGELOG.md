@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.77](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.76...sma-ng-v1.6.77) (2026-04-26)
+
+
+### Bug Fixes
+
+* **deploy:** stamp SMA_NODE_NAME into daemon.env during deploy:docker ([9641bac](https://github.com/newdave/sma-ng/commit/9641bac42d9b2ddeec0a8038c6d015e3dc97b8e7))
+
 ## [1.6.76](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.75...sma-ng-v1.6.76) (2026-04-26)
 
 
