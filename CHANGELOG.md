@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.68](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.67...sma-ng-v1.6.68) (2026-04-26)
+
+
+### Bug Fixes
+
+* **webhook:** drop setup/local.yml from api-key fallback chain ([1530fc4](https://github.com/newdave/sma-ng/commit/1530fc4cf594353c22784ddae8fcb91f0321938e))
+
 ## [1.6.67](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.66...sma-ng-v1.6.67) (2026-04-26)
 
 
