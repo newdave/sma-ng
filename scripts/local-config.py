@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """scripts/local-config.py <file> <section> <key> [default]
 
-Read a key from setup/.local.yml.
+Read a key from setup/local.yml.
 
 Sections resolve as:
 

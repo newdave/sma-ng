@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Roll config to remote hosts: create missing config/sma-ng.yml, merge in new sample keys, and stamp daemon/service credentials from .local.yml"
+#MISE description="Roll config to remote hosts: create missing config/sma-ng.yml, merge in new sample keys, and stamp daemon/service credentials from local.yml"
 #MISE aliases=["deploy:config:roll"]
 #MISE depends=["deploy:mise"]
 set -euo pipefail

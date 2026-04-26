@@ -1,15 +1,41 @@
-# setup/.local.yml.sample — per-machine deployment configuration template
+# setup/local.yml.sample — per-machine deployment configuration template
 #
-# Copy this file to setup/.local.yml and customise it.
-# setup/.local.yml is gitignored and never committed.
+# Copy this file to setup/local.yml and customise it.
+# setup/local.yml is gitignored and never committed.
 #
-# Resolution order for each key:
+# Top-level sections and how `mise run config:roll` consumes each:
+#
+#   deploy   — project-wide defaults shared by every host. Resolved by
+#              scripts/local-config.py for any host-context lookup,
+#              with hosts.<name>.<key> overriding the deploy default.
+#   hosts    — per-host overrides for deploy keys. address: and user:
+#              are required for SSH; everything else is optional.
+#   daemon   — credentials and tunables stamped into config/sma-ng.yml's
+#              `daemon:` block (kebab-cased) and config/daemon.env on
+#              every roll. The deploy pipeline rebuilds `daemon.routing`
+#              from `services:` automatically — manual routing entries
+#              in this file are ignored.
+#   base     — deep-merged into config/sma-ng.yml's `base:` block on
+#              every roll. Use to lock encoder defaults (gpu, codec, crf
+#              profiles, bitrate ratios, audio choices…) without editing
+#              sma-ng.yml on each host. Dicts recurse; lists and scalars
+#              overwrite; untouched keys inherit from sma-ng.yml.sample.
+#   profiles — deep-merged into config/sma-ng.yml's `profiles:` block on
+#              every roll, same merge semantics as base. Each profile is
+#              shallow-overlaid on base at runtime when a file matches a
+#              routing rule. Note: sma-ng.yml's bundled profile defaults
+#              also overlay base, so explicitly set the fields you want
+#              this overlay to dictate (codec, max-bitrate, crf-profiles
+#              etc.) — anything you omit will fall back to the sample's
+#              profile, not to base.
+#   services — Sonarr/Radarr/Plex/Jellyfin/Emby instances. Stamped into
+#              config/sma-ng.yml's services.<type>.<instance>, and every
+#              instance carrying both `path` and `profile` is auto-
+#              converted into a `daemon.routing` rule (longest match
+#              first).
+#
+# Resolution order for any host-scoped key:
 #   hosts.<name>.<key>  >  deploy.<key>  >  built-in default
-#
-# deploy.hosts is a list of logical host labels.
-# Each label must have a matching entry under the top-level hosts: section
-# that provides at minimum an address: (IP or hostname) and user: (SSH user).
-# Any key from deploy: can be overridden per-host in that entry.
 
 # ── deploy — project-wide defaults and host list ─────────────────────────────
 

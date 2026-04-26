@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """scripts/local-section-json.py <local-yml> <section>
 
-Emit a top-level section of setup/.local.yml as JSON, suitable for
+Emit a top-level section of setup/local.yml as JSON, suitable for
 base64-encoding and passing to remote stamping helpers.
 
 Returns ``{}`` for a missing file or section.

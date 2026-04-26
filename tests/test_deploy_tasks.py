@@ -37,7 +37,7 @@ class TestDeployDockerUpgradeTask:
     assert "SSH_OPTS" not in text
 
   def test_init_helpers_return_success_for_normal_host_context(self, tmp_path):
-    local_yml = tmp_path / ".local.yml"
+    local_yml = tmp_path / "local.yml"
     local_yml.write_text(
       textwrap.dedent(
         """
@@ -545,7 +545,7 @@ FIXTURE_LOCAL_YML = (
 
 @pytest.fixture()
 def fixture_local_yml(tmp_path):
-  p = tmp_path / ".local.yml"
+  p = tmp_path / "local.yml"
   p.write_text(FIXTURE_LOCAL_YML)
   return p
 
