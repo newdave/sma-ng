@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.60](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.59...sma-ng-v1.6.60) (2026-04-26)
+
+
+### Bug Fixes
+
+* **deploy:** chown transferred files to the SSH user when use_sudo=true ([04deaaf](https://github.com/newdave/sma-ng/commit/04deaaf332e26cead775123ed5a8deafe3a0154d))
+
 ## [1.6.59](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.58...sma-ng-v1.6.59) (2026-04-26)
 
 
