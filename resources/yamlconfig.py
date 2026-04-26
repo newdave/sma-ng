@@ -85,12 +85,36 @@ def _load_with_dedup(path: str):
   return yaml.load(buf.getvalue())
 
 
+def _to_plain(obj):
+  """Recursively convert ruamel CommentedMap/CommentedSeq to plain dict/list.
+
+  ruamel's round-trip loader returns CommentedMap/CommentedSeq subclasses
+  that carry comment metadata. They behave like dict/list for reads but
+  PyYAML's safe_dump (used by db.set_cluster_config and several other
+  serialization sites) cannot represent them and raises RepresenterError.
+  Public callers of ``load`` expect plain Python data structures, so we
+  fully unwrap before returning.
+  """
+  if isinstance(obj, dict):
+    return {k: _to_plain(v) for k, v in obj.items()}
+  if isinstance(obj, list):
+    return [_to_plain(v) for v in obj]
+  return obj
+
+
 def load(path: str) -> dict:
   try:
     data = _load_with_dedup(path)
-    return dict(data) if data else {}
   except OSError:
     return {}
+  if not data:
+    return {}
+  # ``dict(data)`` raises TypeError when ``data`` is not a mapping, which is
+  # how config_loader detects "list/scalar at top level"; preserve that
+  # behaviour while also unwrapping ruamel CommentedMap/CommentedSeq into
+  # plain types so downstream serializers (yaml.safe_dump in
+  # db.set_cluster_config, json.dumps in /admin/config) don't choke.
+  return dict(_to_plain(data))
 
 
 def write(path: str, data: dict) -> None:
