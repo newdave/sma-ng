@@ -6192,3 +6192,52 @@ class TestWarnUnsupportedEncoders:
     stream_options = [{}]  # no 'codec' key
     mp._warn_unsupported_encoders(codecs, stream_options)
     mp.log.warning.assert_not_called()
+
+
+class TestPostMethod:
+  """mp.post() runs Plex refresh independently of the post-process scripts gate.
+
+  Regression: prior to this fix, manual.py wrapped mp.post() in
+  `if mp.settings.postprocess`, so disabling post-process scripts (the
+  default) silently disabled the Plex refresh as well.
+  """
+
+  def _make_mp(self, postprocess=False, plex_refresh=True):
+    from resources.mediaprocessor import MediaProcessor
+
+    settings = MagicMock()
+    settings.postprocess = postprocess
+    settings.waitpostprocess = False
+    settings.Plex = {"refresh": plex_refresh, "host": "plex.local", "token": "tok"}
+
+    mp = MediaProcessor.__new__(MediaProcessor)
+    mp.settings = settings
+    mp.log = MagicMock()
+    return mp
+
+  @patch("resources.mediaprocessor.plex.refreshPlex")
+  @patch("resources.mediaprocessor.PostProcessor")
+  def test_plex_refresh_fires_when_postprocess_disabled(self, mock_pp, mock_refresh):
+    mp = self._make_mp(postprocess=False, plex_refresh=True)
+    mp.post(["/out/file.mkv"], "movie")
+    mock_pp.assert_not_called()
+    mock_refresh.assert_called_once()
+
+  @patch("resources.mediaprocessor.plex.refreshPlex")
+  @patch("resources.mediaprocessor.PostProcessor")
+  def test_postprocess_runs_when_plex_disabled(self, mock_pp, mock_refresh):
+    mp = self._make_mp(postprocess=True, plex_refresh=False)
+    mock_instance = MagicMock()
+    mock_pp.return_value = mock_instance
+    mp.post(["/out/file.mkv"], "movie")
+    mock_pp.assert_called_once()
+    mock_instance.run_scripts.assert_called_once()
+    mock_refresh.assert_not_called()
+
+  @patch("resources.mediaprocessor.plex.refreshPlex")
+  @patch("resources.mediaprocessor.PostProcessor")
+  def test_plex_refresh_swallows_exceptions(self, mock_pp, mock_refresh):
+    mp = self._make_mp(postprocess=False, plex_refresh=True)
+    mock_refresh.side_effect = RuntimeError("plex offline")
+    mp.post(["/out/file.mkv"], "movie")
+    mp.log.exception.assert_called()
