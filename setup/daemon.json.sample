@@ -1,4 +1,0 @@
-{
-  "_deprecated": "daemon.json is deprecated. Move these settings to the Daemon section in sma-ng.yml.",
-  "_replacement": "/config/sma-ng.yml"
-}
