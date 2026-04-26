@@ -138,3 +138,17 @@ daemon:
 #     main:
 #       url: ""
 #       apikey: ""
+
+# ── base overrides ───────────────────────────────────────────────────────────
+# Deep-merged into config/sma-ng.yml `base:` on every `mise run config:roll`.
+# Use this to lock per-deployment defaults — for example, force every host
+# to use Intel QSV and encode HEVC by default:
+#
+# base:
+#   video:
+#     gpu: qsv
+#     codec:
+#       - hevc
+#
+# The merge is recursive for dicts; lists and scalars overwrite. Anything
+# you do not list here is inherited from setup/sma-ng.yml.sample.
