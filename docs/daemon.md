@@ -587,23 +587,19 @@ node count, so any deployment can opt in by simply pointing additional daemons a
 
 ### Node Identity
 
-Every node auto-generates a UUID on first start and persists it in `sma-ng.yml` under `daemon.node_id`.
-The UUID is used as the node's identity in the shared PostgreSQL `cluster_nodes` table, preventing
-job-claiming collisions that can occur with hostname-based identity.
+The daemon resolves its identity in this priority order on every startup:
 
-Override the auto-generated UUID in two ways:
-
-- Set `SMA_NODE_NAME` environment variable — takes precedence over `sma-ng.yml`.
-- Set `node_id` explicitly in the `daemon:` section of `sma-ng.yml`.
+1. `SMA_NODE_NAME` env var — the canonical deploy-time identity. `mise run config:roll` stamps each host's name into its `config/daemon.env` (e.g. `SMA_NODE_NAME=sma-node1`), so this is the recommended path for any managed deployment. Stable across container recreates and meaningful in dashboards/logs.
+2. `daemon.node_id` already persisted in `sma-ng.yml` — used when no env var is set. Preserves any UUID an earlier daemon generated so existing approved rows in `cluster_nodes` stay attached to this node.
+3. A fresh UUID, generated on the spot and persisted to `sma-ng.yml`. Only reached when neither (1) nor (2) is set. If the persist fails (read-only config dir, wrong uid), the daemon logs a warning and keeps the in-memory UUID for that run; the next restart will generate a new one. Set `SMA_NODE_NAME` to side-step UUID generation entirely.
 
 ```yaml
 daemon:
-  # Auto-generated on first start. Override for a human-readable cluster identity.
+  # Optional: pin a human-readable identity. SMA_NODE_NAME wins over this.
   node_id: media-server-prod-1
 ```
 
-Once a UUID is written to `sma-ng.yml`, it is never regenerated. Delete or null the field only
-if you intentionally want a new identity assigned.
+Whichever value is resolved is also used as the in-container hostname when running under the bundled `docker/docker-compose.yml`, since each `sma-*` profile sets `hostname: ${SMA_NODE_NAME:-sma-ng-<profile>}` so `socket.gethostname()` matches the cluster identity.
 
 ### Shared Work Queue
 
