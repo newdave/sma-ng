@@ -2,13 +2,11 @@
 
 ## [1.6.50](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.49...sma-ng-v1.6.50) (2026-04-26)
 
-
 ### Features
 
 * **config:** add ConfigLoader with longest-prefix routing engine ([83aa49c](https://github.com/newdave/sma-ng/commit/83aa49c4d6d1d69f3cd71b68229c8a1a20f9f5f1))
 
 ## [1.6.49](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.48...sma-ng-v1.6.49) (2026-04-26)
-
 
 ### Features
 
@@ -18,13 +16,11 @@
 
 ## [1.6.48](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.47...sma-ng-v1.6.48) (2026-04-25)
 
-
 ### Features
 
 * **ui:** add light/dark theme toggle to web UI ([9b2ea54](https://github.com/newdave/sma-ng/commit/9b2ea546d11ee58705affbf20ed3558570addd51))
 
 ## [1.6.47](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.46...sma-ng-v1.6.47) (2026-04-25)
-
 
 ### Features
 
@@ -32,13 +28,11 @@
 
 ## [1.6.46](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.45...sma-ng-v1.6.46) (2026-04-25)
 
-
 ### Documentation
 
 * correct .local.yml.sample host labels and mark address/user as required ([1678c6f](https://github.com/newdave/sma-ng/commit/1678c6feeded56526edd3f67c5eb0bb4b97bc193))
 
 ## [1.6.45](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.44...sma-ng-v1.6.45) (2026-04-25)
-
 
 ### Bug Fixes
 
@@ -46,25 +40,21 @@
 
 ## [1.6.44](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.43...sma-ng-v1.6.44) (2026-04-25)
 
-
 ### Bug Fixes
 
 * **deploy:** use hosts key in deploy:check to match named-host .local.yml schema ([d47700b](https://github.com/newdave/sma-ng/commit/d47700b00486778019e3788e83a58471fd2b532e))
 
 ## [1.6.43](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.42...sma-ng-v1.6.43) (2026-04-25)
 
-
 ### Bug Fixes
 
 * **deploy:** add lc() helper to lib.sh and fix broken \"\$CFG\" quoting across all mise tasks ([037ec68](https://github.com/newdave/sma-ng/commit/037ec6880ec383785887b0dcc9007748a8e6e63a))
-
 
 ### Documentation
 
 * sync .local.yml.sample with named-host schema ([bbe2bcf](https://github.com/newdave/sma-ng/commit/bbe2bcfe8335a5c8e111f7be754a5aa4ded6e82b))
 
 ## [1.6.42](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.41...sma-ng-v1.6.42) (2026-04-25)
-
 
 ### Features
 
@@ -77,13 +67,11 @@
 
 ## [1.6.41](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.40...sma-ng-v1.6.41) (2026-04-25)
 
-
 ### Bug Fixes
 
 * remove .mp4 from sma-ng.yml.sample default media_extensions ([8b153ba](https://github.com/newdave/sma-ng/commit/8b153ba7aacefe32ee99a9d25f081cb8c3684e56))
 
 ## [1.6.40](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.39...sma-ng-v1.6.40) (2026-04-25)
-
 
 ### Documentation
 
@@ -92,13 +80,11 @@
 
 ## [1.6.39](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.38...sma-ng-v1.6.39) (2026-04-25)
 
-
 ### Features
 
 * **admin-ui:** add drain/pause/resume buttons and cluster log viewer ([6623898](https://github.com/newdave/sma-ng/commit/662389889f8916fd1cd299bef1ef07d2d23472e7))
 
 ## [1.6.38](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.37...sma-ng-v1.6.38) (2026-04-25)
-
 
 ### Features
 
@@ -106,13 +92,11 @@
 
 ## [1.6.37](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.36...sma-ng-v1.6.37) (2026-04-25)
 
-
 ### Features
 
 * extend HeartbeatThread for cluster command polling and metrics (T-005) ([b9b95f6](https://github.com/newdave/sma-ng/commit/b9b95f63146fb3907d05df0fd5b16cc2b178a534))
 
 ## [1.6.36](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.35...sma-ng-v1.6.36) (2026-04-25)
-
 
 ### Features
 
@@ -121,13 +105,11 @@
 
 ## [1.6.35](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.34...sma-ng-v1.6.35) (2026-04-25)
 
-
 ### Features
 
 * add WorkerPool drain/pause modes and hwaccel detection for cluster mode ([3f3088e](https://github.com/newdave/sma-ng/commit/3f3088e9de6d8bcf2153117ebc2a0541b6aa3962))
 
 ## [1.6.34](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.33...sma-ng-v1.6.34) (2026-04-25)
-
 
 ### Features
 
@@ -137,14 +119,12 @@
 
 ## [1.6.33](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.32...sma-ng-v1.6.33) (2026-04-25)
 
-
 ### Features
 
 * add prepare_models.py to export EfficientNet-B0 to OpenVINO IR ([9b04f1c](https://github.com/newdave/sma-ng/commit/9b04f1cc569cc0dcda88631a3e56e2cda3e3d1e5))
 * implement OpenVINO analyzer with frame extraction and heuristic signals ([98019a5](https://github.com/newdave/sma-ng/commit/98019a55bc4edbdaad1cf687b4067f09ca0f1703))
 
 ## [1.6.32](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.31...sma-ng-v1.6.32) (2026-04-24)
-
 
 ### Features
 
@@ -155,13 +135,11 @@
 * update Docker for YAML config ([679d1cc](https://github.com/newdave/sma-ng/commit/679d1cc7072f7a16680a76ef4062e5b87d319f05))
 * update update.py to support YAML config format ([26cadb3](https://github.com/newdave/sma-ng/commit/26cadb3885712499bc8856014e55f6fbe3830f74))
 
-
 ### Documentation
 
 * update all documentation for YAML config migration ([d948c84](https://github.com/newdave/sma-ng/commit/d948c84ccd93e9dc2779d289fd93e12a5d8f69ab))
 
 ## [1.6.31](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.30...sma-ng-v1.6.31) (2026-04-24)
-
 
 ### Features
 
@@ -169,13 +147,11 @@
 
 ## [1.6.30](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.29...sma-ng-v1.6.30) (2026-04-24)
 
-
 ### Bug Fixes
 
 * preserve Sonarr/Radarr sections when ini_merge --deprecate is run ([50ad738](https://github.com/newdave/sma-ng/commit/50ad7381502d33a1609f84a5fd182571b5f4c953))
 
 ## [1.6.29](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.28...sma-ng-v1.6.29) (2026-04-24)
-
 
 ### Bug Fixes
 
@@ -183,13 +159,11 @@
 
 ## [1.6.28](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.27...sma-ng-v1.6.28) (2026-04-24)
 
-
 ### Features
 
 * add admin node approval and management controls ([b2b640d](https://github.com/newdave/sma-ng/commit/b2b640da1fad78d8fd76c8db6e5b4a2e88e99e3a))
 
 ## [1.6.27](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.26...sma-ng-v1.6.27) (2026-04-24)
-
 
 ### Bug Fixes
 
@@ -197,12 +171,10 @@
 
 ## [1.6.26](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.25...sma-ng-v1.6.26) (2026-04-23)
 
-
 ### Features
 
 * add cluster lifecycle tasks (start/stop/restart/status) ([d51d9a3](https://github.com/newdave/sma-ng/commit/d51d9a3d78f9dea453625a5275e5037e0e37bccd))
 * clean up cluster node on graceful shutdown ([b090079](https://github.com/newdave/sma-ng/commit/b0900797c0d8e6d1cb55d98aedcc977c3293b084))
-
 
 ### Documentation
 
@@ -210,13 +182,11 @@
 
 ## [1.6.25](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.24...sma-ng-v1.6.25) (2026-04-23)
 
-
 ### Bug Fixes
 
 * support shared and suffixed arr config sections ([93018a9](https://github.com/newdave/sma-ng/commit/93018a9e757ee49f7528afcb7fe51749463aca31))
 
 ## [1.6.24](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.23...sma-ng-v1.6.24) (2026-04-23)
-
 
 ### Bug Fixes
 
@@ -224,20 +194,17 @@
 
 ## [1.6.23](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.22...sma-ng-v1.6.23) (2026-04-23)
 
-
 ### Bug Fixes
 
 * restore custom hook and deploy task tests ([bf795e1](https://github.com/newdave/sma-ng/commit/bf795e17f763a3b725e708b59821b6914098c4ea))
 
 ## [1.6.22](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.21...sma-ng-v1.6.22) (2026-04-23)
 
-
 ### Bug Fixes
 
 * vendor repo ini_merge implementation ([3ab9fbe](https://github.com/newdave/sma-ng/commit/3ab9fbeac63c4823c118ae75b60d209d3ac04389))
 
 ## [1.6.21](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.20...sma-ng-v1.6.21) (2026-04-23)
-
 
 ### Bug Fixes
 
@@ -246,13 +213,11 @@
 
 ## [1.6.20](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.19...sma-ng-v1.6.20) (2026-04-23)
 
-
 ### Features
 
 * **tasks:** add build:dist task and xml coverage output to test:cov ([f7bd788](https://github.com/newdave/sma-ng/commit/f7bd7881955290d893dc4d52dd3dd5c9627df0fa))
 
 ## [1.6.19](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.18...sma-ng-v1.6.19) (2026-04-23)
-
 
 ### Bug Fixes
 
@@ -260,11 +225,9 @@
 
 ## [1.6.18](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.17...sma-ng-v1.6.18) (2026-04-23)
 
-
 ### Features
 
 * add bitrate, stream action annotations, forced flag, and filename to output data; update dashboard ([a2d6926](https://github.com/newdave/sma-ng/commit/a2d69266b376486d29bb06bb303cf5ba6ca43a3b))
-
 
 ### Documentation
 
@@ -272,11 +235,9 @@
 
 ## [1.6.17](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.16...sma-ng-v1.6.17) (2026-04-23)
 
-
 ### Features
 
 * switch docs web UI renderer to mistune with mermaid diagram support ([b08899f](https://github.com/newdave/sma-ng/commit/b08899f6f9b6a2f20c8a06cc0eee09a560753dc4))
-
 
 ### Documentation
 
@@ -284,13 +245,11 @@
 
 ## [1.6.16](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.15...sma-ng-v1.6.16) (2026-04-23)
 
-
 ### Documentation
 
 * add migration guide from sickbeard_mp4_automator ([f2340fc](https://github.com/newdave/sma-ng/commit/f2340fc5545af9528e09bf30eda5a0398d03eb69))
 
 ## [1.6.15](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.14...sma-ng-v1.6.15) (2026-04-23)
-
 
 ### Bug Fixes
 
@@ -298,17 +257,14 @@
 
 ## [1.6.14](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.13...sma-ng-v1.6.14) (2026-04-23)
 
-
 ### Features
 
 * add deploy:config-audit task and ini_audit helper ([f6ff54f](https://github.com/newdave/sma-ng/commit/f6ff54f1300179440cf8f5580c2bd877be994af5))
-
 
 ### Bug Fixes
 
 * normalize wildcard cluster hostnames in /status response; add directory webhook test ([d55399f](https://github.com/newdave/sma-ng/commit/d55399fdc2cf22d880812073562076b686f4592b))
 * restore corrupted deploy task files and add ShellCheck suppressions ([70b03e9](https://github.com/newdave/sma-ng/commit/70b03e9a6265d26effa28cb070b244a94ca2a260))
-
 
 ### Documentation
 
@@ -316,13 +272,11 @@
 
 ## [1.6.13](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.12...sma-ng-v1.6.13) (2026-04-22)
 
-
 ### Bug Fixes
 
 * derive docker cluster hostnames from host ([4689e33](https://github.com/newdave/sma-ng/commit/4689e333d8a4ca178ea9b71bc3c9d1a5c313d4ce))
 
 ## [1.6.12](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.11...sma-ng-v1.6.12) (2026-04-22)
-
 
 ### Bug Fixes
 
@@ -330,25 +284,21 @@
 
 ## [1.6.11](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.10...sma-ng-v1.6.11) (2026-04-22)
 
-
 ### Bug Fixes
 
 * use shared ssh helper in deploy docker-upgrade health check ([f69d6f3](https://github.com/newdave/sma-ng/commit/f69d6f3fe24f5404b8ed2d6e01e8486b54272041))
 
 ## [1.6.10](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.9...sma-ng-v1.6.10) (2026-04-22)
 
-
 ### Features
 
 * add docker deploy tasks for bundled postgres management ([32d80f6](https://github.com/newdave/sma-ng/commit/32d80f6b0398772711924d7e4248879792757847))
-
 
 ### Bug Fixes
 
 * docker stuff ([286252e](https://github.com/newdave/sma-ng/commit/286252e2504e904db92d6c73839b09e78120ca48))
 
 ## [1.6.9](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.8...sma-ng-v1.6.9) (2026-04-22)
-
 
 ### Features
 
@@ -357,19 +307,16 @@
 
 ## [1.6.8](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.7...sma-ng-v1.6.8) (2026-04-22)
 
-
 ### Bug Fixes
 
 * refresh docker runtime configuration ([10f4669](https://github.com/newdave/sma-ng/commit/10f466997b99c22cacc6a6a0231c57a6cee22b47))
 
 ## [1.6.7](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.6...sma-ng-v1.6.7) (2026-04-22)
 
-
 ### Bug Fixes
 
 * honor rewritten paths for config routing ([88de91b](https://github.com/newdave/sma-ng/commit/88de91b4247d9cb956a391cfface7971246fa050))
 * improve daemon status handling under load ([70c92e5](https://github.com/newdave/sma-ng/commit/70c92e586b9d23d21a988dcffacb7af6792eac3f))
-
 
 ### Documentation
 
@@ -377,11 +324,9 @@
 
 ## [1.6.6](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.5...sma-ng-v1.6.6) (2026-04-22)
 
-
 ### Bug Fixes
 
 * expose full DRI topology for Intel SR-IOV guests ([3755897](https://github.com/newdave/sma-ng/commit/3755897fb348620b19770a1cea61e862790e5c1b))
-
 
 ### Documentation
 
@@ -389,11 +334,9 @@
 
 ## [1.6.5](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.4...sma-ng-v1.6.5) (2026-04-22)
 
-
 ### Bug Fixes
 
 * align docker compose env handling ([1f0167a](https://github.com/newdave/sma-ng/commit/1f0167a253447bd471df756bbb63dbd541b9c9e2))
-
 
 ### Documentation
 
@@ -402,7 +345,6 @@
 
 ## [1.6.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.3...sma-ng-v1.6.4) (2026-04-22)
 
-
 ### Bug Fixes
 
 * defer path rewrites to job-creation time in handler ([f681f03](https://github.com/newdave/sma-ng/commit/f681f031d4d81dc2c3f995549c86375ee3353639))
@@ -410,13 +352,11 @@
 
 ## [1.6.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.2...sma-ng-v1.6.3) (2026-04-22)
 
-
 ### Bug Fixes
 
 * wire sma-pgsql internal hostname for -pg compose profiles ([d32e845](https://github.com/newdave/sma-ng/commit/d32e845c3b36460bf5150f7dfdeaafeb9249df30))
 
 ## [1.6.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.1...sma-ng-v1.6.2) (2026-04-22)
-
 
 ### Bug Fixes
 
@@ -424,13 +364,11 @@
 
 ## [1.6.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.0...sma-ng-v1.6.1) (2026-04-22)
 
-
 ### Bug Fixes
 
 * _append_env returns 0 when value is empty under set -e ([c8bcac4](https://github.com/newdave/sma-ng/commit/c8bcac4550047dbfe126718f5fbf2f7f2d76345b))
 
 ## [1.6.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.5.2...sma-ng-v1.6.0) (2026-04-22)
-
 
 ### Features
 
@@ -438,13 +376,11 @@
 
 ## [1.5.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.5.1...sma-ng-v1.5.2) (2026-04-22)
 
-
 ### Bug Fixes
 
 * stop overriding SMA_DAEMON_DB_URL in *-pg compose services and docker-upgrade ([97b353c](https://github.com/newdave/sma-ng/commit/97b353c11b041bad6edb6e6a3028eee7d74564bb))
 
 ## [1.5.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.5.0...sma-ng-v1.5.1) (2026-04-22)
-
 
 ### Bug Fixes
 
@@ -452,13 +388,11 @@
 
 ## [1.5.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.3...sma-ng-v1.5.0) (2026-04-22)
 
-
 ### Features
 
 * add deploy:ghcr-login mise task for GHCR image access ([e2671cb](https://github.com/newdave/sma-ng/commit/e2671cb9608041e5e44e54412b0d6018d793bb33))
 
 ## [1.4.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.2...sma-ng-v1.4.3) (2026-04-22)
-
 
 ### Bug Fixes
 
@@ -466,13 +400,11 @@
 
 ## [1.4.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.1...sma-ng-v1.4.2) (2026-04-22)
 
-
 ### Bug Fixes
 
 * remove :? validation from non-pg SMA_DAEMON_DB_URL in docker-compose.yml ([4c0867c](https://github.com/newdave/sma-ng/commit/4c0867c351c0bd554cb74194f75e5211e49e0152))
 
 ## [1.4.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.4.0...sma-ng-v1.4.1) (2026-04-22)
-
 
 ### Bug Fixes
 
@@ -480,13 +412,11 @@
 
 ## [1.4.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.5...sma-ng-v1.4.0) (2026-04-22)
 
-
 ### Features
 
 * add deploy:docker-upgrade mise task for Docker Compose installations ([881cca7](https://github.com/newdave/sma-ng/commit/881cca7da26a5989e460833bdf0e9aa1e18f25ef))
 
 ## [1.3.5](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.4...sma-ng-v1.3.5) (2026-04-21)
-
 
 ### Bug Fixes
 
@@ -494,20 +424,17 @@
 
 ## [1.3.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.3...sma-ng-v1.3.4) (2026-04-21)
 
-
 ### Documentation
 
 * fix SMA_CONFIG path and document RENDER_GID in daemon.env.sample ([9004728](https://github.com/newdave/sma-ng/commit/90047282660a1c85aabbeb0d75265204518c7b46))
 
 ## [1.3.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.2...sma-ng-v1.3.3) (2026-04-21)
 
-
 ### Bug Fixes
 
 * expose /dev/dri/renderD128 device node directly instead of bind-mounting /dev/dri ([721feb3](https://github.com/newdave/sma-ng/commit/721feb379f4e6da4f8ec4c466e69f87265caa4c3))
 
 ## [1.3.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.1...sma-ng-v1.3.2) (2026-04-21)
-
 
 ### Bug Fixes
 
@@ -516,18 +443,15 @@
 
 ## [1.3.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.3.0...sma-ng-v1.3.1) (2026-04-21)
 
-
 ### Bug Fixes
 
 * require SMA_DAEMON_DB_URL on non-pg profiles; fix SMA_DAEMON_CONFIG path ([b138479](https://github.com/newdave/sma-ng/commit/b13847923d8f2d74a22aeb71daa0125b6e3d98e0))
 
 ## [1.3.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.2.2...sma-ng-v1.3.0) (2026-04-21)
 
-
 ### Features
 
 * add enabled flag to Universal Audio config section ([2241f2e](https://github.com/newdave/sma-ng/commit/2241f2e5d212ba5f25a49994d9d2e835a7bf0f39))
-
 
 ### Bug Fixes
 
@@ -535,13 +459,11 @@
 * tag Docker images as latest on push to main ([4ba0e46](https://github.com/newdave/sma-ng/commit/4ba0e462ff6b43b9d6dc9e2044996557c584005e))
 * use GHCR image in docker-compose and remove broken postgres port binding ([f467539](https://github.com/newdave/sma-ng/commit/f467539a8040fb0f7cf3071c835cb48d824f630b))
 
-
 ### Documentation
 
 * update documentation for script extraction and Docker fixes ([e5854bf](https://github.com/newdave/sma-ng/commit/e5854bf0454b6de8bf1b5f856b819cab8e82c20a))
 
 ## [1.2.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.2.1...sma-ng-v1.2.2) (2026-04-21)
-
 
 ### Documentation
 
@@ -549,25 +471,21 @@
 
 ## [1.2.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.2.0...sma-ng-v1.2.1) (2026-04-21)
 
-
 ### Documentation
 
 * add daemon error retrieval command ([64aac08](https://github.com/newdave/sma-ng/commit/64aac08299e64d67a27c10154ad496a4dd67e199))
 
 ## [1.2.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.4...sma-ng-v1.2.0) (2026-04-21)
 
-
 ### Features
 
 * add path search to jobs list ([d97e46c](https://github.com/newdave/sma-ng/commit/d97e46c4e13e5153fcf20556408edf26643922a7))
 * split docker compose profiles by encoder and database ([09b3a2a](https://github.com/newdave/sma-ng/commit/09b3a2afc893af25b53289e07951001c713a04d4))
 
-
 ### Bug Fixes
 
 * harden daemon progress reporting and log discovery ([fe5f211](https://github.com/newdave/sma-ng/commit/fe5f21191129dfc77845dec0d4d5ee90b0f4f480))
 * recycle original before restoreFromOutput overwrites input path ([07add3d](https://github.com/newdave/sma-ng/commit/07add3ddc6f19c33f380113db9368305b32763c2))
-
 
 ### Documentation
 
@@ -575,12 +493,10 @@
 
 ## [1.1.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.3...sma-ng-v1.1.4) (2026-04-20)
 
-
 ### Bug Fixes
 
 * correct qtfs cleanup and recycle bin helper naming ([70b73b8](https://github.com/newdave/sma-ng/commit/70b73b84225fda0218aa6d4d153d75462c996404))
 * harden deploy setup and qsv diagnostics ([0626e51](https://github.com/newdave/sma-ng/commit/0626e5192ccad04ed01c954f5562dfcd0c02079e))
-
 
 ### Documentation
 
@@ -588,13 +504,11 @@
 
 ## [1.1.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.2...sma-ng-v1.1.3) (2026-04-19)
 
-
 ### Bug Fixes
 
 * suppress SC2016 for intentional jq variable refs in sma-webhook.sh ([1d941bc](https://github.com/newdave/sma-ng/commit/1d941bc596d01741456f002d0b2f9d3d8e210e5d))
 
 ## [1.1.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.1...sma-ng-v1.1.2) (2026-04-19)
-
 
 ### Bug Fixes
 
@@ -602,13 +516,11 @@
 
 ## [1.1.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.1.0...sma-ng-v1.1.1) (2026-04-19)
 
-
 ### Documentation
 
 * replace &lt;repo&gt; placeholder with real GitHub URL ([a2d412e](https://github.com/newdave/sma-ng/commit/a2d412e43ef6f6405f22cf310ae1335b6752adc4))
 
 ## [1.1.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.0.1...sma-ng-v1.1.0) (2026-04-19)
-
 
 ### Features
 
@@ -616,13 +528,11 @@
 
 ## [1.0.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.0.0...sma-ng-v1.0.1) (2026-04-19)
 
-
 ### Bug Fixes
 
 * make Intel QSV/oneVPL conditional on amd64 for arm64 support ([5e04cd0](https://github.com/newdave/sma-ng/commit/5e04cd0a592b29138375ff9e4021a054f54e0120))
 
 ## [1.0.0](https://github.com/newdave/sma-ng/compare/sma-ng-v0.3.0...sma-ng-v1.0.0) (2026-04-19)
-
 
 ### ⚠ BREAKING CHANGES
 
@@ -654,7 +564,6 @@
 * tiered bitrate encoding profiles and codec refinements ([6faf936](https://github.com/newdave/sma-ng/commit/6faf936dfe9c8ffc0434cc0de0ee916b6c49b5b3))
 * update naming templates and defaults in sample configs ([c48e2b9](https://github.com/newdave/sma-ng/commit/c48e2b99e391c1102c70c5f3183d5da1fe83b75a))
 
-
 ### Bug Fixes
 
 * array-safe auth headers and HTTP error handling in trigger scripts ([0c2570f](https://github.com/newdave/sma-ng/commit/0c2570ff8a863dd8a2579768b9250941d5c7b252))
@@ -670,7 +579,6 @@
 * use SIGKILL in deploy:restart to bypass graceful drain ([5613dc0](https://github.com/newdave/sma-ng/commit/5613dc038231cf0848560f55518fe40da19bd425))
 * use venv python shebang in daemon.py and update.py ([2bffcd6](https://github.com/newdave/sma-ng/commit/2bffcd64f21b0e12a12e75919d8523ba83806834))
 
-
 ### Documentation
 
 * add /logs endpoints, log viewer, and sync API reference ([4b5f80f](https://github.com/newdave/sma-ng/commit/4b5f80f21562a66a0431b4b133ea49779e92dd64))
@@ -680,7 +588,6 @@
 * update for PostgreSQL requirement, new features, and hardware accel ([8f0052d](https://github.com/newdave/sma-ng/commit/8f0052dbf072c1d867312fcd2e61af6a4084bc5a))
 
 ## [0.3.0](https://github.com/newdave/sma-ng/compare/sma-ng-v0.2.0...sma-ng-v0.3.0) (2026-04-03)
-
 
 ### Features
 
@@ -692,7 +599,6 @@
 * skip .mp4 files in filesystem scanner; add per-path enabled flag ([9a29bd1](https://github.com/newdave/sma-ng/commit/9a29bd16962c1e6b12a09eed30db73624192b690))
 * update sma-webhook.sh to cover all daemon endpoints ([742bed4](https://github.com/newdave/sma-ng/commit/742bed43ac7c7f1e354c230b7ebc36e8ab5f72ad))
 
-
 ### Bug Fixes
 
 * add version tag trigger to docker workflow ([8732843](https://github.com/newdave/sma-ng/commit/8732843cad2d638147fe4226414cf1af3eaf5144))
@@ -701,12 +607,10 @@
 
 ## [0.2.0](https://github.com/newdave/sma-ng/compare/sma-ng-v0.1.2...sma-ng-v0.2.0) (2026-04-01)
 
-
 ### Features
 
 * add /dashboard endpoint; redirect / to /dashboard ([a6305db](https://github.com/newdave/sma-ng/commit/a6305db70d00809f20d2a0a80f20bd326b3db706))
 * multi-worker concurrency, graceful shutdown, dynamic Docker config ([81a904c](https://github.com/newdave/sma-ng/commit/81a904c56a2ee78aea5e195ac8ce22a383ddfddc))
-
 
 ### Bug Fixes
 
@@ -725,10 +629,9 @@
 * UID and GID resolution ([8b108a9](https://github.com/newdave/sma-ng/commit/8b108a98763c8a15b2fd5b176a07b2418f09f542))
 * validate profile values for QSV codecs to prevent invalid options ([fa95206](https://github.com/newdave/sma-ng/commit/fa95206036bbf36386056d03cb38b9637c5ec18b))
 
-
 ### Documentation
 
-* add docstrings to converter base classes, ffmpeg.py, and __init__.py ([75decfd](https://github.com/newdave/sma-ng/commit/75decfdf93c9a9cf2112b4982a2084e5121a012c))
+* add docstrings to converter base classes, ffmpeg.py, and **init**.py ([75decfd](https://github.com/newdave/sma-ng/commit/75decfdf93c9a9cf2112b4982a2084e5121a012c))
 * add docstrings to MediaProcessor (mediaprocessor.py) ([13db344](https://github.com/newdave/sma-ng/commit/13db344a3805dfe822871335dd69b736ceb84a2c))
 * add docstrings to Metadata class (metadata.py) ([5f8dfd9](https://github.com/newdave/sma-ng/commit/5f8dfd93d202224ac63fa27a33e5d835955acb16))
 * add docstrings to readsettings, manual, postprocess, lang, plex, log, update, extensions ([caca227](https://github.com/newdave/sma-ng/commit/caca2277c2a5f4164e0dfb8950a10349df21d491))
