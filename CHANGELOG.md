@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.59](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.58...sma-ng-v1.6.59) (2026-04-26)
+
+
+### Bug Fixes
+
+* **deploy:** config:roll auto-installs ruamel.yaml on remote hosts ([5752392](https://github.com/newdave/sma-ng/commit/5752392bb55ab671f32df690816db297c742d6ea))
+
 ## [1.6.58](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.57...sma-ng-v1.6.58) (2026-04-26)
 
 
