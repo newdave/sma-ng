@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.53](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.52...sma-ng-v1.6.53) (2026-04-26)
+
+
+### Bug Fixes
+
+* **docker:** patch ffmpeg/ffprobe at 4-space indent for four-bucket yaml ([9069294](https://github.com/newdave/sma-ng/commit/90692940f8694a807ad260085e492a15a344e6a4))
+
 ## [1.6.52](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.51...sma-ng-v1.6.52) (2026-04-26)
 
 
