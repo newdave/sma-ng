@@ -200,13 +200,16 @@ class WebhookHandler(BaseHTTPRequestHandler):
     path = query.get("path", [""])[0].strip()
     pcm = self.server.path_config_manager
 
-    # Collect valid root prefixes: the configured path_config paths themselves,
-    # plus every ancestor directory of each, so navigation down from "/" works.
+    # Sources of valid root prefixes: routing-rule match paths and scan-path
+    # entries. Add every ancestor directory of each so navigation from "/"
+    # down through the tree works.
+    base_roots = list(pcm.routing_match_paths())
+    base_roots.extend(sp["path"] for sp in pcm.scan_paths if sp.get("path"))
+
     allowed_roots = set()
-    for entry in pcm.path_configs:
-      p = entry["path"]
+    for raw in base_roots:
+      p = os.path.normpath(raw)
       allowed_roots.add(p)
-      # Add all parent directories so the user can navigate into the root
       parts = p.rstrip("/").split("/")
       for i in range(1, len(parts)):
         allowed_roots.add("/".join(parts[:i]) or "/")
@@ -221,7 +224,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     if not path:
       # Return the top-level configured path prefixes as starting points
-      dirs = sorted(set(os.path.normpath(e["path"]) for e in pcm.path_configs if os.path.isdir(e["path"])))
+      dirs = sorted({os.path.normpath(r) for r in base_roots if os.path.isdir(r)})
       return self.send_json_response(200, {"dirs": dirs, "files": []})
 
     path = os.path.normpath(path)
@@ -249,18 +252,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
       self.send_json_response(403, {"error": "Permission denied"})
 
   def _get_configs(self):
-    configs_with_status = [
-      {
-        "path": entry["path"],
-        "config": entry["config"],
-        "default_args": entry.get("default_args", []),
-        "log_file": self.server.config_log_manager.get_log_file(entry["config"]),
-        "log_name": os.path.splitext(os.path.basename(entry["config"]))[0],
-        "active_jobs": self.server.config_lock_manager.get_active_jobs(entry["config"]),
-        "pending_jobs": self.server.job_db.pending_count_for_config(entry["config"]),
-      }
-      for entry in self.server.path_config_manager.path_configs
-    ]
+    """Admin endpoint surfacing daemon-side routing + per-config status.
+
+    Under the four-bucket schema there is exactly one config file per
+    daemon. The dashboard receives the loaded config's status (active /
+    pending jobs, log file) once, plus the full ``daemon.routing`` rule
+    list with each rule's match / profile / services fields.
+    """
     pcm = self.server.path_config_manager
     default_config = pcm.default_config
     self.send_json_response(
@@ -272,7 +270,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         "default_log_name": os.path.splitext(os.path.basename(default_config))[0],
         "default_active_jobs": self.server.config_lock_manager.get_active_jobs(default_config),
         "default_pending_jobs": self.server.job_db.pending_count_for_config(default_config),
-        "path_configs": configs_with_status,
+        "routing": pcm.routing_rules_admin(),
         "logs_directory": self.server.config_log_manager.logs_dir,
       },
     )
