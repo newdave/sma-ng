@@ -177,6 +177,8 @@ for host in $DEPLOY_HOSTS; do
     ssh_target="${remote_user}@${remote_address}"
 
     mk_ssh_opts "$port" "$key"
+    ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+    [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
 
     echo "==> [$host] syncing code to $dir"
     # shellcheck disable=SC2086
@@ -192,6 +194,7 @@ for host in $DEPLOY_HOSTS; do
     --exclude='*.egg-info/' \
     $rsync_extra \
     . "$ssh_target:$dir"
+    chown_remote_path_to_ssh_user "$host" "$dir"
 
     install_dir=$($cfg sma_install_dir "/opt/sma")
     echo "==> [$host] seeding ${install_dir}/{config,logs} (owner: $remote_user)"
@@ -210,4 +213,8 @@ for host in $DEPLOY_HOSTS; do
         sudo install -o "$service_user" -m 640 setup/daemon.env.sample "${install_dir}/config/daemon.env"
       fi
 REMOTE
+    # The seed step above already chowns ${install_dir}/{config,logs} to
+    # service_user, but the Docker compose host (and any other root-owned
+    # paths under the install_dir umbrella) may still need correcting.
+    chown_remote_path_to_ssh_user "$host" "$install_dir"
 done

@@ -23,6 +23,8 @@ for host in $DEPLOY_HOSTS; do
   rsync -az --delete \
     -e "ssh $ssh_opts" \
     .mise/ "$ssh_target:$dir/.mise/" || { failed="$failed $host"; continue; }
+
+  chown_remote_path_to_ssh_user "$host" "$dir/.mise"
 done
 
 if [ -n "$failed" ]; then

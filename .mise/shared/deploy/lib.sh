@@ -58,6 +58,28 @@ sync_codebase_to_host() {
     --exclude='*.egg-info/' \
     $rsync_extra \
     . "$ssh_target:$dir"
+
+  chown_remote_path_to_ssh_user "$host" "$dir"
+}
+
+# Recursively reassign ownership of a path on the remote host to the SSH
+# user. Only fires when deploy.use_sudo is true (the only mode where files
+# can end up root-owned after sudo-managed steps); otherwise the SSH user
+# already owns everything they touched and the call is a silent no-op.
+# Requires init_host_context (or equivalent) to have populated ssh_opts,
+# ssh_target, and remote_user for the host.
+chown_remote_path_to_ssh_user() {
+  local host="$1" target_path="$2"
+  local host_use_sudo
+  # use_sudo may not be set by every caller — re-query the local config to
+  # avoid surprises when this helper is invoked outside init_docker_host_context.
+  host_use_sudo=$(lc deploy use_sudo "false")
+  if [ "$host_use_sudo" != "true" ]; then
+    return 0
+  fi
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target/remote_user populated by the caller
+  ssh $ssh_opts "$ssh_target" "sudo chown -R ${remote_user}: ${target_path}" \
+    || echo "  WARNING: [$host] chown -R ${remote_user}: ${target_path} failed (continuing)" >&2
 }
 
 init_docker_host_context() {
