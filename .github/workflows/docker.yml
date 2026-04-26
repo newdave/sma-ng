@@ -10,6 +10,7 @@ on:
       - "setup/requirements*.txt"
       - "pyproject.toml"
       - "**.py"
+      - "resources/**"
       - ".github/workflows/docker.yml"
       - ".mise/tasks/**"
   pull_request:
@@ -20,6 +21,7 @@ on:
       - "setup/requirements*.txt"
       - "pyproject.toml"
       - "**.py"
+      - "resources/**"
       - ".github/workflows/docker.yml"
       - ".mise/tasks/**"
   workflow_dispatch:
