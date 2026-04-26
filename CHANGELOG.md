@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.79](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.78...sma-ng-v1.6.79) (2026-04-26)
+
+
+### Bug Fixes
+
+* **ui:** define toggleTheme() in dashboard and admin pages ([02de316](https://github.com/newdave/sma-ng/commit/02de316d987b6d0e89720544ed766e35db5de79b))
+
 ## [1.6.78](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.77...sma-ng-v1.6.78) (2026-04-26)
 
 
