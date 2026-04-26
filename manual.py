@@ -21,6 +21,7 @@ import guessit
 import tmdbsimple as tmdb
 
 from converter.avcodecs import attachment_codec_list, audio_codec_list, subtitle_codec_list, video_codec_list
+from resources.config_loader import ConfigError, ConfigLoader
 from resources.extensions import tmdb_api_key
 from resources.log import getLogger
 from resources.mediaprocessor import MediaProcessor
@@ -812,6 +813,34 @@ def apply_cli_overrides(args, settings):
   return type_hint
 
 
+def _resolve_effective_profile(config_arg, input_path, cli_profile):
+  """Pick the profile to apply: ``--profile`` wins; otherwise resolve via
+  ``daemon.routing`` for *input_path*.
+
+  Returns ``cli_profile`` unchanged if it is set, the routing-resolved
+  profile name when one matches, or ``None`` (meaning "use bare base").
+  Failures here are swallowed and returned as ``None`` — the subsequent
+  ``ReadSettings(...)`` call will surface the same config error in its
+  normal startup path.
+  """
+  if cli_profile:
+    return cli_profile
+  if not input_path:
+    return None
+  try:
+    cfg_path = ReadSettings.resolve_config_path(config_arg, logger=log)
+    if not os.path.isfile(cfg_path):
+      return None
+    loader = ConfigLoader(logger=log)
+    cfg = loader.load(cfg_path)
+    resolved = loader.resolve_routing(cfg, os.path.abspath(input_path))
+  except (ConfigError, OSError):
+    return None
+  if resolved.profile:
+    log.info("Auto-selected profile %r from daemon.routing match for %s" % (resolved.profile, input_path))
+  return resolved.profile
+
+
 def main():
   """Parse CLI arguments and drive the manual conversion/tagging workflow.
 
@@ -822,7 +851,11 @@ def main():
   parser = argparse.ArgumentParser(description="SMA-NG manual conversion and tagging script")
   parser.add_argument("-i", "--input", help="The source that will be converted. May be a file or a directory")
   parser.add_argument("-c", "--config", help="Specify an alternate configuration file location")
-  parser.add_argument("-p", "--profile", help="Apply a named profile from the configuration file")
+  parser.add_argument(
+    "-p",
+    "--profile",
+    help="Apply a named profile from the configuration file. Overrides any profile that the input path's daemon.routing rule would have selected.",
+  )
   parser.add_argument(
     "-a", "--auto", action="store_true", help="Enable auto mode, the script will not prompt you for any further input, good for batch files. It will guess the metadata using guessit"
   )
@@ -870,12 +903,16 @@ def main():
     return
 
   # Settings overrides
-  if args["config"] and os.path.exists(args["config"]):
-    settings = ReadSettings(args["config"], logger=log, profile=args["profile"])
-  elif args["config"] and os.path.exists(os.path.join(os.path.dirname(sys.argv[0]), args["config"])):
-    settings = ReadSettings(os.path.join(os.path.dirname(sys.argv[0]), args["config"]), logger=log, profile=args["profile"])
-  else:
-    settings = ReadSettings(logger=log, profile=args["profile"])
+  config_arg = args["config"]
+  if config_arg and not os.path.exists(config_arg):
+    candidate = os.path.join(os.path.dirname(sys.argv[0]), config_arg)
+    if os.path.exists(candidate):
+      config_arg = candidate
+    else:
+      config_arg = None  # fall through to default resolution
+
+  effective_profile = _resolve_effective_profile(config_arg, args.get("input"), args["profile"])
+  settings = ReadSettings(config_arg, logger=log, profile=effective_profile)
 
   processedArchive = None
   processedList = None

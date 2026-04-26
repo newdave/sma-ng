@@ -160,20 +160,31 @@ class ReadSettings:
 
   def _resolve_path(self, configFile):
     """Resolve the config file path: arg > $SMA_CONFIG > default."""
-    rootpath = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), self.RELATIVE_TO_ROOT))
-    default_path = os.path.normpath(os.path.join(rootpath, self.CONFIG_RELATIVEPATH))
+    return self.resolve_config_path(configFile, logger=self.log)
 
-    env_path = os.environ.get(self.ENV_CONFIG_VAR)
+  @classmethod
+  def resolve_config_path(cls, configFile=None, logger=None):
+    """Resolve the same config path the constructor would, without loading.
+
+    Public so external callers (notably ``manual.py``'s routing-based
+    profile auto-selection) can locate the YAML for an independent
+    ``ConfigLoader`` lookup before constructing a full ``ReadSettings``.
+    """
+    log = logger or logging.getLogger(__name__)
+    rootpath = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), cls.RELATIVE_TO_ROOT))
+    default_path = os.path.normpath(os.path.join(rootpath, cls.CONFIG_DIRECTORY, cls.CONFIG_DEFAULT))
+
+    env_path = os.environ.get(cls.ENV_CONFIG_VAR)
     if env_path and os.path.exists(os.path.realpath(env_path)):
       configFile = os.path.realpath(env_path)
-      self.log.debug("%s environment variable override found." % self.ENV_CONFIG_VAR)
+      log.debug("%s environment variable override found." % cls.ENV_CONFIG_VAR)
     elif not configFile:
       configFile = default_path
-      self.log.debug("Loading default config file.")
+      log.debug("Loading default config file.")
 
     if os.path.isdir(configFile):
-      configFile = os.path.realpath(os.path.join(configFile, self.CONFIG_RELATIVEPATH))
-      self.log.debug("Configuration file specified is a directory, joining with %s." % self.CONFIG_DEFAULT)
+      configFile = os.path.realpath(os.path.join(configFile, cls.CONFIG_DIRECTORY, cls.CONFIG_DEFAULT))
+      log.debug("Configuration file specified is a directory, joining with %s." % cls.CONFIG_DEFAULT)
 
     return configFile
 
