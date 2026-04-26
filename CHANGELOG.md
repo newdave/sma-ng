@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.80](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.79...sma-ng-v1.6.80) (2026-04-26)
+
+
+### Bug Fixes
+
+* **admin:** rename Alpine confirm() method to avoid shadowing window.confirm ([0518697](https://github.com/newdave/sma-ng/commit/0518697c7ecb9c0121cab50b34d556b78bc87c7e))
+* **ui:** apply tailwind darkMode config after CDN script loads ([00a0b78](https://github.com/newdave/sma-ng/commit/00a0b78007e9bd1095bb319b9ef1f21ef2119859))
+* **ui:** comprehensive light/dark mode compatibility fixes ([69d5352](https://github.com/newdave/sma-ng/commit/69d5352d3da01e6ec8569d6654d8ba1abacbfdae))
+
 ## [1.6.79](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.78...sma-ng-v1.6.79) (2026-04-26)
 
 
