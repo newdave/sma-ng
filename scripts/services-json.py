@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """scripts/services-json.py <local-yml>
 
-Read the nested ``services`` block from setup/.local.yml and print it as
+Read the nested ``services`` block from setup/local.yml and print it as
 JSON, mirroring the four-bucket sma-ng.yml schema:
 
     services:
@@ -57,7 +57,7 @@ def _normalise_instance(inst):
   return {k: _stringify(v) for k, v in inst.items() if v is not None and str(v) != ""}
 
 
-path = sys.argv[1] if len(sys.argv) > 1 else "setup/.local.yml"
+path = sys.argv[1] if len(sys.argv) > 1 else "setup/local.yml"
 
 out = {}
 try:

@@ -68,7 +68,7 @@ curl https://mise.run | sh
 
 | Task                         | Description                                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------------------------- |
-| `mise run deploy:check`      | Verify `setup/.local.yml` exists and `DEPLOY_HOSTS` is set                                  |
+| `mise run deploy:check`      | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                  |
 | `mise run deploy:setup`      | First-time host prep: SSH key, apt deps, deploy dir, systemd install                        |
 | `mise run deploy:mise`       | Sync the local `.mise/` deploy control plane to all hosts                                   |
 | `mise run deploy:sync`       | Sync code, install dependencies, and reload systemd on all hosts                            |
@@ -153,28 +153,87 @@ You can run `python manual.py -cl` or inspect config files without starting the 
 Copy the sample and fill in your details:
 
 ```bash
-cp setup/.local.yml.sample setup/.local.yml
+cp setup/local.yml.sample setup/local.yml
 ```
 
-`setup/.local.yml` is gitignored. It controls deploy targets, credentials, and per-host overrides:
+`setup/local.yml` is gitignored. It is the single source of truth for everything
+that distinguishes this deployment from the upstream defaults — deploy targets,
+per-host overrides, credentials, encoder defaults, and quality profiles. Each
+top-level section is consumed by `mise run config:roll` as follows:
+
+| Section    | Effect on each host's `config/sma-ng.yml`                                                  |
+| ---------- | ------------------------------------------------------------------------------------------ |
+| `deploy`   | Project-wide defaults read by `scripts/local-config.py` for any host-context lookup        |
+| `hosts`    | Per-host overrides for any `deploy:` key (`address` and `user` are required for SSH)       |
+| `daemon`   | Stamped into `daemon:` (kebab-cased) and `config/daemon.env` (`SMA_DAEMON_*` env vars)     |
+| `base`     | Deep-merged into `base:` — locks encoder defaults (gpu, codec, crf-profiles, audio…)       |
+| `profiles` | Deep-merged into `profiles:` — overlay rules selected by routing                           |
+| `services` | Stamped into `services.<type>.<instance>` and auto-converted into `daemon.routing` rules   |
+
+Minimal example with the four overlay sections:
 
 ```yaml
 deploy:
-  DEPLOY_HOSTS: "user@server1.example.com user@server2.example.com"
-  DEPLOY_DIR: ~/sma
-  SSH_KEY: ~/.ssh/id_ed25519_sma
-  FFMPEG_DIR: /usr/local/bin
+  hosts:
+    - sma-master
+    - sma-worker-1
+  deploy_dir: /opt/sma
+  ssh_key: ~/.ssh/id_ed25519_sma
+  ffmpeg_dir: /usr/local/bin
+  docker_profile: intel        # or intel-pg, nvenc, etc.
 
 hosts:
-  "user@server1.example.com":
-    SMA_NODE_NAME: sma-master
-  "user@server2.example.com":
-    SMA_NODE_NAME: sma-worker-1
+  sma-master:
+    address: 192.168.1.10
+    user: deploy
+    docker_profile: intel-pg   # bundled postgres on this host
+  sma-worker-1:
+    address: 192.168.1.11
+    user: deploy
 
 daemon:
   api_key: your_secret_key
-  # db_url:   # required for multi-node: postgresql://user:pass@host/db
+  # db_url:   # required for non-pg multi-node: postgresql://user:pass@host/db
+
+base:                          # locks encoder defaults across every host
+  video:
+    gpu: qsv
+    codec: [hevc]
+    preset: fast
+
+profiles:                      # overlays applied per routing rule
+  rq:
+    video:
+      crf-profiles: '0:22:1M:2M,2000:22:2M:4M,4000:22:3M:8M,8000:22:6M:8M'
+  lq:
+    video:
+      crf-profiles: '0:22:3M:6M,8000:22:5M:10M'
+
+services:                      # nested <type>.<instance>; matches sma-ng.yml schema
+  sonarr:
+    main:
+      url: https://sonarr.example.com
+      apikey: <key>
+      path: /mnt/media/TV/1080P
+      profile: rq              # routing.match=path, routing.profile=this
+    kids:
+      url: https://sonarr-kids.example.com
+      apikey: <key>
+      path: /mnt/media/TV/Kids
+      profile: lq
 ```
+
+Deep-merge semantics for `base:` and `profiles:`:
+
+- Dicts recurse — adding `base.video.gpu: qsv` does **not** wipe other `base.video.*` fields.
+- Lists and scalars overwrite — setting `base.video.codec: [hevc]` replaces whatever the
+  sample's list contained.
+- Anything you omit inherits from `setup/sma-ng.yml.sample`.
+
+Note that `sma-ng.yml.sample` ships with its own `profiles.rq` / `profiles.lq` defaults
+(e.g. `codec: [h265]`, `max-bitrate: 8000`). Profiles are a per-section *shallow* overlay
+on top of `base`, so any field that the sample's profile sets will win over your `base:`
+unless you also set it under `profiles:`.
 
 ### Deployment Workflow
 
@@ -215,24 +274,34 @@ mise run pg:recreate
 `.mise/` helper and task code before any config mutation runs.
 
 For managed deployments, `config:roll` also stamps the host's `SMA_NODE_NAME`
-from `setup/.local.yml` into `config/daemon.env`, and the daemon uses that
+from `setup/local.yml` into `config/daemon.env`, and the daemon uses that
 value as its cluster node ID.
 
 For each remote host:
 
-1. Detects GPU type remotely and sets `gpu =` in the generated config
-2. Creates missing config files from samples (`sma-ng.yml`, `daemon.env`)
-3. Merges new keys from updated samples into existing configs (non-destructive — existing values preserved)
-4. Stamps service credentials from `setup/.local.yml` into YAML/INI configs
-5. Sets `ffmpeg`/`ffprobe` paths from `FFMPEG_DIR` in YAML/INI configs
-6. Stamps daemon credentials (`api_key`, `db_url`, `ffmpeg_dir`) into `Daemon:` in `sma-ng.yml` and `daemon.env`
-7. Deploys post-process scripts with correct interpreter shebang and credentials
+1. Detects the host's GPU type and writes it into a freshly-created `sma-ng.yml`
+2. Creates `config/sma-ng.yml` and `config/daemon.env` from the bundled samples if missing
+3. Backs up `config/` to `.backup/<timestamp>/` before any mutation
+4. Merges new keys from `setup/sma-ng.yml.sample` into the existing `config/sma-ng.yml`
+   via `yaml_merge.py` (non-destructive — existing values preserved)
+5. Stamps `ffmpeg` / `ffprobe` paths from the host's resolved `ffmpeg_dir` into
+   `base.converter.{ffmpeg,ffprobe}`
+6. Deep-merges `base:` and `profiles:` overlays from `setup/local.yml` into the
+   matching blocks of `sma-ng.yml` (see overlay semantics above)
+7. Stamps each `services.<type>.<instance>` from `setup/local.yml` into the
+   `services:` block, and rebuilds `daemon.routing` from every instance
+   carrying both `path` and `profile` (longest match first)
+8. Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir` (kebab-case)
+   into `daemon:` and writes the corresponding `SMA_DAEMON_*` env vars plus
+   `SMA_NODE_NAME` into `config/daemon.env`
+9. Deploys post-process scripts with the correct interpreter shebang and
+   Plex/Jellyfin/Emby credentials
 
 ### Deploy Tasks Reference
 
 | Task             | Description                                                                                                                               |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `deploy:check`   | Verify `setup/.local.yml` exists and `DEPLOY_HOSTS` is set                                                                                |
+| `deploy:check`   | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                                                                |
 | `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, systemd install                                                                      |
 | `deploy:mise`    | Sync the local `.mise/` deploy control plane to each remote `DEPLOY_DIR`                                                                  |
 | `deploy:sync`    | Sync code + install deps + reload systemd on all hosts                                                                                    |
@@ -247,7 +316,7 @@ Additional Docker lifecycle helper: `deploy:dockerstop` (alias: `deploy:docker:s
 
 All remote-facing deploy/config tasks depend on `deploy:mise`, so the remote `.mise/`
 control plane is refreshed before those wrappers run. The Docker-specific deploy tasks
-require `DOCKER_PROFILE` to be set per host (or under `deploy:`) in `setup/.local.yml`.
+require `DOCKER_PROFILE` to be set per host (or under `deploy:`) in `setup/local.yml`.
 Use `HOST=<host>` to target one node, or `HOSTS="<host1> <host2>"` to target multiple nodes.
 The PostgreSQL lifecycle tasks skip hosts that are not using one of the bundled `*-pg`
 profiles.

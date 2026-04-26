@@ -1114,32 +1114,57 @@ The deploy tasks push code to remote hosts via SSH/rsync and manage the systemd 
 
 #### Initial setup
 
-1. Copy `setup/.local.yml.sample` to `setup/.local.yml` and configure it (this file is gitignored):
+1. Copy `setup/local.yml.sample` to `setup/local.yml` and configure it (this file is gitignored).
+   See [`docs/deployment.md`](deployment.md#configuration) for the canonical reference of every
+   top-level section. Minimal multi-host example:
 
 ```yaml
 deploy:
-  DEPLOY_HOSTS: "user@server1.example.com user@server2.example.com"
-  DEPLOY_DIR: ~/sma
-  SSH_KEY: ~/.ssh/id_ed25519_sma
-  FFMPEG_DIR: /usr/local/bin
+  hosts: [sma-master, sma-worker-1]
+  deploy_dir: /opt/sma
+  ssh_key: ~/.ssh/id_ed25519_sma
+  ffmpeg_dir: /usr/local/bin
+  docker_profile: intel
+
+hosts:
+  sma-master:
+    address: 192.168.1.10
+    user: deploy
+    docker_profile: intel-pg     # bundled postgres on this host
+  sma-worker-1:
+    address: 192.168.1.11
+    user: deploy
 
 daemon:
   api_key: your_secret_key
-  # db_url:   # leave blank for SQLite
 
-services:
-  Sonarr:
-    host: sonarr.example.com
-    port: 443
-    ssl: true
-    apikey: abc123...
-    path: /mnt/media/TV
-    profile: rq
-  Radarr:
-    host: radarr.example.com
-    apikey: def456...
-    path: /mnt/media/Movies
-    profile: rq
+base:                            # encoder defaults locked across every host
+  video:
+    gpu: qsv
+    codec: [hevc]
+    preset: fast
+
+profiles:                        # overlays selected per routing rule
+  rq:
+    video:
+      crf-profiles: '0:22:1M:2M,2000:22:2M:4M,4000:22:3M:8M,8000:22:6M:8M'
+  lq:
+    video:
+      crf-profiles: '0:22:3M:6M,8000:22:5M:10M'
+
+services:                        # nested <type>.<instance>; auto-builds daemon.routing
+  sonarr:
+    main:
+      url: https://sonarr.example.com
+      apikey: abc123...
+      path: /mnt/media/TV
+      profile: rq
+  radarr:
+    main:
+      url: https://radarr.example.com
+      apikey: def456...
+      path: /mnt/media/Movies
+      profile: rq
 ```
 
 1. Run first-time setup (generates SSH key, installs apt dependencies, creates deploy directory, installs systemd service):
@@ -1152,24 +1177,24 @@ mise run deploy:setup
 
 ```bash
 # Sync code, install dependencies, reload systemd unit
-mise run remote:run
+mise run deploy:sync
 
 # Then restart the service
 mise run deploy:restart
 
 # Optional: stop Docker services on one host
-HOST=user@server1.example.com mise run deploy:dockerstop
+HOST=sma-master mise run deploy:dockerstop
 
 # Optional: stop Docker services on multiple hosts
-HOSTS="user@server1.example.com user@server2.example.com" mise run deploy:dockerstop
+HOSTS="sma-master sma-worker-1" mise run deploy:dockerstop
 ```
 
-`remote:run` does the following on each host in `DEPLOY_HOSTS`:
+`deploy:sync` does the following on each host in `deploy.hosts`:
 
-- rsync the repo (excluding `venv/`, `config/`, `logs/`, `__pycache__/`)
+- rsyncs the repo (excluding `venv/`, `config/`, `logs/`, `__pycache__/`)
 - creates or repairs the virtualenv and installs base Python dependencies
-- Updates `User=` and `Group=` in the systemd unit file to match the SSH user
-- Runs `systemctl daemon-reload`
+- updates `User=` / `Group=` in the systemd unit file to match the SSH user
+- runs `systemctl daemon-reload`
 
 If dependency installation fails due to missing prerequisites (Python, `rsync`, or `venv` support), it automatically
 runs `deploy:setup` for that host and retries.
@@ -1180,15 +1205,24 @@ runs `deploy:setup` for that host and retries.
 mise run config:roll
 ```
 
-This task manages config files on remote hosts without overwriting customizations:
+This task manages `config/sma-ng.yml` on remote hosts without overwriting your customisations.
+For each host it:
 
-- **Creates missing configs** from samples (auto-detects GPU for `sma-ng.yml`)
-- **Merges new keys** from `sma-ng.yml.sample` into existing YAML configs — new settings added to the sample are propagated without touching existing values
-- **Stamps service credentials** from `services.Sonarr`, `services.Radarr`, `services.Plex` etc. in `.local.yml` into `sma-ng.yml`
-- **Updates `Daemon:` section in `sma-ng.yml`** with `api_key`, `db_url`, and `path_configs` entries built from `path` + `profile` fields in each service section
-- **Updates `daemon.env`** with `SMA_DAEMON_*` environment variables
-- **Stamps ffmpeg/ffprobe paths** from `FFMPEG_DIR` into YAML configs
-- **Deploys post-process scripts** from `setup/post_process/` to `post_process/`, stamping in credentials (Plex token, Jellyfin URL, etc.) and updating shebangs to the venv Python
+- **Creates missing configs** from `setup/sma-ng.yml.sample` (auto-detects GPU on first creation)
+- **Backs up** `config/` to `.backup/<timestamp>/` before any mutation
+- **Merges new keys** from the sample via `yaml_merge.py` (non-destructive)
+- **Deep-merges `base:` and `profiles:`** from `setup/local.yml` into the same blocks of
+  `sma-ng.yml`. Dicts recurse, lists/scalars overwrite, anything you omit inherits from
+  the sample.
+- **Stamps `services.<type>.<instance>`** from `setup/local.yml` into `services:` and
+  rebuilds `daemon.routing` from every instance carrying both `path` and `profile`
+  (longest match first)
+- **Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir`** (kebab-case) into
+  `daemon:` and writes the corresponding `SMA_DAEMON_*` env vars plus `SMA_NODE_NAME`
+  into `config/daemon.env`
+- **Stamps `base.converter.{ffmpeg,ffprobe}`** from the host's resolved `ffmpeg_dir`
+- **Deploys post-process scripts** from `setup/post_process/` to `post_process/`,
+  stamping in Plex/Jellyfin/Emby credentials and updating shebangs to the venv Python
 
 #### Per-host overrides
 
@@ -1196,10 +1230,12 @@ Any key from `deploy:` can be overridden for a specific host under `hosts:`:
 
 ```yaml
 hosts:
-  "user@server1.example.com":
-    DEPLOY_DIR: /opt/sma
-    SSH_PORT: "2222"
-    FFMPEG_DIR: /opt/ffmpeg/bin
+  sma-master:
+    address: 192.168.1.10
+    user: deploy
+    deploy_dir: /opt/sma
+    ssh_port: 2222
+    ffmpeg_dir: /opt/ffmpeg/bin
 ```
 
 #### Restarting without deploying
@@ -1210,25 +1246,19 @@ mise run deploy:restart
 
 Runs `sudo systemctl restart sma-daemon` on each host.
 
-#### Running arbitrary mise tasks remotely
-
-```bash
-REMOTE_TASK=test mise run remote:mise
-```
-
-Runs the specified mise task on each host without syncing code first.
-
 #### Summary of deploy tasks
 
 | Task             | Description                                                                |
 | ---------------- | -------------------------------------------------------------------------- |
-| `deploy:check`   | Verify `setup/.local.yml` exists and `DEPLOY_HOSTS` is set                 |
+| `deploy:check`   | Verify `setup/local.yml` exists and `deploy.hosts` is set                  |
 | `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, systemd install       |
-| `remote:run`     | Sync code + install deps + reload systemd on all hosts                     |
-| `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials            |
+| `deploy:mise`    | Sync the local `.mise/` deploy control plane to each remote `deploy_dir`   |
+| `deploy:sync`    | Sync code + install deps + reload systemd on all hosts                     |
+| `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials & overlays |
 | `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart via systemctl |
-| `config:audit`   | Audit local configs                                                        |
-| `remote:mise`    | Run an arbitrary mise task on all hosts                                    |
+| `deploy:docker`  | Rsync the local code to Docker hosts, pull the latest image, recreate SMA  |
+| `pg:restart`     | Restart bundled PostgreSQL on hosts whose `docker_profile` ends in `-pg`   |
+| `pg:recreate`    | Stop bundled PostgreSQL, remove its Docker volume, and recreate            |
 
 Additional Docker lifecycle helper: `deploy:dockerstop` (alias: `deploy:docker:stop`) stops
 services for selected hosts using each host's configured `DOCKER_PROFILE`.

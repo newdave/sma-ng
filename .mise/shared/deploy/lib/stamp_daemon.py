@@ -11,7 +11,7 @@ Usage::
 All credential arguments are base64-encoded to safely handle special
 characters; pass an empty string for unused arguments.
 ``base_overrides`` and ``profiles_overrides`` are JSON-encoded blocks
-from ``setup/.local.yml`` (emitted by ``scripts/local-section-json.py``)
+from ``setup/local.yml`` (emitted by ``scripts/local-section-json.py``)
 and are deep-merged into ``base:`` and ``profiles:`` respectively on
 every roll, so per-deployment defaults like ``base.video.gpu`` and
 quality-profile overlays like ``profiles.rq.video.crf-profiles``
@@ -113,14 +113,14 @@ if os.path.exists(yaml_path):
 
   changed = False
 
-  # base overrides from .local.yml (deep-merge, scalars/lists overwrite)
+  # base overrides from local.yml (deep-merge, scalars/lists overwrite)
   if base_overrides:
     base_block = root.setdefault("base", {})
     for path_, old, new in _deep_merge(base_block, base_overrides):
       print(f"  sma-ng.yml base.{path_}: {old!r} -> {new!r}")
       changed = True
 
-  # profiles overrides from .local.yml (same merge semantics)
+  # profiles overrides from local.yml (same merge semantics)
   if profiles_overrides:
     profiles_block = root.setdefault("profiles", {})
     for path_, old, new in _deep_merge(profiles_block, profiles_overrides):

@@ -75,6 +75,7 @@ resources/models/*.xml
 resources/models/*.bin
 
 # Local deployment overrides
+setup/local.yml
 setup/.local.yml
 setup/.local.ini
 config/daemon.json.save

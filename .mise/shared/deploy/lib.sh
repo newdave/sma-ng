@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-LOCAL="setup/.local.yml"
+LOCAL="setup/local.yml"
 CFG="python3 scripts/local-config.py"
-# lc() is a shorthand for querying .local.yml without needing to handle $CFG quoting.
+# lc() is a shorthand for querying local.yml without needing to handle $CFG quoting.
 lc() { python3 scripts/local-config.py "$LOCAL" "$@"; }
 MISSING_PREREQ_PATTERN='(command not found|No such file or directory|mise.*not found|python3.*not found|python.*not found|rsync.*not found|venv.*not found)'
 
