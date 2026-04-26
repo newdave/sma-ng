@@ -48,6 +48,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
   def send_html_response(self, status_code, html):
     self.send_response(status_code)
     self.send_header("Content-Type", "text/html; charset=utf-8")
+    # HTML is rendered from disk on every request; tell browsers not to cache
+    # so dashboard/admin/docs UI updates after a deploy show on next load.
+    self.send_header("Cache-Control", "no-store, must-revalidate")
     self.end_headers()
     self.wfile.write(html.encode("utf-8"))
 
