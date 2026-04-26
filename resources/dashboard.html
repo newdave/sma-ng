@@ -354,38 +354,35 @@
         <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 mb-8">
             <h2 class="tooltip text-sm font-semibold text-purple-400 uppercase tracking-wider mb-3 cursor-default">
                 Config Mappings
-                <span class="tip">Path prefixes matched longest-first to determine which sma-ng.yml profile a job
-                    uses</span>
+                <span class="tip">The active sma-ng.yml config plus daemon.routing rules that map incoming paths to a
+                    profile and notification services</span>
             </h2>
-            <div class="overflow-x-auto">
+
+            <!-- Active config -->
+            <div class="overflow-x-auto mb-4">
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700 text-xs">
-                            <th class="pb-2 pr-4 font-medium">Path Prefix</th>
                             <th class="pb-2 pr-4 font-medium">Config</th>
                             <th class="pb-2 pr-4 font-medium">
-                                <span class="tooltip cursor-default">Default Flags<span class="tip">Args automatically
-                                        prepended to
-                                        every job submitted for this path</span></span>
+                                <span class="tooltip cursor-default">Default Flags<span class="tip">Args
+                                        automatically prepended to every job (daemon.default-args)</span></span>
                             </th>
                             <th class="pb-2 pr-4 font-medium">
-                                <span class="tooltip cursor-default">Status<span class="tip">Whether this config is
-                                        currently running a
-                                        job</span></span>
+                                <span class="tooltip cursor-default">Status<span class="tip">Whether the daemon
+                                        is currently running a job</span></span>
                             </th>
                             <th class="pb-2 pr-4 font-medium">
-                                <span class="tooltip cursor-default">Pending<span class="tip">Jobs waiting in queue for
-                                        this
-                                        config</span></span>
+                                <span class="tooltip cursor-default">Pending<span class="tip">Jobs waiting in
+                                        queue</span></span>
                             </th>
                             <th class="pb-2 font-medium">Log</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200/50 dark:divide-gray-700/50 text-xs">
-                        <!-- Default config row -->
-                        <tr x-show="configs.default_config" class="opacity-70 hover:opacity-100 hover:bg-gray-100/50 dark:hover:bg-gray-700/20">
-                            <td class="py-2 pr-4 text-gray-500 dark:text-gray-500 font-mono italic">default</td>
-                            <td class="py-2 pr-4 text-gray-500 dark:text-gray-400 font-mono"
+                        <tr x-show="configs.default_config" class="hover:bg-gray-100/50 dark:hover:bg-gray-700/20">
+                            <td class="py-2 pr-4 text-gray-700 dark:text-gray-300 font-mono"
+                                :title="configs.default_config"
                                 x-text="(configs.default_config||'').split('/').pop()"></td>
                             <td class="py-2 pr-4">
                                 <template x-if="configs.default_args && configs.default_args.length">
@@ -407,7 +404,8 @@
                                 <span x-show="!configs.default_active_jobs?.length"
                                     class="bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
                             </td>
-                            <td class="py-2 pr-4 text-gray-500 dark:text-gray-500" x-text="configs.default_pending_jobs || 0"></td>
+                            <td class="py-2 pr-4 text-gray-500 dark:text-gray-500"
+                                x-text="configs.default_pending_jobs || 0"></td>
                             <td class="py-2">
                                 <button x-show="configs.default_log_name"
                                     @click="openLogViewer(configs.default_log_name, (configs.default_config||'').split('/').pop())"
@@ -417,40 +415,54 @@
                                     class="text-gray-400 dark:text-gray-600 font-mono text-xs">—</span>
                             </td>
                         </tr>
-                        <template x-for="c in configs.path_configs || []" :key="c.path">
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Routing rules -->
+            <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                <span class="tooltip cursor-default">Routing Rules<span class="tip">daemon.routing — longest-prefix
+                        match selects the profile and the services notified on completion</span></span>
+            </h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700 text-xs">
+                            <th class="pb-2 pr-4 font-medium">Match</th>
+                            <th class="pb-2 pr-4 font-medium">Profile</th>
+                            <th class="pb-2 font-medium">Services</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200/50 dark:divide-gray-700/50 text-xs">
+                        <template x-for="(r, idx) in configs.routing || []" :key="idx">
                             <tr class="hover:bg-gray-100/50 dark:hover:bg-gray-700/20">
-                                <td class="py-2 pr-4 text-gray-700 dark:text-gray-300 font-mono" :title="c.path" x-text="c.path"></td>
-                                <td class="py-2 pr-4 text-gray-500 dark:text-gray-400 font-mono" x-text="c.config.split('/').pop()"></td>
+                                <td class="py-2 pr-4 text-gray-700 dark:text-gray-300 font-mono" :title="r.match"
+                                    x-text="r.match"></td>
                                 <td class="py-2 pr-4">
-                                    <template x-if="c.default_args && c.default_args.length">
+                                    <span x-show="r.profile"
+                                        class="bg-purple-900/60 text-purple-300 px-1.5 py-0.5 rounded font-mono"
+                                        x-text="r.profile"></span>
+                                    <span x-show="!r.profile" class="text-gray-400 dark:text-gray-600">—</span>
+                                </td>
+                                <td class="py-2">
+                                    <template x-if="r.services && r.services.length">
                                         <span class="flex gap-1 flex-wrap">
-                                            <template x-for="a in c.default_args" :key="a">
+                                            <template x-for="s in r.services" :key="s">
                                                 <span
                                                     class="bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded font-mono"
-                                                    x-text="a"></span>
+                                                    x-text="s"></span>
                                             </template>
                                         </span>
                                     </template>
-                                    <span x-show="!c.default_args || !c.default_args.length"
+                                    <span x-show="!r.services || !r.services.length"
                                         class="text-gray-400 dark:text-gray-600">—</span>
-                                </td>
-                                <td class="py-2 pr-4">
-                                    <span x-show="c.active_jobs && c.active_jobs.length"
-                                        class="bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full"
-                                        x-text="'Running (' + c.active_jobs.length + ')'"></span>
-                                    <span x-show="!c.active_jobs || !c.active_jobs.length"
-                                        class="bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-500 px-2 py-0.5 rounded-full">Idle</span>
-                                </td>
-                                <td class="py-2 pr-4 text-gray-500 dark:text-gray-400" x-text="c.pending_jobs || 0"></td>
-                                <td class="py-2">
-                                    <button x-show="c.log_name"
-                                        @click="openLogViewer(c.log_name, c.config.split('/').pop())"
-                                        class="text-blue-400 hover:text-blue-300 font-mono text-xs"
-                                        x-text="c.log_file ? c.log_file.split('/').pop() : ''"></button>
-                                    <span x-show="!c.log_name" class="text-gray-400 dark:text-gray-600 font-mono text-xs">—</span>
                                 </td>
                             </tr>
                         </template>
+                        <tr x-show="!(configs.routing && configs.routing.length)">
+                            <td colspan="3" class="py-2 text-gray-400 dark:text-gray-600 italic">No routing rules
+                                configured</td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -839,7 +851,7 @@
                     const seq = ++this._acSeq;
 
                     // ── static candidates (no network call needed) ────────────────────────
-                    const configPaths = (this.configs.path_configs || []).map(c => c.path);
+                    const configPaths = (this.configs.routing || []).map(r => (r.match || '').replace(/\/\*+$/, ''));
                     const staticCandidates = [];
 
                     // Config prefixes: show when input is a prefix of the configured path,
