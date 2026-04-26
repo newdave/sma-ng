@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.50](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.49...sma-ng-v1.6.50) (2026-04-26)
+
+
+### Features
+
+* **config:** add ConfigLoader with longest-prefix routing engine ([83aa49c](https://github.com/newdave/sma-ng/commit/83aa49c4d6d1d69f3cd71b68229c8a1a20f9f5f1))
+
 ## [1.6.49](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.48...sma-ng-v1.6.49) (2026-04-26)
 
 
