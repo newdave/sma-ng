@@ -211,7 +211,9 @@ class ConfigLogManager:
         if JSONFormatter is not None:
           file_handler.setFormatter(JSONFormatter())
         else:
-          formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+          from resources.log import SingleLineFormatter
+
+          formatter = SingleLineFormatter("%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
           file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
       # propagate=True (Python default) — records also flow to the DAEMON handler
