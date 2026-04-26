@@ -74,7 +74,8 @@ class TestSchemaDefaultsContract:
     assert cfg.daemon.port == 8585
     assert cfg.daemon.workers == 4
     assert cfg.daemon.smoke_test is True
-    assert cfg.daemon.media_extensions[:3] == [".mkv", ".mp4", ".m4v"]
+    assert cfg.daemon.media_extensions[:3] == [".mkv", ".m4v", ".avi"]
+    assert ".mp4" not in cfg.daemon.media_extensions
 
   def test_base_defaults(self):
     cfg = SmaConfig()

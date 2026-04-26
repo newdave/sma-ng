@@ -381,7 +381,7 @@ class DaemonConfig(_Base):
   scan_paths: list[ScanPath] = Field(default_factory=list)
   path_rewrites: list[PathRewrite] = Field(default_factory=list)
   routing: list[RoutingRule] = Field(default_factory=list)
-  media_extensions: list[str] = Field(default_factory=lambda: [".mkv", ".mp4", ".m4v", ".avi", ".mov", ".wmv", ".ts", ".flv", ".webm"])
+  media_extensions: list[str] = Field(default_factory=lambda: [".mkv", ".m4v", ".avi", ".mov", ".wmv", ".ts", ".flv", ".webm"])
 
 
 # ---------------------------------------------------------------------------
