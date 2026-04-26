@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.76](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.75...sma-ng-v1.6.76) (2026-04-26)
+
+
+### Features
+
+* **lint:** pre-commit rule enforcing logging conventions ([7f30d14](https://github.com/newdave/sma-ng/commit/7f30d147c2d2b97be622558de67fd68b424276ef))
+
 ## [1.6.75](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.74...sma-ng-v1.6.75) (2026-04-26)
 
 
