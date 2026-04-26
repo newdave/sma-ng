@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.58](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.57...sma-ng-v1.6.58) (2026-04-26)
+
+
+### Bug Fixes
+
+* **deploy:** config:roll uses venv python3 locally and remotely ([448bce5](https://github.com/newdave/sma-ng/commit/448bce5fee5ae278263a48b168457bfe8f38568b))
+
 ## [1.6.57](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.56...sma-ng-v1.6.57) (2026-04-26)
 
 
