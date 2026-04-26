@@ -98,26 +98,40 @@ ensure_remote_node_name() {
   local env_path="${install_dir}/config/daemon.env"
   local sample_path="${dir}/setup/daemon.env.sample"
 
+  # Pass the use_sudo flag (not the prefix string) — SSH re-tokenizes
+  # positional args and strips the trailing space from "sudo ", which would
+  # leave the remote side running "sudogrep", "sudocat", etc.
+  local use_sudo_flag="false"
+  if [ -n "${sudo_prefix:-}" ]; then
+    use_sudo_flag="true"
+  fi
+
   echo "  stamping SMA_NODE_NAME=${host} into ${env_path}"
   # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by the caller; env_path/host/sample_path expand client-side (intentional)
-  ssh $ssh_opts "$ssh_target" "bash -s" "$env_path" "$host" "$sample_path" "$sudo_prefix" <<'REMOTE'
+  ssh $ssh_opts "$ssh_target" "bash -s" "$env_path" "$host" "$sample_path" "$use_sudo_flag" <<'REMOTE'
     set -euo pipefail
     env_path="$1"
     node_name="$2"
     sample_path="$3"
-    sudo_prefix="${4:-}"
+    use_sudo="${4:-false}"
+
+    if [ "$use_sudo" = "true" ]; then
+      _run() { sudo "$@"; }
+    else
+      _run() { "$@"; }
+    fi
 
     if [ ! -f "$env_path" ]; then
       if [ -f "$sample_path" ]; then
-        ${sudo_prefix}install -m 640 "$sample_path" "$env_path"
+        _run install -m 640 "$sample_path" "$env_path"
       else
-        ${sudo_prefix}touch "$env_path"
-        ${sudo_prefix}chmod 640 "$env_path"
+        _run touch "$env_path"
+        _run chmod 640 "$env_path"
       fi
     fi
 
     desired="SMA_NODE_NAME=${node_name}"
-    current=$(${sudo_prefix}grep -E '^[#[:space:]]*SMA_NODE_NAME=' "$env_path" | head -n1 || true)
+    current=$(_run grep -E '^[#[:space:]]*SMA_NODE_NAME=' "$env_path" | head -n1 || true)
 
     if [ "$current" = "$desired" ]; then
       exit 0
@@ -129,12 +143,12 @@ ensure_remote_node_name() {
     tmp=$(mktemp)
     trap 'rm -f "$tmp"' EXIT
     if [ -n "$current" ]; then
-      ${sudo_prefix}sed -E "0,/^[#[:space:]]*SMA_NODE_NAME=.*/{s|^[#[:space:]]*SMA_NODE_NAME=.*|${desired}|}" "$env_path" > "$tmp"
+      _run sed -E "0,/^[#[:space:]]*SMA_NODE_NAME=.*/{s|^[#[:space:]]*SMA_NODE_NAME=.*|${desired}|}" "$env_path" > "$tmp"
     else
-      ${sudo_prefix}cat "$env_path" > "$tmp"
+      _run cat "$env_path" > "$tmp"
       printf '%s\n' "$desired" >> "$tmp"
     fi
-    ${sudo_prefix}tee "$env_path" < "$tmp" > /dev/null
+    _run tee "$env_path" < "$tmp" > /dev/null
 REMOTE
 }
 
