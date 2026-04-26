@@ -32,6 +32,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Prefer keeping JSON parsing, payload construction, and non-trivial data transforms in those helper modules rather than re-embedding them in Bash.
 - Shell scripts must conform to ShellCheck best practices and must not produce any ShellCheck warnings or errors. Suppress a warning with a `# shellcheck disable=SCxxxx` comment only when the flag is genuinely a false positive, and always add an inline explanation for why the suppression is safe.
 
+## Logging Rules
+
+- One log record == one line. Multi-line application messages are rejected by `scripts/lint-logging.py`. Tracebacks emitted by `log.exception(...)` are exempt — `SingleLineFormatter` renders them on subsequent lines with a `  | ` prefix so the application message itself stays one line.
+- Do not pass `indent=` to `json.dumps(...)` inside `log.<level>(...)` calls or `print(json.dumps(...))`. The formatter compacts JSON-shaped substrings automatically; an explicit `indent=` produces multi-line records the lint rule rejects.
+- Do not use `print(...)` inside `resources/daemon/`. The worker captures the stdout of subprocess invocations into the per-config log file, so a stray `print` becomes uncontrolled log output. Append `# noqa: log-print` to the line if the call is genuinely interactive (rare here).
+- Do not write secrets into log messages. `RedactingFilter` walks `record.args` and `extra=` for keys in `SECRET_KEYS ∪ SERVICE_SECRET_FIELDS` (`api_key`, `db_url`, `username`, `password`, `node_id`, `apikey`, `token`) and replaces values with `***`; `SingleLineFormatter` runs a final text pass to catch pre-formatted `key=value` strings the filter can't reach. Add new secret-bearing fields to `resources.daemon.constants` so every redaction site picks them up.
+- Width cap: records longer than `SMA_LOG_MAX_WIDTH` (default 1024) are truncated with a `…+N` tail marker. The PostgreSQL `logs` table receives the full record (the cap applies only to console/file handlers).
+- See `docs/brainstorming/2026-04-27-logging-refactor.md` for the design rationale.
+
 ## Markdown Rules
 
 - Markdown files must conform to markdownlint best practices and must not produce any markdownlint warnings or errors.

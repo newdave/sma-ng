@@ -54,3 +54,11 @@ repos:
         language: system
         entry: bash -c 'if rg -n "python3?\\s+(-c|<<)" "$@"; then exit 1; fi' --
         files: ^(\.mise/tasks/|\.mise/shared/.*\.sh$|scripts/.*\.sh$|docker/docker-entrypoint\.sh$|setup/sma-(daemon-start|healthcheck)\.sh$)
+
+      - id: lint-logging
+        name: SMA-NG logging conventions
+        description: Reject json.dumps(..., indent=…) inside log calls, literal newlines in log messages, print(json.dumps(..., indent=…)), and bare print() in resources/daemon/.
+        language: system
+        entry: python3 scripts/lint-logging.py
+        files: ^(daemon\.py|manual\.py|resources/.*\.py|autoprocess/.*\.py)$
+        pass_filenames: true
