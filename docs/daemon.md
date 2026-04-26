@@ -161,7 +161,7 @@ daemon:
   api_key: your_secret_key
   db_url: null
   ffmpeg_dir: null
-  media_extensions: [.mp4, .mkv, .avi, .mov, .ts]
+  media_extensions: [.mkv, .m4v, .avi, .mov, .ts]
   path_rewrites:
     - from: /mnt/local/Media
       to: /mnt/unionfs/Media
@@ -385,7 +385,7 @@ The daemon can periodically scan directories for new media files and queue them 
 | `rewrite_to`   | Replacement prefix                                   |
 | `enabled`      | Set to `false` to disable without removing the entry |
 
-Files already in the `scanned_files` database table are skipped on subsequent scans. Any file whose extension matches `media_extensions` is eligible for submission, including `.mp4` if you leave it in that list.
+Files already in the `scanned_files` database table are skipped on subsequent scans. Any file whose extension matches `media_extensions` is eligible for submission. `.mp4` is excluded from the default list to avoid re-processing already-converted output; add it explicitly if you want scanning to pick it up.
 
 **Manual batch scan script:**
 

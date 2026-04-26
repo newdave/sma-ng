@@ -579,7 +579,7 @@ Daemon:
   api_key: your_secret_key
   db_url:
   ffmpeg_dir:
-  media_extensions: [.mp4, .mkv, .avi, .mov, .ts]
+  media_extensions: [.mkv, .m4v, .avi, .mov, .ts]
   scan_paths:
     - path: /mnt/local/Media
       interval: 3600
@@ -602,7 +602,7 @@ Daemon:
 | `api_key`          | API authentication key (overridable via `--api-key` or `SMA_DAEMON_API_KEY`)                                                                       |
 | `db_url`           | PostgreSQL URL for distributed mode (overridable via `--db-url` or `SMA_DAEMON_DB_URL`)                                                            |
 | `ffmpeg_dir`       | Directory containing `ffmpeg`/`ffprobe` binaries. Prepended to PATH for each conversion. Overridable via `--ffmpeg-dir` or `SMA_DAEMON_FFMPEG_DIR` |
-| `media_extensions` | File extensions considered media files for directory scanning and `/browse` (default: `.mp4 .mkv .avi .mov .ts`)                                   |
+| `media_extensions` | File extensions considered media files for directory scanning and `/browse` (default: `.mkv .m4v .avi .mov .wmv .ts .flv .webm`)                   |
 | `path_rewrites`    | Prefix substitutions applied before config matching; overlapping rewrites are matched longest-prefix-first                                         |
 | `scan_paths`       | Directories for scheduled background scanning. See [Scheduled Directory Scanning](#scheduled-directory-scanning)                                   |
 | `path_configs`     | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection                                                             |
@@ -643,7 +643,7 @@ The daemon can periodically scan directories for new media files and queue them 
 | `rewrite_from` | Path prefix to replace before submitting the job (optional)                                                  |
 | `rewrite_to`   | Replacement prefix (optional; use when the scanner sees files at a different mount point than the converter) |
 
-The daemon tracks which files have been submitted in the `scanned_files` database table. Files already in that table are skipped on subsequent scans. Any file whose extension matches `media_extensions` is eligible for submission, including `.mp4` if you leave it in that list.
+The daemon tracks which files have been submitted in the `scanned_files` database table. Files already in that table are skipped on subsequent scans. Any file whose extension matches `media_extensions` is eligible for submission. `.mp4` is excluded from the default list to avoid re-processing already-converted output; add it explicitly if you want scanning to pick it up.
 
 **Manual batch scan (script):** Use `scripts/sma-scan.sh` to walk a directory and submit each media file via webhook, with the same deduplication logic:
 

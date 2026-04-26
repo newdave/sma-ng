@@ -39,7 +39,6 @@ daemon:
         - radarr.main
   media-extensions:
     - .mkv
-    - .mp4
     - .m4v
     - .avi
     - .mov
