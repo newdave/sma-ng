@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#MISE description="Regenerate setup/sma-ng.yml.sample from the pydantic schema (pass --check for CI drift detection)"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+# Prefer the project venv so ruamel.yaml + pydantic are importable; fall
+# back to whatever python is on PATH (CI installs deps system-wide).
+if [ -x "venv/bin/python" ]; then
+    py="venv/bin/python"
+else
+    py="python3"
+fi
+
+exec "$py" scripts/generate_sma_ng_sample.py "$@"
