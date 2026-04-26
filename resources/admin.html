@@ -245,7 +245,7 @@
             <h2 class="text-sm font-semibold text-red-400">Remove All Failed Jobs</h2>
             <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Permanently deletes every failed job from the database.</p>
           </div>
-          <button @click="confirm('delete-failed')" :disabled="busy"
+          <button @click="openConfirm('delete-failed')" :disabled="busy"
             class="ml-6 flex-shrink-0 px-4 py-2 rounded-lg border border-red-700 text-red-400 hover:border-red-500 disabled:opacity-40 text-sm font-medium"
             x-text="busy === 'delete-failed' ? 'Deleting…' : 'Delete Failed Jobs'"></button>
         </div>
@@ -257,7 +257,7 @@
             <h2 class="text-sm font-semibold text-yellow-400">Remove All Offline Hosts</h2>
             <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Removes stale cluster node records where status is not online.</p>
           </div>
-          <button @click="confirm('delete-offline-nodes')" :disabled="busy"
+          <button @click="openConfirm('delete-offline-nodes')" :disabled="busy"
             class="ml-6 flex-shrink-0 px-4 py-2 rounded-lg border border-yellow-700 text-yellow-400 hover:border-yellow-500 disabled:opacity-40 text-sm font-medium"
             x-text="busy === 'delete-offline-nodes' ? 'Deleting…' : 'Delete Offline Hosts'"></button>
         </div>
@@ -269,7 +269,7 @@
             <h2 class="text-sm font-semibold text-red-500">Wipe Entire Job Database</h2>
             <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Deletes every job from the database. This cannot be undone.</p>
           </div>
-          <button @click="confirm('delete-all-jobs')" :disabled="busy"
+          <button @click="openConfirm('delete-all-jobs')" :disabled="busy"
             class="ml-6 flex-shrink-0 px-4 py-2 rounded-lg border border-red-800 bg-red-900/30 text-red-400 hover:border-red-600 disabled:opacity-40 text-sm font-medium"
             x-text="busy === 'delete-all-jobs' ? 'Wiping…' : 'Wipe All Jobs'"></button>
         </div>
@@ -483,7 +483,7 @@
           }
         },
 
-        confirm(action) {
+        openConfirm(action) {
           const a = this._actions[action];
           if (!a) return;
           this.confirmAction = action;
