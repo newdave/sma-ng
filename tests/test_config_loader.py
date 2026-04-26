@@ -255,3 +255,49 @@ class TestResolveRouting:
     res = loader.resolve_routing(cfg, "/downloads/tv/show.mkv")
     assert res.profile == "rq"
     assert ("sonarr", "main") in res.services
+
+
+class TestLoadReturnsPlainTypes:
+  """Regression: yamlconfig.load must return plain dict/list, not ruamel
+  CommentedMap/CommentedSeq.
+
+  The dashboard's "push config from this node" button hits
+  ``/admin/nodes/<id>/push-config``, which calls ``db.set_cluster_config``
+  → ``yaml.safe_dump``. PyYAML's safe_dump cannot represent ruamel's
+  comment-aware containers, so leaking those types out of ``load`` made
+  every push fail with a server-side RepresenterError that the browser
+  reported as a generic "Failed to fetch".
+  """
+
+  def test_nested_values_are_plain(self, write_yaml):
+    from resources.yamlconfig import load
+
+    p = write_yaml("daemon:\n  api_key: k\n  routing:\n    - match: /tv\n      profile: rq\n")
+    data = load(p)
+    assert type(data) is dict
+    assert type(data["daemon"]) is dict
+    assert type(data["daemon"]["routing"]) is list
+    assert type(data["daemon"]["routing"][0]) is dict
+
+  def test_safe_dump_round_trip(self, write_yaml):
+    import yaml as _yaml
+
+    from resources.yamlconfig import load
+
+    p = write_yaml("daemon:\n  api_key: k\n  routing:\n    - match: /tv\n      profile: rq\n")
+    data = load(p)
+    # Should not raise RepresenterError.
+    assert _yaml.safe_dump(data)
+
+  def test_dedup_path_returns_plain_types(self, write_yaml):
+    """Same guarantee even when the dedup branch fires."""
+    import yaml as _yaml
+
+    from resources.yamlconfig import load
+
+    p = write_yaml("daemon:\n  api-key:\n  port: 8585\nbase:\n  converter:\n    ffmpeg: ffmpeg\ndaemon:\n  api_key: realsecret\n")
+    data = load(p)
+    assert type(data) is dict
+    assert type(data["daemon"]) is dict
+    assert data["daemon"]["api_key"] == "realsecret"
+    assert _yaml.safe_dump(data)
