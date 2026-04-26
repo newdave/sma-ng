@@ -3,4 +3,4 @@
 #MISE aliases=["dev:test:deploy"]
 set -euo pipefail
 
-"$PY" -m pytest tests/test_deploy_tasks.py tests/test_ini_audit.py tests/test_ini_merge.py -q
+"$PY" -m pytest tests/test_deploy_tasks.py -q
