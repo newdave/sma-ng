@@ -82,6 +82,62 @@ chown_remote_path_to_ssh_user() {
     || echo "  WARNING: [$host] chown -R ${remote_user}: ${target_path} failed (continuing)" >&2
 }
 
+# Idempotently stamp SMA_NODE_NAME=<host> into the daemon.env file used by
+# docker-compose (env_file). Without this the recreated container starts with
+# no SMA_NODE_NAME, the daemon falls through to a generated UUID, and the
+# previously-approved cluster_nodes row is replaced by a new pending one on
+# every `deploy:docker` run. config:roll already does this stamping, but
+# deploy:docker does not depend on config:roll, so it must self-heal.
+# Requires init_host_context (or equivalent) to have populated ssh_opts and
+# ssh_target for the host.
+ensure_remote_node_name() {
+  local host="$1"
+  local install_dir
+  # shellcheck disable=SC2154  # $cfg is populated by init_host_context for the current host
+  install_dir=$($cfg sma_install_dir "/opt/sma")
+  local env_path="${install_dir}/config/daemon.env"
+  local sample_path="${dir}/setup/daemon.env.sample"
+
+  echo "  stamping SMA_NODE_NAME=${host} into ${env_path}"
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by the caller; env_path/host/sample_path expand client-side (intentional)
+  ssh $ssh_opts "$ssh_target" "bash -s" "$env_path" "$host" "$sample_path" "$sudo_prefix" <<'REMOTE'
+    set -euo pipefail
+    env_path="$1"
+    node_name="$2"
+    sample_path="$3"
+    sudo_prefix="${4:-}"
+
+    if [ ! -f "$env_path" ]; then
+      if [ -f "$sample_path" ]; then
+        ${sudo_prefix}install -m 640 "$sample_path" "$env_path"
+      else
+        ${sudo_prefix}touch "$env_path"
+        ${sudo_prefix}chmod 640 "$env_path"
+      fi
+    fi
+
+    desired="SMA_NODE_NAME=${node_name}"
+    current=$(${sudo_prefix}grep -E '^[#[:space:]]*SMA_NODE_NAME=' "$env_path" | head -n1 || true)
+
+    if [ "$current" = "$desired" ]; then
+      exit 0
+    fi
+
+    # Build the new contents in a tmp file, then rewrite env_path in place
+    # via tee — this preserves the original file's owner/group/mode rather
+    # than re-creating it as the (sudo) writer.
+    tmp=$(mktemp)
+    trap 'rm -f "$tmp"' EXIT
+    if [ -n "$current" ]; then
+      ${sudo_prefix}sed -E "0,/^[#[:space:]]*SMA_NODE_NAME=.*/{s|^[#[:space:]]*SMA_NODE_NAME=.*|${desired}|}" "$env_path" > "$tmp"
+    else
+      ${sudo_prefix}cat "$env_path" > "$tmp"
+      printf '%s\n' "$desired" >> "$tmp"
+    fi
+    ${sudo_prefix}tee "$env_path" < "$tmp" > /dev/null
+REMOTE
+}
+
 init_docker_host_context() {
   local host="$1"
 
