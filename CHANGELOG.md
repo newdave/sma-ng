@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.70](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.69...sma-ng-v1.6.70) (2026-04-26)
+
+
+### Bug Fixes
+
+* **arr:** rescan converted files via RescanSeries/RescanMovie ([d1c39d7](https://github.com/newdave/sma-ng/commit/d1c39d723cb575bd72416d1460092082640f69e9))
+
+
+### Documentation
+
+* drop SQLite references and INI-era config examples ([d169810](https://github.com/newdave/sma-ng/commit/d169810eb7ebb55ad110b5fb4ab2499582fedf49))
+
 ## [1.6.69](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.68...sma-ng-v1.6.69) (2026-04-26)
 
 
