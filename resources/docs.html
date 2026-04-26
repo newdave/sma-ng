@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>SMA-NG Documentation</title>
 <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/newdave/sma-ng/main/logo.png">
 <script>
@@ -12,6 +13,21 @@
       document.documentElement.classList.add('dark');
     }
   })();
+  function toggleTheme() {
+    var isDark = document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    // Re-render mermaid diagrams with the matching theme. mermaid.initialize
+    // bakes the theme at init time, so we have to re-init and re-run.
+    if (window.mermaid) {
+      window.mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default' });
+      document.querySelectorAll('.mermaid').forEach((el, i) => {
+        if (el.dataset.original == null) el.dataset.original = el.textContent;
+        el.removeAttribute('data-processed');
+        el.textContent = el.dataset.original;
+      });
+      window.mermaid.run();
+    }
+  }
 </script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>tailwind.config = { darkMode: 'class' }</script>
@@ -19,6 +35,16 @@
   .copy-btn { position:absolute; top:0.5rem; right:0.5rem; opacity:0; transition:opacity 0.15s; }
   pre:hover .copy-btn { opacity:1; }
   pre { position:relative; }
+
+  /* Light-mode overrides — keep parity with dashboard.html. */
+  html:not(.dark) .text-gray-400   { color: #4b5563; }
+  html:not(.dark) .text-yellow-400 { color: #a16207; }
+  html:not(.dark) .text-blue-400   { color: #2563eb; }
+  html:not(.dark) .text-blue-300   { color: #1d4ed8; }
+  html:not(.dark) .text-green-400  { color: #15803d; }
+  html:not(.dark) .text-red-400    { color: #b91c1c; }
+  html:not(.dark) .text-indigo-400 { color: #4338ca; }
+  html:not(.dark) .text-purple-400 { color: #7e22ce; }
 </style>
 </head>
 <body class="bg-slate-200 dark:bg-gray-900 text-gray-800 dark:text-gray-100 min-h-screen">
@@ -26,7 +52,7 @@
   <!-- Sidebar -->
   <nav class="w-56 flex-shrink-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 px-3 py-6 flex flex-col gap-1">
     <a href="/dashboard" class="text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 text-xs mb-3 block">&larr; Dashboard</a>
-    <button onclick="toggleTheme()" title="Toggle light/dark theme"
+    <button onclick="toggleTheme()" aria-label="Toggle light/dark theme" title="Toggle light/dark theme"
       class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-3 w-full text-left">
       <svg class="w-3.5 h-3.5 block dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
@@ -54,10 +80,6 @@
 </div>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script>
-function toggleTheme() {
-  var isDark = document.documentElement.classList.toggle('dark');
-  localStorage.setItem('theme', isDark ? 'dark' : 'light');
-}
 mermaid.initialize({ startOnLoad: true, theme: document.documentElement.classList.contains('dark') ? 'dark' : 'default' });
 document.querySelectorAll('pre').forEach(pre => {
   const btn = document.createElement('button');
