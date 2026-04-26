@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.49](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.48...sma-ng-v1.6.49) (2026-04-26)
+
+
+### Features
+
+* **config:** add pydantic v2 schema for sma-ng.yml restructure ([68b76b8](https://github.com/newdave/sma-ng/commit/68b76b87a6c05a97c982c4fcce8133e1181fa22b))
+* **metrics:** add /api/metrics endpoint and cluster metrics dashboard ([1f99fd7](https://github.com/newdave/sma-ng/commit/1f99fd7d97e91967a121d8a9d590e73ca4b23b48))
+* **metrics:** record input file sizes at job completion ([943a1f1](https://github.com/newdave/sma-ng/commit/943a1f150736195f34a0a4575b63444b1942f23d))
+
 ## [1.6.48](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.47...sma-ng-v1.6.48) (2026-04-25)
 
 
