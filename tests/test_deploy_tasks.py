@@ -220,7 +220,7 @@ class TestMiseTaskLayout:
     assert result.returncode == 0, result.stderr or result.stdout
     completions = [re.split(r"(?<!\\):", line, maxsplit=1)[0].replace("\\:", ":") for line in result.stdout.splitlines()]
     assert "config:roll" in completions
-    assert "config:audit" in completions
+    assert "config:sample" in completions
 
   def test_alias_task_names_are_exposed_to_completion(self, tmp_path):
     if not shutil.which("usage"):
@@ -281,10 +281,6 @@ class TestMiseTaskLayout:
     assert "config:roll" in tasks
     assert "deploy:config:roll" not in tasks
     assert "deploy:config:roll" in tasks["config:roll"]
-
-    assert "config:audit" in tasks
-    assert "deploy:config:audit" not in tasks
-    assert "deploy:config:audit" in tasks["config:audit"]
 
   def test_mise_tasks_do_not_call_make(self):
     task_root = os.path.join(PROJECT_ROOT, ".mise/tasks")
