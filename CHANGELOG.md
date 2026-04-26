@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.66](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.65...sma-ng-v1.6.66) (2026-04-26)
+
+
+### Features
+
+* **yaml:** dedup-aware loader merges duplicate top-level keys ([ef0d33c](https://github.com/newdave/sma-ng/commit/ef0d33cb8b175f9167c497191294f82efc771d2b))
+
+
+### Bug Fixes
+
+* **deploy:** route every sma-ng.yml writer through the dedup-aware loader ([e40bb0e](https://github.com/newdave/sma-ng/commit/e40bb0e65a15a8e46bb427ad48ca43ff56a12bd5))
+
 ## [1.6.65](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.64...sma-ng-v1.6.65) (2026-04-26)
 
 
