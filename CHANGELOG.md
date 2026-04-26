@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.65](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.64...sma-ng-v1.6.65) (2026-04-26)
+
+
+### Bug Fixes
+
+* **scripts:** tolerate duplicate keys in local-config YAML loader ([33e1191](https://github.com/newdave/sma-ng/commit/33e11917d2264def5e71297cbcfd70091b85ad66))
+* **webhook:** use venv python and surface api_key resolution errors ([e3ad54f](https://github.com/newdave/sma-ng/commit/e3ad54fe4af714f080d652b28d165a0eb4a24dc9))
+
 ## [1.6.64](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.63...sma-ng-v1.6.64) (2026-04-26)
 
 
