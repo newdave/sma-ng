@@ -14,12 +14,12 @@ failed=""
 for host in $DEPLOY_HOSTS; do
   init_host_context "$host"
 
-  # shellcheck disable=SC2154  # dir, ssh_opts, ssh_target are set by init_host_context above
   echo ""
+  # shellcheck disable=SC2154  # dir is set by init_host_context above.
   echo "==> [$host] syncing .mise control plane to $dir/.mise"
   run_remote_command "$host" "mkdir -p $dir/.mise" || { failed="$failed $host"; continue; }
 
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086,SC2154  # ssh_opts, ssh_target, and dir are set by init_host_context above.
   rsync -az --delete \
     -e "ssh $ssh_opts" \
     .mise/ "$ssh_target:$dir/.mise/" || { failed="$failed $host"; continue; }
