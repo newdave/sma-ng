@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.63](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.62...sma-ng-v1.6.63) (2026-04-26)
+
+
+### Bug Fixes
+
+* **docker:** pin container hostname so node identity survives recreate ([6a64fe3](https://github.com/newdave/sma-ng/commit/6a64fe365cae9bf6c8b61e40d662f0ac25b09f2e))
+
 ## [1.6.62](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.61...sma-ng-v1.6.62) (2026-04-26)
 
 
