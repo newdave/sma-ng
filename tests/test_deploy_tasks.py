@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import textwrap
 from base64 import b64encode
 
@@ -559,7 +560,7 @@ class TestLocalConfig:
 
   def _run(self, fixture_local_yml, *args):
     result = subprocess.run(
-      ["python3", "scripts/local-config.py", str(fixture_local_yml), *args],
+      [sys.executable, "scripts/local-config.py", str(fixture_local_yml), *args],
       cwd=PROJECT_ROOT,
       capture_output=True,
       text=True,
