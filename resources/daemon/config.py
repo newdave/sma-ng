@@ -462,6 +462,30 @@ class PathConfigManager:
     """
     return list(self.default_args)
 
+  def routing_match_paths(self) -> list[str]:
+    """Return cleaned ``match`` prefixes for every ``daemon.routing`` rule.
+
+    Used by the admin dashboard's directory browser to compute the allowed
+    root prefixes the user can navigate into. Trailing ``/**`` or ``/*`` is
+    stripped; an empty match (degenerate "match-all" rule) is skipped.
+    """
+    if self._cfg is None:
+      return []
+    out = []
+    for rule in self._cfg.daemon.routing:
+      p = rule.match.rstrip("/")
+      while p.endswith("*"):
+        p = p.rstrip("*").rstrip("/")
+      if p:
+        out.append(os.path.normpath(p))
+    return out
+
+  def routing_rules_admin(self) -> list[dict]:
+    """Return ``daemon.routing`` rules as plain dicts for the /configs admin endpoint."""
+    if self._cfg is None:
+      return []
+    return [{"match": r.match, "profile": r.profile, "services": list(r.services)} for r in self._cfg.daemon.routing]
+
   def get_services_for_path(self, file_path):
     """Return the list of (service_type, instance_name) tuples to notify
     for *file_path*, per ``daemon.routing`` longest-prefix match.
