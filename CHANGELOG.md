@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.73](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.72...sma-ng-v1.6.73) (2026-04-26)
+
+
+### Bug Fixes
+
+* **yaml:** return plain types from yamlconfig.load so safe_dump works ([ad18ded](https://github.com/newdave/sma-ng/commit/ad18ded127b77c99b6e98852959496cd0e6c6850))
+
 ## [1.6.72](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.71...sma-ng-v1.6.72) (2026-04-26)
 
 
