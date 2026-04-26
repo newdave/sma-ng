@@ -144,4 +144,4 @@ jobs:
         run: mise run setup:deps:dev
 
       - name: Check sample is in sync with schema
-        run: mise run config:generate-sample --check
+        run: mise run config:sample --check

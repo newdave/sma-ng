@@ -3,7 +3,7 @@
 The committed sample is the bytes-identical output of
 ``scripts/generate_sma_ng_sample.py``. The same `--check` mode also runs
 in the ``config-sample-consistency`` CI job; this test catches the same
-drift locally so a developer who forgets ``mise run config:generate-sample``
+drift locally so a developer who forgets ``mise run config:sample``
 gets a clear pytest failure instead of a CI red-light.
 """
 
@@ -35,14 +35,14 @@ def generator_module():
 def test_committed_sample_is_byte_identical_to_generator(generator_module):
   """A regenerated sample must match the committed bytes exactly.
 
-  If this fails, run ``mise run config:generate-sample`` and commit the
+  If this fails, run ``mise run config:sample`` and commit the
   diff — the schema or the illustrative routing/services entries have
   changed and the sample is stale.
   """
   generated = generator_module.build_sample_yaml()
   with open(SAMPLE_PATH, "rb") as f:
     committed = f.read()
-  assert generated == committed, "setup/sma-ng.yml.sample is out of sync with the schema. Run `mise run config:generate-sample` to regenerate."
+  assert generated == committed, "setup/sma-ng.yml.sample is out of sync with the schema. Run `mise run config:sample` to regenerate."
 
 
 def test_committed_sample_loads_through_config_loader():

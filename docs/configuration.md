@@ -44,7 +44,7 @@ The longest matching prefix wins; an unmatched path falls through to
 The schema is the single source of truth for defaults and types; every
 YAML key is validated by pydantic at load. Unknown keys are accepted
 but logged as `WARNING Unknown config key: <dotted.path>` so typos
-surface immediately. Sample regeneration (`mise run config:generate-sample`)
+surface immediately. Sample regeneration (`mise run config:sample`)
 and the `config-sample-consistency` CI job keep the committed sample
 locked to the schema.
 

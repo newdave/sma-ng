@@ -183,7 +183,7 @@ def main() -> int:
     if committed == generated:
       return 0
     sys.stdout.write(_diff(generated, committed))
-    sys.stderr.write("\nsetup/sma-ng.yml.sample is out of sync with the schema. Run `mise run config:generate-sample` to regenerate.\n")
+    sys.stderr.write("\nsetup/sma-ng.yml.sample is out of sync with the schema. Run `mise run config:sample` to regenerate.\n")
     return 1
 
   os.makedirs(SAMPLE_PATH.parent, exist_ok=True)
