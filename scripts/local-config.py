@@ -28,6 +28,9 @@ try:
 
   def _load(path):
     y = _RuamelYAML()
+    # Tolerate duplicate keys (later-wins) so manually-edited configs with
+    # accidental dup top-level sections still resolve, matching PyYAML.
+    y.allow_duplicate_keys = True
     with open(path) as f:
       return y.load(f) or {}
 
