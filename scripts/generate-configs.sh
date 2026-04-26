@@ -6,9 +6,7 @@ CONFIG_DIR="${CONFIG_DIR:-$ROOT_DIR/config}"
 SETUP_DIR="${SETUP_DIR:-$ROOT_DIR/setup}"
 DETECT_GPU_SCRIPT="${DETECT_GPU_SCRIPT:-$ROOT_DIR/scripts/detect-gpu.sh}"
 
-if [ "${GPU+x}" = "x" ]; then
-  GPU="${GPU}"
-else
+if [ -z "${GPU+x}" ]; then
   GPU="$("$DETECT_GPU_SCRIPT")"
 fi
 

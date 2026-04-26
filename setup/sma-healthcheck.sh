@@ -9,17 +9,15 @@ PORT="${2:-8585}"
 URL="http://${HOST}:${PORT}/health"
 TIMEOUT=5
 
-response=$(curl -sf --max-time "$TIMEOUT" "$URL" 2>/dev/null)
-if [ $? -ne 0 ]; then
+if ! response=$(curl -sf --max-time "$TIMEOUT" "$URL" 2>/dev/null); then
     echo "UNHEALTHY: Cannot reach SMA-NG daemon at $URL"
     exit 1
 fi
 
-status=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
-if [ "$status" = "ok" ]; then
+if printf '%s\n' "$response" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'; then
     echo "HEALTHY: SMA-NG daemon responding at $URL"
     exit 0
 else
-    echo "UNHEALTHY: SMA-NG daemon returned status '$status'"
+    echo "UNHEALTHY: SMA-NG daemon returned unexpected response"
     exit 1
 fi

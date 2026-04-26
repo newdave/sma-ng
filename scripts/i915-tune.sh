@@ -131,7 +131,7 @@ card_gt=""
 for card_path in /sys/class/drm/card*/; do
     [[ -d "$card_path" ]] || continue
     # Each card exposes its render node under /sys/class/drm/card*/device/drm/renderD*
-    if ls "${card_path}device/drm/" 2>/dev/null | grep -q "^${render_name}$"; then
+    if [[ -e "${card_path}device/drm/${render_name}" ]]; then
         # Prefer gt/gt0 (kernel 5.18+ unified GT sysfs)
         if [[ -d "${card_path}gt/gt0" ]]; then
             card_gt="${card_path}gt/gt0"
@@ -168,9 +168,6 @@ rps_max="${card_gt}/rps_max_freq_mhz"
 rps_boost="${card_gt}/rps_boost_freq_mhz"
 rps_cur="${card_gt}/rps_cur_freq_mhz"
 rps_act="${card_gt}/rps_act_freq_mhz"
-rps_min_hw="${card_gt}/rps_min_freq_mhz"    # hardware floor (read before we overwrite)
-rps_max_hw="${card_gt}/rps_max_freq_mhz"    # hardware ceiling
-
 # Read hardware min/max from the RP limits file if available
 hw_min_path="${card_gt}/rps_RP1_freq_mhz"   # Efficient+ frequency (RP1 = efficient floor)
 hw_max_path="${card_gt}/rps_RP0_freq_mhz"   # Maximum Turbo (RP0)
