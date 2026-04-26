@@ -1,8 +1,11 @@
 """Logging setup with optional INI-based configuration."""
 
+import copy
+import json
 import logging
 import logging.handlers
 import os
+import re
 from configparser import RawConfigParser
 from logging.config import fileConfig
 
@@ -108,9 +111,255 @@ _ANSI_RED = "\033[31m"
 _ANSI_YELLOW = "\033[33m"
 _ANSI_RESET = "\033[0m"
 
+# ── Single-line formatter, redaction, and width capping ──────────────────────
+# Goals (see docs/brainstorming/2026-04-27-logging-refactor.md):
+#   - Every application log record fits on exactly one line on disk.
+#   - JSON-shaped substrings render compactly (no indent=).
+#   - Records exceeding SMA_LOG_MAX_WIDTH are truncated with a "…+N" suffix.
+#   - Tracebacks (exc_info) are emitted on subsequent lines, each prefixed
+#     with two spaces + "| " so they're greppable as a group while leaving
+#     the application-level message a single line.
+#   - Secrets (api_key, db_url, username, password, node_id, apikey, token)
+#     are redacted at the layer regardless of how the caller dressed them up.
 
-class ColorFormatter(logging.Formatter):
-  """Formatter that colorizes ERROR and WARNING lines on TTYs."""
+_DEFAULT_MAX_WIDTH = 1024
+_NEWLINE_MARKER = " ⏎ "
+_TRACEBACK_PREFIX = "  | "
+_REDACTED = "***"
+
+
+def _redact_keys():
+  """Return the union of secret-bearing field names. Imported lazily so the
+  log module can be loaded without the daemon package on PYTHONPATH (e.g.
+  during early CLI startup)."""
+  try:
+    from resources.daemon.constants import SECRET_KEYS, SERVICE_SECRET_FIELDS
+
+    return frozenset(SECRET_KEYS) | frozenset(SERVICE_SECRET_FIELDS)
+  except Exception:
+    return frozenset({"api_key", "api-key", "db_url", "db-url", "username", "password", "node_id", "node-id", "apikey", "token"})
+
+
+def _redact_value(value, secrets):
+  """Recursively replace values whose dict key is in *secrets* with `***`.
+
+  Walks dicts and lists; scalars pass through. Empty values are left alone
+  (no point masking ``None`` / ``""`` since the user clearly didn't set
+  them).
+  """
+  if isinstance(value, dict):
+    out = {}
+    for k, v in value.items():
+      if isinstance(k, str) and k in secrets and v not in (None, "", 0, False):
+        out[k] = _REDACTED
+      else:
+        out[k] = _redact_value(v, secrets)
+    return out
+  if isinstance(value, list):
+    return [_redact_value(v, secrets) for v in value]
+  if isinstance(value, tuple):
+    return tuple(_redact_value(v, secrets) for v in value)
+  return value
+
+
+def _build_text_redact_pattern(secrets):
+  """Compile a regex matching ``key<sep>value`` pairs where key is a secret."""
+  if not secrets:
+    return None
+  keys = "|".join(re.escape(k) for k in sorted(secrets, key=len, reverse=True))
+  # Match: optional opening quote, key, optional closing quote, separator
+  # (`:` or `=`), optional whitespace + opening quote, then the value up
+  # to the next delimiter.
+  return re.compile(r"(?P<key>['\"]?(?:" + keys + r")['\"]?)(?P<sep>\s*[:=]\s*['\"]?)(?P<val>[^,\s'\"}\]]+)")
+
+
+def _redact_text(message, pattern):
+  if not pattern or not message:
+    return message
+  return pattern.sub(lambda m: m.group("key") + m.group("sep") + _REDACTED, message)
+
+
+def _compact_json_substrings(s):
+  """Identify balanced JSON-shaped substrings in *s* and re-dump them compactly.
+
+  Heuristic: scan for ``{``/``[``, then walk forward tracking depth (with
+  string-aware brace counting) to find the matching close. Pass the slice
+  through ``json.loads``; on failure leave the original substring intact.
+  Embedded secrets in the parsed object are redacted at the same time.
+  """
+  if not s or ("{" not in s and "[" not in s):
+    return s
+  secrets = _redact_keys()
+  out = []
+  i = 0
+  n = len(s)
+  while i < n:
+    # Find next opening brace/bracket.
+    next_brace = -1
+    for ch in ("{", "["):
+      idx = s.find(ch, i)
+      if idx != -1 and (next_brace == -1 or idx < next_brace):
+        next_brace = idx
+    if next_brace == -1:
+      out.append(s[i:])
+      break
+    out.append(s[i:next_brace])
+    open_ch = s[next_brace]
+    close_ch = "}" if open_ch == "{" else "]"
+    depth = 0
+    end = -1
+    in_str = False
+    esc = False
+    for j in range(next_brace, n):
+      c = s[j]
+      if in_str:
+        if esc:
+          esc = False
+        elif c == "\\":
+          esc = True
+        elif c == '"':
+          in_str = False
+      else:
+        if c == '"':
+          in_str = True
+        elif c == open_ch:
+          depth += 1
+        elif c == close_ch:
+          depth -= 1
+          if depth == 0:
+            end = j + 1
+            break
+    if end == -1:
+      out.append(s[next_brace:])
+      break
+    candidate = s[next_brace:end]
+    try:
+      parsed = json.loads(candidate)
+      parsed = _redact_value(parsed, secrets)
+      out.append(json.dumps(parsed, separators=(",", ":"), default=str, ensure_ascii=False))
+    except (json.JSONDecodeError, ValueError):
+      out.append(candidate)
+    i = end
+  return "".join(out)
+
+
+class RedactingFilter(logging.Filter):
+  """Filter that walks ``record.args`` and any ``extra=`` fields and replaces
+  values whose key is a known secret with ``***``. Final message-level
+  text masking happens in :class:`SingleLineFormatter` so it covers
+  pre-formatted strings too.
+  """
+
+  _STANDARD_RECORD_KEYS = frozenset(
+    {
+      "name",
+      "msg",
+      "args",
+      "levelname",
+      "levelno",
+      "pathname",
+      "filename",
+      "module",
+      "exc_info",
+      "exc_text",
+      "stack_info",
+      "lineno",
+      "funcName",
+      "created",
+      "msecs",
+      "relativeCreated",
+      "thread",
+      "threadName",
+      "processName",
+      "process",
+      "message",
+      "asctime",
+      "taskName",
+    }
+  )
+
+  def filter(self, record):
+    secrets = _redact_keys()
+    if record.args:
+      try:
+        if isinstance(record.args, dict):
+          record.args = _redact_value(copy.deepcopy(record.args), secrets)
+        elif isinstance(record.args, (tuple, list)):
+          record.args = type(record.args)(_redact_value(copy.deepcopy(a), secrets) if isinstance(a, (dict, list, tuple)) else a for a in record.args)
+      except Exception:
+        pass
+    for key in list(record.__dict__):
+      if key in self._STANDARD_RECORD_KEYS:
+        continue
+      val = record.__dict__[key]
+      if isinstance(val, (dict, list, tuple)):
+        try:
+          record.__dict__[key] = _redact_value(copy.deepcopy(val), secrets)
+        except Exception:
+          pass
+    return True
+
+
+class SingleLineFormatter(logging.Formatter):
+  """Formatter enforcing the single-line invariant.
+
+  - Newlines in the rendered message become a visible marker ``⏎``.
+  - JSON-looking substrings are compacted (no whitespace).
+  - Output is truncated to ``max_width`` chars with a ``…+N`` tail marker.
+  - ``record.exc_info`` tracebacks are appended on subsequent lines, each
+    prefixed with two spaces + ``| `` so the application message itself
+    remains exactly one line.
+  """
+
+  def __init__(self, fmt=None, datefmt=None, style="%", max_width=None):
+    super().__init__(fmt, datefmt, style)
+    if max_width is None:
+      try:
+        max_width = int(os.environ.get("SMA_LOG_MAX_WIDTH", _DEFAULT_MAX_WIDTH))
+      except (TypeError, ValueError):
+        max_width = _DEFAULT_MAX_WIDTH
+    self._max_width = max_width
+    self._redact_pattern = _build_text_redact_pattern(_redact_keys())
+
+  def format(self, record):
+    # Format message without the parent appending exc_info; we'll do that
+    # ourselves with our own per-frame prefix.
+    saved_exc_info = record.exc_info
+    saved_exc_text = record.exc_text
+    record.exc_info = None
+    record.exc_text = None
+    try:
+      base = super().format(record)
+    finally:
+      record.exc_info = saved_exc_info
+      record.exc_text = saved_exc_text
+
+    base = base.replace("\r\n", "\n").replace("\r", "\n")
+    base = _compact_json_substrings(base)
+    base = _redact_text(base, self._redact_pattern)
+    if "\n" in base:
+      base = base.replace("\n", _NEWLINE_MARKER)
+
+    if self._max_width and len(base) > self._max_width:
+      trimmed = len(base) - self._max_width
+      # Reserve room for the marker so the final string is at most max_width.
+      marker = "…+%d" % trimmed
+      base = base[: max(0, self._max_width - len(marker))] + marker
+
+    if saved_exc_info:
+      tb = self.formatException(saved_exc_info)
+      tb_lines = [ln for ln in tb.split("\n") if ln]
+      base = base + "\n" + "\n".join(_TRACEBACK_PREFIX + ln for ln in tb_lines)
+    return base
+
+
+class ColorFormatter(SingleLineFormatter):
+  """Formatter that colorizes ERROR and WARNING lines on TTYs.
+
+  Inherits :class:`SingleLineFormatter`'s collapse/compact/truncate
+  behaviour so TTY output stays one record per line just like the file
+  handlers.
+  """
 
   def format(self, record):
     msg = super().format(record)
@@ -121,25 +370,72 @@ class ColorFormatter(logging.Formatter):
     return msg
 
 
-def _apply_color_formatters():
-  """Replace formatters on StreamHandlers with ColorFormatter equivalents.
-
-  Called after fileConfig() so colors are applied regardless of what logging.ini
-  specifies. Only applies to handlers writing to a TTY so log files stay clean.
-  """
+def _iter_all_handlers():
+  """Yield every handler attached to root and any named logger."""
   for handler in logging.root.handlers:
-    if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
-      if hasattr(handler.stream, "isatty") and handler.stream.isatty():
-        fmt = handler.formatter
-        handler.setFormatter(ColorFormatter(fmt._fmt if fmt else None, fmt.datefmt if fmt else None))
+    yield handler
   for logger in logging.Logger.manager.loggerDict.values():
     if not isinstance(logger, logging.Logger):
       continue
     for handler in logger.handlers:
-      if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
-        if hasattr(handler.stream, "isatty") and handler.stream.isatty():
-          fmt = handler.formatter
-          handler.setFormatter(ColorFormatter(fmt._fmt if fmt else None, fmt.datefmt if fmt else None))
+      yield handler
+
+
+def _is_structured_handler(handler):
+  """Return True for handlers that should NOT receive SingleLineFormatter.
+
+  - JSONFormatter writes its own line-bounded NDJSON; double-formatting
+    would corrupt the JSON.
+  - PostgreSQLLogHandler stores structured fields in the cluster ``logs``
+    table and renders them server-side; the formatter is irrelevant there.
+  """
+  fmt = handler.formatter
+  if JSONFormatter is not None and isinstance(fmt, JSONFormatter):
+    return True
+  cls_name = type(handler).__name__
+  return cls_name == "PostgreSQLLogHandler"
+
+
+def _apply_single_line_formatter():
+  """Wrap formatters on every handler with :class:`SingleLineFormatter`.
+
+  Called immediately after ``fileConfig()`` so the single-line invariant
+  holds regardless of what ``logging.ini`` specifies. Skips handlers that
+  intentionally use structured formats (JSONFormatter, PostgreSQLLogHandler).
+  TTY StreamHandlers are still wrapped here; ``_apply_color_formatters``
+  later replaces those formatters with :class:`ColorFormatter`, which
+  inherits the same collapse/compact/truncate behaviour.
+  """
+  for handler in _iter_all_handlers():
+    if _is_structured_handler(handler):
+      continue
+    fmt = handler.formatter
+    if isinstance(fmt, SingleLineFormatter):
+      continue
+    handler.setFormatter(SingleLineFormatter(fmt._fmt if fmt else None, fmt.datefmt if fmt else None))
+
+
+def _apply_color_formatters():
+  """Replace formatters on TTY StreamHandlers with ColorFormatter equivalents.
+
+  Called after ``_apply_single_line_formatter`` so the parent formatter is
+  already SingleLineFormatter; ColorFormatter inherits from it. Only applies
+  to handlers writing to a TTY so log files stay clean.
+  """
+  for handler in _iter_all_handlers():
+    if _is_structured_handler(handler):
+      continue
+    if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+      if hasattr(handler.stream, "isatty") and handler.stream.isatty():
+        fmt = handler.formatter
+        handler.setFormatter(ColorFormatter(fmt._fmt if fmt else None, fmt.datefmt if fmt else None))
+
+
+def _apply_redacting_filter():
+  """Attach :class:`RedactingFilter` to the root logger so every record is
+  scrubbed before reaching any handler. Idempotent."""
+  if not any(isinstance(f, RedactingFilter) for f in logging.root.filters):
+    logging.root.addFilter(RedactingFilter())
 
 
 def _apply_job_context_filter():
@@ -305,8 +601,10 @@ def getLogger(name=None, custompath=None):
   checkLoggingConfig(configfile, logs_dir=logs_dir)
 
   fileConfig(configfile, disable_existing_loggers=False)
+  _apply_single_line_formatter()
   _apply_color_formatters()
   _apply_job_context_filter()
   _apply_json_formatter()
+  _apply_redacting_filter()
 
   return logging.getLogger(name)
