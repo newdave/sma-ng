@@ -5,22 +5,32 @@ on:
     branches: [main]
     paths:
       - "**.py"
+      - "**.json"
+      - "**.md"
+      - "**.sh"
       - "setup/requirements*.txt"
       - "pyproject.toml"
       - ".pre-commit-config.yaml"
+      - ".markdownlint.json"
       - "docs/openapi.yaml"
       - ".github/workflows/ci.yml"
       - ".mise/tasks/**"
+      - ".mise/shared/**"
   pull_request:
     branches: [main]
     paths:
       - "**.py"
+      - "**.json"
+      - "**.md"
+      - "**.sh"
       - "setup/requirements*.txt"
       - "pyproject.toml"
       - ".pre-commit-config.yaml"
+      - ".markdownlint.json"
       - "docs/openapi.yaml"
       - ".github/workflows/ci.yml"
       - ".mise/tasks/**"
+      - ".mise/shared/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
