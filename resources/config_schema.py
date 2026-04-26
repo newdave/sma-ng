@@ -377,7 +377,7 @@ class DaemonConfig(_Base):
   log_archive_dir: str = ""
   log_archive_after_days: int = 7
   log_delete_after_days: int = 30
-  default_args: dict[str, Any] = Field(default_factory=dict)
+  default_args: list[str] | str = Field(default_factory=list)
   scan_paths: list[ScanPath] = Field(default_factory=list)
   path_rewrites: list[PathRewrite] = Field(default_factory=list)
   routing: list[RoutingRule] = Field(default_factory=list)

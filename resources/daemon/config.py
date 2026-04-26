@@ -1,4 +1,3 @@
-import configparser
 import copy
 import logging
 import os
@@ -8,7 +7,9 @@ import threading
 import uuid
 from logging.handlers import RotatingFileHandler
 
-from resources.daemon.constants import DAEMON_SECTION, DEFAULT_PROCESS_CONFIG, LOGS_DIR, SCRIPT_DIR, SECRET_KEYS
+from resources.config_loader import ConfigError, ConfigLoader
+from resources.config_schema import SmaConfig
+from resources.daemon.constants import DEFAULT_PROCESS_CONFIG, LOGS_DIR, SECRET_KEYS, SERVICE_SECRET_FIELDS
 from resources.daemon.context import JobContextFilter
 from resources.log import LOG_BACKUP_COUNT, LOG_MAX_BYTES, JSONFormatter, getLogger
 
@@ -38,12 +39,33 @@ def _write_node_id_to_yaml(config_file: str, node_id: str) -> None:
 
 
 def _strip_secrets(data: dict) -> dict:
-  """Return a deep copy of data with SECRET_KEYS removed from the daemon: section."""
+  """Return a deep copy of data with all secret fields redacted.
+
+  Redacts:
+  - SECRET_KEYS from the top-level ``daemon:`` section (api_key, db_url,
+    username, password, node_id)
+  - SERVICE_SECRET_FIELDS from every ``services.<type>.<instance>`` map
+    (apikey, token, password)
+  """
   result = copy.deepcopy(data)
+
   daemon = result.get("daemon", {})
-  for key in list(daemon):
-    if key in SECRET_KEYS:
-      del daemon[key]
+  if isinstance(daemon, dict):
+    for key in list(daemon):
+      if key in SECRET_KEYS:
+        del daemon[key]
+
+  services = result.get("services", {})
+  if isinstance(services, dict):
+    for instances in services.values():
+      if not isinstance(instances, dict):
+        continue
+      for instance in instances.values():
+        if not isinstance(instance, dict):
+          continue
+        for field in list(instance):
+          if field in SERVICE_SECRET_FIELDS:
+            del instance[field]
   return result
 
 
@@ -207,38 +229,53 @@ class ConfigLogManager:
 
 
 class PathConfigManager:
-  """Manages path-to-config mappings for different media directories."""
+  """Loads sma-ng.yml and resolves daemon settings, path rewrites, and routing.
+
+  Backed by ``resources.config_loader.ConfigLoader``: this class is a thin
+  state holder that exposes the legacy attribute and method surface
+  (``api_key``, ``db_url``, ``scan_paths``, ``rewrite_path``,
+  ``get_config_for_path``, ``get_profile_for_path``, ``get_args_for_path``,
+  ``get_recycle_bin``, ``is_recycle_bin_path``) that other daemon modules
+  grep against.
+
+  Under the four-bucket schema there is exactly one config file per
+  daemon (the loaded ``sma-ng.yml``), so ``get_config_for_path`` always
+  returns ``default_config``. ``get_profile_for_path`` walks
+  ``daemon.routing`` via the loader and returns the matched profile name
+  (or ``None`` for bare-base fallback). ``get_args_for_path`` returns
+  ``daemon.default_args`` unconditionally — per-routing-rule
+  ``default_args`` was dropped in the four-bucket cutover.
+  """
 
   def __init__(self, config_file=None, logger=None):
     self.log = logger or log
-    self.path_configs = []
-    self.path_rewrites = []  # Can be set from sma-ng.yml Daemon section
+    self.path_rewrites = []
     self.default_config = DEFAULT_PROCESS_CONFIG
-    self.default_args = []  # Top-level default args for the default config
-    self.api_key = None  # Can be set from sma-ng.yml Daemon section
-    self.basic_auth = None  # (username, password) tuple; can be set from sma-ng.yml Daemon section
-    self.db_url = None  # Can be set from sma-ng.yml Daemon section
-    self.ffmpeg_dir = None  # Can be set from sma-ng.yml Daemon section
-    self.job_timeout_seconds = 0  # Can be set from sma-ng.yml Daemon section (0 = no timeout)
-    self.progress_log_interval = 60  # seconds between progress log entries
-    self.smoke_test = False  # Run startup smoke test against all configs
-    self.recycle_bin_max_age_days = 3  # Delete recycle-bin files older than N days (0 = disabled)
-    self.recycle_bin_min_free_gb = 50  # Delete oldest files when free space < N GiB (0 = disabled)
+    self.default_args = []
+    self.api_key = None
+    self.basic_auth = None
+    self.db_url = None
+    self.ffmpeg_dir = None
+    self.job_timeout_seconds = 0
+    self.progress_log_interval = 60
+    self.smoke_test = False
+    self.recycle_bin_max_age_days = 3
+    self.recycle_bin_min_free_gb = 50.0
     self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
-    self.scan_paths = []  # Can be set from sma-ng.yml Daemon section
-    self._config_file = None  # Resolved path of loaded config file
-    self._node_id = None  # UUID-based node identity; generated on first start
-    self._log_ttl_days = 30  # Days to retain cluster log entries in PostgreSQL
+    self.scan_paths = []
+    self._config_file = None
+    self._node_id = None
+    self._log_ttl_days = 30
     self._node_expiry_days: int = 0
     self._log_archive_dir: str | None = None
     self._log_archive_after_days: int = 0
     self._log_delete_after_days: int = 0
 
+    self._loader = ConfigLoader(logger=self.log)
+    self._cfg: SmaConfig | None = None  # validated config tree, populated by load_config
+
     if not config_file:
       config_file = os.environ.get("SMA_CONFIG") or DEFAULT_PROCESS_CONFIG
-      legacy_yaml = os.path.join(SCRIPT_DIR, "config", "autoProcess.yaml")
-      if config_file == DEFAULT_PROCESS_CONFIG and not os.path.exists(config_file) and os.path.exists(legacy_yaml):
-        config_file = legacy_yaml
     self._config_file = os.path.realpath(config_file) if os.path.exists(config_file) else None
     self.default_config = config_file
     if self._config_file:
@@ -247,43 +284,101 @@ class PathConfigManager:
       self.log.info("No config found, using defaults for all paths")
 
   def load_config(self, config_file, job_db=None):
-    """Load daemon settings from the daemon section of sma-ng.yml."""
+    """Load and validate sma-ng.yml; merge cluster config from DB if distributed."""
+    try:
+      cfg = self._loader.load(config_file)
+    except ConfigError as exc:
+      self.log.error(str(exc))
+      raise
+    except Exception as e:
+      self.log.exception("Error loading daemon config: %s" % e)
+      raise
+
+    self._cfg = cfg
+    self._apply_smaconfig(cfg, config_file)
+
+    # Merge DB-shared cluster config if distributed. DB provides shared
+    # defaults; only keys explicitly set in the local YAML override DB
+    # values. We use raw dict merging on the daemon section so we can
+    # detect "explicitly set" via key presence in the local YAML.
+    if job_db is not None and getattr(job_db, "is_distributed", False):
+      try:
+        db_raw = job_db.get_cluster_config() or {}
+        db_daemon = (db_raw or {}).get("daemon", {})
+        local_daemon = self._raw_local_daemon_section(config_file)
+        if db_daemon and local_daemon is not None:
+          merged_daemon = {**db_daemon, **local_daemon}
+          merged_full = cfg.model_dump(by_alias=True)
+          merged_full["daemon"] = merged_daemon
+          merged_cfg = SmaConfig.model_validate(merged_full)
+          self._cfg = merged_cfg
+          self._apply_smaconfig(merged_cfg, config_file)
+      except Exception:
+        self.log.warning("Failed to fetch cluster config from DB; using local only")
+
+    self.log.debug("Loaded config from %s" % config_file)
+    self.log.debug("Default config: %s" % self.default_config)
+    self.log.debug("Routing rules (%d):" % len(self._cfg.daemon.routing if self._cfg else []))
+    if self._cfg:
+      for rule in self._cfg.daemon.routing:
+        self.log.debug("  %s -> profile=%s services=%s" % (rule.match, rule.profile, rule.services))
+    self._ensure_node_id(config_file)
+    return self._cfg
+
+  @staticmethod
+  def _raw_local_daemon_section(config_file: str) -> dict | None:
+    """Read just the ``daemon:`` section from disk (raw, pre-validation).
+
+    Used to detect which keys the local user explicitly set, so the DB
+    cluster-config merge knows which keys to let win locally.
+    """
     try:
       from resources.yamlconfig import load as _yaml_load
 
       data = _yaml_load(config_file) or {}
-      daemon_data = data.get(DAEMON_SECTION) or {}
-      parsed = self._parse_config_data(daemon_data)
-      if not daemon_data.get("default_config"):
-        parsed["default_config"] = config_file
-      self._apply_config_data(parsed)
+      daemon_section = data.get("daemon")
+      return daemon_section if isinstance(daemon_section, dict) else {}
+    except Exception:
+      return None
 
-      # Merge DB base config if distributed.
-      # DB provides shared defaults; only keys *explicitly* set in the local
-      # YAML (present in daemon_data) override DB values.
-      if job_db is not None and getattr(job_db, "is_distributed", False):
-        try:
-          db_raw = job_db.get_cluster_config() or {}
-          db_daemon = db_raw.get("daemon", {}) if db_raw else {}
-          if db_daemon:
-            db_parsed = self._parse_config_data(db_daemon)
-            explicit_local = {k: parsed[k] for k in daemon_data if k in parsed}
-            merged = {**db_parsed, **explicit_local}
-            self._apply_config_data(merged)
-        except Exception:
-          self.log.warning("Failed to fetch cluster config from DB; using local only")
-
-      self.log.debug("Loaded config from %s" % config_file)
-      self.log.debug("Default config: %s" % self.default_config)
-      self.log.debug("Path mappings (%d):" % len(self.path_configs))
-      for entry in self.path_configs:
-        self.log.debug("  %s -> %s" % (entry["path"], entry.get("config") or entry.get("profile")))
-      self._ensure_node_id(config_file)
-      return parsed
-
-    except Exception as e:
-      self.log.exception("Error loading daemon config: %s" % e)
-      raise
+  def _apply_smaconfig(self, cfg: SmaConfig, config_file: str) -> None:
+    """Project the validated SmaConfig.daemon section onto manager attributes."""
+    d = cfg.daemon
+    self.default_config = config_file
+    self.api_key = d.api_key
+    self.basic_auth = (d.username, d.password) if d.username and d.password else None
+    self.db_url = d.db_url
+    self.ffmpeg_dir = d.ffmpeg_dir
+    self.job_timeout_seconds = d.job_timeout_seconds
+    self.progress_log_interval = d.progress_log_interval
+    self.smoke_test = d.smoke_test
+    self.recycle_bin_max_age_days = d.recycle_bin_max_age_days
+    self.recycle_bin_min_free_gb = float(d.recycle_bin_min_free_gb)
+    self.media_extensions = frozenset(("." + e.lower().lstrip(".")) for e in (d.media_extensions or []) if e)
+    self.default_args = self._parse_args_list(d.default_args)
+    self.path_rewrites = sorted(
+      (
+        {
+          "from": os.path.normpath(r.from_.rstrip("/")),
+          "to": os.path.normpath(r.to.rstrip("/")),
+        }
+        for r in d.path_rewrites
+        if r.from_ and r.to
+      ),
+      key=lambda x: len(x["from"]),
+      reverse=True,
+    )
+    self.scan_paths = [{"path": s.path, "interval": s.interval, "enabled": s.enabled, "rewrite_from": s.rewrite_from, "rewrite_to": s.rewrite_to} for s in d.scan_paths]
+    self._node_id = d.node_id
+    self._log_ttl_days = d.log_ttl_days
+    self._node_expiry_days = d.node_expiry_days
+    self._log_archive_dir = d.log_archive_dir or None
+    self._log_archive_after_days = d.log_archive_after_days
+    self._log_delete_after_days = d.log_delete_after_days
+    if self.path_rewrites:
+      self.log.debug("Path rewrites (%d):" % len(self.path_rewrites))
+      for rewrite in self.path_rewrites:
+        self.log.debug("  %s -> %s" % (rewrite["from"], rewrite["to"]))
 
   def _ensure_node_id(self, config_file):
     """Generate and persist a UUID node identity if one is not already set."""
@@ -333,137 +428,51 @@ class PathConfigManager:
       return shlex.split(raw_args)
     return list(raw_args or [])
 
-  def _parse_config_data(self, config):
-    username = config.get("username") or None
-    password = config.get("password") or None
-
-    media_extensions = self.media_extensions
-    raw_exts = config.get("media_extensions")
-    if raw_exts is not None:
-      media_extensions = frozenset(("." + e.lower().lstrip(".")) for e in raw_exts if e)
-
-    path_rewrites = []
-    for rewrite in config.get("path_rewrites", []):
-      rewrite_from = rewrite.get("from", "").rstrip("/")
-      rewrite_to = rewrite.get("to", "").rstrip("/")
-      if not rewrite_from or not rewrite_to:
-        continue
-      path_rewrites.append({"from": os.path.normpath(rewrite_from), "to": os.path.normpath(rewrite_to)})
-    # Keep rewrite precedence aligned with path_configs: more specific
-    # prefixes must win over broader parent paths.
-    path_rewrites.sort(key=lambda x: len(x["from"]), reverse=True)
-
-    path_configs = []
-    for entry in config.get("path_configs", []):
-      path = entry.get("path", "").rstrip("/")
-      config_path = entry.get("config", "")
-      profile = entry.get("profile", "") or None
-      if not path or (not config_path and not profile):
-        continue
-      if config_path and not os.path.isabs(config_path):
-        config_path = os.path.join(SCRIPT_DIR, config_path)
-      path_configs.append(
-        {
-          "path": os.path.normpath(path),
-          "config": config_path or None,
-          "profile": profile,
-          "default_args": self._parse_args_list(entry.get("default_args", [])),
-        }
-      )
-    path_configs.sort(key=lambda x: len(x["path"]), reverse=True)
-
-    return {
-      "default_config": config.get("default_config", self.default_config),
-      "api_key": config.get("api_key"),
-      "basic_auth": (username, password) if username and password else None,
-      "db_url": config.get("db_url"),
-      "ffmpeg_dir": config.get("ffmpeg_dir"),
-      "job_timeout_seconds": int(config.get("job_timeout_seconds", 0) or 0),
-      "progress_log_interval": int(config.get("progress_log_interval", 60) or 60),
-      "smoke_test": bool(config.get("smoke_test", False)),
-      "recycle_bin_max_age_days": int(config.get("recycle_bin_max_age_days", 3) or 3),
-      "recycle_bin_min_free_gb": float(config.get("recycle_bin_min_free_gb", 50) or 50),
-      "media_extensions": media_extensions,
-      "default_args": self._parse_args_list(config.get("default_args", [])),
-      "path_rewrites": path_rewrites,
-      "scan_paths": list(config.get("scan_paths", [])),
-      "path_configs": path_configs,
-      "node_id": config.get("node_id") or None,
-      "log_ttl_days": int(config.get("log_ttl_days") or 30),
-      "node_expiry_days": int(config.get("node_expiry_days") or 0),
-      "log_archive_dir": config.get("log_archive_dir") or None,
-      "log_archive_after_days": int(config.get("log_archive_after_days") or 0),
-      "log_delete_after_days": int(config.get("log_delete_after_days") or 0),
-    }
-
-  def _apply_config_data(self, parsed):
-    self.default_config = parsed["default_config"]
-    self.api_key = parsed["api_key"]
-    self.basic_auth = parsed["basic_auth"]
-    self.db_url = parsed["db_url"]
-    self.ffmpeg_dir = parsed["ffmpeg_dir"]
-    self.job_timeout_seconds = parsed["job_timeout_seconds"]
-    self.progress_log_interval = parsed["progress_log_interval"]
-    self.smoke_test = parsed["smoke_test"]
-    self.recycle_bin_max_age_days = parsed["recycle_bin_max_age_days"]
-    self.recycle_bin_min_free_gb = parsed["recycle_bin_min_free_gb"]
-    self.media_extensions = parsed["media_extensions"]
-    self.default_args = parsed["default_args"]
-    self.path_rewrites = parsed["path_rewrites"]
-    self.scan_paths = parsed["scan_paths"]
-    self.path_configs = parsed["path_configs"]
-    self._node_id = parsed.get("node_id") or None
-    self._log_ttl_days = parsed.get("log_ttl_days", 30)
-    self._node_expiry_days = parsed.get("node_expiry_days", 0)
-    self._log_archive_dir = parsed.get("log_archive_dir")
-    self._log_archive_after_days = parsed.get("log_archive_after_days", 0)
-    self._log_delete_after_days = parsed.get("log_delete_after_days", 0)
-    if self.path_rewrites:
-      self.log.debug("Path rewrites (%d):" % len(self.path_rewrites))
-      for rewrite in self.path_rewrites:
-        self.log.debug("  %s -> %s" % (rewrite["from"], rewrite["to"]))
-
   def _normalize_match_path(self, path):
     """Return *path* normalized for rewrite-aware config matching."""
     return os.path.normpath(self.rewrite_path(os.path.abspath(path)))
 
   def get_config_for_path(self, file_path):
-    """Get the appropriate config file for a given file path."""
-    file_path = self._normalize_match_path(file_path)
+    """Return the active config file. Single-config-per-daemon model.
 
-    for entry in self.path_configs:
-      if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
-        config_path = entry["config"] or self.default_config
-        if os.path.exists(config_path):
-          self.log.debug("Path %s matched %s -> %s" % (file_path, entry["path"], config_path))
-          return config_path
-        else:
-          self.log.warning("Config file not found: %s, using default" % config_path)
-
-    self.log.debug("Path %s using default config: %s" % (file_path, self.default_config))
+    Under the four-bucket schema there is only one config file (the
+    daemon's loaded ``sma-ng.yml``). This method is preserved for
+    backward compatibility with callers that still pass a path through.
+    """
     return self.default_config
 
   def get_profile_for_path(self, file_path):
-    """Get the named profile for a path-config match, if the match uses the default config."""
-    file_path = self._normalize_match_path(file_path)
+    """Return the profile name for the routing rule that matches *file_path*.
 
-    for entry in self.path_configs:
-      if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
-        if entry.get("config"):
-          return None
-        return entry.get("profile")
-
-    return None
+    Walks ``daemon.routing`` longest-prefix; returns the matched rule's
+    profile (which may itself be ``None`` for bare-base) or ``None`` when
+    no rule matches.
+    """
+    if self._cfg is None:
+      return None
+    res = self._loader.resolve_routing(self._cfg, file_path)
+    return res.profile
 
   def get_args_for_path(self, file_path):
-    """Get the default args list for a given file path based on path_configs."""
-    file_path = self._normalize_match_path(file_path)
+    """Return the global default args list.
 
-    for entry in self.path_configs:
-      if file_path.startswith(entry["path"] + "/") or file_path == entry["path"]:
-        return list(entry.get("default_args", []))
-
+    Per-routing-rule ``default_args`` was dropped in the four-bucket
+    cutover; only the global ``daemon.default_args`` survives. Callers
+    unchanged for backward compatibility.
+    """
     return list(self.default_args)
+
+  def get_services_for_path(self, file_path):
+    """Return the list of (service_type, instance_name) tuples to notify
+    for *file_path*, per ``daemon.routing`` longest-prefix match.
+
+    New API surface in the four-bucket cutover. Empty list on no match
+    or when the matching rule omits ``services:``.
+    """
+    if self._cfg is None:
+      return []
+    res = self._loader.resolve_routing(self._cfg, file_path)
+    return list(res.services)
 
   def rewrite_path(self, path):
     """Apply the first matching path_rewrites prefix substitution, or return path unchanged."""
@@ -475,25 +484,31 @@ class PathConfigManager:
     return path
 
   def get_all_configs(self):
-    """Return list of all unique config files."""
-    configs = {self.default_config}
-    for entry in self.path_configs:
-      if entry.get("config"):
-        configs.add(entry["config"])
-    return list(configs)
+    """Return a single-element list containing the daemon's config file.
+
+    Multi-config support (per-path config file selection) was removed in
+    the four-bucket cutover; this method is kept as a one-entry list for
+    backward compatibility with callers like ``daemon.run_smoke_test``.
+    """
+    return [self.default_config]
 
   def get_recycle_bin(self, config_path):
-    """Return the recycle-bin path from an autoProcess config, or None."""
-    try:
-      if config_path.endswith((".yaml", ".yml")):
-        from resources.yamlconfig import load as _yaml_load
+    """Return the recycle-bin path from a sma-ng.yml config, or None.
 
-        data = _yaml_load(config_path) or {}
-        val = str(data.get("converter", {}).get("recycle-bin", "")).strip()
-      else:
-        cp = configparser.ConfigParser()
-        cp.read(config_path)
-        val = cp.get("Converter", "recycle-bin", fallback="").strip()
+    Reads ``base.converter.recycle-bin`` from the YAML. INI fallback was
+    removed in the four-bucket cutover.
+    """
+    try:
+      if not config_path.endswith((".yaml", ".yml")):
+        return None
+      from resources.yamlconfig import load as _yaml_load
+
+      data = _yaml_load(config_path) or {}
+      base = data.get("base") or {}
+      converter = base.get("converter") if isinstance(base, dict) else None
+      if not isinstance(converter, dict):
+        return None
+      val = str(converter.get("recycle-bin", "")).strip()
       return os.path.abspath(val) if val else None
     except Exception:
       return None
