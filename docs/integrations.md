@@ -142,6 +142,22 @@ daemon:
       services: [radarr.main, autoscan.main]
 ```
 
+**Deploy fan-out.** Under `mise run config:roll`, an Autoscan instance in
+`setup/local.yml` that has no `path:` or `profile:` is treated as a fan-out
+target — its ref is appended to every routing rule generated from
+sonarr/radarr instances. So a single global Autoscan block:
+
+```yaml
+services:
+  autoscan:
+    main:
+      url: http://autoscan.local:3030
+      username: ''
+      password: ''
+```
+
+attaches to every per-path rule on roll, with no per-path duplication.
+
 After a successful conversion (file back at its final source-dir location),
 SMA-NG POSTs `/triggers/manual?dir=<directory>` to every matching Autoscan
 instance. Per-instance failures are logged and swallowed so a transient

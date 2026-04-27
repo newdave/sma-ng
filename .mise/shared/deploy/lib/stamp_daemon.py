@@ -60,6 +60,7 @@ BOOLEAN_FIELDS = {
   "sonarr": {"force-rename", "rescan", "in-progress-check", "block-reprocess"},
   "radarr": {"force-rename", "rescan", "in-progress-check", "block-reprocess"},
   "plex": {"refresh", "ignore-certs", "plexmatch"},
+  "autoscan": {"ignore-certs", "enabled"},
 }
 
 
@@ -160,7 +161,15 @@ if os.path.exists(yaml_path):
 
   # routing rules built from every instance carrying path + profile,
   # sorted longest-match-first.
+  #
+  # Fan-out services: any instance whose type is in FANOUT_TYPES that
+  # carries no path/profile is considered "global" — its ref is appended
+  # to every routing rule's services list so it fires alongside the
+  # per-path service. Currently used for autoscan, where one Autoscan
+  # daemon typically fans library scans out across every managed path.
+  FANOUT_TYPES = {"autoscan"}
   routing_entries = []
+  fanout_refs = []
   for stype, instances in services.items():
     for inst_name, fields in instances.items():
       path = fields.get("path", "").strip()
@@ -173,6 +182,11 @@ if os.path.exists(yaml_path):
             "services": [f"{stype}.{inst_name}"],
           }
         )
+      elif stype in FANOUT_TYPES and not path and not profile:
+        fanout_refs.append(f"{stype}.{inst_name}")
+  if fanout_refs:
+    for entry in routing_entries:
+      entry["services"].extend(fanout_refs)
   if routing_entries:
     routing_entries.sort(key=lambda e: len(e["match"]), reverse=True)
     if daemon_block.get("routing") != routing_entries:
