@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.83](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.82...sma-ng-v1.6.83) (2026-04-27)
+
+
+### Bug Fixes
+
+* **cluster:** reflect drain/pause/resume/restart/shutdown in node status ([b3dab2f](https://github.com/newdave/sma-ng/commit/b3dab2f65dd69313e9558456d85c40eb6affe784))
+
 ## [1.6.82](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.81...sma-ng-v1.6.82) (2026-04-27)
 
 
