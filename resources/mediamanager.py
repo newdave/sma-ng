@@ -107,6 +107,37 @@ def rescan_via_arr(base_url, headers, arr_type, file_path, log):
     return None
 
 
+def downloaded_scan_via_arr(base_url, headers, arr_type, file_path, log):
+  """Trigger Sonarr/Radarr to import a specific file already on disk.
+
+  After ``RescanSeries`` / ``RescanMovie`` runs, any episodefile/moviefile
+  whose recorded path no longer exists is unlinked from the database. When
+  SMA converts in place (``Show.S01E01.mkv`` → ``Show.S01E01.mp4``) the old
+  path is gone, so the unlink fires and the new file is left orphaned —
+  Rescan* re-evaluates known records but does not import new files.
+
+  ``DownloadedEpisodesScan`` / ``DownloadedMoviesScan`` with the *file*
+  path (not its directory) and ``importMode: Move`` is the import flow:
+  Sonarr/Radarr identifies the file, matches it to the existing
+  series/movie, and links it as the new episodefile/moviefile. This works
+  on library paths in Sonarr v3+/Radarr v4+ when the path argument is a
+  single file rather than a download-client root.
+
+  Returns the command ID on success, or None on API error.
+  """
+  try:
+    if arr_type == "sonarr":
+      payload = {"name": "DownloadedEpisodesScan", "path": file_path, "importMode": "Move"}
+    else:
+      payload = {"name": "DownloadedMoviesScan", "path": file_path, "importMode": "Move"}
+    log.info("downloaded_scan_via_arr: triggering %s for %s" % (payload["name"], file_path))
+    cmd = api_command(base_url, headers, payload, log)
+    return cmd.get("id")
+  except Exception:
+    log.exception("downloaded_scan_via_arr: unexpected error for %s" % file_path)
+    return None
+
+
 def rename(base_url, headers, file_id, command_name_files, command_name_all, id_field, media_id, log):
   """Trigger a rename command."""
   if file_id:
