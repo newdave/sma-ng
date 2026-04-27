@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.84](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.83...sma-ng-v1.6.84) (2026-04-27)
+
+
+### Features
+
+* **autoscan:** trigger Cloudbox Autoscan webhook after conversion ([bd8e3f2](https://github.com/newdave/sma-ng/commit/bd8e3f2ccb126251964d8d41da07776dcb2616f5))
+
 ## [1.6.83](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.82...sma-ng-v1.6.83) (2026-04-27)
 
 
