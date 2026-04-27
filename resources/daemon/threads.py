@@ -88,16 +88,25 @@ class HeartbeatThread(_StoppableThread):
     try:
       if command == "drain":
         self.server.worker_pool.set_drain_mode()
+        self.job_db.set_node_status(self.node_id, "draining")
       elif command == "pause":
         self.server.worker_pool.set_paused()
+        self.job_db.set_node_status(self.node_id, "paused")
       elif command == "resume":
         self.server.worker_pool.clear_paused()
         self.server.worker_pool.clear_drain_mode()
+        self.job_db.set_node_status(self.node_id, "online")
       elif command == "restart":
+        # Mark the row so the dashboard shows the transition; the new
+        # process's heartbeat will flip the status back to 'online'.
+        self.job_db.set_node_status(self.node_id, "restarting")
         self.job_db.ack_node_command(cmd_id, "done")
         threading.Thread(target=self.server.graceful_restart, daemon=True).start()
         return True
       elif command == "shutdown":
+        # No subsequent heartbeats will run, so set 'offline' explicitly
+        # rather than waiting for the stale-node recovery to flip it.
+        self.job_db.set_node_status(self.node_id, "offline")
         self.job_db.ack_node_command(cmd_id, "done")
         threading.Thread(target=self.server.shutdown, daemon=True).start()
         return True

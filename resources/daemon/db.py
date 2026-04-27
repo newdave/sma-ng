@@ -708,6 +708,19 @@ class PostgreSQLJobDatabase:
         cur.execute("DELETE FROM cluster_nodes WHERE node_id = %s", (node_id,))
         return cur.rowcount > 0
 
+  def set_node_status(self, node_id, status):
+    """Set cluster_nodes.status for a node. Returns True if a row was updated.
+
+    Used by drain/pause/resume command execution so the DB reflects the
+    in-memory worker-pool gate. The heartbeat upsert preserves
+    'draining'/'paused' on conflict, so once set here the status persists
+    across heartbeats until explicitly cleared (by a 'resume' command).
+    """
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("UPDATE cluster_nodes SET status = %s WHERE node_id = %s", (status, node_id))
+        return cur.rowcount > 0
+
   def get_cluster_nodes(self):
     """Return all rows from cluster_nodes ordered by last_seen descending.
 
