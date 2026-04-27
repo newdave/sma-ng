@@ -359,17 +359,20 @@ def _find_arr_instance(filepath, settings):
 
 
 def triggerRescan(filepath, settings):
-  """Trigger a rescan on the matching Sonarr/Radarr instance based on file path.
+  """Trigger a rescan + import on the matching Sonarr/Radarr instance.
 
-  Issues ``RescanSeries`` / ``RescanMovie`` keyed on the resolved series/movie
-  ID — this is the correct command for files that have just been converted
-  in-place inside the library. ``DownloadedEpisodesScan`` /
-  ``DownloadedMoviesScan`` are scoped to download-client folders and silently
-  no-op on library paths, which is why earlier versions appeared to "do
-  nothing".
+  After in-place conversion the original library file path is gone (extension
+  changed and/or basename changed), so two commands are chained:
 
-  When the matched instance has ``force-rename = True``, waits for the rescan
-  command to complete, then calls Sonarr/Radarr's RenameFiles command.
+  1. ``RescanSeries`` / ``RescanMovie`` — re-evaluates known episodefile/
+     moviefile records and unlinks the now-missing old path.
+  2. ``DownloadedEpisodesScan`` / ``DownloadedMoviesScan`` (with the file
+     path and ``importMode: Move``) — imports the converted file and links
+     it to the existing series/movie. Without this second step the file is
+     orphaned and the episode/movie shows as missing/deleted.
+
+  When the matched instance has ``force-rename = True``, additionally calls
+  Sonarr/Radarr's RenameFiles command after the import completes.
 
   Returns the new file path if arr renamed the file, otherwise None.
   """
@@ -392,18 +395,27 @@ def triggerRescan(filepath, settings):
   headers = {"X-Api-Key": instance["apikey"], "User-Agent": "SMA-NG - manual"}
 
   try:
-    from resources.mediamanager import rename_via_arr, rescan_via_arr, wait_for_command
+    from resources.mediamanager import downloaded_scan_via_arr, rename_via_arr, rescan_via_arr, wait_for_command
 
     log.info("Requesting %s [%s] to rescan library for '%s'." % (arr_type.title(), instance["section"], os.path.basename(filepath)))
-    command_id = rescan_via_arr(base_url, headers, arr_type, filepath, log)
+    rescan_id = rescan_via_arr(base_url, headers, arr_type, filepath, log)
 
-    if instance.get("rename") and command_id:
-      # Wait for the rescan to complete before triggering rename so that the
-      # series/movie file record reflects the converted file's new size/codec.
-      completed = wait_for_command(base_url, headers, command_id, log)
-      if not completed:
-        log.warning("%s [%s] rescan command did not complete; skipping arr rename." % (arr_type.title(), instance["section"]))
+    # Wait for the rescan to settle before importing — Rescan* unlinks the
+    # old file path (gone after in-place conversion), and we need that to
+    # complete before DownloadedScan re-imports the new file. Without this
+    # chain Sonarr/Radarr leaves the new file orphaned and the episode/
+    # movie shows as missing.
+    if rescan_id:
+      if not wait_for_command(base_url, headers, rescan_id, log):
+        log.warning("%s [%s] rescan command did not complete; skipping import." % (arr_type.title(), instance["section"]))
         return None
+
+    import_id = downloaded_scan_via_arr(base_url, headers, arr_type, filepath, log)
+    if import_id and not wait_for_command(base_url, headers, import_id, log):
+      log.warning("%s [%s] import command did not complete; skipping arr rename." % (arr_type.title(), instance["section"]))
+      return None
+
+    if instance.get("rename") and import_id:
       new_path = rename_via_arr(base_url, headers, arr_type, filepath, log)
       if new_path:
         log.info("%s renamed file to: %s" % (arr_type.title(), new_path))

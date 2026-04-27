@@ -7,6 +7,7 @@ from resources.mediamanager import (
   api_get,
   api_put,
   build_api,
+  downloaded_scan_via_arr,
   rename,
   rename_via_arr,
   rescan,
@@ -285,3 +286,33 @@ class TestRescanViaArr:
     mock_get.side_effect = Exception("network error")
     log = MagicMock()
     assert rescan_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mkv", log) is None
+
+
+class TestDownloadedScanViaArr:
+  @patch("resources.mediamanager.requests.post")
+  def test_sonarr_issues_downloaded_episodes_scan(self, mock_post):
+    mock_post.return_value = _make_response({"id": 123, "status": "queued"})
+    log = MagicMock()
+    cmd_id = downloaded_scan_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log)
+    assert cmd_id == 123
+    body = mock_post.call_args[1]["json"]
+    assert body["name"] == "DownloadedEpisodesScan"
+    assert body["path"] == "/tv/Show/S01E01.mp4"
+    assert body["importMode"] == "Move"
+
+  @patch("resources.mediamanager.requests.post")
+  def test_radarr_issues_downloaded_movies_scan(self, mock_post):
+    mock_post.return_value = _make_response({"id": 456, "status": "queued"})
+    log = MagicMock()
+    cmd_id = downloaded_scan_via_arr("http://localhost:7878", {}, "radarr", "/movies/Film/Film.mp4", log)
+    assert cmd_id == 456
+    body = mock_post.call_args[1]["json"]
+    assert body["name"] == "DownloadedMoviesScan"
+    assert body["path"] == "/movies/Film/Film.mp4"
+    assert body["importMode"] == "Move"
+
+  @patch("resources.mediamanager.requests.post")
+  def test_exception_returns_none(self, mock_post):
+    mock_post.side_effect = Exception("network error")
+    log = MagicMock()
+    assert downloaded_scan_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log) is None

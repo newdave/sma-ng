@@ -1021,7 +1021,12 @@ Plex library refresh via PlexAPI with path mapping support.
 
 ### resources/mediamanager.py
 
-Shared Sonarr/Radarr API helpers. After in-place conversion the daemon issues `RescanSeries` (Sonarr) / `RescanMovie` (Radarr) keyed on the series/movie ID resolved via `/api/v3/parse`, then optionally chains a `RenameFiles` command when the instance has `force-rename: true`. The legacy `DownloadedEpisodesScan` / `DownloadedMoviesScan` commands are intentionally not used — they only operate on download-client folders and silently no-op for files that already live in the library.
+Shared Sonarr/Radarr API helpers. After in-place conversion the daemon issues a two-step chain keyed on the series/movie ID resolved via `/api/v3/parse`:
+
+1. `RescanSeries` (Sonarr) / `RescanMovie` (Radarr) — re-evaluates known episodefile/moviefile records and unlinks the now-missing original path (extension and/or basename changed during conversion).
+2. `DownloadedEpisodesScan` (Sonarr) / `DownloadedMoviesScan` (Radarr) with the converted *file* path and `importMode: Move` — imports the new file and links it to the existing series/movie. Without this second step Sonarr/Radarr leave the file orphaned and the episode/movie shows as missing/deleted. Passing a single file path (rather than a directory) lets these commands operate on library paths in Sonarr v3+/Radarr v4+.
+
+When the instance has `force-rename: true`, a `RenameFiles` command is chained after the import completes.
 
 ---
 
