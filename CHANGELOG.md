@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.85](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.84...sma-ng-v1.6.85) (2026-04-27)
+
+
+### Features
+
+* **autoscan:** fan-out autoscan refs to every routing rule on roll ([eb4311e](https://github.com/newdave/sma-ng/commit/eb4311e5eadd5beb43afab91b7f6058cb59fc77b))
+
 ## [1.6.84](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.83...sma-ng-v1.6.84) (2026-04-27)
 
 
