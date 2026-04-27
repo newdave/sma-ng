@@ -745,6 +745,7 @@ class TestExecuteCommand:
     ht = _make_heartbeat(job_db=db, server=server)
     result = ht._execute_command({"id": 10, "command": "drain"})
     server.worker_pool.set_drain_mode.assert_called_once()
+    db.set_node_status.assert_called_once_with(ht.node_id, "draining")
     db.ack_node_command.assert_called_once_with(10, "done")
     assert result is False
 
@@ -754,6 +755,7 @@ class TestExecuteCommand:
     ht = _make_heartbeat(job_db=db, server=server)
     result = ht._execute_command({"id": 11, "command": "pause"})
     server.worker_pool.set_paused.assert_called_once()
+    db.set_node_status.assert_called_once_with(ht.node_id, "paused")
     db.ack_node_command.assert_called_once_with(11, "done")
     assert result is False
 
@@ -764,6 +766,7 @@ class TestExecuteCommand:
     result = ht._execute_command({"id": 12, "command": "resume"})
     server.worker_pool.clear_paused.assert_called_once()
     server.worker_pool.clear_drain_mode.assert_called_once()
+    db.set_node_status.assert_called_once_with(ht.node_id, "online")
     db.ack_node_command.assert_called_once_with(12, "done")
     assert result is False
 
@@ -774,6 +777,7 @@ class TestExecuteCommand:
     with mock.patch("threading.Thread") as mock_thread:
       mock_thread.return_value = mock.MagicMock()
       result = ht._execute_command({"id": 13, "command": "restart"})
+    db.set_node_status.assert_called_once_with(ht.node_id, "restarting")
     db.ack_node_command.assert_called_once_with(13, "done")
     assert result is True
     call_kwargs = mock_thread.call_args[1]
@@ -786,6 +790,7 @@ class TestExecuteCommand:
     with mock.patch("threading.Thread") as mock_thread:
       mock_thread.return_value = mock.MagicMock()
       result = ht._execute_command({"id": 14, "command": "shutdown"})
+    db.set_node_status.assert_called_once_with(ht.node_id, "offline")
     db.ack_node_command.assert_called_once_with(14, "done")
     assert result is True
     call_kwargs = mock_thread.call_args[1]
