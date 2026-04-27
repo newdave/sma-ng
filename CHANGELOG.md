@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.82](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.81...sma-ng-v1.6.82) (2026-04-27)
+
+
+### Bug Fixes
+
+* **arr:** chain DownloadedScan after Rescan so converted file is imported ([fdb9fd6](https://github.com/newdave/sma-ng/commit/fdb9fd6f2b695c1cdc6350f8b9b835c8f528a0c4))
+
 ## [1.6.81](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.80...sma-ng-v1.6.81) (2026-04-27)
 
 
