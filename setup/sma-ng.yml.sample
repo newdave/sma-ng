@@ -297,3 +297,11 @@ services:
       ignore-certs: false
       path-mapping: ''
       plexmatch: true
+  autoscan:
+    main:
+      url: http://localhost:3030
+      username: ''
+      password: ''
+      path-mapping: ''
+      ignore-certs: false
+      enabled: true

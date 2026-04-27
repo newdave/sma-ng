@@ -88,6 +88,16 @@ def _illustrative_services() -> dict:
         "plexmatch": True,
       },
     },
+    "autoscan": {
+      "main": {
+        "url": "http://localhost:3030",
+        "username": "",
+        "password": "",
+        "path-mapping": "",
+        "ignore-certs": False,
+        "enabled": True,
+      },
+    },
   }
 
 

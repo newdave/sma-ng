@@ -105,6 +105,61 @@ Configure `services.plex.<name>` in `sma-ng.yml`. SMA-NG refreshes the matching 
 1. Disable automatic library scanning in Plex to prevent Plex from scanning files mid-conversion
 2. Connect directly to the Plex server using its local hostname or IP on port `32400` (or your custom port) and set `token` plus `refresh = true` in `[Plex]`
 
+### Autoscan
+
+[Autoscan](https://github.com/Cloudbox/autoscan) is a notification fan-out service
+that translates a single trigger into targeted scans across Plex / Emby / Jellyfin.
+Use it when one converted file should land in multiple library backends, or when
+you want to delegate scan throttling and retry logic to Autoscan instead of
+calling each library directly.
+
+Configure one or more instances under `services.autoscan.<name>`:
+
+```yaml
+services:
+  autoscan:
+    main:
+      url: http://autoscan.local:3030
+      username: ''       # optional HTTP Basic Auth
+      password: ''
+      path-mapping: ''   # k=v[,k=v] — same syntax as plex.path-mapping
+      ignore-certs: false
+      enabled: true
+```
+
+Each instance is gated by the same `daemon.routing[].services` mechanism used by
+Sonarr/Radarr. Reference an instance from a routing rule to control which
+converted files trigger it:
+
+```yaml
+daemon:
+  routing:
+    - match: /mnt/media/TV
+      profile: rq
+      services: [sonarr.main, autoscan.main]
+    - match: /mnt/media/Movies
+      profile: rq
+      services: [radarr.main, autoscan.main]
+```
+
+After a successful conversion (file back at its final source-dir location),
+SMA-NG POSTs `/triggers/manual?dir=<directory>` to every matching Autoscan
+instance. Per-instance failures are logged and swallowed so a transient
+Autoscan outage never fails the conversion job.
+
+**Path mapping** rewrites the `dir` value when SMA-NG and Autoscan see different
+mount points (e.g. `/library/Media` here, `/data/Media` there). Use the same
+`from=to[,from=to]` syntax as `plex.path-mapping`.
+
+#### Autoscan troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| 401 returned | Wrong `username` / `password`, or Autoscan instance has no auth configured |
+| 404 returned | `webroot` mismatch, or Autoscan running on a different path prefix |
+| No POST issued | File's directory isn't a prefix of any `daemon.routing[].match` that lists `autoscan.<name>` |
+| Wrong `dir` sent | Add a `path-mapping` entry rewriting SMA's path to Autoscan's |
+
 ### Integration Flow
 
 The following sequence applies to both Sonarr and Radarr using the native webhook method:
@@ -116,6 +171,7 @@ sequenceDiagram
     participant Q as Job Queue
     participant W as ConversionWorker
     participant P as Plex / Media Manager
+    participant A as Autoscan (optional)
 
     MM->>D: POST /webhook/sonarr (On Download)
     D->>D: Extract path + tvdbId / tmdbId
@@ -125,6 +181,7 @@ sequenceDiagram
     W->>W: MediaProcessor.process()
     W->>Q: Mark done
     W->>P: Library refresh (optional)
+    W->>A: POST /triggers/manual?dir=... (optional)
     W->>MM: Rescan / import notify (optional)
 ```
 

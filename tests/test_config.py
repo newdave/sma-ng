@@ -84,6 +84,55 @@ class TestReadSettingsMultiInstance:
     assert settings.Sonarr == {}
     assert settings.Radarr == {}
 
+  @patch("resources.readsettings.ReadSettings._validate_binaries")
+  def test_discovers_autoscan_instances(self, mock_validate, tmp_yaml):
+    """autoscan_instances should be built from services.autoscan, with paths
+    derived from routing rules and disabled instances filtered out."""
+    yml = tmp_yaml(
+      overrides={
+        "services": {
+          "autoscan": {
+            "main": {
+              "url": "http://localhost:3030",
+              "username": "u",
+              "password": "p",
+              "path-mapping": "/library/Media=/data/Media",
+            },
+            "off": {"url": "http://other:3030", "enabled": False},
+          },
+        },
+        "daemon": {
+          "routing": [
+            {"match": "/library/Media", "services": ["autoscan.main"]},
+          ],
+        },
+      }
+    )
+    settings = ReadSettings(yml)
+    assert len(settings.autoscan_instances) == 1
+    inst = settings.autoscan_instances[0]
+    assert inst["section"] == "main"
+    assert inst["host"] == "localhost"
+    assert inst["port"] == 3030
+    assert inst["username"] == "u"
+    assert inst["password"] == "p"
+    assert inst["path"] == "/library/Media"
+    assert inst["path-mapping"] == {"/library/Media": "/data/Media"}
+
+  @patch("resources.readsettings.ReadSettings._validate_binaries")
+  def test_autoscan_no_routing_yields_empty_path(self, mock_validate, tmp_yaml):
+    """An autoscan instance with no routing reference still appears in
+    autoscan_instances (with empty path) so admins can see it; the
+    triggerAutoscan path-prefix gate just won't match anything."""
+    yml = tmp_yaml(
+      overrides={
+        "services": {"autoscan": {"main": {"url": "http://localhost:3030"}}},
+      }
+    )
+    settings = ReadSettings(yml)
+    assert len(settings.autoscan_instances) == 1
+    assert settings.autoscan_instances[0]["path"] == ""
+
 
 class TestGpuProfile:
   """Test gpu shorthand auto-derives all HW acceleration settings."""
