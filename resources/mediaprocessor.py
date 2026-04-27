@@ -14,7 +14,7 @@ import shutil
 import sys
 import time
 
-from autoprocess import plex
+from autoprocess import autoscan, plex
 from converter import Converter, ConverterError, FFMpegConvertError
 from converter.avcodecs import BaseCodec
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
@@ -177,6 +177,15 @@ class MediaProcessor:
         raise
       except Exception:
         self.log.exception("Error refreshing Plex.")
+
+    # Trigger Autoscan
+    if getattr(self.settings, "autoscan_instances", None):
+      try:
+        autoscan.triggerAutoscan(self.settings, output_files[0], self.log)
+      except KeyboardInterrupt:
+        raise
+      except Exception:
+        self.log.exception("Error triggering Autoscan.")
 
   # Process a file from start to finish, with checking to make sure formats are compatible with selected settings
   def process(self, inputfile, reportProgress=False, original=None, info=None, progressOutput=None, tagdata=None):

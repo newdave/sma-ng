@@ -39,6 +39,7 @@ class TestSecretRedaction:
           "kids": {"url": "http://y", "apikey": "leak2"},
         },
         "plex": {"main": {"url": "http://z", "token": "leak3"}},
+        "autoscan": {"main": {"url": "http://a", "username": "u", "password": "leak4"}},
       },
     }
     redacted = _strip_secrets(data)
@@ -47,6 +48,8 @@ class TestSecretRedaction:
         assert f not in instance
       assert "url" in instance  # non-secret stays
     assert "token" not in redacted["services"]["plex"]["main"]
+    assert "password" not in redacted["services"]["autoscan"]["main"]
+    assert redacted["services"]["autoscan"]["main"]["url"] == "http://a"
 
   def test_redaction_is_non_destructive(self):
     """_strip_secrets returns a deep copy — original input is unchanged."""
@@ -93,3 +96,14 @@ class TestSchemaDefaultsContract:
           "daemon": {"routing": [{"match": "/tv", "services": ["sonarr"]}]},
         }
       )
+
+  def test_routing_accepts_autoscan_reference(self):
+    cfg = SmaConfig.model_validate(
+      {
+        "services": {"autoscan": {"main": {"url": "http://localhost:3030"}}},
+        "daemon": {"routing": [{"match": "/tv", "services": ["autoscan.main"]}]},
+      }
+    )
+    assert "main" in cfg.services.autoscan
+    assert cfg.services.autoscan["main"].enabled is True
+    assert cfg.services.autoscan["main"].url == "http://localhost:3030"

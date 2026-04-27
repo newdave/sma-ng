@@ -34,7 +34,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from resources.config_loader import ConfigError, ConfigLoader
-from resources.config_schema import PlexInstance, SmaConfig, SonarrInstance
+from resources.config_schema import AutoscanInstance, PlexInstance, SmaConfig, SonarrInstance
 from resources.extensions import *  # noqa: F401,F403  - legacy wildcard re-exports
 from resources.yamlconfig import cfg_getdirectories, cfg_getdirectory, cfg_getextension, cfg_getextensions, cfg_getpath
 
@@ -616,8 +616,10 @@ class ReadSettings:
 
     self.sonarr_instances = self._build_arr_instances(cfg, "sonarr")
     self.radarr_instances = self._build_arr_instances(cfg, "radarr")
+    self.autoscan_instances = self._build_autoscan_instances(cfg)
     self.sonarr_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
     self.radarr_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
+    self.autoscan_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
 
     # ``Sonarr`` / ``Radarr`` are kept as attributes for backward
     # compatibility; only readsettings itself populated them historically
@@ -679,6 +681,60 @@ class ReadSettings:
       "rescan": instance.rescan,
       "in-progress-check": instance.in_progress_check,
       "blockreprocess": instance.block_reprocess,
+    }
+
+  def _build_autoscan_instances(self, cfg: SmaConfig) -> list[dict[str, Any]]:
+    """Build legacy-shaped Autoscan instance dicts.
+
+    Mirrors ``_build_arr_instances``: per-instance ``path`` is derived from
+    ``daemon.routing[].services`` references to ``autoscan.<name>``. An
+    instance with no routing reference still appears in the list with an
+    empty path so consumers see it; ``triggerAutoscan``'s prefix match
+    skips empty paths.
+    """
+    instances_map: dict[str, AutoscanInstance] = cfg.services.autoscan
+    rules = cfg.daemon.routing
+
+    paths_by_instance: dict[str, list[str]] = {name: [] for name in instances_map}
+    for rule in rules:
+      for ref in rule.services:
+        stype, sname = ref.split(".", 1)
+        if stype == "autoscan" and sname in paths_by_instance:
+          paths_by_instance[sname].append(rule.match)
+
+    output: list[dict[str, Any]] = []
+    for name, instance in instances_map.items():
+      if not instance.enabled or not instance.url:
+        continue
+      paths = paths_by_instance.get(name) or [""]
+      for path in paths:
+        output.append(self._autoscan_to_dict(name, instance, path))
+    return output
+
+  @staticmethod
+  def _autoscan_to_dict(name: str, instance: AutoscanInstance, path: str) -> dict[str, Any]:
+    """Translate an AutoscanInstance + path into a legacy-shaped dict."""
+    parsed = urlparse(instance.url)
+    ssl = parsed.scheme == "https"
+    host = parsed.hostname or ""
+    port = parsed.port if parsed.port else (443 if ssl else 3030)
+    webroot = parsed.path or ""
+    if webroot and not webroot.startswith("/"):
+      webroot = "/" + webroot
+    if webroot.endswith("/"):
+      webroot = webroot[:-1]
+    section = name if name == "main" else f"autoscan-{name}"
+    return {
+      "section": section,
+      "host": host,
+      "port": port,
+      "ssl": ssl,
+      "webroot": webroot,
+      "username": instance.username,
+      "password": instance.password,
+      "path": path,
+      "ignore-certs": instance.ignore_certs,
+      "path-mapping": ReadSettings._as_dict(instance.path_mapping, key_separator="="),
     }
 
   @staticmethod

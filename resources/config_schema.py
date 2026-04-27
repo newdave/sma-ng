@@ -325,10 +325,20 @@ class PlexInstance(_Base):
   plexmatch: bool = True
 
 
+class AutoscanInstance(_Base):
+  url: str
+  username: str = ""
+  password: str = ""
+  path_mapping: str = ""
+  ignore_certs: bool = False
+  enabled: bool = True
+
+
 class Services(_Base):
   sonarr: dict[str, SonarrInstance] = Field(default_factory=dict)
   radarr: dict[str, RadarrInstance] = Field(default_factory=dict)
   plex: dict[str, PlexInstance] = Field(default_factory=dict)
+  autoscan: dict[str, AutoscanInstance] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
