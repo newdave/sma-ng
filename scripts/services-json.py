@@ -42,7 +42,7 @@ except ImportError:
       return yaml.safe_load(f) or {}
 
 
-KNOWN_TYPES = ("sonarr", "radarr", "plex", "jellyfin", "emby")
+KNOWN_TYPES = ("sonarr", "radarr", "plex", "jellyfin", "emby", "autoscan")
 
 
 def _stringify(v):

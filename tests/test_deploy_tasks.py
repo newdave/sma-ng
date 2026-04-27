@@ -441,6 +441,43 @@ class TestDeployLibHelpers:
     assert "- sonarr.main" in content
     assert "- sonarr.kids" in content
 
+  def test_stamp_daemon_appends_autoscan_fanout_to_every_routing_rule(self, tmp_path):
+    """An autoscan instance with no path/profile is treated as a fan-out
+    target — its ref is appended to every generated routing rule's
+    services list, so every transcode under any sonarr/radarr-managed
+    path also fires Autoscan."""
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "sma-ng.yml").write_text("daemon: {}\nservices: {}\n")
+    (config_dir / "daemon.env").write_text("# existing\n")
+
+    services = {
+      "sonarr": {
+        "main": {"url": "http://x", "path": "/media/tv", "profile": "rq"},
+      },
+      "radarr": {
+        "main": {"url": "http://y", "path": "/media/movies", "profile": "rq"},
+      },
+      "autoscan": {
+        "main": {"url": "http://autoscan", "username": "u", "password": "p"},
+      },
+    }
+    result = self._run_stamp_daemon(deploy_dir, services)
+    assert result.returncode == 0, result.stderr or result.stdout
+    content = (config_dir / "sma-ng.yml").read_text()
+
+    import yaml as _y
+
+    parsed = _y.safe_load(content)
+    routing = parsed["daemon"]["routing"]
+    assert len(routing) == 2
+    for rule in routing:
+      assert "autoscan.main" in rule["services"], f"fan-out missing from {rule}"
+    # The autoscan instance itself must still be stamped under services.
+    assert parsed["services"]["autoscan"]["main"]["url"] == "http://autoscan"
+    assert parsed["services"]["autoscan"]["main"]["username"] == "u"
+
   def test_stamp_daemon_writes_sma_node_name_to_daemon_env(self, tmp_path):
     deploy_dir = tmp_path / "deploy"
     config_dir = deploy_dir / "config"
