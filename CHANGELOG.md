@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.81](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.80...sma-ng-v1.6.81) (2026-04-27)
+
+
+### Bug Fixes
+
+* **naming:** re-probe converted output so rename reflects encoded codec ([0d82173](https://github.com/newdave/sma-ng/commit/0d82173c0b6e1553c83d9f1e7a363ec120f9ace4))
+
 ## [1.6.80](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.79...sma-ng-v1.6.80) (2026-04-26)
 
 
