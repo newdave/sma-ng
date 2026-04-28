@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sma-ng"
-version = "1.6.86"
+version = "1.6.87"
 description = "SMA-NG: Next-generation automated media conversion, tagging, and integration pipeline"
 readme = "docs/README.md"
 license = { file = "license.md" }
