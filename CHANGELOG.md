@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.86](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.85...sma-ng-v1.6.86) (2026-04-28)
+
+
+### Features
+
+* **logging:** use final output filename in 'Job completed' log lines ([606cba8](https://github.com/newdave/sma-ng/commit/606cba87adcb9fb20c64a86aa08a4d269c04ab80))
+
 ## [1.6.85](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.84...sma-ng-v1.6.85) (2026-04-27)
 
 
