@@ -674,6 +674,10 @@ def processFile(
     arr_renamed_path = triggerRescan(output["output"], mp.settings)
     if arr_renamed_path:
       output["output"] = arr_renamed_path
+    # Emit a parseable marker so the daemon worker can use the final
+    # output path (post-rename, post-arr-rename) in its "Job N completed"
+    # log line instead of the original input path.
+    log.info("SMA_FINAL_OUTPUT: %s", output["output"])
     return True
   else:
     log.error("There was an error processing file %s, no output data received" % inputfile)

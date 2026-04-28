@@ -19,6 +19,9 @@ _FFMPEG_PROGRESS_RE = _re.compile(r"\bframe=\s*\d+\b")
 _FFMPEG_FPS_RE = _re.compile(r"\bfps=\s*([\d.]+)")
 _FFMPEG_SPEED_RE = _re.compile(r"\bspeed=\s*([\d.]+)x")
 _FFMPEG_BITRATE_RE = _re.compile(r"\bbitrate=\s*([\d.]+)\s*kbits/s")
+# Marker emitted by manual.py:processFile on success — value is the final
+# output path after local rename, restoreFromOutput, and any arr rename.
+_SMA_FINAL_OUTPUT_RE = _re.compile(r"SMA_FINAL_OUTPUT:\s*(.+)$")
 _DEFAULT_PROGRESS_LOG_INTERVAL = 60  # seconds between progress log entries
 
 
@@ -216,6 +219,7 @@ class ConversionWorker(threading.Thread):
     start_time = time.monotonic()
     total_duration_secs = None
     _last_progress_log: float = 0.0
+    final_output: str | None = None
 
     try:
       process = subprocess.Popen(
@@ -231,6 +235,13 @@ class ConversionWorker(threading.Thread):
         line = line.strip()
         if not line:
           continue
+        # Capture the final-output marker emitted by manual.py:processFile
+        # so completion logs can show the post-rename output path instead
+        # of the original input path. Last marker wins (covers batched
+        # inputs that produce multiple outputs).
+        marker = _SMA_FINAL_OUTPUT_RE.search(line)
+        if marker:
+          final_output = marker.group(1).strip()
         # Parse total duration from FFmpeg's initial output line
         if total_duration_secs is None:
           dm = _FFMPEG_DURATION_RE.search(line)
@@ -259,11 +270,12 @@ class ConversionWorker(threading.Thread):
         config_logger.error("Job %d timed out after %ds: %s" % (job_id, self.job_timeout_seconds, path))
         return False
 
+      report_path = final_output or path
       if process.returncode == 0:
-        config_logger.info("Job %d completed successfully: %s" % (job_id, path))
+        config_logger.info("Job %d completed successfully: %s" % (job_id, report_path))
         return True
       else:
-        config_logger.error("Job %d exited with code %d: %s" % (job_id, process.returncode, path))
+        config_logger.error("Job %d exited with code %d: %s" % (job_id, process.returncode, report_path))
         return False
 
     except Exception as e:
@@ -272,7 +284,7 @@ class ConversionWorker(threading.Thread):
     finally:
       self._job_processes.pop(job_id, None)
       self._job_progress.pop(job_id, None)
-      config_logger.info("Job %d finished: %s" % (job_id, path))
+      config_logger.info("Job %d finished: %s" % (job_id, final_output or path))
       config_logger.info("")
 
   def _build_progress_payload(self, line, time_match, total_duration_secs, start_time, now):

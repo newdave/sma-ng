@@ -403,6 +403,40 @@ class TestRunConversionInner:
       result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
     assert result is True
 
+  def test_completion_log_uses_final_output_marker(self, tmp_path):
+    """When manual.py emits SMA_FINAL_OUTPUT, the worker's completion
+    log line should reference the final output path, not the original
+    input path."""
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    config_logger = mock.MagicMock()
+    worker.config_log_manager.get_logger.return_value = config_logger
+    final = "/library/Movies/Movie (2024) [WEB-DL][x265].mp4"
+    proc = _make_fake_process([f"SMA_FINAL_OUTPUT: {final}"], returncode=0)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    assert result is True
+    completion_calls = [c for c in config_logger.info.call_args_list if "completed successfully" in str(c)]
+    assert completion_calls, "expected a 'completed successfully' log line"
+    assert final in str(completion_calls[-1])
+    assert str(media) not in str(completion_calls[-1])
+
+  def test_completion_log_falls_back_to_input_path_without_marker(self, tmp_path):
+    """No SMA_FINAL_OUTPUT marker (e.g. older manual.py) → log the input
+    path the way it always has."""
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    config_logger = mock.MagicMock()
+    worker.config_log_manager.get_logger.return_value = config_logger
+    proc = _make_fake_process(["some unrelated log line"], returncode=0)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    completion_calls = [c for c in config_logger.info.call_args_list if "completed successfully" in str(c)]
+    assert completion_calls
+    assert str(media) in str(completion_calls[-1])
+
   def test_logs_periodic_progress_updates(self, tmp_path):
     media = tmp_path / "movie.mkv"
     media.write_bytes(b"")
