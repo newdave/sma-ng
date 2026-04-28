@@ -264,9 +264,15 @@ class TestWorkerPool:
     pool, workers = _make_pool(worker_count=4)
     assert len(pool._workers) == 4
 
-  def test_notify_sets_job_event_on_each_worker(self):
+  def test_notify_rotates_across_workers(self):
+    """notify() now wakes one worker per call in round-robin rotation
+    rather than waking every worker at once. Three calls should hit each
+    of three workers exactly once."""
     pool, workers = _make_pool(worker_count=3)
-    pool.notify()
+    for w in workers:
+      w.current_job_id = None
+    for _ in range(3):
+      pool.notify()
     for w in workers:
       w.job_event.set.assert_called_once()
 
