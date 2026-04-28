@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.87](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.86...sma-ng-v1.6.87) (2026-04-28)
+
+
+### Features
+
+* **scheduler:** round-robin worker wake-up + chain-wake on burst ([4f407a2](https://github.com/newdave/sma-ng/commit/4f407a23d4ea9105c7f8ec50ea4c0dd61b2011dc))
+
 ## [1.6.86](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.85...sma-ng-v1.6.86) (2026-04-28)
 
 
