@@ -633,3 +633,104 @@ class TestWorkerPoolRestart:
       MockWorker.return_value = mock.MagicMock()
       pool.restart()
     assert pool._ffmpeg_dir == "/existing/ffmpeg"
+
+
+class TestWorkerPoolNotify:
+  """Round-robin notify ensures every worker gets an equal share of
+  wake-ups, replacing the old wake-everyone approach that let worker 1
+  win every race for the next claim."""
+
+  def _idle_pool(self, n=4):
+    pool, workers = _make_pool_worker(worker_count=n)
+    for w in workers:
+      w.current_job_id = None
+    return pool, workers
+
+  def test_notify_one_walks_workers_in_rotation(self):
+    pool, workers = self._idle_pool(4)
+    for _ in range(4):
+      pool.notify()
+    for w in workers:
+      w.job_event.set.assert_called_once()
+
+  def test_notify_one_wraps_around(self):
+    pool, workers = self._idle_pool(3)
+    for _ in range(7):  # 2 full rotations + 1
+      pool.notify()
+    counts = [w.job_event.set.call_count for w in workers]
+    # Counts should differ by at most 1 across workers — round-robin.
+    assert max(counts) - min(counts) <= 1
+    assert sum(counts) == 7
+
+  def test_notify_one_skips_busy_workers(self):
+    pool, workers = self._idle_pool(3)
+    workers[0].current_job_id = 99  # busy
+    pool.notify()
+    workers[0].job_event.set.assert_not_called()
+    workers[1].job_event.set.assert_called_once()
+
+  def test_notify_one_when_all_busy_still_advances_cursor(self):
+    pool, workers = self._idle_pool(3)
+    for w in workers:
+      w.current_job_id = 99
+    pool.notify()
+    # Exactly one worker got pinged so a freed worker sees the wake-up.
+    pinged = [w for w in workers if w.job_event.set.call_count]
+    assert len(pinged) == 1
+
+  def test_notify_one_no_workers_is_safe(self):
+    pool, _ = self._idle_pool(0)
+    pool.notify()  # must not raise
+
+
+class TestConversionWorkerChainWake:
+  """When a worker claims a job it should wake the next idle worker so
+  bursts of arrivals fan out across the pool instead of serializing
+  through whichever worker won the first race."""
+
+  def _pool(self):
+    pool = mock.MagicMock()
+    pool._pause_mode.is_set.return_value = False
+    pool._drain_mode.is_set.return_value = False
+    return pool
+
+  def test_chain_wake_fires_after_successful_claim(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    worker.pool = self._pool()
+    worker.config_lock_manager.get_locked_configs.return_value = []
+    worker.job_db.is_distributed = False  # bypass approval check
+    worker.job_db.claim_next_job.side_effect = [
+      {"id": 1, "path": str(media), "config": "/cfg.ini", "args": "[]"},
+      None,  # second drain iteration: no more jobs
+    ]
+    worker.running = True
+
+    def stop_after_one_pass(*_a, **_kw):
+      worker.running = False
+
+    worker.process_job = mock.MagicMock(side_effect=stop_after_one_pass)
+    worker.job_event.wait = mock.MagicMock(return_value=True)
+    worker.run()
+    worker.pool.notify_one.assert_called()
+
+  def test_no_chain_wake_when_no_job_claimed(self, tmp_path):
+    worker = _make_worker()
+    worker.pool = self._pool()
+    worker.config_lock_manager.get_locked_configs.return_value = []
+    worker.job_db.is_distributed = False
+    worker.job_db.claim_next_job.return_value = None
+    worker.running = True
+
+    call_count = {"n": 0}
+
+    def fake_wait(*_a, **_kw):
+      call_count["n"] += 1
+      if call_count["n"] >= 2:
+        worker.running = False
+      return True
+
+    worker.job_event.wait = fake_wait
+    worker.run()
+    worker.pool.notify_one.assert_not_called()

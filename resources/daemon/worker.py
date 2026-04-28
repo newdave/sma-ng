@@ -82,7 +82,11 @@ class ConversionWorker(threading.Thread):
   def run(self):
     while self.running:
       # Wait for a wakeup on this worker's own event or periodic timeout.
-      self.job_event.wait(timeout=5.0)
+      # Stagger the timeout per worker so timeout-driven polls don't all
+      # hit claim_next_job() in the same instant — the worker with the
+      # lowest id always won that race historically. 5s base + worker_id
+      # * 50ms keeps total latency bounded while breaking the tie.
+      self.job_event.wait(timeout=5.0 + (self.worker_id - 1) * 0.05)
       self.job_event.clear()
 
       if not self.running:
@@ -115,6 +119,11 @@ class ConversionWorker(threading.Thread):
         locked = self.config_lock_manager.get_locked_configs()
         job = self.job_db.claim_next_job(self.worker_id, self.node_id, exclude_configs=locked or None)
         if job:
+          # Chain-wake: notify the next idle worker before starting heavy
+          # work, so a burst of N arrivals fans across N workers instead
+          # of this thread looping through all of them serially.
+          if self.pool is not None:
+            self.pool.notify_one()
           self.process_job(job)
         else:
           break
@@ -359,6 +368,13 @@ class WorkerPool:
     self._job_progress = job_progress if job_progress is not None else {}
     self._drain_mode = threading.Event()  # set = cluster drain (no new jobs, stay online)
     self._pause_mode = threading.Event()  # set = paused (workers block)
+    # Round-robin notify cursor: notify_one() picks the next idle worker
+    # in rotation rather than waking every worker at once. Without this,
+    # all workers wake simultaneously, race for the same DB row, and the
+    # same thread (worker 1) wins consistently — leaving 3+ workers idle
+    # while the queue serializes through one of them.
+    self._notify_cursor = 0
+    self._notify_lock = threading.Lock()
     self._start_workers()
 
   def _start_workers(self):
@@ -401,9 +417,37 @@ class WorkerPool:
       worker.job_event.set()
 
   def notify(self):
-    """Wake all workers."""
-    for worker in self._workers:
-      worker.job_event.set()
+    """Wake one idle worker in round-robin rotation.
+
+    Bursts of arrivals are handled by chain-wake: a worker that claims a
+    job calls notify_one() before starting heavy work, so the next idle
+    worker picks up the next queued job, and so on, fanning the burst
+    across the pool instead of serializing through worker 1.
+    """
+    self.notify_one()
+
+  def notify_one(self) -> None:
+    """Wake the next idle worker in rotation. Falls back to waking the
+    cursor's worker if every worker is busy — the wake is a no-op for a
+    busy worker (its event-set is cleared at the top of its run loop)
+    but keeps the cursor advancing so wake-ups stay fair."""
+    if not self._workers:
+      return
+    with self._notify_lock:
+      n = len(self._workers)
+      # Try to find an idle worker first, walking the rotation.
+      for offset in range(n):
+        idx = (self._notify_cursor + offset) % n
+        worker = self._workers[idx]
+        if worker.current_job_id is None:
+          worker.job_event.set()
+          self._notify_cursor = (idx + 1) % n
+          return
+      # All busy — still advance the cursor and ping the next slot so
+      # whichever worker frees up first sees a pending event.
+      idx = self._notify_cursor % n
+      self._workers[idx].job_event.set()
+      self._notify_cursor = (idx + 1) % n
 
   def stop(self):
     """Signal all workers to stop."""
