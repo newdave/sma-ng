@@ -284,8 +284,7 @@ class ConversionWorker(threading.Thread):
     finally:
       self._job_processes.pop(job_id, None)
       self._job_progress.pop(job_id, None)
-      config_logger.info("Job %d finished: %s" % (job_id, final_output or path))
-      config_logger.info("")
+      config_logger.info("")  # blank line separates jobs in the per-config log
 
   def _build_progress_payload(self, line, time_match, total_duration_secs, start_time, now):
     elapsed_secs = now - start_time
