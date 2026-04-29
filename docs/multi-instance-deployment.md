@@ -1,6 +1,12 @@
 # Multi-Instance Deployment
 
-This guide covers running multiple `sma-ng` daemon instances on one host or across multiple hosts.
+This guide covers the *deployment patterns* for running multiple `sma-ng`
+daemon instances on one host or across multiple hosts.
+
+> **For day-2 operations** (drain a node, roll a cluster-wide upgrade with no
+> queued-job loss, recover a stale node, read logs across the cluster), see
+> [Cluster Operations](cluster-operations.md). This page covers the
+> patterns that precede those runbooks.
 
 The key requirement is a shared PostgreSQL database. When `db_url` points at the same PostgreSQL instance, all SMA-NG nodes coordinate through the job table and heartbeat system:
 
@@ -229,23 +235,6 @@ Recommended:
 /opt/sma-node-b/logs
 ```
 
-## Systemd Pattern
-
-For multiple local instances, create one service unit per instance or a templated unit.
-
-Simple pattern:
-
-```ini
-[Service]
-EnvironmentFile=/opt/sma-tv/config/daemon.env
-ExecStart=/opt/sma/venv/bin/python /opt/sma/daemon.py \
-  --port 8585 \
-  --daemon-config /opt/sma-tv/config/sma-ng.yml \
-  --logs-dir /opt/sma-tv/logs
-```
-
-Repeat with different paths and ports for each instance.
-
 ## Docker / Compose Pattern
 
 For Docker-based clusters:
@@ -269,6 +258,10 @@ After bringing nodes up:
 4. stop one node mid-job and confirm stale recovery works after `stale_seconds`
 5. check `/logs` and `/jobs/<id>` on each instance
 
+For the day-2 procedures (drain, rolling upgrade, recover a stale node,
+read cluster logs), see
+[Cluster Operations](cluster-operations.md).
+
 ## Common Failure Modes
 
 ### Jobs never get picked up
@@ -287,7 +280,6 @@ After bringing nodes up:
 
 - inconsistent `path_rewrites`
 - different container bind mounts
-- different `path_configs`
 
 ### Dashboard only shows one node
 
