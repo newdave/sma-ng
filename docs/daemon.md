@@ -661,6 +661,21 @@ curl -X POST "http://localhost:8585/admin/nodes/media-server-2/pause" -H "X-API-
 curl -X POST "http://localhost:8585/admin/nodes/media-server-2/resume" -H "X-API-Key: SECRET"
 ```
 
+Or, from your operator workstation, via mise wrappers that target each
+host's local daemon (uses the host key as `node_id` — same value
+`config:roll` stamps into `daemon.env` as `SMA_NODE_NAME`):
+
+```bash
+mise run cluster:drain  HOST=media-server-2
+mise run cluster:pause  HOST=media-server-2
+mise run cluster:resume HOST=media-server-2
+mise run cluster:upgrade        # rolling drain + deploy:docker, all hosts
+```
+
+For runbooks combining these — bootstrap, add a node, roll a config,
+zero-loss upgrade, recover a stale node — see
+[Cluster Operations](cluster-operations.md).
+
 ### Cluster Log Viewer
 
 All nodes write log entries to the shared `logs` PostgreSQL table. The admin UI Cluster tab

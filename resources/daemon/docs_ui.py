@@ -22,6 +22,7 @@ DOC_PAGES = [
   ("integrations", "Integrations"),
   ("hardware-acceleration", "Hardware Acceleration"),
   ("deployment", "Deployment"),
+  ("cluster-operations", "Cluster Operations"),
   ("troubleshooting", "Troubleshooting"),
   ("migration", "Migration Guide"),
 ]

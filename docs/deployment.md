@@ -145,6 +145,28 @@ You can run `python manual.py -cl` or inspect config files without starting the 
 
 ## Remote Deployment
 
+> **Looking for *how* to do something?** This page is the task and config
+> reference. For step-by-step runbooks (bootstrap a 3-node cluster, roll an
+> upgrade with no queued-job loss, drain a node for maintenance, recover a
+> stale node, read cluster logs), see
+> [Cluster Operations](cluster-operations.md).
+
+### Docker compose profile reference
+
+`docker_profile` (in `setup/local.yml` `deploy:` or per-host) selects which
+compose profile is brought up by `cluster:start` / `deploy:docker`. Only one
+node should run a `*-pg` profile — that's the host that carries the bundled
+PostgreSQL the rest of the cluster connects to.
+
+| Profile | GPU stack | Bundled Postgres? | Use on |
+|---|---|---|---|
+| `software` | none (CPU only) | no — needs `db_url` | a node without GPU + external DB |
+| `software-pg` | none (CPU only) | yes (`sma-pgsql` service) | single-node deployment, no GPU |
+| `intel` | Intel QSV / VAAPI | no | a slave with Intel GPU |
+| `intel-pg` | Intel QSV / VAAPI | yes | the master in an Intel-GPU cluster |
+| `nvidia` | NVIDIA NVENC | no | a slave with NVIDIA GPU |
+| `nvidia-pg` | NVIDIA NVENC | yes | the master in an NVIDIA-GPU cluster |
+
 ### Configuration
 
 Copy the sample and fill in your details:
@@ -308,8 +330,16 @@ For each remote host:
 | `deploy:docker`  | Rsync the local codebase to each Docker host, stamp `SMA_NODE_NAME` into `daemon.env`, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
 | `pg:restart`     | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg`                                                                  |
 | `pg:recreate`    | Stop bundled PostgreSQL, remove its Docker volume, and recreate it on hosts whose `DOCKER_PROFILE` ends in `-pg`                          |
+| `cluster:start`  | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`)                                                                            |
+| `cluster:stop`   | `docker compose stop` for selected hosts                                                                                                  |
+| `cluster:restart`| `docker compose restart` for selected hosts (hard restart — interrupts in-flight jobs; prefer `cluster:upgrade` or `cluster:drain` first) |
+| `cluster:status` | `docker compose ps` for selected hosts                                                                                                    |
+| `cluster:drain`  | POST `/admin/nodes/<host>/drain` — workers finish active jobs then go idle                                                                |
+| `cluster:pause`  | POST `/admin/nodes/<host>/pause` — workers immediately stop picking up new jobs (active jobs continue)                                    |
+| `cluster:resume` | POST `/admin/nodes/<host>/resume` — clear drain or pause                                                                                  |
+| `cluster:upgrade`| Rolling upgrade: per host, drain → wait for `running_jobs=0` (`DRAIN_TIMEOUT`, default 1800s) → run `deploy:docker HOST=<host>`            |
 
-Additional Docker lifecycle helper: `deploy:dockerstop` (alias: `deploy:docker:stop`) stops services on selected hosts.
+See [Cluster Operations](cluster-operations.md) for runbooks combining these.
 
 All remote-facing deploy/config tasks depend on `deploy:mise`, so the remote `.mise/`
 control plane is refreshed before those wrappers run. The Docker-specific deploy tasks
