@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+#MISE description="Rolling cluster upgrade: drain each node in sequence, wait for queue to empty, then deploy:docker (HOST or HOSTS to scope)"
+#MISE depends=["deploy:mise"]
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source "$(dirname "$0")/../../shared/deploy/lib.sh"
+
+ALL_HOSTS=$(lc deploy hosts "")
+if [ -n "${HOSTS:-}" ]; then
+  DEPLOY_HOSTS="$HOSTS"
+else
+  DEPLOY_HOSTS="${HOST:-$ALL_HOSTS}"
+fi
+
+if [ -z "$DEPLOY_HOSTS" ]; then
+  echo "ERROR: no hosts selected. Set HOST, HOSTS, or deploy.hosts in $LOCAL" >&2
+  exit 1
+fi
+
+DRAIN_TIMEOUT=${DRAIN_TIMEOUT:-1800}      # 30 min default — long-running conversions can take a while
+POLL_INTERVAL=${POLL_INTERVAL:-10}
+daemon_api_key=$(lc daemon api_key "")
+
+# POST a cluster action (drain/resume) to one host's local daemon.
+_post_action() {
+  local host="$1" action="$2"
+  init_host_context "$host"
+  local daemon_port
+  # shellcheck disable=SC2154  # cfg populated by init_host_context above
+  daemon_port=$($cfg daemon_port 8585)
+  local url="http://127.0.0.1:${daemon_port}/admin/nodes/${host}/${action}"
+  local cmd
+  if [ -n "$daemon_api_key" ]; then
+    cmd="curl -sf -X POST ${url} -H 'X-API-Key: ${daemon_api_key}'"
+  else
+    cmd="curl -sf -X POST ${url}"
+  fi
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by init_host_context; ssh_opts must word-split
+  ssh $ssh_opts "$ssh_target" "$cmd" > /dev/null
+}
+
+# Read this host's running_jobs count from /admin/nodes/<host> (returns "" on
+# transient API failure so the caller can retry rather than abort).
+_running_jobs() {
+  local host="$1"
+  init_host_context "$host"
+  local daemon_port
+  # shellcheck disable=SC2154  # cfg populated by init_host_context above
+  daemon_port=$($cfg daemon_port 8585)
+  local url="http://127.0.0.1:${daemon_port}/admin/nodes/${host}"
+  local cmd
+  if [ -n "$daemon_api_key" ]; then
+    cmd="curl -sf ${url} -H 'X-API-Key: ${daemon_api_key}'"
+  else
+    cmd="curl -sf ${url}"
+  fi
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by init_host_context; ssh_opts must word-split
+  ssh $ssh_opts "$ssh_target" "$cmd" 2>/dev/null \
+    | python3 .mise/shared/deploy/lib/node_running_jobs.py 2>/dev/null \
+    || true
+}
+
+failed=""
+for host in $DEPLOY_HOSTS; do
+  echo ""
+  echo "==> [$host] cluster upgrade: drain → wait → deploy:docker"
+
+  if ! _post_action "$host" drain; then
+    echo "  ERROR: [$host] drain request failed; skipping host" >&2
+    failed="$failed $host"
+    continue
+  fi
+  echo "  [$host] drain accepted; waiting up to ${DRAIN_TIMEOUT}s for running_jobs=0"
+
+  elapsed=0
+  drained="false"
+  while [ "$elapsed" -lt "$DRAIN_TIMEOUT" ]; do
+    rj=$(_running_jobs "$host")
+    if [ "$rj" = "0" ]; then
+      drained="true"
+      echo "  [$host] queue drained after ${elapsed}s"
+      break
+    fi
+    if [ -n "$rj" ]; then
+      echo "  [$host] running_jobs=${rj} (${elapsed}s elapsed)"
+    fi
+    sleep "$POLL_INTERVAL"
+    elapsed=$((elapsed + POLL_INTERVAL))
+  done
+
+  if [ "$drained" != "true" ]; then
+    echo "  ERROR: [$host] did not drain within ${DRAIN_TIMEOUT}s; resuming and skipping" >&2
+    _post_action "$host" resume || true
+    failed="$failed $host"
+    continue
+  fi
+
+  echo "==> [$host] running deploy:docker for this host only"
+  if ! HOST="$host" mise run deploy:docker; then
+    echo "  ERROR: [$host] deploy:docker failed; resuming and continuing" >&2
+    _post_action "$host" resume || true
+    failed="$failed $host"
+    continue
+  fi
+  # The new daemon process starts fresh (drain mode is in-memory and lost on
+  # restart); no explicit resume needed — heartbeat will set status to online.
+  echo "==> [$host] upgraded"
+done
+
+if [ -n "$failed" ]; then
+  echo ""
+  echo "ERROR: cluster upgrade failed for:$failed" >&2
+  exit 1
+fi
+
+echo ""
+echo "Cluster upgrade complete: $DEPLOY_HOSTS"
