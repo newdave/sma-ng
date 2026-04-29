@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.90](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.89...sma-ng-v1.6.90) (2026-04-29)
+
+
+### Documentation
+
+* **multi-instance:** drop systemd, cross-link cluster-operations ([f60eff1](https://github.com/newdave/sma-ng/commit/f60eff1196a09db501e23e32780c42cd33f6a2a1))
+
 ## [1.6.89](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.88...sma-ng-v1.6.89) (2026-04-29)
 
 
