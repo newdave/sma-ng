@@ -98,6 +98,14 @@ python daemon.py --host 0.0.0.0 --port 8585
 
 ## Architecture
 
+A single-host install runs the components shown below. In **cluster mode**,
+multiple nodes each run an identical daemon stack (server + worker pool +
+heartbeat) sharing one PostgreSQL `jobs` / `cluster_nodes` / `node_commands`
+table — see [Daemon Mode → Cluster Mode](daemon.md#cluster-mode) for the
+internals and [Cluster Operations](cluster-operations.md) for the operator
+runbooks (bootstrap, roll a config, zero-loss upgrade, drain a node,
+recover from failure).
+
 ```mermaid
 graph TD
     subgraph Entry["Entry Points"]
