@@ -33,20 +33,15 @@ from resources.daemon import (
   STATUS_RUNNING,  # pyright: ignore[reportUnusedImport]
   ConfigLockManager,
   ConfigLogManager,
-  ConversionWorker,  # pyright: ignore[reportUnusedImport]
   DaemonServer,
-  HeartbeatThread,  # pyright: ignore[reportUnusedImport]
   PathConfigManager,
   PostgreSQLJobDatabase,
-  ScannerThread,  # pyright: ignore[reportUnusedImport]
   WebhookHandler,
-  WorkerPool,  # pyright: ignore[reportUnusedImport]
-  _inline,  # pyright: ignore[reportUnusedImport]
+  _inline,  # pyright: ignore[reportUnusedImport]  # re-exported for tests
   _load_dashboard_html,  # pyright: ignore[reportUnusedImport]
   _render_markdown_to_html,  # pyright: ignore[reportUnusedImport]
-  _StoppableThread,  # pyright: ignore[reportUnusedImport]
 )
-from resources.daemon.constants import LOGS_DIR, SCRIPT_DIR, resolve_node_id  # pyright: ignore[reportUnusedImport]
+from resources.daemon.constants import LOGS_DIR, SCRIPT_DIR, resolve_node_id
 from resources.daemon.server import _validate_hwaccel
 from resources.log import getLogger
 

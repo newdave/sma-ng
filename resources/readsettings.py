@@ -35,7 +35,6 @@ from urllib.parse import urlparse
 
 from resources.config_loader import ConfigError, ConfigLoader
 from resources.config_schema import AutoscanInstance, PlexInstance, SmaConfig, SonarrInstance
-from resources.extensions import *  # noqa: F401,F403  - legacy wildcard re-exports
 from resources.yamlconfig import cfg_getdirectories, cfg_getdirectory, cfg_getextension, cfg_getextensions, cfg_getpath
 
 
@@ -620,12 +619,6 @@ class ReadSettings:
     self.sonarr_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
     self.radarr_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
     self.autoscan_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
-
-    # ``Sonarr`` / ``Radarr`` are kept as attributes for backward
-    # compatibility; only readsettings itself populated them historically
-    # and no external consumer reads them, so an empty dict is fine.
-    self.Sonarr: dict[str, Any] = {}
-    self.Radarr: dict[str, Any] = {}
 
     # Plex: pick the first instance (preferring one named "main"), or {}.
     plex_instances = cfg.services.plex

@@ -75,16 +75,6 @@ class TestReadSettingsMultiInstance:
     assert [len(p) for p in paths] == sorted([len(p) for p in paths], reverse=True)
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_backward_compat(self, mock_validate, tmp_yaml):
-    """self.Sonarr / self.Radarr remain on the instance for compatibility but
-    are now empty (no consumer reads them; routing-derived data lives in
-    sonarr_instances/radarr_instances)."""
-    yml = tmp_yaml()
-    settings = ReadSettings(yml)
-    assert settings.Sonarr == {}
-    assert settings.Radarr == {}
-
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
   def test_discovers_autoscan_instances(self, mock_validate, tmp_yaml):
     """autoscan_instances should be built from services.autoscan, with paths
     derived from routing rules and disabled instances filtered out."""
