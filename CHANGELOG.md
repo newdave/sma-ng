@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.89](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.88...sma-ng-v1.6.89) (2026-04-29)
+
+
+### Documentation
+
+* **cluster:** add cluster-operations runbook + cross-links ([f892831](https://github.com/newdave/sma-ng/commit/f892831c7283a3b4f73c793bdd9758fcaed9109b))
+
 ## [1.6.88](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.87...sma-ng-v1.6.88) (2026-04-29)
 
 
