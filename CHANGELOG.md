@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.88](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.87...sma-ng-v1.6.88) (2026-04-29)
+
+
+### Features
+
+* **mise:** add cluster:{drain,pause,resume,upgrade} wrappers ([198d0bb](https://github.com/newdave/sma-ng/commit/198d0bb9d01f2b45bb42e55b214282832a00e39f))
+
 ## [1.6.87](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.86...sma-ng-v1.6.87) (2026-04-28)
 
 
