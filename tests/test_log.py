@@ -39,7 +39,7 @@ class TestCheckLoggingConfig:
     configfile = str(tmp_path / "logging.ini")
     config = RawConfigParser()
     config.add_section("loggers")
-    config.set("loggers", "keys", "root, manual, nzbget, daemon")
+    config.set("loggers", "keys", "root, manual, daemon")
     with open(configfile, "w") as f:
       config.write(f)
     checkLoggingConfig(configfile)

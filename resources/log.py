@@ -34,23 +34,17 @@ except ImportError:
 
 defaults = {
   "loggers": {
-    "keys": "root, manual, nzbget, daemon",
+    "keys": "root, manual, daemon",
   },
   "handlers": {
-    "keys": "consoleHandler, nzbgetHandler, manualHandler, daemonHandler",
+    "keys": "consoleHandler, manualHandler, daemonHandler",
   },
   "formatters": {
-    "keys": "simpleFormatter, minimalFormatter, nzbgetFormatter, daemonFormatter",
+    "keys": "simpleFormatter, minimalFormatter, daemonFormatter",
   },
   "logger_root": {
     "level": "DEBUG",
     "handlers": "consoleHandler",
-  },
-  "logger_nzbget": {
-    "level": "DEBUG",
-    "handlers": "nzbgetHandler",
-    "propagate": 0,
-    "qualname": "NZBGetPostProcess",
   },
   "logger_manual": {
     "level": "DEBUG",
@@ -70,12 +64,6 @@ defaults = {
     "formatter": "simpleFormatter",
     "args": "(sys.stdout,)",
   },
-  "handler_nzbgetHandler": {
-    "class": "StreamHandler",
-    "level": "INFO",
-    "formatter": "nzbgetFormatter",
-    "args": "(sys.stdout,)",
-  },
   "handler_manualHandler": {
     "class": "StreamHandler",
     "level": "INFO",
@@ -93,7 +81,6 @@ defaults = {
     "datefmt": "%Y-%m-%d %H:%M:%S",
   },
   "formatter_minimalFormatter": {"format": "%(message)s", "datefmt": ""},
-  "formatter_nzbgetFormatter": {"format": "[%(levelname)s] %(message)s", "datefmt": ""},
   "formatter_daemonFormatter": {"format": "%(asctime)s [%(levelname)s] [job:%(job_id)s] %(message)s", "datefmt": "%Y-%m-%d %H:%M:%S"},
 }
 
