@@ -170,6 +170,11 @@ class TestMiseTaskLayout:
     assert "cluster:stop" in tasks
     assert "cluster:start" in tasks
     assert "cluster:restart" in tasks
+    assert "cluster:status" in tasks
+    assert "cluster:drain" in tasks
+    assert "cluster:pause" in tasks
+    assert "cluster:resume" in tasks
+    assert "cluster:upgrade" in tasks
 
     assert "pg:restart" in tasks
     assert "deploy:docker:pg:restart" not in tasks
