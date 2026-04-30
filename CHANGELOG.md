@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.93](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.92...sma-ng-v1.6.93) (2026-04-30)
+
+
+### Features
+
+* **qsv,hdr:** ICQ tuning, preset whitelist, deeper look-ahead, HDR color tags ([333aa02](https://github.com/newdave/sma-ng/commit/333aa0295dd720d5122c94fbdf3a204a2a7cf048))
+
 ## [1.6.92](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.91...sma-ng-v1.6.92) (2026-04-30)
 
 
