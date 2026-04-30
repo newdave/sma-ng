@@ -103,11 +103,14 @@ shell-trigger-only and configured in `triggers/`. See
 | `filter` | string | | Custom FFmpeg video filter |
 | `force-filter` | bool | `false` | Force re-encode when filter is set |
 | `codec-parameters` | string | | Extra codec params (e.g., `x265-params`) |
-| `look-ahead-depth` | int | `0` | Look-ahead frames for rate control (QSV: `la_depth`). `0` = encoder default. |
+| `look-ahead-depth` | int | `0` | Look-ahead frames for rate control (QSV: `la_depth`). `0` = encoder default. For `hevc_qsv`, SMA-NG also bumps `-extra_hw_frames` to `look-ahead-depth + 4` to keep the device frame pool from running dry. |
+| `global-quality` | int | `0` | ICQ quality target for QSV encodes (lower = better, typical `21–25` for 1080p HEVC). `0` lets the codec use its default. Ignored when a bitrate target is set via `crf-profiles` / `bitrate-ratio` / `max-bitrate`; ICQ and VBR are mutually exclusive. |
 | `b-frames` | int | `-1` | Number of B-frames. `-1` = encoder default. |
 | `ref-frames` | int | `-1` | Number of reference frames. `-1` = encoder default. |
 
 > **Note:** `codec-parameters` values are automatically cleared at runtime when `gpu` is not `qsv`. QSV-specific flags (e.g. `-low_power 1 -extbrc 1`) in the sample are silently ignored by other backends.
+>
+> **QSV preset:** `h264_qsv`, `hevc_qsv`, `vp9_qsv`, and `av1_qsv` accept the standard FFmpeg QSV preset names (`veryfast`, `faster`, `fast`, `medium`, `slow`, `slower`, `veryslow`). Earlier releases silently dropped any preset on these encoders; SMA-NG now passes them through. `slower` is the recommended QSV default — it costs little speed on Intel iGPUs and meaningfully improves quality.
 
 ---
 
@@ -128,8 +131,19 @@ Override video settings for HDR content (detected automatically).
 | `filter` | string | Video filter for HDR content |
 | `force-filter` | bool | Force re-encode for HDR filter |
 | `look-ahead-depth` | int | Look-ahead depth override for HDR encoding (default: `0`) |
+| `global-quality` | int | ICQ quality target for HDR encodes (default: `0` = inherit from `base.video.global-quality`) |
 | `b-frames` | int | B-frames override for HDR encoding (default: `-1` = encoder default) |
 | `ref-frames` | int | Reference frames override for HDR encoding (default: `-1` = encoder default) |
+
+When the output is HDR (10-bit pix_fmt and `space`/`transfer`/`primaries` set), SMA-NG emits the configured first values as FFmpeg output flags so HDR-aware players (Plex, Apple TV, etc.) tag the stream correctly:
+
+```text
+-color_primaries <hdr.primaries[0]>   # e.g. bt2020
+-color_trc       <hdr.transfer[0]>    # e.g. smpte2084 for HDR10, arib-std-b67 for HLG
+-colorspace      <hdr.space[0]>       # e.g. bt2020nc
+```
+
+For HLG sources, set `transfer: [arib-std-b67]`. The flags are emitted regardless of encoder (qsv / vaapi / nvenc / software) and only on HDR output — HDR→SDR transcodes do not carry the tags forward.
 
 ---
 
@@ -243,7 +257,7 @@ Generates an additional stereo AAC stream for device compatibility.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `codec` | list | `mov_text` | Subtitle codec for text-based subs |
+| `codec` | list | `mov_text` | Subtitle codec for text-based subs. `mov_text` is MP4-only; if `converter.output-format` is `mkv` / `webm` and `codec` is left at the default, it is auto-substituted with `[srt]` at startup with a WARNING. Set the field explicitly to silence the substitution. |
 | `codec-image-based` | list | | Codec for image-based subs (PGS, VobSub) |
 | `languages` | list | | Language whitelist (ISO 639-3) |
 | `default-language` | string | `eng` | Default for unlabeled subs |

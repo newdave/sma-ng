@@ -34,19 +34,49 @@ make detect-gpu        # show detection result without writing config
 
 ## Intel QSV
 
-```ini
-[Video]
-gpu = qsv
-codec = h265qsv, h265
-codec-parameters = -low_power 1 -async_depth 1 -extbrc 1
-look-ahead-depth = 16
-b-frames = 3
-ref-frames = 4
+```yaml
+base:
+  video:
+    gpu: qsv
+    codec: [h265qsv, h265]
+    codec-parameters: '-low_power 1 -async_depth 1 -extbrc 1'
+    look-ahead-depth: 16
+    b-frames: 3
+    ref-frames: 4
 ```
 
 Supported QSV codecs: `h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`
 
 `codec-parameters` accepts raw FFmpeg encoder flags. The defaults in `setup/sma-ng.yml.sample` enable QSV low-power mode and extended rate control (`-low_power 1 -async_depth 1 -extbrc 1`). These are automatically cleared at runtime when `gpu` is not `qsv`.
+
+### Tuning QSV HEVC for ICQ + HDR
+
+For best per-frame quality on Intel QSV, prefer ICQ (Intelligent
+Constant Quality) over scene-blind VBR. Recommended tuning:
+
+```yaml
+base:
+  video:
+    gpu: qsv
+    codec: [h265qsv, h265]
+    preset: slower            # QSV presets cost little speed; veryslow if headroom
+    look-ahead-depth: 40      # SMA-NG bumps -extra_hw_frames automatically
+    global-quality: 23        # ICQ target; 21–25 typical for 1080p HEVC
+    crf-profiles: ''          # clear bitrate matching to enable ICQ
+    crf-profiles-hd: ''       # same for HD
+  hdr:
+    pix-fmt: [p010le]         # required for 10-bit HDR passthrough
+    primaries: [bt2020]
+    transfer: [smpte2084]     # PQ; use [arib-std-b67] for HLG sources
+    space: [bt2020nc]
+```
+
+- **`preset: slower`** — earlier releases silently dropped QSV presets; SMA-NG now passes them through. `slower` improves quality for a small speed cost on Intel iGPUs.
+- **`look-ahead-depth: 40`** — deeper look-ahead helps in ICQ mode. SMA-NG automatically emits `-extra_hw_frames 44` so the device frame pool doesn't run dry.
+- **`global-quality: 23`** — direct knob for `-global_quality`. Lower values raise quality; the typical 1080p HEVC sweet spot is 21–25. Ignored when `crf-profiles` or `max-bitrate` set a bitrate target (ICQ and VBR are mutually exclusive).
+- **`hdr.pix-fmt: [p010le]`** — required to keep 10-bit HDR passthrough; without it the pipeline truncates to 8-bit.
+- **HDR color tags** — when the output is HDR, SMA-NG emits `-color_primaries`, `-color_trc`, and `-colorspace` from `hdr.primaries[0]`, `hdr.transfer[0]`, `hdr.space[0]`. Use `transfer: [arib-std-b67]` for HLG sources so players don't render PQ as washed-out.
+- **MKV vs MP4 subtitles** — `mov_text` is MP4-only. If you switch `converter.output-format` to `mkv`, leave `subtitle.codec` at the default and SMA-NG auto-substitutes `[srt]` at startup with a WARNING; set it explicitly to take control.
 
 ---
 
