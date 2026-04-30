@@ -71,7 +71,7 @@ class TestRunSmokeTest:
     fixture = tmp_path / "test1.mkv"
     fixture.write_bytes(b"fake")
     pcm = _make_pcm()
-    pcm.get_all_configs.return_value = ["/nonexistent/autoProcess.ini"]
+    pcm.get_all_configs.return_value = ["/nonexistent/sma-ng.yml"]
     logger = MagicMock()
     with patch.object(daemon_entry, "_SMOKE_TEST_FIXTURE", str(fixture)):
       run_smoke_test(pcm, None, logger)
@@ -81,7 +81,7 @@ class TestRunSmokeTest:
   def test_exits_1_when_config_raises(self, tmp_path):
     fixture = tmp_path / "test1.mkv"
     fixture.write_bytes(b"fake")
-    config = tmp_path / "autoProcess.ini"
+    config = tmp_path / "sma-ng.yml"
     config.write_text("[Converter]\n")
     pcm = _make_pcm()
     pcm.get_all_configs.return_value = [str(config)]
@@ -95,7 +95,7 @@ class TestRunSmokeTest:
   def test_passes_when_all_configs_succeed(self, tmp_path):
     fixture = tmp_path / "test1.mkv"
     fixture.write_bytes(b"fake")
-    config = tmp_path / "autoProcess.ini"
+    config = tmp_path / "sma-ng.yml"
     config.write_text("[Converter]\n")
     pcm = _make_pcm()
     pcm.get_all_configs.return_value = [str(config)]

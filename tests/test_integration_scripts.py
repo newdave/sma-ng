@@ -204,10 +204,10 @@ class TestPostRadarr:
   def test_sma_config_included_in_payload(self):
     result, submissions = _run(
       "radarr",
-      env_override={**self._env(), "SMA_CONFIG": "/config/autoProcess.movies.ini"},
+      env_override={**self._env(), "SMA_CONFIG": "/config/sma-ng.movies.yml"},
     )
     assert result.returncode == 0
-    assert submissions[0].get("config") == "/config/autoProcess.movies.ini"
+    assert submissions[0].get("config") == "/config/sma-ng.movies.yml"
 
   def test_no_sma_config_omits_config_key(self):
     env = {**self._env()}
@@ -309,10 +309,10 @@ class TestPostSonarr:
   def test_sma_config_included_in_payload(self):
     result, submissions = _run(
       "sonarr",
-      env_override={**self._env(), "SMA_CONFIG": "/config/autoProcess.tv.ini"},
+      env_override={**self._env(), "SMA_CONFIG": "/config/sma-ng.tv.yml"},
     )
     assert result.returncode == 0
-    assert submissions[0].get("config") == "/config/autoProcess.tv.ini"
+    assert submissions[0].get("config") == "/config/sma-ng.tv.yml"
 
   def test_no_sma_config_omits_config_key(self):
     env = {**self._env()}
