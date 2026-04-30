@@ -80,3 +80,9 @@ setup/.local.yml
 setup/.local.ini
 config/daemon.json.save
 docker/.env
+
+# Local-only FarmNVR timelapse helper (not for upstream)
+/scripts/local/
+/.mise/tasks/local/
+
+*farmnvr*
