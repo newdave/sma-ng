@@ -81,7 +81,7 @@ class TestValidateHwaccel:
     logger.warning.assert_not_called()
 
   def test_does_nothing_when_no_video_section(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Converter]\ndelete-original = False\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -90,7 +90,7 @@ class TestValidateHwaccel:
     mock_run.assert_not_called()
 
   def test_does_nothing_when_no_video_codec_key(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\nsome-other-key = value\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -99,7 +99,7 @@ class TestValidateHwaccel:
     mock_run.assert_not_called()
 
   def test_warns_when_ffmpeg_returns_nonzero(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\ncodec = h264, nvenc\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -110,7 +110,7 @@ class TestValidateHwaccel:
     assert "h264_nvenc" in logger.warning.call_args[0][0]
 
   def test_logs_info_validated_ok_when_ffmpeg_returns_zero(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\ncodec = h264, nvenc\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -120,7 +120,7 @@ class TestValidateHwaccel:
     assert any("validated OK" in m for m in info_msgs)
 
   def test_handles_file_not_found_gracefully(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\ncodec = h264, nvenc\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -130,7 +130,7 @@ class TestValidateHwaccel:
     assert "not found" in logger.warning.call_args[0][0]
 
   def test_handles_timeout_expired_gracefully(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\ncodec = h264, nvenc\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -151,7 +151,7 @@ class TestValidateHwaccel:
     mock_run.assert_called_once()
 
   def test_appends_ffmpeg_dir_to_path_env(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\ncodec = h264, nvenc\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -161,7 +161,7 @@ class TestValidateHwaccel:
     assert kwargs["env"]["PATH"].startswith("/custom/ffmpeg/bin")
 
   def test_skips_software_codec(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\ncodec = h264\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -170,7 +170,7 @@ class TestValidateHwaccel:
     mock_run.assert_not_called()
 
   def test_skips_copy_codec(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\ncodec = copy\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -179,7 +179,7 @@ class TestValidateHwaccel:
     mock_run.assert_not_called()
 
   def test_legacy_video_codec_key_still_supported_with_warning(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\nvideo-codec = h264, nvenc\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -424,7 +424,7 @@ class _BlockingHealthHandler(BaseHTTPRequestHandler):
 class TestDaemonServerReloadConfig:
   def _make_reloadable_server(self, tmp_path):
     cfg = str(tmp_path / "sma-ng.yml")
-    _dump_daemon_yaml(cfg, {"default_config": "config/autoProcess.ini"})
+    _dump_daemon_yaml(cfg, {"default_config": "config/sma-ng.yml"})
 
     job_db = MagicMock()
     job_db.pending_count.return_value = 0
@@ -749,7 +749,7 @@ class TestDaemonServerGracefulRestart:
 
 class TestValidateHwaccelExtra:
   def test_handles_generic_exception_gracefully(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\nvideo-codec = h264, nvenc\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -759,7 +759,7 @@ class TestValidateHwaccelExtra:
     assert any("failed" in message for message in messages)
 
   def test_validates_vaapi_encoder(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\nvideo-codec = h264, vaapi\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -769,7 +769,7 @@ class TestValidateHwaccelExtra:
     assert "h264_vaapi" in called_args
 
   def test_validates_qsv_encoder(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\nvideo-codec = h264, qsv\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -779,7 +779,7 @@ class TestValidateHwaccelExtra:
     assert any("h264_qsv" in cmd for cmd in all_calls)
 
   def test_logs_qsv_init_failure_details(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\nvideo-codec = h264, qsv\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -794,7 +794,7 @@ class TestValidateHwaccelExtra:
     assert any("No VA display found" in w for w in warnings)
 
   def test_qsv_init_uses_hwdevices_override(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Converter]\nhwdevices = qsv:/dev/dri/renderD129\n[Video]\nvideo-codec = h264, qsv\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()
@@ -808,7 +808,7 @@ class TestValidateHwaccelExtra:
     assert "/dev/dri/renderD129" in qsv_init_calls[0]
 
   def test_validates_videotoolbox_encoder(self, tmp_path):
-    cfg = tmp_path / "autoProcess.ini"
+    cfg = tmp_path / "sma-ng.yml"
     cfg.write_text("[Video]\nvideo-codec = h264, videotoolbox\n")
     pcm = _make_pcm([str(cfg)])
     logger = MagicMock()

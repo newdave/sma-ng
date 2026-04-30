@@ -69,7 +69,7 @@ def _make_server(
   server.config_lock_manager.is_locked.return_value = False
 
   # config_log_manager
-  server.config_log_manager.get_log_file.return_value = "/logs/autoProcess.log"
+  server.config_log_manager.get_log_file.return_value = "/logs/sma-ng.log"
   server.config_log_manager.get_all_log_files.return_value = []
   server.config_log_manager.logs_dir = "/logs"
 
@@ -403,10 +403,10 @@ class TestGetJobs:
 
   def test_adds_log_name_to_jobs_with_config(self):
     h = _make_handler()
-    h.server.job_db.get_jobs.return_value = [{"id": 1, "path": "/foo.mkv", "config": "/config/autoProcess.ini"}]
+    h.server.job_db.get_jobs.return_value = [{"id": 1, "path": "/foo.mkv", "config": "/config/sma-ng.yml"}]
     h._get_jobs({})
     body = _get_response_body(h)
-    assert body["jobs"][0]["log_name"] == "autoProcess"
+    assert body["jobs"][0]["log_name"] == "sma-ng"
 
   def test_returns_200(self):
     h = _make_handler()
@@ -494,14 +494,14 @@ class TestGetLogs:
     assert body == []
 
   def test_returns_log_entry_with_name(self, tmp_path):
-    log_file = tmp_path / "autoProcess.log"
+    log_file = tmp_path / "sma-ng.log"
     log_file.write_text('{"level": "INFO", "message": "test"}\n')
     h = _make_handler()
-    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "autoProcess", "path": str(log_file)}]
+    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "sma-ng", "path": str(log_file)}]
     h._get_logs()
     body = _get_response_body(h)
     assert len(body) == 1
-    assert body[0]["name"] == "autoProcess"
+    assert body[0]["name"] == "sma-ng"
     assert body[0]["size"] > 0
 
   def test_handles_missing_log_file(self):
@@ -513,10 +513,10 @@ class TestGetLogs:
     assert body[0]["mtime"] is None
 
   def test_formats_log_mtime_in_local_timezone(self, tmp_path):
-    log_file = tmp_path / "autoProcess.log"
+    log_file = tmp_path / "sma-ng.log"
     log_file.write_text('{"level": "INFO", "message": "test"}\n')
     h = _make_handler()
-    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "autoProcess", "path": str(log_file)}]
+    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "sma-ng", "path": str(log_file)}]
     local_tz = timezone(timedelta(hours=-5))
     with patch("resources.daemon.handler._LOCAL_TIMEZONE", local_tz):
       h._get_logs()
@@ -555,12 +555,12 @@ class TestGetLogContent:
     assert h._response_code == 404
 
   def test_returns_entries_from_log_file(self, tmp_path):
-    log_file = tmp_path / "autoProcess.log"
+    log_file = tmp_path / "sma-ng.log"
     entry = {"level": "INFO", "message": "test", "job_id": 1}
     log_file.write_text(json.dumps(entry) + "\n")
     h = _make_handler()
-    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "autoProcess", "path": str(log_file)}]
-    h._get_log_content("/logs/autoProcess", {})
+    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "sma-ng", "path": str(log_file)}]
+    h._get_log_content("/logs/sma-ng", {})
     body = _get_response_body(h)
     assert len(body["entries"]) == 1
     assert body["entries"][0]["message"] == "test"
@@ -1478,8 +1478,8 @@ class TestPostJobsRequeueBulk:
   def test_passes_config_filter(self):
     h = _make_handler(method="POST")
     h.server.job_db.requeue_failed_jobs.return_value = 0
-    h._post_jobs_requeue_bulk({"config": ["/config/autoProcess.ini"]})
-    h.server.job_db.requeue_failed_jobs.assert_called_once_with(config="/config/autoProcess.ini")
+    h._post_jobs_requeue_bulk({"config": ["/config/sma-ng.yml"]})
+    h.server.job_db.requeue_failed_jobs.assert_called_once_with(config="/config/sma-ng.yml")
 
   def test_no_notify_when_zero_requeued(self):
     h = _make_handler(method="POST")

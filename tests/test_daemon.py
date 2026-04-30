@@ -596,7 +596,7 @@ class TestLogEndpoints:
 
   def test_logs_list_entries_have_required_fields(self, live_server):
     # Register a config logger so the list is non-empty
-    live_server.config_log_manager.get_logger("/tmp/autoProcess.test.ini")
+    live_server.config_log_manager.get_logger("/tmp/sma-ng.test.yml")
     data, _ = self._get(live_server, "/logs")
     for entry in data:
       assert "name" in entry
@@ -615,7 +615,7 @@ class TestLogEndpoints:
     import os
 
     # Write a test log file in the manager's logs_dir
-    log_name = "autoProcess.testlog"
+    log_name = "sma-ng.testlog"
     log_path = os.path.join(live_server.config_log_manager.logs_dir, log_name + ".log")
     with open(log_path, "w") as f:
       f.write('{"timestamp":"2026-01-01 00:00:00","level":"INFO","job_id":"1","message":"hello"}\n')
@@ -633,7 +633,7 @@ class TestLogEndpoints:
   def test_logs_content_job_id_filter(self, live_server, tmp_path):
     import os
 
-    log_name = "autoProcess.filterjob"
+    log_name = "sma-ng.filterjob"
     log_path = os.path.join(live_server.config_log_manager.logs_dir, log_name + ".log")
     with open(log_path, "w") as f:
       f.write('{"timestamp":"2026-01-01 00:00:00","level":"INFO","job_id":"10","message":"job10"}\n')
@@ -646,7 +646,7 @@ class TestLogEndpoints:
 
   def test_logs_tail_requires_offset(self, live_server):
     # Register a logger first
-    log_name = "autoProcess.tailtest"
+    log_name = "sma-ng.tailtest"
     live_server.config_log_manager.get_logger("/tmp/" + log_name + ".ini")
     host, port = live_server.server_address
     url = "http://%s:%d/logs/%s/tail" % (host, port, log_name)
@@ -659,7 +659,7 @@ class TestLogEndpoints:
   def test_logs_tail_returns_new_content(self, live_server):
     import os
 
-    log_name = "autoProcess.tailpoll"
+    log_name = "sma-ng.tailpoll"
     log_path = os.path.join(live_server.config_log_manager.logs_dir, log_name + ".log")
     with open(log_path, "w") as f:
       f.write('{"timestamp":"2026-01-01 00:00:00","level":"INFO","job_id":"5","message":"first"}\n')
@@ -689,22 +689,22 @@ class TestConfigLockManagerExtended:
 
   def test_is_locked_initially_false(self):
     mgr = ConfigLockManager()
-    assert mgr.is_locked("/cfg/autoProcess.ini") is False
+    assert mgr.is_locked("/cfg/sma-ng.yml") is False
 
   def test_is_locked_after_acquire(self):
     mgr = ConfigLockManager()
-    mgr.acquire("/cfg/autoProcess.ini", job_id=1, job_path="/a.mkv")
-    assert mgr.is_locked("/cfg/autoProcess.ini") is True
+    mgr.acquire("/cfg/sma-ng.yml", job_id=1, job_path="/a.mkv")
+    assert mgr.is_locked("/cfg/sma-ng.yml") is True
 
   def test_is_locked_false_after_release(self):
     mgr = ConfigLockManager()
-    mgr.acquire("/cfg/autoProcess.ini", job_id=1, job_path="/a.mkv")
-    mgr.release("/cfg/autoProcess.ini", job_id=1)
-    assert mgr.is_locked("/cfg/autoProcess.ini") is False
+    mgr.acquire("/cfg/sma-ng.yml", job_id=1, job_path="/a.mkv")
+    mgr.release("/cfg/sma-ng.yml", job_id=1)
+    assert mgr.is_locked("/cfg/sma-ng.yml") is False
 
   def test_release_unheld_lock_does_not_raise(self):
     mgr = ConfigLockManager()
-    mgr.release("/cfg/autoProcess.ini", job_id=99)  # Should not raise
+    mgr.release("/cfg/sma-ng.yml", job_id=99)  # Should not raise
 
   def test_get_status_empty(self):
     mgr = ConfigLockManager()
@@ -714,21 +714,21 @@ class TestConfigLockManagerExtended:
 
   def test_get_status_shows_active(self):
     mgr = ConfigLockManager()
-    mgr.acquire("/cfg/autoProcess.ini", job_id=42, job_path="/movie.mkv")
+    mgr.acquire("/cfg/sma-ng.yml", job_id=42, job_path="/movie.mkv")
     status = mgr.get_status()
-    assert "/cfg/autoProcess.ini" in status["active"]
+    assert "/cfg/sma-ng.yml" in status["active"]
     # get_status returns a list of active job dicts
-    active_jobs = status["active"]["/cfg/autoProcess.ini"]
+    active_jobs = status["active"]["/cfg/sma-ng.yml"]
     assert any(j["job_id"] == 42 and j["path"] == "/movie.mkv" for j in active_jobs)
 
   def test_get_active_job_returns_empty_when_idle(self):
     mgr = ConfigLockManager()
-    assert mgr.get_active_jobs("/cfg/autoProcess.ini") == []
+    assert mgr.get_active_jobs("/cfg/sma-ng.yml") == []
 
   def test_get_active_job_returns_info_when_locked(self):
     mgr = ConfigLockManager()
-    mgr.acquire("/cfg/autoProcess.ini", job_id=7, job_path="/show.mkv")
-    jobs = mgr.get_active_jobs("/cfg/autoProcess.ini")
+    mgr.acquire("/cfg/sma-ng.yml", job_id=7, job_path="/show.mkv")
+    jobs = mgr.get_active_jobs("/cfg/sma-ng.yml")
     assert len(jobs) == 1
     assert jobs[0]["job_id"] == 7
     assert jobs[0]["path"] == "/show.mkv"
@@ -750,23 +750,23 @@ class TestConfigLogManager:
 
   def test_get_log_file_basename(self, tmp_path):
     mgr = ConfigLogManager(str(tmp_path))
-    log_file = mgr.get_log_file("/config/autoProcess.ini")
-    assert log_file == str(tmp_path / "autoProcess.log")
+    log_file = mgr.get_log_file("/config/sma-ng.yml")
+    assert log_file == str(tmp_path / "sma-ng.log")
 
   def test_get_log_file_different_configs(self, tmp_path):
     mgr = ConfigLogManager(str(tmp_path))
-    assert mgr.get_log_file("/cfg/autoProcess.tv.ini").endswith("autoProcess.tv.log")
-    assert mgr.get_log_file("/cfg/autoProcess.movies.ini").endswith("autoProcess.movies.log")
+    assert mgr.get_log_file("/cfg/sma-ng.tv.yml").endswith("sma-ng.tv.log")
+    assert mgr.get_log_file("/cfg/sma-ng.movies.yml").endswith("sma-ng.movies.log")
 
   def test_get_logger_creates_logger(self, tmp_path):
     mgr = ConfigLogManager(str(tmp_path))
-    logger = mgr.get_logger("/cfg/autoProcess.ini")
+    logger = mgr.get_logger("/cfg/sma-ng.yml")
     assert logger is not None
 
   def test_get_logger_returns_same_instance(self, tmp_path):
     mgr = ConfigLogManager(str(tmp_path))
-    l1 = mgr.get_logger("/cfg/autoProcess.ini")
-    l2 = mgr.get_logger("/cfg/autoProcess.ini")
+    l1 = mgr.get_logger("/cfg/sma-ng.yml")
+    l2 = mgr.get_logger("/cfg/sma-ng.yml")
     assert l1 is l2
 
   def test_get_all_log_files_empty(self, tmp_path):
@@ -775,28 +775,28 @@ class TestConfigLogManager:
 
   def test_get_all_log_files_after_get_logger(self, tmp_path):
     mgr = ConfigLogManager(str(tmp_path))
-    mgr.get_logger("/cfg/autoProcess.ini")
-    mgr.get_logger("/cfg/autoProcess.tv.ini")
+    mgr.get_logger("/cfg/sma-ng.yml")
+    mgr.get_logger("/cfg/sma-ng.tv.yml")
     result = mgr.get_all_log_files()
     names = {e["name"] for e in result}
-    assert names == {"autoProcess", "autoProcess.tv"}
+    assert names == {"sma-ng", "sma-ng.tv"}
     for e in result:
       assert e["path"].endswith(e["name"] + ".log")
 
   def test_get_all_log_files_deduplicates(self, tmp_path):
     mgr = ConfigLogManager(str(tmp_path))
-    mgr.get_logger("/cfg/autoProcess.ini")
-    mgr.get_logger("/cfg/autoProcess.ini")  # same config twice
+    mgr.get_logger("/cfg/sma-ng.yml")
+    mgr.get_logger("/cfg/sma-ng.yml")  # same config twice
     assert len(mgr.get_all_log_files()) == 1
 
   def test_get_all_log_files_discovers_existing_disk_logs(self, tmp_path):
     mgr = ConfigLogManager(str(tmp_path))
     (tmp_path / "daemon.log").write_text("")
-    (tmp_path / "autoProcess.movies.log").write_text("")
-    (tmp_path / "autoProcess.log.1").write_text("")
+    (tmp_path / "sma-ng.movies.log").write_text("")
+    (tmp_path / "sma-ng.log.1").write_text("")
     result = mgr.get_all_log_files()
     names = {e["name"] for e in result}
-    assert names == {"daemon", "autoProcess.movies"}
+    assert names == {"daemon", "sma-ng.movies"}
 
 
 # ---------------------------------------------------------------------------
@@ -809,25 +809,25 @@ class TestPathConfigManagerExtended:
 
   def test_db_url_from_yaml(self, tmp_path):
     cfg = str(tmp_path / "sma-ng.yml")
-    _dump_daemon_yaml(cfg, {"default_config": "config/autoProcess.ini", "db_url": "postgresql://sma:pw@db/sma"})
+    _dump_daemon_yaml(cfg, {"default_config": "config/sma-ng.yml", "db_url": "postgresql://sma:pw@db/sma"})
     mgr = PathConfigManager(cfg)
     assert mgr.db_url == "postgresql://sma:pw@db/sma"
 
   def test_ffmpeg_dir_from_yaml(self, tmp_path):
     cfg = str(tmp_path / "sma-ng.yml")
-    _dump_daemon_yaml(cfg, {"default_config": "config/autoProcess.ini", "ffmpeg_dir": "/usr/local/bin"})
+    _dump_daemon_yaml(cfg, {"default_config": "config/sma-ng.yml", "ffmpeg_dir": "/usr/local/bin"})
     mgr = PathConfigManager(cfg)
     assert mgr.ffmpeg_dir == "/usr/local/bin"
 
   def test_api_key_from_yaml(self, tmp_path):
     cfg = str(tmp_path / "sma-ng.yml")
-    _dump_daemon_yaml(cfg, {"default_config": "config/autoProcess.ini", "api_key": "supersecret"})
+    _dump_daemon_yaml(cfg, {"default_config": "config/sma-ng.yml", "api_key": "supersecret"})
     mgr = PathConfigManager(cfg)
     assert mgr.api_key == "supersecret"
 
   def test_null_values_remain_none(self, tmp_path):
     cfg = str(tmp_path / "sma-ng.yml")
-    _dump_daemon_yaml(cfg, {"default_config": "config/autoProcess.ini", "db_url": None, "ffmpeg_dir": None, "api_key": None})
+    _dump_daemon_yaml(cfg, {"default_config": "config/sma-ng.yml", "db_url": None, "ffmpeg_dir": None, "api_key": None})
     mgr = PathConfigManager(cfg)
     assert mgr.db_url is None
     assert mgr.ffmpeg_dir is None
@@ -1021,7 +1021,7 @@ class TestPostgreSQLJobDatabase:
     cur.fetchone.side_effect = [None, {"id": 42}]
     cur.fetchall.return_value = []
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
-    result = db.add_job("/path/movie.mkv", "/cfg/autoProcess.ini")
+    result = db.add_job("/path/movie.mkv", "/cfg/sma-ng.yml")
     assert result == 42
 
   def test_add_job_returns_none_on_duplicate(self):
@@ -1031,7 +1031,7 @@ class TestPostgreSQLJobDatabase:
     cur.fetchone.return_value = {"id": 10}
     cur.fetchall.return_value = []
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
-    result = db.add_job("/path/movie.mkv", "/cfg/autoProcess.ini")
+    result = db.add_job("/path/movie.mkv", "/cfg/sma-ng.yml")
     assert result is None
 
   def test_add_job_acquires_advisory_lock_for_path(self):
@@ -1040,7 +1040,7 @@ class TestPostgreSQLJobDatabase:
     cur = MagicMock()
     cur.fetchone.side_effect = [None, {"id": 42}]
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
-    db.add_job("/path/movie.mkv", "/cfg/autoProcess.ini")
+    db.add_job("/path/movie.mkv", "/cfg/sma-ng.yml")
 
     first_sql, first_params = cur.execute.call_args_list[0][0]
     assert "pg_advisory_xact_lock" in first_sql
@@ -1978,7 +1978,7 @@ class TestHTTPEndpoints:
   def test_webhook_rejects_recycle_bin_path(self, live_server, tmp_path):
     recycle = tmp_path / "recycle"
     recycle.mkdir()
-    ini = tmp_path / "autoProcess.ini"
+    ini = tmp_path / "sma-ng.yml"
     ini.write_text("[Converter]\nrecycle-bin = %s\n" % recycle)
     live_server.path_config_manager.default_config = str(ini)
 
@@ -1992,7 +1992,7 @@ class TestHTTPEndpoints:
     recycle = tmp_path / "recycle"
     subdir = recycle / "Movies"
     subdir.mkdir(parents=True)
-    ini = tmp_path / "autoProcess.ini"
+    ini = tmp_path / "sma-ng.yml"
     ini.write_text("[Converter]\nrecycle-bin = %s\n" % recycle)
     live_server.path_config_manager.default_config = str(ini)
 
@@ -2007,7 +2007,7 @@ class TestHTTPEndpoints:
     recycle.mkdir()
     media = tmp_path / "media"
     media.mkdir()
-    ini = tmp_path / "autoProcess.ini"
+    ini = tmp_path / "sma-ng.yml"
     ini.write_text("[Converter]\nrecycle-bin = %s\n" % recycle)
     live_server.path_config_manager.default_config = str(ini)
 
