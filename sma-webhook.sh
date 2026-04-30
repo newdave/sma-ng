@@ -5,7 +5,7 @@
 # Usage:
 #   sma-webhook.sh submit /path/to/file.mkv          Submit a file for conversion
 #   sma-webhook.sh submit /path/to/file.mkv -tmdb 603  Submit with extra args
-#   sma-webhook.sh submit /path/to/file.mkv --config /path/to/autoProcess.ini
+#   sma-webhook.sh submit /path/to/file.mkv --config /path/to/sma-ng.yml
 #   sma-webhook.sh submit /path/to/file.mkv --retries 3  Submit with retry-on-failure
 #   sma-webhook.sh health                             Check daemon health
 #   sma-webhook.sh jobs                               List all jobs

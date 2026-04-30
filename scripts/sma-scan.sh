@@ -7,7 +7,7 @@
 #
 # Options:
 #   --reset           Re-submit all files, ignoring scan history
-#   --config <path>   Override autoProcess.ini for all submitted files
+#   --config <path>   Override sma-ng.yml for all submitted files
 #   --dry-run         Print files that would be submitted without submitting
 #   --delay <secs>    Seconds to wait between submissions (default: 0)
 #   -h, --help        Show this help

@@ -70,7 +70,7 @@ def _build_db_url_from_env():
 
 
 def run_smoke_test(path_config_manager, ffmpeg_dir, logger):
-  """Run a dry-run option-generation check against every configured autoProcess config.
+  """Run a dry-run option-generation check against every configured config.
 
   Uses MediaProcessor.jsonDump() which runs ffprobe on the fixture file and
   builds the full FFmpeg command string, but does not execute FFmpeg.  Exits
@@ -147,9 +147,7 @@ def main():
     help="Seconds without a heartbeat before a node is declared stale and its running jobs are requeued (default: 120). Only used with PostgreSQL backend.",
   )
   parser.add_argument("--api-key", help="API key for authentication (or set SMA_DAEMON_API_KEY env var)")
-  parser.add_argument(
-    "--smoke-test", action="store_true", help="Run a dry-run option-generation check against all configured autoProcess files at startup, then exit with 0 on success or 1 on failure"
-  )
+  parser.add_argument("--smoke-test", action="store_true", help="Run a dry-run option-generation check against all configured config files at startup, then exit with 0 on success or 1 on failure")
   parser.add_argument(
     "--job-timeout",
     type=int,

@@ -5,8 +5,8 @@ Supports single files and recursive directory trees.  Optionally updates
 .plexmatch sidecars and triggers a Plex library refresh after renaming.
 
 When no ``-c`` config is given, reads ``sma-ng.yml`` (if present) to route
-each file to the correct per-directory ``autoProcess.ini``, matching the
-same logic the daemon uses for conversions.
+each file to the correct per-directory profile, matching the same logic
+the daemon uses for conversions.
 """
 
 import argparse
@@ -83,7 +83,7 @@ def main():
   parser.add_argument("--dry-run", action="store_true", help="Print what would be renamed; make no changes")
   parser.add_argument("--no-plexmatch", action="store_true", help="Skip .plexmatch updates")
   parser.add_argument("--no-plex", action="store_true", help="Skip Plex library refresh")
-  parser.add_argument("-c", "--config", metavar="PATH", help="Alternate autoProcess.ini path (disables sma-ng.yml routing)")
+  parser.add_argument("-c", "--config", metavar="PATH", help="Alternate sma-ng.yml path (disables routing)")
   parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
 
   args = parser.parse_args()
