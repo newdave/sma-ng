@@ -70,7 +70,7 @@ triggers/cli/scan.sh --wait /media/tv/show/season1/
 | Flag | Description |
 | --- | --- |
 | `-w`, `--wait` | Block until the job completes (exit 0 on success, non-zero on failure) |
-| `-c`, `--config PATH` | Override autoProcess.ini for this job |
+| `-c`, `--config PATH` | Override sma-ng.yml for this job |
 | `-a`, `--args ARGS` | Pass arbitrary extra args to manual.py (quoted string) |
 | `--tmdb ID` | Shorthand for `--args "-tmdb ID"` |
 | `--tvdb ID` | Shorthand for `--args "-tvdb ID"` |

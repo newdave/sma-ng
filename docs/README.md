@@ -854,11 +854,11 @@ bash /path/to/triggers/torrents/utorrent.sh %L %T %D %K %F %I %N
 
 ## Hardware Acceleration
 
-The `gpu` key in `[Converter]` sets the hardware acceleration profile used at runtime. You can also set each hwaccel option manually.
+The `gpu` key under `base.converter` sets the hardware acceleration profile used at runtime. You can also set each hwaccel option manually.
 
 ### GPU Config Option
 
-The `gpu` key is a runtime setting in `sma-ng.yml` that selects which hardware acceleration backend SMA-NG uses during conversion. `make config` and `mise run config:generate` now call the same generator, auto-detect the GPU the same way, and write the correct value into the generated `autoProcess*.ini` files, but you can also set or change it manually at any time. The runtime settings driven by `gpu` are `hwaccels`, `hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`, and `[Video] codec`.
+The `gpu` key is a runtime setting in `sma-ng.yml` that selects which hardware acceleration backend SMA-NG uses during conversion. `make config` and `mise run config:generate` call the same generator, auto-detect the GPU the same way, and write the correct value into the generated `sma-ng.yml`, but you can also set or change it manually at any time. The runtime settings driven by `gpu` are `hwaccels`, `hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`, and `base.video.codec`.
 
 Valid values for `gpu`:
 
@@ -1295,8 +1295,8 @@ The daemon also writes per-config rotating log files in `logs/`:
 
 | Config                       | Log File                       |
 | ---------------------------- | ------------------------------ |
-| `config/sma-ng.yml`    | `logs/autoProcess.log`         |
-| `config/sma-ng.yml-tv` | `logs/sma-ng.yml-tv.log` |
+| `config/sma-ng.yml`     | `logs/sma-ng.log`        |
+| `config/sma-ng-tv.yml`  | `logs/sma-ng-tv.log`     |
 
 ### Common Issues
 

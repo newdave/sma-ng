@@ -300,16 +300,16 @@ Returns an array of log file objects:
 
 ```bash
 # Last 200 lines
-curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?lines=200"
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/sma-ng?lines=200"
 
 # Filter by log level
-curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?level=ERROR"
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/sma-ng?level=ERROR"
 
 # Filter by job ID
-curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?job_id=42"
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/sma-ng?job_id=42"
 
 # Read from byte offset (for polling)
-curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?offset=51200"
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/sma-ng?offset=51200"
 ```
 
 Returns:
@@ -337,7 +337,7 @@ Structured timestamps returned by the daemon API use the daemon host's local tim
 ### Poll for new entries (live tail)
 
 ```bash
-curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess/tail?offset=51200"
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/sma-ng/tail?offset=51200"
 ```
 
 Use the `file_size` from each response as the `offset` for the next request. The dashboard log viewer uses this automatically in live mode.

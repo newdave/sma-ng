@@ -1,10 +1,10 @@
 # Hardware Acceleration
 
-SMA-NG supports hardware-accelerated video encoding via FFmpeg. The `gpu` setting in `[Video]` selects the encoder backend.
+SMA-NG supports hardware-accelerated video encoding via FFmpeg. The `gpu` setting under `base.converter` selects the encoder backend.
 
 ## GPU Auto-Detection
 
-`make config` and `mise run config:generate` call the same generator, auto-detect the GPU the same way, and write the correct value to the generated `autoProcess*.ini` profiles:
+`make config` and `mise run config:generate` call the same generator, auto-detect the GPU the same way, and write the correct value to the generated `sma-ng.yml`:
 
 - macOS → `videotoolbox`
 - NVIDIA GPU (detected via `nvidia-smi`) → `nvenc`

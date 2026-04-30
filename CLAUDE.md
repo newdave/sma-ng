@@ -157,7 +157,7 @@ The daemon is a package under `resources/daemon/`. `daemon.py` at project root i
 
 ### Configuration
 
-The main config file is `config/sma-ng.yml` (copy from `setup/sma-ng.yml.sample`). Override location via `SMA_CONFIG` environment variable. The legacy `autoProcess.ini` format is no longer supported — pointing `SMA_CONFIG` at a `.ini` file is rejected at startup.
+The main config file is `config/sma-ng.yml` (copy from `setup/sma-ng.yml.sample`). Override location via `SMA_CONFIG` environment variable. INI-format configs are not supported — pointing `SMA_CONFIG` at a `.ini` file is rejected at startup.
 
 Top-level YAML buckets:
 

@@ -33,13 +33,13 @@ You can also view and filter logs through the dashboard log viewer or via the AP
 curl -H "X-API-Key: SECRET" http://localhost:8585/logs
 
 # Last 100 lines of a log
-curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?lines=100"
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/sma-ng?lines=100"
 
 # Filter by job ID
-curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?job_id=42"
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/sma-ng?job_id=42"
 
 # Filter by level
-curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/autoProcess?level=ERROR"
+curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/sma-ng?level=ERROR"
 ```
 
 ---
