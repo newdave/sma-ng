@@ -12,7 +12,7 @@ from resources.yamlconfig import load as yaml_load
 from resources.yamlconfig import write as yaml_write
 
 xml = "/config/config.xml"
-autoProcess = None
+config_path = None
 
 
 def main():
@@ -23,27 +23,27 @@ def main():
   ``SMA_RS`` names a config section and ``config.xml`` is present, also
   writes the media manager API key, SSL flag, port, webroot, and host.
   """
-  _autoProcess = autoProcess if autoProcess is not None else os.path.join(os.environ.get("SMA_PATH", "/usr/local/sma"), "config/sma-ng.yml")
+  _config_path = config_path if config_path is not None else os.path.join(os.environ.get("SMA_PATH", "/usr/local/sma"), "config/sma-ng.yml")
   _xml = xml
 
   # Ensure a valid config file
   ReadSettings()
 
-  if not os.path.isfile(_autoProcess):
-    legacy_ini = os.path.splitext(_autoProcess)[0] + ".ini"
+  if not os.path.isfile(_config_path):
+    legacy_ini = os.path.splitext(_config_path)[0] + ".ini"
     if os.path.isfile(legacy_ini):
-      _autoProcess = legacy_ini
+      _config_path = legacy_ini
     else:
-      logging.error("autoProcess config does not exist")
+      logging.error("Config file does not exist: %s" % _config_path)
       sys.exit(1)
 
-  if _autoProcess.endswith((".yaml", ".yml")):
-    config = yaml_load(_autoProcess)
-  elif _autoProcess.endswith(".ini"):
+  if _config_path.endswith((".yaml", ".yml")):
+    config = yaml_load(_config_path)
+  elif _config_path.endswith(".ini"):
     config = configparser.ConfigParser()
-    config.read(_autoProcess)
+    config.read(_config_path)
   else:
-    logging.error("Unsupported config format: %s" % _autoProcess)
+    logging.error("Unsupported config format: %s" % _config_path)
     sys.exit(1)
 
   # Set FFMPEG/FFProbe Paths
@@ -94,10 +94,10 @@ def main():
       config[section]["host"] = host
 
   if isinstance(config, configparser.ConfigParser):
-    with open(_autoProcess, "w") as fp:
+    with open(_config_path, "w") as fp:
       config.write(fp)
   else:
-    yaml_write(_autoProcess, config)
+    yaml_write(_config_path, config)
 
 
 if __name__ == "__main__":
