@@ -92,7 +92,47 @@ class ConfigLoader:
       raise ConfigError(f"Config validation failed for {path!r}:\n{exc}") from exc
 
     self._warn_extras(cfg, prefix="")
+    self._normalize_subtitle_codec_for_container(cfg)
     return cfg
+
+  _MKV_LIKE_CONTAINERS = ("mkv", "matroska", "matroska,webm", "webm")
+  _MP4_LIKE_CONTAINERS = ("mp4", "m4v", "mov", "ipod", "ismv")
+
+  def _normalize_subtitle_codec_for_container(self, cfg: SmaConfig) -> None:
+    """Reconcile subtitle.codec with the resolved output container.
+
+    mov_text only works inside MP4-family containers; srt/ass/ssa
+    don't fit there. When the configured value is the schema default
+    (``["mov_text"]``) and the output container is MKV/WebM, swap in
+    ``["srt"]`` and warn. When the operator has set codecs explicitly,
+    only warn — don't override their choice.
+    """
+    conv = cfg.base.converter
+    target = (conv.output_format or "").lower() or (conv.output_extension or "").lower().lstrip(".")
+    if not target:
+      return
+
+    sub = cfg.base.subtitle
+    if target in self._MKV_LIKE_CONTAINERS:
+      if sub.codec == ["mov_text"]:
+        self.logger.warning(
+          "subtitle.codec is the default mov_text but output container is %r; substituting [srt]. Set base.subtitle.codec explicitly to silence this warning.",
+          target,
+        )
+        sub.codec = ["srt"]
+      elif "mov_text" in sub.codec:
+        self.logger.warning(
+          "subtitle.codec contains mov_text but output container is %r; mov_text streams will be skipped at encode time.",
+          target,
+        )
+    elif target in self._MP4_LIKE_CONTAINERS:
+      bad = [c for c in sub.codec if c in ("srt", "subrip", "ass", "ssa", "webvtt")]
+      if bad:
+        self.logger.warning(
+          "subtitle.codec entries %r are not supported in %r output; those streams will be skipped at encode time.",
+          bad,
+          target,
+        )
 
   def _reject_old_shape(self, raw: dict, path: str) -> None:
     """Refuse the legacy flat layout with a pointer to the new shape."""
