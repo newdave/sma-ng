@@ -4,6 +4,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 from datetime import datetime
 from http.server import ThreadingHTTPServer
 
@@ -15,7 +16,7 @@ except Exception:
   _VERSION = "unknown"
 
 from resources.daemon.constants import resolve_node_id
-from resources.daemon.threads import HeartbeatThread, RecycleBinCleanerThread, ScannerThread
+from resources.daemon.threads import ConfigWatcherThread, HeartbeatThread, RecycleBinCleanerThread, ScannerThread
 from resources.daemon.worker import WorkerPool
 
 
@@ -110,6 +111,7 @@ class DaemonServer(ThreadingHTTPServer):
     self._cli_ffmpeg_dir = cli_ffmpeg_dir
     self._job_processes = {}  # job_id -> Popen, for cancel support
     self._job_progress = {}  # job_id -> structured progress payload from FFmpeg output
+    self._reload_lock = threading.Lock()  # serializes auto-watcher and POST /reload
 
     # Start worker threads via WorkerPool — each worker gets its own Event
     # so workers never race to clear a shared flag.
@@ -176,6 +178,25 @@ class DaemonServer(ThreadingHTTPServer):
     )
     self.recycle_cleaner_thread.start()
 
+    # Start config watcher (auto-reload on sma-ng.yml change)
+    self.config_watcher_thread = None
+    try:
+      cw = getattr(path_config_manager, "config_watch", None)
+      enabled = bool(getattr(cw, "enabled", False)) if cw is not None else False
+      interval = int(getattr(cw, "interval_seconds", 0)) if cw is not None else 0
+      if enabled and interval > 0 and path_config_manager._config_file:
+        self.config_watcher_thread = ConfigWatcherThread(
+          server=self,
+          path_config_manager=path_config_manager,
+          settings=cw,
+          logger=logger,
+        )
+        self.config_watcher_thread.start()
+      else:
+        logger.info("Config watcher disabled.")
+    except Exception:
+      logger.exception("Could not start config watcher; auto-reload disabled.")
+
   def notify_workers(self):
     """Wake all worker threads by setting each worker's individual event."""
     self.worker_pool.notify()
@@ -200,7 +221,17 @@ class DaemonServer(ThreadingHTTPServer):
     return self.job_db.cancel_job(job_id)
 
   def reload_config(self):
-    """Reload sma-ng.yml in-place without stopping workers or active conversions."""
+    """Reload sma-ng.yml in-place without stopping workers or active conversions.
+
+    Serialized via ``self._reload_lock`` so the auto-watcher
+    (``ConfigWatcherThread``) and a manual ``POST /reload`` cannot
+    race on ``scanner_thread`` / ``recycle_cleaner_thread``
+    reassignment below.
+    """
+    with self._reload_lock:
+      return self._reload_config_locked()
+
+  def _reload_config_locked(self):
     if not self.path_config_manager._config_file:
       self.logger.warning("No daemon config file to reload.")
       return False
@@ -262,6 +293,8 @@ class DaemonServer(ThreadingHTTPServer):
     self.heartbeat_thread.stop()
     self.scanner_thread.stop()
     self.recycle_cleaner_thread.stop()
+    if self.config_watcher_thread:
+      self.config_watcher_thread.stop()
 
     active = [w for w in self.worker_pool._workers if w.is_alive()]
     while active:
@@ -295,6 +328,8 @@ class DaemonServer(ThreadingHTTPServer):
     self.heartbeat_thread.stop()
     self.scanner_thread.stop()
     self.recycle_cleaner_thread.stop()
+    if self.config_watcher_thread:
+      self.config_watcher_thread.stop()
 
     # Wait for in-progress conversions to complete
     active = [w for w in self.worker_pool._workers if w.is_alive()]

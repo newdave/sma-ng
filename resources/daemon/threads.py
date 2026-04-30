@@ -371,3 +371,82 @@ class RecycleBinCleanerThread(_StoppableThread):
         except Exception:
           self.log.exception("RecycleCleaner: error cleaning %s" % directory)
       self._stop_event.wait(timeout=self.CHECK_INTERVAL)
+
+
+class ConfigWatcherThread(_StoppableThread):
+  """Polls the active sma-ng.yml and triggers DaemonServer.reload_config() on detected changes.
+
+  Watches ``path_config_manager._config_file`` for ``(mtime_ns, size)``
+  changes and, after a debounce window with no further change, calls
+  ``server.reload_config()`` (the same code path as ``POST /reload``).
+
+  Failure modes are non-fatal: a missing file is logged once and
+  polling continues; a failed reload logs a WARNING and does not
+  retry until the file changes again.
+
+  Tunable via ``daemon.config_watch.{enabled,interval_seconds,debounce_seconds}``.
+  Disabled when the daemon is launched without a resolvable config
+  file or when ``enabled: false`` / ``interval_seconds: 0``.
+  """
+
+  def __init__(self, server, path_config_manager, settings, logger):
+    super().__init__()
+    self.server = server
+    self.pcm = path_config_manager
+    self.interval = max(1, int(settings.interval_seconds))
+    self.debounce = max(0, int(settings.debounce_seconds))
+    self.log = logger
+    self._missing_logged = False
+
+  def _stat_tuple(self):
+    path = self.pcm._config_file
+    if not path:
+      return None
+    try:
+      st = os.stat(path)
+      return (st.st_mtime_ns or int(st.st_mtime), st.st_size)
+    except FileNotFoundError:
+      return None
+    except OSError:
+      return None
+
+  def run(self):
+    last = self._stat_tuple()
+    path = self.pcm._config_file
+    self.log.info("Config watcher started: file=%s interval=%ds debounce=%ds" % (path, self.interval, self.debounce))
+    while self.running:
+      self._stop_event.wait(timeout=self.interval)
+      if not self.running:
+        return
+      current = self._stat_tuple()
+      if current is None:
+        if not self._missing_logged:
+          self.log.debug("Config watcher: %s is currently unreadable; will retry." % self.pcm._config_file)
+          self._missing_logged = True
+        continue
+      self._missing_logged = False
+      if current == last:
+        continue
+      self.log.info("Config change detected at %s — reloading after %ds debounce." % (path, self.debounce))
+      # Debounce: wait until the file stops changing for `debounce` seconds.
+      stable = current
+      settle_deadline = time.monotonic() + self.debounce
+      while self.running and time.monotonic() < settle_deadline:
+        self._stop_event.wait(timeout=min(0.5, max(0.05, self.debounce / 4 or 0.05)))
+        if not self.running:
+          return
+        latest = self._stat_tuple()
+        if latest is None:
+          continue
+        if latest != stable:
+          stable = latest
+          settle_deadline = time.monotonic() + self.debounce
+      try:
+        ok = self.server.reload_config()
+        if ok is False:
+          self.log.warning("Config reload failed; will retry on next change.")
+      except Exception:
+        self.log.exception("Config reload raised; will retry on next change.")
+      # Record the post-reload tuple regardless of success so we don't
+      # spin on the same change.
+      last = self._stat_tuple() or stable

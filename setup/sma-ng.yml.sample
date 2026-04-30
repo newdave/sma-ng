@@ -46,6 +46,10 @@ daemon:
     - .ts
     - .flv
     - .webm
+  config-watch:
+    enabled: true
+    interval-seconds: 5
+    debounce-seconds: 2
 # ── Base media-conversion settings ───────────────────────────────────
 # Defaults applied to every conversion. Profiles below shallow-merge on top
 # of these per-section.

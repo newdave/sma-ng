@@ -369,6 +369,12 @@ class RoutingRule(_Base):
   services: list[str] = Field(default_factory=list)
 
 
+class ConfigWatchSettings(_Base):
+  enabled: bool = True
+  interval_seconds: int = 5
+  debounce_seconds: int = 2
+
+
 class DaemonConfig(_Base):
   host: str = "0.0.0.0"
   port: int = 8585
@@ -394,6 +400,7 @@ class DaemonConfig(_Base):
   path_rewrites: list[PathRewrite] = Field(default_factory=list)
   routing: list[RoutingRule] = Field(default_factory=list)
   media_extensions: list[str] = Field(default_factory=lambda: [".mkv", ".m4v", ".avi", ".mov", ".wmv", ".ts", ".flv", ".webm"])
+  config_watch: ConfigWatchSettings = Field(default_factory=ConfigWatchSettings)
 
 
 # ---------------------------------------------------------------------------

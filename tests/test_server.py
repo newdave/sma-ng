@@ -631,6 +631,7 @@ class TestDaemonServerShutdown:
     server.heartbeat_thread = MagicMock()
     server.scanner_thread = MagicMock()
     server.recycle_cleaner_thread = MagicMock()
+    server.config_watcher_thread = MagicMock()
     server.logger = MagicMock()
     return server
 
@@ -707,6 +708,7 @@ class TestDaemonServerGracefulRestart:
     server.heartbeat_thread = MagicMock()
     server.scanner_thread = MagicMock()
     server.recycle_cleaner_thread = MagicMock()
+    server.config_watcher_thread = MagicMock()
     server.logger = MagicMock()
     server.node_id = "node"
     return server
