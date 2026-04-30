@@ -606,7 +606,7 @@ paths:
                     type: string
                   default_log_name:
                     type: string
-                    description: Log name for the default config (e.g. "autoProcess")
+                    description: Log name for the default config (e.g. "sma-ng")
                   default_active_jobs:
                     type: array
                   default_pending_jobs:

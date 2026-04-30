@@ -188,7 +188,7 @@ python manual.py -i "/path/to/file.mkv" -oo
 python manual.py -cl
 
 # Use alternate config file
-python manual.py -i "/path/to/file.mkv" -a -c config/autoProcess.lq.ini
+python manual.py -i "/path/to/file.mkv" -a -c config/sma-ng.yml --profile lq
 
 # Force re-encode even if format matches
 python manual.py -i "/path/to/file.mp4" -a -fc
@@ -275,7 +275,7 @@ Public endpoints: `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`, `/
 
 ### Path-Based Configuration
 
-The daemon can use different `autoProcess.ini` files based on the input path. Matching is longest-prefix-first, so more specific paths take priority over broader ones.
+The daemon routes jobs to different `sma-ng.yml` profiles or service instances based on the input path. Matching is longest-prefix-first, so more specific paths take priority over broader ones.
 
 Important `sma-ng.yml` `daemon:` keys:
 
@@ -337,7 +337,7 @@ The daemon implementation lives under `resources/daemon/`.
 ### Core Modules
 
 - `resources/mediaprocessor.py` - central conversion pipeline
-- `resources/readsettings.py` - parses `autoProcess.ini` and defines defaults
+- `resources/readsettings.py` - flat-attribute adapter over the validated `sma-ng.yml` schema
 - `resources/metadata.py` - TMDB metadata fetch and MP4 tagging
 - `resources/postprocess.py` - runs custom scripts from `post_process/`
 - `resources/extensions.py` - TMDB API key and file extension definitions
@@ -350,15 +350,9 @@ The daemon implementation lives under `resources/daemon/`.
 
 ## Configuration
 
-The main config file is `config/autoProcess.ini` (copy from `setup/autoProcess.ini.sample`). Override location via `SMA_CONFIG`.
+The main config file is `config/sma-ng.yml` (copy from `setup/sma-ng.yml.sample`). Override location via `SMA_CONFIG`. See [`docs/configuration.md`](docs/configuration.md) for the full reference.
 
-Important sections include `[Converter]`, `[Video]`, `[HDR]`, `[Audio]`, `[Subtitle]`, `[Metadata]`, `[Sonarr]`, `[Radarr]`, and `[Plex]`.
-
-`mise run config:generate` generates three quality-profile configs:
-
-- `config/autoProcess.ini` - default regular-quality profile
-- `config/autoProcess.rq.ini` - explicit regular-quality profile
-- `config/autoProcess.lq.ini` - lower-quality profile for bandwidth-limited destinations
+Top-level YAML buckets: `daemon:`, `base:`, `profiles:`, `services:`. Quality variants live as named overlays under `profiles:` (for example `profiles.lq`) and are selected via `manual.py --profile <name>` or `daemon.routing[].profile`.
 
 Daemon settings follow:
 
@@ -379,7 +373,7 @@ Main documentation lives in `docs/` and is also served at `http://localhost:8585
 
 - `docs/README.md` - architecture and module reference
 - `docs/getting-started.md` - installation, quick start, CLI
-- `docs/configuration.md` - `autoProcess.ini` reference
+- `docs/configuration.md` - `sma-ng.yml` reference
 - `docs/daemon.md` - daemon mode, API, clustering
 - `docs/integrations.md` - Sonarr, Radarr, and downloader integrations
 - `docs/hardware-acceleration.md` - GPU configuration
@@ -492,7 +486,7 @@ Claude permission allowlists in `.claude/settings*.json` are informational only 
 - `venv/`
 - `**/__pycache__/`
 - `*.pyc`
-- `config/autoProcess.ini`
+- `config/sma-ng.yml`
 
 When diagnosing runtime issues, check:
 
@@ -520,8 +514,9 @@ When adding new codec support:
 
 When adding new settings:
 
-- `resources/readsettings.py` - add to `DEFAULTS` and `readConfig()`
-- `setup/autoProcess.ini.sample` - add the default value
+- `resources/config_schema.py` - add the field to the relevant pydantic model (single source of truth for defaults and validation)
+- `setup/sma-ng.yml.sample` - regenerate via `mise run config:sample` so the sample stays in lockstep with the schema
+- `resources/readsettings.py` - if the new field needs a flat `settings.<name>` attribute for legacy consumers, add the projection there
 
 When adding new API endpoints to the daemon:
 

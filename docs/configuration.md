@@ -5,7 +5,7 @@ Configuration lives in `config/sma-ng.yml` (YAML). Copy from
 `mise run config:generate`. Override the path via the `SMA_CONFIG`
 environment variable.
 
-The legacy `autoProcess.ini` format is no longer supported. Pointing
+INI-format configs and flat-shape YAML are not supported. Pointing
 SMA-NG at a `.ini` file or a flat-shape YAML (top-level `converter:`,
 `video:`, etc.) fails fast at startup with a pointer to this document.
 
