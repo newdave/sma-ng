@@ -128,6 +128,42 @@ class TestUnknownKeyWarnings:
 
 
 # ---------------------------------------------------------------------------
+# subtitle.codec / output container reconciliation
+# ---------------------------------------------------------------------------
+
+
+class TestSubtitleContainerNormalization:
+  def test_movtext_with_mkv_warns_and_substitutes_srt(self, loader, write_yaml, caplog):
+    p = write_yaml("base:\n  converter:\n    output-format: mkv\n    output-extension: mkv\n")
+    with caplog.at_level(logging.WARNING, logger="test.config"):
+      cfg = loader.load(p)
+    assert cfg.base.subtitle.codec == ["srt"]
+    assert any("mov_text" in r.getMessage() and "mkv" in r.getMessage() for r in caplog.records)
+
+  def test_movtext_with_mp4_unchanged(self, loader, write_yaml, caplog):
+    # mp4 is the schema default; mov_text is the schema default codec
+    p = write_yaml("base:\n  converter:\n    output-format: mp4\n")
+    with caplog.at_level(logging.WARNING, logger="test.config"):
+      cfg = loader.load(p)
+    assert cfg.base.subtitle.codec == ["mov_text"]
+    assert not any("mov_text" in r.getMessage() for r in caplog.records)
+
+  def test_explicit_subtitle_codec_with_mkv_left_alone(self, loader, write_yaml, caplog):
+    p = write_yaml("base:\n  converter:\n    output-format: mkv\n  subtitle:\n    codec:\n      - mov_text\n      - srt\n")
+    with caplog.at_level(logging.WARNING, logger="test.config"):
+      cfg = loader.load(p)
+    assert cfg.base.subtitle.codec == ["mov_text", "srt"]
+    assert any("mov_text" in r.getMessage() and "skipped" in r.getMessage() for r in caplog.records)
+
+  def test_srt_with_mp4_warns_no_substitution(self, loader, write_yaml, caplog):
+    p = write_yaml("base:\n  converter:\n    output-format: mp4\n  subtitle:\n    codec:\n      - srt\n")
+    with caplog.at_level(logging.WARNING, logger="test.config"):
+      cfg = loader.load(p)
+    assert cfg.base.subtitle.codec == ["srt"]
+    assert any("srt" in r.getMessage() and "mp4" in r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
 # apply_profile()
 # ---------------------------------------------------------------------------
 
