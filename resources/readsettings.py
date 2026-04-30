@@ -433,6 +433,7 @@ class ReadSettings:
     self.pix_fmt = self._as_list(cfg.pix_fmt)
     self.keep_source_pix_fmt = cfg.prioritize_source_pix_fmt
     self.look_ahead_depth = cfg.look_ahead_depth
+    self.global_quality = cfg.global_quality
     self.b_frames = cfg.b_frames
     self.ref_frames = cfg.ref_frames
 
@@ -449,6 +450,7 @@ class ReadSettings:
       "forcefilter": hdr_cfg.force_filter,
       "profile": self._as_list(hdr_cfg.profile),
       "look_ahead_depth": hdr_cfg.look_ahead_depth,
+      "global_quality": hdr_cfg.global_quality,
       "b_frames": hdr_cfg.b_frames,
       "ref_frames": hdr_cfg.ref_frames,
     }

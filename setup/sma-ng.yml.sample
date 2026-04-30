@@ -112,6 +112,7 @@ base:
     filter: ''
     force-filter: false
     look-ahead-depth: 0
+    global-quality: 0
     b-frames: -1
     ref-frames: -1
   hdr:
@@ -129,6 +130,7 @@ base:
     force-filter: false
     profile: []
     look-ahead-depth: 0
+    global-quality: 0
     b-frames: -1
     ref-frames: -1
   analyzer:
