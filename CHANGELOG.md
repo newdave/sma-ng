@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.6.96](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.95...sma-ng-v1.6.96) (2026-04-30)
+
+
+### Features
+
+* **daemon:** auto-reload sma-ng.yml on file change ([37e2ff9](https://github.com/newdave/sma-ng/commit/37e2ff9cb28fd3f8be925b2f9a176e53105f1251))
+
+
+### Documentation
+
+* **daemon:** document config auto-reload watcher ([4c697c8](https://github.com/newdave/sma-ng/commit/4c697c8edf5b4719a889cc51f3e8b2f28ae26919))
+* **prp:** add config-file-watcher PRP and task breakdown ([72751a1](https://github.com/newdave/sma-ng/commit/72751a15256e738688af724aa6711ebde56765f9))
+
 ## [1.6.95](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.94...sma-ng-v1.6.95) (2026-04-30)
 
 
