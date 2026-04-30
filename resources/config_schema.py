@@ -104,6 +104,7 @@ class VideoSettings(_Base):
   filter: str = ""
   force_filter: bool = False
   look_ahead_depth: int = 0
+  global_quality: int = 0
   b_frames: int = -1
   ref_frames: int = -1
 
@@ -120,6 +121,7 @@ class HDRSettings(_Base):
   force_filter: bool = False
   profile: list[str] = Field(default_factory=list)
   look_ahead_depth: int = 0
+  global_quality: int = 0
   b_frames: int = -1
   ref_frames: int = -1
 

@@ -430,6 +430,9 @@ class VideoCodec(BaseCodec):
     "field_order": str,
     "map": int,
     "bsf": str,
+    "color_primaries": str,
+    "color_transfer": str,
+    "color_space": str,
   }
 
   def _aspect_corrections(self, sw, sh, w, h, mode):
@@ -575,6 +578,12 @@ class VideoCodec(BaseCodec):
       optlist.extend(["-r:v", str(safe["fps"])])
     if "pix_fmt" in safe:
       optlist.extend(["-pix_fmt", str(safe["pix_fmt"])])
+    if safe.get("color_primaries"):
+      optlist.extend(["-color_primaries", str(safe["color_primaries"])])
+    if safe.get("color_transfer"):
+      optlist.extend(["-color_trc", str(safe["color_transfer"])])
+    if safe.get("color_space"):
+      optlist.extend(["-colorspace", str(safe["color_space"])])
     if "field_order" in safe:
       optlist.extend(["-field_order", str(safe["field_order"])])
     if "bitrate" in safe:
@@ -1153,7 +1162,17 @@ class HWAccelVideoCodec:
       del safe["height"]
 
   def _hw_parse_quality(self, safe):
-    """Apply hw_quality_default when no explicit quality or bitrate is present."""
+    """Apply hw_quality_default when no explicit quality or bitrate is present.
+
+    Honors an operator-supplied ``global_quality`` value (from
+    ``base.video.global_quality`` / ``base.hdr.global_quality``) by
+    routing it onto the codec's quality key, but only when no
+    bitrate target is set (ICQ and VBR are mutually exclusive).
+    """
+    if "global_quality" in safe:
+      gq = safe.pop("global_quality")
+      if gq and gq > 0 and "bitrate" not in safe and self.hw_quality_key not in safe:
+        safe[self.hw_quality_key] = gq
     if self.hw_quality_key not in safe and "bitrate" not in safe and self.hw_quality_default is not None:
       safe[self.hw_quality_key] = self.hw_quality_default
 
@@ -1342,7 +1361,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
   hw_quality_flag = "-global_quality"
   hw_quality_range = (1, 51)
   hw_quality_default = 25
-  hw_presets = ()
+  hw_presets = ("veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow")
   hw_profiles = ("baseline", "main", "high", "high10")
   hw_extbrc = True
   codec_params = None
@@ -1352,6 +1371,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
       "decode_device": str,
       "device": str,
       "look_ahead_depth": int,
+      "global_quality": int,
       "b_frames": int,
       "ref_frames": int,
     }
@@ -1551,7 +1571,7 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
   hw_quality_flag = "-global_quality"
   hw_quality_range = (1, 51)
   hw_quality_default = 25
-  hw_presets = ()
+  hw_presets = ("veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow")
   hw_profiles = ("main", "main10", "main444")
   hw_extbrc = True
   codec_params = None
@@ -1561,6 +1581,7 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
       "decode_device": str,
       "device": str,
       "look_ahead_depth": int,
+      "global_quality": int,
       "b_frames": int,
       "ref_frames": int,
     }
@@ -1599,7 +1620,7 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
     optlist.extend(super(H265QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
     look_ahead_depth = safe.get("look_ahead_depth", 0)
     if look_ahead_depth and look_ahead_depth > 0:
-      optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth)])
+      optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth), "-extra_hw_frames", str(look_ahead_depth + 4)])
     else:
       optlist.extend(["-look_ahead", "0"])
     if "b_frames" in safe and safe["b_frames"] >= 0:
@@ -2000,7 +2021,7 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
   hw_quality_flag = "-global_quality"
   hw_quality_range = (1, 51)
   hw_quality_default = 25
-  hw_presets = ()
+  hw_presets = ("veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow")
   hw_extbrc = True
   encoder_options = AV1Codec.encoder_options.copy()
   encoder_options.update(
@@ -2008,6 +2029,7 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
       "decode_device": str,
       "device": str,
       "look_ahead_depth": int,
+      "global_quality": int,
       "b_frames": int,
       "ref_frames": int,
     }
@@ -2101,7 +2123,7 @@ class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
   hw_quality_flag = "-global_quality"
   hw_quality_range = (1, 255)
   hw_quality_default = 25
-  hw_presets = ()
+  hw_presets = ("veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow")
   hw_extbrc = True
   encoder_options = Vp9Codec.encoder_options.copy()
   encoder_options.update(
@@ -2109,6 +2131,7 @@ class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
       "decode_device": str,
       "device": str,
       "look_ahead_depth": int,
+      "global_quality": int,
       "b_frames": int,
       "ref_frames": int,
     }

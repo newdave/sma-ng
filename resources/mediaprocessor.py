@@ -1354,6 +1354,7 @@ class MediaProcessor:
       vparams = self.settings.hdr.get("codec_params")
 
     vlook_ahead_depth = self.settings.hdr.get("look_ahead_depth", 0) if hdrInput else self.settings.look_ahead_depth
+    vglobal_quality = self.settings.hdr.get("global_quality", 0) if hdrInput else self.settings.global_quality
     vb_frames = self.settings.hdr.get("b_frames", -1) if hdrInput else self.settings.b_frames
     vref_frames = self.settings.hdr.get("ref_frames", -1) if hdrInput else self.settings.ref_frames
 
@@ -1418,6 +1419,20 @@ class MediaProcessor:
 
     hdrOutput = self.isHDROutput(vpix_fmt, bit_depth)
 
+    vcolor_primaries = None
+    vcolor_transfer = None
+    vcolor_space = None
+    if hdrOutput:
+      hdr_primaries = self.settings.hdr.get("primaries") or []
+      hdr_transfer = self.settings.hdr.get("transfer") or []
+      hdr_space = self.settings.hdr.get("space") or []
+      if hdr_primaries:
+        vcolor_primaries = hdr_primaries[0]
+      if hdr_transfer:
+        vcolor_transfer = hdr_transfer[0]
+      if hdr_space:
+        vcolor_space = hdr_space[0]
+
     vbsf = None
     if self.settings.removebvs and self.hasBitstreamVideoSubs(info.video.framedata):
       self.log.debug("Found side data type with closed captioning [remove-bitstream-subs]")
@@ -1463,7 +1478,15 @@ class MediaProcessor:
       "look_ahead_depth": vlook_ahead_depth,
       "b_frames": vb_frames,
       "ref_frames": vref_frames,
+      "color_primaries": vcolor_primaries,
+      "color_transfer": vcolor_transfer,
+      "color_space": vcolor_space,
     }
+    if vglobal_quality and vglobal_quality > 0:
+      if vbitrate:
+        self.log.debug("global_quality=%d configured but bitrate target is set; ICQ will be ignored in favor of VBR." % vglobal_quality)
+      else:
+        video_settings["global_quality"] = vglobal_quality
     video_settings["title"] = self.videoStreamTitle(info.video, video_settings, hdr=hdrOutput, tagdata=tagdata)
 
     return video_settings, vcodecs, vcodec, hdrOutput

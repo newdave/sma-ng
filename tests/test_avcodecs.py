@@ -194,6 +194,84 @@ class TestH265QSVCodec:
   def test_ffmpeg_codec_name(self):
     assert H265QSVCodec.ffmpeg_codec_name == "hevc_qsv"
 
+  def test_preset_slower_emitted(self):
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv", "preset": "slower"})
+    assert "-preset" in opts
+    assert opts[opts.index("-preset") + 1] == "slower"
+
+  def test_preset_unknown_dropped(self):
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv", "preset": "bogus"})
+    assert "-preset" not in opts
+
+  def test_look_ahead_emits_extra_hw_frames(self):
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv", "look_ahead_depth": 40})
+    assert "-look_ahead_depth" in opts
+    assert opts[opts.index("-look_ahead_depth") + 1] == "40"
+    assert "-extra_hw_frames" in opts
+    assert opts[opts.index("-extra_hw_frames") + 1] == "44"
+
+  def test_look_ahead_zero_no_extra_hw_frames(self):
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv"})
+    assert "-extra_hw_frames" not in opts
+
+  def test_global_quality_emits_flag_and_skips_bitrate(self):
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv", "global_quality": 23})
+    assert "-global_quality" in opts
+    assert opts[opts.index("-global_quality") + 1] == "23"
+    assert "-vb" not in opts
+    assert "-maxrate:v" not in opts
+    assert "-bufsize" not in opts
+
+  def test_global_quality_zero_uses_codec_default(self):
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv", "global_quality": 0})
+    assert "-global_quality" in opts
+    assert opts[opts.index("-global_quality") + 1] == "25"  # hw_quality_default
+
+  def test_global_quality_loses_to_explicit_bitrate(self):
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv", "bitrate": 5000, "global_quality": 23})
+    assert "-vb" in opts
+    assert "-global_quality" not in opts
+
+  def test_hdr_color_flags_emitted(self):
+    codec = H265QSVCodec()
+    opts = codec.parse_options(
+      {
+        "codec": "h265qsv",
+        "color_primaries": "bt2020",
+        "color_transfer": "smpte2084",
+        "color_space": "bt2020nc",
+      }
+    )
+    assert "-color_primaries" in opts and opts[opts.index("-color_primaries") + 1] == "bt2020"
+    assert "-color_trc" in opts and opts[opts.index("-color_trc") + 1] == "smpte2084"
+    assert "-colorspace" in opts and opts[opts.index("-colorspace") + 1] == "bt2020nc"
+
+  def test_no_color_flags_when_unset(self):
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv"})
+    assert "-color_primaries" not in opts
+    assert "-color_trc" not in opts
+    assert "-colorspace" not in opts
+
+  def test_hlg_transfer_passthrough(self):
+    codec = H265QSVCodec()
+    opts = codec.parse_options(
+      {
+        "codec": "h265qsv",
+        "color_primaries": "bt2020",
+        "color_transfer": "arib-std-b67",
+        "color_space": "bt2020nc",
+      }
+    )
+    assert opts[opts.index("-color_trc") + 1] == "arib-std-b67"
+
 
 class TestH265VAAPICodec:
   """Test HEVC VAAPI codec."""
