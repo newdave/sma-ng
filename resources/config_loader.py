@@ -74,7 +74,7 @@ class ConfigLoader:
     """
 
     if path.lower().endswith(".ini"):
-      raise ConfigError("autoProcess.ini is no longer supported. Convert to sma-ng.yml — see docs/configuration.md.")
+      raise ConfigError("INI-format config files are no longer supported. Use sma-ng.yml — see docs/configuration.md.")
 
     try:
       raw = yamlconfig.load(path)

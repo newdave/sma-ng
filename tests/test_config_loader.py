@@ -43,15 +43,15 @@ def loader():
 
 class TestLoadErrors:
   def test_rejects_ini_extension(self, loader, tmp_path):
-    p = tmp_path / "autoProcess.ini"
+    p = tmp_path / "legacy.ini"
     p.write_text("[Converter]\nffmpeg = ffmpeg\n")
-    with pytest.raises(ConfigError, match="autoProcess.ini is no longer supported"):
+    with pytest.raises(ConfigError, match="INI-format config files are no longer supported"):
       loader.load(str(p))
 
   def test_rejects_ini_extension_uppercase(self, loader, tmp_path):
     p = tmp_path / "thing.INI"
     p.write_text("")
-    with pytest.raises(ConfigError, match="autoProcess.ini"):
+    with pytest.raises(ConfigError, match="INI-format"):
       loader.load(str(p))
 
   def test_rejects_old_flat_shape(self, loader, write_yaml):
