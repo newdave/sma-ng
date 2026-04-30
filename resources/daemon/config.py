@@ -279,6 +279,9 @@ class PathConfigManager:
     self.recycle_bin_min_free_gb = 50.0
     self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
     self.scan_paths = []
+    from resources.config_schema import ConfigWatchSettings
+
+    self.config_watch = ConfigWatchSettings()
     self._config_file = None
     self._node_id = None
     self._log_ttl_days = 30
@@ -385,6 +388,7 @@ class PathConfigManager:
       reverse=True,
     )
     self.scan_paths = [{"path": s.path, "interval": s.interval, "enabled": s.enabled, "rewrite_from": s.rewrite_from, "rewrite_to": s.rewrite_to} for s in d.scan_paths]
+    self.config_watch = d.config_watch
     self._node_id = d.node_id
     self._log_ttl_days = d.log_ttl_days
     self._node_expiry_days = d.node_expiry_days
