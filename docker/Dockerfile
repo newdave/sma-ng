@@ -281,8 +281,7 @@ COPY --chown=ubuntu:ubuntu . .
 RUN find /app -maxdepth 1 -type f \( \
     -name 'daemon.py' -o \
     -name 'manual.py' -o \
-    -name 'rename.py' -o \
-    -name 'update.py' \
+    -name 'rename.py' \
     \) -exec sed -i '1s|^#!/opt/sma/venv/bin/python3$|#!/venv/bin/python3|' {} +
 
 # Install entrypoint script (root-owned, world-executable)

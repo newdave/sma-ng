@@ -263,7 +263,6 @@ class TestDockerfileRuntime:
     assert "daemon.py" in dockerfile_raw
     assert "manual.py" in dockerfile_raw
     assert "rename.py" in dockerfile_raw
-    assert "update.py" in dockerfile_raw
 
 
 # ──────────────────────────────────────────────────────────────────────────────
