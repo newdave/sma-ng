@@ -735,12 +735,20 @@ class TestPrintableFFMPEGCommand:
   def test_quotes_spaces(self):
     mp = self._make_processor()
     result = mp.printableFFMPEGCommand(["ffmpeg", "-i", "/path with spaces/file.mkv", "-c", "copy"])
-    assert '"/path with spaces/file.mkv"' in result
+    # shlex.quote uses single quotes for shell-safety
+    assert "'/path with spaces/file.mkv'" in result
 
   def test_no_quotes_without_spaces(self):
     mp = self._make_processor()
     result = mp.printableFFMPEGCommand(["ffmpeg", "-c", "copy"])
-    assert '"' not in result
+    assert "'" not in result and '"' not in result
+
+  def test_quotes_metadata_titles_with_spaces(self):
+    mp = self._make_processor()
+    result = mp.printableFFMPEGCommand(["ffmpeg", "-metadata:s:v", "title=FHD HDR", "-metadata:s:a:0", "title=5.1 Channel"])
+    # Each title= value with spaces is quoted as a single argv token
+    assert "'title=FHD HDR'" in result
+    assert "'title=5.1 Channel'" in result
 
 
 class TestRawEscape:

@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import sys
 import time
@@ -681,13 +682,13 @@ class MediaProcessor:
       outputfile, _ = self.getOutputFile(input_dir, filename, input_extension)
       cmds = self.converter.ffmpeg.generateCommands(outputfile, parsed, dump["preopts"], dump["postopts"])
       dump["ffmpeg_commands"] = []
-      dump["ffmpeg_commands"].append(" ".join('"%s"' % item if " " in item and '"' not in item else item for item in cmds))
+      dump["ffmpeg_commands"].append(self.printableFFMPEGCommand(cmds))
       for suboptions in dump["ripsubopts"]:
         subparsed = self.converter.parse_options(suboptions)
         extension = self.getSubExtensionFromCodec(suboptions["format"])
         suboutputfile = self.getSubOutputFileFromOptions(inputfile, suboptions, extension)
         subcmds = self.converter.ffmpeg.generateCommands(suboutputfile, subparsed)
-        dump["ffmpeg_commands"].append(" ".join(str(item) for item in subcmds))
+        dump["ffmpeg_commands"].append(self.printableFFMPEGCommand(subcmds))
       for sub in dump["downloadedsubs"]:
         self.log.debug("Cleaning up downloaded sub %s which was only used to simulate options." % (sub))
         self.removeFile(sub)
@@ -2652,8 +2653,16 @@ class MediaProcessor:
 
   # Generate copy/paste friendly FFMPEG command
   def printableFFMPEGCommand(self, cmds):
-    """Format an FFmpeg command list as a human-readable string, quoting items that contain spaces or pipes."""
-    return " ".join('"%s"' % item if (" " in item or "|" in item) and '"' not in item else item for item in cmds)
+    """Format an FFmpeg command list as a copy/paste-safe shell string.
+
+    Uses ``shlex.quote`` so any argv element containing whitespace,
+    quotes, or shell metacharacters round-trips through a shell
+    correctly. Crucially, metadata values like ``title=FHD HDR`` are
+    wrapped as ``'title=FHD HDR'`` so the printed command matches the
+    actual subprocess argv (the conversion itself uses ``shell=False``
+    Popen and is unaffected).
+    """
+    return " ".join(shlex.quote(str(item)) for item in cmds)
 
   # Encode a new file based on selected options, built in naming conflict resolution
   def convert(self, options, preopts, postopts, reportProgress=False, progressOutput=None):
