@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.92](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.91...sma-ng-v1.6.92) (2026-04-30)
+
+
+### Documentation
+
+* **prp:** add remove-autoprocess-ini-mentions PRP and task breakdown ([620166c](https://github.com/newdave/sma-ng/commit/620166cfb09564cab1779cb5c5af61091f9ef2c1))
+* **prp:** add remove-update-py-ini-fallback PRP and task breakdown ([81a5d66](https://github.com/newdave/sma-ng/commit/81a5d66453ea5cf50243cf516abc99ad9ac74174))
+
 ## [1.6.91](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.90...sma-ng-v1.6.91) (2026-04-30)
 
 
