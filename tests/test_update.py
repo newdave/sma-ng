@@ -32,7 +32,7 @@ def _run_update(env, ini_path, xml_path=None):
     try:
       spec.loader.exec_module(module)
       # Override module-level paths so main() uses the test-provided values
-      module.autoProcess = ini_path
+      module.config_path = ini_path
       module.xml = xml_path or "/nonexistent/config.xml"
       module.main()
     except SystemExit as e:
@@ -66,7 +66,7 @@ class TestUpdateBasic:
 
   def test_exits_if_ini_missing(self):
     env = {"SMA_PATH": PROJECT_ROOT}
-    code = _run_update(env, "/nonexistent/autoProcess.ini")
+    code = _run_update(env, "/nonexistent/sma-ng.yml")
     assert code == 1
 
 
