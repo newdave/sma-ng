@@ -12,14 +12,14 @@ Options:
     -imdb <id>              IMDB ID override (tt prefix optional)
     -s, --season <n>        Season number (TV)
     -e, --episode <n>       Episode number (TV)
-    -c, --config <path>     Override autoProcess.ini location (also: $SMA_CONFIG)
+    -c, --config <path>     Override sma-ng.yml location (also: $SMA_CONFIG)
     --movie                 Force movie type when auto-detection is ambiguous
     --tv                    Force TV type when auto-detection is ambiguous
     -r, --recursive         Process all media files under a directory
     -h, --help              Show this help
 
 Environment:
-    SMA_CONFIG              Path to autoProcess.ini (overrides default location)
+    SMA_CONFIG              Path to sma-ng.yml (overrides default location)
 
 Each input file is processed independently: metadata is fetched from TMDB using
 guessit filename inference (or the supplied IDs), then update_plexmatch() writes
@@ -170,7 +170,7 @@ def main():
   parser.add_argument("-imdb", dest="imdb", default=None, help="IMDB ID override")
   parser.add_argument("-s", "--season", dest="season", default=None, type=int, help="Season number (TV)")
   parser.add_argument("-e", "--episode", dest="episode", default=None, type=int, help="Episode number (TV)")
-  parser.add_argument("-c", "--config", dest="config", default=None, help="Path to autoProcess.ini")
+  parser.add_argument("-c", "--config", dest="config", default=None, help="Path to sma-ng.yml")
   parser.add_argument("--movie", action="store_true", help="Force movie type")
   parser.add_argument("--tv", action="store_true", help="Force TV type")
   parser.add_argument("-r", "--recursive", action="store_true", help="Recurse into subdirectories")

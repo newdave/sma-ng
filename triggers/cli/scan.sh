@@ -6,7 +6,7 @@
 #
 # Options:
 #   -w, --wait            Wait for the job to complete (default: submit and exit)
-#   -c, --config PATH     Override the autoProcess.ini config for this job
+#   -c, --config PATH     Override the sma-ng.yml config for this job
 #   -a, --args ARGS       Extra arguments to pass to manual.py (e.g. "-tmdb 603")
 #       --tmdb ID         Shorthand for --args "-tmdb ID"
 #       --tvdb ID         Shorthand for --args "-tvdb ID"
