@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.94](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.93...sma-ng-v1.6.94) (2026-04-30)
+
+
+### Features
+
+* **config:** warn + normalize mov_text/mkv mismatch ([93d67dc](https://github.com/newdave/sma-ng/commit/93d67dc26032812d7784c89257fe9731499c831a))
+
+
+### Documentation
+
+* tune QSV HEVC ICQ + HDR color tags ([4809afd](https://github.com/newdave/sma-ng/commit/4809afd807acc221f7e553ff82611e91df379625))
+
 ## [1.6.93](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.92...sma-ng-v1.6.93) (2026-04-30)
 
 
