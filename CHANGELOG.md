@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.95](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.94...sma-ng-v1.6.95) (2026-04-30)
+
+
+### Bug Fixes
+
+* **log:** shell-quote ffmpeg command items containing spaces ([e4743d9](https://github.com/newdave/sma-ng/commit/e4743d9a0fd0c8c57e76a0221bdc337a3e44cb20))
+
 ## [1.6.94](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.93...sma-ng-v1.6.94) (2026-04-30)
 
 
