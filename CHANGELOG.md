@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.91](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.90...sma-ng-v1.6.91) (2026-04-30)
+
+
+### Documentation
+
+* drop autoProcess.ini references from active docs ([231f1e3](https://github.com/newdave/sma-ng/commit/231f1e31df2575b6c17189868362892cee7e3311))
+
 ## [1.6.90](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.89...sma-ng-v1.6.90) (2026-04-29)
 
 
