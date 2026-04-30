@@ -540,6 +540,18 @@ Reloaded immediately: `routing`, `path_rewrites`, `scan_paths`, `api_key`, `medi
 
 Not reloaded (require full restart): `--host`, `--port`, `--workers`.
 
+### Auto-reload on file change
+
+The daemon also watches `sma-ng.yml` and triggers the same reload when the file changes. Editor saves, `mise run config:roll` deploys, and rsync updates all take effect within `interval-seconds + debounce-seconds` (default 7s) with no operator action.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `daemon.config-watch.enabled` | bool | `true` | Set to `false` to disable the watcher and require manual `POST /reload` |
+| `daemon.config-watch.interval-seconds` | int | `5` | Polling interval. Set to `0` to disable. The watcher uses `os.stat()` once per tick — negligible overhead |
+| `daemon.config-watch.debounce-seconds` | int | `2` | After a change is detected, wait this long with no further changes before reloading. Coalesces editor-save bursts and atomic rewrites into a single reload |
+
+The auto-watcher and `POST /reload` share a lock so they cannot race on the scanner / recycle-cleaner thread reassignment that happens during reload. A failed reload (validation error) keeps the previous in-memory settings and waits for the next file change before retrying — no busy-loop on a known-broken config.
+
 ---
 
 ## Graceful Shutdown / Restart
