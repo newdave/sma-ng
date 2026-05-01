@@ -2651,6 +2651,64 @@ class MediaProcessor:
     self.log.debug("canBypassConvert returned False.")
     return False
 
+  def _write_ffmpeg_stderr_sidecar(self, e):
+    """Persist the full ffmpeg stderr from a failed convert to a sidecar file.
+
+    Per-line log records are truncated at ``SMA_LOG_MAX_WIDTH`` (default
+    1024 chars), which is fine for streaming progress lines but loses the
+    multi-KB stderr that ffmpeg emits on a hard failure (full encoder
+    config, the offending option, the parse error). This helper writes
+    the complete ``cmd`` + ``output`` payload to a per-job sidecar so the
+    operator has the full story without changing the line-length cap.
+
+    The sidecar lives next to the per-config rotating log file (we read
+    ``baseFilename`` off the logger's ``RotatingFileHandler``). On a
+    daemon job, the path is ``logs/stderr/<config>.job<id>.<ts>.stderr.log``.
+    Returns the absolute sidecar path on success or ``None`` if no log
+    directory could be resolved.
+    """
+    if not getattr(e, "output", None):
+      return None
+    try:
+      log_dir = None
+      log_basename = "ffmpeg"
+      logger = self.log
+      while logger is not None:
+        for handler in getattr(logger, "handlers", ()):
+          base = getattr(handler, "baseFilename", None)
+          if base:
+            log_dir = os.path.dirname(base)
+            log_basename = os.path.splitext(os.path.basename(base))[0]
+            break
+        if log_dir:
+          break
+        logger = getattr(logger, "parent", None)
+      if not log_dir:
+        return None
+
+      try:
+        from resources.daemon.context import _job_id
+
+        job_id = _job_id.get()
+      except Exception:
+        job_id = "-"
+
+      stderr_dir = os.path.join(log_dir, "stderr")
+      os.makedirs(stderr_dir, exist_ok=True)
+      ts = time.strftime("%Y%m%d-%H%M%S")
+      sidecar = os.path.join(stderr_dir, "%s.job%s.%s.stderr.log" % (log_basename, job_id, ts))
+      with open(sidecar, "w", encoding="utf-8") as f:
+        f.write("# ffmpeg cmd:\n")
+        f.write(getattr(e, "cmd", "") or "")
+        f.write("\n\n# ffmpeg stderr:\n")
+        f.write(e.output)
+        if not e.output.endswith("\n"):
+          f.write("\n")
+      return sidecar
+    except Exception:
+      self.log.debug("Could not write ffmpeg stderr sidecar.", exc_info=True)
+      return None
+
   # Generate copy/paste friendly FFMPEG command
   def printableFFMPEGCommand(self, cmds):
     """Format an FFmpeg command list as a copy/paste-safe shell string.
@@ -2769,6 +2827,9 @@ class MediaProcessor:
       self.log.exception("Error converting file, FFMPEG error.")
       self.log.error(e.cmd)
       self.log.error(e.output)
+      sidecar_path = self._write_ffmpeg_stderr_sidecar(e)
+      if sidecar_path:
+        self.log.error("Full ffmpeg stderr written to %s" % sidecar_path)
       if os.path.isfile(outputfile):
         self.removeFile(outputfile)
         self.log.error("%s deleted." % outputfile)
