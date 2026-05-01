@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.7.1...sma-ng-v1.8.0) (2026-05-01)
+
+
+### Features
+
+* **dashboard:** multi-select bulk requeue/cancel/delete ([16813d9](https://github.com/newdave/sma-ng/commit/16813d9c5e67b9c465c63822c12798521e724de8))
+* **dashboard:** surface skipped count in submit toast ([c1f4b7b](https://github.com/newdave/sma-ng/commit/c1f4b7b70834cb66988c33dc222a2abfcab15b40))
+
 ## [1.7.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.7.0...sma-ng-v1.7.1) (2026-05-01)
 
 
