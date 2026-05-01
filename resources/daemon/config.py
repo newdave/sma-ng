@@ -315,6 +315,8 @@ class PathConfigManager:
       raise
 
     self._cfg = cfg
+    # Invalidate per-profile converter cache used by should_skip_same_extension.
+    self._converter_cache = {}
     self._apply_smaconfig(cfg, config_file)
 
     # Merge DB-shared cluster config if distributed. DB provides shared
@@ -502,6 +504,61 @@ class PathConfigManager:
       return None
     res = self._loader.resolve_routing(self._cfg, file_path)
     return res.profile
+
+  def should_skip_same_extension(self, file_path: str) -> bool:
+    """Return True if *file_path* would be a no-op conversion under the
+    resolved profile — i.e. its extension already matches the configured
+    output extension AND the operator hasn't opted into reprocessing via
+    ``process-same-extensions: true`` or ``force-convert: true``.
+
+    Matches the runtime check in
+    :py:meth:`resources.mediaprocessor.MediaProcessor.process` (around
+    line 2650) so directory submissions don't queue files the worker will
+    immediately discard.
+
+    Profile-aware: a routing rule pointing at a profile that flips
+    ``process-same-extensions`` back on for a given path tree will return
+    False here. Per-profile merged converter settings are cached.
+    """
+    if self._cfg is None:
+      return False
+    ext = os.path.splitext(file_path)[1].lower().lstrip(".")
+    if not ext:
+      return False
+    conv = self._converter_for_path(file_path)
+    if conv is None:
+      return False
+    if conv.force_convert or conv.process_same_extensions:
+      return False
+    target_ext = (conv.output_extension or "mp4").lower().lstrip(".")
+    return ext == target_ext
+
+  def _converter_for_path(self, file_path: str):
+    """Resolve the merged ``base.converter`` for *file_path*'s profile.
+
+    Caches per-profile-name to avoid re-running the overlay merge for
+    every file in a large directory submission.
+    """
+    if self._cfg is None:
+      return None
+    profile_name = None
+    try:
+      res = self._loader.resolve_routing(self._cfg, file_path)
+      profile_name = res.profile
+    except Exception:
+      profile_name = None
+    cache = getattr(self, "_converter_cache", None)
+    if cache is None:
+      cache = {}
+      self._converter_cache = cache
+    if profile_name in cache:
+      return cache[profile_name]
+    try:
+      merged = self._loader.apply_profile(self._cfg, profile_name)
+      cache[profile_name] = merged.converter
+    except Exception:
+      cache[profile_name] = self._cfg.base.converter
+    return cache[profile_name]
 
   def get_args_for_path(self, file_path):
     """Return the global default args list.

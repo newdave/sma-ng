@@ -131,6 +131,73 @@ class TestPathConfigManager:
     assert pcm.get_profile_for_path("/mnt/local/Media/TV/1080P/show.mkv") == "specific"
 
 
+class TestShouldSkipSameExtension:
+  """``PathConfigManager.should_skip_same_extension`` filters directory
+  submissions so files already at the configured output extension don't
+  pollute the queue when ``process-same-extensions: false``."""
+
+  @staticmethod
+  def _write(tmp_path, body):
+    cfg = str(tmp_path / "sma-ng.yml")
+    y = _YAML()
+    with open(cfg, "w") as f:
+      y.dump(body, f)
+    return cfg
+
+  def test_skips_when_ext_matches_default_output(self, tmp_path):
+    cfg = self._write(tmp_path, {})
+    pcm = PathConfigManager(cfg)
+    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mp4") is True
+    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mkv") is False
+
+  def test_does_not_skip_when_force_convert(self, tmp_path):
+    cfg = self._write(tmp_path, {"base": {"converter": {"force-convert": True}}})
+    pcm = PathConfigManager(cfg)
+    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mp4") is False
+
+  def test_does_not_skip_when_process_same_extensions_true(self, tmp_path):
+    cfg = self._write(tmp_path, {"base": {"converter": {"process-same-extensions": True}}})
+    pcm = PathConfigManager(cfg)
+    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mp4") is False
+
+  def test_skips_with_alternative_output_extension(self, tmp_path):
+    cfg = self._write(tmp_path, {"base": {"converter": {"output-extension": "mkv"}}})
+    pcm = PathConfigManager(cfg)
+    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mkv") is True
+    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mp4") is False
+
+  def test_profile_overlay_re_enables_processing(self, tmp_path):
+    """Profile that flips process-same-extensions back on must un-skip."""
+    cfg = self._write(
+      tmp_path,
+      {
+        "daemon": {
+          "routing": [
+            {"match": "/mnt/Media/Reprocess", "profile": "redo"},
+          ],
+        },
+        "base": {"converter": {"process-same-extensions": False}},
+        "profiles": {"redo": {"converter": {"process-same-extensions": True}}},
+        "services": {},
+      },
+    )
+    pcm = PathConfigManager(cfg)
+    # Outside the routing rule → base settings → mp4 skipped.
+    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mp4") is True
+    # Inside the routing rule → profile overlay → mp4 NOT skipped.
+    assert pcm.should_skip_same_extension("/mnt/Media/Reprocess/x.mp4") is False
+
+  def test_case_insensitive_extension(self, tmp_path):
+    cfg = self._write(tmp_path, {})
+    pcm = PathConfigManager(cfg)
+    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.MP4") is True
+
+  def test_no_extension_returns_false(self, tmp_path):
+    cfg = self._write(tmp_path, {})
+    pcm = PathConfigManager(cfg)
+    assert pcm.should_skip_same_extension("/mnt/Media/Movies/no_ext_file") is False
+
+
 class TestNodeIdResolution:
   def test_resolve_node_id_prefers_sma_node_name_env(self, monkeypatch):
     import resources.daemon.constants as _constants

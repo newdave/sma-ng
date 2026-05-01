@@ -88,6 +88,11 @@ def _make_server(
   server.path_config_manager.routing_match_paths.return_value = []
   server.path_config_manager.get_profile_for_path.return_value = None
   server.path_config_manager.get_services_for_path.return_value = []
+  # Default to "do not skip" so directory-submission tests don't see every
+  # file silently dropped by the same-extension gate (mp4 already matches the
+  # default output extension). Individual tests override this when they need
+  # the gate active.
+  server.path_config_manager.should_skip_same_extension.return_value = False
 
   # server methods
   server.notify_workers.return_value = None
@@ -1202,6 +1207,17 @@ class TestQueueFile:
     h._queue_file(str(f), [], None)
     h.server.notify_workers.assert_called_once()
 
+  def test_skips_when_extension_matches_output_no_force(self, tmp_path):
+    f = tmp_path / "movie.mp4"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.should_skip_same_extension.return_value = True
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert body["status"] == "skipped"
+    assert body["reason"] == "same_as_output_extension"
+    h.server.job_db.add_job.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # TestQueueDirectory
@@ -1235,6 +1251,36 @@ class TestQueueDirectory:
     assert body["queued_count"] == 0
     assert body["duplicate_count"] == 1
     assert body["duplicates"][0]["job_id"] == 8
+
+  def test_skips_files_with_same_output_extension(self, tmp_path):
+    """process-same-extensions: false → mp4 files in a submitted dir
+    are not queued (matches the worker-time no-op detection)."""
+    (tmp_path / "movie.mkv").write_text("x")  # should queue
+    (tmp_path / "already.mp4").write_text("x")  # should skip
+    h = _make_handler()
+    h.server.job_db.add_job.return_value = 1
+    # only mp4 paths should be reported as same-extension
+    h.server.path_config_manager.should_skip_same_extension.side_effect = lambda p: p.lower().endswith(".mp4")
+    h._queue_directory(str(tmp_path), [], None)
+    body = _get_response_body(h)
+    assert body["queued_count"] == 1
+    assert body["skipped_count"] == 1
+    assert body["skipped"][0]["path"].endswith("already.mp4")
+    assert body["skipped"][0]["reason"] == "same_as_output_extension"
+    # add_job called only for the mkv
+    assert h.server.job_db.add_job.call_count == 1
+
+  def test_does_not_skip_when_force_convert_true(self, tmp_path):
+    """should_skip_same_extension returning False (e.g. force-convert: true)
+    keeps the mp4 queued."""
+    (tmp_path / "already.mp4").write_text("x")
+    h = _make_handler()
+    h.server.job_db.add_job.return_value = 9
+    h.server.path_config_manager.should_skip_same_extension.return_value = False
+    h._queue_directory(str(tmp_path), [], None)
+    body = _get_response_body(h)
+    assert body["queued_count"] == 1
+    assert body["skipped_count"] == 0
 
   def test_resolve_config_uses_existing_override(self, tmp_path):
     cfg = tmp_path / "alt.ini"

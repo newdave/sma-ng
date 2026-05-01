@@ -1012,10 +1012,22 @@ class WebhookHandler(BaseHTTPRequestHandler):
     The directory is walked at its original (submitted) path; path rewrites
     are applied to each discovered file individually so jobs are created
     with the rewritten (e.g. union-mount) paths.
+
+    Files whose extension already matches the resolved profile's
+    ``output-extension`` are skipped at queue time when neither
+    ``process-same-extensions`` nor ``force-convert`` is enabled — this
+    matches the runtime no-op detection in MediaProcessor.process() so
+    we don't pollute the queue with jobs the worker would immediately
+    discard.
     """
-    queued, duplicates = [], []
+    pcm = self.server.path_config_manager
+    skip_same_ext = getattr(pcm, "should_skip_same_extension", None)
+    queued, duplicates, skipped = [], [], []
     for filepath in self._walk_media_files(path):
-      job_path = self.server.path_config_manager.rewrite_path(filepath)
+      job_path = pcm.rewrite_path(filepath)
+      if callable(skip_same_ext) and skip_same_ext(job_path):
+        skipped.append({"path": job_path, "reason": "same_as_output_extension"})
+        continue
       resolved_config = self._resolve_config(job_path, config_override)
       profile = self._resolve_profile(job_path, config_override)
       job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
@@ -1026,19 +1038,47 @@ class WebhookHandler(BaseHTTPRequestHandler):
       else:
         queued.append({"job_id": job_id, "path": job_path, "config": resolved_config, "profile": profile})
 
-    if not queued and not duplicates:
+    if not queued and not duplicates and not skipped:
       self.send_json_response(200, {"status": "empty", "path": path, "message": "No media files found in directory"})
       return
 
     if queued:
       self.server.notify_workers()
-      self.server.logger.info("Directory %s: queued %d files, %d duplicates" % (path, len(queued), len(duplicates)))
+    self.server.logger.info(
+      "Directory %s: queued %d, duplicates %d, skipped %d" % (path, len(queued), len(duplicates), len(skipped)),
+    )
 
-    self.send_json_response(202, {"status": "queued", "directory": path, "queued": queued, "duplicates": duplicates, "queued_count": len(queued), "duplicate_count": len(duplicates)})
+    self.send_json_response(
+      202,
+      {
+        "status": "queued",
+        "directory": path,
+        "queued": queued,
+        "duplicates": duplicates,
+        "skipped": skipped,
+        "queued_count": len(queued),
+        "duplicate_count": len(duplicates),
+        "skipped_count": len(skipped),
+      },
+    )
 
   def _queue_file(self, path, extra_args, config_override, max_retries=0):
     """Queue a single file job and respond."""
-    job_path = self.server.path_config_manager.rewrite_path(path)
+    pcm = self.server.path_config_manager
+    job_path = pcm.rewrite_path(path)
+    skip_same_ext = getattr(pcm, "should_skip_same_extension", None)
+    if callable(skip_same_ext) and skip_same_ext(job_path):
+      self.server.logger.info("Skipped queue: %s (same as output extension)" % job_path)
+      self.send_json_response(
+        200,
+        {
+          "status": "skipped",
+          "path": job_path,
+          "reason": "same_as_output_extension",
+          "message": "process-same-extensions is false and force-convert is false; file already matches output extension",
+        },
+      )
+      return
     resolved_config = self._resolve_config(job_path, config_override)
     profile = self._resolve_profile(job_path, config_override)
     job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
