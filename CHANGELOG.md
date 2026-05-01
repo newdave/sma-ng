@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.98](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.97...sma-ng-v1.6.98) (2026-05-01)
+
+
+### Features
+
+* **log:** write full ffmpeg stderr to per-job sidecar on failure ([f576cd4](https://github.com/newdave/sma-ng/commit/f576cd466d496d8dad6270779707203dccacfc0b))
+
 ## [1.6.97](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.96...sma-ng-v1.6.97) (2026-05-01)
 
 
