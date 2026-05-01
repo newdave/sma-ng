@@ -69,9 +69,10 @@ class TestLoadPathConfigManager:
   def test_returns_none_when_no_path_configs(self):
     mock_pcm = MagicMock()
     mock_pcm.path_configs = []
+    mock_pcm.scan_paths = []
     with patch("resources.daemon.config.PathConfigManager", return_value=mock_pcm):
       result = _load_path_config_manager()
-    # path_configs is empty → returns None
+    # No path_configs and no scan_paths → returns None
     assert result is None
 
   def test_returns_pcm_when_path_configs_present(self):
