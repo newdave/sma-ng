@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.0...sma-ng-v1.10.1) (2026-05-01)
+
+
+### Bug Fixes
+
+* **qsv:** move extra-hw-frames from base.converter to base.video + base.hdr ([70f687c](https://github.com/newdave/sma-ng/commit/70f687c1dfbf5c0e75cda3fef7aec9b7c72c8f00))
+
 ## [1.10.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.9.1...sma-ng-v1.10.0) (2026-05-01)
 
 
