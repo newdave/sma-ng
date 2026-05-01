@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.99](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.98...sma-ng-v1.6.99) (2026-05-01)
+
+
+### Bug Fixes
+
+* **types:** resolve all pyright errors and warnings across codebase ([2816ff6](https://github.com/newdave/sma-ng/commit/2816ff6c7b3d8f369f884debeecca888b3733640))
+
+
+### Documentation
+
+* **errors:** update /errors command for local.yml config format ([57dc702](https://github.com/newdave/sma-ng/commit/57dc7025834bc4f11dd1db6ec9b480d91fc761c7))
+
 ## [1.6.98](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.97...sma-ng-v1.6.98) (2026-05-01)
 
 
