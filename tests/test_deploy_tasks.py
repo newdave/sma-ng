@@ -354,7 +354,7 @@ class TestDeployConfigTask:
 
 
 class TestDeployLibHelpers:
-  def _run_stamp_daemon(self, deploy_dir, services, *, api_key="", db_url="", ffmpeg_dir="", node_name=""):
+  def _run_stamp_daemon(self, deploy_dir, services, *, api_key="", db_url="", ffmpeg_dir="", node_name="", workers=""):
     services_b64 = b64encode(json.dumps(services).encode()).decode()
     args = [
       PYTHON,
@@ -368,6 +368,9 @@ class TestDeployLibHelpers:
       "",
       "",
       services_b64,
+      "",  # base_overrides_b64
+      "",  # profiles_overrides_b64
+      b64encode(str(workers).encode()).decode() if workers != "" else "",
     ]
     return subprocess.run(args, cwd=PROJECT_ROOT, capture_output=True, text=True, check=False)
 
@@ -384,6 +387,50 @@ class TestDeployLibHelpers:
     assert "api-key: abc123" in content
     assert "db-url: postgresql://x" in content
     assert "ffmpeg-dir: /usr/local/bin" in content
+
+  def test_stamp_daemon_writes_workers_when_provided(self, tmp_path):
+    """`hosts.<label>.workers` (or `deploy.workers`) lands in
+    `daemon.workers` so the daemon picks it up without CLI/env nudging."""
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "sma-ng.yml").write_text("daemon: {}\n")
+    (config_dir / "daemon.env").write_text("# existing\n")
+
+    result = self._run_stamp_daemon(deploy_dir, {}, workers="6")
+    assert result.returncode == 0, result.stderr or result.stdout
+    content = (config_dir / "sma-ng.yml").read_text()
+    assert "workers: 6" in content
+
+  def test_stamp_daemon_skips_workers_when_unset(self, tmp_path):
+    """An empty workers arg must NOT touch `daemon.workers` so the daemon's
+    own default (or a manually-edited value) survives the roll."""
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "sma-ng.yml").write_text("daemon:\n  workers: 12\n")
+    (config_dir / "daemon.env").write_text("# existing\n")
+
+    result = self._run_stamp_daemon(deploy_dir, {}, api_key="abc")
+    assert result.returncode == 0, result.stderr or result.stdout
+    content = (config_dir / "sma-ng.yml").read_text()
+    assert "workers: 12" in content  # untouched
+
+  def test_stamp_daemon_ignores_invalid_workers(self, tmp_path):
+    """Non-positive / non-integer values are dropped silently (treated as
+    'leave existing alone'). Prevents a stray `workers: 0` from breaking
+    the daemon."""
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "sma-ng.yml").write_text("daemon:\n  workers: 4\n")
+    (config_dir / "daemon.env").write_text("# existing\n")
+
+    for bad in ("0", "-2", "abc", "  "):
+      result = self._run_stamp_daemon(deploy_dir, {}, workers=bad)
+      assert result.returncode == 0, result.stderr or result.stdout
+    content = (config_dir / "sma-ng.yml").read_text()
+    assert "workers: 4" in content
 
   def test_stamp_daemon_writes_nested_service_credentials(self, tmp_path):
     deploy_dir = tmp_path / "deploy"
