@@ -375,6 +375,50 @@ class ConfigWatchSettings(_Base):
   debounce_seconds: int = 2
 
 
+# ---------------------------------------------------------------------------
+# Library audit (errors / orphan sidecars / leftover tmp / preconv originals /
+# tmdb-tvdb duplicates). Distributed across cluster via PG queue + claim.
+# ---------------------------------------------------------------------------
+
+
+_DEFAULT_AUDIT_SKIP_DIRS = [
+  "Extras",
+  "Featurettes",
+  "Behind The Scenes",
+  "Deleted Scenes",
+  "Interviews",
+  "Other",
+  "Specials",
+  "Trailers",
+]
+
+
+class AuditPath(_Base):
+  path: str
+  enabled: bool = True
+  rewrite_from: str = ""
+  rewrite_to: str = ""
+
+
+class AuditAutoFix(_Base):
+  ffprobe_failed: bool = False
+  orphan_sidecar: bool = False
+  leftover_tmp: bool = False
+  preconv_original: bool = False
+
+
+class AuditSettings(_Base):
+  enabled: bool = False
+  paths: list[AuditPath] = Field(default_factory=list)
+  interval_seconds: int = 86400
+  skip_dirs: list[str] = Field(default_factory=lambda: list(_DEFAULT_AUDIT_SKIP_DIRS))
+  concurrency: int = 2
+  batch_size: int = 50
+  claim_stale_seconds: int = 600
+  dry_run: bool = True
+  auto_fix: AuditAutoFix = Field(default_factory=AuditAutoFix)
+
+
 class DaemonConfig(_Base):
   host: str = "0.0.0.0"
   port: int = 8585
@@ -401,6 +445,7 @@ class DaemonConfig(_Base):
   routing: list[RoutingRule] = Field(default_factory=list)
   media_extensions: list[str] = Field(default_factory=lambda: [".mkv", ".m4v", ".avi", ".mov", ".wmv", ".ts", ".flv", ".webm"])
   config_watch: ConfigWatchSettings = Field(default_factory=ConfigWatchSettings)
+  audit: AuditSettings = Field(default_factory=AuditSettings)
 
 
 # ---------------------------------------------------------------------------
@@ -465,4 +510,7 @@ __all__ = [
   "ScanPath",
   "PathRewrite",
   "RoutingRule",
+  "AuditPath",
+  "AuditAutoFix",
+  "AuditSettings",
 ]

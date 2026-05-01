@@ -788,6 +788,137 @@ class WebhookHandler(BaseHTTPRequestHandler):
   def _post_job_action(self, path):
     dispatch_post_job_action(self, path)
 
+  # ------------------------------------------------------------------
+  # Library audit
+  # ------------------------------------------------------------------
+
+  def _get_library_audit(self, query):
+    limit = int(query.get("limit", [50])[0])
+    offset = int(query.get("offset", [0])[0])
+    runs = self.server.job_db.list_audit_runs(limit=limit, offset=offset)
+    self.send_json_response(200, {"runs": runs, "count": len(runs), "limit": limit, "offset": offset})
+
+  def _get_library_audit_run(self, path):
+    audit_id = self._parse_audit_id(path)
+    if audit_id is None:
+      return
+    run = self.server.job_db.get_audit_run(audit_id)
+    if run is None:
+      self.send_json_response(404, {"error": "Audit run not found"})
+      return
+    self.send_json_response(200, run)
+
+  def _get_library_findings(self, query):
+    status = query.get("status", [None])[0]
+    kind = query.get("kind", [None])[0]
+    path_q = query.get("path", [None])[0]
+    limit = int(query.get("limit", [50])[0])
+    offset = int(query.get("offset", [0])[0])
+    findings = self.server.job_db.get_findings(status=status, kind=kind, path=path_q, limit=limit, offset=offset)
+    self.send_json_response(200, {"findings": findings, "count": len(findings), "limit": limit, "offset": offset})
+
+  def _get_library_finding(self, path):
+    finding_id = self._parse_finding_id(path)
+    if finding_id is None:
+      return
+    finding = self.server.job_db.get_finding(finding_id)
+    if finding is None:
+      self.send_json_response(404, {"error": "Finding not found"})
+      return
+    self.send_json_response(200, finding)
+
+  def _post_library_audit(self):
+    """Trigger an on-demand audit run (202 + detached enumerator thread).
+
+    Body: {"paths": [...], "dry_run": bool} — both optional. Defaults to
+    daemon.audit.paths and daemon.audit.dry_run.
+    """
+    body = {}
+    content_length = int(self.headers.get("Content-Length", 0))
+    if content_length:
+      try:
+        body = json.loads(self.rfile.read(content_length))
+      except (json.JSONDecodeError, ValueError) as exc:
+        self.send_json_response(400, {"error": str(exc)})
+        return
+    pcm = self.server.path_config_manager
+    paths = body.get("paths") if isinstance(body, dict) else None
+    if not paths:
+      paths = [a["path"] for a in pcm.audit_paths if a.get("enabled", True) and a.get("path")]
+    if not paths:
+      self.send_json_response(400, {"error": "No audit paths configured (daemon.audit.paths is empty)"})
+      return
+    audit_id = self.server.job_db.create_audit_run(paths, "api:%s" % self.server.node_id)
+    self.send_json_response(202, {"status": "queued", "audit_id": audit_id, "paths": paths})
+    try:
+      self.wfile.flush()
+    except Exception:
+      pass
+    threading.Thread(
+      target=self._run_audit_enumerate,
+      args=(audit_id, paths),
+      daemon=True,
+    ).start()
+
+  def _run_audit_enumerate(self, audit_id, paths):
+    """Enumerate paths into the audit queue. Runs detached so the HTTP request returns immediately."""
+    from resources.library_audit.enumerator import enumerate_paths
+
+    pcm = self.server.path_config_manager
+    settings = pcm.audit_settings
+    is_recycle_bin_path = getattr(pcm, "is_recycle_bin_path", None)
+    try:
+      batch = []
+      total = 0
+      for p, hint in enumerate_paths(paths, skip_dirs=list(settings.skip_dirs), is_recycle_bin_path=is_recycle_bin_path):
+        batch.append((p, hint))
+        if len(batch) >= 500:
+          self.server.job_db.enqueue_audit_units(audit_id, batch)
+          total += len(batch)
+          batch = []
+      if batch:
+        self.server.job_db.enqueue_audit_units(audit_id, batch)
+        total += len(batch)
+      self.server.logger.info("Library audit run %d enumerated %d unit(s) (api trigger)" % (audit_id, total))
+      if total == 0:
+        self.server.job_db.set_audit_run_status(audit_id, "completed")
+    except Exception:
+      self.server.logger.exception("Library audit enumerate failed for run %d" % audit_id)
+      try:
+        self.server.job_db.set_audit_run_status(audit_id, "failed", error="enumerate raised")
+      except Exception:
+        pass
+
+  def _post_library_finding_action(self, path, target_status):
+    finding_id = self._parse_finding_id(path)
+    if finding_id is None:
+      return
+    rows = self.server.job_db.set_finding_status(finding_id, target_status)
+    if rows == 0:
+      self.send_json_response(404, {"error": "Finding not found"})
+      return
+    self.send_json_response(200, {"status": target_status, "finding_id": finding_id})
+
+  def _parse_audit_id(self, path):
+    """Extract integer audit id from /library/audit/<id>."""
+    try:
+      return int(path.rstrip("/").split("/")[-1])
+    except (ValueError, IndexError):
+      self.send_json_response(400, {"error": "Invalid audit id"})
+      return None
+
+  def _parse_finding_id(self, path):
+    """Extract integer finding id from /library/findings/<id>[/action]."""
+    parts = path.rstrip("/").split("/")
+    # /library/findings/<id> → last segment is id
+    # /library/findings/<id>/ack → second-to-last segment is id
+    candidate = parts[-1] if parts[-1].isdigit() else (parts[-2] if len(parts) >= 2 else "")
+    try:
+      return int(candidate)
+    except (ValueError, IndexError):
+      self.send_json_response(400, {"error": "Invalid finding id"})
+      return None
+
   def do_POST(self):
     dispatch_post(self)
 

@@ -470,6 +470,13 @@ class Metadata:
     video["----:com.apple.iTunes:iTunMOVI"] = self.xml.encode("UTF-8", errors="ignore")  # XML - see xmlTags method
     if self.rating:
       video["----:com.apple.iTunes:iTunEXTC"] = self.rating.encode("UTF-8", errors="ignore")  # iTunes content rating
+    # Dedicated SMA atoms so the library auditor can read ids without parsing the iTunMOVI plist.
+    if getattr(self, "tmdbid", None):
+      video["----:com.apple.iTunes:TMDB"] = str(self.tmdbid).encode("UTF-8")
+    if getattr(self, "tvdbid", None):
+      video["----:com.apple.iTunes:TVDB"] = str(self.tvdbid).encode("UTF-8")
+    if getattr(self, "imdbid", None):
+      video["----:com.apple.iTunes:IMDB"] = str(self.imdbid).encode("UTF-8")
 
     if artwork:
       coverpath = self.getArtwork(path, inputfile, thumbnail=thumbnail)

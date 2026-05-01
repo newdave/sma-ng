@@ -919,6 +919,12 @@ def main():
   mediatype_group.add_argument("--tv", action="store_true", help="Force guessit to treat input as a TV episode")
   mediatype_group.add_argument("--movie", action="store_true", help="Force guessit to treat input as a movie")
 
+  parser.add_argument(
+    "--audit",
+    action="store_true",
+    help="Run a library audit on the input path: locate ffprobe failures, orphan sidecars, leftover .tmp files, leftover pre-conversion originals, and TMDB/TVDB-id duplicates. Prints findings and exits non-zero when any are found.",
+  )
+
   args = vars(parser.parse_args())
 
   # Setup the silent mode
@@ -972,6 +978,15 @@ def main():
       pass
   else:
     path = getValue("Enter path to file")
+
+  if args.get("audit"):
+    from resources.config_schema import AuditSettings as _AuditSettings
+    from resources.library_audit import run_audit_inline as _run_audit_inline
+
+    audit_settings = _AuditSettings()
+    ffmpeg_dir = getattr(settings, "ffmpeg_dir", None) or None
+    rc = _run_audit_inline([path], audit_settings, log, ffmpeg_dir=ffmpeg_dir)
+    sys.exit(rc)
 
   if os.path.isdir(path):
     success = walkDir(

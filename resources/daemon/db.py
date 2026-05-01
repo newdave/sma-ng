@@ -4,7 +4,23 @@ from contextlib import contextmanager
 
 import yaml as _yaml
 
-from resources.daemon.constants import SECRET_KEYS, STATUS_COMPLETED, STATUS_FAILED, STATUS_PENDING, STATUS_RUNNING, resolve_node_id
+from resources.daemon.constants import (
+  AUDIT_RUN_COMPLETED,
+  AUDIT_RUN_ENUMERATING,
+  AUDIT_RUN_PROBING,
+  AUDIT_RUN_QUEUED,
+  AUDIT_UNIT_CLAIMED,
+  AUDIT_UNIT_DONE,
+  AUDIT_UNIT_ERROR,
+  AUDIT_UNIT_PENDING,
+  SECRET_KEYS,
+  STATUS_COMPLETED,
+  STATUS_FAILED,
+  STATUS_OPEN,
+  STATUS_PENDING,
+  STATUS_RUNNING,
+  resolve_node_id,
+)
 from resources.log import getLogger
 
 log = getLogger("DAEMON")
@@ -216,6 +232,70 @@ class PostgreSQLJobDatabase:
         cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_size_bytes BIGINT")
         cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS output_size_bytes BIGINT")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status_completed ON jobs(status, completed_at)")
+        # ---- library audit ---------------------------------------------------
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS library_audit_runs (
+                        id           BIGSERIAL PRIMARY KEY,
+                        status       TEXT NOT NULL DEFAULT 'queued',
+                        triggered_by TEXT,
+                        scope_paths  TEXT[] NOT NULL,
+                        started_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        completed_at TIMESTAMPTZ,
+                        total_units  INTEGER NOT NULL DEFAULT 0,
+                        done_units   INTEGER NOT NULL DEFAULT 0,
+                        error        TEXT
+                    )
+                """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_runs_status ON library_audit_runs(status)")
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS library_audit_queue (
+                        id          BIGSERIAL PRIMARY KEY,
+                        audit_id    BIGINT NOT NULL REFERENCES library_audit_runs(id) ON DELETE CASCADE,
+                        path        TEXT NOT NULL,
+                        kind_hint   TEXT NOT NULL,
+                        status      TEXT NOT NULL DEFAULT 'pending',
+                        claimed_by  TEXT,
+                        claimed_at  TIMESTAMPTZ,
+                        finished_at TIMESTAMPTZ,
+                        error       TEXT
+                    )
+                """)
+        cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_audit_queue_pending
+                        ON library_audit_queue (audit_id, status)
+                        WHERE status = 'pending'
+                """)
+        cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_audit_queue_claimed
+                        ON library_audit_queue (status, claimed_at)
+                        WHERE status = 'claimed'
+                """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS library_findings (
+                        id            BIGSERIAL PRIMARY KEY,
+                        kind          TEXT NOT NULL,
+                        path          TEXT NOT NULL,
+                        details       JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        status        TEXT NOT NULL DEFAULT 'open',
+                        first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        acked_at      TIMESTAMPTZ,
+                        resolved_at   TIMESTAMPTZ,
+                        audit_id      BIGINT REFERENCES library_audit_runs(id) ON DELETE SET NULL,
+                        UNIQUE (kind, path)
+                    )
+                """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_findings_status ON library_findings (status, kind)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_findings_path ON library_findings (path)")
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS library_audit_media_ids (
+                        audit_id BIGINT NOT NULL REFERENCES library_audit_runs(id) ON DELETE CASCADE,
+                        path     TEXT NOT NULL,
+                        media_id TEXT NOT NULL,
+                        PRIMARY KEY (audit_id, path)
+                    )
+                """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_media_ids_run_mid ON library_audit_media_ids (audit_id, media_id)")
     self.log.info("PostgreSQL database initialized: %s" % self.db_url)
     self._reset_running_jobs()
 
@@ -1128,3 +1208,325 @@ class PostgreSQLJobDatabase:
           "INSERT INTO scanned_files (path) VALUES (%s) ON CONFLICT DO NOTHING",
           [(p,) for p in paths],
         )
+
+  # ------------------------------------------------------------------
+  # Library audit (distributed scanner)
+  # ------------------------------------------------------------------
+
+  _AUDIT_ENUMERATE_LOCK_KEY = 4242000001  # arbitrary stable bigint for pg_advisory lock
+
+  def create_audit_run(self, scope_paths, triggered_by):
+    """Create a new audit run; returns its id."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          "INSERT INTO library_audit_runs (status, triggered_by, scope_paths) VALUES (%s, %s, %s) RETURNING id",
+          (AUDIT_RUN_ENUMERATING, triggered_by, list(scope_paths)),
+        )
+        return cur.fetchone()["id"]
+
+  def set_audit_run_status(self, audit_id, status, error=None):
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          "UPDATE library_audit_runs SET status = %s, error = COALESCE(%s, error) WHERE id = %s",
+          (status, error, audit_id),
+        )
+
+  def enqueue_audit_units(self, audit_id, units):
+    """``units`` is iterable of (path, kind_hint). Returns row count inserted."""
+    rows = list(units)
+    if not rows:
+      return 0
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.executemany(
+          "INSERT INTO library_audit_queue (audit_id, path, kind_hint) VALUES (%s, %s, %s)",
+          [(audit_id, p, k) for (p, k) in rows],
+        )
+        cur.execute(
+          "UPDATE library_audit_runs SET total_units = total_units + %s, status = %s WHERE id = %s",
+          (len(rows), AUDIT_RUN_PROBING, audit_id),
+        )
+    return len(rows)
+
+  def claim_audit_units(self, node_id, audit_id, batch=50):
+    """Atomic batch claim. Mirrors claim_next_job's FOR UPDATE SKIP LOCKED pattern."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+                    UPDATE library_audit_queue q
+                       SET status = %s, claimed_by = %s, claimed_at = NOW()
+                      FROM (
+                            SELECT id FROM library_audit_queue
+                             WHERE audit_id = %s AND status = %s
+                             ORDER BY id LIMIT %s
+                             FOR UPDATE SKIP LOCKED
+                           ) sub
+                     WHERE q.id = sub.id
+                    RETURNING q.id, q.audit_id, q.path, q.kind_hint
+                    """,
+          (AUDIT_UNIT_CLAIMED, node_id, audit_id, AUDIT_UNIT_PENDING, batch),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+  def mark_audit_unit_done(self, unit_id, error=None):
+    status = AUDIT_UNIT_ERROR if error else AUDIT_UNIT_DONE
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+                    UPDATE library_audit_queue
+                       SET status = %s, finished_at = NOW(), error = %s
+                     WHERE id = %s
+                    RETURNING audit_id
+                    """,
+          (status, error, unit_id),
+        )
+        row = cur.fetchone()
+        if row:
+          cur.execute(
+            "UPDATE library_audit_runs SET done_units = done_units + 1 WHERE id = %s",
+            (row["audit_id"],),
+          )
+
+  def release_stale_audit_claims(self, stale_seconds):
+    """Reset claimed-but-orphaned units back to pending. Returns row count."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+                    UPDATE library_audit_queue
+                       SET status = %s, claimed_by = NULL, claimed_at = NULL
+                     WHERE status = %s
+                       AND claimed_at < NOW() - make_interval(secs => %s)
+                    """,
+          (AUDIT_UNIT_PENDING, AUDIT_UNIT_CLAIMED, int(stale_seconds)),
+        )
+        return cur.rowcount
+
+  def requeue_audit_claims_for_node(self, node_id):
+    """On worker startup, undo any claims this node still owns from a prior run."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+                    UPDATE library_audit_queue
+                       SET status = %s, claimed_by = NULL, claimed_at = NULL
+                     WHERE status = %s AND claimed_by = %s
+                    """,
+          (AUDIT_UNIT_PENDING, AUDIT_UNIT_CLAIMED, node_id),
+        )
+        return cur.rowcount
+
+  def list_active_audit_runs(self):
+    """Runs that still have pending or claimed units to probe."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+                    SELECT id, scope_paths, total_units, done_units
+                      FROM library_audit_runs
+                     WHERE status IN (%s, %s, %s)
+                     ORDER BY id
+                    """,
+          (AUDIT_RUN_QUEUED, AUDIT_RUN_ENUMERATING, AUDIT_RUN_PROBING),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+  def complete_finished_audit_runs(self):
+    """Flip any probing run with zero pending+claimed units to completed.
+
+    Only the enumerator (holding the advisory lock) should call this.
+    """
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+                    UPDATE library_audit_runs r
+                       SET status = %s, completed_at = NOW()
+                     WHERE r.status = %s
+                       AND NOT EXISTS (
+                           SELECT 1 FROM library_audit_queue q
+                            WHERE q.audit_id = r.id
+                              AND q.status IN (%s, %s)
+                       )
+                    RETURNING r.id
+                    """,
+          (AUDIT_RUN_COMPLETED, AUDIT_RUN_PROBING, AUDIT_UNIT_PENDING, AUDIT_UNIT_CLAIMED),
+        )
+        return [r["id"] for r in cur.fetchall()]
+
+  def get_audit_run(self, audit_id):
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("SELECT * FROM library_audit_runs WHERE id = %s", (audit_id,))
+        row = cur.fetchone()
+        if not row:
+          return None
+        cur.execute(
+          """
+                    SELECT claimed_by, COUNT(*) AS units
+                      FROM library_audit_queue
+                     WHERE audit_id = %s AND status IN (%s, %s)
+                     GROUP BY claimed_by
+                    """,
+          (audit_id, AUDIT_UNIT_CLAIMED, AUDIT_UNIT_DONE),
+        )
+        per_node = [dict(r) for r in cur.fetchall()]
+        out = dict(row)
+        out["per_node_progress"] = per_node
+        return out
+
+  def list_audit_runs(self, limit=50, offset=0):
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          "SELECT * FROM library_audit_runs ORDER BY id DESC LIMIT %s OFFSET %s",
+          (limit, offset),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+  def try_acquire_audit_enumerate_lock(self):
+    """Best-effort exclusive lock so only one node enumerates. Session-scoped.
+
+    Returns the open connection on success (caller must release); None when
+    another node already holds it.
+    """
+    conn = self._pool.getconn()
+    try:
+      with conn.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s) AS ok", (self._AUDIT_ENUMERATE_LOCK_KEY,))
+        ok = cur.fetchone()["ok"]
+      if not ok:
+        self._pool.putconn(conn)
+        return None
+      return conn
+    except Exception:
+      self._pool.putconn(conn)
+      raise
+
+  def release_audit_enumerate_lock(self, conn):
+    if conn is None:
+      return
+    try:
+      with conn.cursor() as cur:
+        cur.execute("SELECT pg_advisory_unlock(%s)", (self._AUDIT_ENUMERATE_LOCK_KEY,))
+      conn.commit()
+    except Exception:
+      try:
+        conn.rollback()
+      except Exception:
+        pass
+    finally:
+      self._pool.putconn(conn)
+
+  def upsert_finding(self, kind, path, details, audit_id=None):
+    """Insert or refresh a finding; reopens dismissed/resolved findings if they recur.
+
+    Returns the finding id.
+    """
+    payload = json.dumps(details or {})
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+                    INSERT INTO library_findings (kind, path, details, status, audit_id)
+                    VALUES (%s, %s, %s::jsonb, %s, %s)
+                    ON CONFLICT (kind, path) DO UPDATE
+                       SET last_seen_at = NOW(),
+                           details      = EXCLUDED.details,
+                           audit_id     = EXCLUDED.audit_id,
+                           status       = CASE
+                                            WHEN library_findings.status IN ('dismissed', 'resolved')
+                                              THEN %s
+                                            ELSE library_findings.status
+                                          END
+                    RETURNING id
+                    """,
+          (kind, path, payload, STATUS_OPEN, audit_id, STATUS_OPEN),
+        )
+        return cur.fetchone()["id"]
+
+  def get_findings(self, status=None, kind=None, path=None, limit=50, offset=0):
+    where = []
+    params = []
+    if status:
+      where.append("status = %s")
+      params.append(status)
+    if kind:
+      where.append("kind = %s")
+      params.append(kind)
+    if path:
+      where.append("path = %s")
+      params.append(path)
+    sql = "SELECT * FROM library_findings"
+    if where:
+      sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY last_seen_at DESC LIMIT %s OFFSET %s"
+    params.extend([limit, offset])
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(sql, params)
+        return [dict(r) for r in cur.fetchall()]
+
+  def get_finding(self, finding_id):
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("SELECT * FROM library_findings WHERE id = %s", (finding_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+  def set_finding_status(self, finding_id, status):
+    """Transition a finding through the open → acked/dismissed/resolved lifecycle."""
+    ts_field = {
+      "acked": "acked_at",
+      "resolved": "resolved_at",
+    }.get(status)
+    sql = "UPDATE library_findings SET status = %s"
+    params = [status]
+    if ts_field:
+      sql += ", %s = NOW()" % ts_field
+    sql += " WHERE id = %s"
+    params.append(finding_id)
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(sql, params)
+        return cur.rowcount
+
+  def record_media_id(self, audit_id, path, media_id):
+    """Upsert an observed (audit_id, path) → media_id for later duplicate-ID rollup."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+                    INSERT INTO library_audit_media_ids (audit_id, path, media_id)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (audit_id, path) DO UPDATE SET media_id = EXCLUDED.media_id
+                    """,
+          (audit_id, path, media_id),
+        )
+
+  def find_duplicate_media_ids(self, audit_id):
+    """Return {media_id: [paths]} for ids observed at ≥2 paths in the run."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+                    SELECT media_id, ARRAY_AGG(path ORDER BY path) AS paths
+                      FROM library_audit_media_ids
+                     WHERE audit_id = %s
+                     GROUP BY media_id
+                    HAVING COUNT(*) > 1
+                    """,
+          (audit_id,),
+        )
+        return {r["media_id"]: r["paths"] for r in cur.fetchall()}
+
+  def purge_audit_media_ids(self, audit_id):
+    """Drop the scratch media-id rows once duplicate rollup has finished."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("DELETE FROM library_audit_media_ids WHERE audit_id = %s", (audit_id,))
+        return cur.rowcount

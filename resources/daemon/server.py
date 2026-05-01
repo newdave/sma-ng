@@ -16,7 +16,14 @@ except Exception:
   _VERSION = "unknown"
 
 from resources.daemon.constants import resolve_node_id
-from resources.daemon.threads import ConfigWatcherThread, HeartbeatThread, RecycleBinCleanerThread, ScannerThread
+from resources.daemon.threads import (
+  ConfigWatcherThread,
+  HeartbeatThread,
+  LibraryAuditThread,
+  LibraryAuditWorkerThread,
+  RecycleBinCleanerThread,
+  ScannerThread,
+)
 from resources.daemon.worker import WorkerPool
 
 
@@ -178,6 +185,25 @@ class DaemonServer(ThreadingHTTPServer):
     )
     self.recycle_cleaner_thread.start()
 
+    # Start library audit threads (enumerator + worker). Both no-op when
+    # job_db is not distributed or when daemon.audit.enabled is false.
+    self.library_audit_thread = LibraryAuditThread(
+      job_db=job_db,
+      path_config_manager=path_config_manager,
+      server=self,
+      node_id=self.node_id,
+      logger=logger,
+    )
+    self.library_audit_thread.start()
+    self.library_audit_worker_thread = LibraryAuditWorkerThread(
+      job_db=job_db,
+      path_config_manager=path_config_manager,
+      server=self,
+      node_id=self.node_id,
+      logger=logger,
+    )
+    self.library_audit_worker_thread.start()
+
     # Start config watcher (auto-reload on sma-ng.yml change)
     self.config_watcher_thread = None
     try:
@@ -282,6 +308,29 @@ class DaemonServer(ThreadingHTTPServer):
     )
     self.recycle_cleaner_thread.start()
 
+    # Restart library audit threads so a new audit_settings (paths, intervals,
+    # skip_dirs) takes effect without a process restart.
+    self.library_audit_thread.stop()
+    self.library_audit_thread.join(timeout=5)
+    self.library_audit_thread = LibraryAuditThread(
+      job_db=self.job_db,
+      path_config_manager=self.path_config_manager,
+      server=self,
+      node_id=self.node_id,
+      logger=self.logger,
+    )
+    self.library_audit_thread.start()
+    self.library_audit_worker_thread.stop()
+    self.library_audit_worker_thread.join(timeout=5)
+    self.library_audit_worker_thread = LibraryAuditWorkerThread(
+      job_db=self.job_db,
+      path_config_manager=self.path_config_manager,
+      server=self,
+      node_id=self.node_id,
+      logger=self.logger,
+    )
+    self.library_audit_worker_thread.start()
+
     self.logger.info("Configuration reloaded.")
     return True
 
@@ -293,6 +342,8 @@ class DaemonServer(ThreadingHTTPServer):
     self.heartbeat_thread.stop()
     self.scanner_thread.stop()
     self.recycle_cleaner_thread.stop()
+    self.library_audit_thread.stop()
+    self.library_audit_worker_thread.stop()
     if self.config_watcher_thread:
       self.config_watcher_thread.stop()
 
@@ -315,6 +366,8 @@ class DaemonServer(ThreadingHTTPServer):
 
     self.heartbeat_thread.join(timeout=5)
     self.scanner_thread.join(timeout=5)
+    self.library_audit_thread.join(timeout=5)
+    self.library_audit_worker_thread.join(timeout=5)
 
     super().shutdown()
 
@@ -328,6 +381,8 @@ class DaemonServer(ThreadingHTTPServer):
     self.heartbeat_thread.stop()
     self.scanner_thread.stop()
     self.recycle_cleaner_thread.stop()
+    self.library_audit_thread.stop()
+    self.library_audit_worker_thread.stop()
     if self.config_watcher_thread:
       self.config_watcher_thread.stop()
 
@@ -352,6 +407,8 @@ class DaemonServer(ThreadingHTTPServer):
 
     self.heartbeat_thread.join(timeout=5)
     self.scanner_thread.join(timeout=5)
+    self.library_audit_thread.join(timeout=5)
+    self.library_audit_worker_thread.join(timeout=5)
 
     super().shutdown()
 

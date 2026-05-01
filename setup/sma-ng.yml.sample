@@ -50,6 +50,28 @@ daemon:
     enabled: true
     interval-seconds: 5
     debounce-seconds: 2
+  audit:
+    enabled: false
+    paths: []
+    interval-seconds: 86400
+    skip-dirs:
+      - Extras
+      - Featurettes
+      - Behind The Scenes
+      - Deleted Scenes
+      - Interviews
+      - Other
+      - Specials
+      - Trailers
+    concurrency: 2
+    batch-size: 50
+    claim-stale-seconds: 600
+    dry-run: true
+    auto-fix:
+      ffprobe-failed: false
+      orphan-sidecar: false
+      leftover-tmp: false
+      preconv-original: false
 # ── Base media-conversion settings ───────────────────────────────────
 # Defaults applied to every conversion. Profiles below shallow-merge on top
 # of these per-section.

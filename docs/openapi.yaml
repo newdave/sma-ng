@@ -135,6 +135,82 @@ components:
           type: integer
           nullable: true
 
+    LibraryAuditRun:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          enum: [queued, enumerating, probing, completed, failed]
+        triggered_by:
+          type: string
+          nullable: true
+          description: "Source of the run: scheduled:<node-id>, api:<node-id>, or cli"
+        scope_paths:
+          type: array
+          items:
+            type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        total_units:
+          type: integer
+        done_units:
+          type: integer
+        error:
+          type: string
+          nullable: true
+        per_node_progress:
+          type: array
+          description: Distributed-workload contribution per node for the run
+          items:
+            type: object
+            properties:
+              claimed_by:
+                type: string
+                nullable: true
+              units:
+                type: integer
+
+    LibraryFinding:
+      type: object
+      properties:
+        id:
+          type: integer
+        kind:
+          type: string
+          enum: [ffprobe_failed, orphan_sidecar, leftover_tmp, preconv_original, duplicate_id]
+        path:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum: [open, acked, dismissed, resolved]
+        first_seen_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        acked_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        audit_id:
+          type: integer
+          nullable: true
+
 paths:
   /health:
     get:
@@ -1019,3 +1095,263 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /library/audit:
+    get:
+      summary: List recent library-audit runs
+      operationId: listLibraryAuditRuns
+      tags: [library-audit]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated list of audit runs (most recent first)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LibraryAuditRun"
+                  count:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+    post:
+      summary: Trigger an on-demand library audit
+      description: |
+        Creates a new audit run and returns immediately (202). Path enumeration
+        and per-file probing happen asynchronously across every cluster node.
+        Body fields are all optional; omit `paths` to use the configured
+        `daemon.audit.paths`.
+      operationId: triggerLibraryAudit
+      tags: [library-audit]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                paths:
+                  type: array
+                  items:
+                    type: string
+                dry_run:
+                  type: boolean
+      responses:
+        "202":
+          description: Audit run queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: queued
+                  audit_id:
+                    type: integer
+                  paths:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: No audit paths supplied or configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /library/audit/{id}:
+    get:
+      summary: Get a single audit run with per-node progress
+      operationId: getLibraryAuditRun
+      tags: [library-audit]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Audit run details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryAuditRun"
+        "404":
+          description: Audit run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /library/findings:
+    get:
+      summary: List library-audit findings
+      operationId: listLibraryFindings
+      tags: [library-audit]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, acked, dismissed, resolved]
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [ffprobe_failed, orphan_sidecar, leftover_tmp, preconv_original, duplicate_id]
+        - name: path
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated findings list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  findings:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LibraryFinding"
+                  count:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /library/findings/{id}:
+    get:
+      summary: Get a single library finding
+      operationId: getLibraryFinding
+      tags: [library-audit]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Finding details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryFinding"
+        "404":
+          description: Finding not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /library/findings/{id}/ack:
+    post:
+      summary: Acknowledge a finding (operator has seen it)
+      operationId: ackLibraryFinding
+      tags: [library-audit]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Finding acked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: acked
+                  finding_id:
+                    type: integer
+        "404":
+          description: Finding not found
+
+  /library/findings/{id}/dismiss:
+    post:
+      summary: Dismiss a finding (operator wants it suppressed unless it recurs)
+      operationId: dismissLibraryFinding
+      tags: [library-audit]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Finding dismissed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: dismissed
+                  finding_id:
+                    type: integer
+        "404":
+          description: Finding not found
+
+  /library/findings/{id}/resolve:
+    post:
+      summary: Mark a finding resolved (the underlying issue has been fixed)
+      operationId: resolveLibraryFinding
+      tags: [library-audit]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Finding resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: resolved
+                  finding_id:
+                    type: integer
+        "404":
+          description: Finding not found
