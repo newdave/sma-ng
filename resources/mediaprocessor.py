@@ -16,7 +16,7 @@ import sys
 import time
 
 from autoprocess import autoscan, plex
-from converter import Converter, ConverterError, FFMpegConvertError
+from converter import Converter, FFMpegConvertError
 from converter.avcodecs import BaseCodec
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
 from resources.extensions import bad_sub_extensions, subtitle_codec_extensions
@@ -31,7 +31,7 @@ try:
 except ImportError:
   cleanit = None
 try:
-  from ffsubsync import ffsubsync
+  from ffsubsync import ffsubsync  # type: ignore[import-not-found]
 except ImportError:
   ffsubsync = None
 # Custom Functions
@@ -267,7 +267,7 @@ class MediaProcessor:
       "options": options,
       "preopts": preopts,
       "postopts": postopts,
-      "external_subs": downloaded_subs + ripped_subs,
+      "external_subs": (downloaded_subs or []) + ripped_subs,
       "x": dim["x"],
       "y": dim["y"],
       "cues_to_front": self.settings.output_format in ["mkv"] and self.settings.relocate_moov,
@@ -683,13 +683,13 @@ class MediaProcessor:
       cmds = self.converter.ffmpeg.generateCommands(outputfile, parsed, dump["preopts"], dump["postopts"])
       dump["ffmpeg_commands"] = []
       dump["ffmpeg_commands"].append(self.printableFFMPEGCommand(cmds))
-      for suboptions in dump["ripsubopts"]:
+      for suboptions in dump["ripsubopts"] or []:
         subparsed = self.converter.parse_options(suboptions)
         extension = self.getSubExtensionFromCodec(suboptions["format"])
         suboutputfile = self.getSubOutputFileFromOptions(inputfile, suboptions, extension)
         subcmds = self.converter.ffmpeg.generateCommands(suboutputfile, subparsed)
         dump["ffmpeg_commands"].append(self.printableFFMPEGCommand(subcmds))
-      for sub in dump["downloadedsubs"]:
+      for sub in dump["downloadedsubs"] or []:
         self.log.debug("Cleaning up downloaded sub %s which was only used to simulate options." % (sub))
         self.removeFile(sub)
 
@@ -1013,7 +1013,7 @@ class MediaProcessor:
     ###############################################################
     # Video stream
     ###############################################################
-    video_settings, vcodecs, vcodec, hdrOutput = self._select_video_codec(inputfile, info, codecs, pix_fmts, tagdata, analyzer_recommendations=analyzer_recommendations)
+    video_settings, vcodecs, vcodec, _hdrOutput = self._select_video_codec(inputfile, info, codecs, pix_fmts, tagdata, analyzer_recommendations=analyzer_recommendations)
 
     ###############################################################
     # Audio streams
@@ -2389,7 +2389,7 @@ class MediaProcessor:
     for k in disposition:
       if disposition[k] and k in potentials:
         dispo += "." + k
-    input_dir, filename, input_extension = self.parseFile(inputfile)
+    input_dir, filename, _input_extension = self.parseFile(inputfile)
     output_dir = self.settings.output_dir or input_dir
     if not os.path.exists(output_dir):
       try:
@@ -2738,7 +2738,7 @@ class MediaProcessor:
     inputfile = options["source"][0]
     input_dir, filename, input_extension = self.parseFile(inputfile)
     originalinputfile = inputfile
-    outputfile, output_dir = self.getOutputFile(input_dir, filename, input_extension, self.settings.temp_extension)
+    outputfile, _output_dir = self.getOutputFile(input_dir, filename, input_extension, self.settings.temp_extension)
     finaloutputfile, _ = self.getOutputFile(input_dir, filename, input_extension)
 
     if outputfile is None or finaloutputfile is None:
@@ -2774,11 +2774,15 @@ class MediaProcessor:
 
       except Exception:
         i = 2
-        while os.path.isfile(finaloutputfile):
-          outputfile, output_dir = self.getOutputFile(input_dir, filename, input_extension, self.settings.temp_extension, number=i)
+        while finaloutputfile and os.path.isfile(finaloutputfile):
+          outputfile, _output_dir = self.getOutputFile(input_dir, filename, input_extension, self.settings.temp_extension, number=i)
           finaloutputfile, _ = self.getOutputFile(input_dir, filename, input_extension, number=i)
           i += 1
         self.log.debug("Unable to rename inputfile. Alternatively renaming output file to %s." % outputfile)
+
+    if outputfile is None or finaloutputfile is None:
+      self.log.error("Unable to determine output file path, aborting conversion.")
+      return None, inputfile
 
     # Delete output file if it already exists and deleting enabled
     if os.path.exists(outputfile) and self.settings.delete:
@@ -2786,13 +2790,17 @@ class MediaProcessor:
 
     # Final sweep to make sure outputfile does not exist, renaming as the final solution
     i = 2
-    while os.path.isfile(outputfile):
-      outputfile, output_dir = self.getOutputFile(input_dir, filename, input_extension, self.settings.temp_extension, number=i)
+    while outputfile and os.path.isfile(outputfile):
+      outputfile, _output_dir = self.getOutputFile(input_dir, filename, input_extension, self.settings.temp_extension, number=i)
       finaloutputfile, _ = self.getOutputFile(input_dir, filename, input_extension, number=i)
       i += 1
 
+    if outputfile is None or finaloutputfile is None:
+      self.log.error("Unable to determine output file path, aborting conversion.")
+      return None, inputfile
+
     try:
-      conv = self.converter.convert(outputfile, options, timeout=None, preopts=preopts, postopts=postopts, strip_metadata=self.settings.strip_metadata)
+      conv = self.converter.convert(outputfile, options, timeout=0, preopts=preopts, postopts=postopts, strip_metadata=self.settings.strip_metadata)
     except KeyboardInterrupt:
       raise
     except Exception:
@@ -2807,8 +2815,9 @@ class MediaProcessor:
 
     try:
       timecode = 0
-      debug = ""
-      for timecode, debug in conv:
+      debug: str = ""
+      for timecode, _raw_debug in conv:
+        debug = _raw_debug if isinstance(_raw_debug, str) else " ".join(str(x) for x in _raw_debug)
         if reportProgress:
           if progressOutput:
             progressOutput(timecode, debug)
@@ -2830,7 +2839,7 @@ class MediaProcessor:
       sidecar_path = self._write_ffmpeg_stderr_sidecar(e)
       if sidecar_path:
         self.log.error("Full ffmpeg stderr written to %s" % sidecar_path)
-      if os.path.isfile(outputfile):
+      if outputfile is not None and os.path.isfile(outputfile):
         self.removeFile(outputfile)
         self.log.error("%s deleted." % outputfile)
       outputfile = None
@@ -2854,7 +2863,7 @@ class MediaProcessor:
         return None, inputfile
 
     # Check if the finaloutputfile differs from the outputfile. This can happen during above renaming or from temporary extension option
-    if outputfile != finaloutputfile:
+    if outputfile != finaloutputfile and outputfile is not None and finaloutputfile is not None:
       self.log.debug("Outputfile and finaloutputfile are different attempting to rename to final extension [temp_extension].")
       try:
         os.rename(outputfile, finaloutputfile)

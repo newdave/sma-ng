@@ -13,7 +13,7 @@ from resources.log import getLogger
 from resources.readsettings import ReadSettings
 
 
-def refreshPlex(settings: ReadSettings, path: str = None, logger: logging.Logger = None):
+def refreshPlex(settings: ReadSettings, path: Optional[str] = None, logger: Optional[logging.Logger] = None):
   """Trigger a targeted Plex library section refresh for a converted file's directory.
 
   Applies any configured path mappings before looking up which library
@@ -30,6 +30,10 @@ def refreshPlex(settings: ReadSettings, path: str = None, logger: logging.Logger
   log = logger or getLogger(__name__)
 
   log.info("Starting Plex refresh.")
+
+  if not path:
+    log.error("No path provided to refreshPlex.")
+    return
 
   targetpath = os.path.dirname(path)
   pathMapping = settings.Plex.get("path-mapping", {})
@@ -62,7 +66,7 @@ def refreshPlex(settings: ReadSettings, path: str = None, logger: logging.Logger
     log.error("Unable to establish Plex server connection.")
 
 
-def getPlexServer(settings: ReadSettings, logger: logging.Logger = None) -> Optional[PlexServer]:
+def getPlexServer(settings: ReadSettings, logger: Optional[logging.Logger] = None) -> Optional[PlexServer]:
   """Establish a connection to a Plex Media Server.
 
   Connects directly to a local or reachable Plex Media Server using the
@@ -82,18 +86,18 @@ def getPlexServer(settings: ReadSettings, logger: logging.Logger = None) -> Opti
     log.error("No Plex host/token configured, please update your configuration file.")
     return None
 
-  plex: PlexServer = None
-  session: requests.Session = None
+  plex: Optional[PlexServer] = None
+  session: Optional[requests.Session] = None
 
   if settings.Plex.get("ignore-certs"):
     session = requests.Session()
     session.verify = False
-    requests.packages.urllib3.disable_warnings()
+    requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
 
   log.info("Connecting to Plex server...")
   protocol = "https://" if settings.Plex.get("ssl") else "http://"
   try:
-    plex = PlexServer(protocol + settings.Plex.get("host") + ":" + str(settings.Plex.get("port")), settings.Plex.get("token"), session=session)
+    plex = PlexServer(protocol + str(settings.Plex.get("host")) + ":" + str(settings.Plex.get("port")), settings.Plex.get("token"), session=session)
     log.info("Connected to Plex server %s using direct server settings." % (plex.friendlyName))
   except:
     log.exception("Error connecting to Plex server.")

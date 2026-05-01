@@ -51,8 +51,9 @@ def _load_path_config_manager():
     from resources.daemon.config import PathConfigManager
 
     pcm = PathConfigManager()
-    if pcm.path_configs:
-      log.debug("Loaded sma-ng.yml path routing (%d path(s))" % len(pcm.path_configs))
+    routing = getattr(pcm, "path_configs", None) or getattr(pcm, "scan_paths", None)
+    if routing:
+      log.debug("Loaded sma-ng.yml path routing (%d path(s))" % len(routing))
       return pcm
   except Exception:
     log.debug("sma-ng.yml not available; using single config for all paths")

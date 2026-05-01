@@ -12,6 +12,8 @@ from converter.avcodecs import BaseDecoder, attachment_codec_list, audio_codec_l
 from converter.ffmpeg import FFMpeg, FFMpegConvertError, FFMpegError
 from converter.formats import format_list
 
+__all__ = ["Converter", "ConverterError", "FFMpeg", "FFMpegConvertError", "FFMpegError"]
+
 
 class ConverterError(Exception):
   """Raised when the Converter encounters a configuration or usage error."""
@@ -247,6 +249,8 @@ class Converter(object):
     opts = ["-i", infile, "-map", "0:v?", "-c:v", "copy", "-map", "0:a?", "-c:a", "copy", "-map", "0:s?", "-c:s", "copy", "-map", "0:t?", "-c:t", "copy"]
 
     info = self.ffmpeg.probe(infile)
+    if info is None:
+      raise ConverterError("FFprobe returned no info for %s" % infile)
     i = len(info.attachment)
 
     if coverpath:
@@ -262,8 +266,9 @@ class Converter(object):
     if cues_to_front:
       opts.extend(["-cues_to_front", "true"])
 
+    duration = info.format.duration if info.format else 0
     for timecode, debug in self.ffmpeg.convert(outfile, opts, timeout=0):
-      yield int((100.0 * timecode) / info.format.duration), debug
+      yield int((100.0 * timecode) / duration) if duration else 0, debug
     os.remove(infile)
 
   def convert(self, outfile, options, twopass=False, timeout=10, preopts=None, postopts=None, strip_metadata=False):

@@ -269,18 +269,19 @@ def _tmdb_search(media_type, title, year):
   if media_type == "movie":
     if year:
       search.movie(query=title, year=year)
-      if not search.results:
+      if not getattr(search, "results", None):
         search.movie(query=title)
     else:
       search.movie(query=title)
   else:
     if year:
       search.tv(query=title, first_air_date_year=year)
-      if not search.results:
+      if not getattr(search, "results", None):
         search.tv(query=title)
     else:
       search.tv(query=title)
-  return search.results[0] if search.results else None
+  results = getattr(search, "results", None)
+  return results[0] if results else None
 
 
 def movieInfo(guessData, tmdbid=None, imdbid=None, language=None, original=None):
@@ -338,8 +339,8 @@ def tvInfo(guessData, tmdbid=None, tvdbid=None, imdbid=None, season=None, episod
     tmdbid = result["id"]
 
   metadata = Metadata(MediaType.TV, tmdbid=tmdbid, imdbid=imdbid, tvdbid=tvdbid, season=season, episode=episode, language=language, logger=log, original=original)
-  ep_display = "E".join("%02d" % e for e in metadata.episodes)
-  log.info("Matched TV episode as %s (TMDB ID: %d) S%02d%s" % (metadata.showname, int(metadata.tmdbid), int(season), ep_display))
+  ep_display = "E".join("%02d" % e for e in (metadata.episodes or []))
+  log.info("Matched TV episode as %s (TMDB ID: %d) S%02d%s" % (metadata.showname, int(metadata.tmdbid or 0), int(season or 0), ep_display))
   return metadata
 
 
@@ -383,7 +384,7 @@ def triggerRescan(filepath, settings):
     return None
 
   instance, arr_type = _find_arr_instance(filepath, settings)
-  if not instance:
+  if not instance or not arr_type:
     log.debug("No matching Sonarr/Radarr instance found for path %s, skipping rescan." % os.path.dirname(filepath))
     return None
 
@@ -545,9 +546,9 @@ def processFile(
   elif tagdata.mediatype == MediaType.Movie:
     log.info("Processing %s" % (tagdata.title))
   elif tagdata.mediatype == MediaType.TV:
-    ep_nums = ["%02d" % e for e in tagdata.episodes]
+    ep_nums = ["%02d" % e for e in (tagdata.episodes or [])]
     ep_display = "E" + ep_nums[0] if len(ep_nums) == 1 else "E%s-E%s" % (ep_nums[0], ep_nums[-1])
-    log.info("Processing %s S%02d%s - %s" % (tagdata.showname, int(tagdata.season), ep_display, tagdata.title))
+    log.info("Processing %s S%02d%s - %s" % (tagdata.showname, int(tagdata.season or 0), ep_display, tagdata.title))
 
   if tagOnly:
     if tagdata:

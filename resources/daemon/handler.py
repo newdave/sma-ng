@@ -4,6 +4,7 @@ import re as _re
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler
+from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
 from resources.daemon.config import _strip_secrets
@@ -11,8 +12,13 @@ from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING
 from resources.daemon.docs_ui import DOCS_DIR, _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html
+
+__all__ = ["WebhookHandler", "_inline"]
 from resources.daemon.routes import dispatch_get, dispatch_post, dispatch_post_job_action
 from resources.daemon.webhook_parsing import parse_generic_webhook_body, parse_radarr_body, parse_sonarr_body
+
+if TYPE_CHECKING:
+  from resources.daemon.server import DaemonServer
 
 _LOCAL_TIMEZONE = datetime.now().astimezone().tzinfo
 
@@ -32,6 +38,9 @@ def _json_default(value):
 
 class WebhookHandler(BaseHTTPRequestHandler):
   """HTTP request handler for webhook endpoints."""
+
+  if TYPE_CHECKING:
+    server: "DaemonServer"
 
   # Endpoints that don't require authentication (prefix-matched for /docs/*)
   PUBLIC_ENDPOINTS = ["/", "/dashboard", "/admin", "/metrics", "/health", "/status", "/docs", "/favicon.png"]

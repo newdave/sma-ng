@@ -270,9 +270,9 @@ class RedactingFilter(logging.Filter):
     if record.args:
       try:
         if isinstance(record.args, dict):
-          record.args = _redact_value(copy.deepcopy(record.args), secrets)
+          record.args = _redact_value(copy.deepcopy(record.args), secrets)  # type: ignore[assignment]
         elif isinstance(record.args, (tuple, list)):
-          record.args = type(record.args)(_redact_value(copy.deepcopy(a), secrets) if isinstance(a, (dict, list, tuple)) else a for a in record.args)
+          record.args = type(record.args)(_redact_value(copy.deepcopy(a), secrets) if isinstance(a, (dict, list, tuple)) else a for a in record.args)  # type: ignore[assignment]
       except Exception:
         pass
     for key in list(record.__dict__):
@@ -299,7 +299,7 @@ class SingleLineFormatter(logging.Formatter):
   """
 
   def __init__(self, fmt=None, datefmt=None, style="%", max_width=None):
-    super().__init__(fmt, datefmt, style)
+    super().__init__(fmt, datefmt, style)  # type: ignore[arg-type]
     if max_width is None:
       try:
         max_width = int(os.environ.get("SMA_LOG_MAX_WIDTH", _DEFAULT_MAX_WIDTH))

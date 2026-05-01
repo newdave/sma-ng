@@ -240,6 +240,8 @@ class ConversionWorker(threading.Thread):
       )
       self._job_processes[job_id] = process
 
+      if process.stdout is None:
+        return
       for line in process.stdout:
         line = line.strip()
         if not line:
@@ -297,7 +299,7 @@ class ConversionWorker(threading.Thread):
 
   def _build_progress_payload(self, line, time_match, total_duration_secs, start_time, now):
     elapsed_secs = now - start_time
-    progress = {"elapsed": _seconds_to_hms(elapsed_secs)}
+    progress: dict = {"elapsed": _seconds_to_hms(elapsed_secs)}
 
     if time_match:
       timecode = time_match.group(1)

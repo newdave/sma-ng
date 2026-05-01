@@ -114,7 +114,7 @@ def load(path: str) -> dict:
   # behaviour while also unwrapping ruamel CommentedMap/CommentedSeq into
   # plain types so downstream serializers (yaml.safe_dump in
   # db.set_cluster_config, json.dumps in /admin/config) don't choke.
-  return dict(_to_plain(data))
+  return dict(_to_plain(data))  # type: ignore[arg-type]
 
 
 def write(path: str, data: dict) -> None:
