@@ -16,6 +16,8 @@ import sys
 import time
 
 from autoprocess import autoscan, plex
+from autoprocess import emby as emby_refresh
+from autoprocess import jellyfin as jellyfin_refresh
 from converter import Converter, FFMpegConvertError
 from converter.avcodecs import BaseCodec
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
@@ -187,6 +189,24 @@ class MediaProcessor:
         raise
       except Exception:
         self.log.exception("Error triggering Autoscan.")
+
+    # Refresh Emby
+    if getattr(self.settings, "emby_instances", None):
+      try:
+        emby_refresh.refreshEmby(self.settings, output_files[0], self.log)
+      except KeyboardInterrupt:
+        raise
+      except Exception:
+        self.log.exception("Error refreshing Emby.")
+
+    # Refresh Jellyfin
+    if getattr(self.settings, "jellyfin_instances", None):
+      try:
+        jellyfin_refresh.refreshJellyfin(self.settings, output_files[0], self.log)
+      except KeyboardInterrupt:
+        raise
+      except Exception:
+        self.log.exception("Error refreshing Jellyfin.")
 
   # Process a file from start to finish, with checking to make sure formats are compatible with selected settings
   def process(self, inputfile, reportProgress=False, original=None, info=None, progressOutput=None, tagdata=None):

@@ -157,13 +157,21 @@ daemon:
 #
 #   jellyfin:
 #     main:
-#       url: ""
-#       token: ""
+#       url: http://jellyfin.example.com:8096
+#       apikey: ""
+#       refresh: true
+#       path-mapping: ""
+#       ignore-certs: false
+#       enabled: true
 #
 #   emby:
 #     main:
-#       url: ""
+#       url: http://emby.example.com:8096
 #       apikey: ""
+#       refresh: true
+#       path-mapping: ""
+#       ignore-certs: false
+#       enabled: true
 
 # ── base overrides ───────────────────────────────────────────────────────────
 # Deep-merged into config/sma-ng.yml `base:` on every `mise run config:roll`.
