@@ -717,7 +717,6 @@ class FFMpeg(object):
     deduplication, then appends ['-y', outfile] for a real output file or
     ['-f', 'null', '-'] for a null sink (when outfile is falsy).
     """
-    print()
     cmds = [self.ffmpeg_path]
     if preopts:
       cmds.extend(preopts)

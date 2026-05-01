@@ -1635,7 +1635,13 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
     optlist.extend(super(H265QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
     look_ahead_depth = safe.get("look_ahead_depth", 0)
     if look_ahead_depth and look_ahead_depth > 0:
-      optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth), "-extra_hw_frames", str(look_ahead_depth + 4)])
+      # `-extra_hw_frames` is a device/hwframe-context option, not an encoder
+      # option; ffmpeg 8.x fails the conversion when it appears in encoder
+      # scope ("Codec AVOption extra_hw_frames is not a encoding option"
+      # → "Error opening output files: Invalid argument"). The global
+      # `-extra_hw_frames` set at input scope by MediaProcessor already
+      # provides the QSV pipeline pool needed for look-ahead.
+      optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth)])
     else:
       optlist.extend(["-look_ahead", "0"])
     if "b_frames" in safe and safe["b_frames"] >= 0:
@@ -2173,7 +2179,9 @@ class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
       optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
     look_ahead_depth = safe.get("look_ahead_depth", 0)
     if look_ahead_depth and look_ahead_depth > 0:
-      optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth), "-extra_hw_frames", str(look_ahead_depth + 4)])
+      # See H265QSVCodec for why -extra_hw_frames is no longer emitted at
+      # encoder scope (ffmpeg 8.x rejects it as a non-encoding option).
+      optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth)])
     else:
       optlist.extend(["-look_ahead", "0"])
     if "b_frames" in safe and safe["b_frames"] >= 0:
