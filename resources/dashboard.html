@@ -230,7 +230,7 @@
                 </button>
             </form>
             <div x-show="submitResult" class="mt-3 text-sm px-3 py-2 rounded-lg"
-                :class="submitError ? 'bg-red-900/50 text-red-300' : 'bg-green-900/50 text-green-300'"
+                :class="submitError ? 'bg-red-900/50 text-red-300' : (submitWarning ? 'bg-amber-900/50 text-amber-300' : 'bg-green-900/50 text-green-300')"
                 x-text="submitResult">
             </div>
         </div>
@@ -737,7 +737,7 @@
                 metrics: null, metricsAvailable: false,
                 filter: 'all', page: 0, pageSize: 50, threadsTab: 'local', searchQuery: '', searchTimer: null,
                 lastUpdate: '', interval: null,
-                submitPath: '', submitArgs: '', submitFlags: [], submitting: false, submitResult: '', submitError: false,
+                submitPath: '', submitArgs: '', submitFlags: [], submitting: false, submitResult: '', submitError: false, submitWarning: false,
                 flagDefs: [
                     { flag: '-fc', label: 'Force Convert', title: 'Force conversion even if file already has the target extension or matches force-convert=false' },
                     { flag: '-pse', label: 'Same Ext', title: 'Allow reprocessing files that already have the target extension' },
@@ -816,18 +816,42 @@
                     this.searchTimer = setTimeout(() => { this.page = 0; this.fetchJobs(); }, 300);
                 },
                 formatSubmitResult(d) {
+                    // Single-file: skipped because the file already matches the
+                    // configured output extension and process-same-extensions /
+                    // force-convert are both off.
+                    if (d.status === 'skipped' && d.reason === 'same_as_output_extension') {
+                        return 'Skipped ' + (d.path || this.submitPath.trim()) + ' (already at output extension; enable process-same-extensions or force-convert to reprocess)';
+                    }
                     if (d.job_id !== undefined && d.job_id !== null && d.path) {
                         return 'Job #' + d.job_id + ' queued for ' + d.path;
                     }
                     if (d.status === 'empty') {
                         return d.message || ('No media files found in directory: ' + (d.directory || d.path || this.submitPath.trim()));
                     }
-                    if (Array.isArray(d.queued) && d.queued.length) {
-                        if (d.queued_count === 1 && d.queued[0].job_id !== undefined && d.queued[0].path) {
+                    // Directory submissions: report queued / duplicate / skipped counts.
+                    if (Array.isArray(d.queued) || d.queued_count !== undefined || d.skipped_count) {
+                        const dir = d.directory || this.submitPath.trim();
+                        const queuedN = d.queued_count !== undefined ? d.queued_count : (Array.isArray(d.queued) ? d.queued.length : 0);
+                        const dupN = d.duplicate_count || 0;
+                        const skipN = d.skipped_count || 0;
+                        // Single-job shortcut when nothing else interesting happened.
+                        if (queuedN === 1 && !dupN && !skipN && Array.isArray(d.queued) && d.queued[0] && d.queued[0].job_id !== undefined && d.queued[0].path) {
                             return 'Job #' + d.queued[0].job_id + ' queued for ' + d.queued[0].path;
                         }
-                        let msg = (d.queued_count || d.queued.length) + ' jobs queued from ' + (d.directory || this.submitPath.trim());
-                        if (d.duplicate_count) msg += ' (' + d.duplicate_count + ' duplicates skipped)';
+                        // No new jobs at all — surface why.
+                        if (queuedN === 0) {
+                            const parts = [];
+                            if (dupN) parts.push(dupN + ' already queued');
+                            if (skipN) parts.push(skipN + ' at output extension');
+                            if (parts.length) return 'No new jobs from ' + dir + ' (' + parts.join(', ') + ')';
+                            return 'No new jobs from ' + dir;
+                        }
+                        // Mixed result.
+                        let msg = queuedN + ' job' + (queuedN === 1 ? '' : 's') + ' queued from ' + dir;
+                        const tail = [];
+                        if (dupN) tail.push(dupN + ' duplicate' + (dupN === 1 ? '' : 's') + ' skipped');
+                        if (skipN) tail.push(skipN + ' already at output ext');
+                        if (tail.length) msg += ' (' + tail.join(', ') + ')';
                         return msg;
                     }
                     if (d.status === 'duplicate' && d.job_id !== undefined && d.job_id !== null) {
@@ -836,7 +860,7 @@
                     return d.message || d.status || 'Job submitted';
                 },
                 async submitJob() {
-                    this.submitting = true; this.submitResult = ''; this.submitError = false;
+                    this.submitting = true; this.submitResult = ''; this.submitError = false; this.submitWarning = false;
                     try {
                         const body = { path: this.submitPath.trim() };
                         const extraArgs = [...this.submitFlags];
@@ -846,6 +870,12 @@
                         const d = await r.json();
                         if (r.ok) {
                             this.submitResult = this.formatSubmitResult(d);
+                            // Amber toast when nothing was actually queued (all
+                            // duplicate, all same-extension, or empty directory)
+                            // so the operator sees the no-op clearly without
+                            // mistaking it for a queued-success.
+                            const queuedN = d.queued_count !== undefined ? d.queued_count : (Array.isArray(d.queued) ? d.queued.length : (d.job_id ? 1 : 0));
+                            if (queuedN === 0) this.submitWarning = true;
                             this.submitPath = ''; this.submitArgs = ''; this.submitFlags = [];
                             setTimeout(() => this.refresh(), 500);
                         } else {
