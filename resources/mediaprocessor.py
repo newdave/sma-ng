@@ -2670,10 +2670,17 @@ class MediaProcessor:
     if not getattr(e, "output", None):
       return None
     try:
+      import logging as _logging
+
       log_dir = None
       log_basename = "ffmpeg"
       logger = self.log
-      while logger is not None:
+      # Bound the parent-chain walk: real loggers terminate at the root
+      # (parent is None), but a Mock's `.parent` is always a fresh Mock.
+      # Stop after 32 hops or once we leave the real Logger hierarchy.
+      for _ in range(32):
+        if not isinstance(logger, _logging.Logger):
+          break
         for handler in getattr(logger, "handlers", ()):
           base = getattr(handler, "baseFilename", None)
           if base:
@@ -2683,6 +2690,8 @@ class MediaProcessor:
         if log_dir:
           break
         logger = getattr(logger, "parent", None)
+        if logger is None:
+          break
       if not log_dir:
         return None
 
