@@ -129,7 +129,7 @@ class PostProcessor:
         self.log.debug("Stdout: %s." % stdout)
         self.log.debug("Stderr: %s." % stderr)
         if self.wait:
-          status = command.wait()
+          command.wait()
       except:
         self.log.exception("Failed to execute script %s." % script)
 

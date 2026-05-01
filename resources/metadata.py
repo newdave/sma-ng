@@ -138,9 +138,13 @@ class Metadata:
     elif self.mediatype == MediaType.TV:
       # Normalize episode to a list for multi-episode support
       if isinstance(episode, list):
-        self.episodes = [int(e) for e in episode]
+        self.episodes = [int(e) for e in episode if e is not None]
       else:
+        if episode is None:
+          raise ValueError("episode is required for TV mediatype")
         self.episodes = [int(episode)]
+      if season is None:
+        raise ValueError("season is required for TV mediatype")
       self.season = int(season)
       self.episode = self.episodes[0]
 
@@ -288,21 +292,24 @@ class Metadata:
       if imdbid:
         imdbid = "tt%s" % imdbid if not imdbid.startswith("tt") else imdbid
         find = tmdb.Find(imdbid)
-        response = find.info(external_source="imdb_id")
-      if find and len(find.movie_results) > 0:
-        tmdbid = find.movie_results[0].get("id")
+        find.info(external_source="imdb_id")
+      movie_results = getattr(find, "movie_results", None) if find else None
+      if movie_results:
+        tmdbid = movie_results[0].get("id")
     elif mediatype == MediaType.TV:
       if imdbid:
         imdbid = "tt%s" % imdbid if not imdbid.startswith("tt") else imdbid
         find = tmdb.Find(imdbid)
-        response = find.info(external_source="imdb_id")
-        if find and len(find.tv_results) > 0:
-          tmdbid = find.tv_results[0].get("id")
+        find.info(external_source="imdb_id")
+        tv_results = getattr(find, "tv_results", None) if find else None
+        if tv_results:
+          tmdbid = tv_results[0].get("id")
       if tvdbid and not tmdbid:
         find = tmdb.Find(tvdbid)
-        response = find.info(external_source="tvdb_id")
-        if find and len(find.tv_results) > 0:
-          tmdbid = find.tv_results[0].get("id")
+        find.info(external_source="tvdb_id")
+        tv_results = getattr(find, "tv_results", None) if find else None
+        if tv_results:
+          tmdbid = tv_results[0].get("id")
     return tmdbid
 
   @staticmethod
@@ -406,7 +413,7 @@ class Metadata:
         _, cmds = next(conv)
         self.log.debug("Metadata tagging FFmpeg command:")
         self.log.debug(" ".join(str(item) for item in cmds))
-        for timecode, debug in conv:
+        for _timecode, debug in conv:
           self.log.debug(debug)
         self.log.info("Tags written successfully using FFMPEG fallback method.")
         return True
@@ -664,7 +671,7 @@ class Metadata:
         break
 
     if not poster:
-      d, f = os.path.split(path)
+      d, _f = os.path.split(path)
       for e in valid_poster_extensions:
         path = os.path.join(d, "smaposter" + os.extsep + e)
         if os.path.exists(path):

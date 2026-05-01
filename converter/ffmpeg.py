@@ -14,6 +14,7 @@ import os.path
 import re
 import signal
 from subprocess import PIPE, Popen
+from typing import Optional, overload
 
 from converter.avcodecs import BaseCodec, video_codec_list
 
@@ -43,6 +44,7 @@ class FFMpegConvertError(Exception):
     """
     super(FFMpegConvertError, self).__init__(message)
 
+    self.message = message
     self.cmd = cmd
     self.output = output
     self.details = details
@@ -200,16 +202,28 @@ class MediaStreamInfo(object):
           disposition += "-" + k
     return disposition
 
+  @overload
   @staticmethod
-  def parse_float(val, default=0.0):
+  def parse_float(val, default: None) -> Optional[float]: ...
+  @overload
+  @staticmethod
+  def parse_float(val, default: float = ...) -> float: ...
+  @staticmethod
+  def parse_float(val, default: Optional[float] = 0.0) -> Optional[float]:
     """Convert val to float, returning default on failure."""
     try:
       return float(val)
     except Exception:
       return default
 
+  @overload
   @staticmethod
-  def parse_int(val, default=0):
+  def parse_int(val, default: None) -> Optional[int]: ...
+  @overload
+  @staticmethod
+  def parse_int(val, default: int = ...) -> int: ...
+  @staticmethod
+  def parse_int(val, default: Optional[int] = 0) -> Optional[int]:
     """Convert val to int, returning default on failure."""
     try:
       return int(val)
@@ -370,7 +384,7 @@ class MediaInfo(object):
       "format": self.format.format,
       "format-fullname": self.format.fullname,
       "filename": os.path.basename(self.path) if self.path else None,
-      "video": self.video.json,
+      "video": self.video.json if self.video else None,
       "audio": [x.json for x in self.audio],
       "subtitle": [x.json for x in self.subtitle],
       "attachment": [x.json for x in self.attachment],
@@ -390,7 +404,7 @@ class MediaInfo(object):
       elif line == "[STREAM]":
         current_stream = MediaStreamInfo()
       elif line == "[/STREAM]":
-        if current_stream.type:
+        if current_stream is not None and current_stream.type:
           self.streams.append(current_stream)
         current_stream = None
       elif line == "[FORMAT]":
@@ -514,10 +528,11 @@ class FFMpeg(object):
     {codec_name: {'encoders': [...], 'decoders': [...]}}. Where a codec is
     its own encoder or decoder, its name appears in the respective list.
     """
-    codecs = self._get_stdout([self.ffprobe_path, "-hide_banner", "-codecs"])
-    codecs = {line_match.group(2): (line_match.group(1), line_match.group(3)) for line_match in self.CODECS_LINE_RE.finditer(codecs)}
+    raw_output = self._get_stdout([self.ffprobe_path, "-hide_banner", "-codecs"])
+    raw_codecs = {line_match.group(2): (line_match.group(1), line_match.group(3)) for line_match in self.CODECS_LINE_RE.finditer(raw_output)}
 
-    for codec, coders in codecs.items():
+    codecs: dict = {}
+    for codec, coders in raw_codecs.items():
       decoders_match = self.CODECS_DECODERS_RE.search(coders[1])
       encoders_match = self.CODECS_ENCODERS_RE.search(coders[1])
       self_encoder = [codec] if coders[0][1] == "E" else []
@@ -607,7 +622,7 @@ class FFMpeg(object):
     Return the decoded stdout output for the command.
     """
     p = self._spawn(cmds)
-    stdout_data, stderr = p.communicate()
+    stdout_data, _stderr = p.communicate()
     return stdout_data.decode(console_encoding, errors="ignore")
 
   def framedata(self, fname):
@@ -686,7 +701,8 @@ class FFMpeg(object):
       return None
 
     try:
-      info.video.framedata = self.framedata(fname)
+      if info.video is not None:
+        info.video.framedata = self.framedata(fname)
     except KeyboardInterrupt:
       raise
     except Exception:
@@ -789,6 +805,9 @@ class FFMpeg(object):
     except OSError:
       raise FFMpegError("Error while calling ffmpeg binary")
 
+    if p.stderr is None:
+      raise FFMpegError("ffmpeg subprocess has no stderr handle")
+
     yielded = False
     buf = ""
     total_output = ""
@@ -798,6 +817,8 @@ class FFMpeg(object):
         signal.alarm(timeout)
 
       ret = p.stderr.read(10)
+      if isinstance(ret, str):
+        ret = ret.encode(console_encoding, errors="ignore")
 
       if timeout:
         signal.alarm(0)
@@ -809,16 +830,17 @@ class FFMpeg(object):
           yield 10, ""
         break
 
+      decoded: str
       try:
-        ret = ret.decode(console_encoding)
+        decoded = ret.decode(console_encoding)
       except UnicodeDecodeError:
         try:
-          ret = ret.decode(console_encoding, errors="ignore")
+          decoded = ret.decode(console_encoding, errors="ignore")
         except Exception:
-          pass
+          decoded = ""
 
-      total_output += ret
-      buf += ret
+      total_output += decoded
+      buf += decoded
       if "\r" in buf:
         line, buf = buf.split("\r", 1)
 

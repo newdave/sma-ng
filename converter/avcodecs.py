@@ -289,7 +289,7 @@ class AudioCodec(BaseCodec):
       optlist.extend(["-map", str(s) + ":" + str(safe["map"])])
     if "channels" in safe:
       optlist.extend(["-ac:a:" + stream, str(safe["channels"])])
-    if "bitrate" in safe:
+    if "bitrate" in safe and br is not None:
       optlist.extend(["-b:a:" + stream, str(br) + "k"])
       optlist.extend(["-metadata:s:a:" + stream, "BPS=" + str(br * 1000)])
       optlist.extend(["-metadata:s:a:" + stream, "BPS-eng=" + str(br * 1000)])
@@ -316,7 +316,7 @@ class AudioCodec(BaseCodec):
     optlist.extend(["-metadata:s:a:" + stream, "language=" + lang])
     optlist.extend(["-disposition:a:" + stream, self.safe_disposition(safe.get("disposition"))])
 
-    optlist.extend(self._codec_specific_produce_ffmpeg_list(safe, stream))
+    optlist.extend(self._codec_specific_produce_ffmpeg_list(safe, stream))  # type: ignore[arg-type]
     return optlist
 
 
@@ -393,7 +393,7 @@ class SubtitleCodec(BaseCodec):
     optlist.extend(["-metadata:s:s:" + stream, "language=" + lang])
     optlist.extend(["-disposition:s:" + stream, self.safe_disposition(safe.get("disposition"))])
 
-    optlist.extend(self._codec_specific_produce_ffmpeg_list(safe, stream))
+    optlist.extend(self._codec_specific_produce_ffmpeg_list(safe, stream))  # type: ignore[arg-type]
     return optlist
 
 
@@ -1149,6 +1149,8 @@ class HWAccelVideoCodec:
   hw_presets = None
   hw_profiles = None
   hw_extbrc = False
+  scale_filter: str = ""
+  default_fmt: str = ""
 
   def _hw_parse_preset(self, safe):
     """Validate preset against hw_presets whitelist, remove if unsupported."""
@@ -1943,7 +1945,7 @@ class Vp9Codec(VideoCodec):
     if "color_primaries" in framedata and self.color_primaries.get(framedata["color_primaries"]):
       safe["color_primaries"] = self.color_primaries.get(framedata["color_primaries"])
     if "color_transfer" in framedata and self.color_transfer.get(framedata["color_transfer"]):
-      safe["color_transfer"] = self.color_trc.get(framedata["color_transfer"])
+      safe["color_transfer"] = self.color_transfer.get(framedata["color_transfer"])
     if "color_space" in framedata and self.color_space.get(framedata["color_space"]):
       safe["color_space"] = self.color_space.get(framedata["color_space"])
     if "color_range" in framedata and framedata["color_range"] in [0, 1, 2]:

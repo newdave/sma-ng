@@ -95,6 +95,9 @@ def get_job_status(job_id, logger=None):
   """Get current status of a job."""
   log = logger or logging.getLogger(__name__)
   url = "%s/jobs/%d" % (get_daemon_url(), job_id)
+  if requests is None:
+    log.error("requests not installed; cannot query daemon")
+    return None
   try:
     r = requests.get(url, headers=_headers(), timeout=10)
     if r.status_code == 200:
@@ -168,6 +171,8 @@ def check_daemon_health(logger=None):
   """Check if the daemon is running and healthy."""
   log = logger or logging.getLogger(__name__)
   url = get_daemon_url() + "/health"
+  if requests is None:
+    return False
   try:
     r = requests.get(url, timeout=5)
     data = r.json()

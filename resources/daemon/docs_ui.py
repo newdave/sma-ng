@@ -92,7 +92,7 @@ _md = mistune.create_markdown(renderer=_DocsRenderer(escape=True), plugins=["tab
 
 def _inline(text):
   """Render inline Markdown to HTML (no block wrapper). Preserved for backward compatibility."""
-  rendered = _md(text).strip()
+  rendered = str(_md(text)).strip()
   if rendered.startswith("<p") and rendered.endswith("</p>"):
     rendered = rendered[rendered.index(">") + 1 : -4]
   return rendered
