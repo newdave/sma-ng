@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.8.1...sma-ng-v1.8.2) (2026-05-01)
+
+
+### Bug Fixes
+
+* **qsv:** size input-scope extra_hw_frames from look_ahead_depth + 4, cap at 100 ([9c01efb](https://github.com/newdave/sma-ng/commit/9c01efb092c47ebec83af5b6e4a869a90a847e90))
+
 ## [1.8.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.8.0...sma-ng-v1.8.1) (2026-05-01)
 
 
