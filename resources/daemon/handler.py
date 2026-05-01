@@ -670,6 +670,77 @@ class WebhookHandler(BaseHTTPRequestHandler):
       self.server.notify_workers()
     self.send_json_response(200, {"requeued": count})
 
+  _BULK_ACTIONS = ("requeue", "cancel", "delete")
+
+  def _post_jobs_bulk(self):
+    """Apply *action* to every job id listed in the request body.
+
+    Body schema::
+
+        {"action": "requeue|cancel|delete", "ids": [1, 2, 3]}
+
+    Returns a per-id breakdown so the UI can flag partial failures
+    (e.g. attempting to cancel a completed job)::
+
+        {"action": "...", "succeeded": [...], "skipped": [...], "not_found": [...]}
+    """
+    content_length = int(self.headers.get("Content-Length", 0))
+    try:
+      body = json.loads(self.rfile.read(content_length) if content_length else b"{}")
+    except (json.JSONDecodeError, ValueError):
+      self.send_json_response(400, {"error": "Invalid JSON body"})
+      return
+    action = body.get("action") if isinstance(body, dict) else None
+    raw_ids = body.get("ids") if isinstance(body, dict) else None
+    if action not in self._BULK_ACTIONS:
+      self.send_json_response(400, {"error": "action must be one of %s" % ", ".join(self._BULK_ACTIONS)})
+      return
+    if not isinstance(raw_ids, list) or not raw_ids:
+      self.send_json_response(400, {"error": "ids must be a non-empty list of integers"})
+      return
+    try:
+      ids = [int(j) for j in raw_ids]
+    except (TypeError, ValueError):
+      self.send_json_response(400, {"error": "ids must be integers"})
+      return
+
+    if action == "delete":
+      # Cancel any running subprocesses first so we don't orphan ffmpeg
+      # children when their job rows disappear.
+      for jid in ids:
+        if self.server.job_db.get_job(jid) and self.server.job_db.get_job(jid).get("status") == "running":
+          try:
+            self.server.cancel_job(jid)
+          except Exception:
+            self.server.logger.exception("Bulk delete: failed to cancel running job %d before delete" % jid)
+      deleted = self.server.job_db.delete_jobs(ids)
+      not_found = [j for j in ids if j not in deleted]
+      self.server.logger.info("Bulk delete: %d/%d jobs deleted" % (len(deleted), len(ids)))
+      self.send_json_response(200, {"action": action, "succeeded": deleted, "skipped": [], "not_found": not_found})
+      return
+
+    succeeded, skipped, not_found = [], [], []
+    for jid in ids:
+      job = self.server.job_db.get_job(jid)
+      if job is None:
+        not_found.append(jid)
+        continue
+      if action == "requeue":
+        if self.server.job_db.requeue_job(jid):
+          succeeded.append(jid)
+        else:
+          skipped.append({"id": jid, "reason": "not_failed", "status": job.get("status")})
+      else:  # cancel
+        if self.server.cancel_job(jid):
+          succeeded.append(jid)
+        else:
+          skipped.append({"id": jid, "reason": "not_cancellable", "status": job.get("status")})
+
+    if action == "requeue" and succeeded:
+      self.server.notify_workers()
+    self.server.logger.info("Bulk %s: %d succeeded, %d skipped, %d not found" % (action, len(succeeded), len(skipped), len(not_found)))
+    self.send_json_response(200, {"action": action, "succeeded": succeeded, "skipped": skipped, "not_found": not_found})
+
   def _post_job_requeue(self, path):
     job_id = self._parse_job_id(path)
     if job_id is None:

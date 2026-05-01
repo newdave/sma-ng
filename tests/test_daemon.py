@@ -431,9 +431,16 @@ class TestDashboardHTML:
 
   def test_submit_result_handles_directory_responses(self):
     assert "formatSubmitResult(d)" in DASHBOARD_HTML
-    assert "queued_count === 1" in DASHBOARD_HTML
-    assert "jobs queued from" in DASHBOARD_HTML
+    assert "queuedN === 1" in DASHBOARD_HTML
+    assert "queued from" in DASHBOARD_HTML
     assert "No media files found in directory" in DASHBOARD_HTML
+    # Same-extension gate (b4385de) — UI surfaces skipped count.
+    assert "skipped_count" in DASHBOARD_HTML
+    assert "same_as_output_extension" in DASHBOARD_HTML
+    # Multi-select toolbar — bulk action endpoint + verbs.
+    assert "/jobs/bulk" in DASHBOARD_HTML
+    assert "selectedJobIds" in DASHBOARD_HTML
+    assert "bulkAction" in DASHBOARD_HTML
 
   def test_stat_keys_present(self):
     for key in ("total", "pending", "running", "completed", "failed"):

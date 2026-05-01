@@ -501,6 +501,72 @@ paths:
                   requeued:
                     type: integer
 
+  /jobs/bulk:
+    post:
+      summary: Apply an action to a set of jobs by id
+      description: |
+        Bulk action endpoint used by the dashboard's multi-select toolbar.
+        Supports `requeue` (only failed jobs transition; others are skipped),
+        `cancel` (kills the running subprocess if any, otherwise marks the
+        pending row cancelled — completed/failed jobs are skipped), and
+        `delete` (removes the row outright; running subprocesses are
+        cancelled first to avoid orphaning the ffmpeg child).
+      operationId: bulkJobsAction
+      tags: [jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, ids]
+              properties:
+                action:
+                  type: string
+                  enum: [requeue, cancel, delete]
+                ids:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: integer
+      responses:
+        "200":
+          description: Per-id outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  action:
+                    type: string
+                  succeeded:
+                    type: array
+                    items:
+                      type: integer
+                  skipped:
+                    type: array
+                    description: Jobs that exist but couldn't transition
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        reason:
+                          type: string
+                          enum: [not_failed, not_cancellable]
+                        status:
+                          type: string
+                  not_found:
+                    type: array
+                    items:
+                      type: integer
+        "400":
+          description: Invalid body or unknown action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /webhook/sonarr:
     post:
       summary: Native Sonarr webhook endpoint

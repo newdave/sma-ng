@@ -1298,6 +1298,100 @@ class TestQueueDirectory:
 
 
 # ---------------------------------------------------------------------------
+# TestBulkJobsAction
+# ---------------------------------------------------------------------------
+
+
+class TestBulkJobsAction:
+  """``POST /jobs/bulk`` — used by the dashboard's multi-select toolbar."""
+
+  def _make(self, body):
+    payload = json.dumps(body).encode("utf-8")
+    h = _make_handler(method="POST", path="/jobs/bulk", body=payload, headers={"Content-Length": str(len(payload))})
+    return h
+
+  def test_invalid_action_returns_400(self):
+    h = self._make({"action": "explode", "ids": [1]})
+    h._post_jobs_bulk()
+    body = _get_response_body(h)
+    assert h._response_code == 400
+    assert "action must be one of" in body["error"]
+
+  def test_empty_ids_returns_400(self):
+    h = self._make({"action": "requeue", "ids": []})
+    h._post_jobs_bulk()
+    assert h._response_code == 400
+
+  def test_non_integer_ids_returns_400(self):
+    h = self._make({"action": "requeue", "ids": ["abc"]})
+    h._post_jobs_bulk()
+    assert h._response_code == 400
+
+  def test_requeue_succeeds_and_notifies(self):
+    h = self._make({"action": "requeue", "ids": [1, 2]})
+    h.server.job_db.get_job.side_effect = lambda jid: {"id": jid, "status": "failed"}
+    h.server.job_db.requeue_job.return_value = True
+    h._post_jobs_bulk()
+    body = _get_response_body(h)
+    assert body["action"] == "requeue"
+    assert body["succeeded"] == [1, 2]
+    assert body["skipped"] == []
+    h.server.notify_workers.assert_called_once()
+
+  def test_requeue_skips_non_failed_jobs(self):
+    h = self._make({"action": "requeue", "ids": [1, 2]})
+    h.server.job_db.get_job.side_effect = lambda jid: {"id": jid, "status": "completed" if jid == 2 else "failed"}
+    h.server.job_db.requeue_job.side_effect = lambda jid: jid == 1
+    h._post_jobs_bulk()
+    body = _get_response_body(h)
+    assert body["succeeded"] == [1]
+    assert body["skipped"] == [{"id": 2, "reason": "not_failed", "status": "completed"}]
+
+  def test_requeue_not_found_marked(self):
+    h = self._make({"action": "requeue", "ids": [99]})
+    h.server.job_db.get_job.return_value = None
+    h._post_jobs_bulk()
+    body = _get_response_body(h)
+    assert body["succeeded"] == []
+    assert body["not_found"] == [99]
+
+  def test_cancel_succeeds(self):
+    h = self._make({"action": "cancel", "ids": [5]})
+    h.server.job_db.get_job.return_value = {"id": 5, "status": "running"}
+    h.server.cancel_job.return_value = True
+    h._post_jobs_bulk()
+    body = _get_response_body(h)
+    assert body["succeeded"] == [5]
+
+  def test_cancel_skips_completed(self):
+    h = self._make({"action": "cancel", "ids": [5]})
+    h.server.job_db.get_job.return_value = {"id": 5, "status": "completed"}
+    h.server.cancel_job.return_value = False
+    h._post_jobs_bulk()
+    body = _get_response_body(h)
+    assert body["skipped"] == [{"id": 5, "reason": "not_cancellable", "status": "completed"}]
+
+  def test_delete_calls_db_and_returns_deleted_ids(self):
+    h = self._make({"action": "delete", "ids": [1, 2, 3]})
+    h.server.job_db.get_job.return_value = {"id": 1, "status": "completed"}
+    h.server.job_db.delete_jobs.return_value = [1, 3]
+    h._post_jobs_bulk()
+    body = _get_response_body(h)
+    assert body["action"] == "delete"
+    assert body["succeeded"] == [1, 3]
+    assert body["not_found"] == [2]
+
+  def test_delete_cancels_running_jobs_first(self):
+    """Running subprocesses must be cancelled before their rows disappear
+    so we don't orphan the ffmpeg child process."""
+    h = self._make({"action": "delete", "ids": [7]})
+    h.server.job_db.get_job.return_value = {"id": 7, "status": "running"}
+    h.server.job_db.delete_jobs.return_value = [7]
+    h._post_jobs_bulk()
+    h.server.cancel_job.assert_called_with(7)
+
+
+# ---------------------------------------------------------------------------
 # TestMergeArgs
 # ---------------------------------------------------------------------------
 

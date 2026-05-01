@@ -555,10 +555,41 @@
                     </template>
                 </div>
             </div>
+            <!-- Bulk-action toolbar (visible when ≥1 row selected) -->
+            <div x-show="selectedJobIds.length > 0"
+                class="mb-3 flex flex-wrap items-center gap-2 px-3 py-2 rounded border border-blue-700/50 bg-blue-900/30 text-xs">
+                <span class="text-blue-200 font-medium" x-text="selectedJobIds.length + ' selected'"></span>
+                <span class="text-blue-300/60">·</span>
+                <button @click="bulkAction('requeue')" :disabled="bulkBusy"
+                    class="px-2.5 py-1 rounded border border-red-700 text-red-300 hover:border-red-500 hover:bg-red-900/30 disabled:opacity-30 transition-colors">
+                    Requeue
+                </button>
+                <button @click="bulkAction('cancel')" :disabled="bulkBusy"
+                    class="px-2.5 py-1 rounded border border-amber-700 text-amber-300 hover:border-amber-500 hover:bg-amber-900/30 disabled:opacity-30 transition-colors">
+                    Cancel
+                </button>
+                <button @click="bulkAction('delete')" :disabled="bulkBusy"
+                    class="px-2.5 py-1 rounded border border-red-800 text-red-400 hover:border-red-600 hover:bg-red-900/40 disabled:opacity-30 transition-colors">
+                    Delete
+                </button>
+                <button @click="clearSelection()" :disabled="bulkBusy"
+                    class="px-2.5 py-1 rounded border border-gray-500 text-gray-300 hover:border-gray-400 transition-colors ml-auto">
+                    Clear
+                </button>
+                <span x-show="bulkResult" class="ml-2" :class="bulkError ? 'text-red-300' : 'text-blue-200'" x-text="bulkResult"></span>
+            </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700 text-xs">
+                            <th class="pb-2 pr-2 w-8 font-medium">
+                                <input type="checkbox"
+                                    :checked="jobs.length > 0 && jobs.every(j => selectedJobIds.includes(j.id))"
+                                    :indeterminate.prop="jobs.some(j => selectedJobIds.includes(j.id)) && !jobs.every(j => selectedJobIds.includes(j.id))"
+                                    @change="$event.target.checked ? selectAllJobs() : clearSelection()"
+                                    title="Select all on page"
+                                    class="rounded border-gray-400 dark:border-gray-600 cursor-pointer" />
+                            </th>
                             <th class="pb-2 pr-3 w-12 font-medium">ID</th>
                             <th class="pb-2 pr-3 font-medium">File</th>
                             <th class="pb-2 pr-3 font-medium">Config</th>
@@ -570,7 +601,15 @@
                     </thead>
                     <tbody class="divide-y divide-gray-200/50 dark:divide-gray-700/50">
                         <template x-for="j in jobs" :key="j.id">
-                            <tr class="hover:bg-gray-100/50 dark:hover:bg-gray-700/30 group">
+                            <tr class="hover:bg-gray-100/50 dark:hover:bg-gray-700/30 group"
+                                :class="selectedJobIds.includes(j.id) ? 'bg-blue-900/20' : ''">
+                                <td class="py-2 pr-2">
+                                    <input type="checkbox"
+                                        :checked="selectedJobIds.includes(j.id)"
+                                        @change="toggleJobSelection(j.id, $event.shiftKey)"
+                                        @click.stop
+                                        class="rounded border-gray-400 dark:border-gray-600 cursor-pointer" />
+                                </td>
                                 <td class="py-2 pr-3 text-gray-400 dark:text-gray-600 font-mono text-xs" x-text="j.id"></td>
                                 <td class="py-2 pr-3 text-xs max-w-xs">
                                     <div class="tooltip cursor-default">
@@ -623,7 +662,7 @@
                         </template>
                         <template x-if="jobs.length === 0">
                             <tr>
-                                <td colspan="7" class="py-8 text-center text-gray-500 dark:text-gray-500 text-sm"
+                                <td colspan="8" class="py-8 text-center text-gray-500 dark:text-gray-500 text-sm"
                                     x-text="searchQuery.trim() ? 'No jobs match \u201c' + searchQuery.trim() + '\u201d' : 'No jobs found'">
                                 </td>
                             </tr>
@@ -738,6 +777,7 @@
                 filter: 'all', page: 0, pageSize: 50, threadsTab: 'local', searchQuery: '', searchTimer: null,
                 lastUpdate: '', interval: null,
                 submitPath: '', submitArgs: '', submitFlags: [], submitting: false, submitResult: '', submitError: false, submitWarning: false,
+                selectedJobIds: [], lastSelectedJobId: null, bulkBusy: false, bulkResult: '', bulkError: false,
                 flagDefs: [
                     { flag: '-fc', label: 'Force Convert', title: 'Force conversion even if file already has the target extension or matches force-convert=false' },
                     { flag: '-pse', label: 'Same Ext', title: 'Allow reprocessing files that already have the target extension' },
@@ -935,6 +975,84 @@
                         }
                     } catch (e) { }
                     this.requeueingAll = false;
+                },
+                // ── Multi-select ──────────────────────────────────────────────────────────
+                toggleJobSelection(jobId, shiftKey) {
+                    // Shift-click extends the selection range from the last toggled row,
+                    // matching the file-manager idiom users already expect.
+                    if (shiftKey && this.lastSelectedJobId !== null) {
+                        const ids = this.jobs.map(j => j.id);
+                        const a = ids.indexOf(this.lastSelectedJobId);
+                        const b = ids.indexOf(jobId);
+                        if (a !== -1 && b !== -1) {
+                            const [lo, hi] = a < b ? [a, b] : [b, a];
+                            const range = ids.slice(lo, hi + 1);
+                            const target = !this.selectedJobIds.includes(jobId);
+                            for (const id of range) {
+                                const idx = this.selectedJobIds.indexOf(id);
+                                if (target && idx === -1) this.selectedJobIds.push(id);
+                                else if (!target && idx !== -1) this.selectedJobIds.splice(idx, 1);
+                            }
+                            this.lastSelectedJobId = jobId;
+                            return;
+                        }
+                    }
+                    const i = this.selectedJobIds.indexOf(jobId);
+                    if (i === -1) this.selectedJobIds.push(jobId);
+                    else this.selectedJobIds.splice(i, 1);
+                    this.lastSelectedJobId = jobId;
+                },
+                selectAllJobs() {
+                    this.selectedJobIds = this.jobs.map(j => j.id);
+                    this.lastSelectedJobId = this.jobs.length ? this.jobs[this.jobs.length - 1].id : null;
+                },
+                clearSelection() {
+                    this.selectedJobIds = [];
+                    this.lastSelectedJobId = null;
+                    this.bulkResult = '';
+                    this.bulkError = false;
+                },
+                async bulkAction(action) {
+                    if (!this.selectedJobIds.length) return;
+                    if (action === 'delete') {
+                        const n = this.selectedJobIds.length;
+                        if (!window.confirm('Delete ' + n + ' job' + (n === 1 ? '' : 's') + '? This cannot be undone.')) return;
+                    }
+                    this.bulkBusy = true;
+                    this.bulkResult = '';
+                    this.bulkError = false;
+                    try {
+                        const r = await fetch('/jobs/bulk', {
+                            method: 'POST',
+                            headers: this.authHeaders(),
+                            body: JSON.stringify({ action, ids: this.selectedJobIds }),
+                        });
+                        const d = await r.json();
+                        if (r.ok) {
+                            const ok = (d.succeeded || []).length;
+                            const skipped = (d.skipped || []).length;
+                            const missing = (d.not_found || []).length;
+                            const verb = action === 'requeue' ? 'requeued' : (action === 'cancel' ? 'cancelled' : 'deleted');
+                            let msg = ok + ' ' + verb;
+                            const tail = [];
+                            if (skipped) tail.push(skipped + ' skipped');
+                            if (missing) tail.push(missing + ' not found');
+                            if (tail.length) msg += ' (' + tail.join(', ') + ')';
+                            this.bulkResult = msg;
+                            this.bulkError = ok === 0;
+                            this.selectedJobIds = [];
+                            this.lastSelectedJobId = null;
+                            setTimeout(() => this.refresh(), 300);
+                        } else {
+                            this.bulkError = true;
+                            this.bulkResult = d.error || ('Bulk ' + action + ' failed');
+                        }
+                    } catch (e) {
+                        this.bulkError = true;
+                        this.bulkResult = 'Request failed: ' + e.message;
+                    }
+                    this.bulkBusy = false;
+                    setTimeout(() => { this.bulkResult = ''; this.bulkError = false; }, 6000);
                 },
                 // ── Autocomplete ──────────────────────────────────────────────────────────
                 acOpen: false, acItems: [], acIndex: -1,
