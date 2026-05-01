@@ -751,6 +751,80 @@ class TestPrintableFFMPEGCommand:
     assert "'title=5.1 Channel'" in result
 
 
+class TestFFMpegStderrSidecar:
+  """Tests for _write_ffmpeg_stderr_sidecar (full ffmpeg stderr capture on failure)."""
+
+  def _make_processor_with_filehandler(self, log_dir):
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    with patch("resources.mediaprocessor.Converter"):
+      with patch("resources.readsettings.ReadSettings._validate_binaries"):
+        from resources.mediaprocessor import MediaProcessor
+
+        mp = MediaProcessor.__new__(MediaProcessor)
+        mp.settings = MagicMock()
+        # Use a real logger with a real RotatingFileHandler so the sidecar
+        # writer can locate the log directory by reading baseFilename.
+        log_path = log_dir / "sma-ng.log"
+        log_path.write_text("")
+        logger = logging.getLogger("test.mp.stderr.%s" % log_dir.name)
+        for h in list(logger.handlers):
+          logger.removeHandler(h)
+        handler = RotatingFileHandler(str(log_path), maxBytes=1024, backupCount=1)
+        logger.addHandler(handler)
+        mp.log = logger
+        return mp, log_path
+
+  def test_writes_full_stderr_to_sidecar(self, tmp_path):
+    from converter.ffmpeg import FFMpegConvertError
+
+    mp, log_path = self._make_processor_with_filehandler(tmp_path)
+    e = FFMpegConvertError(
+      "Exited with code 1",
+      "ffmpeg -i in.mkv out.mp4",
+      "ffmpeg version 8.1\n" + ("X" * 8000) + "\nError opening output files: Invalid argument\n",
+      pid=12345,
+    )
+    sidecar = mp._write_ffmpeg_stderr_sidecar(e)
+    assert sidecar is not None
+    assert sidecar.startswith(str(tmp_path / "stderr"))
+    assert "sma-ng.job" in sidecar
+    assert sidecar.endswith(".stderr.log")
+    contents = open(sidecar).read()
+    assert "ffmpeg cmd:" in contents
+    assert "ffmpeg -i in.mkv out.mp4" in contents
+    assert "Error opening output files: Invalid argument" in contents
+    # Full payload preserved (not truncated at SMA_LOG_MAX_WIDTH)
+    assert "X" * 8000 in contents
+
+  def test_returns_none_when_no_output(self, tmp_path):
+    from converter.ffmpeg import FFMpegConvertError
+
+    mp, _ = self._make_processor_with_filehandler(tmp_path)
+    e = FFMpegConvertError("boom", "cmd", "", pid=1)
+    assert mp._write_ffmpeg_stderr_sidecar(e) is None
+
+  def test_returns_none_when_no_filehandler(self):
+    import logging
+
+    with patch("resources.mediaprocessor.Converter"):
+      with patch("resources.readsettings.ReadSettings._validate_binaries"):
+        from resources.mediaprocessor import MediaProcessor
+
+        mp = MediaProcessor.__new__(MediaProcessor)
+        mp.settings = MagicMock()
+        # Plain logger with no FileHandler — sidecar writer should bail.
+        mp.log = logging.getLogger("test.mp.stderr.nofile")
+        for h in list(mp.log.handlers):
+          mp.log.removeHandler(h)
+
+    from converter.ffmpeg import FFMpegConvertError
+
+    e = FFMpegConvertError("boom", "cmd", "stderr line\n", pid=1)
+    assert mp._write_ffmpeg_stderr_sidecar(e) is None
+
+
 class TestRawEscape:
   def _make_processor(self):
     with patch("resources.mediaprocessor.Converter"):
