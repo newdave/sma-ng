@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.9.0...sma-ng-v1.9.1) (2026-05-01)
+
+
+### Bug Fixes
+
+* **qsv:** use flat settings.look_ahead_depth, not nonexistent settings.video ([90dc5fb](https://github.com/newdave/sma-ng/commit/90dc5fb885d8b2694d013befa0f99422c8f7d008))
+
 ## [1.9.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.8.2...sma-ng-v1.9.0) (2026-05-01)
 
 
