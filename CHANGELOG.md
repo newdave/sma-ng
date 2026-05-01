@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.8.2...sma-ng-v1.9.0) (2026-05-01)
+
+
+### Features
+
+* **qsv:** expose extra-hw-frames as base.converter yaml override ([03fb7b9](https://github.com/newdave/sma-ng/commit/03fb7b9943c2ee17fcd3d6cebf05884b9d75b47b))
+
 ## [1.8.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.8.1...sma-ng-v1.8.2) (2026-05-01)
 
 
