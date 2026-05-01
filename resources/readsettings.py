@@ -371,6 +371,7 @@ class ReadSettings:
     self.preopts = self._as_list(cfg.preopts, lower=False, replace=[])
     self.postopts = self._as_list(cfg.postopts, lower=False, replace=[])
     self.regex = cfg.regex_directory_replace
+    self.extra_hw_frames = int(cfg.extra_hw_frames or 0)
 
     if self.gpu:
       self._apply_hwaccel_profile(self.gpu)

@@ -1895,6 +1895,9 @@ class TestSetAcceleration:
     mp.settings.hwdevices = hwdevices or {}
     mp.settings.hwoutputfmt = hwoutputfmt or {}
     mp.settings.hwaccel_decoders = hwaccel_decoders or []
+    # MagicMock auto-creates attrs as child Mocks (truthy), so the QSV
+    # `-extra_hw_frames` override path needs an explicit 0 to mean "auto".
+    mp.settings.extra_hw_frames = 0
     return mp
 
   def test_no_hwaccel_match_returns_empty_opts(self):
@@ -2003,6 +2006,46 @@ class TestSetAcceleration:
     mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
     opts, _ = mp.setAcceleration("h264", "yuv420p")
     assert opts[opts.index("-extra_hw_frames") + 1] == "100"
+
+  def test_qsv_extra_hw_frames_yaml_override_used_when_positive(self):
+    """`base.converter.extra-hw-frames: N` overrides the auto-derived pool."""
+    mp = self._make_mp_with_hwaccel(
+      hwaccels_available=["qsv"],
+      settings_hwaccels=["qsv"],
+    )
+    mp.settings.video = {"look_ahead_depth": 0}
+    mp.settings.hdr = {"look_ahead_depth": 0}
+    mp.settings.extra_hw_frames = 64
+    mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
+    opts, _ = mp.setAcceleration("h264", "yuv420p")
+    assert opts[opts.index("-extra_hw_frames") + 1] == "64"
+
+  def test_qsv_extra_hw_frames_yaml_override_capped_at_100(self):
+    """Operator-supplied override is still bounded by ffmpeg's 100 ceiling."""
+    mp = self._make_mp_with_hwaccel(
+      hwaccels_available=["qsv"],
+      settings_hwaccels=["qsv"],
+    )
+    mp.settings.video = {"look_ahead_depth": 40}
+    mp.settings.hdr = {"look_ahead_depth": 0}
+    mp.settings.extra_hw_frames = 250
+    mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
+    opts, _ = mp.setAcceleration("h264", "yuv420p")
+    assert opts[opts.index("-extra_hw_frames") + 1] == "100"
+
+  def test_qsv_extra_hw_frames_zero_override_falls_back_to_auto(self):
+    """`extra-hw-frames: 0` (the schema default) means auto — derive from
+    look_ahead_depth, NOT a literal 0 (which would disable the pool)."""
+    mp = self._make_mp_with_hwaccel(
+      hwaccels_available=["qsv"],
+      settings_hwaccels=["qsv"],
+    )
+    mp.settings.video = {"look_ahead_depth": 40}
+    mp.settings.hdr = {"look_ahead_depth": 0}
+    mp.settings.extra_hw_frames = 0
+    mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
+    opts, _ = mp.setAcceleration("h264", "yuv420p")
+    assert opts[opts.index("-extra_hw_frames") + 1] == "44"
 
 
 # ---------------------------------------------------------------------------

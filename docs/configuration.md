@@ -80,6 +80,7 @@ shell-trigger-only and configured in `triggers/`. See
 | `wait-post-process` | bool | `false` | Wait for post-process scripts to finish |
 | `preopts` | list | | Extra FFmpeg options before input |
 | `postopts` | list | | Extra FFmpeg options after codec options |
+| `extra-hw-frames` | int | `0` | QSV `-extra_hw_frames` pool size (input/device scope). `0` = auto: derive from `look-ahead-depth + 4` with a floor of 20. Any positive value is used verbatim, clamped to ffmpeg's QSV ceiling of 100. Only applied when `gpu: qsv`. |
 
 ---
 

@@ -67,6 +67,11 @@ class ConverterSettings(_Base):
   preopts: list[str] = Field(default_factory=list)
   postopts: list[str] = Field(default_factory=list)
   regex_directory_replace: str = r"[^\w\-_\. ]"
+  # QSV `-extra_hw_frames` pool size (input/device scope). 0 = auto: derive
+  # from the configured look-ahead depth (max(video, hdr) + 4) with a floor
+  # of 20. Any positive value is used verbatim, clamped to ffmpeg's QSV
+  # device-init ceiling of 100. Only applied when QSV hwaccel is active.
+  extra_hw_frames: int = 0
 
 
 class PermissionSettings(_Base):
