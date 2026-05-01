@@ -22,7 +22,10 @@ KIND_HINT_PRECONV = "preconv"  # → preconv_original_check
 
 
 SIDECAR_EXTS = frozenset({".srt", ".sub", ".idx", ".ass", ".ssa", ".vtt", ".nfo", ".jpg", ".jpeg", ".png"})
-TMP_EXTS = frozenset({".tmp", ".partial"})
+TMP_EXTS = frozenset({".tmp", ".partial", ".tag"})
+# `.tag` covers SMA's tag-step leftovers (Converter.tag renames the freshly
+# converted output to `<file>.<ext>.tag` before re-muxing it; older releases
+# left these behind on tagging failure).
 TMP_SUFFIXES = (".2.mp4", ".3.mp4", ".4.mp4", ".5.mp4")  # recycle-bin collision leftovers
 MEDIA_CONTAINER_EXTS = frozenset({".mp4", ".mkv", ".avi", ".mov", ".m4v", ".ts", ".m2ts", ".wmv", ".flv", ".webm"})
 NON_MP4_CONTAINERS = frozenset({".mkv", ".avi", ".mov", ".m4v", ".ts", ".m2ts", ".wmv", ".flv", ".webm"})

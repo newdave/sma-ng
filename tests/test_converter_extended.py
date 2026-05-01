@@ -186,6 +186,53 @@ class TestConverterTag:
       results = list(c.tag(str(f)))
     assert isinstance(results, list)
 
+  def test_tag_failure_restores_original_and_removes_orphan(self, tmp_path):
+    """When the tag remux blows up mid-flight (ffprobe error, ffmpeg crash,
+    SIGTERM, etc.) the original file must be restored from `.tag` so we
+    don't leave a stranded `Movie.mp4.tag` and a missing `Movie.mp4`."""
+    c = _make_converter()
+    src = tmp_path / "movie.mp4"
+    src.write_bytes(b"original-source-bytes")
+
+    # ffmpeg "writes" a partial output then raises.
+    def failing_convert(outfile, opts, timeout=0):
+      # simulate a few bytes of output written before the crash
+      with open(outfile, "wb") as f:
+        f.write(b"partial-output")
+      if False:  # makes the function a generator without a reachable yield
+        yield
+      raise ConverterError("simulated crash mid-mux")
+
+    fake_info = _make_info()
+    fake_info.format.duration = 10.0
+
+    with (
+      patch.object(c.ffmpeg, "probe", return_value=fake_info),
+      patch.object(c.ffmpeg, "convert", side_effect=failing_convert),
+    ):
+      with pytest.raises(ConverterError):
+        list(c.tag(str(src)))
+
+    # No leftover .tag, no half-written .mp4, original bytes restored.
+    assert not (tmp_path / "movie.mp4.tag").exists()
+    assert src.exists()
+    assert src.read_bytes() == b"original-source-bytes"
+
+  def test_tag_failure_in_probe_restores_original(self, tmp_path):
+    """ffprobe returning None (file unreadable after rename, e.g. fs flake)
+    must still restore the original."""
+    c = _make_converter()
+    src = tmp_path / "movie.mp4"
+    src.write_bytes(b"original-source-bytes")
+
+    with patch.object(c.ffmpeg, "probe", return_value=None):
+      with pytest.raises(ConverterError):
+        list(c.tag(str(src)))
+
+    assert not (tmp_path / "movie.mp4.tag").exists()
+    assert src.exists()
+    assert src.read_bytes() == b"original-source-bytes"
+
   def test_tag_cues_to_front(self, tmp_path):
     c = _make_converter()
     f = tmp_path / "movie.mp4"
