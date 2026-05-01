@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.9.1...sma-ng-v1.10.0) (2026-05-01)
+
+
+### Features
+
+* **deploy:** expose worker count via setup/local.yml (deploy + per-host) ([8a2dd12](https://github.com/newdave/sma-ng/commit/8a2dd126dabd51a677adfb0a6d293343c095cc2d))
+
 ## [1.9.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.9.0...sma-ng-v1.9.1) (2026-05-01)
 
 
