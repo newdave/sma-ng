@@ -599,6 +599,43 @@ class TestBaseCodecHelpers:
     dispo = codec.safe_disposition(None)
     assert "-default" in dispo
 
+  def test_safe_disposition_blank_starts_with_zero(self):
+    """All-negation result must start with '0' so FFmpeg 8.x parses it as a value.
+
+    Regression: FFmpeg 8.0 rewrote the CLI parser to be stricter about
+    option-vs-value tokens. A disposition value beginning with '-'
+    (e.g. ``-default-dub-...`` for a stream with no positive flags)
+    is misread as another option flag, output filename argv gets
+    consumed by something else, and the muxer fails with
+    'Error opening output files: Invalid argument'. Verify the safe
+    fix prefixes the FFmpeg-special '0' clear-all token.
+    """
+    codec = BaseCodec()
+    for dispo_in in ("", None):
+      result = codec.safe_disposition(dispo_in)
+      assert result.startswith("0-"), "got %r" % result
+      # All known flags still listed as negations
+      assert "-default" in result
+      assert "-forced" in result
+
+  def test_safe_disposition_with_positive_flag_unchanged(self):
+    """When the value has a positive flag, no '0' prefix is needed."""
+    codec = BaseCodec()
+    result = codec.safe_disposition("+default")
+    assert result.startswith("+default"), "got %r" % result
+    assert not result.startswith("0")
+    # Other flags still negated
+    assert "-forced" in result
+
+  def test_safe_disposition_only_existing_flag_unchanged(self):
+    """When the value already has every flag positive, nothing to negate."""
+    codec = BaseCodec()
+    all_positive = "".join("+" + d for d in codec.DISPOSITIONS)
+    result = codec.safe_disposition(all_positive)
+    # Idempotent — nothing added, no '0' prefix
+    assert result == all_positive
+    assert not result.startswith("0")
+
   def test_supports_bit_depth(self):
     codec = BaseCodec()
     assert codec.supportsBitDepth(8) is True
