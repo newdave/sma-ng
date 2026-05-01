@@ -2052,18 +2052,23 @@ class MediaProcessor:
             opts.extend(["-hwaccel_device", "sma"])
 
         if hwaccel == "qsv":
-          # QSV pool size at input/device scope. Sized for the deepest
-          # look-ahead window we'd reasonably configure (look_ahead_depth
-          # up to ~40 + B-frames + safety margin). The encoder-scope
-          # `-extra_hw_frames` that older SMA-NG builds added per look-
-          # ahead session is rejected by ffmpeg 8.x ("not a encoding
-          # option") and was removed in favour of this single global
-          # pool — see avcodecs.H265QSVCodec for details.
+          # The QSV `-extra_hw_frames` lives at input/device scope (right
+          # next to `-hwaccel qsv`). When look-ahead is configured, the
+          # value must cover the encoder's look-ahead window — older
+          # SMA-NG builds emitted a *second* `-extra_hw_frames` inside
+          # the encoder optlist with `look_ahead_depth + 4`, which
+          # ffmpeg 8.x rejects ("not a encoding option" → "Error opening
+          # output files: Invalid argument"). Compute the same value
+          # here and apply it to the single input-scope flag instead.
+          # ffmpeg caps `extra_hw_frames` at 100; over-requesting causes
+          # device-init failures, so clamp to that ceiling.
+          _MAX_QSV_EXTRA_HW_FRAMES = 100
           la_depth = max(
             int(self.settings.video.get("look_ahead_depth", 0) or 0),
             int(self.settings.hdr.get("look_ahead_depth", 0) or 0),
           )
-          pool = max(20, la_depth + 12)
+          pool = max(20, la_depth + 4) if la_depth > 0 else 20
+          pool = min(pool, _MAX_QSV_EXTRA_HW_FRAMES)
           opts.extend(["-extra_hw_frames", str(pool)])
 
         self.log.debug("%s hwaccel is supported by this ffmpeg build and will be used [hwaccels]." % hwaccel)
