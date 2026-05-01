@@ -1166,6 +1166,23 @@ class PostgreSQLJobDatabase:
       self.log.info("Deleted %d failed jobs" % deleted)
     return deleted
 
+  def delete_jobs(self, job_ids):
+    """Delete a specific set of jobs by id. Returns the list of ids actually deleted.
+
+    The caller is responsible for cancelling any running subprocesses
+    before calling this — this method only removes the row.
+    """
+    ids = [int(j) for j in (job_ids or [])]
+    if not ids:
+      return []
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("DELETE FROM jobs WHERE id = ANY(%s) RETURNING id", (ids,))
+        deleted = [row["id"] for row in cur.fetchall()]
+    if deleted:
+      self.log.info("Deleted %d jobs by id" % len(deleted))
+    return deleted
+
   def delete_offline_nodes(self):
     """Delete cluster_nodes rows where status is not 'online'. Returns count deleted."""
     with self._conn() as conn:

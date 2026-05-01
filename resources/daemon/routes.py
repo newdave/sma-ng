@@ -112,6 +112,7 @@ def _post_routes():
     "/reload": lambda handler, path, query: handler._post_reload(),
     "/cleanup": lambda handler, path, query: handler._post_cleanup(query),
     "/jobs/requeue": lambda handler, path, query: handler._post_jobs_requeue_bulk(query),
+    "/jobs/bulk": lambda handler, path, query: handler._post_jobs_bulk(),
     "/scan/filter": lambda handler, path, query: handler._post_scan_filter(),
     "/scan/record": lambda handler, path, query: handler._post_scan_record(),
     "/admin/config": lambda handler, path, query: handler._post_admin_config(path, query),
