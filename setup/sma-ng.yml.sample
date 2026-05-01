@@ -325,6 +325,22 @@ services:
       ignore-certs: false
       path-mapping: ''
       plexmatch: true
+  emby:
+    main:
+      url: http://localhost:8096
+      apikey: ''
+      refresh: true
+      ignore-certs: false
+      path-mapping: ''
+      enabled: true
+  jellyfin:
+    main:
+      url: http://localhost:8096
+      apikey: ''
+      refresh: true
+      ignore-certs: false
+      path-mapping: ''
+      enabled: true
   autoscan:
     main:
       url: http://localhost:3030

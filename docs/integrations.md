@@ -105,6 +105,76 @@ Configure `services.plex.<name>` in `sma-ng.yml`. SMA-NG refreshes the matching 
 1. Disable automatic library scanning in Plex to prevent Plex from scanning files mid-conversion
 2. Connect directly to the Plex server using its local hostname or IP on port `32400` (or your custom port) and set `token` plus `refresh = true` in `[Plex]`
 
+### Emby
+
+Configure one or more `services.emby.<name>` instances in `sma-ng.yml`. After
+each successful conversion SMA-NG POSTs `/Library/Media/Updated` to every
+matching Emby server with the converted file's parent directory, scoping the
+metadata refresh rather than triggering a full-library rescan.
+
+```yaml
+services:
+  emby:
+    main:
+      url: http://emby.local:8096
+      apikey: ''        # Settings → Advanced → API Keys
+      refresh: true
+      path-mapping: ''  # k=v[,k=v] — same syntax as plex.path-mapping
+      ignore-certs: false
+      enabled: true
+```
+
+Reference the instance from a `daemon.routing[].services` rule to gate which
+converted files trigger which servers (per-path-tree routing, longest-prefix
+match, identical to Sonarr/Radarr/Autoscan):
+
+```yaml
+daemon:
+  routing:
+    - match: /mnt/media/Movies
+      profile: rq
+      services: [radarr.main, emby.main]
+```
+
+Authentication uses the per-instance `apikey` via the `X-Emby-Token` header.
+Per-instance failures are logged and swallowed so a transient Emby outage never
+fails the conversion job.
+
+**Path mapping** rewrites the directory sent to Emby when SMA-NG and Emby see
+different mount points. Same `from=to[,from=to]` syntax as `plex.path-mapping`.
+
+### Jellyfin
+
+Configure one or more `services.jellyfin.<name>` instances in `sma-ng.yml`.
+Jellyfin retained Emby's `/Library/Media/Updated` endpoint after the fork, so
+the integration shape is identical:
+
+```yaml
+services:
+  jellyfin:
+    main:
+      url: http://jellyfin.local:8096
+      apikey: ''        # Dashboard → API Keys
+      refresh: true
+      path-mapping: ''
+      ignore-certs: false
+      enabled: true
+```
+
+Routing-rule gating, auth header, path-mapping, and failure semantics are
+identical to the Emby integration above. Both can be referenced from the same
+routing rule when one converted file should refresh both servers.
+
+### Emby / Jellyfin troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| 401 returned | Wrong `apikey`, or apikey not granted access in admin |
+| 404 returned | `webroot` mismatch — server is mounted under a path prefix |
+| No POST issued | File's directory isn't a prefix of any `daemon.routing[].match` that lists `emby.<name>` / `jellyfin.<name>`, OR `refresh: false` |
+| Library not updated despite 204 | Path mismatch — the server doesn't recognise the directory; add a `path-mapping` entry |
+| `apikey not configured` warning | The instance is reachable but the apikey field is empty |
+
 ### Autoscan
 
 [Autoscan](https://github.com/Cloudbox/autoscan) is a notification fan-out service
@@ -186,7 +256,7 @@ sequenceDiagram
     participant D as SMA-NG Daemon
     participant Q as Job Queue
     participant W as ConversionWorker
-    participant P as Plex / Media Manager
+    participant P as Plex / Emby / Jellyfin
     participant A as Autoscan (optional)
 
     MM->>D: POST /webhook/sonarr (On Download)
@@ -196,7 +266,7 @@ sequenceDiagram
     W->>Q: Poll / dequeue
     W->>W: MediaProcessor.process()
     W->>Q: Mark done
-    W->>P: Library refresh (optional)
+    W->>P: Library refresh (optional, per-server, parallel)
     W->>A: POST /triggers/manual?dir=... (optional)
     W->>MM: Rescan / import notify (optional)
 ```

@@ -88,6 +88,26 @@ def _illustrative_services() -> dict:
         "plexmatch": True,
       },
     },
+    "emby": {
+      "main": {
+        "url": "http://localhost:8096",
+        "apikey": "",
+        "refresh": True,
+        "ignore-certs": False,
+        "path-mapping": "",
+        "enabled": True,
+      },
+    },
+    "jellyfin": {
+      "main": {
+        "url": "http://localhost:8096",
+        "apikey": "",
+        "refresh": True,
+        "ignore-certs": False,
+        "path-mapping": "",
+        "enabled": True,
+      },
+    },
     "autoscan": {
       "main": {
         "url": "http://localhost:3030",

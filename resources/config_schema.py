@@ -336,10 +336,45 @@ class AutoscanInstance(_Base):
   enabled: bool = True
 
 
+class EmbyInstance(_Base):
+  """Emby Media Server instance.
+
+  ``apikey`` is generated under the Emby admin dashboard at
+  Settings → Advanced → API Keys. The refresh path uses
+  ``POST /emby/Library/Media/Updated`` (the same call Sonarr/Radarr make).
+  """
+
+  url: str
+  apikey: str = ""
+  refresh: bool = False
+  ignore_certs: bool = False
+  path_mapping: str = ""
+  enabled: bool = True
+
+
+class JellyfinInstance(_Base):
+  """Jellyfin Media Server instance.
+
+  ``apikey`` is created under the Jellyfin admin dashboard at
+  Dashboard → API Keys. The refresh path uses
+  ``POST /Library/Media/Updated`` — Jellyfin retained the Emby endpoint
+  shape after the fork.
+  """
+
+  url: str
+  apikey: str = ""
+  refresh: bool = False
+  ignore_certs: bool = False
+  path_mapping: str = ""
+  enabled: bool = True
+
+
 class Services(_Base):
   sonarr: dict[str, SonarrInstance] = Field(default_factory=dict)
   radarr: dict[str, RadarrInstance] = Field(default_factory=dict)
   plex: dict[str, PlexInstance] = Field(default_factory=dict)
+  emby: dict[str, EmbyInstance] = Field(default_factory=dict)
+  jellyfin: dict[str, JellyfinInstance] = Field(default_factory=dict)
   autoscan: dict[str, AutoscanInstance] = Field(default_factory=dict)
 
 
@@ -507,6 +542,9 @@ __all__ = [
   "SonarrInstance",
   "RadarrInstance",
   "PlexInstance",
+  "EmbyInstance",
+  "JellyfinInstance",
+  "AutoscanInstance",
   "ScanPath",
   "PathRewrite",
   "RoutingRule",

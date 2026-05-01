@@ -34,7 +34,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from resources.config_loader import ConfigError, ConfigLoader
-from resources.config_schema import AutoscanInstance, PlexInstance, SmaConfig, SonarrInstance
+from resources.config_schema import AutoscanInstance, EmbyInstance, JellyfinInstance, PlexInstance, SmaConfig, SonarrInstance
 from resources.yamlconfig import cfg_getdirectories, cfg_getdirectory, cfg_getextension, cfg_getextensions, cfg_getpath
 
 
@@ -618,9 +618,13 @@ class ReadSettings:
     self.sonarr_instances = self._build_arr_instances(cfg, "sonarr")
     self.radarr_instances = self._build_arr_instances(cfg, "radarr")
     self.autoscan_instances = self._build_autoscan_instances(cfg)
+    self.emby_instances = self._build_media_server_instances(cfg, "emby")
+    self.jellyfin_instances = self._build_media_server_instances(cfg, "jellyfin")
     self.sonarr_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
     self.radarr_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
     self.autoscan_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
+    self.emby_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
+    self.jellyfin_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
 
     # Plex: pick the first instance (preferring one named "main"), or {}.
     plex_instances = cfg.services.plex
@@ -728,6 +732,58 @@ class ReadSettings:
       "username": instance.username,
       "password": instance.password,
       "path": path,
+      "ignore-certs": instance.ignore_certs,
+      "path-mapping": ReadSettings._as_dict(instance.path_mapping, key_separator="="),
+    }
+
+  def _build_media_server_instances(self, cfg: SmaConfig, kind: str) -> list[dict[str, Any]]:
+    """Build legacy-shaped instance dicts for an Emby- or Jellyfin-style server.
+
+    Emby and Jellyfin share the same on-the-wire shape (Jellyfin forked from
+    Emby and kept ``/Library/Media/Updated`` compatible), so they use the same
+    builder. ``kind`` is ``"emby"`` or ``"jellyfin"``.
+    """
+    instances_map: dict[str, EmbyInstance | JellyfinInstance] = getattr(cfg.services, kind)
+    rules = cfg.daemon.routing
+
+    paths_by_instance: dict[str, list[str]] = {name: [] for name in instances_map}
+    for rule in rules:
+      for ref in rule.services:
+        stype, sname = ref.split(".", 1)
+        if stype == kind and sname in paths_by_instance:
+          paths_by_instance[sname].append(rule.match)
+
+    output: list[dict[str, Any]] = []
+    for name, instance in instances_map.items():
+      if not instance.enabled or not instance.url:
+        continue
+      paths = paths_by_instance.get(name) or [""]
+      for path in paths:
+        output.append(self._media_server_to_dict(kind, name, instance, path))
+    return output
+
+  @staticmethod
+  def _media_server_to_dict(kind: str, name: str, instance: EmbyInstance | JellyfinInstance, path: str) -> dict[str, Any]:
+    parsed = urlparse(instance.url)
+    ssl = parsed.scheme == "https"
+    host = parsed.hostname or ""
+    port = parsed.port if parsed.port else (443 if ssl else 8096)
+    webroot = parsed.path or ""
+    if webroot and not webroot.startswith("/"):
+      webroot = "/" + webroot
+    if webroot.endswith("/"):
+      webroot = webroot[:-1]
+    section = name if name == "main" else f"{kind}-{name}"
+    return {
+      "section": section,
+      "kind": kind,
+      "host": host,
+      "port": port,
+      "ssl": ssl,
+      "webroot": webroot,
+      "apikey": instance.apikey,
+      "path": path,
+      "refresh": instance.refresh,
       "ignore-certs": instance.ignore_certs,
       "path-mapping": ReadSettings._as_dict(instance.path_mapping, key_separator="="),
     }
