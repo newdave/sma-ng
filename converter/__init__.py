@@ -236,7 +236,13 @@ class Converter(object):
     image is attached as a cover art attachment stream (PNG or JPEG).
 
     Yields (percent_complete, debug_string) tuples driven by FFMpeg.convert().
-    The temporary file is removed on completion.
+
+    On success the temporary `.tag` file is removed. On failure (ffprobe /
+    ffmpeg error, KeyboardInterrupt, OOM kill, daemon SIGTERM mid-mux, etc.)
+    the partially-written output is removed and the `.tag` is renamed back
+    to its original name so the source file is preserved — older versions
+    of this method left orphan `Movie.mp4.tag` files scattered through the
+    library when tagging blew up partway.
     """
     outfile = infile
     infile = infile + ".tag"
@@ -246,30 +252,52 @@ class Converter(object):
       i += 1
 
     os.rename(outfile, infile)
-    opts = ["-i", infile, "-map", "0:v?", "-c:v", "copy", "-map", "0:a?", "-c:a", "copy", "-map", "0:s?", "-c:s", "copy", "-map", "0:t?", "-c:t", "copy"]
+    success = False
+    try:
+      opts = ["-i", infile, "-map", "0:v?", "-c:v", "copy", "-map", "0:a?", "-c:a", "copy", "-map", "0:s?", "-c:s", "copy", "-map", "0:t?", "-c:t", "copy"]
 
-    info = self.ffmpeg.probe(infile)
-    if info is None:
-      raise ConverterError("FFprobe returned no info for %s" % infile)
-    i = len(info.attachment)
+      info = self.ffmpeg.probe(infile)
+      if info is None:
+        raise ConverterError("FFprobe returned no info for %s" % infile)
+      i = len(info.attachment)
 
-    if coverpath:
-      opts.extend(["-attach", coverpath])
-      if coverpath.endswith("png"):
-        opts.extend(["-metadata:s:t:" + str(i), "mimetype=image/png", "-metadata:s:t:" + str(i), "filename=cover.png"])
+      if coverpath:
+        opts.extend(["-attach", coverpath])
+        if coverpath.endswith("png"):
+          opts.extend(["-metadata:s:t:" + str(i), "mimetype=image/png", "-metadata:s:t:" + str(i), "filename=cover.png"])
+        else:
+          opts.extend(["-metadata:s:t:" + str(i), "mimetype=image/jpeg", "-metadata:s:t:" + str(i), "filename=cover.jpg"])
+
+      for k in metadata:
+        opts.extend(["-metadata", "%s=%s" % (k, metadata[k])])
+
+      if cues_to_front:
+        opts.extend(["-cues_to_front", "true"])
+
+      duration = info.format.duration if info.format else 0
+      for timecode, debug in self.ffmpeg.convert(outfile, opts, timeout=0):
+        yield int((100.0 * timecode) / duration) if duration else 0, debug
+      success = True
+    finally:
+      if success:
+        # Normal path: clean up the renamed-aside source.
+        try:
+          os.remove(infile)
+        except OSError:
+          pass
       else:
-        opts.extend(["-metadata:s:t:" + str(i), "mimetype=image/jpeg", "-metadata:s:t:" + str(i), "filename=cover.jpg"])
-
-    for k in metadata:
-      opts.extend(["-metadata", "%s=%s" % (k, metadata[k])])
-
-    if cues_to_front:
-      opts.extend(["-cues_to_front", "true"])
-
-    duration = info.format.duration if info.format else 0
-    for timecode, debug in self.ffmpeg.convert(outfile, opts, timeout=0):
-      yield int((100.0 * timecode) / duration) if duration else 0, debug
-    os.remove(infile)
+        # Failure path: remove any partial output, then put the source
+        # back so the next attempt has something to tag.
+        try:
+          if os.path.isfile(outfile):
+            os.remove(outfile)
+        except OSError:
+          pass
+        try:
+          if os.path.isfile(infile):
+            os.rename(infile, outfile)
+        except OSError:
+          pass
 
   def convert(self, outfile, options, twopass=False, timeout=10, preopts=None, postopts=None, strip_metadata=False):
     """

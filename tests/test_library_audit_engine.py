@@ -116,12 +116,26 @@ def test_enumerate_classifies_files(tmp_path):
   (tmp_path / "x.tmp").write_text("")
   (tmp_path / "y.partial").write_text("")
   (tmp_path / "z.mkv").write_bytes(b"")
+  # Converter.tag leftover when tagging blew up partway through.
+  (tmp_path / "stranded.mp4.tag").write_bytes(b"")
   units = dict(enumerate_paths([str(tmp_path)]))
   hints = set(units.values())
   assert KIND_HINT_MEDIA in hints
   assert KIND_HINT_SIDECAR in hints
   assert KIND_HINT_TMP in hints
   assert KIND_HINT_PRECONV in hints  # .mkv when no mp4 sibling
+  # `.mp4.tag` is classified as a tmp leftover, NOT as media.
+  assert units[str(tmp_path / "stranded.mp4.tag")] == KIND_HINT_TMP
+
+
+def test_tmp_artifact_check_flags_mp4_tag_leftover(tmp_path):
+  """Auditor recognises the SMA tag-step leftover so it can be
+  recycled by the auto-fix path."""
+  p = tmp_path / "Movie.mp4.tag"
+  p.write_bytes(b"")
+  result = tmp_artifact_check(str(p))
+  assert result is not None
+  assert result["reason"] == "leftover_artifact"
 
 
 def test_enumerate_skips_extras_dirs(tmp_path):
