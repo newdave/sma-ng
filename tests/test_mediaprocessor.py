@@ -1936,6 +1936,74 @@ class TestSetAcceleration:
     assert opts == []
     assert device is None
 
+  def test_qsv_extra_hw_frames_default_pool_when_no_look_ahead(self):
+    """Without look-ahead, the input-scope `-extra_hw_frames` keeps its
+    historical default of 20 frames."""
+    mp = self._make_mp_with_hwaccel(
+      hwaccels_available=["qsv"],
+      settings_hwaccels=["qsv"],
+    )
+    mp.settings.video = {"look_ahead_depth": 0}
+    mp.settings.hdr = {"look_ahead_depth": 0}
+    mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
+    opts, _ = mp.setAcceleration("h264", "yuv420p")
+    assert "-extra_hw_frames" in opts
+    assert opts[opts.index("-extra_hw_frames") + 1] == "20"
+
+  def test_qsv_extra_hw_frames_grows_with_look_ahead_depth(self):
+    """With look_ahead_depth=40 the input-scope pool becomes 44 (=depth+4),
+    matching what the old encoder-scope `-extra_hw_frames` computed."""
+    mp = self._make_mp_with_hwaccel(
+      hwaccels_available=["qsv"],
+      settings_hwaccels=["qsv"],
+    )
+    mp.settings.video = {"look_ahead_depth": 40}
+    mp.settings.hdr = {"look_ahead_depth": 0}
+    mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
+    opts, _ = mp.setAcceleration("h264", "yuv420p")
+    # Single -extra_hw_frames flag at input scope, value = depth + 4.
+    assert opts.count("-extra_hw_frames") == 1
+    assert opts[opts.index("-extra_hw_frames") + 1] == "44"
+
+  def test_qsv_extra_hw_frames_uses_max_of_video_and_hdr_depth(self):
+    """When base.video and base.hdr both configure a look-ahead, the pool
+    sizes for whichever is larger so neither pipeline starves."""
+    mp = self._make_mp_with_hwaccel(
+      hwaccels_available=["qsv"],
+      settings_hwaccels=["qsv"],
+    )
+    mp.settings.video = {"look_ahead_depth": 8}
+    mp.settings.hdr = {"look_ahead_depth": 40}
+    mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
+    opts, _ = mp.setAcceleration("h264", "yuv420p")
+    assert opts[opts.index("-extra_hw_frames") + 1] == "44"
+
+  def test_qsv_extra_hw_frames_floor_at_20(self):
+    """A small look_ahead_depth (e.g. 4) should not shrink the pool below
+    the historical default of 20."""
+    mp = self._make_mp_with_hwaccel(
+      hwaccels_available=["qsv"],
+      settings_hwaccels=["qsv"],
+    )
+    mp.settings.video = {"look_ahead_depth": 4}
+    mp.settings.hdr = {"look_ahead_depth": 0}
+    mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
+    opts, _ = mp.setAcceleration("h264", "yuv420p")
+    assert opts[opts.index("-extra_hw_frames") + 1] == "20"
+
+  def test_qsv_extra_hw_frames_capped_at_100(self):
+    """ffmpeg rejects QSV `extra_hw_frames` above 100 (device-init failure),
+    so SMA must clamp to that ceiling regardless of look_ahead_depth."""
+    mp = self._make_mp_with_hwaccel(
+      hwaccels_available=["qsv"],
+      settings_hwaccels=["qsv"],
+    )
+    mp.settings.video = {"look_ahead_depth": 200}
+    mp.settings.hdr = {"look_ahead_depth": 0}
+    mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
+    opts, _ = mp.setAcceleration("h264", "yuv420p")
+    assert opts[opts.index("-extra_hw_frames") + 1] == "100"
+
 
 # ---------------------------------------------------------------------------
 # setDefaultAudioStream
