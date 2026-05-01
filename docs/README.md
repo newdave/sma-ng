@@ -29,6 +29,7 @@ Automated media conversion, tagging, and integration pipeline. Converts media fi
 - [Environment Architecture](environment-architecture.md)
 - [Hardware Acceleration](#hardware-acceleration)
 - [Multi-Instance Deployment](multi-instance-deployment.md)
+- [Library Audit](library-audit.md)
 - [Processing Pipeline](#processing-pipeline)
 - [Module Reference](#module-reference)
 - [Post-Process Scripts](#post-process-scripts)

@@ -12,6 +12,25 @@ STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 
+# Library-audit finding lifecycle (see resources/library_audit/).
+STATUS_OPEN = "open"
+STATUS_ACKED = "acked"
+STATUS_DISMISSED = "dismissed"
+STATUS_RESOLVED = "resolved"
+
+# Library-audit queue-row lifecycle.
+AUDIT_UNIT_PENDING = "pending"
+AUDIT_UNIT_CLAIMED = "claimed"
+AUDIT_UNIT_DONE = "done"
+AUDIT_UNIT_ERROR = "error"
+
+# Library-audit run lifecycle.
+AUDIT_RUN_QUEUED = "queued"
+AUDIT_RUN_ENUMERATING = "enumerating"
+AUDIT_RUN_PROBING = "probing"
+AUDIT_RUN_COMPLETED = "completed"
+AUDIT_RUN_FAILED = "failed"
+
 _node_id_cache: str | None = None
 
 SECRET_KEYS: frozenset = frozenset({"api_key", "db_url", "username", "password", "node_id"})

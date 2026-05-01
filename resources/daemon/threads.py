@@ -3,6 +3,8 @@ import threading
 import time
 
 from resources.daemon.log_archiver import LogArchiver
+from resources.library_audit.engine import AuditEngine
+from resources.library_audit.enumerator import enumerate_paths
 from resources.log import getLogger
 
 log = getLogger("DAEMON")
@@ -450,3 +452,214 @@ class ConfigWatcherThread(_StoppableThread):
       # Record the post-reload tuple regardless of success so we don't
       # spin on the same change.
       last = self._stat_tuple() or stable
+
+
+class LibraryAuditThread(_StoppableThread):
+  """Schedules library-audit runs and acts as the cluster's enumerator.
+
+  One node at a time holds the advisory enumeration lock; that node is
+  responsible for (a) creating a new ``library_audit_runs`` row when no
+  audit is in flight, (b) walking the configured ``audit_paths`` and
+  inserting per-file work units, and (c) flipping completed runs to
+  ``completed`` once every queue row is done. Probing itself is performed
+  by every node's :class:`LibraryAuditWorkerThread` (workload distribution).
+
+  The thread re-reads ``path_config_manager.audit_settings`` on every cycle
+  so a config reload picks up new paths/intervals/skip-dirs without a
+  daemon restart.
+  """
+
+  def __init__(self, job_db, path_config_manager, server, node_id, logger):
+    super().__init__()
+    self.job_db = job_db
+    self.pcm = path_config_manager
+    self.server = server
+    self.node_id = node_id
+    self.log = logger
+
+  def _settings(self):
+    return self.pcm.audit_settings
+
+  def _next_interval(self):
+    s = self._settings()
+    return max(60, int(s.interval_seconds))
+
+  def _scope_paths(self):
+    return [a["path"] for a in self.pcm.audit_paths if a.get("enabled", True) and a.get("path")]
+
+  def run(self):
+    if not self.job_db.is_distributed:
+      return
+    self.log.info("Library audit thread started — interval %ds" % self._next_interval())
+    while self.running:
+      try:
+        self._cycle()
+      except Exception:
+        self.log.exception("Library audit cycle failed")
+      self._stop_event.wait(timeout=self._next_interval())
+
+  def _cycle(self):
+    settings = self._settings()
+    if not settings.enabled:
+      self.log.debug("Library audit disabled — skipping cycle")
+      return
+    self.job_db.release_stale_audit_claims(settings.claim_stale_seconds)
+    completed = self.job_db.complete_finished_audit_runs()
+    if completed:
+      self.log.info("Library audit completed run(s): %s" % completed)
+      self._rollup_completed(completed, settings)
+    paths = self._scope_paths()
+    if not paths:
+      self.log.debug("Library audit has no enabled paths — skipping enumerate")
+      return
+    if self.job_db.list_active_audit_runs():
+      return  # another run is still in progress; let workers drain it
+    lock_conn = self.job_db.try_acquire_audit_enumerate_lock()
+    if lock_conn is None:
+      self.log.debug("Library audit: another node holds the enumerate lock")
+      return
+    try:
+      audit_id = self.job_db.create_audit_run(paths, "scheduled:%s" % self.node_id)
+      total = self._enumerate_into_queue(audit_id, paths, settings)
+      self.log.info("Library audit run %d enumerated %d work unit(s)" % (audit_id, total))
+      if total == 0:
+        self.job_db.set_audit_run_status(audit_id, "completed")
+    finally:
+      self.job_db.release_audit_enumerate_lock(lock_conn)
+
+  def _enumerate_into_queue(self, audit_id, paths, settings):
+    is_recycle_bin_path = getattr(self.pcm, "is_recycle_bin_path", None)
+    batch = []
+    total = 0
+    for path, hint in enumerate_paths(paths, skip_dirs=list(settings.skip_dirs), is_recycle_bin_path=is_recycle_bin_path):
+      batch.append((path, hint))
+      if len(batch) >= 500:
+        self.job_db.enqueue_audit_units(audit_id, batch)
+        total += len(batch)
+        batch = []
+        if not self.running:
+          return total
+    if batch:
+      self.job_db.enqueue_audit_units(audit_id, batch)
+      total += len(batch)
+    return total
+
+  def _rollup_completed(self, audit_ids, settings):
+    """For each just-completed run, write DUPLICATE_ID findings then purge media-id scratch rows."""
+    engine = AuditEngine(
+      self.job_db,
+      self.pcm,
+      self.log,
+      ffmpeg_dir=getattr(self.pcm, "ffmpeg_dir", None),
+      dry_run=settings.dry_run,
+      auto_fix=settings.auto_fix,
+    )
+    for audit_id in audit_ids:
+      try:
+        written = engine.rollup_duplicate_ids(audit_id)
+        if written:
+          self.log.info("Library audit run %d: wrote %d duplicate-id finding(s)" % (audit_id, written))
+      except Exception:
+        self.log.exception("Library audit duplicate-id rollup failed for run %d" % audit_id)
+
+
+class LibraryAuditWorkerThread(_StoppableThread):
+  """Per-node probe worker. Claims units and writes findings.
+
+  Self-balancing across the cluster — uses ``FOR UPDATE SKIP LOCKED`` so
+  whichever node is fastest claims more units. Concurrency-capped via a
+  semaphore so the audit never spawns more ffprobe subprocesses than
+  ``audit.concurrency`` per node.
+  """
+
+  IDLE_SLEEP_SECONDS = 5
+
+  def __init__(self, job_db, path_config_manager, server, node_id, logger):
+    super().__init__()
+    self.job_db = job_db
+    self.pcm = path_config_manager
+    self.server = server
+    self.node_id = node_id
+    self.log = logger
+
+  def _settings(self):
+    return self.pcm.audit_settings
+
+  def run(self):
+    if not self.job_db.is_distributed:
+      return
+    try:
+      self.job_db.requeue_audit_claims_for_node(self.node_id)
+    except Exception:
+      self.log.exception("Library audit worker: requeue-on-startup failed")
+    self.log.info("Library audit worker started on node %s" % self.node_id)
+    while self.running:
+      try:
+        progressed = self._tick()
+      except Exception:
+        self.log.exception("Library audit worker tick failed")
+        progressed = False
+      if not progressed:
+        self._stop_event.wait(timeout=self.IDLE_SLEEP_SECONDS)
+
+  def _tick(self) -> bool:
+    settings = self._settings()
+    if not settings.enabled:
+      return False
+    runs = self.job_db.list_active_audit_runs()
+    if not runs:
+      return False
+    engine = AuditEngine(
+      self.job_db,
+      self.pcm,
+      self.log,
+      ffmpeg_dir=getattr(self.pcm, "ffmpeg_dir", None),
+      dry_run=settings.dry_run,
+      auto_fix=settings.auto_fix,
+    )
+    sem = threading.Semaphore(max(1, int(settings.concurrency)))
+    progressed = False
+    for run in runs:
+      if not self.running:
+        break
+      units = self.job_db.claim_audit_units(self.node_id, run["id"], batch=int(settings.batch_size))
+      if not units:
+        continue
+      progressed = True
+      threads = []
+      for unit in units:
+        if not self.running:
+          break
+        sem.acquire()
+        t = threading.Thread(target=self._process_unit, args=(unit, run["id"], engine, sem), daemon=True)
+        t.start()
+        threads.append(t)
+      for t in threads:
+        t.join()
+      # If a conversion was queued, wake conversion workers.
+      try:
+        self.server.notify_workers()
+      except Exception:
+        pass
+    return progressed
+
+  def _process_unit(self, unit, run_id, engine: AuditEngine, sem):
+    try:
+      finding = engine.probe_one(unit)
+      if finding is not None:
+        engine.upsert(finding, run_id)
+        action = engine.maybe_auto_fix(finding)
+        if action != "skipped" and action != "dry_run":
+          self.log.info(
+            "Library audit %s: %s (%s)" % (finding.kind.value, finding.path, action),
+            extra={"audit_id": run_id, "kind": finding.kind.value, "action": action, "path": finding.path},
+          )
+      self.job_db.mark_audit_unit_done(unit["id"])
+    except Exception as exc:
+      try:
+        self.job_db.mark_audit_unit_done(unit["id"], error=str(exc)[:512])
+      except Exception:
+        self.log.exception("Library audit: failed to mark unit %s as error" % unit["id"])
+      self.log.exception("Library audit probe error for %s" % unit.get("path"))
+    finally:
+      sem.release()

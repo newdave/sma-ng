@@ -82,6 +82,17 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `POST` | `/jobs/requeue`       | Yes  | Requeue all failed jobs. Query: `?config=...` to filter                 |
 | `POST` | `/scan/filter`        | Yes  | Filter unscanned paths (large lists). Body: `{"paths": [...]}`          |
 | `POST` | `/scan/record`        | Yes  | Mark paths as scanned. Body: `{"paths": [...]}`                         |
+| `GET`  | `/library/audit`      | Yes  | List recent audit runs. Query: `?limit=50&offset=0`                     |
+| `GET`  | `/library/audit/<id>` | Yes  | Get one audit run with per-node progress                                |
+| `POST` | `/library/audit`      | Yes  | Trigger an audit. Body: `{"paths": [...]}` (optional)                   |
+| `GET`  | `/library/findings`   | Yes  | List findings. Query: `?status=open&kind=ffprobe_failed&limit=50`       |
+| `GET`  | `/library/findings/<id>` | Yes | Get one finding                                                       |
+| `POST` | `/library/findings/<id>/ack`     | Yes | Acknowledge a finding                                          |
+| `POST` | `/library/findings/<id>/dismiss` | Yes | Dismiss a finding                                              |
+| `POST` | `/library/findings/<id>/resolve` | Yes | Mark a finding resolved                                        |
+
+See [Library Audit](library-audit.md) for the distributed-workload model,
+finding kinds, configuration knobs, and auto-fix safety semantics.
 
 Node admin API route:
 

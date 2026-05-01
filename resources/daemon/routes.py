@@ -52,6 +52,17 @@ def dispatch_post_job_action(handler, path):
     handler.send_json_response(404, {"error": "Not found"})
 
 
+def dispatch_post_finding_action(handler, path):
+  if path.endswith("/ack"):
+    handler._post_library_finding_action(path, "acked")
+  elif path.endswith("/dismiss"):
+    handler._post_library_finding_action(path, "dismissed")
+  elif path.endswith("/resolve"):
+    handler._post_library_finding_action(path, "resolved")
+  else:
+    handler.send_json_response(404, {"error": "Not found"})
+
+
 def _get_routes():
   return {
     "/": lambda handler, path, query: handler._get_root(path, query),
@@ -71,6 +82,8 @@ def _get_routes():
     "/favicon.png": lambda handler, path, query: handler._get_favicon(path, query),
     "/metrics": lambda handler, path, query: handler._get_metrics_page(path, query),
     "/api/metrics": lambda handler, path, query: handler._get_metrics_api(path, query),
+    "/library/audit": lambda handler, path, query: handler._get_library_audit(query),
+    "/library/findings": lambda handler, path, query: handler._get_library_findings(query),
   }
 
 
@@ -79,6 +92,8 @@ def _get_prefix_routes():
     ("/docs/", lambda handler, path, query: handler._get_docs(path, query)),
     ("/jobs/", lambda handler, path, query: handler._get_job(path)),
     ("/logs/", lambda handler, path, query: handler._get_log_content(path, query)),
+    ("/library/audit/", lambda handler, path, query: handler._get_library_audit_run(path)),
+    ("/library/findings/", lambda handler, path, query: handler._get_library_finding(path)),
   ]
 
 
@@ -100,6 +115,7 @@ def _post_routes():
     "/scan/filter": lambda handler, path, query: handler._post_scan_filter(),
     "/scan/record": lambda handler, path, query: handler._post_scan_record(),
     "/admin/config": lambda handler, path, query: handler._post_admin_config(path, query),
+    "/library/audit": lambda handler, path, query: handler._post_library_audit(),
   }
 
 
@@ -107,4 +123,5 @@ def _post_prefix_routes():
   return [
     ("/jobs/", lambda handler, path, query: dispatch_post_job_action(handler, path)),
     ("/admin/nodes/", lambda handler, path, query: handler._post_admin_node_action(path)),
+    ("/library/findings/", lambda handler, path, query: dispatch_post_finding_action(handler, path)),
   ]

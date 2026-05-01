@@ -279,9 +279,10 @@ class PathConfigManager:
     self.recycle_bin_min_free_gb = 50.0
     self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
     self.scan_paths = []
-    from resources.config_schema import ConfigWatchSettings
+    from resources.config_schema import AuditSettings, ConfigWatchSettings
 
     self.config_watch = ConfigWatchSettings()
+    self.audit_settings = AuditSettings()
     self._config_file = None
     self._node_id = None
     self._log_ttl_days = 30
@@ -389,6 +390,7 @@ class PathConfigManager:
     )
     self.scan_paths = [{"path": s.path, "interval": s.interval, "enabled": s.enabled, "rewrite_from": s.rewrite_from, "rewrite_to": s.rewrite_to} for s in d.scan_paths]
     self.config_watch = d.config_watch
+    self.audit_settings = d.audit
     self._node_id = d.node_id
     self._log_ttl_days = d.log_ttl_days
     self._node_expiry_days = d.node_expiry_days
@@ -434,6 +436,11 @@ class PathConfigManager:
     # ``node_id`` property and resolve_node_id() agree.
     self._node_id = node_id
     set_node_id_cache(node_id)
+
+  @property
+  def audit_paths(self) -> list[dict]:
+    """Return audit_paths as plain dicts (mirrors scan_paths shape)."""
+    return [{"path": a.path, "enabled": a.enabled, "rewrite_from": a.rewrite_from, "rewrite_to": a.rewrite_to} for a in self.audit_settings.paths]
 
   @property
   def node_id(self) -> str:

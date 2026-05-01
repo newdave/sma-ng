@@ -1750,6 +1750,8 @@ class TestDaemonServerShutdownLifecycle:
     server.scanner_thread = MagicMock()
     server.recycle_cleaner_thread = MagicMock()
     server.config_watcher_thread = MagicMock()
+    server.library_audit_thread = MagicMock()
+    server.library_audit_worker_thread = MagicMock()
     server.job_db = MagicMock()
     server.job_db.is_distributed = True
     return server
