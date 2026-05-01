@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.7.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.99...sma-ng-v1.7.0) (2026-05-01)
+
+
+### Features
+
+* **audit:** add distributed library audit subsystem ([32148b7](https://github.com/newdave/sma-ng/commit/32148b7a9778d37abff6c2a115f0fa0076fc2516))
+* **integrations:** direct Emby + Jellyfin library refresh ([416a8eb](https://github.com/newdave/sma-ng/commit/416a8eb5a9697c2bc3ced0477c0f92c5bf4724be))
+
+
+### Bug Fixes
+
+* **mediaprocessor:** bound stderr-sidecar parent-logger walk ([a407a35](https://github.com/newdave/sma-ng/commit/a407a352a23c42433a39690cf95c892374f9d23e))
+
 ## [1.6.99](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.98...sma-ng-v1.6.99) (2026-05-01)
 
 
