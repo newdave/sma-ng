@@ -155,10 +155,22 @@ class ConfigLoader:
     Pydantic captures unknown keys under ``__pydantic_extra__`` when the
     model has ``extra="allow"``. We walk every nested model and dict-of-
     model to surface every dotted path the user might have typo'd.
+
+    Suppresses the snake-form-of-an-aliased-field case: when both
+    ``node-id`` (the kebab alias) and ``node_id`` (the field name) are
+    present in the YAML, pydantic populates the field from the alias
+    and the field-name form lands in extras as a redundant duplicate.
+    That's not a typo — it's a stale on-disk copy from older stamping
+    passes — so don't shout about it.
     """
 
     extras = getattr(model, "__pydantic_extra__", None) or {}
+    field_names = set(type(model).model_fields.keys())
     for key in extras:
+      # Skip the warning if this extra is the snake form of an existing
+      # field whose kebab alias already populated it.
+      if "_" in key and key in field_names:
+        continue
       dotted = f"{prefix}.{key}" if prefix else key
       self.logger.warning("Unknown config key: %s", dotted)
 

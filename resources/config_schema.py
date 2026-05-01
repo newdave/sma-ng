@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 def _to_kebab(name: str) -> str:
@@ -70,7 +70,9 @@ class ConverterSettings(_Base):
 
 
 class PermissionSettings(_Base):
-  chmod: str = "0664"
+  # `mode` is accepted as an alias for `chmod` — Linux/Unix users
+  # naturally reach for "mode" when describing file-permission bits.
+  chmod: str = Field(default="0664", validation_alias=AliasChoices("chmod", "mode"))
   uid: int = -1
   gid: int = -1
 
@@ -205,6 +207,11 @@ class AudioSettings(_Base):
   stream_codec_combinations: list[Any] = Field(default_factory=list)
   sorting: AudioSorting = Field(default_factory=AudioSorting)
   universal: UniversalAudio = Field(default_factory=UniversalAudio)
+  # Section-level on/off shortcut. ``universal-audio: false`` is a
+  # convenience alias for ``universal.enabled: false`` — kept in the
+  # schema because it's the form most operators reach for first.
+  # When set, it overrides ``universal.enabled`` (see model_validator).
+  universal_audio: bool | None = None
   channel_filters: dict[str, str] = Field(
     default_factory=lambda: {
       "6-2": "pan=stereo|FL=0.5*FC+0.707*FL+0.707*BL+0.5*LFE|FR=0.5*FC+0.707*FR+0.707*BR+0.5*LFE",
@@ -332,6 +339,11 @@ class PlexInstance(_Base):
   ignore_certs: bool = False
   path_mapping: str = ""
   plexmatch: bool = True
+  # Legacy fields read by post_process/plex.py for the older
+  # username/password auth path. Keep them in the schema so configs
+  # carrying them don't trigger Unknown-config-key warnings.
+  username: str = ""
+  servername: str = ""
 
 
 class AutoscanInstance(_Base):
@@ -365,11 +377,12 @@ class JellyfinInstance(_Base):
   ``apikey`` is created under the Jellyfin admin dashboard at
   Dashboard → API Keys. The refresh path uses
   ``POST /Library/Media/Updated`` — Jellyfin retained the Emby endpoint
-  shape after the fork.
+  shape after the fork. ``token`` is accepted as a legacy alias for
+  ``apikey`` so older stamped configs validate without warnings.
   """
 
   url: str
-  apikey: str = ""
+  apikey: str = Field(default="", validation_alias=AliasChoices("apikey", "token"))
   refresh: bool = False
   ignore_certs: bool = False
   path_mapping: str = ""
@@ -500,6 +513,18 @@ class SmaConfig(_Base):
   base: BaseConfig = Field(default_factory=BaseConfig)
   profiles: dict[str, ProfileOverlay] = Field(default_factory=dict)
   services: Services = Field(default_factory=Services)
+
+  @model_validator(mode="after")
+  def _propagate_universal_audio_shortcut(self) -> "SmaConfig":
+    """When ``base.audio.universal-audio`` is set, mirror it onto
+    ``base.audio.universal.enabled`` (and the same for every profile
+    overlay) so the shortcut behaves like operators expect."""
+    if self.base.audio.universal_audio is not None:
+      self.base.audio.universal.enabled = bool(self.base.audio.universal_audio)
+    for prof in self.profiles.values():
+      if prof.audio is not None and prof.audio.universal_audio is not None:
+        prof.audio.universal.enabled = bool(prof.audio.universal_audio)
+    return self
 
   @model_validator(mode="after")
   def _validate_routing_references(self) -> "SmaConfig":
