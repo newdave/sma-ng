@@ -2065,7 +2065,10 @@ class MediaProcessor:
           # non-look-ahead workloads). ffmpeg's QSV device-init ceiling is
           # 100, so anything larger is clamped.
           _MAX_QSV_EXTRA_HW_FRAMES = 100
-          override = int(getattr(self.settings, "extra_hw_frames", 0) or 0)
+          override = max(
+            int(getattr(self.settings, "extra_hw_frames", 0) or 0),
+            int((self.settings.hdr or {}).get("extra_hw_frames", 0) or 0),
+          )
           if override > 0:
             pool = override
           else:

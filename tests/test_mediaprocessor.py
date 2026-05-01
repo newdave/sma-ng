@@ -2047,6 +2047,21 @@ class TestSetAcceleration:
     opts, _ = mp.setAcceleration("h264", "yuv420p")
     assert opts[opts.index("-extra_hw_frames") + 1] == "44"
 
+  def test_qsv_extra_hw_frames_hdr_override_used(self):
+    """`base.hdr.extra-hw-frames` (or the matching profile overlay) is
+    consulted alongside `base.video.extra-hw-frames`; the larger of the
+    two wins so neither path starves the QSV pool."""
+    mp = self._make_mp_with_hwaccel(
+      hwaccels_available=["qsv"],
+      settings_hwaccels=["qsv"],
+    )
+    mp.settings.look_ahead_depth = 0
+    mp.settings.extra_hw_frames = 0
+    mp.settings.hdr = {"look_ahead_depth": 0, "extra_hw_frames": 72}
+    mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
+    opts, _ = mp.setAcceleration("h264", "yuv420p")
+    assert opts[opts.index("-extra_hw_frames") + 1] == "72"
+
 
 # ---------------------------------------------------------------------------
 # setDefaultAudioStream

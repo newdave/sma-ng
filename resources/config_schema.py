@@ -67,11 +67,6 @@ class ConverterSettings(_Base):
   preopts: list[str] = Field(default_factory=list)
   postopts: list[str] = Field(default_factory=list)
   regex_directory_replace: str = r"[^\w\-_\. ]"
-  # QSV `-extra_hw_frames` pool size (input/device scope). 0 = auto: derive
-  # from the configured look-ahead depth (max(video, hdr) + 4) with a floor
-  # of 20. Any positive value is used verbatim, clamped to ffmpeg's QSV
-  # device-init ceiling of 100. Only applied when QSV hwaccel is active.
-  extra_hw_frames: int = 0
 
 
 class PermissionSettings(_Base):
@@ -112,6 +107,11 @@ class VideoSettings(_Base):
   global_quality: int = 0
   b_frames: int = -1
   ref_frames: int = -1
+  # QSV `-extra_hw_frames` pool size (input/device scope). 0 = auto: derive
+  # from look-ahead-depth + 4 with a floor of 20. Any positive value is
+  # used verbatim, clamped to ffmpeg's QSV ceiling of 100. Only applied
+  # when `gpu: qsv`. Profiles can override per path (profiles.<name>.video.extra-hw-frames).
+  extra_hw_frames: int = 0
 
 
 class HDRSettings(_Base):
@@ -129,6 +129,8 @@ class HDRSettings(_Base):
   global_quality: int = 0
   b_frames: int = -1
   ref_frames: int = -1
+  # See VideoSettings.extra_hw_frames — same semantics for HDR encodes.
+  extra_hw_frames: int = 0
 
 
 class AnalyzerSettings(_Base):

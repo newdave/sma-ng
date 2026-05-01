@@ -371,7 +371,6 @@ class ReadSettings:
     self.preopts = self._as_list(cfg.preopts, lower=False, replace=[])
     self.postopts = self._as_list(cfg.postopts, lower=False, replace=[])
     self.regex = cfg.regex_directory_replace
-    self.extra_hw_frames = int(cfg.extra_hw_frames or 0)
 
     if self.gpu:
       self._apply_hwaccel_profile(self.gpu)
@@ -437,6 +436,7 @@ class ReadSettings:
     self.global_quality = cfg.global_quality
     self.b_frames = cfg.b_frames
     self.ref_frames = cfg.ref_frames
+    self.extra_hw_frames = int(cfg.extra_hw_frames or 0)
 
     hdr_cfg = base.hdr
     self.hdr: dict[str, Any] = {
@@ -454,6 +454,7 @@ class ReadSettings:
       "global_quality": hdr_cfg.global_quality,
       "b_frames": hdr_cfg.b_frames,
       "ref_frames": hdr_cfg.ref_frames,
+      "extra_hw_frames": int(hdr_cfg.extra_hw_frames or 0),
     }
 
     naming = base.naming

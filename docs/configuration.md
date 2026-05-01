@@ -80,7 +80,6 @@ shell-trigger-only and configured in `triggers/`. See
 | `wait-post-process` | bool | `false` | Wait for post-process scripts to finish |
 | `preopts` | list | | Extra FFmpeg options before input |
 | `postopts` | list | | Extra FFmpeg options after codec options |
-| `extra-hw-frames` | int | `0` | QSV `-extra_hw_frames` pool size (input/device scope). `0` = auto: derive from `look-ahead-depth + 4` with a floor of 20. Any positive value is used verbatim, clamped to ffmpeg's QSV ceiling of 100. Only applied when `gpu: qsv`. |
 
 ---
 
@@ -104,7 +103,8 @@ shell-trigger-only and configured in `triggers/`. See
 | `filter` | string | | Custom FFmpeg video filter |
 | `force-filter` | bool | `false` | Force re-encode when filter is set |
 | `codec-parameters` | string | | Extra codec params (e.g., `x265-params`) |
-| `look-ahead-depth` | int | `0` | Look-ahead frames for rate control (QSV: `la_depth`). `0` = encoder default. For `hevc_qsv`, SMA-NG also bumps `-extra_hw_frames` to `look-ahead-depth + 4` to keep the device frame pool from running dry. |
+| `look-ahead-depth` | int | `0` | Look-ahead frames for rate control (QSV: `la_depth`). `0` = encoder default. SMA-NG auto-sizes `-extra_hw_frames` to `look-ahead-depth + 4` (floor `20`, cap `100`) to keep the device frame pool from running dry. |
+| `extra-hw-frames` | int | `0` | QSV `-extra_hw_frames` pool size (input/device scope). `0` = auto: derived from `look-ahead-depth`. Any positive value overrides the auto-derived pool, clamped to ffmpeg's QSV ceiling of `100`. Profiles can override per path (`profiles.<name>.video.extra-hw-frames`). Only emitted when `gpu: qsv`. |
 | `global-quality` | int | `0` | ICQ quality target for QSV encodes (lower = better, typical `21–25` for 1080p HEVC). `0` lets the codec use its default. Ignored when a bitrate target is set via `crf-profiles` / `bitrate-ratio` / `max-bitrate`; ICQ and VBR are mutually exclusive. |
 | `b-frames` | int | `-1` | Number of B-frames. `-1` = encoder default. |
 | `ref-frames` | int | `-1` | Number of reference frames. `-1` = encoder default. |
@@ -132,6 +132,7 @@ Override video settings for HDR content (detected automatically).
 | `filter` | string | Video filter for HDR content |
 | `force-filter` | bool | Force re-encode for HDR filter |
 | `look-ahead-depth` | int | Look-ahead depth override for HDR encoding (default: `0`) |
+| `extra-hw-frames` | int | QSV pool override for HDR encoding (default: `0` = inherit from `base.video.extra-hw-frames`). The larger of the two values wins so neither pipeline starves. |
 | `global-quality` | int | ICQ quality target for HDR encodes (default: `0` = inherit from `base.video.global-quality`) |
 | `b-frames` | int | B-frames override for HDR encoding (default: `-1` = encoder default) |
 | `ref-frames` | int | Reference frames override for HDR encoding (default: `-1` = encoder default) |
