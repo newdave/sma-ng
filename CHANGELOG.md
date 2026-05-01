@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.1...sma-ng-v1.10.2) (2026-05-01)
+
+
+### Bug Fixes
+
+* **converter:** restore source on tag-step failure; teach auditor about .tag leftovers ([bbc8dc4](https://github.com/newdave/sma-ng/commit/bbc8dc4002de17e196160a083c890d47a928d43b))
+
 ## [1.10.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.0...sma-ng-v1.10.1) (2026-05-01)
 
 
