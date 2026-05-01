@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.7.0...sma-ng-v1.7.1) (2026-05-01)
+
+
+### Bug Fixes
+
+* **handler:** skip same-extension files at queue time ([b4385de](https://github.com/newdave/sma-ng/commit/b4385de5a84527b78fac7c556bb9925ef9facbcb))
+
 ## [1.7.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.99...sma-ng-v1.7.0) (2026-05-01)
 
 
