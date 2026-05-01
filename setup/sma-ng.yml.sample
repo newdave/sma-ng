@@ -106,6 +106,7 @@ base:
     preopts: []
     postopts: []
     regex-directory-replace: '[^\w\-_\. ]'
+    extra-hw-frames: 0
   permissions:
     chmod: '0664'
     uid: -1

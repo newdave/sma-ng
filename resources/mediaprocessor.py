@@ -2052,22 +2052,28 @@ class MediaProcessor:
             opts.extend(["-hwaccel_device", "sma"])
 
         if hwaccel == "qsv":
-          # The QSV `-extra_hw_frames` lives at input/device scope (right
-          # next to `-hwaccel qsv`). When look-ahead is configured, the
-          # value must cover the encoder's look-ahead window — older
-          # SMA-NG builds emitted a *second* `-extra_hw_frames` inside
-          # the encoder optlist with `look_ahead_depth + 4`, which
-          # ffmpeg 8.x rejects ("not a encoding option" → "Error opening
-          # output files: Invalid argument"). Compute the same value
-          # here and apply it to the single input-scope flag instead.
-          # ffmpeg caps `extra_hw_frames` at 100; over-requesting causes
-          # device-init failures, so clamp to that ceiling.
+          # QSV `-extra_hw_frames` lives at input/device scope (right next
+          # to `-hwaccel qsv`). ffmpeg 8.x rejects this option at encoder
+          # scope, so SMA-NG no longer emits a second copy inside the
+          # encoder optlist (would surface as "Error opening output files:
+          # Invalid argument"). The single input-scope value here must
+          # cover the encoder's look-ahead window.
+          #
+          # `base.converter.extra-hw-frames` overrides the auto-derived
+          # value; 0 (default) means auto: max(video, hdr) look_ahead_depth
+          # + 4, with a floor of 20 (preserves the historical default for
+          # non-look-ahead workloads). ffmpeg's QSV device-init ceiling is
+          # 100, so anything larger is clamped.
           _MAX_QSV_EXTRA_HW_FRAMES = 100
-          la_depth = max(
-            int(self.settings.video.get("look_ahead_depth", 0) or 0),
-            int(self.settings.hdr.get("look_ahead_depth", 0) or 0),
-          )
-          pool = max(20, la_depth + 4) if la_depth > 0 else 20
+          override = int(getattr(self.settings, "extra_hw_frames", 0) or 0)
+          if override > 0:
+            pool = override
+          else:
+            la_depth = max(
+              int(self.settings.video.get("look_ahead_depth", 0) or 0),
+              int(self.settings.hdr.get("look_ahead_depth", 0) or 0),
+            )
+            pool = max(20, la_depth + 4) if la_depth > 0 else 20
           pool = min(pool, _MAX_QSV_EXTRA_HW_FRAMES)
           opts.extend(["-extra_hw_frames", str(pool)])
 
