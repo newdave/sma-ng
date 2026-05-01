@@ -87,11 +87,24 @@ class BaseCodec(object):
     Takes an existing disposition string (e.g. '+default+forced') and
     appends '-<flag>' for every known disposition flag not already present,
     so that FFmpeg clears inherited flags rather than leaving them ambiguous.
+
+    FFmpeg 8.x rewrote its CLI parser to be stricter about option-vs-value
+    tokens. A value that begins with '-' (e.g. when the source stream had
+    no positive disposition flags and the loop emits ``-default-dub-...``)
+    is misread as the next option, the output filename gets consumed by
+    something else, and the muxer fails with
+    ``Error opening output files: Invalid argument``. Prefix the
+    FFmpeg-special ``0`` clear-all token whenever the result would
+    otherwise begin with ``-`` so the parser unambiguously consumes the
+    full string as the disposition value. ``0`` is supported by FFmpeg
+    6.x / 7.x / 8.x, so the fix is safe across versions.
     """
     dispo = dispo or ""
     for d in self.DISPOSITIONS:
       if d not in dispo:
         dispo += "-" + d
+    if dispo.startswith("-"):
+      dispo = "0" + dispo
     return dispo
 
   def safe_framedata(self, opts):
