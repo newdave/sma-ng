@@ -6,7 +6,13 @@ Usage::
     python3 stamp_daemon.py <deploy_dir> <api_key_b64> <db_url_b64>
         <ffmpeg_dir_b64> <node_name_b64> <db_user_b64> <db_pw_b64>
         <db_name_b64> <services_b64> [<base_overrides_b64>
-        [<profiles_overrides_b64>]]
+        [<profiles_overrides_b64> [<workers_b64>]]]
+
+``workers_b64`` is the resolved per-host or deploy-wide worker count
+from setup/local.yml (``hosts.<label>.workers`` overrides
+``deploy.workers``). When non-empty and parseable as a positive
+integer, it is written to ``daemon.workers`` in sma-ng.yml so the
+daemon picks it up without requiring a CLI flag or env var.
 
 All credential arguments are base64-encoded to safely handle special
 characters; pass an empty string for unused arguments.
@@ -85,6 +91,21 @@ db_name = _b64arg(8)
 services = json.loads(base64.b64decode(sys.argv[9]).decode()) if len(sys.argv) > 9 else {}
 base_overrides = json.loads(base64.b64decode(sys.argv[10]).decode()) if len(sys.argv) > 10 and sys.argv[10] else {}
 profiles_overrides = json.loads(base64.b64decode(sys.argv[11]).decode()) if len(sys.argv) > 11 and sys.argv[11] else {}
+workers_raw = _b64arg(12)
+
+
+def _parse_positive_int(raw):
+  """Return *raw* as an int when it parses to a positive integer, else None."""
+  if not raw or not raw.strip():
+    return None
+  try:
+    val = int(raw.strip())
+  except (TypeError, ValueError):
+    return None
+  return val if val > 0 else None
+
+
+workers = _parse_positive_int(workers_raw)
 
 
 def _deep_merge(dst, src, path=""):
@@ -141,6 +162,15 @@ if os.path.exists(yaml_path):
       print(f"  sma-ng.yml daemon.{field}: {daemon_block.get(field)!r} -> {val!r}")
       daemon_block[field] = val
       changed = True
+
+  # daemon.workers — global default from setup/local.yml.deploy.workers,
+  # overridable per host via setup/local.yml.hosts.<label>.workers. The
+  # roll script resolves the right value (host > deploy fallback) before
+  # invoking the stamper.
+  if workers is not None and daemon_block.get("workers") != workers:
+    print(f"  sma-ng.yml daemon.workers: {daemon_block.get('workers')!r} -> {workers!r}")
+    daemon_block["workers"] = workers
+    changed = True
 
   # service credentials (skip routing-only keys)
   if services:
