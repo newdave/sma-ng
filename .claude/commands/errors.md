@@ -4,10 +4,10 @@ Fetch recent failed jobs and their error logs from the deployed SMA-NG daemon.
 
 ## Steps
 
-1. Read `setup/.local.ini` and parse:
-   - Host: take the first entry in `DEPLOY_HOSTS` under `[deploy]`, strip any `user@` prefix to get the bare IP/hostname
-   - Port: 8585 (default; there is no port field in .local.ini)
-   - API key: `api_key` under `[daemon]`
+1. Read `setup/local.yml` and parse:
+   - Host: take the first label from `deploy.hosts`, then look up `hosts.<label>.address` for the bare IP/hostname
+   - Port: 8585 (default; not configurable in `local.yml`)
+   - API key: `daemon.api_key`
    Construct base URL as `http://<host>:8585`.
 
 2. Fetch `<base_url>/jobs?status=failed&limit=10` with header `X-API-Key: <api_key>`.
