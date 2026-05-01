@@ -205,18 +205,29 @@ class TestH265QSVCodec:
     opts = codec.parse_options({"codec": "h265qsv", "preset": "bogus"})
     assert "-preset" not in opts
 
-  def test_look_ahead_emits_extra_hw_frames(self):
+  def test_look_ahead_emits_depth(self):
+    """`-look_ahead 1` and `-look_ahead_depth N` are emitted at encoder scope.
+
+    `-extra_hw_frames` was previously emitted here too, but ffmpeg 8.x
+    rejects it at encoder scope ("not a encoding option" → "Error opening
+    output files: Invalid argument"). The hwframe pool is sized at input
+    scope by MediaProcessor.generateOptions instead.
+    """
     codec = H265QSVCodec()
     opts = codec.parse_options({"codec": "h265qsv", "look_ahead_depth": 40})
     assert "-look_ahead_depth" in opts
     assert opts[opts.index("-look_ahead_depth") + 1] == "40"
-    assert "-extra_hw_frames" in opts
-    assert opts[opts.index("-extra_hw_frames") + 1] == "44"
+    assert "-look_ahead" in opts
+    assert opts[opts.index("-look_ahead") + 1] == "1"
+    # Encoder-scope -extra_hw_frames must not appear (ffmpeg 8.x rejects it).
+    assert "-extra_hw_frames" not in opts
 
-  def test_look_ahead_zero_no_extra_hw_frames(self):
+  def test_look_ahead_zero_disables(self):
     codec = H265QSVCodec()
     opts = codec.parse_options({"codec": "h265qsv"})
     assert "-extra_hw_frames" not in opts
+    assert "-look_ahead" in opts
+    assert opts[opts.index("-look_ahead") + 1] == "0"
 
   def test_global_quality_emits_flag_and_skips_bitrate(self):
     codec = H265QSVCodec()
@@ -1378,12 +1389,17 @@ class TestQSVAdvancedOptions:
     opts = codec.parse_options({"codec": "av1qsv", "ref_frames": 3})
     assert "-refs" in opts
 
-  def test_vp9qsv_look_ahead_extra_hw_frames(self):
+  def test_vp9qsv_look_ahead_emits_depth(self):
+    """ffmpeg 8.x rejects encoder-scope -extra_hw_frames; the QSV pool is
+    sized at input scope by MediaProcessor instead. Encoder optlist must
+    only carry the look-ahead settings the encoder actually consumes."""
     from converter.avcodecs import Vp9QSVCodec
 
     codec = Vp9QSVCodec()
     opts = codec.parse_options({"codec": "vp9qsv", "look_ahead_depth": 15})
-    assert "-extra_hw_frames" in opts
+    assert "-look_ahead_depth" in opts
+    assert opts[opts.index("-look_ahead_depth") + 1] == "15"
+    assert "-extra_hw_frames" not in opts
 
   def test_vp9qsv_b_frames(self):
     from converter.avcodecs import Vp9QSVCodec
