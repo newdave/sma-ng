@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.2...sma-ng-v1.10.3) (2026-05-01)
+
+
+### Bug Fixes
+
+* **config:** silence Unknown-config-key warnings for stale-on-disk dups + add legacy-alias schema fields ([be54bba](https://github.com/newdave/sma-ng/commit/be54bba7c084b647dc0f6c715b9c7d342a758e50))
+
 ## [1.10.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.1...sma-ng-v1.10.2) (2026-05-01)
 
 
