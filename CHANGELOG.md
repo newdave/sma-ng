@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.8.0...sma-ng-v1.8.1) (2026-05-01)
+
+
+### Bug Fixes
+
+* **qsv:** drop encoder-scope -extra_hw_frames rejected by ffmpeg 8.x ([a5a1c58](https://github.com/newdave/sma-ng/commit/a5a1c581e593448b5692105b27bd8f145f01cc2a))
+
 ## [1.8.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.7.1...sma-ng-v1.8.0) (2026-05-01)
 
 
