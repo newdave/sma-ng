@@ -1946,7 +1946,7 @@ class TestSetAcceleration:
       hwaccels_available=["qsv"],
       settings_hwaccels=["qsv"],
     )
-    mp.settings.video = {"look_ahead_depth": 0}
+    mp.settings.look_ahead_depth = 0
     mp.settings.hdr = {"look_ahead_depth": 0}
     mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
     opts, _ = mp.setAcceleration("h264", "yuv420p")
@@ -1960,7 +1960,7 @@ class TestSetAcceleration:
       hwaccels_available=["qsv"],
       settings_hwaccels=["qsv"],
     )
-    mp.settings.video = {"look_ahead_depth": 40}
+    mp.settings.look_ahead_depth = 40
     mp.settings.hdr = {"look_ahead_depth": 0}
     mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
     opts, _ = mp.setAcceleration("h264", "yuv420p")
@@ -1975,7 +1975,7 @@ class TestSetAcceleration:
       hwaccels_available=["qsv"],
       settings_hwaccels=["qsv"],
     )
-    mp.settings.video = {"look_ahead_depth": 8}
+    mp.settings.look_ahead_depth = 8
     mp.settings.hdr = {"look_ahead_depth": 40}
     mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
     opts, _ = mp.setAcceleration("h264", "yuv420p")
@@ -1988,7 +1988,7 @@ class TestSetAcceleration:
       hwaccels_available=["qsv"],
       settings_hwaccels=["qsv"],
     )
-    mp.settings.video = {"look_ahead_depth": 4}
+    mp.settings.look_ahead_depth = 4
     mp.settings.hdr = {"look_ahead_depth": 0}
     mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
     opts, _ = mp.setAcceleration("h264", "yuv420p")
@@ -2001,7 +2001,7 @@ class TestSetAcceleration:
       hwaccels_available=["qsv"],
       settings_hwaccels=["qsv"],
     )
-    mp.settings.video = {"look_ahead_depth": 200}
+    mp.settings.look_ahead_depth = 200
     mp.settings.hdr = {"look_ahead_depth": 0}
     mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
     opts, _ = mp.setAcceleration("h264", "yuv420p")
@@ -2013,7 +2013,7 @@ class TestSetAcceleration:
       hwaccels_available=["qsv"],
       settings_hwaccels=["qsv"],
     )
-    mp.settings.video = {"look_ahead_depth": 0}
+    mp.settings.look_ahead_depth = 0
     mp.settings.hdr = {"look_ahead_depth": 0}
     mp.settings.extra_hw_frames = 64
     mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
@@ -2026,7 +2026,7 @@ class TestSetAcceleration:
       hwaccels_available=["qsv"],
       settings_hwaccels=["qsv"],
     )
-    mp.settings.video = {"look_ahead_depth": 40}
+    mp.settings.look_ahead_depth = 40
     mp.settings.hdr = {"look_ahead_depth": 0}
     mp.settings.extra_hw_frames = 250
     mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")
@@ -2040,7 +2040,7 @@ class TestSetAcceleration:
       hwaccels_available=["qsv"],
       settings_hwaccels=["qsv"],
     )
-    mp.settings.video = {"look_ahead_depth": 40}
+    mp.settings.look_ahead_depth = 40
     mp.settings.hdr = {"look_ahead_depth": 0}
     mp.settings.extra_hw_frames = 0
     mp.converter.ffmpeg.hwaccel_decoder = MagicMock(return_value="h264_qsv")

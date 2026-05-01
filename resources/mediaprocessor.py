@@ -2070,8 +2070,8 @@ class MediaProcessor:
             pool = override
           else:
             la_depth = max(
-              int(self.settings.video.get("look_ahead_depth", 0) or 0),
-              int(self.settings.hdr.get("look_ahead_depth", 0) or 0),
+              int(getattr(self.settings, "look_ahead_depth", 0) or 0),
+              int((self.settings.hdr or {}).get("look_ahead_depth", 0) or 0),
             )
             pool = max(20, la_depth + 4) if la_depth > 0 else 20
           pool = min(pool, _MAX_QSV_EXTRA_HW_FRAMES)
