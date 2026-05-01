@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.97](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.96...sma-ng-v1.6.97) (2026-05-01)
+
+
+### Bug Fixes
+
+* **ffmpeg:** prefix '0' on all-negation disposition values ([85a62c0](https://github.com/newdave/sma-ng/commit/85a62c075ecd0791adc20eb449e57e8f55b44e8a))
+
 ## [1.6.96](https://github.com/newdave/sma-ng/compare/sma-ng-v1.6.95...sma-ng-v1.6.96) (2026-04-30)
 
 
