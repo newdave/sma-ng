@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.3...sma-ng-v1.10.4) (2026-05-02)
+
+
+### Bug Fixes
+
+* **schema:** coerce permissions.mode int → octal string ([947839c](https://github.com/newdave/sma-ng/commit/947839c2732e93281e89f6d588b2b131e55dcb86))
+
 ## [1.10.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.2...sma-ng-v1.10.3) (2026-05-01)
 
 
