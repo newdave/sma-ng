@@ -1111,6 +1111,22 @@ class MediaProcessor:
       self.log.info("Audio detected for stream %s - %s %s %d channel." % (a.index, a.codec, a.metadata["language"], a.audio_channels))
       allowua = self._process_audio_stream(a, inputfile, info, awl, allowua, blocked_audio_languages, blocked_audio_dispositions, audio_settings, tagdata, acodecs=acodecs, ua_codecs=ua_codecs)
 
+    # Defensive fallback: if every audio stream got filtered out (typically
+    # because the source was mistagged with `hearing_impaired` or another
+    # ignored disposition on its primary track), retry without language /
+    # disposition filtering rather than fail the conversion. The user gets
+    # at least one audio stream and a clear warning instead of a hard
+    # "Conversion has no audio streams, aborting" abort.
+    if info.audio and not audio_settings:
+      self.log.warning(
+        "All %d source audio stream(s) were filtered out by language / disposition rules — relaxing filters and accepting them as a fallback so the conversion can proceed." % len(info.audio)
+      )
+      relaxed_awl: list[str] = []  # accept any language
+      relaxed_blocked_dispos: set[str] = set()  # ignore disposition exclusions
+      relaxed_blocked_lang: set[str] = set()
+      for a in info.audio:
+        self._process_audio_stream(a, inputfile, info, relaxed_awl, allowua, relaxed_blocked_lang, relaxed_blocked_dispos, audio_settings, tagdata, acodecs=acodecs, ua_codecs=ua_codecs)
+
     self.purgeDuplicateStreams(acombinations, audio_settings, info, acodecs, ua_codecs)
 
     try:
