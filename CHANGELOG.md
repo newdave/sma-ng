@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.6...sma-ng-v1.11.0) (2026-05-02)
+
+
+### Features
+
+* **deploy:** add deploy:reload mise task for hot-reload after config:roll ([28a5a4b](https://github.com/newdave/sma-ng/commit/28a5a4bf946add15b45d842c7c842e24b77eb37e))
+
 ## [1.10.6](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.5...sma-ng-v1.10.6) (2026-05-02)
 
 
