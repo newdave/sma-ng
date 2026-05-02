@@ -3102,6 +3102,40 @@ class TestRunFfmpeg:
     assert outputfile is None
 
 
+class TestStripHwDecoderFromPreopts:
+  """`_strip_hw_decoder_from_preopts` removes the input-side hardware
+  decoder so the conversion can be retried with software decode when
+  the GPU's QSV decoder fails to init at runtime (e.g. av1_qsv on
+  pre-Arc Intel iGPUs that list the decoder but can't actually use it)."""
+
+  def test_returns_none_for_empty(self):
+    from resources.mediaprocessor import _strip_hw_decoder_from_preopts as f
+
+    assert f(None) is None
+    assert f([]) is None
+
+  def test_returns_none_when_no_decoder(self):
+    from resources.mediaprocessor import _strip_hw_decoder_from_preopts as f
+
+    assert f(["-hwaccel", "qsv", "-extra_hw_frames", "40"]) is None
+
+  def test_strips_vcodec_pair(self):
+    from resources.mediaprocessor import _strip_hw_decoder_from_preopts as f
+
+    result = f(["-extra_hw_frames", "40", "-vcodec", "av1_qsv", "-hwaccel", "qsv"])
+    assert result == ["-extra_hw_frames", "40", "-hwaccel", "qsv"]
+
+  def test_strips_c_v_pair(self):
+    from resources.mediaprocessor import _strip_hw_decoder_from_preopts as f
+
+    assert f(["-c:v", "av1_qsv", "-i", "x"]) == ["-i", "x"]
+
+  def test_only_strips_first_occurrence(self):
+    from resources.mediaprocessor import _strip_hw_decoder_from_preopts as f
+
+    assert f(["-vcodec", "av1_qsv", "-vcodec", "h264_qsv"]) == ["-vcodec", "h264_qsv"]
+
+
 # ---------------------------------------------------------------------------
 # _cleanup_input()
 # ---------------------------------------------------------------------------
@@ -4960,6 +4994,40 @@ class TestRunFfmpeg:
     mp.convert = MagicMock(return_value=(None, "/fake/input.mkv"))
     outputfile, inputfile, ripped = mp._run_ffmpeg("/fake/input.mkv", {}, [], [], [], [], False, None)
     assert outputfile is None
+
+
+class TestStripHwDecoderFromPreopts:
+  """`_strip_hw_decoder_from_preopts` removes the input-side hardware
+  decoder so the conversion can be retried with software decode when
+  the GPU's QSV decoder fails to init at runtime (e.g. av1_qsv on
+  pre-Arc Intel iGPUs that list the decoder but can't actually use it)."""
+
+  def test_returns_none_for_empty(self):
+    from resources.mediaprocessor import _strip_hw_decoder_from_preopts as f
+
+    assert f(None) is None
+    assert f([]) is None
+
+  def test_returns_none_when_no_decoder(self):
+    from resources.mediaprocessor import _strip_hw_decoder_from_preopts as f
+
+    assert f(["-hwaccel", "qsv", "-extra_hw_frames", "40"]) is None
+
+  def test_strips_vcodec_pair(self):
+    from resources.mediaprocessor import _strip_hw_decoder_from_preopts as f
+
+    result = f(["-extra_hw_frames", "40", "-vcodec", "av1_qsv", "-hwaccel", "qsv"])
+    assert result == ["-extra_hw_frames", "40", "-hwaccel", "qsv"]
+
+  def test_strips_c_v_pair(self):
+    from resources.mediaprocessor import _strip_hw_decoder_from_preopts as f
+
+    assert f(["-c:v", "av1_qsv", "-i", "x"]) == ["-i", "x"]
+
+  def test_only_strips_first_occurrence(self):
+    from resources.mediaprocessor import _strip_hw_decoder_from_preopts as f
+
+    assert f(["-vcodec", "av1_qsv", "-vcodec", "h264_qsv"]) == ["-vcodec", "h264_qsv"]
 
 
 # ---------------------------------------------------------------------------
