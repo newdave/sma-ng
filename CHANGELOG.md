@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.6](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.5...sma-ng-v1.10.6) (2026-05-02)
+
+
+### Bug Fixes
+
+* **mediaprocessor:** retry once with software decode when QSV decoder init fails ([e684597](https://github.com/newdave/sma-ng/commit/e684597dd9cb68b90efbdd219585a36230cdc1b8))
+
 ## [1.10.5](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.4...sma-ng-v1.10.5) (2026-05-02)
 
 
