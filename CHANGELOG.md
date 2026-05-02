@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.5](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.4...sma-ng-v1.10.5) (2026-05-02)
+
+
+### Bug Fixes
+
+* **mediaprocessor:** defensive fallback when audio filter zeroes all streams ([e05f238](https://github.com/newdave/sma-ng/commit/e05f238c578261d34f3a5036c4f9f07f11095815))
+
 ## [1.10.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.3...sma-ng-v1.10.4) (2026-05-02)
 
 
