@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.11.0...sma-ng-v1.11.1) (2026-05-02)
+
+
+### Bug Fixes
+
+* **ffmpeg:** add second-tier full-software retry when QSV pipeline fails ([46dbccf](https://github.com/newdave/sma-ng/commit/46dbccf838b80d03d8ead7bf9be4f66a15ea5b59))
+
 ## [1.11.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.10.6...sma-ng-v1.11.0) (2026-05-02)
 
 
