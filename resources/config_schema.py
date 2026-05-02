@@ -72,9 +72,24 @@ class ConverterSettings(_Base):
 class PermissionSettings(_Base):
   # `mode` is accepted as an alias for `chmod` — Linux/Unix users
   # naturally reach for "mode" when describing file-permission bits.
+  # Plain integer values like `0664` (often written unquoted in YAML)
+  # are coerced to the canonical zero-padded octal string.
   chmod: str = Field(default="0664", validation_alias=AliasChoices("chmod", "mode"))
   uid: int = -1
   gid: int = -1
+
+  @model_validator(mode="before")
+  @classmethod
+  def _stringify_chmod(cls, data):
+    if not isinstance(data, dict):
+      return data
+    for k in ("chmod", "mode"):
+      v = data.get(k)
+      if isinstance(v, int):
+        # YAML loads `0664` (or `420`) as an int; render as zero-padded
+        # octal so `int(value, 8)` downstream still works.
+        data[k] = "0%o" % v if v < 0o1000 else "%o" % v
+    return data
 
 
 class MetadataSettings(_Base):
