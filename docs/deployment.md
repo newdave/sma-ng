@@ -73,6 +73,7 @@ curl https://mise.run | sh
 | `mise run deploy:mise`       | Sync the local `.mise/` deploy control plane to all hosts                                   |
 | `mise run deploy:sync`       | Sync code and install dependencies on all hosts                            |
 | `mise run config:roll`       | Roll configs to remote hosts: create missing files, merge new keys, stamp credentials       |
+| `mise run deploy:reload`     | Hot-reload: POST `/reload` on every host so daemons re-read `config/sma-ng.yml` in place (no container restart). Use after `config:roll` when the change is hot-reloadable (api_key, scan_paths, routing, codec lists, profile overlays, audit settings). Worker count + bind host/port still require `deploy:restart`. |
 | `mise run deploy:restart`    | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container                  |
 | `mise run config:audit`      | Audit local configs                                                                         |
 | `mise run deploy:docker`     | Rsync code to Docker hosts, pull latest image, and recreate the SMA container               |
@@ -325,6 +326,7 @@ For each remote host:
 | `deploy:mise`    | Sync the local `.mise/` deploy control plane to each remote `DEPLOY_DIR`                                                                  |
 | `deploy:sync`    | Sync code and install deps on all hosts                                                                                                   |
 | `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials                                                                           |
+| `deploy:reload`  | Hot-reload `config/sma-ng.yml` on every host (POST `/reload`). Pair with `config:roll` for non-restart-required changes                  |
 | `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container                                                                |
 | `config:audit`   | Audit local configs                                                                                                                       |
 | `deploy:docker`  | Rsync the local codebase to each Docker host, stamp `SMA_NODE_NAME` into `daemon.env`, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
