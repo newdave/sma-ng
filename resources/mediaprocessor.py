@@ -18,6 +18,28 @@ import time
 from autoprocess import autoscan, plex
 from autoprocess import emby as emby_refresh
 from autoprocess import jellyfin as jellyfin_refresh
+
+
+def _strip_hw_decoder_from_preopts(preopts):
+  """Return *preopts* with any `-vcodec <name>` (or `-c:v <name>`) pair
+  removed, or ``None`` if no such pair was present.
+
+  Used to retry a failed conversion with software input decoding when
+  the hardware decoder ffmpeg lists in its build (e.g. ``av1_qsv``)
+  isn't actually supported by the GPU at runtime. Only strips the FIRST
+  occurrence — preopts is the input-side option block, so multiple
+  ``-vcodec`` entries shouldn't appear there.
+  """
+  if not preopts:
+    return None
+  out = list(preopts)
+  for i, tok in enumerate(out):
+    if tok in ("-vcodec", "-c:v") and i + 1 < len(out):
+      del out[i : i + 2]
+      return out
+  return None
+
+
 from converter import Converter, FFMpegConvertError
 from converter.avcodecs import BaseCodec
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
@@ -2870,39 +2892,56 @@ class MediaProcessor:
       self.log.error("Unable to determine output file path, aborting conversion.")
       return None, inputfile
 
-    try:
-      conv = self.converter.convert(outputfile, options, timeout=0, preopts=preopts, postopts=postopts, strip_metadata=self.settings.strip_metadata)
-    except KeyboardInterrupt:
-      raise
-    except Exception:
-      self.log.exception("Error converting file.")
-      return None, inputfile
-
-    _, cmds = next(conv)
-    self.log.info("FFmpeg command:")
-    self.log.info("======================")
-    self.log.info(self.printableFFMPEGCommand(cmds))
-    self.log.info("======================")
-
-    try:
-      timecode = 0
-      debug: str = ""
-      for timecode, _raw_debug in conv:
-        debug = _raw_debug if isinstance(_raw_debug, str) else " ".join(str(x) for x in _raw_debug)
+    def _run_convert(_preopts):
+      """Drive the convert generator end-to-end. Returns True on success,
+      raises FFMpegConvertError on failure (for retry consideration)."""
+      conv = self.converter.convert(
+        outputfile,
+        options,
+        timeout=0,
+        preopts=_preopts,
+        postopts=postopts,
+        strip_metadata=self.settings.strip_metadata,
+      )
+      _, _cmds = next(conv)
+      self.log.info("FFmpeg command:")
+      self.log.info("======================")
+      self.log.info(self.printableFFMPEGCommand(_cmds))
+      self.log.info("======================")
+      _timecode = 0
+      _debug: str = ""
+      for _timecode, _raw_debug in conv:
+        _debug = _raw_debug if isinstance(_raw_debug, str) else " ".join(str(x) for x in _raw_debug)
         if reportProgress:
           if progressOutput:
-            progressOutput(timecode, debug)
+            progressOutput(_timecode, _debug)
           else:
-            self.displayProgressBar(timecode, debug)
+            self.displayProgressBar(_timecode, _debug)
       if reportProgress:
         if progressOutput:
-          progressOutput(100, debug)
+          progressOutput(100, _debug)
         else:
           self.displayProgressBar(100, newline=True)
-
       self.log.info("%s created." % outputfile)
       self.setPermissions(outputfile)
 
+    try:
+      try:
+        _run_convert(preopts)
+      except FFMpegConvertError as first_err:
+        # If preopts forced a hardware decoder via `-vcodec <name>` (e.g.
+        # av1_qsv on a pre-Arc Intel iGPU that lists the decoder but
+        # can't actually init it), strip that decoder and retry once
+        # with software decode. The QSV ENCODE path stays in `options`
+        # and is unaffected.
+        retry_preopts = _strip_hw_decoder_from_preopts(preopts)
+        if retry_preopts is None:
+          raise
+        self.log.warning("Conversion failed with hardware decoder; retrying once with software decode (stripping `-vcodec` from preopts). Original error: %s" % str(first_err)[:300])
+        if outputfile is not None and os.path.isfile(outputfile):
+          # Clear any partial output written by the failed attempt.
+          self.removeFile(outputfile)
+        _run_convert(retry_preopts)
     except FFMpegConvertError as e:
       self.log.exception("Error converting file, FFMPEG error.")
       self.log.error(e.cmd)
