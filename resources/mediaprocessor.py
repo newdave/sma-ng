@@ -40,6 +40,86 @@ def _strip_hw_decoder_from_preopts(preopts):
   return None
 
 
+_QSV_INPUT_PIPELINE_FLAGS = (
+  "-hwaccel",
+  "-hwaccel_output_format",
+  "-extra_hw_frames",
+  "-init_hw_device",
+  "-filter_hw_device",
+  "-hwaccel_device",
+)
+
+
+def _strip_qsv_input_pipeline_from_preopts(preopts):
+  """Return *preopts* with QSV input-pipeline flags removed, or ``None``
+  if nothing was stripped.
+
+  Removes ``-hwaccel``, ``-hwaccel_output_format``, ``-extra_hw_frames``,
+  ``-init_hw_device``, ``-filter_hw_device``, and ``-hwaccel_device``
+  flag/value pairs. Also strips a leading ``-vcodec``/``-c:v`` pair so
+  the input is fully decoded in software. Used as the second retry tier
+  when even software decode + QSV encoder is unstable on the GPU
+  (e.g. 4K HDR10+ HEVC on weaker iGPUs).
+  """
+  if not preopts:
+    return None
+  out = list(preopts)
+  changed = False
+  i = 0
+  while i < len(out):
+    if out[i] in _QSV_INPUT_PIPELINE_FLAGS and i + 1 < len(out):
+      del out[i : i + 2]
+      changed = True
+      continue
+    if out[i] in ("-vcodec", "-c:v") and i + 1 < len(out):
+      del out[i : i + 2]
+      changed = True
+      continue
+    i += 1
+  return out if changed else None
+
+
+_QSV_CODEC_TO_SW = {
+  "h264qsv": "h264",
+  "h265qsv": "h265",
+  "hevc_qsv": "h265",
+  "hevcqsvpatched": "h265",
+  "av1qsv": "av1",
+}
+
+
+def _swap_qsv_codec_to_sw(options):
+  """Swap a QSV video encoder in *options* to its software equivalent.
+
+  Returns the original codec name on success (so the caller can log
+  the swap and restore on a final retry attempt), or ``None`` if the
+  options dict didn't carry a known QSV encoder. Mutates *options*
+  in place by replacing ``options['video']['codec']`` and removing
+  ``qsv_pix_fmt`` if present (which only applies to ``scale_qsv``).
+  """
+  if not options or not isinstance(options.get("video"), dict):
+    return None
+  video = options["video"]
+  codec = video.get("codec")
+  if not codec:
+    return None
+  if isinstance(codec, list):
+    # codec list is a fallback chain; rewrite first entry only
+    head = codec[0] if codec else None
+    sw = _QSV_CODEC_TO_SW.get(head)
+    if not sw:
+      return None
+    video["codec"] = [sw] + list(codec[1:])
+    video.pop("qsv_pix_fmt", None)
+    return head
+  sw = _QSV_CODEC_TO_SW.get(codec)
+  if not sw:
+    return None
+  video["codec"] = sw
+  video.pop("qsv_pix_fmt", None)
+  return codec
+
+
 from converter import Converter, FFMpegConvertError
 from converter.avcodecs import BaseCodec
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
@@ -2929,11 +3009,10 @@ class MediaProcessor:
       try:
         _run_convert(preopts)
       except FFMpegConvertError as first_err:
-        # If preopts forced a hardware decoder via `-vcodec <name>` (e.g.
+        # Tier 1: strip the input-side `-vcodec <hw_decoder>` (e.g.
         # av1_qsv on a pre-Arc Intel iGPU that lists the decoder but
-        # can't actually init it), strip that decoder and retry once
-        # with software decode. The QSV ENCODE path stays in `options`
-        # and is unaffected.
+        # can't actually init it) and retry with software decode. The
+        # QSV ENCODE path in `options` is left intact.
         retry_preopts = _strip_hw_decoder_from_preopts(preopts)
         if retry_preopts is None:
           raise
@@ -2941,7 +3020,27 @@ class MediaProcessor:
         if outputfile is not None and os.path.isfile(outputfile):
           # Clear any partial output written by the failed attempt.
           self.removeFile(outputfile)
-        _run_convert(retry_preopts)
+        try:
+          _run_convert(retry_preopts)
+        except FFMpegConvertError as second_err:
+          # Tier 2: full software pipeline. Some combinations (4K HDR10+
+          # HEVC on weaker iGPUs) fail even with SW decode because the
+          # QSV upload + scale_qsv filter chain still can't handle the
+          # input. Strip the QSV input pipeline entirely AND swap the
+          # encoder to its software counterpart so libx265/libx264/libaom
+          # picks up the conversion.
+          sw_preopts = _strip_qsv_input_pipeline_from_preopts(preopts) or []
+          original_codec = _swap_qsv_codec_to_sw(options)
+          if original_codec is None:
+            # No QSV encoder to swap — second retry won't help.
+            raise
+          self.log.warning(
+            "Software-decode retry also failed; falling back to full software pipeline "
+            "(swapping encoder %s -> %s, stripping QSV input pipeline). Error: %s" % (original_codec, options["video"]["codec"], str(second_err)[:300])
+          )
+          if outputfile is not None and os.path.isfile(outputfile):
+            self.removeFile(outputfile)
+          _run_convert(sw_preopts)
     except FFMpegConvertError as e:
       self.log.exception("Error converting file, FFMPEG error.")
       self.log.error(e.cmd)

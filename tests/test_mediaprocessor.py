@@ -3136,6 +3136,101 @@ class TestStripHwDecoderFromPreopts:
     assert f(["-vcodec", "av1_qsv", "-vcodec", "h264_qsv"]) == ["-vcodec", "h264_qsv"]
 
 
+class TestStripQsvInputPipelineFromPreopts:
+  """`_strip_qsv_input_pipeline_from_preopts` removes the QSV input
+  pipeline (-hwaccel, -hwaccel_output_format, -extra_hw_frames,
+  -init_hw_device, etc.) for the second-tier full-software fallback."""
+
+  def test_returns_none_for_empty(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    assert f(None) is None
+    assert f([]) is None
+
+  def test_returns_none_when_no_pipeline(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    assert f(["-fix_sub_duration"]) is None
+
+  def test_strips_full_qsv_pipeline(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    preopts = [
+      "-init_hw_device",
+      "qsv=hw,child_device=/dev/dri/renderD128",
+      "-hwaccel",
+      "qsv",
+      "-hwaccel_output_format",
+      "qsv",
+      "-extra_hw_frames",
+      "40",
+      "-fix_sub_duration",
+      "-vcodec",
+      "hevc_qsv",
+    ]
+    assert f(preopts) == ["-fix_sub_duration"]
+
+  def test_strips_partial_pipeline(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    assert f(["-hwaccel", "qsv", "-fix_sub_duration"]) == ["-fix_sub_duration"]
+
+  def test_does_not_mutate_input(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    original = ["-hwaccel", "qsv", "-fix_sub_duration"]
+    f(original)
+    assert original == ["-hwaccel", "qsv", "-fix_sub_duration"]
+
+
+class TestSwapQsvCodecToSw:
+  """`_swap_qsv_codec_to_sw` swaps QSV encoders in the options dict to
+  their software counterparts for the second-tier full-software fallback."""
+
+  def test_returns_none_for_no_video(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    assert f({}) is None
+    assert f({"video": None}) is None
+    assert f({"video": {}}) is None
+
+  def test_returns_none_for_non_qsv_codec(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    options = {"video": {"codec": "h265"}}
+    assert f(options) is None
+    assert options["video"]["codec"] == "h265"
+
+  def test_swaps_hevc_qsv_to_h265(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    options = {"video": {"codec": "hevc_qsv", "qsv_pix_fmt": "p010le"}}
+    assert f(options) == "hevc_qsv"
+    assert options["video"]["codec"] == "h265"
+    assert "qsv_pix_fmt" not in options["video"]
+
+  def test_swaps_h264qsv_to_h264(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    options = {"video": {"codec": "h264qsv"}}
+    assert f(options) == "h264qsv"
+    assert options["video"]["codec"] == "h264"
+
+  def test_swaps_av1qsv_to_av1(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    options = {"video": {"codec": "av1qsv"}}
+    assert f(options) == "av1qsv"
+    assert options["video"]["codec"] == "av1"
+
+  def test_swaps_first_entry_in_codec_list(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    options = {"video": {"codec": ["hevc_qsv", "h265"]}}
+    assert f(options) == "hevc_qsv"
+    assert options["video"]["codec"] == ["h265", "h265"]
+
+
 # ---------------------------------------------------------------------------
 # _cleanup_input()
 # ---------------------------------------------------------------------------
@@ -5028,6 +5123,101 @@ class TestStripHwDecoderFromPreopts:
     from resources.mediaprocessor import _strip_hw_decoder_from_preopts as f
 
     assert f(["-vcodec", "av1_qsv", "-vcodec", "h264_qsv"]) == ["-vcodec", "h264_qsv"]
+
+
+class TestStripQsvInputPipelineFromPreopts:
+  """`_strip_qsv_input_pipeline_from_preopts` removes the QSV input
+  pipeline (-hwaccel, -hwaccel_output_format, -extra_hw_frames,
+  -init_hw_device, etc.) for the second-tier full-software fallback."""
+
+  def test_returns_none_for_empty(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    assert f(None) is None
+    assert f([]) is None
+
+  def test_returns_none_when_no_pipeline(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    assert f(["-fix_sub_duration"]) is None
+
+  def test_strips_full_qsv_pipeline(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    preopts = [
+      "-init_hw_device",
+      "qsv=hw,child_device=/dev/dri/renderD128",
+      "-hwaccel",
+      "qsv",
+      "-hwaccel_output_format",
+      "qsv",
+      "-extra_hw_frames",
+      "40",
+      "-fix_sub_duration",
+      "-vcodec",
+      "hevc_qsv",
+    ]
+    assert f(preopts) == ["-fix_sub_duration"]
+
+  def test_strips_partial_pipeline(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    assert f(["-hwaccel", "qsv", "-fix_sub_duration"]) == ["-fix_sub_duration"]
+
+  def test_does_not_mutate_input(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    original = ["-hwaccel", "qsv", "-fix_sub_duration"]
+    f(original)
+    assert original == ["-hwaccel", "qsv", "-fix_sub_duration"]
+
+
+class TestSwapQsvCodecToSw:
+  """`_swap_qsv_codec_to_sw` swaps QSV encoders in the options dict to
+  their software counterparts for the second-tier full-software fallback."""
+
+  def test_returns_none_for_no_video(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    assert f({}) is None
+    assert f({"video": None}) is None
+    assert f({"video": {}}) is None
+
+  def test_returns_none_for_non_qsv_codec(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    options = {"video": {"codec": "h265"}}
+    assert f(options) is None
+    assert options["video"]["codec"] == "h265"
+
+  def test_swaps_hevc_qsv_to_h265(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    options = {"video": {"codec": "hevc_qsv", "qsv_pix_fmt": "p010le"}}
+    assert f(options) == "hevc_qsv"
+    assert options["video"]["codec"] == "h265"
+    assert "qsv_pix_fmt" not in options["video"]
+
+  def test_swaps_h264qsv_to_h264(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    options = {"video": {"codec": "h264qsv"}}
+    assert f(options) == "h264qsv"
+    assert options["video"]["codec"] == "h264"
+
+  def test_swaps_av1qsv_to_av1(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    options = {"video": {"codec": "av1qsv"}}
+    assert f(options) == "av1qsv"
+    assert options["video"]["codec"] == "av1"
+
+  def test_swaps_first_entry_in_codec_list(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+
+    options = {"video": {"codec": ["hevc_qsv", "h265"]}}
+    assert f(options) == "hevc_qsv"
+    assert options["video"]["codec"] == ["h265", "h265"]
 
 
 # ---------------------------------------------------------------------------
