@@ -32,11 +32,34 @@ for host in $DEPLOY_HOSTS; do
     matched=1
 
     echo ""
+
+    # Drop any stale `sma-postgres`-named container from before the
+    # canonical container_name standardized on `sma-pgsql`. Volume
+    # sma-pgdata is preserved.
+    if ! remove_stale_pg_containers "$host" "sma-pgsql"; then
+        echo "  WARNING: [$host] stale-pg cleanup reported errors — continuing" >&2
+    fi
+
     echo "==> [$host] restarting sma-pgsql (profile: $profile)"
-    if ! run_remote_compose "$host" "--profile $profile restart sma-pgsql"; then
-        echo "ERROR: [$host] docker compose restart failed for sma-pgsql" >&2
-        failed="$failed $host"
-        continue
+    # If a stale container was just removed, no `sma-pgsql` exists yet
+    # for compose to restart — fall back to `up -d` so the canonical
+    # name is created in place. `up -d` is a no-op when the container
+    # is already running and named correctly, so the same path works
+    # for the steady-state case after the first run.
+    # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts must word-split for ssh; remote command intentionally expands client-side
+    if ssh $ssh_opts "$ssh_target" "${sudo_prefix}docker inspect sma-pgsql >/dev/null 2>&1"; then
+        if ! run_remote_compose "$host" "--profile $profile restart sma-pgsql"; then
+            echo "ERROR: [$host] docker compose restart failed for sma-pgsql" >&2
+            failed="$failed $host"
+            continue
+        fi
+    else
+        echo "  no sma-pgsql container present — bringing one up via compose"
+        if ! run_remote_compose "$host" "--profile $profile up -d sma-pgsql"; then
+            echo "ERROR: [$host] docker compose up failed for sma-pgsql" >&2
+            failed="$failed $host"
+            continue
+        fi
     fi
 
     echo "==> [$host] waiting for sma-pgsql to become healthy (timeout: ${PG_HEALTH_TIMEOUT}s)"

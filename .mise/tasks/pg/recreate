@@ -34,6 +34,15 @@ for host in $DEPLOY_HOSTS; do
     echo ""
     pg_volumes=$(capture_remote_pg_volume_names "$host" | awk 'NF' | sort -u)
 
+    # Drop any stale `sma-postgres`-named container from before the
+    # canonical container_name standardized on `sma-pgsql`. The
+    # volume is removed by the explicit step below regardless, so
+    # data preservation is not a concern here (this task is the
+    # destructive one).
+    if ! remove_stale_pg_containers "$host" "sma-pgsql"; then
+        echo "  WARNING: [$host] stale-pg cleanup reported errors — continuing" >&2
+    fi
+
     echo "==> [$host] stopping and removing sma-pgsql (profile: $profile)"
     if ! run_remote_compose "$host" "--profile $profile stop sma-pgsql"; then
         echo "ERROR: [$host] docker compose stop failed for sma-pgsql" >&2

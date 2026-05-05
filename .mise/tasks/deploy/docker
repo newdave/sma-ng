@@ -80,6 +80,13 @@ for host in $DEPLOY_HOSTS; do
     # creates the container on a fresh host. Without this, the SMA
     # container starts without its database and fails its health check.
     if docker_profile_is_pg "$profile"; then
+        # Drop any old `sma-postgres`-named container left over from
+        # before the canonical container_name standardized on
+        # `sma-pgsql`. Volume sma-pgdata is preserved so the new
+        # container starts on the same data.
+        if ! remove_stale_pg_containers "$host" "sma-pgsql"; then
+            echo "  WARNING: [$host] stale-pg cleanup reported errors — continuing" >&2
+        fi
         echo "==> [$host] ensuring sma-pgsql is up (profile: $profile)"
         if ! run_remote_compose "$host" "--profile $profile up -d sma-pgsql"; then
             echo "ERROR: [$host] docker compose up failed for sma-pgsql" >&2
