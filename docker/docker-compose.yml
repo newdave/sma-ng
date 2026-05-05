@@ -13,7 +13,7 @@ services:
   # ────────────────────────────────────────────────────────────────────
   sma-pgsql:
     image: postgres:16-alpine
-    container_name: sma-postgres
+    container_name: sma-pgsql
     profiles: [software-pg, intel-pg, nvidia-pg]
     restart: unless-stopped
     ports:

@@ -62,13 +62,13 @@ for host in $DEPLOY_HOSTS; do
     fi
 
     echo "==> [$host] waiting for sma-pgsql to become healthy (timeout: ${PG_HEALTH_TIMEOUT}s)"
-    if ! wait_for_remote_container_health "$host" "sma-postgres" "$PG_HEALTH_TIMEOUT"; then
+    if ! wait_for_remote_container_health "$host" "sma-pgsql" "$PG_HEALTH_TIMEOUT"; then
         echo "ERROR: [$host] sma-pgsql did not become healthy within ${PG_HEALTH_TIMEOUT}s" >&2
         failed="$failed $host"
         continue
     fi
 
-    print_remote_container_summary "$host" "sma-postgres"
+    print_remote_container_summary "$host" "sma-pgsql"
     echo "==> [$host] done"
 done
 
