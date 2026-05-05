@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.6](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.5...sma-ng-v1.12.6) (2026-05-05)
+
+
+### Bug Fixes
+
+* **docker:** set apparmor=unconfined to permit AF_UNIX sockets in nested-docker LXC ([9372367](https://github.com/newdave/sma-ng/commit/937236756498b2375dd1a509b305643502f05296))
+
 ## [1.12.5](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.4...sma-ng-v1.12.5) (2026-05-05)
 
 
