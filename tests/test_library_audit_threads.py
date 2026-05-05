@@ -138,3 +138,154 @@ def test_worker_tick_processes_claimed_units(monkeypatch):
   assert thread._tick() is True
   db.claim_audit_units.assert_called_with("n1", 5, batch=10)
   db.mark_audit_unit_done.assert_called_with(11)
+
+
+# ---------------------------------------------------------------------------
+# Extended coverage — _rollup_completed, run() loops, _process_unit error paths
+# ---------------------------------------------------------------------------
+
+
+def test_audit_thread_run_skips_when_not_distributed():
+  thread, db, _ = _make_audit_thread()
+  db.is_distributed = False
+  # Should return immediately without raising.
+  thread.running = False
+  thread.run()
+  db.list_active_audit_runs.assert_not_called()
+
+
+def test_audit_thread_rollup_writes_duplicate_findings(monkeypatch):
+  thread, db, _ = _make_audit_thread()
+  fake_engine = mock.MagicMock()
+  fake_engine.rollup_duplicate_ids.return_value = 3
+  monkeypatch.setattr("resources.daemon.threads.AuditEngine", lambda *a, **k: fake_engine)
+  thread._rollup_completed([1, 2], thread.pcm.audit_settings)
+  assert fake_engine.rollup_duplicate_ids.call_count == 2
+
+
+def test_audit_thread_rollup_swallows_exception(monkeypatch):
+  thread, db, _ = _make_audit_thread()
+  fake_engine = mock.MagicMock()
+  fake_engine.rollup_duplicate_ids.side_effect = RuntimeError("rollup failed")
+  monkeypatch.setattr("resources.daemon.threads.AuditEngine", lambda *a, **k: fake_engine)
+  # Should NOT raise.
+  thread._rollup_completed([42], thread.pcm.audit_settings)
+
+
+def test_audit_thread_enumerate_into_queue_batches_at_500(monkeypatch):
+  thread, db, _ = _make_audit_thread()
+  # Generate 1200 paths — should produce 3 enqueues (500, 500, 200)
+  paths_seq = [(f"/x/f{i}.mp4", "media") for i in range(1200)]
+  monkeypatch.setattr(
+    "resources.daemon.threads.enumerate_paths",
+    lambda *a, **k: iter(paths_seq),
+  )
+  total = thread._enumerate_into_queue(7, ["/x"], thread.pcm.audit_settings)
+  assert total == 1200
+  # 500 + 500 + 200 → 3 calls
+  assert db.enqueue_audit_units.call_count == 3
+
+
+def test_audit_thread_enumerate_into_queue_aborts_on_stop(monkeypatch):
+  thread, db, _ = _make_audit_thread()
+  paths_seq = [(f"/x/f{i}.mp4", "media") for i in range(600)]
+  monkeypatch.setattr(
+    "resources.daemon.threads.enumerate_paths",
+    lambda *a, **k: iter(paths_seq),
+  )
+  thread.running = False  # signal stop on first batch boundary
+  total = thread._enumerate_into_queue(7, ["/x"], thread.pcm.audit_settings)
+  # First 500-batch enqueued, then stop honored.
+  assert total == 500
+  assert db.enqueue_audit_units.call_count == 1
+
+
+def test_audit_thread_zero_total_marks_run_completed(monkeypatch):
+  thread, db, _ = _make_audit_thread()
+  monkeypatch.setattr(
+    "resources.daemon.threads.enumerate_paths",
+    lambda *a, **k: iter([]),  # nothing found
+  )
+  thread._cycle()
+  db.set_audit_run_status.assert_called_once_with(99, "completed")
+
+
+def test_audit_thread_releases_lock_even_on_exception(monkeypatch):
+  thread, db, _ = _make_audit_thread()
+  monkeypatch.setattr(
+    "resources.daemon.threads.enumerate_paths",
+    lambda *a, **k: (_ for _ in ()).throw(RuntimeError("walk failed")),
+  )
+  # _cycle catches in the outer try; we directly call without the run loop.
+  try:
+    thread._cycle()
+  except RuntimeError:
+    pass
+  db.release_audit_enumerate_lock.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Worker thread extended
+# ---------------------------------------------------------------------------
+
+
+def test_worker_run_skips_when_not_distributed():
+  thread, db, _ = _make_worker_thread()
+  db.is_distributed = False
+  thread.running = False
+  thread.run()
+  db.requeue_audit_claims_for_node.assert_not_called()
+
+
+def test_worker_run_swallows_requeue_exception_on_startup():
+  thread, db, _ = _make_worker_thread()
+  db.requeue_audit_claims_for_node.side_effect = RuntimeError("db down")
+  thread.running = False  # exit after one tick
+  # Should NOT raise.
+  thread.run()
+
+
+def test_worker_tick_handles_engine_failure(monkeypatch):
+  thread, db, _ = _make_worker_thread()
+  db.list_active_audit_runs.return_value = [{"id": 5, "scope_paths": []}]
+  db.claim_audit_units.return_value = [
+    {"id": 11, "audit_id": 5, "path": "/x.mp4", "kind_hint": "media"},
+  ]
+
+  fake_engine = mock.MagicMock()
+  fake_engine.probe_one.side_effect = RuntimeError("probe boom")
+  monkeypatch.setattr("resources.daemon.threads.AuditEngine", lambda *a, **k: fake_engine)
+  # Should NOT raise; error is logged and unit marked done with error.
+  assert thread._tick() is True
+  # mark_audit_unit_done called with error= keyword
+  call_args = db.mark_audit_unit_done.call_args_list
+  assert any("error" in str(c) for c in call_args)
+
+
+def test_worker_tick_records_finding_and_auto_fix_action(monkeypatch):
+  thread, db, _ = _make_worker_thread()
+  db.list_active_audit_runs.return_value = [{"id": 5, "scope_paths": []}]
+  db.claim_audit_units.return_value = [
+    {"id": 11, "audit_id": 5, "path": "/x.mp4", "kind_hint": "media"},
+  ]
+
+  from resources.library_audit.engine import Finding
+  from resources.library_audit.kinds import FindingKind
+
+  finding = Finding(FindingKind.FFPROBE_FAILED, "/x.mp4", {"reason": "empty"})
+  fake_engine = mock.MagicMock()
+  fake_engine.probe_one.return_value = finding
+  fake_engine.maybe_auto_fix.return_value = "queued"
+
+  monkeypatch.setattr("resources.daemon.threads.AuditEngine", lambda *a, **k: fake_engine)
+
+  assert thread._tick() is True
+  fake_engine.upsert.assert_called_once_with(finding, 5)
+  fake_engine.maybe_auto_fix.assert_called_once_with(finding)
+
+
+def test_worker_tick_no_units_returns_false():
+  thread, db, _ = _make_worker_thread()
+  db.list_active_audit_runs.return_value = [{"id": 5, "scope_paths": []}]
+  db.claim_audit_units.return_value = []
+  assert thread._tick() is False
