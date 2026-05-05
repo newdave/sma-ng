@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.0...sma-ng-v1.12.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* **deploy:** create install dirs before stamping daemon.env ([6650ddf](https://github.com/newdave/sma-ng/commit/6650ddf4a8260217023d4e4612f696022153c8a3))
+
 ## [1.12.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.11.1...sma-ng-v1.12.0) (2026-05-05)
 
 
