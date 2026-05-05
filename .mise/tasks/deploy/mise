@@ -15,6 +15,7 @@ for host in $DEPLOY_HOSTS; do
   init_host_context "$host"
 
   echo ""
+  ensure_remote_deploy_dir "$host" || { failed="$failed $host"; continue; }
   # shellcheck disable=SC2154  # dir is set by init_host_context above.
   echo "==> [$host] syncing .mise control plane to $dir/.mise"
   run_remote_command "$host" "mkdir -p $dir/.mise" || { failed="$failed $host"; continue; }

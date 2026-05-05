@@ -142,26 +142,8 @@ done
 
 # ── 7. create deploy_dir on each host ──────────────────────────────────────
 for host in $DEPLOY_HOSTS; do
-    cfg="$CFG $LOCAL $host"
-    dir=$($cfg deploy_dir ~/sma)
-    port=$($cfg ssh_port 22)
-    key=$($cfg ssh_key "")
-    use_sudo=$($cfg use_sudo "false")
-
-    remote_user=$($cfg user "$(whoami)")
-    remote_address=$($cfg address "")
-    ssh_target="${remote_user}@${remote_address}"
-
-    mk_ssh_opts "$port" "$key"
-
-    echo "==> [$host] ensuring $dir exists"
-    if [ "$use_sudo" = "true" ] && [ -n "$remote_user" ]; then
-        # shellcheck disable=SC2029  # dir/remote_user intentionally expand client-side before the remote shell runs.
-        ssh "${SSH_OPTS[@]}" "$ssh_target" "sudo mkdir -p $dir && sudo chown $remote_user: $dir"
-    else
-        # shellcheck disable=SC2029  # dir intentionally expands client-side before the remote shell runs.
-        ssh "${SSH_OPTS[@]}" "$ssh_target" "mkdir -p $dir"
-    fi
+    init_host_context "$host"
+    ensure_remote_deploy_dir "$host"
 done
 
 # ── 8. sync code and seed config/ + logs/ on each host ───────────────────

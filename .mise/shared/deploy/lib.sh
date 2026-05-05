@@ -41,6 +41,31 @@ init_host_context() {
   return 0
 }
 
+# Idempotently create the remote deploy_dir (e.g. /opt/sma) when it does not
+# already exist. Uses sudo when deploy.use_sudo is true, then chowns the
+# directory to the SSH user so subsequent rsync/mkdir calls (which run as
+# the SSH user) can write inside it without further escalation. A no-op when
+# the directory already exists. Requires init_host_context to have run first
+# so cfg/ssh_opts/ssh_target/dir are populated.
+ensure_remote_deploy_dir() {
+  local host="$1"
+  # shellcheck disable=SC2154  # cfg/dir populated by init_host_context above
+  local host_use_sudo
+  host_use_sudo=$($cfg use_sudo "false")
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts must word-split for ssh; remote command intentionally expands client-side
+  if ssh $ssh_opts "$ssh_target" "test -d $dir"; then
+    return 0
+  fi
+  echo "==> [$host] creating deploy_dir $dir"
+  if [ "$host_use_sudo" = "true" ]; then
+    # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts must word-split; dir/remote_user expand client-side intentionally
+    ssh $ssh_opts "$ssh_target" "sudo mkdir -p $dir && sudo chown ${remote_user}: $dir"
+  else
+    # shellcheck disable=SC2086,SC2029  # ssh_opts must word-split; dir expands client-side intentionally
+    ssh $ssh_opts "$ssh_target" "mkdir -p $dir"
+  fi
+}
+
 sync_codebase_to_host() {
   local host="$1" rsync_extra="${2:-}"
 
