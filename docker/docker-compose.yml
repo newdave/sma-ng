@@ -16,15 +16,6 @@ services:
     container_name: sma-pgsql
     profiles: [software-pg, intel-pg, nvidia-pg]
     restart: unless-stopped
-    # Pin the unix socket to PGDATA (always owned by the postgres user)
-    # so startup does not depend on /var/run/postgresql being writable
-    # — that dir's perms can be lost under host user-namespace remap or
-    # stray env_file entries, producing the "could not create Unix
-    # socket … Permission denied" FATAL on boot.
-    command:
-      - "postgres"
-      - "-c"
-      - "unix_socket_directories=/var/lib/postgresql/data"
     ports:
       - "${PGSQL_BIND_IP:-0.0.0.0}:${PGSQL_PORT:-5432}:5432"
     networks:
@@ -39,7 +30,7 @@ services:
     volumes:
       - sma-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h /var/lib/postgresql/data -U $${POSTGRES_USER:-sma} -d $${POSTGRES_DB:-sma}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-sma} -d $${POSTGRES_DB:-sma}"]
       interval: 10s
       timeout: 5s
       retries: 5
