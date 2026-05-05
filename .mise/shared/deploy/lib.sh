@@ -270,6 +270,50 @@ docker_profile_is_pg() {
   [[ "$1" == *-pg ]]
 }
 
+# Stop and remove any stale SMA-owned containers on the remote host whose
+# names collide with the active service's port bindings or compose
+# project. The set of names is hard-coded to the container_names
+# declared in docker/docker-compose.yml (the SMA daemon variants only;
+# sma-pgsql is preserved). Without this, switching a host between
+# profiles (e.g. `intel` -> `intel-pg`) leaves the previous container
+# running and `compose up -d --force-recreate sma-ng-<new-profile>`
+# fails with "Bind for 0.0.0.0:8585 failed: port is already allocated".
+# Same SSH context requirements as ensure_remote_docker; respects
+# deploy.use_sudo via the caller-populated sudo_prefix.
+remove_stale_sma_containers() {
+  local host="$1" active_service="$2"
+  local known_names=(sma-ng-software sma-ng-software-pg sma-ng-intel sma-ng-intel-pg sma-ng-nvidia sma-ng-nvidia-pg)
+  local stale=()
+  for name in "${known_names[@]}"; do
+    if [ "$name" = "$active_service" ]; then
+      continue
+    fi
+    stale+=("$name")
+  done
+  if [ ${#stale[@]} -eq 0 ]; then
+    return 0
+  fi
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts must word-split for ssh; remote command intentionally expands client-side
+  ssh $ssh_opts "$ssh_target" "bash -s" "${sudo_prefix:-}" "${stale[@]}" <<'REMOTE'
+    set -euo pipefail
+    sudo_prefix="$1"
+    shift
+    _run() {
+      if [ -n "$sudo_prefix" ]; then
+        sudo "$@"
+      else
+        "$@"
+      fi
+    }
+    for name in "$@"; do
+      if _run docker inspect "$name" >/dev/null 2>&1; then
+        echo "  removing stale container: $name"
+        _run docker rm -f "$name" >/dev/null
+      fi
+    done
+REMOTE
+}
+
 run_remote_compose() {
   local host="$1" compose_args="$2"
   # shellcheck disable=SC2029,SC2086

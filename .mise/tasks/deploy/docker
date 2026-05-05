@@ -91,6 +91,16 @@ for host in $DEPLOY_HOSTS; do
         fi
     fi
 
+    # Drop any stale SMA daemon container left over from a previous
+    # profile choice on this host (e.g. switching `intel` -> `intel-pg`
+    # leaves `sma-ng-intel` running and grabs port 8585, so compose's
+    # --force-recreate of `sma-ng-intel-pg` fails with a port-bind
+    # error). Only SMA-owned container_names from docker-compose.yml
+    # are touched; the bundled sma-pgsql is preserved.
+    if ! remove_stale_sma_containers "$host" "$service"; then
+        echo "  WARNING: [$host] stale-container cleanup reported errors — continuing" >&2
+    fi
+
     # Recreate only the SMA service — leave postgres untouched
     echo "==> [$host] recreating $service"
     if ! run_remote_compose "$host" "--profile $profile up -d --force-recreate --no-deps $service"; then
