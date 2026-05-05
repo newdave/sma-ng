@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.11.1...sma-ng-v1.12.0) (2026-05-05)
+
+
+### Features
+
+* **deploy:** auto-create remote deploy_dir from deploy:mise ([470562e](https://github.com/newdave/sma-ng/commit/470562e4c400b82f49fb62c4f0522cd3c2793384))
+
 ## [1.11.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.11.0...sma-ng-v1.11.1) (2026-05-02)
 
 
