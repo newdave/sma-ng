@@ -162,12 +162,13 @@ ensure_remote_node_name() {
 
   echo "  stamping SMA_NODE_NAME=${host} into ${env_path}"
   # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by the caller; env_path/host/sample_path expand client-side (intentional)
-  ssh $ssh_opts "$ssh_target" "bash -s" "$env_path" "$host" "$sample_path" "$use_sudo_flag" <<'REMOTE'
+  ssh $ssh_opts "$ssh_target" "bash -s" "$env_path" "$host" "$sample_path" "$use_sudo_flag" "$remote_user" <<'REMOTE'
     set -euo pipefail
     env_path="$1"
     node_name="$2"
     sample_path="$3"
     use_sudo="${4:-false}"
+    owner="${5:-}"
 
     if [ "$use_sudo" = "true" ]; then
       _run() { sudo "$@"; }
@@ -177,10 +178,23 @@ ensure_remote_node_name() {
 
     if [ ! -f "$env_path" ]; then
       if [ -f "$sample_path" ]; then
-        _run install -m 640 "$sample_path" "$env_path"
+        if [ -n "$owner" ]; then
+          _run install -o "$owner" -g "$owner" -m 640 "$sample_path" "$env_path"
+        else
+          _run install -m 640 "$sample_path" "$env_path"
+        fi
       else
         _run touch "$env_path"
         _run chmod 640 "$env_path"
+        if [ -n "$owner" ]; then
+          _run chown "$owner:$owner" "$env_path" 2>/dev/null || _run chown "$owner:" "$env_path"
+        fi
+      fi
+    elif [ -n "$owner" ]; then
+      # Self-heal a previously root-owned daemon.env from older deploys.
+      current_owner=$(stat -c '%U' "$env_path" 2>/dev/null || stat -f '%Su' "$env_path" 2>/dev/null || echo "")
+      if [ -n "$current_owner" ] && [ "$current_owner" != "$owner" ]; then
+        _run chown "$owner:$owner" "$env_path" 2>/dev/null || _run chown "$owner:" "$env_path"
       fi
     fi
 

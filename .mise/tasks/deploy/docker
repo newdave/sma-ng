@@ -74,6 +74,23 @@ for host in $DEPLOY_HOSTS; do
         continue
     fi
 
+    # On *-pg profiles, ensure the bundled postgres is up before
+    # recreating the SMA service. Plain `up -d` (no --force-recreate)
+    # is a no-op when sma-pgsql is already running and healthy, but
+    # creates the container on a fresh host. Without this, the SMA
+    # container starts without its database and fails its health check.
+    if docker_profile_is_pg "$profile"; then
+        echo "==> [$host] ensuring sma-pgsql is up (profile: $profile)"
+        if ! run_remote_compose "$host" "--profile $profile up -d sma-pgsql"; then
+            echo "ERROR: [$host] docker compose up failed for sma-pgsql" >&2
+            failed="$failed $host"
+            continue
+        fi
+        if ! wait_for_remote_container_health "$host" "sma-postgres" "${HEALTH_TIMEOUT}"; then
+            echo "  WARNING: [$host] sma-postgres did not become healthy within ${HEALTH_TIMEOUT}s — continuing anyway" >&2
+        fi
+    fi
+
     # Recreate only the SMA service — leave postgres untouched
     echo "==> [$host] recreating $service"
     if ! run_remote_compose "$host" "--profile $profile up -d --force-recreate --no-deps $service"; then
