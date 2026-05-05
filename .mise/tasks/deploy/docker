@@ -86,8 +86,8 @@ for host in $DEPLOY_HOSTS; do
             failed="$failed $host"
             continue
         fi
-        if ! wait_for_remote_container_health "$host" "sma-postgres" "${HEALTH_TIMEOUT}"; then
-            echo "  WARNING: [$host] sma-postgres did not become healthy within ${HEALTH_TIMEOUT}s — continuing anyway" >&2
+        if ! wait_for_remote_container_health "$host" "sma-pgsql" "${HEALTH_TIMEOUT}"; then
+            echo "  WARNING: [$host] sma-pgsql did not become healthy within ${HEALTH_TIMEOUT}s — continuing anyway" >&2
         fi
     fi
 

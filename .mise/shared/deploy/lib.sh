@@ -313,7 +313,7 @@ if [ -n "$requested_volumes" ]; then
   volumes="$requested_volumes"
 else
   project_name=$(
-    docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' sma-postgres 2>/dev/null || true
+    docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' sma-pgsql 2>/dev/null || true
   )
 
   if [ -z "$project_name" ]; then
@@ -348,7 +348,7 @@ if [ "$use_sudo" = "true" ]; then
 capture_remote_pg_volume_names() {
   local host="$1"
   # shellcheck disable=SC2029,SC2086
-  ssh $ssh_opts "$ssh_target" "${sudo_prefix}docker inspect --format '{{range .Mounts}}{{if .Name}}{{.Name}}{{println}}{{end}}{{end}}' sma-postgres 2>/dev/null || true"
+  ssh $ssh_opts "$ssh_target" "${sudo_prefix}docker inspect --format '{{range .Mounts}}{{if .Name}}{{.Name}}{{println}}{{end}}{{end}}' sma-pgsql 2>/dev/null || true"
 }
 
 run_remote_command() {

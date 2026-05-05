@@ -385,6 +385,13 @@ class TestComposePostgres:
   def test_postgres_service_exists(self, compose):
     assert "sma-pgsql" in compose["services"]
 
+  def test_postgres_container_name_matches_service_name(self, compose):
+    # The DB hostname in SMA_DAEMON_DB_URL is "sma-pgsql"; keep the
+    # explicit container_name in lockstep so `docker ps` / `docker
+    # inspect` calls (and any lib.sh helpers that target the running
+    # container) see the same name.
+    assert compose["services"]["sma-pgsql"].get("container_name") == "sma-pgsql"
+
   def test_postgres_starts_only_for_pg_profiles(self, compose):
     profiles = compose["services"]["sma-pgsql"]["profiles"]
     assert set(profiles) == {"software-pg", "intel-pg", "nvidia-pg"}
