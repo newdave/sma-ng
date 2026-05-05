@@ -1992,3 +1992,659 @@ class TestHandleRadarrWebhook:
     with patch("os.path.exists", return_value=True), patch("os.path.isdir", return_value=False):
       h._handle_radarr_webhook()
     assert h._response_code == 500
+
+
+# ---------------------------------------------------------------------------
+# Cluster-only admin routes — exercise the is_distributed=False 503 path AND
+# the happy path when distributed mode is enabled.
+# ---------------------------------------------------------------------------
+
+
+class TestClusterLogsRoute:
+  def test_returns_503_when_not_distributed(self):
+    h = _make_handler(is_distributed=False)
+    h._get_cluster_logs("/cluster/logs", {})
+    assert h._response_code == 503
+    assert "distributed" in _get_response_body(h)["error"].lower()
+
+  def test_returns_logs_in_distributed_mode(self):
+    h = _make_handler(is_distributed=True)
+    ts = datetime(2026, 5, 5, 10, 0, 0, tzinfo=timezone.utc)
+    h.server.job_db.get_logs.return_value = [
+      {"timestamp": ts, "level": "INFO", "message": "hello", "node_id": "n1"},
+    ]
+    h._get_cluster_logs("/cluster/logs", {})
+    assert h._response_code == 200
+    body = _get_response_body(h)
+    assert body["total"] == 1
+    assert body["logs"][0]["timestamp"] == ts.isoformat()
+
+  def test_filter_params_applied(self):
+    h = _make_handler(is_distributed=True)
+    h.server.job_db.get_logs.return_value = []
+    h._get_cluster_logs(
+      "/cluster/logs",
+      {"node_id": ["n1"], "level": ["ERROR"], "limit": ["50"], "offset": ["10"]},
+    )
+    h.server.job_db.get_logs.assert_called_once_with(node_id="n1", level="ERROR", limit=50, offset=10)
+
+  def test_limit_capped_at_500(self):
+    h = _make_handler(is_distributed=True)
+    h.server.job_db.get_logs.return_value = []
+    h._get_cluster_logs("/cluster/logs", {"limit": ["999"]})
+    _args, kw = h.server.job_db.get_logs.call_args
+    assert kw["limit"] == 500
+
+
+class TestAdminConfigRoutes:
+  def test_get_admin_config_503_when_not_distributed(self):
+    h = _make_handler(is_distributed=False)
+    h._get_admin_config("/admin/config", {})
+    assert h._response_code == 503
+
+  def test_get_admin_config_returns_cluster_config(self):
+    h = _make_handler(is_distributed=True)
+    h.server.job_db.get_cluster_config.return_value = {"daemon": {"api_key": "x"}}
+    h._get_admin_config("/admin/config", {})
+    assert h._response_code == 200
+    assert _get_response_body(h)["config"] == {"daemon": {"api_key": "x"}}
+
+  def test_get_admin_config_handles_none_config(self):
+    h = _make_handler(is_distributed=True)
+    h.server.job_db.get_cluster_config.return_value = None
+    h._get_admin_config("/admin/config", {})
+    assert _get_response_body(h)["config"] == {}
+
+  def test_post_admin_config_503_when_not_distributed(self):
+    h = _make_handler(is_distributed=False)
+    h._post_admin_config("/admin/config", {})
+    assert h._response_code == 503
+
+  def test_post_admin_config_invalid_json_returns_400(self):
+    h = _make_handler(
+      method="POST",
+      body=b"not-json",
+      headers={"Content-Length": "8"},
+      is_distributed=True,
+    )
+    h._post_admin_config("/admin/config", {})
+    assert h._response_code == 400
+
+  def test_post_admin_config_non_dict_returns_400(self):
+    body = json.dumps({"config": "not-a-dict"}).encode()
+    h = _make_handler(
+      method="POST",
+      body=body,
+      headers={"Content-Length": str(len(body))},
+      is_distributed=True,
+    )
+    h._post_admin_config("/admin/config", {})
+    assert h._response_code == 400
+
+  def test_post_admin_config_strips_secrets_and_saves(self):
+    body = json.dumps({"config": {"daemon": {"api_key": "leak"}}}).encode()
+    h = _make_handler(
+      method="POST",
+      body=body,
+      headers={"Content-Length": str(len(body)), "X-Actor": "ui-test"},
+      is_distributed=True,
+    )
+    h._post_admin_config("/admin/config", {})
+    assert h._response_code == 200
+    h.server.job_db.set_cluster_config.assert_called_once()
+    saved_config = h.server.job_db.set_cluster_config.call_args[0][0]
+    # secrets stripping happens server-side; verify api_key is gone
+    assert "api_key" not in saved_config.get("daemon", {})
+
+  def test_post_admin_config_accepts_top_level_object(self):
+    """Body without 'config' wrapper is treated as the config itself."""
+    body = json.dumps({"converter": {"ffmpeg": "/usr/bin/ffmpeg"}}).encode()
+    h = _make_handler(
+      method="POST",
+      body=body,
+      headers={"Content-Length": str(len(body))},
+      is_distributed=True,
+    )
+    h._post_admin_config("/admin/config", {})
+    assert h._response_code == 200
+
+
+class TestMetricsRoute:
+  def test_returns_503_when_not_distributed(self):
+    h = _make_handler(is_distributed=False)
+    h._get_metrics_api("/metrics", {})
+    assert h._response_code == 503
+    body = _get_response_body(h)
+    assert body["available"] is False
+    assert "PostgreSQL" in body["reason"]
+
+  def test_default_window_is_24h(self):
+    h = _make_handler(is_distributed=True)
+    h.server.job_db.get_metrics.return_value = {"jobs": []}
+    h._get_metrics_api("/metrics", {})
+    h.server.job_db.get_metrics.assert_called_once_with(window="24h")
+
+  def test_unknown_window_falls_back_to_24h(self):
+    h = _make_handler(is_distributed=True)
+    h.server.job_db.get_metrics.return_value = {}
+    h._get_metrics_api("/metrics", {"window": ["forever"]})
+    h.server.job_db.get_metrics.assert_called_with(window="24h")
+
+  @pytest.mark.parametrize("window", ["24h", "7d", "30d", "all"])
+  def test_valid_windows(self, window):
+    h = _make_handler(is_distributed=True)
+    h.server.job_db.get_metrics.return_value = {}
+    h._get_metrics_api("/metrics", {"window": [window]})
+    h.server.job_db.get_metrics.assert_called_with(window=window)
+
+
+# ---------------------------------------------------------------------------
+# Admin node actions
+# ---------------------------------------------------------------------------
+
+
+class TestAdminNodeActions:
+  def test_unknown_path_returns_404(self):
+    h = _make_handler(method="POST", path="/admin/wat")
+    h._post_admin_node_action("/admin/wat")
+    assert h._response_code == 404
+
+  def test_unknown_action_returns_404(self):
+    h = _make_handler(method="POST", path="/admin/nodes/n1/banana")
+    h._post_admin_node_action("/admin/nodes/n1/banana")
+    assert h._response_code == 404
+
+  def test_approve_with_valid_body(self):
+    body = json.dumps({"note": "looks good"}).encode()
+    h = _make_handler(
+      method="POST",
+      path="/admin/nodes/n1/approve",
+      body=body,
+      headers={"Content-Length": str(len(body))},
+    )
+    h._post_admin_node_action("/admin/nodes/n1/approve")
+    assert h._response_code == 200
+    body_out = _get_response_body(h)
+    assert body_out["status"] == "approved"
+
+  def test_approve_with_no_body(self):
+    h = _make_handler(method="POST", path="/admin/nodes/n1/approve")
+    h._post_admin_node_action("/admin/nodes/n1/approve")
+    assert h._response_code == 200
+
+  def test_approve_with_invalid_json_returns_400(self):
+    h = _make_handler(
+      method="POST",
+      path="/admin/nodes/n1/approve",
+      body=b"not-json",
+      headers={"Content-Length": "8"},
+    )
+    h._post_admin_node_action("/admin/nodes/n1/approve")
+    assert h._response_code == 400
+
+  def test_reject_action(self):
+    h = _make_handler(method="POST", path="/admin/nodes/n1/reject")
+    h._post_admin_node_action("/admin/nodes/n1/reject")
+    assert h._response_code == 200
+    body = _get_response_body(h)
+    assert body["status"] == "rejected"
+
+  def test_approve_unknown_node_returns_404(self):
+    h = _make_handler(method="POST", path="/admin/nodes/missing/approve")
+    h.server.job_db.set_node_approval.return_value = None
+    h._post_admin_node_action("/admin/nodes/missing/approve")
+    assert h._response_code == 404
+
+  @pytest.mark.parametrize("action", ["restart", "shutdown", "drain", "pause", "resume"])
+  def test_lifecycle_actions(self, action):
+    h = _make_handler(method="POST", path=f"/admin/nodes/n1/{action}")
+    h.server.job_db.send_node_command.return_value = ["n1"]
+    h._post_admin_node_action(f"/admin/nodes/n1/{action}")
+    assert h._response_code == 202
+    body = _get_response_body(h)
+    assert body["status"] == f"{action}_requested"
+
+  def test_lifecycle_action_for_unknown_node_returns_404(self):
+    h = _make_handler(method="POST", path="/admin/nodes/missing/restart")
+    h.server.job_db.send_node_command.return_value = []
+    h._post_admin_node_action("/admin/nodes/missing/restart")
+    assert h._response_code == 404
+
+  def test_delete_action(self):
+    h = _make_handler(method="POST", path="/admin/nodes/n1/delete")
+    h.server.job_db.delete_node.return_value = True
+    h._post_admin_node_action("/admin/nodes/n1/delete")
+    assert h._response_code == 200
+    body = _get_response_body(h)
+    assert body["deleted"] is True
+
+  def test_delete_unknown_node_returns_404(self):
+    h = _make_handler(method="POST", path="/admin/nodes/missing/delete")
+    h.server.job_db.delete_node.return_value = False
+    h._post_admin_node_action("/admin/nodes/missing/delete")
+    assert h._response_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Bulk job actions
+# ---------------------------------------------------------------------------
+
+
+class TestBulkJobActions:
+  def test_invalid_json_returns_400(self):
+    h = _make_handler(
+      method="POST",
+      body=b"junk",
+      headers={"Content-Length": "4"},
+    )
+    h._post_jobs_bulk()
+    assert h._response_code == 400
+
+  def test_missing_action_returns_400(self):
+    body = json.dumps({"ids": [1]}).encode()
+    h = _make_handler(method="POST", body=body, headers={"Content-Length": str(len(body))})
+    h._post_jobs_bulk()
+    assert h._response_code == 400
+
+  def test_unknown_action_returns_400(self):
+    body = json.dumps({"action": "magic", "ids": [1]}).encode()
+    h = _make_handler(method="POST", body=body, headers={"Content-Length": str(len(body))})
+    h._post_jobs_bulk()
+    assert h._response_code == 400
+
+  def test_empty_ids_returns_400(self):
+    body = json.dumps({"action": "requeue", "ids": []}).encode()
+    h = _make_handler(method="POST", body=body, headers={"Content-Length": str(len(body))})
+    h._post_jobs_bulk()
+    assert h._response_code == 400
+
+  def test_non_integer_ids_returns_400(self):
+    body = json.dumps({"action": "requeue", "ids": ["abc"]}).encode()
+    h = _make_handler(method="POST", body=body, headers={"Content-Length": str(len(body))})
+    h._post_jobs_bulk()
+    assert h._response_code == 400
+
+  def test_requeue_partitions_results(self):
+    body = json.dumps({"action": "requeue", "ids": [1, 2, 3]}).encode()
+    h = _make_handler(method="POST", body=body, headers={"Content-Length": str(len(body))})
+    h.server.job_db.get_job.side_effect = [
+      {"id": 1, "status": "failed"},
+      {"id": 2, "status": "completed"},
+      None,
+    ]
+    h.server.job_db.requeue_job.side_effect = [True, False]
+    h._post_jobs_bulk()
+    assert h._response_code == 200
+    body = _get_response_body(h)
+    assert 1 in body["succeeded"]
+    assert any(s["id"] == 2 for s in body["skipped"])
+    assert 3 in body["not_found"]
+
+  def test_cancel_partitions_results(self):
+    body = json.dumps({"action": "cancel", "ids": [1, 2]}).encode()
+    h = _make_handler(method="POST", body=body, headers={"Content-Length": str(len(body))})
+    h.server.job_db.get_job.side_effect = [
+      {"id": 1, "status": "running"},
+      {"id": 2, "status": "completed"},
+    ]
+    h.server.cancel_job.side_effect = [True, False]
+    h._post_jobs_bulk()
+    assert h._response_code == 200
+    body = _get_response_body(h)
+    assert 1 in body["succeeded"]
+    assert any(s["id"] == 2 for s in body["skipped"])
+
+  def test_delete_cancels_running_first(self):
+    body = json.dumps({"action": "delete", "ids": [1, 2]}).encode()
+    h = _make_handler(method="POST", body=body, headers={"Content-Length": str(len(body))})
+    h.server.job_db.get_job.side_effect = [
+      {"id": 1, "status": "running"},
+      {"id": 1, "status": "running"},  # called twice in nested check
+      {"id": 2, "status": "failed"},
+      {"id": 2, "status": "failed"},
+    ]
+    h.server.job_db.delete_jobs.return_value = [1, 2]
+    h._post_jobs_bulk()
+    assert h._response_code == 200
+    h.server.cancel_job.assert_called_with(1)
+
+
+class TestPostJobPriority:
+  def test_invalid_id_returns_400(self):
+    h = _make_handler(method="POST", path="/jobs/abc/priority")
+    h._post_job_priority("/jobs/abc/priority")
+    assert h._response_code == 400
+
+  def test_invalid_json_returns_400(self):
+    h = _make_handler(
+      method="POST",
+      path="/jobs/1/priority",
+      body=b"junk",
+      headers={"Content-Length": "4"},
+    )
+    h._post_job_priority("/jobs/1/priority")
+    assert h._response_code == 400
+
+  def test_missing_priority_field_returns_400(self):
+    body = json.dumps({}).encode()
+    h = _make_handler(
+      method="POST",
+      path="/jobs/1/priority",
+      body=body,
+      headers={"Content-Length": str(len(body))},
+    )
+    h._post_job_priority("/jobs/1/priority")
+    assert h._response_code == 400
+
+  def test_non_integer_priority_returns_400(self):
+    body = json.dumps({"priority": "high"}).encode()
+    h = _make_handler(
+      method="POST",
+      path="/jobs/1/priority",
+      body=body,
+      headers={"Content-Length": str(len(body))},
+    )
+    h._post_job_priority("/jobs/1/priority")
+    assert h._response_code == 400
+
+  def test_unknown_job_returns_404(self):
+    body = json.dumps({"priority": 5}).encode()
+    h = _make_handler(
+      method="POST",
+      path="/jobs/9999/priority",
+      body=body,
+      headers={"Content-Length": str(len(body))},
+    )
+    h.server.job_db.set_job_priority.return_value = False
+    h.server.job_db.get_job.return_value = None
+    h._post_job_priority("/jobs/9999/priority")
+    assert h._response_code == 404
+
+  def test_non_pending_job_returns_409(self):
+    body = json.dumps({"priority": 5}).encode()
+    h = _make_handler(
+      method="POST",
+      path="/jobs/1/priority",
+      body=body,
+      headers={"Content-Length": str(len(body))},
+    )
+    h.server.job_db.set_job_priority.return_value = False
+    h.server.job_db.get_job.return_value = {"id": 1, "status": "running"}
+    h._post_job_priority("/jobs/1/priority")
+    assert h._response_code == 409
+
+  def test_happy_path(self):
+    body = json.dumps({"priority": 7}).encode()
+    h = _make_handler(
+      method="POST",
+      path="/jobs/1/priority",
+      body=body,
+      headers={"Content-Length": str(len(body))},
+    )
+    h.server.job_db.set_job_priority.return_value = True
+    h._post_job_priority("/jobs/1/priority")
+    assert h._response_code == 200
+    assert _get_response_body(h)["priority"] == 7
+
+
+class TestSimpleAdminRoutes:
+  def test_post_admin_delete_failed(self):
+    h = _make_handler(method="POST", path="/admin/jobs/failed")
+    h._post_admin_delete_failed()
+    assert h._response_code == 200
+    assert _get_response_body(h)["deleted"] == 2
+
+  def test_post_admin_delete_offline_nodes(self):
+    h = _make_handler(method="POST", path="/admin/nodes/offline")
+    h._post_admin_delete_offline_nodes()
+    assert h._response_code == 200
+    assert _get_response_body(h)["deleted"] == 1
+
+  def test_post_admin_delete_all_jobs(self):
+    h = _make_handler(method="POST", path="/admin/jobs")
+    h._post_admin_delete_all_jobs()
+    assert h._response_code == 200
+    assert _get_response_body(h)["deleted"] == 10
+
+
+class TestParseJobId:
+  def test_invalid_id_sends_400(self):
+    h = _make_handler(method="POST", path="/jobs/notanid/cancel")
+    out = h._parse_job_id("/jobs/notanid/cancel")
+    assert out is None
+    assert h._response_code == 400
+
+  def test_valid_id(self):
+    h = _make_handler(method="POST", path="/jobs/42/cancel")
+    assert h._parse_job_id("/jobs/42/cancel") == 42
+
+  def test_segment_minus_1(self):
+    h = _make_handler(method="POST", path="/jobs/42")
+    assert h._parse_job_id("/jobs/42", segment=-1) == 42
+
+  def test_index_error_returns_400(self):
+    h = _make_handler(method="POST", path="/")
+    assert h._parse_job_id("/", segment=-5) is None
+    assert h._response_code == 400
+
+
+class TestPostScanRoutes:
+  def test_post_scan_filter_returns_unscanned(self):
+    body = json.dumps({"paths": ["/a", "/b", "/c"]}).encode()
+    h = _make_handler(method="POST", body=body, headers={"Content-Length": str(len(body))})
+    h.server.job_db.filter_unscanned.return_value = ["/a"]
+    h._post_scan_filter()
+    assert h._response_code == 200
+    body = _get_response_body(h)
+    assert body["unscanned"] == ["/a"]
+    assert body["already_scanned"] == 2
+
+  def test_post_scan_record(self):
+    body = json.dumps({"paths": ["/a", "/b"]}).encode()
+    h = _make_handler(method="POST", body=body, headers={"Content-Length": str(len(body))})
+    h._post_scan_record()
+    assert h._response_code == 200
+    assert _get_response_body(h)["recorded"] == 2
+
+
+class TestRequeueBulkRoute:
+  def test_requeue_with_no_config(self):
+    h = _make_handler(method="POST", path="/jobs/requeue")
+    h.server.job_db.requeue_failed_jobs.return_value = 7
+    h._post_jobs_requeue_bulk({})
+    assert h._response_code == 200
+    assert _get_response_body(h)["requeued"] == 7
+    h.server.notify_workers.assert_called_once()
+
+  def test_requeue_with_no_jobs_skips_notify(self):
+    h = _make_handler(method="POST", path="/jobs/requeue")
+    h.server.job_db.requeue_failed_jobs.return_value = 0
+    h._post_jobs_requeue_bulk({})
+    h.server.notify_workers.assert_not_called()
+
+  def test_requeue_with_config_filter(self):
+    h = _make_handler(method="POST", path="/jobs/requeue")
+    h.server.job_db.requeue_failed_jobs.return_value = 3
+    h._post_jobs_requeue_bulk({"config": ["/config/sma-ng.yml"]})
+    h.server.job_db.requeue_failed_jobs.assert_called_once_with(config="/config/sma-ng.yml")
+
+
+# ---------------------------------------------------------------------------
+# Library audit routes
+# ---------------------------------------------------------------------------
+
+
+class TestLibraryAuditRoutes:
+  def test_get_library_audit_returns_runs(self):
+    h = _make_handler()
+    h.server.job_db.list_audit_runs.return_value = [{"id": 1, "status": "completed"}]
+    h._get_library_audit({"limit": ["10"]})
+    assert h._response_code == 200
+    body = _get_response_body(h)
+    assert body["count"] == 1
+    assert body["limit"] == 10
+
+  def test_get_library_audit_run_unknown_returns_404(self):
+    h = _make_handler()
+    h.server.job_db.get_audit_run.return_value = None
+    h._get_library_audit_run("/library/audit/9999")
+    assert h._response_code == 404
+
+  def test_get_library_audit_run_returns_run(self):
+    h = _make_handler()
+    h.server.job_db.get_audit_run.return_value = {"id": 1, "status": "running"}
+    h._get_library_audit_run("/library/audit/1")
+    assert h._response_code == 200
+    body = _get_response_body(h)
+    assert body["id"] == 1
+
+  def test_get_library_audit_run_invalid_id_returns_400(self):
+    h = _make_handler()
+    h._get_library_audit_run("/library/audit/abc")
+    assert h._response_code == 400
+
+  def test_get_library_findings_returns_list(self):
+    h = _make_handler()
+    h.server.job_db.get_findings.return_value = [
+      {"id": 1, "kind": "ffprobe_failed", "path": "/x.mp4"},
+    ]
+    h._get_library_findings({"status": ["open"], "kind": ["ffprobe_failed"]})
+    assert h._response_code == 200
+    body = _get_response_body(h)
+    assert body["count"] == 1
+
+  def test_get_library_finding_unknown_returns_404(self):
+    h = _make_handler()
+    h.server.job_db.get_finding.return_value = None
+    h._get_library_finding("/library/findings/9999")
+    assert h._response_code == 404
+
+  def test_get_library_finding_returns_finding(self):
+    h = _make_handler()
+    h.server.job_db.get_finding.return_value = {"id": 1, "kind": "ffprobe_failed"}
+    h._get_library_finding("/library/findings/1")
+    assert h._response_code == 200
+
+  def test_get_library_finding_invalid_id_returns_400(self):
+    h = _make_handler()
+    h._get_library_finding("/library/findings/abc")
+    assert h._response_code == 400
+
+  def test_post_library_audit_no_paths_returns_400(self):
+    h = _make_handler(method="POST")
+    h.server.path_config_manager.audit_paths = []
+    h._post_library_audit()
+    assert h._response_code == 400
+
+  def test_post_library_audit_invalid_json_returns_400(self):
+    h = _make_handler(
+      method="POST",
+      body=b"junk",
+      headers={"Content-Length": "4"},
+    )
+    h._post_library_audit()
+    assert h._response_code == 400
+
+  def test_post_library_audit_with_explicit_paths(self):
+    body = json.dumps({"paths": ["/a", "/b"]}).encode()
+    h = _make_handler(
+      method="POST",
+      body=body,
+      headers={"Content-Length": str(len(body))},
+    )
+    h.server.job_db.create_audit_run.return_value = 42
+    # The route fires off a background thread for enumerate; stub the
+    # method on the handler so the thread is a no-op.
+    with patch.object(WebhookHandler, "_run_audit_enumerate", lambda *_a, **_k: None):
+      h._post_library_audit()
+    assert h._response_code == 202
+    body_out = _get_response_body(h)
+    assert body_out["audit_id"] == 42
+
+  def test_post_library_audit_uses_configured_paths(self):
+    h = _make_handler(method="POST")
+    h.server.path_config_manager.audit_paths = [
+      {"path": "/configured/path", "enabled": True},
+      {"path": "/disabled", "enabled": False},
+    ]
+    h.server.job_db.create_audit_run.return_value = 7
+    with patch.object(WebhookHandler, "_run_audit_enumerate", lambda *_a, **_k: None):
+      h._post_library_audit()
+    assert h._response_code == 202
+    body = _get_response_body(h)
+    assert body["paths"] == ["/configured/path"]
+
+  def test_post_library_finding_action_unknown_returns_404(self):
+    h = _make_handler(method="POST")
+    h.server.job_db.set_finding_status.return_value = 0
+    h._post_library_finding_action("/library/findings/9999/dismiss", "dismissed")
+    assert h._response_code == 404
+
+  def test_post_library_finding_action_invalid_id_returns_400(self):
+    h = _make_handler(method="POST")
+    h._post_library_finding_action("/library/findings/abc/dismiss", "dismissed")
+    assert h._response_code == 400
+
+  def test_post_library_finding_action_happy_path(self):
+    h = _make_handler(method="POST")
+    h.server.job_db.set_finding_status.return_value = 1
+    h._post_library_finding_action("/library/findings/5/dismiss", "dismissed")
+    assert h._response_code == 200
+
+
+class TestParseHelpers:
+  def test_parse_audit_id_invalid(self):
+    h = _make_handler()
+    assert h._parse_audit_id("/library/audit/abc") is None
+    assert h._response_code == 400
+
+  def test_parse_finding_id_invalid(self):
+    h = _make_handler()
+    assert h._parse_finding_id("/library/findings/abc") is None
+    assert h._response_code == 400
+
+
+class TestPostReload:
+  def test_post_reload_returns_202(self):
+    h = _make_handler(method="POST")
+    h._post_reload("/reload", {})
+    assert h._response_code == 200
+    assert _get_response_body(h)["status"] == "reloading"
+
+
+class TestFavicon:
+  def test_favicon_404_when_missing(self):
+    h = _make_handler()
+    with patch("builtins.open", side_effect=FileNotFoundError):
+      h._get_favicon("/favicon.ico", {})
+    assert h._response_code == 404
+
+  def test_favicon_200_when_present(self):
+    h = _make_handler()
+    fake = io.BytesIO(b"\x89PNG fake")
+    with patch("builtins.open", lambda *a, **k: fake):
+      fake.read = lambda: b"\x89PNG fake"
+      h._get_favicon("/favicon.ico", {})
+    assert h._response_code == 200
+
+
+class TestHTMLRoutes:
+  def test_get_dashboard_injects_api_key(self):
+    h = _make_handler(api_key="topsecret")
+    with patch("resources.daemon.handler._load_dashboard_html", return_value="<html><head></head></html>"):
+      h._get_dashboard("/dashboard", {})
+    assert h._response_code == 200
+    body = _get_response_bytes(h).decode()
+    assert "topsecret" in body
+
+  def test_get_admin_injects_api_key(self):
+    h = _make_handler(api_key="topsecret")
+    with patch("resources.daemon.handler._load_admin_html", return_value="<html><head></head></html>"):
+      h._get_admin("/admin", {})
+    assert h._response_code == 200
+
+  def test_get_root_redirects_to_dashboard(self):
+    h = _make_handler()
+    h._get_root("/", {})
+    assert h._response_code == 301
+    assert h._response_headers.get("Location") == "/dashboard"
