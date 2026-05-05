@@ -16,6 +16,12 @@ services:
     container_name: sma-pgsql
     profiles: [software-pg, intel-pg, nvidia-pg]
     restart: unless-stopped
+    # Workaround for host AppArmor docker-default profile denying AF_UNIX
+    # socket creation when dockerd runs nested inside an LXC. Affects pgsql
+    # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
+    # users in the sma daemon. Safe on non-LXC hosts.
+    security_opt:
+      - apparmor=unconfined
     ports:
       - "${PGSQL_BIND_IP:-0.0.0.0}:${PGSQL_PORT:-5432}:5432"
     networks:
@@ -59,6 +65,12 @@ services:
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [software]
     restart: unless-stopped
+    # Workaround for host AppArmor docker-default profile denying AF_UNIX
+    # socket creation when dockerd runs nested inside an LXC. Affects pgsql
+    # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
+    # users in the sma daemon. Safe on non-LXC hosts.
+    security_opt:
+      - apparmor=unconfined
     ports:
       - "${SMA_PORT:-8585}:8585"
     volumes:
@@ -82,6 +94,12 @@ services:
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [software-pg]
     restart: unless-stopped
+    # Workaround for host AppArmor docker-default profile denying AF_UNIX
+    # socket creation when dockerd runs nested inside an LXC. Affects pgsql
+    # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
+    # users in the sma daemon. Safe on non-LXC hosts.
+    security_opt:
+      - apparmor=unconfined
     ports:
       - "${SMA_PORT:-8585}:8585"
     volumes:
@@ -108,6 +126,12 @@ services:
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [nvidia]
     restart: unless-stopped
+    # Workaround for host AppArmor docker-default profile denying AF_UNIX
+    # socket creation when dockerd runs nested inside an LXC. Affects pgsql
+    # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
+    # users in the sma daemon. Safe on non-LXC hosts.
+    security_opt:
+      - apparmor=unconfined
     ports:
       - "${SMA_PORT:-8585}:8585"
     volumes:
@@ -140,6 +164,12 @@ services:
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [nvidia-pg]
     restart: unless-stopped
+    # Workaround for host AppArmor docker-default profile denying AF_UNIX
+    # socket creation when dockerd runs nested inside an LXC. Affects pgsql
+    # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
+    # users in the sma daemon. Safe on non-LXC hosts.
+    security_opt:
+      - apparmor=unconfined
     ports:
       - "${SMA_PORT:-8585}:8585"
     volumes:
@@ -175,6 +205,12 @@ services:
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [intel]
     restart: unless-stopped
+    # Workaround for host AppArmor docker-default profile denying AF_UNIX
+    # socket creation when dockerd runs nested inside an LXC. Affects pgsql
+    # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
+    # users in the sma daemon. Safe on non-LXC hosts.
+    security_opt:
+      - apparmor=unconfined
     ports:
       - "${SMA_PORT:-8585}:8585"
     volumes:
@@ -204,6 +240,12 @@ services:
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [intel-pg]
     restart: unless-stopped
+    # Workaround for host AppArmor docker-default profile denying AF_UNIX
+    # socket creation when dockerd runs nested inside an LXC. Affects pgsql
+    # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
+    # users in the sma daemon. Safe on non-LXC hosts.
+    security_opt:
+      - apparmor=unconfined
     ports:
       - "${SMA_PORT:-8585}:8585"
     volumes:
