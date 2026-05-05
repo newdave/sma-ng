@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.5](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.4...sma-ng-v1.12.5) (2026-05-05)
+
+
+### Reverts
+
+* **docker:** unpin postgres unix socket from PGDATA ([f960be1](https://github.com/newdave/sma-ng/commit/f960be1cc4cdf28b0a6c6e3f5b587446d0613608))
+
 ## [1.12.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.3...sma-ng-v1.12.4) (2026-05-05)
 
 
