@@ -107,6 +107,35 @@ chown_remote_path_to_ssh_user() {
     || echo "  WARNING: [$host] chown -R ${remote_user}: ${target_path} failed (continuing)" >&2
 }
 
+# Idempotently create the persistent ${sma_install_dir}/{config,logs}
+# directories on the remote host, owned by the SSH user. These are the
+# bind-mount targets for the SMA Docker container; if Docker creates them
+# implicitly via compose volumes they end up root-owned and the daemon
+# can't write to them. Sudo is used when deploy.use_sudo is true. A no-op
+# when both directories already exist.
+# Requires init_host_context to have populated cfg/ssh_opts/ssh_target/
+# remote_user for the host.
+ensure_remote_install_dirs() {
+  local host="$1"
+  local install_dir
+  # shellcheck disable=SC2154  # cfg populated by init_host_context above
+  install_dir=$($cfg sma_install_dir "/opt/sma")
+  local host_use_sudo
+  host_use_sudo=$($cfg use_sudo "false")
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts must word-split for ssh
+  if ssh $ssh_opts "$ssh_target" "test -d ${install_dir}/config && test -d ${install_dir}/logs"; then
+    return 0
+  fi
+  echo "  creating ${install_dir}/{config,logs} (owner: ${remote_user})"
+  if [ "$host_use_sudo" = "true" ]; then
+    # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts must word-split; remote command intentionally expands client-side
+    ssh $ssh_opts "$ssh_target" "sudo mkdir -p ${install_dir}/config ${install_dir}/logs && sudo chown ${remote_user}: ${install_dir} ${install_dir}/config ${install_dir}/logs"
+  else
+    # shellcheck disable=SC2086,SC2029  # ssh_opts must word-split; remote command intentionally expands client-side
+    ssh $ssh_opts "$ssh_target" "mkdir -p ${install_dir}/config ${install_dir}/logs"
+  fi
+}
+
 # Idempotently stamp SMA_NODE_NAME=<host> into the daemon.env file used by
 # docker-compose (env_file). Without this the recreated container starts with
 # no SMA_NODE_NAME, the daemon falls through to a generated UUID, and the

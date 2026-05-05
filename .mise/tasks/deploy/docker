@@ -38,6 +38,16 @@ for host in $DEPLOY_HOSTS; do
         continue
     fi
 
+    # Make sure the bind-mount targets exist before stamping daemon.env or
+    # bringing the container up. Otherwise `install` below fails with
+    # "No such file or directory" on a fresh host, and docker compose
+    # would create the volume dirs root-owned.
+    if ! ensure_remote_install_dirs "$host"; then
+        echo "ERROR: [$host] could not create install dirs" >&2
+        failed="$failed $host"
+        continue
+    fi
+
     # Pin the cluster identity into daemon.env before recreating the
     # container. Without this, a host whose daemon.env was seeded but never
     # passed through config:roll comes up with no SMA_NODE_NAME, the daemon
