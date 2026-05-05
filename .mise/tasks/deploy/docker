@@ -98,13 +98,13 @@ for host in $DEPLOY_HOSTS; do
         fi
     fi
 
-    # Drop any stale SMA daemon container left over from a previous
-    # profile choice on this host (e.g. switching `intel` -> `intel-pg`
-    # leaves `sma-ng-intel` running and grabs port 8585, so compose's
-    # --force-recreate of `sma-ng-intel-pg` fails with a port-bind
-    # error). Only SMA-owned container_names from docker-compose.yml
-    # are touched; the bundled sma-pgsql is preserved.
-    if ! remove_stale_sma_containers "$host" "$service"; then
+    # Drop legacy per-profile SMA daemon containers (sma-ng-software,
+    # sma-ng-intel, sma-ng-intel-pg, etc.) left over from before the
+    # canonical container_name standardized on `sma-ng`. New deploys
+    # use compose's --force-recreate to replace the same-named
+    # container in place, so this is purely a one-time migration step
+    # for hosts still carrying the old per-profile names.
+    if ! remove_stale_sma_containers "$host"; then
         echo "  WARNING: [$host] stale-container cleanup reported errors — continuing" >&2
     fi
 
@@ -141,8 +141,9 @@ for host in $DEPLOY_HOSTS; do
         echo "==> [$host] $service healthy (${elapsed}s)"
     fi
 
-    # Print running container summary
-    print_remote_container_summary "$host" "$service"
+    # Print running container summary (canonical container_name is
+    # `sma-ng` regardless of profile)
+    print_remote_container_summary "$host" "sma-ng"
 
     echo "==> [$host] done"
 done
