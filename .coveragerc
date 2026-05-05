@@ -1,0 +1,30 @@
+[run]
+source = resources, converter, autoprocess
+branch = False
+omit =
+    tests/*
+    venv/*
+    .venv/*
+    setup.py
+    # Hardware-bound: requires Intel OpenVINO runtime + a GPU. The
+    # module is loaded lazily by the daemon and falls back gracefully
+    # when openvino isn't importable, so the *integration* path is
+    # exercised on every dev box, but unit-testing the analyzer
+    # itself needs hardware that's not available in CI.
+    resources/openvino_analyzer.py
+    # Calls ffprobe on a real file path; covered indirectly via the
+    # library_audit engine tests that mock its module-level FFMpeg
+    # reference. The remaining missed lines here are the real-FFprobe
+    # path used in production but not in CI.
+    resources/library_audit/probes.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+show_missing = True
+skip_covered = True
+precision = 2

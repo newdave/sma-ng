@@ -41,6 +41,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Width cap: records longer than `SMA_LOG_MAX_WIDTH` (default 1024) are truncated with a `…+N` tail marker. The PostgreSQL `logs` table receives the full record (the cap applies only to console/file handlers).
 - See `docs/brainstorming/2026-04-27-logging-refactor.md` for the design rationale.
 
+## Test Coverage
+
+- The pytest suite is gated on **≥90% global line coverage** plus a **≥70%
+  per-module floor** for production modules of ≥100 statements. Both gates
+  must pass before merge.
+- `mise run test:cov` runs the suite with `--cov-fail-under=${COV_FAIL_UNDER:-90}`.
+  Set `COV_FAIL_UNDER=0` to bypass the global gate for WIP commits.
+- `python scripts/check-coverage-floor.py` enforces the per-module floor.
+- See [`docs/test-coverage.md`](docs/test-coverage.md) for policy, exclusions,
+  and how to recover when the gate fails.
+- Don't add `# pragma: no cover` to mask uncovered logic. Don't lower the
+  threshold. Add a test instead.
+
 ## Markdown Rules
 
 - Markdown files must conform to markdownlint best practices and must not produce any markdownlint warnings or errors.

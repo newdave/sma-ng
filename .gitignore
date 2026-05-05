@@ -86,3 +86,7 @@ docker/.env
 /.mise/tasks/local/
 
 *farmnvr*
+/cov.json
+/coverage.json
+/htmlcov/
+/coverage.xml
