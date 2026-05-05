@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.2...sma-ng-v1.12.3) (2026-05-05)
+
+
+### Bug Fixes
+
+* **deploy:** drop stale SMA containers before profile switch ([80303c6](https://github.com/newdave/sma-ng/commit/80303c6fd0386276f44c58d588983c27635528c2))
+* **deploy:** drop stale sma-postgres container during pg lifecycle ops ([3663119](https://github.com/newdave/sma-ng/commit/36631194e0ad8620ceca8cae5f62a6b91930864d))
+
 ## [1.12.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.1...sma-ng-v1.12.2) (2026-05-05)
 
 
