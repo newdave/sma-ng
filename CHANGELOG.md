@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.1...sma-ng-v1.12.2) (2026-05-05)
+
+
+### Bug Fixes
+
+* **deploy:** bring up bundled postgres on -pg profiles + chown daemon.env ([6b78399](https://github.com/newdave/sma-ng/commit/6b78399870418af639939d90be1ce0729ca4ee6c))
+
 ## [1.12.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.0...sma-ng-v1.12.1) (2026-05-05)
 
 
