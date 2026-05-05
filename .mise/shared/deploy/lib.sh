@@ -270,6 +270,54 @@ docker_profile_is_pg() {
   [[ "$1" == *-pg ]]
 }
 
+# Stop and remove any stale postgres container left over from earlier
+# deploys when the container_name differed from today's canonical
+# `sma-pgsql`. Historically the container was named `sma-postgres`
+# while the compose service stayed `sma-pgsql`, leaving lib.sh helpers
+# unable to find the running container by name and (more importantly)
+# blocking the next recreate because port 5432 was still bound.
+#
+# Safe: only `docker rm -f` is run, never `docker volume rm`, so the
+# named `sma-pgdata` volume keeps the database files. The new
+# sma-pgsql container re-mounts the same volume and picks up the
+# existing data on first start.
+#
+# Same SSH context requirements as ensure_remote_docker; respects
+# deploy.use_sudo via the caller-populated sudo_prefix.
+remove_stale_pg_containers() {
+  local host="$1" active_name="${2:-sma-pgsql}"
+  local known_names=(sma-postgres sma-pgsql)
+  local stale=()
+  for name in "${known_names[@]}"; do
+    if [ "$name" = "$active_name" ]; then
+      continue
+    fi
+    stale+=("$name")
+  done
+  if [ ${#stale[@]} -eq 0 ]; then
+    return 0
+  fi
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts must word-split for ssh; remote command intentionally expands client-side
+  ssh $ssh_opts "$ssh_target" "bash -s" "${sudo_prefix:-}" "${stale[@]}" <<'REMOTE'
+    set -euo pipefail
+    sudo_prefix="$1"
+    shift
+    _run() {
+      if [ -n "$sudo_prefix" ]; then
+        sudo "$@"
+      else
+        "$@"
+      fi
+    }
+    for name in "$@"; do
+      if _run docker inspect "$name" >/dev/null 2>&1; then
+        echo "  removing stale postgres container: $name (volume sma-pgdata preserved)"
+        _run docker rm -f "$name" >/dev/null
+      fi
+    done
+REMOTE
+}
+
 # Stop and remove any stale SMA-owned containers on the remote host whose
 # names collide with the active service's port bindings or compose
 # project. The set of names is hard-coded to the container_names
