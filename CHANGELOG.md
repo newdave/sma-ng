@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.4](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.3...sma-ng-v1.12.4) (2026-05-05)
+
+
+### Bug Fixes
+
+* **docker:** pin postgres unix socket to PGDATA to avoid /var/run perms ([c815392](https://github.com/newdave/sma-ng/commit/c815392b33b8c35752b5f902472fe3f44bde3185))
+
 ## [1.12.3](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.2...sma-ng-v1.12.3) (2026-05-05)
 
 
