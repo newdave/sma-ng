@@ -913,3 +913,122 @@ class TestRecycleBinCleanerRun:
     with mock.patch.object(cleaner, "_free_gb", return_value=None):
       deleted = cleaner._clean_directory(str(tmp_path))
     assert deleted == 0
+
+
+class TestHeartbeatDistributedExtras:
+  """Cover the is_distributed-only branches: expire_offline_nodes + log_archive."""
+
+  def test_expire_offline_nodes_called_when_distributed(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.heartbeat.return_value = None
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = []
+    db.expire_offline_nodes.return_value = ["dead-node-1"]
+    server = mock.MagicMock()
+    server.path_config_manager.node_expiry_days = 30
+    server.path_config_manager.log_archive_dir = None
+    server.path_config_manager.log_archive_after_days = 0
+    ht = _make_heartbeat(job_db=db, server=server)
+
+    call_count = [0]
+
+    def fake_wait(timeout=None) -> bool:
+      call_count[0] += 1
+      if call_count[0] >= 1:
+        ht.running = False
+      return False
+
+    ht._stop_event.wait = fake_wait
+    ht.run()
+    db.expire_offline_nodes.assert_called_with(30)
+
+  def test_expire_offline_nodes_skipped_when_zero_days(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.heartbeat.return_value = None
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = []
+    server = mock.MagicMock()
+    server.path_config_manager.node_expiry_days = 0  # disabled
+    server.path_config_manager.log_archive_dir = None
+    server.path_config_manager.log_archive_after_days = 0
+    ht = _make_heartbeat(job_db=db, server=server)
+    ht._stop_event.wait = lambda timeout=None: setattr(ht, "running", False) or False
+    ht.run()
+    db.expire_offline_nodes.assert_not_called()
+
+  def test_log_archiver_runs_when_configured(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.heartbeat.return_value = None
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = []
+    server = mock.MagicMock()
+    server.path_config_manager.node_expiry_days = 0
+    server.path_config_manager.log_archive_dir = "/var/log/sma-archive"
+    server.path_config_manager.log_archive_after_days = 30
+    server.path_config_manager.log_delete_after_days = 90
+    ht = _make_heartbeat(job_db=db, server=server)
+    ht._stop_event.wait = lambda timeout=None: setattr(ht, "running", False) or False
+    fake_archiver = mock.MagicMock()
+    with mock.patch("resources.daemon.threads.LogArchiver", return_value=fake_archiver):
+      ht.run()
+    fake_archiver.run.assert_called()
+
+  def test_recover_stale_nodes_wakes_workers(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.heartbeat.return_value = None
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = [("dead-node", 5)]  # 5 jobs requeued
+    server = mock.MagicMock()
+    server.path_config_manager.node_expiry_days = 0
+    server.path_config_manager.log_archive_dir = None
+    server.path_config_manager.log_archive_after_days = 0
+    ht = _make_heartbeat(job_db=db, server=server)
+    ht._stop_event.wait = lambda timeout=None: setattr(ht, "running", False) or False
+    ht.run()
+    server.notify_workers.assert_called_once()
+
+  def test_recover_stale_nodes_no_jobs_skips_notify(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.heartbeat.return_value = None
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = [("dead-node", 0)]  # no jobs
+    server = mock.MagicMock()
+    server.path_config_manager.node_expiry_days = 0
+    server.path_config_manager.log_archive_dir = None
+    server.path_config_manager.log_archive_after_days = 0
+    ht = _make_heartbeat(job_db=db, server=server)
+    ht._stop_event.wait = lambda timeout=None: setattr(ht, "running", False) or False
+    ht.run()
+    server.notify_workers.assert_not_called()
+
+  def test_cleanup_old_logs_called_when_ttl_set(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.heartbeat.return_value = None
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = []
+    server = mock.MagicMock()
+    server.path_config_manager.node_expiry_days = 0
+    server.path_config_manager.log_archive_dir = None
+    server.path_config_manager.log_archive_after_days = 0
+    log = logging.getLogger("test.hb-ttl")
+    ht = HeartbeatThread(
+      job_db=db,
+      node_id="n1",
+      host="127.0.0.1",
+      worker_count=1,
+      server=server,
+      interval=5,
+      stale_seconds=60,
+      logger=log,
+      started_at=None,
+      log_ttl_days=14,
+    )
+    ht._stop_event.wait = lambda timeout=None: setattr(ht, "running", False) or False
+    ht.run()
+    db.cleanup_old_logs.assert_called_with(14)
