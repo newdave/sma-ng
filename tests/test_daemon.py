@@ -1,6 +1,7 @@
 """Tests for daemon.py - job database, path config, and markdown rendering."""
 
 import json
+import os
 import threading
 import urllib.error
 import urllib.request
@@ -2887,3 +2888,960 @@ class TestParseRadarrBody:
     path, args = handler._parse_radarr_body()
     assert path is None
     assert resp.status == 400
+
+
+# ---------------------------------------------------------------------------
+# PathConfigManager — extended coverage for routing helpers + recycle-bin
+# ---------------------------------------------------------------------------
+
+
+class TestPathConfigManagerExtended:
+  def _yaml(self, tmp_path, body: dict) -> str:
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, body)
+    return cfg
+
+  def test_routing_match_paths_strips_globs(self, tmp_path):
+    cfg = self._yaml(
+      tmp_path,
+      {
+        "routing": [
+          {"match": "/mnt/media/TV/**", "profile": "tv"},
+          {"match": "/mnt/media/Movies/*", "profile": "mov"},
+          {"match": "/mnt/exact", "profile": "exact"},
+        ],
+      },
+    )
+    pcm = PathConfigManager(cfg)
+    out = pcm.routing_match_paths()
+    assert "/mnt/media/TV" in out
+    assert "/mnt/media/Movies" in out
+    assert "/mnt/exact" in out
+
+  def test_routing_match_paths_skips_empty_matches(self, tmp_path):
+    cfg = self._yaml(
+      tmp_path,
+      {"routing": [{"match": "**", "profile": "all"}]},
+    )
+    pcm = PathConfigManager(cfg)
+    # Bare /** stripped fully → empty → skipped
+    assert pcm.routing_match_paths() == []
+
+  def test_routing_match_paths_empty_when_no_config(self):
+    pcm = PathConfigManager.__new__(PathConfigManager)
+    pcm._cfg = None
+    assert pcm.routing_match_paths() == []
+
+  def test_routing_rules_admin_returns_dicts(self, tmp_path):
+    cfg = self._yaml(
+      tmp_path,
+      {
+        "routing": [
+          {"match": "/a", "profile": "p1", "services": ["sonarr.main"]},
+        ],
+      },
+    )
+    pcm = PathConfigManager(cfg)
+    rules = pcm.routing_rules_admin()
+    assert len(rules) == 1
+    assert rules[0]["match"] == "/a"
+    assert rules[0]["profile"] == "p1"
+    assert rules[0]["services"] == ["sonarr.main"]
+
+  def test_routing_rules_admin_empty_when_no_config(self):
+    pcm = PathConfigManager.__new__(PathConfigManager)
+    pcm._cfg = None
+    assert pcm.routing_rules_admin() == []
+
+  def test_get_services_for_path_empty_when_no_config(self):
+    pcm = PathConfigManager.__new__(PathConfigManager)
+    pcm._cfg = None
+    assert pcm.get_services_for_path("/x") == []
+
+  def test_get_services_for_path_returns_routing_services(self, tmp_path):
+    cfg = self._yaml(
+      tmp_path,
+      {
+        "routing": [
+          {"match": "/mnt/tv", "profile": "tv", "services": ["sonarr.main"]},
+        ],
+      },
+    )
+    pcm = PathConfigManager(cfg)
+    svcs = pcm.get_services_for_path("/mnt/tv/show.mkv")
+    assert ("sonarr", "main") in svcs
+
+  def test_get_profile_for_path_returns_none_when_no_config(self):
+    pcm = PathConfigManager.__new__(PathConfigManager)
+    pcm._cfg = None
+    assert pcm.get_profile_for_path("/anything") is None
+
+  def test_rewrite_path_no_match_returns_unchanged(self, tmp_path):
+    cfg = self._yaml(tmp_path, {})
+    pcm = PathConfigManager(cfg)
+    assert pcm.rewrite_path("/no/rewrite/here.mkv") == "/no/rewrite/here.mkv"
+
+  def test_rewrite_path_exact_match(self, tmp_path):
+    cfg = self._yaml(
+      tmp_path,
+      {"path_rewrites": [{"from": "/mnt/local", "to": "/mnt/unionfs"}]},
+    )
+    pcm = PathConfigManager(cfg)
+    assert pcm.rewrite_path("/mnt/local") == "/mnt/unionfs"
+
+  def test_get_recycle_bin_reads_from_yaml(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    y = _YAML()
+    bin_dir = tmp_path / "trash"
+    with open(cfg, "w") as f:
+      y.dump({"base": {"converter": {"recycle-bin": str(bin_dir)}}}, f)
+    pcm = PathConfigManager(cfg)
+    assert pcm.get_recycle_bin(cfg) == os.path.abspath(str(bin_dir))
+
+  def test_get_recycle_bin_returns_none_for_non_yaml(self, tmp_path):
+    cfg = self._yaml(tmp_path, {})
+    pcm = PathConfigManager(cfg)
+    assert pcm.get_recycle_bin("/some/file.ini") is None
+
+  def test_get_recycle_bin_returns_none_for_empty_value(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    y = _YAML()
+    with open(cfg, "w") as f:
+      y.dump({"base": {"converter": {"recycle-bin": ""}}}, f)
+    pcm = PathConfigManager(cfg)
+    assert pcm.get_recycle_bin(cfg) is None
+
+  def test_get_recycle_bin_swallows_errors(self, tmp_path):
+    cfg = self._yaml(tmp_path, {})
+    pcm = PathConfigManager(cfg)
+    # Pointing at a non-existent file should return None, not raise.
+    assert pcm.get_recycle_bin(str(tmp_path / "missing.yml")) is None
+
+  def test_is_recycle_bin_path_when_no_bin(self, tmp_path):
+    cfg = self._yaml(tmp_path, {})
+    pcm = PathConfigManager(cfg)
+    assert pcm.is_recycle_bin_path("/some/path") is False
+
+  def test_is_recycle_bin_path_inside_bin(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    y = _YAML()
+    bin_dir = tmp_path / "trash"
+    bin_dir.mkdir()
+    with open(cfg, "w") as f:
+      y.dump({"base": {"converter": {"recycle-bin": str(bin_dir)}}}, f)
+    pcm = PathConfigManager(cfg)
+    assert pcm.is_recycle_bin_path(str(bin_dir / "old.mkv")) is True
+    assert pcm.is_recycle_bin_path(str(tmp_path / "elsewhere.mkv")) is False
+
+  def test_get_args_for_path_returns_default(self, tmp_path):
+    cfg = self._yaml(tmp_path, {"default_args": ["--audit", "--debug"]})
+    pcm = PathConfigManager(cfg)
+    assert pcm.get_args_for_path("/x") == ["--audit", "--debug"]
+
+  def test_get_all_configs_returns_single_entry(self, tmp_path):
+    cfg = self._yaml(tmp_path, {})
+    pcm = PathConfigManager(cfg)
+    assert pcm.get_all_configs() == [pcm.default_config]
+
+  def test_node_expiry_days_property(self, tmp_path):
+    cfg = self._yaml(tmp_path, {"node_expiry_days": 14})
+    pcm = PathConfigManager(cfg)
+    assert pcm.node_expiry_days == 14
+
+  def test_log_archive_properties(self, tmp_path):
+    cfg = self._yaml(
+      tmp_path,
+      {
+        "log_archive_dir": "/var/log/archive",
+        "log_archive_after_days": 30,
+        "log_delete_after_days": 90,
+      },
+    )
+    pcm = PathConfigManager(cfg)
+    assert pcm.log_archive_dir == "/var/log/archive"
+    assert pcm.log_archive_after_days == 30
+    assert pcm.log_delete_after_days == 90
+
+
+class TestRawLocalDaemonSection:
+  def test_returns_dict_when_section_present(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    y = _YAML()
+    with open(cfg, "w") as f:
+      y.dump({"daemon": {"api_key": "x"}, "services": {}}, f)
+    out = PathConfigManager._raw_local_daemon_section(cfg)
+    assert out == {"api_key": "x"}
+
+  def test_returns_empty_dict_when_section_missing(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    y = _YAML()
+    with open(cfg, "w") as f:
+      y.dump({"services": {}}, f)
+    out = PathConfigManager._raw_local_daemon_section(cfg)
+    assert out == {}
+
+  def test_returns_empty_dict_when_section_not_a_dict(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    with open(cfg, "w") as f:
+      f.write("daemon: just-a-string\nservices: {}\n")
+    out = PathConfigManager._raw_local_daemon_section(cfg)
+    assert out == {}
+
+  def test_returns_empty_dict_on_load_error(self, tmp_path):
+    out = PathConfigManager._raw_local_daemon_section(str(tmp_path / "missing.yml"))
+    assert out == {}
+
+
+class TestParseArgsList:
+  def test_string_input_split_with_shlex(self):
+    out = PathConfigManager._parse_args_list('--profile hq --debug "with space"')
+    assert out == ["--profile", "hq", "--debug", "with space"]
+
+  def test_list_input_passthrough(self):
+    assert PathConfigManager._parse_args_list(["--a", "--b"]) == ["--a", "--b"]
+
+  def test_none_input_returns_empty_list(self):
+    assert PathConfigManager._parse_args_list(None) == []
+
+  def test_empty_string_returns_empty_list(self):
+    assert PathConfigManager._parse_args_list("") == []
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQLJobDatabase — extended mocked-cursor coverage of methods that were
+# previously only exercised against a live DB.
+# ---------------------------------------------------------------------------
+
+
+class TestPGExtendedMocked:
+  """Drive each DB method through the mock-pool helper to cover SQL
+  templating without requiring TEST_DB_URL."""
+
+  # ------------------------------------------------------------------
+  # cluster_nodes lifecycle
+  # ------------------------------------------------------------------
+
+  def test_heartbeat_executes_upsert(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    db.heartbeat("n1", "127.0.0.1", 4, "2026-01-01T00:00:00Z", version="1.0", hwaccel="qsv", node_name="master")
+    cur.execute.assert_called_once()
+    # SQL must reference cluster_nodes
+    sql = cur.execute.call_args[0][0]
+    assert "cluster_nodes" in sql
+    assert "ON CONFLICT" in sql
+
+  def test_is_node_approved_true(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"approval_status": "approved"}
+    assert db.is_node_approved("n1") is True
+
+  def test_is_node_approved_false_on_other_status(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"approval_status": "pending"}
+    assert db.is_node_approved("n1") is False
+
+  def test_is_node_approved_false_when_no_row(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = None
+    assert db.is_node_approved("n1") is False
+
+  def test_set_node_approval_returns_row(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"node_id": "n1", "approval_status": "approved"}
+    out = db.set_node_approval("n1", approved=True, actor="ui", note="ok")
+    assert out["node_id"] == "n1"
+
+  def test_set_node_approval_returns_none_when_node_missing(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = None
+    assert db.set_node_approval("missing") is None
+
+  def test_set_node_approval_rejected(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"node_id": "n1", "approval_status": "rejected"}
+    out = db.set_node_approval("n1", approved=False)
+    assert out["approval_status"] == "rejected"
+    args = cur.execute.call_args[0][1]
+    assert "rejected" in args
+
+  def test_delete_node_returns_true_when_deleted(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 1
+    assert db.delete_node("n1") is True
+
+  def test_delete_node_returns_false_when_missing(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 0
+    assert db.delete_node("missing") is False
+
+  def test_set_node_status(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    db.set_node_status("n1", "draining")
+    cur.execute.assert_called()
+    args = cur.execute.call_args[0][1]
+    assert "draining" in args
+
+  # ------------------------------------------------------------------
+  # node_commands
+  # ------------------------------------------------------------------
+
+  def test_send_node_command_broadcast(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [{"node_id": "n1"}, {"node_id": "n2"}]
+    out = db.send_node_command(None, "drain", requested_by="api")
+    assert out == ["n1", "n2"]
+
+  def test_send_node_command_specific_node(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [{"node_id": "n1"}]
+    out = db.send_node_command("n1", "restart")
+    assert out == ["n1"]
+
+  def test_poll_node_command_returns_pending(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"id": 7, "command": "drain"}
+    out = db.poll_node_command("n1")
+    assert out == {"id": 7, "command": "drain"}
+    # Should issue UPDATE to mark executing
+    assert cur.execute.call_count == 2
+
+  def test_poll_node_command_returns_none_when_no_pending(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = None
+    assert db.poll_node_command("n1") is None
+
+  def test_ack_node_command(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    db.ack_node_command(5, "done")
+    args = cur.execute.call_args[0][1]
+    assert args == ("done", 5)
+
+  # ------------------------------------------------------------------
+  # logs table
+  # ------------------------------------------------------------------
+
+  def test_insert_logs_executes_bulk_insert(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    db.insert_logs(
+      [
+        {"node_id": "n1", "level": "INFO", "logger": "app", "message": "hi"},
+        {"node_id": "n1", "level": "ERROR", "logger": "app", "message": "bad"},
+      ]
+    )
+    cur.executemany.assert_called_once()
+
+  def test_insert_logs_noop_when_empty(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    db.insert_logs([])
+    cur.executemany.assert_not_called()
+
+  def test_cleanup_old_logs_returns_rowcount(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 42
+    assert db.cleanup_old_logs(7) == 42
+
+  def test_get_logs_no_filters(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [{"id": 1, "message": "x"}]
+    out = db.get_logs()
+    assert len(out) == 1
+    sql = cur.execute.call_args[0][0]
+    assert "LIMIT %s OFFSET %s" in sql
+
+  def test_get_logs_with_filters(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = []
+    db.get_logs(node_id="n1", level="ERROR", limit=10, offset=5)
+    sql = cur.execute.call_args[0][0]
+    assert "node_id = %s" in sql
+    assert "level = %s" in sql
+    params = cur.execute.call_args[0][1]
+    assert params == ["n1", "ERROR", 10, 5]
+
+  def test_get_logs_for_archival(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [{"id": 1, "node_id": "n1"}]
+    out = db.get_logs_for_archival(30)
+    assert len(out) == 1
+
+  def test_delete_logs_before_returns_rowcount(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 99
+    assert db.delete_logs_before(30) == 99
+
+  # ------------------------------------------------------------------
+  # cluster_config
+  # ------------------------------------------------------------------
+
+  def test_get_cluster_config_returns_parsed(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"config": "daemon:\n  api_key: x\n"}
+    out = db.get_cluster_config()
+    assert out == {"daemon": {"api_key": "x"}}
+
+  def test_get_cluster_config_returns_none_when_no_row(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = None
+    assert db.get_cluster_config() is None
+
+  def test_set_cluster_config_strips_secrets(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cfg = {"daemon": {"api_key": "leak", "node_id": "ok"}, "base": {}}
+    db.set_cluster_config(cfg, updated_by="ui")
+    written_yaml = cur.execute.call_args[0][1][0]
+    # api_key should be stripped from the serialized output
+    assert "api_key" not in written_yaml
+
+  # ------------------------------------------------------------------
+  # node lifecycle
+  # ------------------------------------------------------------------
+
+  def test_expire_offline_nodes_returns_empty_when_none_expired(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = []
+    assert db.expire_offline_nodes(30) == []
+
+  def test_expire_offline_nodes_returns_deleted_ids(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    # First call returns rows; subsequent calls (cleanup_orphaned_commands, DELETE) get empty
+    cur.fetchall.side_effect = [[{"node_id": "dead1"}, {"node_id": "dead2"}]]
+    cur.rowcount = 2
+    out = db.expire_offline_nodes(30)
+    assert out == ["dead1", "dead2"]
+
+  def test_cleanup_orphaned_commands_noop_for_empty(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    assert db.cleanup_orphaned_commands([]) == 0
+
+  def test_cleanup_orphaned_commands_returns_rowcount(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 3
+    assert db.cleanup_orphaned_commands(["dead1", "dead2"]) == 3
+
+  # ------------------------------------------------------------------
+  # job lifecycle (the bulk paths)
+  # ------------------------------------------------------------------
+
+  def test_requeue_job_returns_true_when_updated(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 1
+    assert db.requeue_job(42) is True
+
+  def test_requeue_job_returns_false_when_not_failed(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 0
+    assert db.requeue_job(42) is False
+
+  def test_requeue_failed_jobs_no_filter(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 5
+    assert db.requeue_failed_jobs() == 5
+
+  def test_requeue_failed_jobs_with_config_filter(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 3
+    out = db.requeue_failed_jobs(config="/c.yml")
+    assert out == 3
+    sql = cur.execute.call_args[0][0]
+    assert "config = %s" in sql
+
+  def test_cancel_job_returns_true_when_cancelled(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"id": 5}
+    assert db.cancel_job(5) is True
+
+  def test_cancel_job_returns_false_when_not_cancellable(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = None
+    assert db.cancel_job(5) is False
+
+  def test_set_job_priority_returns_true_when_pending(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"id": 1}
+    assert db.set_job_priority(1, 5) is True
+
+  def test_set_job_priority_returns_false_otherwise(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = None
+    assert db.set_job_priority(1, 5) is False
+
+  def test_delete_failed_jobs(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 7
+    assert db.delete_failed_jobs() == 7
+
+  def test_delete_jobs_returns_deleted_ids(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [{"id": 1}, {"id": 2}]
+    assert db.delete_jobs([1, 2, 99]) == [1, 2]
+
+  def test_delete_jobs_empty_returns_empty(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    assert db.delete_jobs([]) == []
+    cur.execute.assert_not_called()
+
+  def test_delete_jobs_none_returns_empty(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    assert db.delete_jobs(None) == []
+
+  def test_delete_offline_nodes(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 2
+    assert db.delete_offline_nodes() == 2
+
+  def test_delete_all_jobs_logs(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 100
+    assert db.delete_all_jobs() == 100
+
+  def test_pending_count(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"count": 5}
+    assert db.pending_count() == 5
+
+  def test_pending_count_for_config(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"count": 2}
+    assert db.pending_count_for_config("/c.yml") == 2
+
+  # ------------------------------------------------------------------
+  # scanned_files
+  # ------------------------------------------------------------------
+
+  def test_filter_unscanned_empty_returns_empty(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    assert db.filter_unscanned([]) == []
+    cur.execute.assert_not_called()
+
+  def test_filter_unscanned_returns_subset(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [{"path": "/a"}]
+    out = db.filter_unscanned(["/a", "/b", "/c"])
+    assert set(out) == {"/b", "/c"}
+
+  def test_record_scanned_noop_when_empty(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    db.record_scanned([])
+    cur.executemany.assert_not_called()
+
+  def test_record_scanned_inserts(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    db.record_scanned(["/a", "/b"])
+    cur.executemany.assert_called_once()
+
+  # ------------------------------------------------------------------
+  # library_audit
+  # ------------------------------------------------------------------
+
+  def test_create_audit_run_returns_id(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"id": 99}
+    assert db.create_audit_run(["/x"], "scheduled") == 99
+
+  def test_set_audit_run_status(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    db.set_audit_run_status(99, "completed")
+    cur.execute.assert_called()
+
+  def test_enqueue_audit_units_zero_when_empty(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    assert db.enqueue_audit_units(99, []) == 0
+    cur.executemany.assert_not_called()
+
+  def test_enqueue_audit_units_returns_count(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    n = db.enqueue_audit_units(99, [("/a", "media"), ("/b", "media")])
+    assert n == 2
+    cur.executemany.assert_called_once()
+
+  def test_claim_audit_units_returns_dicts(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [
+      {"id": 1, "audit_id": 99, "path": "/a", "kind_hint": "media"},
+    ]
+    out = db.claim_audit_units("n1", 99, batch=10)
+    assert len(out) == 1
+    assert out[0]["path"] == "/a"
+
+  def test_mark_audit_unit_done_success(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"audit_id": 99}
+    db.mark_audit_unit_done(5)
+    # 2 SQL calls: UPDATE queue, UPDATE runs.done_units
+    assert cur.execute.call_count == 2
+
+  def test_mark_audit_unit_done_with_error(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"audit_id": 99}
+    db.mark_audit_unit_done(5, error="probe failed")
+    args = cur.execute.call_args_list[0][0][1]
+    assert "probe failed" in args
+
+
+class TestPGLibraryAuditMocked:
+  """Cover the library-audit DB methods (lines 1311-1549)."""
+
+  def test_release_stale_audit_claims_returns_rowcount(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 4
+    assert db.release_stale_audit_claims(600) == 4
+
+  def test_requeue_audit_claims_for_node_returns_rowcount(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 7
+    assert db.requeue_audit_claims_for_node("n1") == 7
+
+  def test_list_active_audit_runs_returns_dicts(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [{"id": 1, "scope_paths": [], "total_units": 10, "done_units": 5}]
+    out = db.list_active_audit_runs()
+    assert len(out) == 1
+    assert out[0]["id"] == 1
+
+  def test_complete_finished_audit_runs_returns_ids(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [{"id": 5}, {"id": 6}]
+    out = db.complete_finished_audit_runs()
+    assert out == [5, 6]
+
+  def test_get_audit_run_returns_with_per_node_progress(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"id": 5, "status": "completed"}
+    cur.fetchall.return_value = [{"claimed_by": "n1", "units": 10}]
+    out = db.get_audit_run(5)
+    assert out["id"] == 5
+    assert out["per_node_progress"] == [{"claimed_by": "n1", "units": 10}]
+
+  def test_get_audit_run_returns_none_when_missing(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = None
+    assert db.get_audit_run(5) is None
+
+  def test_list_audit_runs(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [{"id": 2}, {"id": 1}]
+    out = db.list_audit_runs(limit=10, offset=0)
+    assert [r["id"] for r in out] == [2, 1]
+
+  def test_try_acquire_audit_enumerate_lock_success(self):
+    db, pool, conn, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"ok": True}
+    out = db.try_acquire_audit_enumerate_lock()
+    assert out is conn
+    pool.putconn.assert_not_called()
+
+  def test_try_acquire_audit_enumerate_lock_returns_none(self):
+    db, pool, conn, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"ok": False}
+    assert db.try_acquire_audit_enumerate_lock() is None
+    pool.putconn.assert_called_once_with(conn)
+
+  def test_try_acquire_audit_enumerate_lock_returns_conn_to_pool_on_error(self):
+    db, pool, conn, cur = _make_db_with_mock_pool()
+    cur.execute.side_effect = RuntimeError("db down")
+    with pytest.raises(RuntimeError):
+      db.try_acquire_audit_enumerate_lock()
+    pool.putconn.assert_called_once_with(conn)
+
+  def test_release_audit_enumerate_lock_no_op_for_none(self):
+    db, _, _, _ = _make_db_with_mock_pool()
+    db.release_audit_enumerate_lock(None)  # should NOT raise
+
+  def test_release_audit_enumerate_lock_returns_to_pool(self):
+    db, pool, _, _ = _make_db_with_mock_pool()
+    fake_conn = MagicMock()
+    db.release_audit_enumerate_lock(fake_conn)
+    pool.putconn.assert_called_once_with(fake_conn)
+
+  def test_release_audit_enumerate_lock_swallows_exception(self):
+    db, pool, _, _ = _make_db_with_mock_pool()
+    fake_conn = MagicMock()
+    fake_conn.cursor.return_value.__enter__.side_effect = RuntimeError("boom")
+    # Should NOT raise.
+    db.release_audit_enumerate_lock(fake_conn)
+    pool.putconn.assert_called_once()
+
+  def test_upsert_finding_returns_id(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"id": 11}
+    out = db.upsert_finding("ffprobe_failed", "/x.mp4", {"reason": "empty"}, audit_id=99)
+    assert out == 11
+
+  def test_get_findings_no_filters(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [{"id": 1, "path": "/a"}]
+    out = db.get_findings()
+    assert len(out) == 1
+    sql = cur.execute.call_args[0][0]
+    assert "WHERE" not in sql.split("ORDER BY")[0]  # no filter clause
+
+  def test_get_findings_with_filters(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = []
+    db.get_findings(status="open", kind="ffprobe_failed", path="/x", limit=10, offset=5)
+    sql = cur.execute.call_args[0][0]
+    assert "status = %s" in sql
+    assert "kind = %s" in sql
+    assert "path = %s" in sql
+
+  def test_get_finding_returns_dict(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = {"id": 1, "kind": "ffprobe_failed"}
+    assert db.get_finding(1)["id"] == 1
+
+  def test_get_finding_returns_none_when_missing(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchone.return_value = None
+    assert db.get_finding(1) is None
+
+  def test_set_finding_status_open(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 1
+    assert db.set_finding_status(5, "open") == 1
+    sql = cur.execute.call_args[0][0]
+    assert "acked_at" not in sql
+
+  def test_set_finding_status_acked_includes_timestamp(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 1
+    db.set_finding_status(5, "acked")
+    sql = cur.execute.call_args[0][0]
+    assert "acked_at" in sql
+
+  def test_set_finding_status_resolved_includes_timestamp(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 1
+    db.set_finding_status(5, "resolved")
+    sql = cur.execute.call_args[0][0]
+    assert "resolved_at" in sql
+
+  def test_record_media_id_executes_upsert(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    db.record_media_id(99, "/x.mp4", "movie:tmdb:603")
+    sql = cur.execute.call_args[0][0]
+    assert "ON CONFLICT" in sql
+
+  def test_find_duplicate_media_ids_returns_dict(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.fetchall.return_value = [
+      {"media_id": "movie:tmdb:603", "paths": ["/a", "/b"]},
+    ]
+    out = db.find_duplicate_media_ids(99)
+    assert out == {"movie:tmdb:603": ["/a", "/b"]}
+
+  def test_purge_audit_media_ids_returns_rowcount(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cur.rowcount = 5
+    assert db.purge_audit_media_ids(99) == 5
+
+
+class TestPGGetMetricsMocked:
+  """Cover the get_metrics analytics method (lines 535-674)."""
+
+  def _setup_metric_cursor(self, cur, wdef=True):
+    """Sequence fetchone/fetchall to mimic the multi-query metrics call."""
+    import datetime as _dt
+
+    snap = {"pending": 5, "running": 2, "total": 100}
+    kpi = {
+      "completed": 80,
+      "failed": 5,
+      "cancelled": 1,
+      "failure_rate_pct": 5.88,
+      "avg_duration_seconds": 120.5,
+      "p95_duration_seconds": 600.0,
+      "avg_compression_pct": 35.5,
+    }
+    cur.fetchone.side_effect = [snap, kpi]
+    if wdef:
+      ts_rows = [
+        {
+          "bucket": _dt.datetime(2026, 5, 5, 10, 0, 0, tzinfo=_dt.timezone.utc),
+          "completed": 10,
+          "failed": 1,
+        },
+      ]
+      node_rows = [
+        {
+          "node_id": "n1",
+          "node_name": "master",
+          "completed": 60,
+          "failed": 3,
+          "avg_duration_seconds": 100.0,
+        },
+      ]
+      cur.fetchall.side_effect = [ts_rows, node_rows]
+    else:
+      cur.fetchall.side_effect = [
+        [
+          {
+            "node_id": "n1",
+            "node_name": "master",
+            "completed": 60,
+            "failed": 3,
+            "avg_duration_seconds": None,
+          }
+        ]
+      ]
+
+  def test_get_metrics_24h_window(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    self._setup_metric_cursor(cur)
+    out = db.get_metrics(window="24h")
+    assert out["available"] is True
+    assert out["window"] == "24h"
+    assert out["kpis"]["completed"] == 80
+    assert out["kpis"]["failed"] == 5
+    assert out["kpis"]["throughput_per_hour"] is not None
+    assert len(out["timeseries"]) == 1
+    assert out["nodes"][0]["node_id"] == "n1"
+
+  def test_get_metrics_7d_window(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    self._setup_metric_cursor(cur)
+    out = db.get_metrics(window="7d")
+    assert out["window"] == "7d"
+    assert out["kpis"]["throughput_per_hour"] is not None
+
+  def test_get_metrics_all_window_no_timeseries(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    self._setup_metric_cursor(cur, wdef=False)
+    out = db.get_metrics(window="all")
+    assert out["timeseries"] == []
+    # throughput_per_hour is None for all-time (no fixed window length)
+    assert out["kpis"]["throughput_per_hour"] is None
+
+  def test_get_metrics_handles_null_kpi_fields(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    snap = {"pending": 0, "running": 0, "total": 0}
+    kpi = {
+      "completed": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "failure_rate_pct": None,
+      "avg_duration_seconds": None,
+      "p95_duration_seconds": None,
+      "avg_compression_pct": None,
+    }
+    cur.fetchone.side_effect = [snap, kpi]
+    cur.fetchall.side_effect = [[], []]
+    out = db.get_metrics(window="24h")
+    # All null fields stay null in the output, not coerced to 0.0
+    assert out["kpis"]["failure_rate_pct"] is None
+    assert out["kpis"]["avg_duration_seconds"] is None
+
+  def test_get_metrics_handles_null_node_avg_duration(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    snap = {"pending": 0, "running": 0, "total": 0}
+    kpi = {
+      "completed": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "failure_rate_pct": None,
+      "avg_duration_seconds": None,
+      "p95_duration_seconds": None,
+      "avg_compression_pct": None,
+    }
+    cur.fetchone.side_effect = [snap, kpi]
+    cur.fetchall.side_effect = [
+      [],  # timeseries
+      [
+        {
+          "node_id": "n1",
+          "node_name": "master",
+          "completed": 0,
+          "failed": 0,
+          "avg_duration_seconds": None,
+        }
+      ],
+    ]
+    out = db.get_metrics(window="24h")
+    assert out["nodes"][0]["avg_duration_seconds"] is None
+
+
+class TestConfigLockManagerMore:
+  def test_get_locked_configs(self):
+    from daemon import ConfigLockManager
+
+    log = MagicMock()
+    m = ConfigLockManager(max_per_config=2, logger=log)
+    # Acquire two slots for same config — fills it.
+    m.acquire("/c.yml", 1, "/p1")
+    m.acquire("/c.yml", 2, "/p2")
+    locked = m.get_locked_configs()
+    assert "/c.yml" in locked
+    m.release("/c.yml", 1)
+    m.release("/c.yml", 2)
+
+  def test_get_active_jobs_returns_empty_for_unknown_config(self):
+    from daemon import ConfigLockManager
+
+    log = MagicMock()
+    m = ConfigLockManager(max_per_config=2, logger=log)
+    assert m.get_active_jobs("/never-locked.yml") == []
+
+  def test_get_active_jobs_returns_dicts(self):
+    from daemon import ConfigLockManager
+
+    log = MagicMock()
+    m = ConfigLockManager(max_per_config=2, logger=log)
+    m.acquire("/c.yml", 1, "/path/to/file.mkv")
+    out = m.get_active_jobs("/c.yml")
+    assert out == [{"job_id": 1, "path": "/path/to/file.mkv"}]
+    m.release("/c.yml", 1)
+
+
+class TestConfigLogManagerMore:
+  def test_get_all_log_files_returns_empty_when_dir_missing(self, tmp_path):
+    from daemon import ConfigLogManager
+
+    log = MagicMock()
+    m = ConfigLogManager(logs_dir=str(tmp_path / "missing"))
+    assert m.get_all_log_files() == []
+
+  def test_get_all_log_files_filters_non_logs(self, tmp_path):
+    from daemon import ConfigLogManager
+
+    log = MagicMock()
+    (tmp_path / "alpha.log").write_text("")
+    (tmp_path / "notes.txt").write_text("")
+    (tmp_path / "subdir").mkdir()
+    m = ConfigLogManager(logs_dir=str(tmp_path))
+    out = m.get_all_log_files()
+    names = {e["name"] for e in out}
+    assert "alpha" in names
+    assert "notes" not in names
+
+
+class TestPathConfigManagerLoadErrors:
+  def test_load_config_propagates_other_exceptions(self, tmp_path):
+    from resources.config_loader import ConfigError
+
+    cfg = tmp_path / "broken.yml"
+    cfg.write_text("not: valid: yaml:")
+    pcm = PathConfigManager.__new__(PathConfigManager)
+    pcm.log = MagicMock()
+    pcm.path_rewrites = []
+    pcm.default_config = str(cfg)
+    pcm._config_file = str(cfg)
+    pcm._loader = MagicMock()
+    pcm._loader.load.side_effect = RuntimeError("unexpected")
+    with pytest.raises(RuntimeError):
+      pcm.load_config(str(cfg))
+    pcm.log.exception.assert_called()
+
+  def test_load_config_propagates_config_error(self, tmp_path):
+    from resources.config_loader import ConfigError
+
+    cfg = tmp_path / "bad.yml"
+    cfg.write_text("daemon: invalid")
+    pcm = PathConfigManager.__new__(PathConfigManager)
+    pcm.log = MagicMock()
+    pcm.path_rewrites = []
+    pcm.default_config = str(cfg)
+    pcm._config_file = str(cfg)
+    pcm._loader = MagicMock()
+    pcm._loader.load.side_effect = ConfigError("bad schema")
+    with pytest.raises(ConfigError):
+      pcm.load_config(str(cfg))
+    pcm.log.error.assert_called()
