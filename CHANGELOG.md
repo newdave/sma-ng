@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.6...sma-ng-v1.13.0) (2026-05-05)
+
+
+### Features
+
+* **test:** add coverage gate at 90% global + 70% per-module floor ([e68e3b6](https://github.com/newdave/sma-ng/commit/e68e3b66cf4e474a06d4c0a6cd30afa44f90eb32))
+
 ## [1.12.6](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.5...sma-ng-v1.12.6) (2026-05-05)
 
 
