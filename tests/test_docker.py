@@ -392,6 +392,22 @@ class TestComposePostgres:
     # container) see the same name.
     assert compose["services"]["sma-pgsql"].get("container_name") == "sma-pgsql"
 
+  def test_sma_daemon_services_share_canonical_container_name(self, compose):
+    # All SMA daemon variants resolve to a single container named
+    # `sma-ng` regardless of profile, so switching a host's profile
+    # in setup/local.yml just replaces the same container in place
+    # rather than leaving stale per-profile containers around.
+    sma_services = (
+      "sma-software",
+      "sma-software-pg",
+      "sma-intel",
+      "sma-intel-pg",
+      "sma-nvidia",
+      "sma-nvidia-pg",
+    )
+    for svc in sma_services:
+      assert compose["services"][svc].get("container_name") == "sma-ng", f"{svc} should have container_name=sma-ng for cross-profile reuse"
+
   def test_postgres_starts_only_for_pg_profiles(self, compose):
     profiles = compose["services"]["sma-pgsql"]["profiles"]
     assert set(profiles) == {"software-pg", "intel-pg", "nvidia-pg"}

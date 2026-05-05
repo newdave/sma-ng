@@ -55,8 +55,8 @@ services:
   # ────────────────────────────────────────────────────────────────────
   sma-software:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
-    container_name: sma-ng-software
-    hostname: "${SMA_NODE_NAME:-sma-ng-software}"
+    container_name: sma-ng
+    hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [software]
     restart: unless-stopped
     ports:
@@ -78,8 +78,8 @@ services:
 
   sma-software-pg:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
-    container_name: sma-ng-software-pg
-    hostname: "${SMA_NODE_NAME:-sma-ng-software-pg}"
+    container_name: sma-ng
+    hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [software-pg]
     restart: unless-stopped
     ports:
@@ -104,8 +104,8 @@ services:
 
   sma-nvidia:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
-    container_name: sma-ng-nvidia
-    hostname: "${SMA_NODE_NAME:-sma-ng-nvidia}"
+    container_name: sma-ng
+    hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [nvidia]
     restart: unless-stopped
     ports:
@@ -136,8 +136,8 @@ services:
 
   sma-nvidia-pg:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
-    container_name: sma-ng-nvidia-pg
-    hostname: "${SMA_NODE_NAME:-sma-ng-nvidia-pg}"
+    container_name: sma-ng
+    hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [nvidia-pg]
     restart: unless-stopped
     ports:
@@ -171,8 +171,8 @@ services:
 
   sma-intel:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
-    container_name: sma-ng-intel
-    hostname: "${SMA_NODE_NAME:-sma-ng-intel}"
+    container_name: sma-ng
+    hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [intel]
     restart: unless-stopped
     ports:
@@ -200,8 +200,8 @@ services:
 
   sma-intel-pg:
     image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
-    container_name: sma-ng-intel-pg
-    hostname: "${SMA_NODE_NAME:-sma-ng-intel-pg}"
+    container_name: sma-ng
+    hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [intel-pg]
     restart: unless-stopped
     ports:
