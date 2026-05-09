@@ -218,8 +218,7 @@ services:
       - /mnt/unionfs/downloads:/downloads
       - /transcodes:/transcodes
     devices:
-      - /dev/dri/card1:/dev/dri/card0
-      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/dri:/dev/dri
     # No group_add: the entrypoint runs as root, stats the mapped /dev/dri
     # device nodes, adds the `ubuntu` runtime user to whatever groups own
     # them, then drops privileges via setpriv. Works regardless of the
