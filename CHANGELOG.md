@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.14.1...sma-ng-v1.14.2) (2026-05-09)
+
+
+### Bug Fixes
+
+* **docker:** auto-reconcile /dev/dri GIDs and drop privileges via setpriv ([df3704d](https://github.com/newdave/sma-ng/commit/df3704d0d9942bfc0792d92def98fe20fb0395ae))
+
 ## [1.14.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.14.0...sma-ng-v1.14.1) (2026-05-09)
 
 
