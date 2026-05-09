@@ -136,6 +136,7 @@ Override video settings for HDR content (detected automatically).
 | `global-quality` | int | ICQ quality target for HDR encodes (default: `0` = inherit from `base.video.global-quality`) |
 | `b-frames` | int | B-frames override for HDR encoding (default: `-1` = encoder default) |
 | `ref-frames` | int | Reference frames override for HDR encoding (default: `-1` = encoder default) |
+| `max-bitrate` | int | HDR-only override of `base.video.max-bitrate` in kbps. `-1` (default) inherits the SDR cap; `0` disables the cap entirely so HDR remuxes copy through; positive values cap HDR independently. |
 
 When the output is HDR (10-bit pix_fmt and `space`/`transfer`/`primaries` set), SMA-NG emits the configured first values as FFmpeg output flags so HDR-aware players (Plex, Apple TV, etc.) tag the stream correctly:
 

@@ -455,6 +455,7 @@ class ReadSettings:
       "b_frames": hdr_cfg.b_frames,
       "ref_frames": hdr_cfg.ref_frames,
       "extra_hw_frames": int(hdr_cfg.extra_hw_frames or 0),
+      "max_bitrate": int(hdr_cfg.max_bitrate),
     }
 
     naming = base.naming

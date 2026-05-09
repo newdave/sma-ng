@@ -1183,6 +1183,73 @@ class TestMaxBitrateVBV:
     assert options["video"]["bufsize"] is None
 
 
+class TestHDRMaxBitrateOverride:
+  """hdr.max_bitrate overrides video.max-bitrate for HDR sources only."""
+
+  def _make_mp(self, tmp_yaml, vmaxbitrate, hdr_max_bitrate):
+    with patch("resources.readsettings.ReadSettings._validate_binaries"):
+      from resources.mediaprocessor import MediaProcessor
+      from resources.readsettings import ReadSettings
+
+      settings = ReadSettings(tmp_yaml())
+      settings.vcodec = ["hevc"]
+      settings.vmaxbitrate = vmaxbitrate
+      settings.hdr["codec"] = ["hevc"]
+      settings.hdr["space"] = ["bt2020nc"]
+      settings.hdr["transfer"] = ["smpte2084"]
+      settings.hdr["primaries"] = ["bt2020"]
+      settings.hdr["max_bitrate"] = hdr_max_bitrate
+
+    mock_converter = MagicMock()
+    mock_converter.ffmpeg.codecs = {
+      "hevc": {"encoders": ["libx265"]},
+      "aac": {"encoders": ["aac"]},
+    }
+    mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8, "yuv420p10le": 10}
+    mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {"hevc": "libx265", "aac": "aac"}.get(c, c)
+
+    mp = MediaProcessor.__new__(MediaProcessor)
+    mp.settings = settings
+    mp.converter = mock_converter
+    mp.log = MagicMock()
+    mp.deletesubs = set()
+    from resources.subtitles import SubtitleProcessor
+
+    mp.subtitles = SubtitleProcessor(mp)
+    return mp
+
+  def _hdr_info(self, make_media_info, video_bitrate):
+    info = make_media_info(video_codec="hevc", video_bitrate=video_bitrate, total_bitrate=video_bitrate + 128000, audio_bitrate=128000)
+    info.video.color = {"space": "bt2020nc", "transfer": "smpte2084", "primaries": "bt2020"}
+    info.video.pix_fmt = "yuv420p10le"
+    return info
+
+  def test_hdr_max_bitrate_zero_disables_cap_and_allows_copy(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, vmaxbitrate=18000, hdr_max_bitrate=0)
+    info = self._hdr_info(make_media_info, video_bitrate=60_000_000)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    assert options["video"]["codec"] == "copy"
+
+  def test_hdr_max_bitrate_negative_inherits_sdr_cap(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, vmaxbitrate=18000, hdr_max_bitrate=-1)
+    info = self._hdr_info(make_media_info, video_bitrate=60_000_000)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    assert options["video"]["codec"] != "copy"
+
+  def test_hdr_max_bitrate_positive_caps_independently(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, vmaxbitrate=5000, hdr_max_bitrate=40000)
+    info = self._hdr_info(make_media_info, video_bitrate=30_000_000)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    # 30 Mbps source under the 40 Mbps HDR cap → copy (would exceed the 5 Mbps SDR cap if SDR rule applied)
+    assert options["video"]["codec"] == "copy"
+
+
 class TestAnalyzerProcessorIntegration:
   def _make_mp(self, tmp_yaml):
     with patch("resources.readsettings.ReadSettings._validate_binaries"):

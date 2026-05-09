@@ -161,6 +161,7 @@ base:
     b-frames: -1
     ref-frames: -1
     extra-hw-frames: 0
+    max-bitrate: -1
   analyzer:
     enabled: false
     backend: openvino
