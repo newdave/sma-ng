@@ -103,6 +103,7 @@ base:
     post-process: false
     wait-post-process: false
     detailed-progress: false
+    software-fallback: true
     preopts: []
     postopts: []
     regex-directory-replace: '[^\w\-_\. ]'

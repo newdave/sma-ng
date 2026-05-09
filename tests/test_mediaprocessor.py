@@ -3477,6 +3477,46 @@ class TestConvert:
     result, inp = mp.convert(options, [], [], False, None)
     assert result is None
 
+  def test_software_fallback_disabled_skips_retries(self, tmp_path):
+    """When `software_fallback=False`, the first ffmpeg failure must surface
+    immediately instead of triggering the SW-decode and full-SW retries.
+    Operators flip this off to diagnose real hardware issues (e.g. /dev/dri
+    permissions) that the fallback would otherwise mask."""
+    from converter import FFMpegConvertError
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.software_fallback = False
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"x")
+    out = tmp_path / "input.mp4"
+    out.write_bytes(b"partial")
+
+    options = {
+      "source": [str(src)],
+      "audio": [{"codec": "aac"}],
+      "video": {"codec": "h265qsv"},
+      "subtitle": [],
+    }
+    preopts = ["-hwaccel", "qsv", "-vcodec", "hevc_qsv"]
+
+    call_count = 0
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      nonlocal call_count
+      call_count += 1
+      yield None, ["ffmpeg"]
+      raise FFMpegConvertError("cmd", "output", 1)
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    result, _ = mp.convert(options, preopts, [], False, None)
+    assert result is None
+    # Single attempt — no retries triggered.
+    assert call_count == 1
+    # Encoder must not be swapped to its software counterpart when the
+    # fallback is disabled.
+    assert options["video"]["codec"] == "h265qsv"
+
   def test_input_same_as_output_renames_input(self, tmp_path):
     mp = self._make_mp(tmp_path)
     # Create an mp4 input so output extension matches
@@ -5493,6 +5533,46 @@ class TestConvert:
     mp.setPermissions = MagicMock()
     result, inp = mp.convert(options, [], [], False, None)
     assert result is None
+
+  def test_software_fallback_disabled_skips_retries(self, tmp_path):
+    """When `software_fallback=False`, the first ffmpeg failure must surface
+    immediately instead of triggering the SW-decode and full-SW retries.
+    Operators flip this off to diagnose real hardware issues (e.g. /dev/dri
+    permissions) that the fallback would otherwise mask."""
+    from converter import FFMpegConvertError
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.software_fallback = False
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"x")
+    out = tmp_path / "input.mp4"
+    out.write_bytes(b"partial")
+
+    options = {
+      "source": [str(src)],
+      "audio": [{"codec": "aac"}],
+      "video": {"codec": "h265qsv"},
+      "subtitle": [],
+    }
+    preopts = ["-hwaccel", "qsv", "-vcodec", "hevc_qsv"]
+
+    call_count = 0
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      nonlocal call_count
+      call_count += 1
+      yield None, ["ffmpeg"]
+      raise FFMpegConvertError("cmd", "output", 1)
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    result, _ = mp.convert(options, preopts, [], False, None)
+    assert result is None
+    # Single attempt — no retries triggered.
+    assert call_count == 1
+    # Encoder must not be swapped to its software counterpart when the
+    # fallback is disabled.
+    assert options["video"]["codec"] == "h265qsv"
 
   def test_input_same_as_output_renames_input(self, tmp_path):
     mp = self._make_mp(tmp_path)

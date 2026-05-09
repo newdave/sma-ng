@@ -368,6 +368,7 @@ class ReadSettings:
     self.postprocess = cfg.post_process
     self.waitpostprocess = cfg.wait_post_process
     self.detailedprogress = cfg.detailed_progress
+    self.software_fallback = cfg.software_fallback
     self.preopts = self._as_list(cfg.preopts, lower=False, replace=[])
     self.postopts = self._as_list(cfg.postopts, lower=False, replace=[])
     self.regex = cfg.regex_directory_replace
