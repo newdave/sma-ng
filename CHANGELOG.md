@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.14.2...sma-ng-v1.15.0) (2026-05-09)
+
+
+### Features
+
+* **transcoder:** add base.converter.software-fallback toggle ([4b10a36](https://github.com/newdave/sma-ng/commit/4b10a36af1605557767dd13177906f59264b5469))
+
 ## [1.14.2](https://github.com/newdave/sma-ng/compare/sma-ng-v1.14.1...sma-ng-v1.14.2) (2026-05-09)
 
 
