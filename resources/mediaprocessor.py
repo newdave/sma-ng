@@ -3021,6 +3021,12 @@ class MediaProcessor:
       try:
         _run_convert(preopts)
       except FFMpegConvertError as first_err:
+        if not getattr(self.settings, "software_fallback", True):
+          # Operator opted out of the fallback chain — surface the
+          # original hardware error immediately so it isn't masked by
+          # retries (e.g. /dev/dri permissions, missing QSV runtime).
+          self.log.warning("Conversion failed with hardware decoder and software-fallback is disabled; surfacing original error.")
+          raise
         # Tier 1: strip the input-side `-vcodec <hw_decoder>` (e.g.
         # av1_qsv on a pre-Arc Intel iGPU that lists the decoder but
         # can't actually init it) and retry with software decode. The
