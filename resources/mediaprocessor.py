@@ -47,6 +47,7 @@ _QSV_INPUT_PIPELINE_FLAGS = (
   "-init_hw_device",
   "-filter_hw_device",
   "-hwaccel_device",
+  "-qsv_device",
 )
 
 
@@ -55,11 +56,16 @@ def _strip_qsv_input_pipeline_from_preopts(preopts):
   if nothing was stripped.
 
   Removes ``-hwaccel``, ``-hwaccel_output_format``, ``-extra_hw_frames``,
-  ``-init_hw_device``, ``-filter_hw_device``, and ``-hwaccel_device``
-  flag/value pairs. Also strips a leading ``-vcodec``/``-c:v`` pair so
-  the input is fully decoded in software. Used as the second retry tier
-  when even software decode + QSV encoder is unstable on the GPU
-  (e.g. 4K HDR10+ HEVC on weaker iGPUs).
+  ``-init_hw_device``, ``-filter_hw_device``, ``-hwaccel_device``, and
+  ``-qsv_device`` flag/value pairs. Also strips a leading
+  ``-vcodec``/``-c:v`` pair so the input is fully decoded in software.
+  Used as the second retry tier when even software decode + QSV encoder
+  is unstable on the GPU (e.g. 4K HDR10+ HEVC on weaker iGPUs). Stripping
+  ``-qsv_device`` matters even when the encoder swap is the proximate
+  fix: ffmpeg parses globals before opening any input, so a stale
+  ``-qsv_device /dev/dri/renderD128`` makes the software fallback abort
+  with "Error parsing global options: Input/output error" whenever the
+  render device init itself is failing — masking the real host issue.
   """
   if not preopts:
     return None

@@ -3249,6 +3249,34 @@ class TestStripQsvInputPipelineFromPreopts:
     f(original)
     assert original == ["-hwaccel", "qsv", "-fix_sub_duration"]
 
+  def test_strips_qsv_device_global(self):
+    """`-qsv_device` must be stripped on the software fallback. ffmpeg
+    parses globals before opening any input, so a stale
+    `-qsv_device /dev/dri/renderD128` makes the SW fallback abort with
+    'Error parsing global options: Input/output error' whenever the
+    render device init itself is failing on the host."""
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    preopts = [
+      "-qsv_device",
+      "/dev/dri/renderD128",
+      "-extra_hw_frames",
+      "40",
+      "-hwaccel",
+      "qsv",
+      "-hwaccel_output_format",
+      "qsv",
+      "-vcodec",
+      "h264_qsv",
+      "-fix_sub_duration",
+    ]
+    assert f(preopts) == ["-fix_sub_duration"]
+
+  def test_strips_qsv_device_alone(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    assert f(["-qsv_device", "/dev/dri/renderD128", "-fix_sub_duration"]) == ["-fix_sub_duration"]
+
 
 class TestSwapQsvCodecToSw:
   """`_swap_qsv_codec_to_sw` swaps QSV encoders in the options dict to
@@ -5237,6 +5265,34 @@ class TestStripQsvInputPipelineFromPreopts:
     original = ["-hwaccel", "qsv", "-fix_sub_duration"]
     f(original)
     assert original == ["-hwaccel", "qsv", "-fix_sub_duration"]
+
+  def test_strips_qsv_device_global(self):
+    """`-qsv_device` must be stripped on the software fallback. ffmpeg
+    parses globals before opening any input, so a stale
+    `-qsv_device /dev/dri/renderD128` makes the SW fallback abort with
+    'Error parsing global options: Input/output error' whenever the
+    render device init itself is failing on the host."""
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    preopts = [
+      "-qsv_device",
+      "/dev/dri/renderD128",
+      "-extra_hw_frames",
+      "40",
+      "-hwaccel",
+      "qsv",
+      "-hwaccel_output_format",
+      "qsv",
+      "-vcodec",
+      "h264_qsv",
+      "-fix_sub_duration",
+    ]
+    assert f(preopts) == ["-fix_sub_duration"]
+
+  def test_strips_qsv_device_alone(self):
+    from resources.mediaprocessor import _strip_qsv_input_pipeline_from_preopts as f
+
+    assert f(["-qsv_device", "/dev/dri/renderD128", "-fix_sub_duration"]) == ["-fix_sub_duration"]
 
 
 class TestSwapQsvCodecToSw:
