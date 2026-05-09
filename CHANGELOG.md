@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.15.1...sma-ng-v2.0.0) (2026-05-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **transcoder:** existing deployments that relied on implicit software fallback now see hardware failures (/dev/dri permissions, missing QSV runtime, etc.) as job failures. Set base.converter.software-fallback: true to restore the prior behavior.
+
+### Features
+
+* **transcoder:** default software-fallback to false ([a25b9eb](https://github.com/newdave/sma-ng/commit/a25b9eb10cb00ada122edc3b9d62172d0cc2f0f4))
+
+
+### Documentation
+
+* **brainstorming:** qsv transcoding refactor — phased plan (observability then typed pipeline) ([12cf6c9](https://github.com/newdave/sma-ng/commit/12cf6c9ab4dd1cb8ae2eee0684420335a2c4371b))
+
 ## [1.15.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.15.0...sma-ng-v1.15.1) (2026-05-09)
 
 
