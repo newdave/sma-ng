@@ -220,9 +220,10 @@ services:
     devices:
       - /dev/dri/card1:/dev/dri/card0
       - /dev/dri/renderD128:/dev/dri/renderD128
-    group_add:
-      - "${RENDER_GID:-992}"
-      - "${VIDEO_GID:-44}"
+    # No group_add: the entrypoint runs as root, stats the mapped /dev/dri
+    # device nodes, adds the `ubuntu` runtime user to whatever groups own
+    # them, then drops privileges via setpriv. Works regardless of the
+    # host's render/video GID assignments.
     env_file:
       - path: /opt/sma/config/daemon.env
         required: true
@@ -254,9 +255,10 @@ services:
     devices:
       - /dev/dri/card1:/dev/dri/card0
       - /dev/dri/renderD128:/dev/dri/renderD128
-    group_add:
-      - "${RENDER_GID:-992}"
-      - "${VIDEO_GID:-44}"
+    # No group_add: the entrypoint runs as root, stats the mapped /dev/dri
+    # device nodes, adds the `ubuntu` runtime user to whatever groups own
+    # them, then drops privileges via setpriv. Works regardless of the
+    # host's render/video GID assignments.
     depends_on:
       sma-pgsql:
         condition: service_healthy

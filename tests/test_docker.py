@@ -74,6 +74,11 @@ def dockerfile_raw():
   return _read("docker/Dockerfile")
 
 
+@pytest.fixture(scope="module")
+def entrypoint_raw():
+  return _read("docker/docker-entrypoint.sh")
+
+
 class TestDockerfileStages:
   def test_three_named_stages(self, dockerfile):
     assert _stages(dockerfile) == ["ffmpeg-builder", "python-builder", "runtime"]
@@ -191,10 +196,13 @@ class TestDockerfileRuntime:
   def test_tini_installed(self, dockerfile_raw):
     assert "tini" in dockerfile_raw
 
-  def test_non_root_user_created(self, dockerfile_raw):
-    # ubuntu:24.04 ships the built-in 'ubuntu' user at UID/GID 1000; no
-    # explicit useradd is needed.
-    assert "USER ubuntu" in dockerfile_raw
+  def test_runtime_drops_to_ubuntu_via_setpriv(self, dockerfile_raw, entrypoint_raw):
+    # The entrypoint starts as root so it can reconcile /dev/dri device GIDs
+    # at startup, then drops privileges to the built-in `ubuntu` user
+    # (UID/GID 1000) via setpriv with --init-groups.
+    assert "USER ubuntu" not in dockerfile_raw
+    assert "util-linux" in dockerfile_raw
+    assert "setpriv --reuid=ubuntu --regid=ubuntu --init-groups" in entrypoint_raw
 
   def test_render_group_created_with_fixed_gid(self, dockerfile_raw):
     assert "getent group render" in dockerfile_raw
@@ -203,9 +211,11 @@ class TestDockerfileRuntime:
   def test_ubuntu_user_added_to_render_group(self, dockerfile_raw):
     assert "usermod -aG render ubuntu" in dockerfile_raw
 
-  def test_user_set_to_sma(self, dockerfile):
-    user_instructions = _instructions_of("USER", dockerfile)
-    assert any("ubuntu" in u for u in user_instructions)
+  def test_no_user_directive(self, dockerfile):
+    # The container starts as root so the entrypoint can reconcile /dev/dri
+    # device GIDs and add the runtime user to the matching host groups before
+    # dropping privileges via setpriv. A USER directive would prevent that.
+    assert _instructions_of("USER", dockerfile) == []
 
   def test_port_8585_exposed(self, dockerfile):
     exposed = _instructions_of("EXPOSE", dockerfile)
@@ -368,13 +378,13 @@ class TestComposeGpuProfiles:
     devices_pg = compose["services"]["sma-intel-pg"]["devices"]
     assert any("renderD128" in str(d) for d in devices_pg)
 
-  def test_intel_adds_render_group(self, compose):
-    # group_add uses numeric GID env var; set RENDER_GID to match the host
-    # render group (check with: getent group render).
-    groups = compose["services"]["sma-intel"]["group_add"]
-    assert any("RENDER_GID" in str(g) for g in groups)
-    groups_pg = compose["services"]["sma-intel-pg"]["group_add"]
-    assert any("RENDER_GID" in str(g) for g in groups_pg)
+  def test_intel_no_static_group_add(self, compose):
+    # The entrypoint runs as root, stats the mapped /dev/dri device nodes,
+    # adds the runtime user to whatever groups own them, then drops to ubuntu
+    # via setpriv. Static group_add lines would shadow the auto-detection
+    # and reintroduce host-GID skew bugs, so they must not be present.
+    assert "group_add" not in compose["services"]["sma-intel"]
+    assert "group_add" not in compose["services"]["sma-intel-pg"]
 
   def test_software_profiles_exist(self, compose):
     assert "software" in compose["services"]["sma-software"]["profiles"]

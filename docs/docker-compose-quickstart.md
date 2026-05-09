@@ -16,7 +16,7 @@ The `-pg` profiles include a bundled PostgreSQL container. The non-`-pg` profile
 With the current compose layout, use the two env files for different jobs:
 
 - `/opt/sma/config/daemon.env` → container/runtime settings (`SMA_NODE_NAME`, `SMA_DAEMON_*`, `POSTGRES_*`, `LIBVA_DRIVER_NAME`, `NVIDIA_*`)
-- `docker/.env` → Compose interpolation (`SMA_IMAGE_TAG`, `SMA_PORT`, `PGSQL_BIND_IP`, `PGSQL_PORT`, `RENDER_GID`, `VIDEO_GID`)
+- `docker/.env` → Compose interpolation (`SMA_IMAGE_TAG`, `SMA_PORT`, `PGSQL_BIND_IP`, `PGSQL_PORT`)
 
 For clustered Docker deployments, set `SMA_NODE_NAME` in
 `/opt/sma/config/daemon.env`. The daemon uses that value directly as its
@@ -104,8 +104,6 @@ SMA_IMAGE_TAG=latest
 SMA_PORT=8585
 PGSQL_BIND_IP=0.0.0.0
 PGSQL_PORT=5432
-# RENDER_GID=109
-# VIDEO_GID=44
 EOF
 ```
 
@@ -115,8 +113,8 @@ Use `docker/.env` only for values that Docker Compose itself expands from `docke
 - `SMA_PORT`
 - `PGSQL_BIND_IP`
 - `PGSQL_PORT`
-- `RENDER_GID`
-- `VIDEO_GID`
+
+GPU device permissions (`/dev/dri/*`) are reconciled automatically by the container entrypoint — no `RENDER_GID`/`VIDEO_GID` configuration is required.
 
 Put daemon/container settings in `/opt/sma/config/daemon.env` instead.
 
@@ -336,10 +334,9 @@ Replace `software-pg` with whichever profile you use.
 
 ### Intel profile cannot see `/dev/dri`
 
-- verify host device exists
-- verify `RENDER_GID`
-- verify `VIDEO_GID`
+- verify host device exists (`ls -l /dev/dri` on the host)
 - for SR-IOV guests, verify the guest itself exposes a matching `card*` and `renderD*` pair under `/dev/dri`
+- check container startup logs for `granted ubuntu access to /dev/dri/...` lines confirming the entrypoint added the runtime user to the host render/video groups
 - verify `vainfo` works inside the container
 
 ### NVIDIA profile starts without GPU
