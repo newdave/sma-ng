@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.15.0...sma-ng-v1.15.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* **manual:** unlink original when extension changes in no-moveto path ([1f23fb0](https://github.com/newdave/sma-ng/commit/1f23fb0bd860d5427d8aa5a558a78e434b5cc781))
+
 ## [1.15.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.14.2...sma-ng-v1.15.0) (2026-05-09)
 
 
