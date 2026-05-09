@@ -372,11 +372,15 @@ class TestComposeGpuProfiles:
       assert "${SMA_NODE_NAME" in hostname, f"{service_name} hostname must allow SMA_NODE_NAME override, got {hostname!r}"
 
   def test_intel_exposes_render_node(self, compose):
-    # Only the render node is needed for headless QSV/VAAPI encoding.
-    devices = compose["services"]["sma-intel"]["devices"]
-    assert any("renderD128" in str(d) for d in devices)
-    devices_pg = compose["services"]["sma-intel-pg"]["devices"]
-    assert any("renderD128" in str(d) for d in devices_pg)
+    # Headless QSV/VAAPI encoding needs at least the render node. Either
+    # the whole `/dev/dri` tree (preferred, lets SR-IOV guests map every
+    # card*/renderD* pair without per-host edits) or an explicit renderD*
+    # mapping is acceptable.
+    def _exposes_dri(devices):
+      return any(("renderD" in str(d)) or (str(d).split(":", 1)[0] == "/dev/dri") for d in devices)
+
+    assert _exposes_dri(compose["services"]["sma-intel"]["devices"])
+    assert _exposes_dri(compose["services"]["sma-intel-pg"]["devices"])
 
   def test_intel_no_static_group_add(self, compose):
     # The entrypoint runs as root, stats the mapped /dev/dri device nodes,
