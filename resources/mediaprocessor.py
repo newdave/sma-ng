@@ -1407,7 +1407,13 @@ class MediaProcessor:
       vbitrate = vbitrate * analyzer_recommendations.bitrate_ratio_multiplier
     analyzer_max_bitrate = analyzer_recommendations.max_bitrate_ceiling
     effective_vmaxbitrate = self.settings.vmaxbitrate
-    if analyzer_max_bitrate:
+    hdr_unlimited = False
+    if hdrInput:
+      hdr_max_bitrate = self.settings.hdr.get("max_bitrate", -1)
+      if hdr_max_bitrate >= 0:
+        effective_vmaxbitrate = hdr_max_bitrate
+        hdr_unlimited = hdr_max_bitrate == 0
+    if analyzer_max_bitrate and not hdr_unlimited:
       effective_vmaxbitrate = min(effective_vmaxbitrate, analyzer_max_bitrate) if effective_vmaxbitrate else analyzer_max_bitrate
     self.log.debug("Using video bitrate ratio of %f, which results in %f changing to %f." % (vbitrate_ratio, vbitrate_estimate, vbitrate))
     if effective_vmaxbitrate and vbitrate > effective_vmaxbitrate:

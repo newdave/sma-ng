@@ -148,6 +148,12 @@ class HDRSettings(_Base):
   ref_frames: int = -1
   # See VideoSettings.extra_hw_frames — same semantics for HDR encodes.
   extra_hw_frames: int = 0
+  # HDR-specific override of video.max-bitrate. Set to a positive kbps value
+  # to cap HDR sources independently of the SDR ceiling. Set to 0 to disable
+  # the cap entirely for HDR sources (useful on the 4K profile so HDR remuxes
+  # copy through instead of being re-encoded just because the source bitrate
+  # exceeds the SDR target). Negative leaves the SDR cap in effect.
+  max_bitrate: int = -1
 
 
 class AnalyzerSettings(_Base):
