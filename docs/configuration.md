@@ -78,7 +78,7 @@ shell-trigger-only and configured in `triggers/`. See
 | `force-convert` | bool | `false` | Force conversion even if codec matches |
 | `post-process` | bool | `false` | Run post-process scripts |
 | `wait-post-process` | bool | `false` | Wait for post-process scripts to finish |
-| `software-fallback` | bool | `true` | Retry hardware-accelerated failures with software decode and, if needed, a full software pipeline. Set to `false` to surface the original FFmpeg error immediately (useful for diagnosing real hardware issues like `/dev/dri` permissions). |
+| `software-fallback` | bool | `false` | When `true`, retry hardware-accelerated failures with software decode and, if needed, a full software pipeline. Defaults to `false` so the original FFmpeg error surfaces immediately — the retry chain historically masked real hardware issues (e.g. `/dev/dri` permissions, missing QSV runtime) by silently completing jobs on the CPU. Set to `true` per-profile or globally to restore the legacy "always finish, even in software" behavior. |
 | `preopts` | list | | Extra FFmpeg options before input |
 | `postopts` | list | | Extra FFmpeg options after codec options |
 

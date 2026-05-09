@@ -64,12 +64,15 @@ class ConverterSettings(_Base):
   post_process: bool = False
   wait_post_process: bool = False
   detailed_progress: bool = False
-  # When True (default), QSV/hardware-accelerated conversions that fail are
-  # retried with software decode and, if that also fails, with a full
-  # software pipeline. Set to False to surface the original FFmpeg error
-  # immediately — useful for diagnosing real hardware issues that the
-  # fallback would otherwise mask (e.g. /dev/dri permissions).
-  software_fallback: bool = True
+  # When True, QSV/hardware-accelerated conversions that fail are retried
+  # with software decode and, if that also fails, with a full software
+  # pipeline. Defaults to False so the original FFmpeg error surfaces
+  # immediately; the retry chain mutates argv in-place and historically
+  # masked real hardware issues (e.g. /dev/dri permissions, QSV runtime
+  # missing) by completing on the CPU instead of failing fast. Operators
+  # who prefer the legacy "always finish, even if it ends up in software"
+  # behavior can set this to True per-profile or globally.
+  software_fallback: bool = False
   preopts: list[str] = Field(default_factory=list)
   postopts: list[str] = Field(default_factory=list)
   regex_directory_replace: str = r"[^\w\-_\. ]"
