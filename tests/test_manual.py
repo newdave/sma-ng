@@ -463,6 +463,84 @@ class TestProcessFile:
     mock_tagdata.writeTags.assert_called_once()
     assert result is None  # tagOnly returns early (None)
 
+  def test_overwrite_input_unlinks_original_when_extension_changed(self, tmp_path):
+    """Regression: in the no-moveto + output_dir case, restoreFromOutput
+    only atomically replaces the input when input/output share a filename
+    + extension. For mkv -> mp4 (and any extension change) the original
+    sits next to the new output. Previous code skipped the unlink based
+    on _overwrite_input alone, leaving the .mkv on disk forever."""
+    src = tmp_path / "Show - S02E03.mkv"
+    src.write_bytes(b"x")
+    out_in_input_dir = tmp_path / "Show - S02E03.mp4"
+    out_in_input_dir.write_bytes(b"y")
+
+    mp = self._make_mp()
+    mp.settings.output_dir = str(tmp_path / "transcodes")
+    mp.settings.moveto = None
+    mp.deletesubs = set()
+    mp.process.return_value = {
+      "output": str(tmp_path / "transcodes" / "Show - S02E03.mp4"),
+      "input": str(src),
+      "input_deleted": False,
+      "delete": True,
+      "external_subs": [],
+      "options": {},
+      "x": 1920,
+      "y": 1080,
+      "cues_to_front": False,
+    }
+    mp.replicate.return_value = [str(out_in_input_dir)]
+    mp.getDefaultAudioLanguage.return_value = None
+    # Simulate restoreFromOutput moving the .mp4 next to the .mkv.
+    mp.restoreFromOutput.return_value = str(out_in_input_dir)
+    # Real removeFile so we can assert filesystem state.
+    mp.removeFile.side_effect = lambda p, *a, **kw: (os.remove(p) or True) if os.path.isfile(p) else True
+
+    with patch("manual.getInfo", return_value=None):
+      with patch("manual._find_arr_instance", return_value=(None, None)):
+        with patch("manual.triggerRescan", return_value=None):
+          result = processFile(str(src), mp, info=MagicMock())
+
+    assert result is True
+    assert not src.exists(), "Original .mkv must be unlinked when output extension differs"
+    assert out_in_input_dir.exists(), "New .mp4 must remain in the input directory"
+
+  def test_overwrite_input_skips_unlink_when_extensions_match(self, tmp_path):
+    """When input and output share filename + extension, restoreFromOutput
+    has already atomically overwritten the original. The cleanup branch
+    must NOT issue a redundant unlink against the (now-new) file."""
+    src = tmp_path / "Show.mp4"
+    src.write_bytes(b"new-content")  # already overwritten by restoreFromOutput
+
+    mp = self._make_mp()
+    mp.settings.output_dir = str(tmp_path / "transcodes")
+    mp.settings.moveto = None
+    mp.deletesubs = set()
+    mp.process.return_value = {
+      "output": str(tmp_path / "transcodes" / "Show.mp4"),
+      "input": str(src),
+      "input_deleted": False,
+      "delete": True,
+      "external_subs": [],
+      "options": {},
+      "x": 1920,
+      "y": 1080,
+      "cues_to_front": False,
+    }
+    mp.replicate.return_value = [str(src)]
+    mp.getDefaultAudioLanguage.return_value = None
+    # restoreFromOutput collapses output back to input path.
+    mp.restoreFromOutput.return_value = str(src)
+    mp.removeFile.side_effect = AssertionError("removeFile must not be called when input was atomically overwritten")
+
+    with patch("manual.getInfo", return_value=None):
+      with patch("manual._find_arr_instance", return_value=(None, None)):
+        with patch("manual.triggerRescan", return_value=None):
+          result = processFile(str(src), mp, info=MagicMock())
+
+    assert result is True
+    assert src.exists()
+
 
 # ---------------------------------------------------------------------------
 # main() — arg parsing and branching

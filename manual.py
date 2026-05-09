@@ -635,18 +635,33 @@ def processFile(
       mp.setPermissions(file)
 
     # Clean up the original input only after the output is safely placed.
-    # For the no-moveto case the input path was atomically overwritten by
-    # restoreFromOutput (recycle copy was already taken above); just clear
-    # any staged subtitle temp files. For the moveto case the original is
-    # still at its source path and needs a full recycle + unlink.
+    # For the no-moveto case the recycle copy was already taken above
+    # (line 617). restoreFromOutput moves the converted file back into
+    # the input directory under the OUTPUT filename, which only collides
+    # with — and atomically replaces — the original when the input and
+    # output share a filename + extension (typical mp4 -> mp4 force
+    # convert). For mkv -> mp4 (and any other extension change) the
+    # original sits next to the new output and needs an explicit unlink;
+    # without it both files end up in the library and downstream
+    # importers (Sonarr/Radarr) see duplicates.
+    # For the moveto case the original is still at its source path and
+    # needs a full recycle + unlink via _cleanup_input.
     if _overwrite_input:
+      input_was_replaced = output["input"] == output["output"]
+      deleted = True
+      if output.get("delete") and not input_was_replaced and os.path.isfile(output["input"]):
+        if mp.removeFile(output["input"]):
+          log.debug("Original %s deleted." % output["input"])
+        else:
+          log.error("Couldn't delete original %s." % output["input"])
+          deleted = False
       for subfile in list(mp.deletesubs):
         if mp.removeFile(subfile):
           log.debug("Subtitle %s deleted." % subfile)
         else:
           log.debug("Unable to delete subtitle %s." % subfile)
       mp.deletesubs = set()
-      output["input_deleted"] = bool(output.get("delete"))
+      output["input_deleted"] = bool(output.get("delete")) and deleted
     else:
       output["input_deleted"] = mp._cleanup_input(output["input"], output.get("delete", False))
 
