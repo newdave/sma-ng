@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.14.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.13.0...sma-ng-v1.14.0) (2026-05-09)
+
+
+### Features
+
+* **hdr:** add hdr.max-bitrate override to allow HDR copy on 4K profile ([f48e49e](https://github.com/newdave/sma-ng/commit/f48e49e7245468e42c8234cd1d6e860059a21ab0))
+
+
+### Bug Fixes
+
+* **docker:** source SMA_DAEMON_DB_URL from daemon.env on non-pg profiles ([6417572](https://github.com/newdave/sma-ng/commit/6417572506b61ecec21648b301799c0989d8fc0e))
+
 ## [1.13.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.12.6...sma-ng-v1.13.0) (2026-05-05)
 
 
