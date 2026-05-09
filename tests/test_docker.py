@@ -450,12 +450,18 @@ class TestComposePostgres:
     for svc in ("sma-software", "sma-intel", "sma-nvidia"):
       assert "depends_on" not in compose["services"][svc]
 
-  def test_non_pg_profiles_require_db_url(self, compose):
-    # Non-pg profiles use :? so Docker Compose errors at startup when
-    # SMA_DAEMON_DB_URL is not provided, rather than starting with a blank URL.
+  def test_non_pg_profiles_source_db_url_from_env_file(self, compose):
+    # Non-pg profiles get SMA_DAEMON_DB_URL from /opt/sma/config/daemon.env
+    # (stamped by mise run config:roll). The compose file deliberately does
+    # not set it under `environment:` so a missing env file fails clearly at
+    # daemon startup rather than at compose-parse time, and so docker/.env
+    # cannot silently override the per-host stamped value.
     for svc in ("sma-software", "sma-intel", "sma-nvidia"):
-      env = compose["services"][svc]["environment"]
-      assert env["SMA_DAEMON_DB_URL"].startswith("${SMA_DAEMON_DB_URL:?")
+      svc_def = compose["services"][svc]
+      env = svc_def.get("environment", {}) or {}
+      assert "SMA_DAEMON_DB_URL" not in env
+      env_files = svc_def.get("env_file", [])
+      assert any((isinstance(ef, dict) and ef.get("path") == "/opt/sma/config/daemon.env") or ef == "/opt/sma/config/daemon.env" for ef in env_files)
 
   def test_pg_profiles_default_db_url_to_bundled_postgres(self, compose):
     for svc in ("sma-software-pg", "sma-intel-pg", "sma-nvidia-pg"):
