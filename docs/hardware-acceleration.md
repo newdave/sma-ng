@@ -178,7 +178,7 @@ environment:
 
 - The usable Intel VF may appear as `card1` with `renderD128`, or as higher-numbered render nodes, depending on the guest.
 - The Intel Docker Compose profiles mount the whole `/dev/dri` tree so FFmpeg and VAAPI can see the matching `card*` and `renderD*` nodes together.
-- If `card*` is owned by the host `video` group, set `VIDEO_GID` in `docker/.env` so the container can open the DRM node during `vainfo` and QSV initialization.
+- The container entrypoint runs as root, stats the mapped `/dev/dri/*` device nodes, and adds the runtime user to whatever groups own them before dropping privileges. No `RENDER_GID`/`VIDEO_GID` tuning is required regardless of host GID assignments.
 - Validate inside the guest first with `ls -l /dev/dri`, then inside the container with `docker compose exec sma-intel vainfo`.
 
 The official Docker image now includes `vainfo` and VAAPI userspace drivers to simplify diagnostics.

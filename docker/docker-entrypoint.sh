@@ -37,6 +37,29 @@ seed_file() {
     fi
 }
 
+# ── reconcile /dev/dri device GIDs (root only) ────────────────────────────────
+# Render nodes on the host can be owned by `render`/`video` groups whose GIDs
+# don't match the ones baked into the image. Rather than asking the operator
+# to set RENDER_GID/VIDEO_GID in .env, stat the actual device files and add
+# the `ubuntu` runtime user to whatever groups own them. Falls through silently
+# if no /dev/dri devices are mapped (NVENC / software-only deployments).
+if [ "$(id -u)" = "0" ] && [ -d /dev/dri ]; then
+    for dev in /dev/dri/card0 /dev/dri/card1 /dev/dri/renderD128 /dev/dri/renderD129; do
+        [ -e "$dev" ] || continue
+        gid="$(stat -c '%g' "$dev" 2>/dev/null || true)"
+        [ -n "$gid" ] || continue
+        gname="$(getent group "$gid" | cut -d: -f1)"
+        if [ -z "$gname" ]; then
+            gname="dri_${gid}"
+            groupadd -g "$gid" "$gname" 2>/dev/null || true
+        fi
+        if ! id -nG ubuntu 2>/dev/null | tr ' ' '\n' | grep -qx "$gname"; then
+            usermod -aG "$gname" ubuntu 2>/dev/null && \
+                log "granted ubuntu access to $dev (group=$gname gid=$gid)"
+        fi
+    done
+fi
+
 # ── ensure directories exist ───────────────────────────────────────────────────
 
 mkdir -p "$CONFIG_DIR" "$DEFAULTS_DIR"
@@ -112,4 +135,12 @@ if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -d /sys/module/i915 ]; then
 fi
 
 # ── hand off to the container CMD ─────────────────────────────────────────────
+# When started as root (so we could fix up /dev/dri GIDs above), drop to the
+# unprivileged `ubuntu` user with --init-groups so the supplementary groups
+# we just added (render/video/dri_*) take effect.
+if [ "$(id -u)" = "0" ]; then
+    chown -R ubuntu:ubuntu "$CONFIG_DIR" "$DEFAULTS_DIR" 2>/dev/null || true
+    exec setpriv --reuid=ubuntu --regid=ubuntu --init-groups -- "$@"
+fi
+
 exec "$@"

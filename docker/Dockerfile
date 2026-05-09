@@ -240,6 +240,7 @@ RUN apt-get update \
     libzimg2 \
     libssl3 \
     ca-certificates \
+    util-linux \
     tini \
     # oneVPL / Intel QSV runtime, MFX compatibility libs, and Intel VA userspace drivers — amd64 only
     && if [ "$TARGETARCH" = "amd64" ]; then \
@@ -296,7 +297,10 @@ VOLUME ["/config", "/logs", "/mnt", "/downloads", "/transcodes"]
 
 EXPOSE 8585
 
-USER ubuntu
+# Entrypoint runs as root so it can reconcile /dev/dri device GIDs with
+# the in-container `ubuntu` user before dropping privileges via setpriv.
+# This makes QSV/VAAPI work without requiring the operator to set
+# RENDER_GID/VIDEO_GID in .env to match their host.
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8585/health')" || exit 1
