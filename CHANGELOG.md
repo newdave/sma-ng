@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/newdave/sma-ng/compare/sma-ng-v1.14.0...sma-ng-v1.14.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* **qsv:** strip -qsv_device on software fallback to surface real errors ([5a6145c](https://github.com/newdave/sma-ng/commit/5a6145c6110dea68b9e00a476b9ed1224bf91416))
+
 ## [1.14.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.13.0...sma-ng-v1.14.0) (2026-05-09)
 
 
