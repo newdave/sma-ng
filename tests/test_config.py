@@ -138,6 +138,28 @@ class TestGpuProfile:
     assert settings.hwoutputfmt.get("qsv") == "qsv"
 
   @patch("resources.readsettings.ReadSettings._validate_binaries")
+  def test_qsv_profile_excludes_av1_qsv_by_default(self, mock_validate, tmp_yaml):
+    """av1_qsv is advertised on every Intel iGPU but only actually works
+    on Arc/Xe2; pre-Arc parts (Coffee/Comet/Tiger/Alder/Raptor Lake) crash
+    inside oneVPL when it's selected. The default profile must NOT include
+    it; operators on Arc-or-newer hardware can opt back in via explicit
+    `hwaccel-decoders` in YAML."""
+    settings = ReadSettings(tmp_yaml(gpu="qsv"))
+    assert "av1_qsv" not in settings.hwaccel_decoders, "av1_qsv must not be in the default QSV decoder set; got %s" % settings.hwaccel_decoders
+
+  @patch("resources.readsettings.ReadSettings._validate_binaries")
+  def test_qsv_profile_allows_explicit_av1_qsv_optin(self, mock_validate, tmp_yaml):
+    """Operators on Arc/Xe2 can re-enable av1_qsv by listing it
+    explicitly. The auto-fill path must not stomp the explicit list."""
+    yml = tmp_yaml(
+      gpu="qsv",
+      overrides={"base": {"converter": {"hwaccel-decoders": ["hevc_qsv", "h264_qsv", "av1_qsv"]}}},
+    )
+    settings = ReadSettings(yml)
+    assert "av1_qsv" in settings.hwaccel_decoders
+    assert settings.hwaccel_decoders == ["hevc_qsv", "h264_qsv", "av1_qsv"]
+
+  @patch("resources.readsettings.ReadSettings._validate_binaries")
   def test_nvenc_profile(self, mock_validate, tmp_yaml):
     settings = ReadSettings(tmp_yaml(gpu="nvenc"))
     assert settings.gpu == "nvenc"

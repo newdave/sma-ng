@@ -49,6 +49,18 @@ Supported QSV codecs: `h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`
 
 `codec-parameters` accepts raw FFmpeg encoder flags. The defaults in `setup/sma-ng.yml.sample` enable QSV low-power mode and extended rate control (`-low_power 1 -async_depth 1 -extbrc 1`). These are automatically cleared at runtime when `gpu` is not `qsv`.
 
+### Auto-populated QSV decoders
+
+Setting `gpu: qsv` (and leaving `base.converter.hwaccel-decoders` empty) auto-populates the hardware decoder list with the safe Intel QSV set: `hevc_qsv`, `h264_qsv`, `vp9_qsv`, `vc1_qsv`. `av1_qsv` is **deliberately omitted** — FFmpeg advertises it on every Intel iGPU, but it only actually works on Arc / Xe2 (DG2 and later); pre-Arc parts (Coffee/Comet/Tiger/Alder/Raptor Lake) crash inside oneVPL when it's selected. Operators on Arc-or-newer hardware can opt in by listing the decoders explicitly:
+
+```yaml
+base:
+  converter:
+    hwaccel-decoders: [hevc_qsv, h264_qsv, vp9_qsv, vc1_qsv, av1_qsv]
+```
+
+The auto-fill only runs when `hwaccel-decoders` is empty — an explicit list always wins.
+
 ### Tuning QSV HEVC for ICQ + HDR
 
 For best per-frame quality on Intel QSV, prefer ICQ (Intelligent
