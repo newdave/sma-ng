@@ -285,6 +285,14 @@ RUN find /app -maxdepth 1 -type f \( \
     -name 'rename.py' \
     \) -exec sed -i '1s|^#!/opt/sma/venv/bin/python3$|#!/venv/bin/python3|' {} +
 
+# Register the sma-ng package metadata in the venv so
+# importlib.metadata.version("sma-ng") at runtime returns the real version
+# (otherwise the daemon reports version="unknown" via /status, which makes
+# the admin UI's per-node version column useless and hides image lag from
+# operators). --no-deps avoids reinstalling anything from requirements.txt;
+# --no-build-isolation reuses the already-installed setuptools.
+RUN /venv/bin/pip install --no-deps --no-build-isolation /app
+
 # Install entrypoint script (root-owned, world-executable)
 COPY docker/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
