@@ -478,6 +478,14 @@ class TestAdminHTML:
     assert "nodeAction(node, 'approve')" in ADMIN_HTML
     assert "nodeAction(node, 'reject')" in ADMIN_HTML
 
+  def test_node_table_renders_version_column(self):
+    """Operators need to confirm at-a-glance which sma-ng image each
+    cluster node is running. The cluster_nodes row already carries the
+    daemon's version (populated from importlib.metadata at startup), so
+    surface it as a column in the admin nodes table."""
+    assert ">Version<" in ADMIN_HTML
+    assert "x-text=\"node.version || '—'\"" in ADMIN_HTML
+
 
 class TestDocsTemplate:
   """Test docs navigation template generation."""
