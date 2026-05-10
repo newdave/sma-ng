@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/newdave/sma-ng/compare/sma-ng-v2.1.0...sma-ng-v2.1.1) (2026-05-10)
+
+
+### Bug Fixes
+
+* **docker:** install sma-ng metadata in venv so version is reported correctly ([100c6f7](https://github.com/newdave/sma-ng/commit/100c6f7f9ae706c6be7921157fcf36f596cc0402))
+
 ## [2.1.0](https://github.com/newdave/sma-ng/compare/sma-ng-v2.0.0...sma-ng-v2.1.0) (2026-05-10)
 
 
