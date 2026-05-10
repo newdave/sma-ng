@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/newdave/sma-ng/compare/sma-ng-v2.1.1...sma-ng-v2.1.2) (2026-05-10)
+
+
+### Bug Fixes
+
+* **qsv:** drop av1_qsv from default hwaccel-decoders; clarify auto-fill ([b33e880](https://github.com/newdave/sma-ng/commit/b33e88099043eebb9e19fa05db7f069a81bb5100))
+
 ## [2.1.1](https://github.com/newdave/sma-ng/compare/sma-ng-v2.1.0...sma-ng-v2.1.1) (2026-05-10)
 
 
