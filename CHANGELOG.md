@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/newdave/sma-ng/compare/sma-ng-v2.0.0...sma-ng-v2.1.0) (2026-05-10)
+
+
+### Features
+
+* **admin:** show daemon version per node in cluster table ([b0510f9](https://github.com/newdave/sma-ng/commit/b0510f902a2f155f57db46e2ef0a650e382ceeb3))
+
 ## [2.0.0](https://github.com/newdave/sma-ng/compare/sma-ng-v1.15.1...sma-ng-v2.0.0) (2026-05-09)
 
 
