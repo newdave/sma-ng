@@ -54,7 +54,15 @@ class ReadSettings:
   HWACCEL_PROFILES = {
     "qsv": {
       "hwaccels": ["qsv"],
-      "hwaccel-decoders": ["hevc_qsv", "h264_qsv", "vp9_qsv", "av1_qsv", "vc1_qsv"],
+      # av1_qsv is intentionally OMITTED from the default set. ffmpeg
+      # advertises an `av1_qsv` decoder on every Intel iGPU, but it is
+      # only functional on Arc / Xe2 (DG2 and later). Pre-Arc iGPUs
+      # (Coffee/Comet/Tiger/Alder/Raptor Lake) accept the codec at
+      # registration time and then crash inside oneVPL — which used to
+      # surface as an unrecoverable QSV runtime error and a wedged job.
+      # Operators who run Arc or newer can opt back in via
+      # `base.converter.hwaccel-decoders` in YAML.
+      "hwaccel-decoders": ["hevc_qsv", "h264_qsv", "vp9_qsv", "vc1_qsv"],
       "hwdevices": {"qsv": "/dev/dri/renderD128"},
       "hwaccel-output-format": {"qsv": "qsv"},
     },
@@ -192,7 +200,14 @@ class ReadSettings:
   # ---------------------------------------------------------------------
 
   def _apply_hwaccel_profile(self, gpu):
-    """Apply hardware acceleration profile, setting derived values."""
+    """Apply hardware acceleration profile, setting derived values.
+
+    Each entry in ``HWACCEL_PROFILES`` only overrides the corresponding
+    ``settings.*`` slot when the user hasn't already populated it; this
+    is what lets ``gpu: qsv`` alone drive the full chain (hwaccels,
+    decoders, device, output format) without forcing operators to
+    duplicate every value in YAML.
+    """
     profile = self.HWACCEL_PROFILES.get(gpu)
     if not profile:
       return
@@ -204,6 +219,7 @@ class ReadSettings:
       self.hwaccels = list(profile["hwaccels"])
     if not self.hwaccel_decoders:
       self.hwaccel_decoders = list(profile["hwaccel-decoders"])
+      self.log.info("hwaccel-decoders not set; auto-populating for gpu=%s: %s" % (gpu, self.hwaccel_decoders))
     if not self.hwdevices:
       self.hwdevices = dict(profile["hwdevices"])
     if not self.hwoutputfmt:
