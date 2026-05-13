@@ -21,11 +21,10 @@ permissions:
 jobs:
   # ── Step 1: Run release-please on every push to main ────────────────────────
   # Creates or updates a "Release PR" that bumps pyproject.toml and the
-  # release-please manifest. This repository uses release-please's
-  # always-bump-patch strategy, so releases default to point releases such as
-  # 1.2.12323. When the Release PR is merged, release-please creates the
-  # GitHub Release and the v* tag, then sets release_created=true so the
-  # publish and docker jobs below run.
+  # release-please manifest. Multiple commits are batched into a single release
+  # PR using group-pull-request-title-pattern. When the Release PR is manually
+  # merged, release-please creates the GitHub Release and the v* tag, then sets
+  # release_created=true so the publish and docker jobs below run.
   release-please:
     name: Release Please
     runs-on: ubuntu-latest
@@ -40,26 +39,10 @@ jobs:
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  # ── Step 1b: Auto-merge the release PR ──────────────────────────────────────
-  # After release-please opens or updates the Release PR, immediately approve
-  # and enable auto-merge so it merges as soon as required status checks pass.
-  # If no PR was created (release_created run) this job is a no-op.
-  auto-merge-release-pr:
-    name: Auto-merge Release PR
-    needs: release-please
-    if: needs.release-please.outputs.pr != ''
-    runs-on: ubuntu-latest
-    steps:
-      - name: Enable auto-merge (squash)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ fromJSON(needs.release-please.outputs.pr).number }}
-        run: gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --auto
-
   # ── Step 2a: Build & attach dist artifacts to the GitHub Release ─────────────
-  # Runs only when release-please actually created a release (not on every push).
-  # The version in pyproject.toml is the single source of truth — release-please
-  # has already bumped it before this job runs.
+  # Runs only when release-please actually created a release (when the Release
+  # PR was manually merged). The version in pyproject.toml is the single source
+  # of truth — release-please has already bumped it before this job runs.
   publish:
     name: Build & publish release artifacts
     needs: release-please
