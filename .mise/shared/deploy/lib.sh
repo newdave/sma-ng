@@ -236,6 +236,8 @@ init_docker_host_context() {
   sma_db_user=$($cfg db_user "")
   sma_db_password=$($cfg db_password "")
   sma_db_name=$($cfg db_name "")
+  sma_image="${SMA_IMAGE:-$($cfg image "")}"
+  sma_image_tag="${SMA_IMAGE_TAG:-$($cfg image_tag "")}"
 
   pg_env_str=""
   _append_env() {
@@ -249,6 +251,8 @@ init_docker_host_context() {
   _append_env SMA_DAEMON_DB_USER     "$sma_db_user"
   _append_env SMA_DAEMON_DB_PASSWORD "$sma_db_password"
   _append_env SMA_DAEMON_DB_NAME     "$sma_db_name"
+  _append_env SMA_IMAGE              "$sma_image"
+  _append_env SMA_IMAGE_TAG          "$sma_image_tag"
 
   if [ "$use_sudo" = "true" ] && [ -n "$pg_env_str" ]; then
     compose_cmd="sudo env ${pg_env_str}docker compose"

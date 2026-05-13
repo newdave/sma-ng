@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Build and push a multi-platform image (linux/amd64 + linux/arm64) via buildx (IMAGE=ghcr.io/owner/sma-ng:latest to override)"
+#MISE description="Build and push a Docker image via buildx"
 set -euo pipefail
 
 # shellcheck source=../../shared/docker/env.sh
@@ -11,11 +11,13 @@ if [ -z "${IMAGE:-}" ]; then
     exit 1
 fi
 
-echo "Building and pushing multi-platform image: $IMAGE (FFmpeg ${FFMPEG_VERSION})..."
+PLATFORM="${PLATFORM:-linux/amd64,linux/arm64}"
+echo "Building and pushing image: $IMAGE (FFmpeg ${FFMPEG_VERSION})..."
+echo "Platform: ${PLATFORM}"
 docker buildx build \
     --file docker/Dockerfile \
     --target runtime \
-    --platform linux/amd64,linux/arm64 \
+    --platform "${PLATFORM}" \
     --build-arg FFMPEG_VERSION="${FFMPEG_VERSION}" \
     --tag "$IMAGE" \
     --push \

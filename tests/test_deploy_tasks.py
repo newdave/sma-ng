@@ -166,6 +166,8 @@ class TestMiseTaskLayout:
     assert "deploy:docker" in tasks
     assert "deploy:docker:upgrade" not in tasks
     assert "deploy:docker:upgrade" in tasks["deploy:docker"]
+    assert "deploy:redeploy" in tasks
+    assert "deploy:prod" in tasks["deploy:redeploy"]
 
     assert "cluster:stop" in tasks
     assert "cluster:start" in tasks
@@ -555,6 +557,28 @@ class TestDeployMiseTask:
   def test_deploy_restart_sources_shared_lib(self):
     text = _read(".mise/tasks/deploy/restart")
     assert 'source "$(dirname "$0")/../../shared/deploy/lib.sh"' in text
+
+  def test_deploy_redeploy_orchestrates_build_config_and_docker_steps(self):
+    text = _read(".mise/tasks/deploy/redeploy")
+    assert '#MISE depends=["deploy:check"]' in text
+    assert "mise run build:push" in text
+    assert "mise run config:roll" in text
+    assert "mise run deploy:docker" in text
+    assert 'SMA_IMAGE="$DEPLOY_IMAGE" SMA_IMAGE_TAG="$DEPLOY_IMAGE_TAG"' in text
+
+  def test_deploy_docker_can_override_compose_image_and_tag(self):
+    lib = _read(".mise/shared/deploy/lib.sh")
+    compose = _read("docker/docker-compose.yml")
+    assert 'sma_image="${SMA_IMAGE:-$($cfg image "")}"' in lib
+    assert 'sma_image_tag="${SMA_IMAGE_TAG:-$($cfg image_tag "")}"' in lib
+    assert '_append_env SMA_IMAGE              "$sma_image"' in lib
+    assert '_append_env SMA_IMAGE_TAG          "$sma_image_tag"' in lib
+    assert "image: ${SMA_IMAGE:-ghcr.io/newdave/sma-ng}:${SMA_IMAGE_TAG:-latest}" in compose
+
+  def test_build_push_platform_is_overridable(self):
+    text = _read(".mise/tasks/build/push")
+    assert 'PLATFORM="${PLATFORM:-linux/amd64,linux/arm64}"' in text
+    assert '--platform "${PLATFORM}"' in text
 
   def test_no_task_uses_quoted_cfg_variable(self):
     task_root = os.path.join(PROJECT_ROOT, ".mise/tasks")
