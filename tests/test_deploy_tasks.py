@@ -268,6 +268,7 @@ class TestMiseTaskLayout:
     completions = [re.split(r"(?<!\\):", line, maxsplit=1)[0].replace("\\:", ":") for line in result.stdout.splitlines()]
     assert "setup:deps" in completions
     assert "setup:deps:base" in completions
+    assert "setup:docker:target" in completions
 
   def test_shared_deploy_library_is_not_a_task(self):
     assert not os.path.exists(os.path.join(PROJECT_ROOT, ".mise/tasks/deploy/lib.sh"))
@@ -316,6 +317,70 @@ class TestMiseTaskLayout:
     text = _read("Makefile")
     assert "install-mise:" in text
     assert "mise run" in text
+
+
+class TestDockerTargetInstaller:
+  def test_setup_task_calls_installer(self):
+    text = _read(".mise/tasks/setup/docker/target")
+    assert "#MISE description=" in text
+    assert "setup/install-docker-target.sh" in text
+
+  def test_installer_creates_docker_host_layout_and_alias_snippet(self, tmp_path):
+    install_dir = tmp_path / "sma"
+    transcode_dir = tmp_path / "transcodes"
+    snippet_path = tmp_path / "sma-aliases.sh"
+
+    env = {
+      **os.environ,
+      "SMA_INSTALL_DIR": str(install_dir),
+      "SMA_TRANSCODE_DIR": str(transcode_dir),
+      "SMA_BASH_SNIPPET": str(snippet_path),
+      "SMA_USE_SUDO": "false",
+      "SMA_OWNER": f"{os.getuid()}:{os.getgid()}",
+    }
+    result = subprocess.run(
+      ["bash", "setup/install-docker-target.sh"],
+      cwd=PROJECT_ROOT,
+      env=env,
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert (install_dir / "config" / "sma-ng.yml").is_file()
+    assert (install_dir / "config" / "daemon.env").is_file()
+    assert (install_dir / "logs").is_dir()
+    assert (install_dir / "cache").is_dir()
+    assert (transcode_dir / "sma").is_dir()
+    assert snippet_path.read_text() == _read("setup/sma-ng-docker-aliases.sh")
+
+  def test_docker_alias_snippet_wraps_manual_py(self):
+    bash_script = textwrap.dedent(
+      """
+      set -euo pipefail
+      shopt -s expand_aliases
+      docker() { printf '%s\\n' "$*"; }
+      source setup/sma-ng-docker-aliases.sh
+      sma-convert /mnt/media/movie.mkv --profile rq
+      sma-preview /mnt/media/movie.mkv
+      sma-codecs
+      """
+    )
+
+    result = subprocess.run(
+      ["bash", "-lc", bash_script],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    lines = result.stdout.splitlines()
+    assert lines[0] == "exec -it sma-ng python manual.py -i /mnt/media/movie.mkv -a --profile rq"
+    assert lines[1] == "exec -it sma-ng python manual.py -i /mnt/media/movie.mkv -oo"
+    assert lines[2] == "exec -it sma-ng python manual.py -cl"
 
 
 class TestDeployConfigTask:

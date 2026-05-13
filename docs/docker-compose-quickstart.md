@@ -26,11 +26,26 @@ Bundled PostgreSQL is published on the Docker host by default, so other machines
 
 ## 1. Prepare Host Directories
 
-Create the persistent directories the compose file expects:
+From a checkout on the deployment target, run the installer:
 
 ```bash
-sudo mkdir -p /opt/sma/config /opt/sma/logs /transcodes
-sudo chown -R "$USER":"$USER" /opt/sma /transcodes
+mise run setup:docker:target
+```
+
+If `mise` is not installed yet, run the script directly:
+
+```bash
+bash setup/install-docker-target.sh
+```
+
+By default this creates the persistent directories and seed files the compose file expects:
+
+```bash
+/opt/sma/config/sma-ng.yml
+/opt/sma/config/daemon.env
+/opt/sma/logs/
+/opt/sma/cache/
+/transcodes/sma/
 ```
 
 The default compose mounts are:
@@ -43,22 +58,17 @@ The default compose mounts are:
 
 Adjust the compose file if your host uses different media paths.
 
+The installer accepts environment overrides:
+
+```bash
+SMA_INSTALL_DIR=/srv/sma SMA_TRANSCODE_DIR=/srv/transcodes mise run setup:docker:target
+```
+
 ## 2. Create Config Files
 
-At minimum, create:
-
-```bash
-cp setup/sma-ng.yml.sample /opt/sma/config/sma-ng.yml
-cp setup/sma-ng.yml.sample /opt/sma/config/sma-ng.yml
-```
-
-If you want runtime environment overrides, also create:
-
-```bash
-cp setup/daemon.env.sample /opt/sma/config/daemon.env 2>/dev/null || true
-```
-
-If `setup/daemon.env.sample` is not present in your checkout, just create `/opt/sma/config/daemon.env` manually.
+The installer copies `setup/sma-ng.yml.sample` to `/opt/sma/config/sma-ng.yml` and
+`setup/daemon.env.sample` to `/opt/sma/config/daemon.env` only when those files do not already exist.
+Existing local config is left untouched.
 
 ## 3. Edit `sma-ng.yml`
 
@@ -118,7 +128,32 @@ GPU device permissions (`/dev/dri/*`) are reconciled automatically by the contai
 
 Put daemon/container settings in `/opt/sma/config/daemon.env` instead.
 
-## 6. Edit `daemon.env`
+## 6. Load CLI Aliases
+
+The installer writes a sourceable Bash helper snippet to `/opt/sma/sma-ng-docker-aliases.sh`.
+Load it in your interactive shell:
+
+```bash
+source /opt/sma/sma-ng-docker-aliases.sh
+```
+
+Useful aliases:
+
+| Alias | Command |
+| --- | --- |
+| `sma-manual` | Run `python manual.py` inside the `sma-ng` container |
+| `sma-convert /mnt/media/file.mkv` | Run `manual.py -i <file> -a` |
+| `sma-preview /mnt/media/file.mkv` | Run `manual.py -i <file> -oo` |
+| `sma-codecs` | Run `manual.py -cl` |
+| `sma-smoke` | Run `python daemon.py --smoke-test` |
+| `sma-rename` | Run `python rename.py` |
+| `sma-logs` | Follow `docker logs` for the `sma-ng` container |
+| `sma-shell` | Open an interactive shell in the `sma-ng` container |
+
+Paths passed to these aliases must be container-visible paths, such as `/mnt/...`, `/downloads/...`,
+`/transcodes/...`, or another path mounted into the compose service.
+
+## 7. Edit `daemon.env`
 
 For bundled PostgreSQL profiles (`software-pg`, `intel-pg`, `nvidia-pg`), set matching `POSTGRES_*` values plus the daemon database URL:
 
@@ -141,7 +176,7 @@ SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
 SMA_DAEMON_API_KEY=change-me-too
 ```
 
-## 7. Start a Profile
+## 8. Start a Profile
 
 From the repo root:
 
@@ -181,7 +216,7 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml --profile nvi
 docker compose --env-file docker/.env -f docker/docker-compose.yml --profile nvidia up -d
 ```
 
-## 8. Verify
+## 9. Verify
 
 Check the containers:
 

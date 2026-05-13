@@ -51,6 +51,10 @@ deploy:
   # Remote directory to sync into.
   deploy_dir: /opt/sma
 
+  # Host-side Docker bind-mount root. setup:docker:target and deploy helpers
+  # create config/, logs/, and cache/ below this path.
+  # sma_install_dir: /opt/sma
+
   # SSH port (can be overridden per-host).
   ssh_port: 22
 

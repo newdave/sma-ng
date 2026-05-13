@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Create Docker deployment directories and SMA-NG CLI helper aliases"
+set -euo pipefail
+
+setup/install-docker-target.sh "$@"
