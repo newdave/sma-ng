@@ -1,12 +1,21 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "release-type": "python",
-  "group-pull-request-title-pattern": "chore(main): release sma-ng ${version}",
+  "group-pull-request-title-pattern": "chore(main): release ${component} ${version}",
+  "bump-minor-pre-major": false,
+  "bump-patch-for-minor-pre-major": false,
   "packages": {
     ".": {
       "release-type": "python",
       "package-name": "sma-ng",
-      "version-file": "pyproject.toml"
+      "version-file": "pyproject.toml",
+      "change-type-order": [
+        "BREAKING CHANGE",
+        "Features",
+        "Bug Fixes",
+        "Documentation",
+        "Chore"
+      ]
     }
   }
 }
