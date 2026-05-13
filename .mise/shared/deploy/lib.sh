@@ -107,12 +107,12 @@ chown_remote_path_to_ssh_user() {
     || echo "  WARNING: [$host] chown -R ${remote_user}: ${target_path} failed (continuing)" >&2
 }
 
-# Idempotently create the persistent ${sma_install_dir}/{config,logs}
+# Idempotently create the persistent ${sma_install_dir}/{config,logs,data}
 # directories on the remote host, owned by the SSH user. These are the
 # bind-mount targets for the SMA Docker container; if Docker creates them
 # implicitly via compose volumes they end up root-owned and the daemon
 # can't write to them. Sudo is used when deploy.use_sudo is true. A no-op
-# when both directories already exist.
+# when all directories already exist.
 # Requires init_host_context to have populated cfg/ssh_opts/ssh_target/
 # remote_user for the host.
 ensure_remote_install_dirs() {
@@ -123,16 +123,16 @@ ensure_remote_install_dirs() {
   local host_use_sudo
   host_use_sudo=$($cfg use_sudo "false")
   # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts must word-split for ssh
-  if ssh $ssh_opts "$ssh_target" "test -d ${install_dir}/config && test -d ${install_dir}/logs"; then
+  if ssh $ssh_opts "$ssh_target" "test -d ${install_dir}/config && test -d ${install_dir}/logs && test -d ${install_dir}/data"; then
     return 0
   fi
-  echo "  creating ${install_dir}/{config,logs} (owner: ${remote_user})"
+  echo "  creating ${install_dir}/{config,logs,data} (owner: ${remote_user})"
   if [ "$host_use_sudo" = "true" ]; then
     # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts must word-split; remote command intentionally expands client-side
-    ssh $ssh_opts "$ssh_target" "sudo mkdir -p ${install_dir}/config ${install_dir}/logs && sudo chown ${remote_user}: ${install_dir} ${install_dir}/config ${install_dir}/logs"
+    ssh $ssh_opts "$ssh_target" "sudo mkdir -p ${install_dir}/config ${install_dir}/logs ${install_dir}/data && sudo chown ${remote_user}: ${install_dir} ${install_dir}/config ${install_dir}/logs ${install_dir}/data"
   else
     # shellcheck disable=SC2086,SC2029  # ssh_opts must word-split; remote command intentionally expands client-side
-    ssh $ssh_opts "$ssh_target" "mkdir -p ${install_dir}/config ${install_dir}/logs"
+    ssh $ssh_opts "$ssh_target" "mkdir -p ${install_dir}/config ${install_dir}/logs ${install_dir}/data"
   fi
 }
 

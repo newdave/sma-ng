@@ -72,6 +72,7 @@ as_root mkdir -p \
   "${install_dir}/config" \
   "${install_dir}/logs" \
   "${install_dir}/cache" \
+  "${install_dir}/data" \
   "${transcode_dir}/sma"
 
 as_root chown -R "$owner" "$install_dir" "$transcode_dir"
@@ -92,6 +93,7 @@ Host paths:
   config:     ${install_dir}/config
   logs:       ${install_dir}/logs
   cache:      ${install_dir}/cache
+  data:       ${install_dir}/data
   transcodes: ${transcode_dir}/sma
 
 Load CLI helpers in Bash with:

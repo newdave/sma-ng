@@ -298,10 +298,10 @@ COPY docker/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Runtime directories (seeded at startup via entrypoint; override with volume mounts)
-RUN mkdir -p /config /logs /mnt /downloads /transcodes \
-    && chown -R ubuntu:ubuntu /config /logs /app
+RUN mkdir -p /config /logs /data /mnt /downloads /transcodes \
+    && chown -R ubuntu:ubuntu /config /logs /data /app
 
-VOLUME ["/config", "/logs", "/mnt", "/downloads", "/transcodes"]
+VOLUME ["/config", "/logs", "/data", "/mnt", "/downloads", "/transcodes"]
 
 EXPOSE 8585
 

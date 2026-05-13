@@ -88,7 +88,7 @@ SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
 
 - small single-host setup: PostgreSQL on the same machine
 - multi-host cluster: PostgreSQL on a stable host or managed service
-- PostgreSQL is required for every deployment — single-node and clustered alike. There is no embedded SQLite fallback.
+- SQLite is suitable for a single SMA-NG daemon on one host. Use PostgreSQL when multiple daemons or hosts share work.
 
 ## Path Strategy
 
