@@ -82,7 +82,7 @@ deploy:
   # db_user: sma
   # db_password: ""
   # db_name: sma
-  # db_url: ""                        # full URL; overrides the components above
+  # db_url: ""                        # full URL; stamped to SMA_DAEMON_DB_URL and SMA_DB_URL
 
   # Docker Compose profile to use (e.g. intel, nvenc, intel-pg).
   # docker_profile: intel
@@ -127,7 +127,7 @@ daemon:
   # api_key: ""
 
   # PostgreSQL connection URL — derived from deploy db_* keys if not set.
-  # Ignored when the host's docker_profile ends in `-pg` (bundled postgres).
+  # Required for hosts using *-pg docker_profile (external PostgreSQL).
   # db_url: ""
 
   # ffmpeg/ffprobe directory (SMA_DAEMON_FFMPEG_DIR). Overrides deploy.ffmpeg_dir.

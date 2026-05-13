@@ -401,15 +401,8 @@ class TestComposeGpuProfiles:
 
 
 class TestComposePostgres:
-  def test_postgres_service_exists(self, compose):
-    assert "sma-pgsql" in compose["services"]
-
-  def test_postgres_container_name_matches_service_name(self, compose):
-    # The DB hostname in SMA_DAEMON_DB_URL is "sma-pgsql"; keep the
-    # explicit container_name in lockstep so `docker ps` / `docker
-    # inspect` calls (and any lib.sh helpers that target the running
-    # container) see the same name.
-    assert compose["services"]["sma-pgsql"].get("container_name") == "sma-pgsql"
+  def test_no_bundled_postgres_service(self, compose):
+    assert "sma-pgsql" not in compose["services"]
 
   def test_sma_daemon_services_share_canonical_container_name(self, compose):
     # All SMA daemon variants resolve to a single container named
@@ -427,45 +420,9 @@ class TestComposePostgres:
     for svc in sma_services:
       assert compose["services"][svc].get("container_name") == "sma-ng", f"{svc} should have container_name=sma-ng for cross-profile reuse"
 
-  def test_postgres_starts_only_for_pg_profiles(self, compose):
-    profiles = compose["services"]["sma-pgsql"]["profiles"]
-    assert set(profiles) == {"software-pg", "intel-pg", "nvidia-pg"}
-
-  def test_postgres_uses_alpine_image(self, compose):
-    assert "postgres" in compose["services"]["sma-pgsql"]["image"]
-    assert "alpine" in compose["services"]["sma-pgsql"]["image"]
-
-  def test_postgres_restart_policy(self, compose):
-    assert compose["services"]["sma-pgsql"]["restart"] == "unless-stopped"
-
-  def test_postgres_has_named_volume(self, compose):
-    vols = compose["services"]["sma-pgsql"]["volumes"]
-    assert any("pgdata" in str(v) for v in vols)
-
-  def test_postgres_named_volume_declared(self, compose):
-    assert "sma-pgdata" in compose.get("volumes", {})
-
-  def test_postgres_env_vars_set(self, compose):
-    env = compose["services"]["sma-pgsql"]["environment"]
-    env_str = str(env)
-    assert "POSTGRES_DB" in env_str
-    assert "POSTGRES_USER" in env_str
-    assert "POSTGRES_PASSWORD" in env_str
-
-  def test_postgres_has_healthcheck(self, compose):
-    hc = compose["services"]["sma-pgsql"].get("healthcheck")
-    assert hc is not None
-    assert "pg_isready" in str(hc["test"])
-
-  def test_postgres_port_published_on_all_interfaces_by_default(self, compose):
-    ports = compose["services"]["sma-pgsql"]["ports"]
-    assert "${PGSQL_BIND_IP:-0.0.0.0}:${PGSQL_PORT:-5432}:5432" in ports
-
-  def test_only_pg_profiles_depend_on_postgres(self, compose):
+  def test_no_profiles_depend_on_bundled_postgres(self, compose):
     for svc in ("sma-software-pg", "sma-intel-pg", "sma-nvidia-pg"):
-      dep = compose["services"][svc].get("depends_on", {})
-      assert "sma-pgsql" in dep
-      assert dep["sma-pgsql"]["condition"] == "service_healthy"
+      assert "depends_on" not in compose["services"][svc]
     for svc in ("sma-software", "sma-intel", "sma-nvidia"):
       assert "depends_on" not in compose["services"][svc]
 
@@ -473,15 +430,15 @@ class TestComposePostgres:
     for svc in ("sma-software", "sma-intel", "sma-nvidia"):
       svc_def = compose["services"][svc]
       env = svc_def.get("environment", {}) or {}
-      assert env["SMA_DAEMON_DB_URL"] == "${SMA_DAEMON_DB_URL:-sqlite:////data/sma-ng.db}"
+      assert env["SMA_DAEMON_DB_URL"] == "${SMA_DAEMON_DB_URL:-${SMA_DB_URL:-sqlite:////data/sma-ng.db}}"
       env_files = svc_def.get("env_file", [])
       assert any((isinstance(ef, dict) and ef.get("path") == "/opt/sma/config/daemon.env") or ef == "/opt/sma/config/daemon.env" for ef in env_files)
       assert "/opt/sma/data:/data" in svc_def["volumes"]
 
-  def test_pg_profiles_default_db_url_to_bundled_postgres(self, compose):
+  def test_pg_profiles_use_external_db_url_env(self, compose):
     for svc in ("sma-software-pg", "sma-intel-pg", "sma-nvidia-pg"):
       env = compose["services"][svc]["environment"]
-      assert "sma-pgsql:5432" in env["SMA_DAEMON_DB_URL"]
+      assert env["SMA_DAEMON_DB_URL"] == "${SMA_DAEMON_DB_URL:-${SMA_DB_URL:-}}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────

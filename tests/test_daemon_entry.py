@@ -232,8 +232,9 @@ class TestDaemonMainArgParsing:
     pcm = _make_pcm(db_url=None)
 
     with patch.dict(os.environ, {}, clear=False):
-      # Remove env var if set
+      # Remove env vars if set
       env_backup = os.environ.pop("SMA_DAEMON_DB_URL", None)
+      env_alias_backup = os.environ.pop("SMA_DB_URL", None)
       try:
         with patch("sys.argv", ["daemon.py"]):
           with patch("daemon.PathConfigManager", return_value=pcm):
@@ -244,6 +245,8 @@ class TestDaemonMainArgParsing:
       finally:
         if env_backup is not None:
           os.environ["SMA_DAEMON_DB_URL"] = env_backup
+        if env_alias_backup is not None:
+          os.environ["SMA_DB_URL"] = env_alias_backup
     assert exc.value.code == 1
 
   def test_db_url_from_env_var(self):
@@ -264,6 +267,25 @@ class TestDaemonMainArgParsing:
                       pass
     if mock_db.call_args:
       assert mock_db.call_args[0][0] == "postgresql://env/sma"
+
+  def test_db_url_from_env_alias_var(self):
+    pcm = _make_pcm(db_url=None)
+    mock_server = _make_server()
+
+    with patch.dict(os.environ, {"SMA_DB_URL": "postgresql://env-alias/sma"}, clear=False):
+      with patch("sys.argv", ["daemon.py"]):
+        with patch("daemon.PathConfigManager", return_value=pcm):
+          with patch("daemon.ConfigLogManager", return_value=MagicMock()):
+            with patch("daemon.ConfigLockManager", return_value=MagicMock()):
+              with patch("daemon.PostgreSQLJobDatabase", return_value=MagicMock()) as mock_db:
+                with patch("daemon.DaemonServer", return_value=mock_server):
+                  with patch("daemon._validate_hwaccel"):
+                    try:
+                      daemon_entry.main()
+                    except (KeyboardInterrupt, SystemExit):
+                      pass
+    if mock_db.call_args:
+      assert mock_db.call_args[0][0] == "postgresql://env-alias/sma"
 
   def test_sqlite_db_url_uses_sqlite_backend(self):
     db = MagicMock()
