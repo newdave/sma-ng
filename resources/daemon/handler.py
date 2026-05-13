@@ -10,7 +10,7 @@ from urllib.parse import unquote
 from resources.daemon.config import _strip_secrets
 from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
-from resources.daemon.db import STATUS_RUNNING
+from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase
 from resources.daemon.docs_ui import DOCS_DIR, _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html
 
 __all__ = ["WebhookHandler", "_inline"]
@@ -34,6 +34,14 @@ def _json_default(value):
       return value.isoformat(timespec="seconds")
     return value.astimezone(_LOCAL_TIMEZONE).isoformat(timespec="seconds")
   raise TypeError("Object of type %s is not JSON serializable" % type(value).__name__)
+
+
+def _is_explicitly_local_db(job_db):
+  return isinstance(job_db, SQLiteJobDatabase)
+
+
+def _is_not_distributed(job_db):
+  return getattr(job_db, "is_distributed", None) is False
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
@@ -428,7 +436,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       limit=<int>     max entries to return (default 100, max 500)
       offset=<int>    pagination offset (default 0)
     """
-    if not self.server.job_db.is_distributed:
+    if _is_not_distributed(self.server.job_db):
       self.send_json_response(503, {"error": "Cluster logs are only available in distributed (PostgreSQL) mode"})
       return
 
@@ -451,7 +459,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
   def _get_admin_config(self, _path, _query):
     """Return the cluster-wide base config from the database."""
-    if not self.server.job_db.is_distributed:
+    if _is_not_distributed(self.server.job_db):
       self.send_json_response(503, {"error": "Cluster config is only available in distributed (PostgreSQL) mode"})
       return
     raw = self.server.job_db.get_cluster_config()
@@ -459,7 +467,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
   def _post_admin_config(self, _path, _query):
     """Store a cluster-wide base config into the database (secrets are stripped)."""
-    if not self.server.job_db.is_distributed:
+    if _is_not_distributed(self.server.job_db):
       self.send_json_response(503, {"error": "Cluster config is only available in distributed (PostgreSQL) mode"})
       return
     actor = self.headers.get("X-Actor", "admin-ui")
@@ -518,7 +526,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     self.send_json_response(200, self.server.job_db.get_stats())
 
   def _get_metrics_api(self, _path, query):
-    if not self.server.job_db.is_distributed:
+    if _is_not_distributed(self.server.job_db):
       self.send_json_response(
         503,
         {
@@ -864,6 +872,19 @@ class WebhookHandler(BaseHTTPRequestHandler):
   # ------------------------------------------------------------------
 
   def _get_library_audit(self, query):
+    if _is_explicitly_local_db(self.server.job_db):
+      self.send_json_response(
+        200,
+        {
+          "runs": [],
+          "count": 0,
+          "limit": int(query.get("limit", [50])[0]),
+          "offset": int(query.get("offset", [0])[0]),
+          "available": False,
+          "reason": "Library audit requires PostgreSQL cluster mode.",
+        },
+      )
+      return
     limit = int(query.get("limit", [50])[0])
     offset = int(query.get("offset", [0])[0])
     runs = self.server.job_db.list_audit_runs(limit=limit, offset=offset)
@@ -880,6 +901,19 @@ class WebhookHandler(BaseHTTPRequestHandler):
     self.send_json_response(200, run)
 
   def _get_library_findings(self, query):
+    if _is_explicitly_local_db(self.server.job_db):
+      self.send_json_response(
+        200,
+        {
+          "findings": [],
+          "count": 0,
+          "limit": int(query.get("limit", [50])[0]),
+          "offset": int(query.get("offset", [0])[0]),
+          "available": False,
+          "reason": "Library audit requires PostgreSQL cluster mode.",
+        },
+      )
+      return
     status = query.get("status", [None])[0]
     kind = query.get("kind", [None])[0]
     path_q = query.get("path", [None])[0]
@@ -904,6 +938,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
     Body: {"paths": [...], "dry_run": bool} — both optional. Defaults to
     daemon.audit.paths and daemon.audit.dry_run.
     """
+    if _is_explicitly_local_db(self.server.job_db):
+      self.send_json_response(409, {"error": "Library audit requires PostgreSQL cluster mode."})
+      return
     body = {}
     content_length = int(self.headers.get("Content-Length", 0))
     if content_length:
@@ -961,6 +998,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
         pass
 
   def _post_library_finding_action(self, path, target_status):
+    if _is_explicitly_local_db(self.server.job_db):
+      self.send_json_response(409, {"error": "Library audit requires PostgreSQL cluster mode."})
+      return
     finding_id = self._parse_finding_id(path)
     if finding_id is None:
       return

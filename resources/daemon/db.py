@@ -1,6 +1,11 @@
 import copy
 import json
+import os
+import sqlite3
+import threading
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from urllib.parse import unquote, urlparse
 
 import yaml as _yaml
 
@@ -30,6 +35,490 @@ _METRICS_WINDOW_MAP = {
   "7d": {"trunc": "day", "filter": "7 days", "series_offset": "6 days", "step": "1 day", "throughput_hours": 168.0},
   "30d": {"trunc": "day", "filter": "30 days", "series_offset": "29 days", "step": "1 day", "throughput_hours": 720.0},
 }
+
+
+def _utc_now():
+  return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _sqlite_path_from_url(db_url):
+  parsed = urlparse(db_url)
+  if parsed.scheme != "sqlite":
+    raise ValueError("SQLite database URL must use sqlite:///path or sqlite:////absolute/path")
+  if parsed.netloc and parsed.netloc != "localhost":
+    raise ValueError("SQLite database URL must be local, got host: %s" % parsed.netloc)
+  path = unquote(parsed.path or "")
+  if not path:
+    raise ValueError("SQLite database URL must include a file path")
+  if parsed.netloc == "localhost":
+    return path
+  return path
+
+
+class SQLiteJobDatabase:
+  """SQLite-backed job queue for single-node deployments.
+
+  This backend is intentionally local-only: it supports persistent jobs,
+  scanner de-duplication, and local job controls, but does not expose
+  distributed cluster coordination, cluster logs, or metrics.
+  """
+
+  is_distributed: bool = False
+
+  def __init__(self, db_url, logger=None):
+    self.db_url = db_url
+    self.path = _sqlite_path_from_url(db_url)
+    self.log = logger or log
+    self._node_id = resolve_node_id()
+    self._lock = threading.RLock()
+    os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+    self._conn_obj = sqlite3.connect(self.path, check_same_thread=False)
+    self._conn_obj.row_factory = sqlite3.Row
+    self._conn_obj.execute("PRAGMA journal_mode=WAL")
+    self._conn_obj.execute("PRAGMA foreign_keys=ON")
+    self._init_db()
+
+  @contextmanager
+  def _conn(self):
+    with self._lock:
+      try:
+        yield self._conn_obj
+        self._conn_obj.commit()
+      except Exception:
+        self._conn_obj.rollback()
+        raise
+
+  def close(self):
+    self._conn_obj.close()
+
+  def _init_db(self):
+    with self._conn() as conn:
+      conn.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          path TEXT NOT NULL,
+          config TEXT NOT NULL,
+          args TEXT DEFAULT '[]',
+          status TEXT DEFAULT 'pending',
+          worker_id INTEGER,
+          node_id TEXT,
+          error TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          started_at TEXT,
+          completed_at TEXT,
+          retry_count INTEGER DEFAULT 0,
+          max_retries INTEGER DEFAULT 0,
+          next_attempt_at TEXT,
+          priority INTEGER DEFAULT 0,
+          input_size_bytes INTEGER,
+          output_size_bytes INTEGER
+        )
+      """)
+      conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
+      conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_config ON jobs(config)")
+      conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at)")
+      conn.execute("""
+        CREATE TABLE IF NOT EXISTS scanned_files (
+          path TEXT PRIMARY KEY,
+          scanned_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      """)
+      conn.execute("""
+        CREATE TABLE IF NOT EXISTS cluster_nodes (
+          node_id TEXT PRIMARY KEY,
+          host TEXT NOT NULL,
+          workers INTEGER NOT NULL DEFAULT 0,
+          last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          status TEXT NOT NULL DEFAULT 'online',
+          running_jobs INTEGER NOT NULL DEFAULT 0,
+          pending_jobs INTEGER NOT NULL DEFAULT 0,
+          version TEXT,
+          hwaccel TEXT,
+          node_name TEXT
+        )
+      """)
+    self._reset_running_jobs()
+
+  def _reset_running_jobs(self):
+    count = self._requeue_running_jobs_for_node(self._node_id)
+    if count > 0:
+      self.log.info("Reset %d interrupted jobs to pending (node: %s)" % (count, self._node_id))
+
+  def _requeue_running_jobs_for_node(self, node_id):
+    with self._conn() as conn:
+      cur = conn.execute(
+        """
+        UPDATE jobs
+        SET status = ?, worker_id = NULL, node_id = NULL, started_at = NULL
+        WHERE status = ? AND node_id = ?
+        """,
+        (STATUS_PENDING, STATUS_RUNNING, node_id),
+      )
+      return cur.rowcount
+
+  def add_job(self, path, config, args=None, max_retries=0):
+    args_json = json.dumps(args or [])
+    with self._conn() as conn:
+      row = conn.execute(
+        "SELECT id FROM jobs WHERE path = ? AND status IN (?, ?) LIMIT 1",
+        (path, STATUS_PENDING, STATUS_RUNNING),
+      ).fetchone()
+      if row:
+        self.log.debug("Duplicate job for path: %s (existing job %d)" % (path, row["id"]))
+        return None
+      cur = conn.execute(
+        "INSERT INTO jobs (path, config, args, status, max_retries) VALUES (?, ?, ?, ?, ?)",
+        (path, config, args_json, STATUS_PENDING, max_retries),
+      )
+      job_id = cur.lastrowid
+    self.log.debug("Added job %d: %s" % (job_id, path))
+    return job_id
+
+  def find_active_job(self, path):
+    with self._conn() as conn:
+      row = conn.execute("SELECT * FROM jobs WHERE path = ? AND status IN (?, ?) LIMIT 1", (path, STATUS_PENDING, STATUS_RUNNING)).fetchone()
+      return dict(row) if row else None
+
+  def claim_next_job(self, worker_id, node_id, exclude_configs=None):
+    now = _utc_now()
+    with self._conn() as conn:
+      params = [STATUS_PENDING, now]
+      sql = """
+        SELECT id FROM jobs
+        WHERE status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+      """
+      if exclude_configs:
+        placeholders = ", ".join("?" for _ in exclude_configs)
+        sql += " AND config NOT IN (%s)" % placeholders
+        params.extend(list(exclude_configs))
+      sql += " ORDER BY priority DESC, created_at ASC LIMIT 1"
+      row = conn.execute(sql, params).fetchone()
+      if row is None:
+        return None
+      job_id = row["id"]
+      conn.execute(
+        "UPDATE jobs SET status = ?, worker_id = ?, node_id = ?, started_at = ? WHERE id = ?",
+        (STATUS_RUNNING, worker_id, node_id, now, job_id),
+      )
+    return self.get_job(job_id)
+
+  def get_pending_jobs(self):
+    with self._conn() as conn:
+      return [dict(r) for r in conn.execute("SELECT * FROM jobs WHERE status = ? ORDER BY created_at ASC", (STATUS_PENDING,)).fetchall()]
+
+  def get_next_pending_job(self):
+    with self._conn() as conn:
+      row = conn.execute("SELECT * FROM jobs WHERE status = ? ORDER BY created_at ASC LIMIT 1", (STATUS_PENDING,)).fetchone()
+      return dict(row) if row else None
+
+  def start_job(self, job_id, worker_id):
+    with self._conn() as conn:
+      conn.execute("UPDATE jobs SET status = ?, worker_id = ?, started_at = ? WHERE id = ?", (STATUS_RUNNING, worker_id, _utc_now(), job_id))
+    self.log.debug("Job %d started by worker %d" % (job_id, worker_id))
+
+  def complete_job(self, job_id, input_size=None, output_size=None):
+    with self._conn() as conn:
+      conn.execute(
+        "UPDATE jobs SET status = ?, completed_at = ?, input_size_bytes = ?, output_size_bytes = ? WHERE id = ?",
+        (STATUS_COMPLETED, _utc_now(), input_size, output_size, job_id),
+      )
+    self.log.debug("Job %d completed" % job_id)
+
+  def fail_job(self, job_id, error=None):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    with self._conn() as conn:
+      row = conn.execute("SELECT retry_count, max_retries FROM jobs WHERE id = ?", (job_id,)).fetchone()
+      if row and row["retry_count"] < row["max_retries"]:
+        retry_count = row["retry_count"] + 1
+        delay = 2**retry_count * 60
+        next_attempt = (now + timedelta(seconds=delay)).isoformat()
+        conn.execute(
+          """
+          UPDATE jobs
+          SET status = ?, retry_count = ?, error = ?, next_attempt_at = ?,
+              started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
+          WHERE id = ?
+          """,
+          (STATUS_PENDING, retry_count, error, next_attempt, job_id),
+        )
+        self.log.debug("Job %d failed (attempt %d/%d), retrying in %ds" % (job_id, retry_count, row["max_retries"], delay))
+      else:
+        conn.execute("UPDATE jobs SET status = ?, error = ?, completed_at = ? WHERE id = ?", (STATUS_FAILED, error, now.isoformat(), job_id))
+        self.log.debug("Job %d failed: %s" % (job_id, error))
+
+  def get_job(self, job_id):
+    with self._conn() as conn:
+      row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+      return dict(row) if row else None
+
+  def get_jobs(self, status=None, config=None, path=None, limit=100, offset=0):
+    query = "SELECT * FROM jobs WHERE 1=1"
+    params = []
+    if status:
+      query += " AND status = ?"
+      params.append(status)
+    if config:
+      query += " AND config = ?"
+      params.append(config)
+    if path:
+      query += " AND LOWER(path) LIKE LOWER(?)"
+      params.append("%" + path + "%")
+    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    with self._conn() as conn:
+      return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+  def get_stats(self):
+    with self._conn() as conn:
+      stats = {r["status"]: r["count"] for r in conn.execute("SELECT status, COUNT(*) AS count FROM jobs GROUP BY status").fetchall()}
+      stats["total"] = conn.execute("SELECT COUNT(*) AS total FROM jobs").fetchone()["total"]
+    return stats
+
+  def get_metrics(self, window: str = "24h") -> dict:
+    return {"available": False, "reason": "Metrics require PostgreSQL cluster mode.", "window": window}
+
+  def get_running_jobs(self):
+    with self._conn() as conn:
+      return [dict(r) for r in conn.execute("SELECT * FROM jobs WHERE status = ?", (STATUS_RUNNING,)).fetchall()]
+
+  def cleanup_old_jobs(self, days=30):
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).replace(microsecond=0).isoformat()
+    with self._conn() as conn:
+      cur = conn.execute("DELETE FROM jobs WHERE status IN (?, ?) AND completed_at < ?", (STATUS_COMPLETED, STATUS_FAILED, cutoff))
+      deleted = cur.rowcount
+    if deleted > 0:
+      self.log.info("Cleaned up %d old jobs" % deleted)
+    return deleted
+
+  def pending_count(self):
+    with self._conn() as conn:
+      return conn.execute("SELECT COUNT(*) AS count FROM jobs WHERE status = ?", (STATUS_PENDING,)).fetchone()["count"]
+
+  def pending_count_for_config(self, config):
+    with self._conn() as conn:
+      return conn.execute("SELECT COUNT(*) AS count FROM jobs WHERE status = ? AND config = ?", (STATUS_PENDING, config)).fetchone()["count"]
+
+  def heartbeat(self, node_id, host, workers, started_at, version=None, hwaccel=None, node_name=None):
+    now = _utc_now()
+    started = started_at.isoformat() if hasattr(started_at, "isoformat") else str(started_at)
+    with self._conn() as conn:
+      conn.execute(
+        """
+        INSERT INTO cluster_nodes (node_id, host, workers, last_seen, started_at, status, running_jobs, pending_jobs, version, hwaccel, node_name)
+        VALUES (?, ?, ?, ?, ?, 'online',
+          (SELECT COUNT(*) FROM jobs WHERE status = 'running' AND node_id = ?),
+          (SELECT COUNT(*) FROM jobs WHERE status = 'pending'),
+          ?, ?, ?)
+        ON CONFLICT(node_id) DO UPDATE SET
+          host = excluded.host,
+          workers = excluded.workers,
+          last_seen = excluded.last_seen,
+          status = excluded.status,
+          running_jobs = excluded.running_jobs,
+          pending_jobs = excluded.pending_jobs,
+          version = COALESCE(excluded.version, cluster_nodes.version),
+          hwaccel = COALESCE(excluded.hwaccel, cluster_nodes.hwaccel),
+          node_name = COALESCE(excluded.node_name, cluster_nodes.node_name)
+        """,
+        (node_id, host, workers, now, started, node_id, version, hwaccel, node_name or None),
+      )
+    return None
+
+  def is_node_approved(self, node_id):
+    return True
+
+  def set_node_approval(self, node_id, approved=True, actor=None, note=None):
+    return None
+
+  def delete_node(self, node_id):
+    with self._conn() as conn:
+      cur = conn.execute("DELETE FROM cluster_nodes WHERE node_id = ?", (node_id,))
+      return cur.rowcount > 0
+
+  def set_node_status(self, node_id, status):
+    with self._conn() as conn:
+      cur = conn.execute("UPDATE cluster_nodes SET status = ? WHERE node_id = ?", (status, node_id))
+      return cur.rowcount > 0
+
+  def get_cluster_nodes(self):
+    self.heartbeat(self._node_id, self._node_id, 0, _utc_now())
+    with self._conn() as conn:
+      nodes = [dict(r) for r in conn.execute("SELECT * FROM cluster_nodes ORDER BY last_seen DESC").fetchall()]
+      active = [dict(r) for r in conn.execute("SELECT node_id, id AS job_id, path, config FROM jobs WHERE status = ?", (STATUS_RUNNING,)).fetchall()]
+    jobs_by_node = {}
+    for row in active:
+      jobs_by_node.setdefault(row["node_id"], []).append({"job_id": row["job_id"], "path": row["path"], "config": row["config"]})
+    for node in nodes:
+      node["uptime_seconds"] = 0
+      node["approval_status"] = "approved"
+      node["active_jobs"] = jobs_by_node.get(node["node_id"], [])
+    return nodes
+
+  def recover_stale_nodes(self, stale_seconds=120):
+    return []
+
+  def mark_node_offline(self, node_id, remove=False):
+    requeued = self._requeue_running_jobs_for_node(node_id)
+    with self._conn() as conn:
+      if remove:
+        conn.execute("DELETE FROM cluster_nodes WHERE node_id = ?", (node_id,))
+      else:
+        conn.execute("UPDATE cluster_nodes SET status = 'offline' WHERE node_id = ?", (node_id,))
+    if requeued:
+      self.log.info("Requeued %d running jobs on shutdown" % requeued)
+
+  def send_node_command(self, node_id, command, requested_by=None):
+    return []
+
+  def poll_node_command(self, node_id):
+    return None
+
+  def ack_node_command(self, cmd_id, status):
+    return None
+
+  def insert_logs(self, records):
+    return None
+
+  def cleanup_old_logs(self, days):
+    return 0
+
+  def get_logs(self, node_id=None, level=None, limit=100, offset=0):
+    return []
+
+  def get_cluster_config(self):
+    return None
+
+  def set_cluster_config(self, config_dict, updated_by=None):
+    return None
+
+  def expire_offline_nodes(self, expiry_days):
+    return []
+
+  def cleanup_orphaned_commands(self, node_ids):
+    return 0
+
+  def get_logs_for_archival(self, before_days):
+    return []
+
+  def delete_logs_before(self, before_days):
+    return 0
+
+  def requeue_job(self, job_id):
+    with self._conn() as conn:
+      cur = conn.execute(
+        """
+        UPDATE jobs
+        SET status = ?, worker_id = NULL, node_id = NULL, error = NULL, started_at = NULL, completed_at = NULL
+        WHERE id = ? AND status = ?
+        """,
+        (STATUS_PENDING, job_id, STATUS_FAILED),
+      )
+      requeued = cur.rowcount > 0
+    if requeued:
+      self.log.info("Requeued failed job %d" % job_id)
+    return requeued
+
+  def requeue_failed_jobs(self, config=None):
+    sql = """
+      UPDATE jobs
+      SET status = ?, worker_id = NULL, node_id = NULL, error = NULL, started_at = NULL, completed_at = NULL
+      WHERE status = ?
+    """
+    params = [STATUS_PENDING, STATUS_FAILED]
+    if config:
+      sql += " AND config = ?"
+      params.append(config)
+    with self._conn() as conn:
+      cur = conn.execute(sql, params)
+      count = cur.rowcount
+    if count > 0:
+      self.log.info("Requeued %d failed jobs" % count)
+    return count
+
+  def cancel_job(self, job_id):
+    with self._conn() as conn:
+      cur = conn.execute(
+        "UPDATE jobs SET status = 'cancelled', error = 'Cancelled by user', completed_at = ? WHERE id = ? AND status IN (?, ?)",
+        (_utc_now(), job_id, STATUS_PENDING, STATUS_RUNNING),
+      )
+      cancelled = cur.rowcount > 0
+    if cancelled:
+      self.log.info("Cancelled job %d" % job_id)
+    return cancelled
+
+  def set_job_priority(self, job_id, priority):
+    with self._conn() as conn:
+      cur = conn.execute("UPDATE jobs SET priority = ? WHERE id = ? AND status = ?", (priority, job_id, STATUS_PENDING))
+      updated = cur.rowcount > 0
+    if updated:
+      self.log.info("Set priority %d for job %d" % (priority, job_id))
+    return updated
+
+  def delete_failed_jobs(self):
+    with self._conn() as conn:
+      cur = conn.execute("DELETE FROM jobs WHERE status = ?", (STATUS_FAILED,))
+      deleted = cur.rowcount
+    if deleted > 0:
+      self.log.info("Deleted %d failed jobs" % deleted)
+    return deleted
+
+  def delete_jobs(self, job_ids):
+    ids = [int(j) for j in (job_ids or [])]
+    if not ids:
+      return []
+    placeholders = ", ".join("?" for _ in ids)
+    with self._conn() as conn:
+      existing = [row["id"] for row in conn.execute("SELECT id FROM jobs WHERE id IN (%s)" % placeholders, ids).fetchall()]
+      if existing:
+        conn.execute("DELETE FROM jobs WHERE id IN (%s)" % placeholders, ids)
+    if existing:
+      self.log.info("Deleted %d jobs by id" % len(existing))
+    return existing
+
+  def delete_offline_nodes(self):
+    with self._conn() as conn:
+      cur = conn.execute("DELETE FROM cluster_nodes WHERE status != 'online'")
+      deleted = cur.rowcount
+    if deleted > 0:
+      self.log.info("Deleted %d offline nodes" % deleted)
+    return deleted
+
+  def delete_all_jobs(self):
+    with self._conn() as conn:
+      cur = conn.execute("DELETE FROM jobs")
+      deleted = cur.rowcount
+    self.log.info("Deleted all jobs (%d rows)" % deleted)
+    return deleted
+
+  def filter_unscanned(self, paths):
+    if not paths:
+      return []
+    placeholders = ", ".join("?" for _ in paths)
+    with self._conn() as conn:
+      already = {row["path"] for row in conn.execute("SELECT path FROM scanned_files WHERE path IN (%s)" % placeholders, paths).fetchall()}
+    return [p for p in paths if p not in already]
+
+  def record_scanned(self, paths):
+    if not paths:
+      return
+    with self._conn() as conn:
+      conn.executemany("INSERT OR IGNORE INTO scanned_files (path) VALUES (?)", [(p,) for p in paths])
+
+  def list_audit_runs(self, limit=50, offset=0):
+    return []
+
+  def get_audit_run(self, audit_id):
+    return None
+
+  def get_findings(self, status=None, kind=None, path=None, limit=50, offset=0):
+    return []
+
+  def get_finding(self, finding_id):
+    return None
+
+  def set_finding_status(self, finding_id, status):
+    return None
 
 
 class PostgreSQLJobDatabase:

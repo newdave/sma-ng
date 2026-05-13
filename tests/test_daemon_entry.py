@@ -265,6 +265,15 @@ class TestDaemonMainArgParsing:
     if mock_db.call_args:
       assert mock_db.call_args[0][0] == "postgresql://env/sma"
 
+  def test_sqlite_db_url_uses_sqlite_backend(self):
+    db = MagicMock()
+    with patch("daemon.SQLiteJobDatabase", return_value=db) as mock_sqlite:
+      created, label = daemon_entry._create_job_database("sqlite:////data/sma-ng.db", MagicMock())
+
+    assert created is db
+    assert mock_sqlite.call_args[0][0] == "sqlite:////data/sma-ng.db"
+    assert label == "SQLite: sqlite:////data/sma-ng.db"
+
   def test_ffmpeg_dir_from_cli(self):
     pcm = _make_pcm(db_url="postgresql://localhost/sma")
     pcm.ffmpeg_dir = None

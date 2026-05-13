@@ -9,7 +9,7 @@ Features:
 - Path-based configuration selection via sma-ng.yml Daemon section
 - Per-config logging to separate files in logs/ directory
 - Only one process per config runs at a time (others queue)
-- PostgreSQL persistence for job queue (survives restarts)
+- SQLite or PostgreSQL persistence for job queue (survives restarts)
 - API key authentication for webhook endpoints
 
 Usage:
@@ -36,6 +36,7 @@ from resources.daemon import (
   DaemonServer,
   PathConfigManager,
   PostgreSQLJobDatabase,
+  SQLiteJobDatabase,
   WebhookHandler,
   _inline,  # pyright: ignore[reportUnusedImport]  # re-exported for tests
   _load_dashboard_html,  # pyright: ignore[reportUnusedImport]
@@ -67,6 +68,13 @@ def _build_db_url_from_env():
   if password:
     return "postgresql://%s:%s@%s:%s/%s" % (user, password, host, port, dbname)
   return "postgresql://%s@%s:%s/%s" % (user, host, port, dbname)
+
+
+def _create_job_database(db_url, logger):
+  """Create the configured job database backend."""
+  if db_url.startswith("sqlite:"):
+    return SQLiteJobDatabase(db_url, logger=logger), "SQLite: %s" % db_url
+  return PostgreSQLJobDatabase(db_url, logger=logger), "PostgreSQL: %s" % db_url
 
 
 def run_smoke_test(path_config_manager, ffmpeg_dir, logger):
@@ -127,7 +135,7 @@ def main():
 
   Resolves configuration from CLI flags, environment variables, and
   the ``Daemon`` config section (in that priority order). Initialises the job database
-  PostgreSQL, sets up per-config logging and concurrency locks,
+  backend, sets up per-config logging and concurrency locks,
   and then serves requests until interrupted.
   """
   parser = argparse.ArgumentParser(description="SMA-NG Daemon - HTTP webhook server for media conversion")
@@ -194,10 +202,9 @@ def main():
   # Note: PostgreSQL URL is not accepted on the CLI to prevent credentials appearing in ps output.
   db_url = os.environ.get("SMA_DAEMON_DB_URL") or _build_db_url_from_env() or path_config_manager.db_url
   if not db_url:
-    log.error("No database URL configured. Set SMA_DAEMON_DB_URL (or SMA_DAEMON_DB_HOST + SMA_DAEMON_DB_PASSWORD) or db_url in the Daemon config section")
+    log.error("No database URL configured. Set SMA_DAEMON_DB_URL (sqlite:////data/sma-ng.db for single-node Docker, or PostgreSQL for cluster mode) or db_url in the Daemon config section")
     sys.exit(1)
-  job_db = PostgreSQLJobDatabase(db_url, logger=log)
-  db_label = "PostgreSQL: %s" % db_url
+  job_db, db_label = _create_job_database(db_url, log)
 
   if job_db.is_distributed:
     from resources.daemon.db_log_handler import PostgreSQLLogHandler
