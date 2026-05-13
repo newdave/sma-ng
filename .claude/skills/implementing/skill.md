@@ -1,76 +1,29 @@
 ---
 name: implementing
-description:
-  Use when an approved implementation blueprint exists and you are about to
-  start implementation
+description: Use when an SMA-NG implementation plan exists and code changes should begin.
 ---
 
 # Implementing
 
-## Overview
-
-Execute an existing blueprint exactly as written, with verification and
-checkpoints. If the blueprint is wrong or unclear, stop and ask to change it.
-
-## When to Use
-
-- An implementation blueprint exists and is approved
-- The work needs disciplined, step-by-step execution
-
-Skip if: there is no blueprint (write one first) or the task is trivial.
-
-## Quick Reference
-
-1. Read the full blueprint.
-2. Call out blockers or questions.
-3. Track progress per task.
-4. Verify each task before moving on.
-5. Check in after a small batch.
-
-## Execution Workflow
-
-1. **Load the blueprint**
-   - Read end to end.
-   - Identify unclear steps or missing info.
-
-2. **Confirm before starting**
-   - If anything is unclear, ask and wait.
-   - Do not "fix" the blueprint silently.
-
-3. **Execute tasks in order**
-   - One task at a time.
-   - Follow steps exactly.
-   - Run the listed verification.
-   - Mark the task complete.
-
-4. **Checkpoint**
-   - After 2-3 tasks (or any risky task), summarize:
-     - What changed
-     - Verification results
-     - Open questions
-   - Wait for approval before continuing.
-
-5. **Finish**
-   - Run any final verification from the blueprint.
-   - Report completion and remaining risks.
+Execute the agreed plan with verification.
 
 ## Rules
 
-- Do not add scope or extra features
-- Do not reorder tasks unless the blueprint says so
-- Stop and ask if blocked or if verification fails
+- Follow the plan unless code evidence proves it is wrong.
+- Keep changes minimal and local to the affected transcoding, daemon, config, or integration path.
+- Preserve existing Python style and public behavior unless the task changes it.
+- Run the listed validation, or the smallest meaningful substitute.
+- Stop and report if the plan would break config compatibility, media output expectations, or daemon safety.
 
-## Delegate
+## Report
 
-- Use **implementer** agent for code changes per task
-- Use **test-writer** agent if tests are missing
-- Use **code-reviewer** agent after completion
+```markdown
+## Completed
+- [step/path]
 
-Pipeline: discovering → researching → blueprinting → **implementing** →
-code-review
+## Validation
+- [command]: [result]
 
-## Common Mistakes
-
-- Skipping verification to "save time"
-- Changing the blueprint without approval
-- Executing multiple tasks in parallel without permission
+## Deviations
+- [deviation or none]
+```

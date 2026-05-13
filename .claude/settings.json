@@ -21,6 +21,7 @@
     "venv/**",
     "**/__pycache__/**",
     "*.pyc",
-    "config/autoProcess.ini"
+    "config/autoProcess.ini",
+    "config/sma-ng.yml"
   ]
 }

@@ -1,54 +1,21 @@
 ---
 name: errors
-description: Fetch recent failed jobs and their error logs from the deployed SMA-NG daemon
+description: Fetch recent failed jobs and error logs from the deployed SMA-NG daemon
 ---
 
-# Fetch Recent Errors from Live Daemon
+# Fetch Recent Errors
 
-This command mirrors the authoritative Claude workflow in `.claude/commands/errors.md`.
-If the two files diverge, follow the Claude version and sync this Codex copy.
-
-## Usage
-
-`/errors [count|job:<id>]`
-
-- No argument: fetch the 10 most recent failed jobs
-- Numeric argument: fetch that many recent failed jobs
-- `job:<id>`: fetch only that job and its full log
+Mirror of `.claude/commands/errors.md`.
+If these diverge, follow the Claude command and sync this file.
 
 ## Steps
 
-1. Read `setup/.local.ini` and parse:
-   - Host: take the first entry in `DEPLOY_HOSTS` under `[deploy]`, strip any `user@` prefix to get the bare IP/hostname
-   - Port: `8585`
-   - API key: `api_key` under `[daemon]`
-   Construct the base URL as `http://<host>:8585`.
-
-2. Resolve `$ARGUMENTS`:
-   - Empty -> `limit=10`
-   - Integer `N` -> `limit=N`
-   - `job:<id>` -> fetch only that job
-
-3. If fetching recent failures, call:
-   - `<base_url>/jobs?status=failed&limit=<N>`
-   with header `X-API-Key: <api_key>`.
-   - If unreachable, say so and stop.
-
-4. For each failed job, fetch its error log:
-   - `<base_url>/logs/<log_name>?job_id=<id>&level=ERROR&lines=100`
-   with the same `X-API-Key` header.
-
-5. If fetching a single job, call:
-   - `<base_url>/jobs/<id>`
-   - `<base_url>/logs/<log_name>?level=INFO&lines=200`
-
-6. Present each job as:
-
-   **Job <id>** — `<path>`
-   Error: `<error field>`
-   Args: `<args field>`
-   ```
-   <error log lines>
-   ```
-
-7. Summarise the distinct failure patterns and offer to investigate or fix.
+1. Read `setup/local.yml`:
+   host is the first `deploy.hosts` label resolved through `hosts.<label>.address`;
+   API key is `daemon.api_key`;
+   port is `8585`.
+2. If `$ARGUMENTS` is a job ID, fetch `/jobs/<id>` and its log with `level=INFO&lines=200`.
+3. Otherwise fetch `/jobs?status=failed&limit=10`, then each job log with
+   `/logs/<log_name>?job_id=<id>&level=ERROR&lines=100`.
+4. Use `X-API-Key: <api_key>` for daemon requests.
+5. Present job ID, path, error field, args field, relevant log lines, and distinct failure patterns.

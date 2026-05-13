@@ -19,6 +19,6 @@ Analyze changes and generate a Conventional Commits message.
 
 Return only the message:
 
-```
+```text
 feat: add google oauth support
 ```

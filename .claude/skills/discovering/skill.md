@@ -1,83 +1,24 @@
 ---
 name: discovering
-description:
-  Use when idea is vague, multiple interpretations exist, scope is undefined, or
-  stakeholders need alignment before technical work begins
+description: Use when the SMA-NG request has unclear goals, scope, users, or success criteria.
 ---
 
-# Discovering Skill
+# Discovering
 
-Use when the what/why is unclear; output is a direction, not a solution.
+Clarify what outcome is needed before choosing an implementation path.
 
-## When to Use vs Researching
+## Use When
 
-```
-What's unclear?
-├── What/Why (goal, scope, requirements) → Discovering
-└── How (technical approach, implementation) → Researching
-```
+- The request could mean multiple things.
+- Operator impact, integration scope, or config behavior is unclear.
+- The task might affect transcoding output, daemon behavior, or deployment workflow.
 
-## When to Use
+Skip for obvious bug fixes or clearly scoped code changes.
 
-- Idea is vague or underspecified
-- Multiple interpretations exist
-- Need to align on scope and goals
-- Stakeholders have different expectations
+## Workflow
 
-Skip if: request is clear and decision-ready (use **researching** skill
-instead).
-
-## Quick Reference
-
-| Phase      | Focus                          | Output          |
-| ---------- | ------------------------------ | --------------- |
-| Context    | Code, docs, recent changes     | Current state   |
-| Intent     | Purpose, constraints, criteria | Requirements    |
-| Directions | 2-3 approaches + trade-offs    | Recommendation  |
-| Confirm    | Sign-off                       | Discovery brief |
-
-## Core Rules
-
-- Gather project context first
-- One question at a time
-- Prefer multiple choice
-- High-level directions, not technical solutions
-
-## Flow
-
-1. **Context** — Check code, docs, recent changes
-
-2. **Intent** — Purpose, constraints, success criteria, scope
-
-3. **Directions** — 2-3 high-level approaches with trade-offs; recommend one
-
-4. **Confirm & Output** — Discovery brief:
-   - Goal (1 sentence)
-   - Non-goals
-   - Direction/approach
-   - Open questions (1-3 bullets)
-
-Get sign-off before proceeding.
-
-## Common Mistakes
-
-| Mistake                           | Fix                                       |
-| --------------------------------- | ----------------------------------------- |
-| Jumping to technical solutions    | Stay high-level; how comes later          |
-| Asking multiple questions at once | One question, wait for answer             |
-| Skipping context gathering        | Always check existing code/docs first     |
-| No clear recommendation           | Always pick one direction and explain why |
-| Proceeding without sign-off       | Get explicit confirmation                 |
-
-## Delegate
-
-- Use **explorer** subagent for a breadth-first repo map and evidence from
-  code/docs/recent history (Context phase)
-
-## After Discovery
-
-- Technical uncertainty? → Use **researching** skill
-- Direction clear? → Use **blueprinting** skill
-
-Pipeline: **discovering** → researching → blueprinting → implementing →
-code-review
+1. Inspect relevant repo context with `explorer`.
+2. State the current behavior and the unclear decision.
+3. Ask one focused question, or proceed with explicit assumptions if the risk is low.
+4. Produce a short discovery brief:
+   goal, non-goals, affected paths, success criteria, and assumptions.

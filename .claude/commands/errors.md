@@ -14,18 +14,22 @@ Fetch recent failed jobs and their error logs from the deployed SMA-NG daemon.
    - If unreachable, say so and stop.
 
 3. For each failed job (most recent first), fetch its error log:
-   `<base_url>/logs/<log_name>?job_id=<id>&level=ERROR&lines=100`
+   `<base_url>/logs/<log_name>?job_id=<job-id>&level=ERROR&lines=100`
    with the same `X-API-Key` header.
 
 4. Present each job as:
 
-   **Job <id>** — `<path>`
+   **Job `<id>`** — `<path>`
+
    Error: `<error field>`
+
    Args: `<args field>`
-   ```
+
+   ```text
    <error log lines>
    ```
 
 5. Summarise the distinct failure patterns and offer to investigate or fix.
 
-If $ARGUMENTS is a job ID, fetch only that job (`<base_url>/jobs/<id>`) and its full log (`level=INFO`, no `job_id` filter needed if log_name is known).
+If $ARGUMENTS is a job ID, fetch only that job (`<base_url>/jobs/<id>`) and its full log.
+Use `level=INFO`; no `job_id` filter is needed if `log_name` is known.

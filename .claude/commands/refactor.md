@@ -6,4 +6,6 @@ description:
 disable-model-invocation: true
 ---
 
+# Refactor
+
 Invoke the refactoring skill and follow it.
