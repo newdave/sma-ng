@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/newdave/sma-ng/compare/sma-ng-v2.1.2...sma-ng-v2.2.0) (2026-05-13)
+
+
+### Features
+
+* add production redeploy task ([61ea256](https://github.com/newdave/sma-ng/commit/61ea2568f7376ce12c79a88c98db3de2c9731994))
+
 ## [2.1.2](https://github.com/newdave/sma-ng/compare/sma-ng-v2.1.1...sma-ng-v2.1.2) (2026-05-10)
 
 
