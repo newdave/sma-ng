@@ -61,7 +61,7 @@ curl https://mise.run | sh
 | --- | --- |
 | `mise run build:docker` | Build the Docker image locally for the native platform |
 | `mise run build:push` | Build and push a Docker image — requires `IMAGE=`, override platforms with `PLATFORM=` |
-| `mise run docker:run` | Run the locally-built image — requires `SMA_DAEMON_DB_URL` |
+| `mise run docker:run` | Run the locally-built image with SQLite by default |
 | `mise run build:shell` | Open an interactive shell inside the locally-built image |
 | `mise run build:smoke` | Smoke-test the image: verify Python imports and FFmpeg binary |
 
@@ -132,7 +132,7 @@ No containers are left running afterwards.
 mise run setup:docker:target
 ```
 
-This creates `/opt/sma/config`, `/opt/sma/logs`, `/opt/sma/cache`, and `/transcodes/sma`, then seeds
+This creates `/opt/sma/config`, `/opt/sma/logs`, `/opt/sma/cache`, `/opt/sma/data`, and `/transcodes/sma`, then seeds
 `/opt/sma/config/sma-ng.yml` and `/opt/sma/config/daemon.env` if they are missing. It also installs
 `/opt/sma/sma-ng-docker-aliases.sh`; source that file in Bash to get aliases such as `sma-manual`,
 `sma-convert`, `sma-preview`, `sma-codecs`, and `sma-logs`.
@@ -176,15 +176,16 @@ You can run `python manual.py -cl` or inspect config files without starting the 
 `docker_profile` (in `setup/local.yml` `deploy:` or per-host) selects which
 compose profile is brought up by `cluster:start` / `deploy:docker`. Only one
 node should run a `*-pg` profile — that's the host that carries the bundled
-PostgreSQL the rest of the cluster connects to.
+PostgreSQL the rest of the cluster connects to. Non-`*-pg` profiles default
+to a local SQLite database at `/opt/sma/data/sma-ng.db` for single-node use.
 
 | Profile | GPU stack | Bundled Postgres? | Use on |
 | --- | --- | --- | --- |
-| `software` | none (CPU only) | no — needs `db_url` | a node without GPU + external DB |
+| `software` | none (CPU only) | no | single-node CPU deployment with SQLite |
 | `software-pg` | none (CPU only) | yes (`sma-pgsql` service) | single-node deployment, no GPU |
-| `intel` | Intel QSV / VAAPI | no | a slave with Intel GPU |
+| `intel` | Intel QSV / VAAPI | no | single-node Intel GPU deployment with SQLite |
 | `intel-pg` | Intel QSV / VAAPI | yes | the master in an Intel-GPU cluster |
-| `nvidia` | NVIDIA NVENC | no | a slave with NVIDIA GPU |
+| `nvidia` | NVIDIA NVENC | no | single-node NVIDIA GPU deployment with SQLite |
 | `nvidia-pg` | NVIDIA NVENC | yes | the master in an NVIDIA-GPU cluster |
 
 ### Configuration
@@ -419,7 +420,10 @@ docker run --rm -p 8585:8585 \
 # Build locally
 make docker-build
 
-# Run locally-built image
+# Run locally-built image with SQLite at ./data/sma-ng.db
+make docker-run
+
+# Or point at PostgreSQL explicitly
 SMA_DAEMON_DB_URL=postgresql://user:pass@host/db make docker-run
 ```
 
@@ -431,15 +435,15 @@ The bundled PostgreSQL compose service publishes `5432` on the Docker host by de
 
 **Environment variables for Docker:**
 
-| Variable                | Default   | Description                             |
-| ----------------------- | --------- | --------------------------------------- |
-| `SMA_DAEMON_HOST`       | `0.0.0.0` | Bind host                               |
-| `SMA_DAEMON_PORT`       | `8585`    | Port                                    |
-| `SMA_DAEMON_WORKERS`    | `2`       | Worker count                            |
-| `SMA_DAEMON_API_KEY`    |           | API key                                 |
-| `SMA_DAEMON_DB_URL`     |           | PostgreSQL connection URL (required)    |
-| `SMA_DAEMON_FFMPEG_DIR` |           | Directory containing `ffmpeg`/`ffprobe` |
-| `SMA_CONFIG`            |           | Override `sma-ng.yml` path              |
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SMA_DAEMON_HOST` | `0.0.0.0` | Bind host |
+| `SMA_DAEMON_PORT` | `8585` | Port |
+| `SMA_DAEMON_WORKERS` | `2` | Worker count |
+| `SMA_DAEMON_API_KEY` | | API key |
+| `SMA_DAEMON_DB_URL` | `sqlite:////data/sma-ng.db` | SQLite or PostgreSQL connection URL |
+| `SMA_DAEMON_FFMPEG_DIR` | | Directory containing `ffmpeg`/`ffprobe` |
+| `SMA_CONFIG` | | Override `sma-ng.yml` path |
 
 See also:
 

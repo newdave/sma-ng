@@ -352,8 +352,15 @@ class TestDockerTargetInstaller:
     assert (install_dir / "config" / "daemon.env").is_file()
     assert (install_dir / "logs").is_dir()
     assert (install_dir / "cache").is_dir()
+    assert (install_dir / "data").is_dir()
     assert (transcode_dir / "sma").is_dir()
     assert snippet_path.read_text() == _read("setup/sma-ng-docker-aliases.sh")
+
+  def test_remote_install_dirs_include_sqlite_data_dir(self):
+    lib = _read(".mise/shared/deploy/lib.sh")
+    setup = _read(".mise/tasks/deploy/setup")
+    assert "${install_dir}/data" in lib
+    assert '"${install_dir}/data"' in setup
 
   def test_docker_alias_snippet_wraps_manual_py(self):
     bash_script = textwrap.dedent(

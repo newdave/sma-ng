@@ -11,7 +11,9 @@ The repository ships a compose file at [`docker/docker-compose.yml`](../docker/d
 - `nvidia`
 - `nvidia-pg`
 
-The `-pg` profiles include a bundled PostgreSQL container. The non-`-pg` profiles are for external PostgreSQL or single-node/no-cluster setups where you will supply `SMA_DAEMON_DB_URL` yourself.
+The non-`-pg` profiles are single-node profiles and default to SQLite at `/data/sma-ng.db`, persisted on the
+Docker host under `/opt/sma/data/sma-ng.db`. The `-pg` profiles include a bundled PostgreSQL container for
+clustered deployments or operators who explicitly want PostgreSQL.
 
 With the current compose layout, use the two env files for different jobs:
 
@@ -45,6 +47,7 @@ By default this creates the persistent directories and seed files the compose fi
 /opt/sma/config/daemon.env
 /opt/sma/logs/
 /opt/sma/cache/
+/opt/sma/data/
 /transcodes/sma/
 ```
 
@@ -52,6 +55,7 @@ The default compose mounts are:
 
 - `/opt/sma/config` → container `/config`
 - `/opt/sma/logs` → container `/logs`
+- `/opt/sma/data` → container `/data`
 - `/mnt` → container `/mnt`
 - `/mnt/unionfs/downloads` → container `/downloads`
 - `/transcodes` → container `/transcodes`
@@ -101,8 +105,9 @@ Notes:
 
 - `/config/...` paths are inside-container paths
 - `/mnt/...` paths must match the container view of your mounted media
-- for `*-pg` profiles, `db_url` can stay `null` because the compose environment provides it
-- for non-`-pg` profiles, set `db_url` or `SMA_DAEMON_DB_URL` yourself if you want PostgreSQL-backed clustering
+- for non-`-pg` profiles, `db_url` can stay `null` because compose defaults to `sqlite:////data/sma-ng.db`
+- for `*-pg` profiles, `db_url` can stay `null` because the compose environment provides PostgreSQL
+- set `SMA_DAEMON_DB_URL` yourself only when overriding the default SQLite path or using external PostgreSQL
 
 ## 5. Create a Compose `.env` File
 
@@ -155,6 +160,20 @@ Paths passed to these aliases must be container-visible paths, such as `/mnt/...
 
 ## 7. Edit `daemon.env`
 
+For single-node non-`-pg` profiles, no database setting is required. The compose file defaults to:
+
+```bash
+SMA_DAEMON_DB_URL=sqlite:////data/sma-ng.db
+```
+
+The SQLite file is stored on the Docker host at `/opt/sma/data/sma-ng.db`.
+Set `SMA_NODE_NAME` and `SMA_DAEMON_API_KEY` if you want stable identity and API protection:
+
+```bash
+SMA_NODE_NAME=media-node-a
+SMA_DAEMON_API_KEY=change-me-too
+```
+
 For bundled PostgreSQL profiles (`software-pg`, `intel-pg`, `nvidia-pg`), set matching `POSTGRES_*` values plus the daemon database URL:
 
 ```bash
@@ -168,7 +187,7 @@ SMA_DAEMON_API_KEY=change-me-too
 
 Because the bundled PostgreSQL service publishes `5432` on the Docker host by default, external tools can usually connect with a URL like `postgresql://sma:change-me-now@<docker-host-ip>:5432/sma` while compose-managed SMA containers continue using the internal `sma-pgsql` hostname.
 
-For non-`-pg` profiles, point the daemon at your external database instead:
+For non-`-pg` profiles that should use external PostgreSQL instead of SQLite, point the daemon at that database:
 
 ```bash
 SMA_NODE_NAME=media-node-a

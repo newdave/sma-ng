@@ -6,6 +6,8 @@ daemon:
   port: 8585
   workers: 4
   api-key:
+  # Single-node Docker defaults to sqlite:////data/sma-ng.db via compose.
+  # Use postgresql://... here or SMA_DAEMON_DB_URL for clustered deployments.
   db-url:
   ffmpeg-dir:
   node-id:

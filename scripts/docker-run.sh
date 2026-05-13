@@ -4,11 +4,7 @@ set -euo pipefail
 TAG="${TAG:-sma-ng:local}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [ -z "${SMA_DAEMON_DB_URL:-}" ]; then
-  echo "Error: SMA_DAEMON_DB_URL is required (no SQLite fallback)" >&2
-  echo "  Example: SMA_DAEMON_DB_URL=postgresql://sma:pass@host:5432/sma make docker-run" >&2
-  exit 1
-fi
+SMA_DAEMON_DB_URL="${SMA_DAEMON_DB_URL:-sqlite:////data/sma-ng.db}"
 
 # Detect GPU and build appropriate docker flags.
 # Override by setting SMA_GPU=nvenc|qsv|vaapi|software before calling this script.
@@ -24,7 +20,7 @@ case "$GPU" in
 esac
 echo "GPU: ${GPU}${GPU_FLAGS:+ ($GPU_FLAGS)}"
 
-mkdir -p config logs
+mkdir -p config logs data
 # shellcheck disable=SC2086
 docker run --rm \
   -p 8585:8585 \
@@ -32,5 +28,6 @@ docker run --rm \
   -e SMA_GPU="${GPU}" \
   -v "$(pwd)/config:/config" \
   -v "$(pwd)/logs:/logs" \
+  -v "$(pwd)/data:/data" \
   ${GPU_FLAGS} \
   "$TAG"

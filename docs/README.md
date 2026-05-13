@@ -21,7 +21,7 @@ Automated media conversion, tagging, and integration pipeline. Converts media fi
   - [Path-Based Configuration](#path-based-configuration)
   - [Per-Config Logging](#per-config-logging)
   - [Scheduled Directory Scanning](#scheduled-directory-scanning)
-  - [Job Persistence (PostgreSQL)](#job-persistence-postgresql)
+  - [Job Persistence (SQLite or PostgreSQL)](#job-persistence-sqlite-or-postgresql)
   - [Graceful Shutdown](#graceful-shutdown)
 - [Media Manager Integration](#media-manager-integration)
 - [Download Client Integration](#download-client-integration)
@@ -620,8 +620,8 @@ Matching is longest-prefix-first. `/mnt/media/Movies/4K/film.mkv` matches `Movie
 
 Each config gets a separate log file in `logs/`. The log filename is derived from the config file stem (filename without extension):
 
-| Config                             | Log File                         |
-| ---------------------------------- | -------------------------------- |
+| Config | Log File |
+| --- | --- |
 | `config/sma-ng.yml` | `logs/sma-ng.log` |
 
 Log rotation: 10MB max, 5 backups.
@@ -686,21 +686,26 @@ curl -X POST http://localhost:8585/scan/record \
   -d '{"paths": ["/mnt/media/film1.mkv"]}'
 ```
 
-### Job Persistence (PostgreSQL)
+### Job Persistence (SQLite or PostgreSQL)
 
-The daemon uses PostgreSQL exclusively. Jobs, scanned-files state, cluster nodes, and per-config logs all live in the database, so any number of daemons can share the same backend and split work across the cluster. Single-node deployments still need PostgreSQL — there is no embedded SQLite fallback.
+The daemon supports two database modes:
+
+- SQLite for single-node deployments. Docker non-`-pg` profiles default to `sqlite:////data/sma-ng.db`, which is
+  persisted on the host at `/opt/sma/data/sma-ng.db`.
+- PostgreSQL for clustered deployments, shared job queues, cluster logs, metrics, and cluster administration.
 
 Configure the connection via either:
 
 ```yaml
 # config/sma-ng.yml
 daemon:
-  db_url: postgresql://sma:secret@db.example.com:5432/sma
+  db_url: sqlite:////data/sma-ng.db
 ```
 
 Or via the environment (preferred when running under Docker, since secrets stay out of `ps` output):
 
 ```bash
+SMA_DAEMON_DB_URL=sqlite:////data/sma-ng.db python daemon.py
 SMA_DAEMON_DB_URL=postgresql://sma:secret@db.example.com:5432/sma python daemon.py
 # or split into parts and let the daemon assemble the URL
 SMA_DAEMON_DB_HOST=db.example.com
@@ -1274,18 +1279,18 @@ Sends a graceful shutdown webhook to each host, waits for the daemon to drain, t
 
 #### Summary of deploy tasks
 
-| Task             | Description                                                                |
-| ---------------- | -------------------------------------------------------------------------- |
-| `deploy:check`   | Verify `setup/local.yml` exists and `deploy.hosts` is set                  |
-| `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, Docker install       |
-| `deploy:mise`    | Sync the local `.mise/` deploy control plane to each remote `deploy_dir`   |
-| `deploy:redeploy`| Build/push current code, optionally roll config, then recreate SMA Docker containers |
-| `deploy:sync`    | Sync code and install deps on all hosts                     |
-| `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials & overlays |
+| Task | Description |
+| --- | --- |
+| `deploy:check` | Verify `setup/local.yml` exists and `deploy.hosts` is set |
+| `deploy:setup` | First-time host prep: SSH key, apt deps, deploy dir, Docker install |
+| `deploy:mise` | Sync the local `.mise/` deploy control plane to each remote `deploy_dir` |
+| `deploy:redeploy` | Build/push current code, optionally roll config, then recreate SMA Docker containers |
+| `deploy:sync` | Sync code and install deps on all hosts |
+| `config:roll` | Roll configs: create missing, merge new keys, stamp credentials and overlays |
 | `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container |
-| `deploy:docker`  | Rsync the local code to Docker hosts, pull the latest image, recreate SMA  |
-| `pg:restart`     | Restart bundled PostgreSQL on hosts whose `docker_profile` ends in `-pg`   |
-| `pg:recreate`    | Stop bundled PostgreSQL, remove its Docker volume, and recreate            |
+| `deploy:docker` | Rsync the local code to Docker hosts, pull the latest image, recreate SMA |
+| `pg:restart` | Restart bundled PostgreSQL on hosts whose `docker_profile` ends in `-pg` |
+| `pg:recreate` | Stop bundled PostgreSQL, remove its Docker volume, and recreate |
 
 Additional Docker lifecycle helper: `deploy:dockerstop` (alias: `deploy:docker:stop`) stops
 services for selected hosts using each host's configured `DOCKER_PROFILE`.
@@ -1304,10 +1309,10 @@ journalctl -u sma-daemon -f
 
 The daemon also writes per-config rotating log files in `logs/`:
 
-| Config                       | Log File                       |
-| ---------------------------- | ------------------------------ |
-| `config/sma-ng.yml`     | `logs/sma-ng.log`        |
-| `config/sma-ng-tv.yml`  | `logs/sma-ng-tv.log`     |
+| Config | Log File |
+| --- | --- |
+| `config/sma-ng.yml` | `logs/sma-ng.log` |
+| `config/sma-ng-tv.yml` | `logs/sma-ng-tv.log` |
 
 ### Common Issues
 
@@ -1351,24 +1356,24 @@ The daemon also writes per-config rotating log files in `logs/`:
 
 ### Environment Variables
 
-| Variable                | Description                                                                 |
-| ----------------------- | --------------------------------------------------------------------------- |
-| `SMA_CONFIG`            | Override path to `sma-ng.yml`                                         |
-| `SMA_DAEMON_API_KEY`    | Daemon API key                                                              |
-| `SMA_DAEMON_DB_URL`     | PostgreSQL connection URL for distributed mode                              |
-| `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` (prepended to PATH for conversions) |
-| `SMA_DAEMON_HOST`       | Daemon bind host (Docker default: empty = 0.0.0.0)                          |
-| `SMA_DAEMON_PORT`       | Daemon port (Docker default: 8585)                                          |
-| `SMA_DAEMON_WORKERS`    | Number of concurrent workers (Docker default: 4)                            |
-| `SMA_DAEMON_CONFIG`     | Path to daemon config, normally `config/sma-ng.yml`                         |
-| `SMA_DAEMON_API_KEY`    | API key (overrides `daemon.api_key` in `sma-ng.yml`)                        |
-| `SMA_DAEMON_DB_HOST`    | PostgreSQL host (used when `SMA_DAEMON_DB_URL` is not set)                  |
-| `SMA_DAEMON_DB_USER`    | PostgreSQL user (used with `SMA_DAEMON_DB_HOST`)                            |
-| `SMA_DAEMON_DB_PASSWORD`| PostgreSQL password (used with `SMA_DAEMON_DB_HOST`)                        |
-| `SMA_DAEMON_DB_NAME`    | PostgreSQL database name (default: `sma`)                                   |
-| `SMA_DAEMON_DB_PORT`    | PostgreSQL port (default: `5432`)                                           |
-| `SMA_NODE_NAME`         | Cluster node identity (overrides `socket.gethostname()`)                    |
-| `SMA_DAEMON_LOGS_DIR`   | Directory for per-config log files                                          |
+| Variable | Description |
+| --- | --- |
+| `SMA_CONFIG` | Override path to `sma-ng.yml` |
+| `SMA_DAEMON_API_KEY` | Daemon API key |
+| `SMA_DAEMON_DB_URL` | SQLite or PostgreSQL connection URL |
+| `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` |
+| `SMA_DAEMON_HOST` | Daemon bind host (Docker default: empty = 0.0.0.0) |
+| `SMA_DAEMON_PORT` | Daemon port (Docker default: 8585) |
+| `SMA_DAEMON_WORKERS` | Number of concurrent workers (Docker default: 4) |
+| `SMA_DAEMON_CONFIG` | Path to daemon config, normally `config/sma-ng.yml` |
+| `SMA_DAEMON_API_KEY` | API key (overrides `daemon.api_key` in `sma-ng.yml`) |
+| `SMA_DAEMON_DB_HOST` | PostgreSQL host (used when `SMA_DAEMON_DB_URL` is not set) |
+| `SMA_DAEMON_DB_USER` | PostgreSQL user (used with `SMA_DAEMON_DB_HOST`) |
+| `SMA_DAEMON_DB_PASSWORD` | PostgreSQL password (used with `SMA_DAEMON_DB_HOST`) |
+| `SMA_DAEMON_DB_NAME` | PostgreSQL database name (default: `sma`) |
+| `SMA_DAEMON_DB_PORT` | PostgreSQL port (default: `5432`) |
+| `SMA_NODE_NAME` | Cluster node identity (overrides `socket.gethostname()`) |
+| `SMA_DAEMON_LOGS_DIR` | Directory for per-config log files |
 
 ---
 

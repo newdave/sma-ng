@@ -52,7 +52,8 @@ deploy:
   deploy_dir: /opt/sma
 
   # Host-side Docker bind-mount root. setup:docker:target and deploy helpers
-  # create config/, logs/, and cache/ below this path.
+  # create config/, logs/, cache/, and data/ below this path. Non-PostgreSQL
+  # Docker profiles persist their default SQLite DB in data/sma-ng.db.
   # sma_install_dir: /opt/sma
 
   # SSH port (can be overridden per-host).

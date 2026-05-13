@@ -179,7 +179,7 @@ for host in $DEPLOY_HOSTS; do
     chown_remote_path_to_ssh_user "$host" "$dir"
 
     install_dir=$($cfg sma_install_dir "/opt/sma")
-    echo "==> [$host] seeding ${install_dir}/{config,logs} (owner: $remote_user)"
+    echo "==> [$host] seeding ${install_dir}/{config,logs,data} (owner: $remote_user)"
     # shellcheck disable=SC2029,SC2087  # remote_user/install_dir expand client-side; heredoc stays literal until the remote shell runs it.
     ssh "${SSH_OPTS[@]}" "$ssh_target" 'bash -s' "$dir" "$remote_user" "$install_dir" <<'REMOTE'
       set -euo pipefail
@@ -188,14 +188,14 @@ for host in $DEPLOY_HOSTS; do
       install_dir="$3"
       cd "$dir"
 
-      sudo mkdir -p "${install_dir}/config" "${install_dir}/logs"
-      sudo chown -R "$service_user": "${install_dir}/config" "${install_dir}/logs"
+      sudo mkdir -p "${install_dir}/config" "${install_dir}/logs" "${install_dir}/data"
+      sudo chown -R "$service_user": "${install_dir}/config" "${install_dir}/logs" "${install_dir}/data"
 
       if [ ! -f "${install_dir}/config/daemon.env" ]; then
         sudo install -o "$service_user" -m 640 setup/daemon.env.sample "${install_dir}/config/daemon.env"
       fi
 REMOTE
-    # The seed step above already chowns ${install_dir}/{config,logs} to
+    # The seed step above already chowns ${install_dir}/{config,logs,data} to
     # service_user, but the Docker compose host (and any other root-owned
     # paths under the install_dir umbrella) may still need correcting.
     chown_remote_path_to_ssh_user "$host" "$install_dir"

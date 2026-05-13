@@ -225,6 +225,7 @@ class TestDockerfileRuntime:
     volumes = _instructions_of("VOLUME", dockerfile)
     assert any("/config" in v for v in volumes)
     assert any("/logs" in v for v in volumes)
+    assert any("/data" in v for v in volumes)
 
   def test_healthcheck_present(self, dockerfile):
     assert any(i == "HEALTHCHECK" for i, _ in dockerfile)
@@ -305,6 +306,10 @@ class TestComposeBaseService:
   def test_logs_volume_mounted(self, compose):
     volumes = compose["services"]["sma-software"]["volumes"]
     assert any("/logs" in str(v) for v in volumes)
+
+  def test_data_volume_mounted_for_sqlite(self, compose):
+    volumes = compose["services"]["sma-software"]["volumes"]
+    assert "/opt/sma/data:/data" in volumes
 
   def test_media_volume_mounted(self, compose):
     volumes = compose["services"]["sma-software"]["volumes"]
@@ -464,18 +469,14 @@ class TestComposePostgres:
     for svc in ("sma-software", "sma-intel", "sma-nvidia"):
       assert "depends_on" not in compose["services"][svc]
 
-  def test_non_pg_profiles_source_db_url_from_env_file(self, compose):
-    # Non-pg profiles get SMA_DAEMON_DB_URL from /opt/sma/config/daemon.env
-    # (stamped by mise run config:roll). The compose file deliberately does
-    # not set it under `environment:` so a missing env file fails clearly at
-    # daemon startup rather than at compose-parse time, and so docker/.env
-    # cannot silently override the per-host stamped value.
+  def test_non_pg_profiles_default_to_sqlite(self, compose):
     for svc in ("sma-software", "sma-intel", "sma-nvidia"):
       svc_def = compose["services"][svc]
       env = svc_def.get("environment", {}) or {}
-      assert "SMA_DAEMON_DB_URL" not in env
+      assert env["SMA_DAEMON_DB_URL"] == "${SMA_DAEMON_DB_URL:-sqlite:////data/sma-ng.db}"
       env_files = svc_def.get("env_file", [])
       assert any((isinstance(ef, dict) and ef.get("path") == "/opt/sma/config/daemon.env") or ef == "/opt/sma/config/daemon.env" for ef in env_files)
+      assert "/opt/sma/data:/data" in svc_def["volumes"]
 
   def test_pg_profiles_default_db_url_to_bundled_postgres(self, compose):
     for svc in ("sma-software-pg", "sma-intel-pg", "sma-nvidia-pg"):
