@@ -21,10 +21,10 @@ permissions:
 jobs:
   # ── Step 1: Run release-please on every push to main ────────────────────────
   # Creates or updates a "Release PR" that bumps pyproject.toml and the
-  # release-please manifest. Multiple commits are batched into a single release
-  # PR using group-pull-request-title-pattern. When the Release PR is manually
-  # merged, release-please creates the GitHub Release and the v* tag, then sets
-  # release_created=true so the publish and docker jobs below run.
+  # release-please manifest. Grouping via group-pull-request-title-pattern
+  # batches commits by release type. When the Release PR is merged (automated
+  # for patches, manual for minor/major), release-please creates the GitHub
+  # Release and v* tag, then sets release_created=true for publish jobs.
   release-please:
     name: Release Please
     runs-on: ubuntu-latest
@@ -32,6 +32,10 @@ jobs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
       pr: ${{ steps.rp.outputs.pr }}
+      version: ${{ steps.rp.outputs.version }}
+      patch: ${{ steps.detect-patch.outputs.match }}
+      minor: ${{ steps.detect-minor.outputs.match }}
+      major: ${{ steps.detect-major.outputs.match }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: rp
@@ -39,10 +43,85 @@ jobs:
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      # Detect release type by parsing version string and PR title
+      # Patch: only Z changes (fix: commits only)
+      # Minor: Y changes (feat: commits)
+      # Major: X changes (BREAKING CHANGE commits)
+      - name: Detect patch release (only Z changes)
+        id: detect-patch
+        if: steps.rp.outputs.version
+        run: |
+          version="${{ steps.rp.outputs.version }}"
+          if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            patch="${BASH_REMATCH[3]}"
+            if (( patch > 0 )); then
+              echo "match=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "match=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "match=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect minor release (Y changes)
+        id: detect-minor
+        if: steps.rp.outputs.version && steps.rp.outputs.pr
+        run: |
+          pr_title="${{ fromJSON(steps.rp.outputs.pr).title }}"
+          if [[ "$pr_title" == *"feat"* ]] && [[ "$pr_title" != *"BREAKING"* ]]; then
+            echo "match=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "match=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect major release (X changes)
+        id: detect-major
+        if: steps.rp.outputs.version && steps.rp.outputs.pr
+        run: |
+          pr_title="${{ fromJSON(steps.rp.outputs.pr).title }}"
+          if [[ "$pr_title" == *"BREAKING"* ]]; then
+            echo "match=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "match=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Step 1b: Auto-merge patch releases (x.y.Z) ──────────────────────────────
+  # Patch releases auto-merge immediately after checks pass.
+  patch-auto-merge:
+    name: Auto-merge patch release (x.y.Z)
+    needs: release-please
+    if: needs.release-please.outputs.pr != '' && needs.release-please.outputs.patch == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge (squash)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ fromJSON(needs.release-please.outputs.pr).number }}
+        run: gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --auto
+
+  # ── Step 1c: Label and notify minor releases (x.Y.z) ──────────────────────────
+  # Minor releases require manual approval—label PR and post notification.
+  minor-approval-gate:
+    name: Gate minor release (x.Y.z) for approval
+    needs: release-please
+    if: needs.release-please.outputs.pr != '' && needs.release-please.outputs.minor == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add label and request approval
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ fromJSON(needs.release-please.outputs.pr).number }}
+        run: |
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "type: minor-release"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body \
+            "🟡 **Minor release (x.Y.z) detected.** This requires manual approval before merge. Review the changelog and approve when ready."
+
+  # ── Step 1d: Major releases (X.y.z) require manual workflow_dispatch ──────────
+  # No automatic action for major releases; they must be triggered explicitly.
+
   # ── Step 2a: Build & attach dist artifacts to the GitHub Release ─────────────
   # Runs only when release-please actually created a release (when the Release
-  # PR was manually merged). The version in pyproject.toml is the single source
-  # of truth — release-please has already bumped it before this job runs.
+  # PR was merged). The version in pyproject.toml is the single source of truth.
   publish:
     name: Build & publish release artifacts
     needs: release-please
