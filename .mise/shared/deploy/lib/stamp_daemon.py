@@ -240,6 +240,7 @@ if os.path.exists(env_path):
     "SMA_NODE_NAME": node_name,
     "SMA_DAEMON_API_KEY": api_key,
     "SMA_DAEMON_DB_URL": db_url,
+    "SMA_DB_URL": db_url,
     "SMA_DAEMON_DB_USER": db_user,
     "SMA_DAEMON_DB_PASSWORD": db_pw,
     "SMA_DAEMON_DB_NAME": db_name,

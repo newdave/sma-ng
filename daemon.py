@@ -70,6 +70,14 @@ def _build_db_url_from_env():
   return "postgresql://%s@%s:%s/%s" % (user, host, port, dbname)
 
 
+def _db_url_from_env_aliases():
+  """Return db URL from supported direct env vars.
+
+  Preferred order keeps backward compatibility while accepting SMA_DB_URL.
+  """
+  return os.environ.get("SMA_DAEMON_DB_URL") or os.environ.get("SMA_DB_URL")
+
+
 def _create_job_database(db_url, logger):
   """Create the configured job database backend."""
   if db_url.startswith("sqlite:"):
@@ -200,9 +208,11 @@ def main():
 
   # Determine database (priority: env var > component env vars > config file)
   # Note: PostgreSQL URL is not accepted on the CLI to prevent credentials appearing in ps output.
-  db_url = os.environ.get("SMA_DAEMON_DB_URL") or _build_db_url_from_env() or path_config_manager.db_url
+  db_url = _db_url_from_env_aliases() or _build_db_url_from_env() or path_config_manager.db_url
   if not db_url:
-    log.error("No database URL configured. Set SMA_DAEMON_DB_URL (sqlite:////data/sma-ng.db for single-node Docker, or PostgreSQL for cluster mode) or db_url in the Daemon config section")
+    log.error(
+      "No database URL configured. Set SMA_DAEMON_DB_URL or SMA_DB_URL (sqlite:////data/sma-ng.db for single-node Docker, or PostgreSQL for cluster mode) or db_url in the Daemon config section"
+    )
     sys.exit(1)
   job_db, db_label = _create_job_database(db_url, log)
 

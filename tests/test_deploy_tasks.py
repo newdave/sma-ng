@@ -645,6 +645,7 @@ class TestDeployMiseTask:
     assert 'sma_image_tag="${SMA_IMAGE_TAG:-$($cfg image_tag "")}"' in lib
     assert '_append_env SMA_IMAGE              "$sma_image"' in lib
     assert '_append_env SMA_IMAGE_TAG          "$sma_image_tag"' in lib
+    assert '_append_env SMA_DB_URL             "$sma_db_url"' in lib
     assert "image: ${SMA_IMAGE:-ghcr.io/newdave/sma-ng}:${SMA_IMAGE_TAG:-latest}" in compose
 
   def test_build_push_platform_is_overridable(self):

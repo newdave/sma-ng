@@ -1,55 +1,13 @@
 services:
 
   # ────────────────────────────────────────────────────────────────────
-  # PostgreSQL database — only started by the *-pg profiles.
-  #
-  # Credentials resolved from SMA_DAEMON_DB_* first, then POSTGRES_* fallbacks:
-  #   SMA_DAEMON_DB_PASSWORD=<required>  (or POSTGRES_PASSWORD)
-  #   SMA_DAEMON_DB_USER=sma             (or POSTGRES_USER)
-  #   SMA_DAEMON_DB_NAME=sma             (or POSTGRES_DB)
-  #
-  # Profiles that include this service:
-  #   software-pg   intel-pg   nvidia-pg
-  # ────────────────────────────────────────────────────────────────────
-  sma-pgsql:
-    image: postgres:16-alpine
-    container_name: sma-pgsql
-    profiles: [software-pg, intel-pg, nvidia-pg]
-    restart: unless-stopped
-    # Workaround for host AppArmor docker-default profile denying AF_UNIX
-    # socket creation when dockerd runs nested inside an LXC. Affects pgsql
-    # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
-    # users in the sma daemon. Safe on non-LXC hosts.
-    security_opt:
-      - apparmor=unconfined
-    ports:
-      - "${PGSQL_BIND_IP:-0.0.0.0}:${PGSQL_PORT:-5432}:5432"
-    networks:
-      - sma-net
-    env_file:
-      - path: /opt/sma/config/daemon.env
-        required: true
-    environment:
-      POSTGRES_USER: "${POSTGRES_USER:-sma}"
-      POSTGRES_DB: "${POSTGRES_DB:-sma}"
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in /opt/sma/config/daemon.env or the environment}"
-    volumes:
-      - sma-pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-sma} -d $${POSTGRES_DB:-sma}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  # ────────────────────────────────────────────────────────────────────
   # Encoder/profile matrix:
   #   software      — CPU-only, local SQLite by default
-  #   software-pg   — CPU-only, bundled PostgreSQL
+  #   software-pg   — CPU-only, external PostgreSQL via SMA_DB_URL/SMA_DAEMON_DB_URL
   #   intel         — Intel QSV + VAAPI, local SQLite by default
-  #   intel-pg      — Intel QSV + VAAPI, bundled PostgreSQL
+  #   intel-pg      — Intel QSV + VAAPI, external PostgreSQL via SMA_DB_URL/SMA_DAEMON_DB_URL
   #   nvidia        — NVIDIA NVENC/NVDEC, local SQLite by default
-  #   nvidia-pg     — NVIDIA NVENC/NVDEC, bundled PostgreSQL
+  #   nvidia-pg     — NVIDIA NVENC/NVDEC, external PostgreSQL via SMA_DB_URL/SMA_DAEMON_DB_URL
   #
   # Examples:
   #   docker compose --profile software up
@@ -85,7 +43,7 @@ services:
         required: true
     environment:
       SMA_CONFIG: "${SMA_CONFIG:-/config/sma-ng.yml}"
-      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-sqlite:////data/sma-ng.db}"
+      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-${SMA_DB_URL:-sqlite:////data/sma-ng.db}}"
     networks:
       - sma-net
 
@@ -110,15 +68,12 @@ services:
       - /mnt:/mnt
       - /mnt/unionfs/downloads:/downloads
       - /transcodes:/transcodes
-    depends_on:
-      sma-pgsql:
-        condition: service_healthy
     env_file:
       - path: /opt/sma/config/daemon.env
         required: true
     environment:
       SMA_CONFIG: "${SMA_CONFIG:-/config/sma-ng.yml}"
-      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-postgresql://$${POSTGRES_USER:-sma}:$${POSTGRES_PASSWORD:-change-me-now}@sma-pgsql:5432/$${POSTGRES_DB:-sma}}"
+      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-${SMA_DB_URL:-}}"
     networks:
       - sma-net
 
@@ -155,7 +110,7 @@ services:
         required: true
     environment:
       SMA_CONFIG: "${SMA_CONFIG:-/config/sma-ng.yml}"
-      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-sqlite:////data/sma-ng.db}"
+      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-${SMA_DB_URL:-sqlite:////data/sma-ng.db}}"
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
       NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,video,utility}"
     networks:
@@ -189,15 +144,12 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu, video]
-    depends_on:
-      sma-pgsql:
-        condition: service_healthy
     env_file:
       - path: /opt/sma/config/daemon.env
         required: true
     environment:
       SMA_CONFIG: "${SMA_CONFIG:-/config/sma-ng.yml}"
-      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-postgresql://$${POSTGRES_USER:-sma}:$${POSTGRES_PASSWORD:-change-me-now}@sma-pgsql:5432/$${POSTGRES_DB:-sma}}"
+      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-${SMA_DB_URL:-}}"
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
       NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,video,utility}"
     networks:
@@ -235,7 +187,7 @@ services:
         required: true
     environment:
       SMA_CONFIG: "${SMA_CONFIG:-/config/sma-ng.yml}"
-      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-sqlite:////data/sma-ng.db}"
+      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-${SMA_DB_URL:-sqlite:////data/sma-ng.db}}"
     networks:
       - sma-net
 
@@ -267,20 +219,14 @@ services:
     # device nodes, adds the `ubuntu` runtime user to whatever groups own
     # them, then drops privileges via setpriv. Works regardless of the
     # host's render/video GID assignments.
-    depends_on:
-      sma-pgsql:
-        condition: service_healthy
     env_file:
       - path: /opt/sma/config/daemon.env
         required: true
     environment:
       SMA_CONFIG: "${SMA_CONFIG:-/config/sma-ng.yml}"
-      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-postgresql://${POSTGRES_USER:-sma}:${POSTGRES_PASSWORD:-change-me-now}@sma-pgsql:5432/${POSTGRES_DB:-sma}}"
+      SMA_DAEMON_DB_URL: "${SMA_DAEMON_DB_URL:-${SMA_DB_URL:-}}"
     networks:
       - sma-net
-
-volumes:
-  sma-pgdata:
 
 networks:
   sma-net:

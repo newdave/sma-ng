@@ -246,6 +246,7 @@ init_docker_host_context() {
     fi
   }
   _append_env SMA_DAEMON_DB_URL      "$sma_db_url"
+  _append_env SMA_DB_URL             "$sma_db_url"
   _append_env SMA_DAEMON_DB_HOST     "$sma_db_host"
   _append_env SMA_DAEMON_DB_PORT     "$sma_db_port"
   _append_env SMA_DAEMON_DB_USER     "$sma_db_user"
