@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.0](https://github.com/newdave/sma-ng/compare/sma-ng-v2.2.0...sma-ng-v2.3.0) (2026-05-13)
+
+
+### Features
+
+* add docker target setup installer ([926a658](https://github.com/newdave/sma-ng/commit/926a6587bd88f28014286b75a0906f6d6947b214))
+
 ## [2.2.0](https://github.com/newdave/sma-ng/compare/sma-ng-v2.1.2...sma-ng-v2.2.0) (2026-05-13)
 
 
