@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Sync code to remote hosts, pull latest Docker image, and recreate SMA containers on all DEPLOY_HOSTS"
+#MISE description="Sync code to remote hosts, pull the configured Docker image, and recreate SMA containers"
 #MISE aliases=["deploy:docker:upgrade"]
 #MISE depends=["deploy:mise"]
 set -euo pipefail

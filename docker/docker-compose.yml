@@ -60,7 +60,7 @@ services:
   #   docker compose --profile nvidia-pg up
   # ────────────────────────────────────────────────────────────────────
   sma-software:
-    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
+    image: ${SMA_IMAGE:-ghcr.io/newdave/sma-ng}:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [software]
@@ -88,7 +88,7 @@ services:
       - sma-net
 
   sma-software-pg:
-    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
+    image: ${SMA_IMAGE:-ghcr.io/newdave/sma-ng}:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [software-pg]
@@ -120,7 +120,7 @@ services:
       - sma-net
 
   sma-nvidia:
-    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
+    image: ${SMA_IMAGE:-ghcr.io/newdave/sma-ng}:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [nvidia]
@@ -157,7 +157,7 @@ services:
       - sma-net
 
   sma-nvidia-pg:
-    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
+    image: ${SMA_IMAGE:-ghcr.io/newdave/sma-ng}:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [nvidia-pg]
@@ -198,7 +198,7 @@ services:
       - sma-net
 
   sma-intel:
-    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
+    image: ${SMA_IMAGE:-ghcr.io/newdave/sma-ng}:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [intel]
@@ -232,7 +232,7 @@ services:
       - sma-net
 
   sma-intel-pg:
-    image: ghcr.io/newdave/sma-ng:${SMA_IMAGE_TAG:-latest}
+    image: ${SMA_IMAGE:-ghcr.io/newdave/sma-ng}:${SMA_IMAGE_TAG:-latest}
     container_name: sma-ng
     hostname: "${SMA_NODE_NAME:-sma-ng}"
     profiles: [intel-pg]

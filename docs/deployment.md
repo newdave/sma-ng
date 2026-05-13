@@ -59,7 +59,7 @@ curl https://mise.run | sh
 | Task                    | Description                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------- |
 | `mise run build:docker` | Build the Docker image locally for the native platform                                |
-| `mise run build:push`   | Build and push a multi-arch image (`linux/amd64` + `linux/arm64`) — requires `IMAGE=` |
+| `mise run build:push`   | Build and push a Docker image — requires `IMAGE=`, override platforms with `PLATFORM=` |
 | `mise run docker:run`   | Run the locally-built image — requires `SMA_DAEMON_DB_URL`                            |
 | `mise run build:shell`  | Open an interactive shell inside the locally-built image                              |
 | `mise run build:smoke`  | Smoke-test the image: verify Python imports and FFmpeg binary                         |
@@ -71,6 +71,7 @@ curl https://mise.run | sh
 | `mise run deploy:check`      | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                  |
 | `mise run deploy:setup`      | First-time host prep: SSH key, apt deps, deploy dir, Docker install                        |
 | `mise run deploy:mise`       | Sync the local `.mise/` deploy control plane to all hosts (creates `deploy_dir` if missing, with sudo when `deploy.use_sudo: true`) |
+| `mise run deploy:redeploy`   | Build/push the current code image, then pull and recreate the SMA container on production hosts |
 | `mise run deploy:sync`       | Sync code and install dependencies on all hosts                            |
 | `mise run config:roll`       | Roll configs to remote hosts: create missing files, merge new keys, stamp credentials       |
 | `mise run deploy:reload`     | Hot-reload: POST `/reload` on every host so daemons re-read `config/sma-ng.yml` in place (no container restart). Use after `config:roll` when the change is hot-reloadable (api_key, scan_paths, routing, codec lists, profile overlays, audit settings). Worker count + bind host/port still require `deploy:restart`. |
@@ -257,6 +258,38 @@ unless you also set it under `profiles:`.
 
 ### Deployment Workflow
 
+For normal production code changes, use the single redeploy command:
+
+```bash
+mise run deploy:redeploy
+```
+
+`deploy:redeploy` builds and pushes the current checkout as a Docker image, then calls
+`deploy:docker` one host at a time so each node pulls the exact image tag and recreates
+only the SMA container.
+By default it builds `linux/amd64` and deploys `ghcr.io/<deploy.gh_user>/sma-ng:latest`.
+
+Useful overrides:
+
+```bash
+# Redeploy one host
+HOST=sma-master mise run deploy:redeploy
+
+# Redeploy selected hosts
+HOSTS="sma-master sma-worker-1" mise run deploy:redeploy
+
+# Use an explicit image tag
+IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:redeploy
+
+# Include config/sample/service changes in the same run
+ROLL_CONFIG=true mise run deploy:redeploy
+
+# Pull and recreate an already-pushed image without rebuilding
+BUILD_IMAGE=false IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:redeploy
+```
+
+Lower-level tasks are still available when you need one specific phase:
+
 ```bash
 # 1. First-time: SSH key, apt deps, install Docker, deploy dir
 mise run deploy:setup
@@ -324,6 +357,7 @@ For each remote host:
 | `deploy:check`   | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                                                                |
 | `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, Docker install                                                                      |
 | `deploy:mise`    | Sync the local `.mise/` deploy control plane to each remote `DEPLOY_DIR` (creates `deploy_dir` if missing, with sudo when `deploy.use_sudo: true`) |
+| `deploy:redeploy`| Build/push the current code image, optionally run `config:roll`, then run `deploy:docker` for selected hosts                             |
 | `deploy:sync`    | Sync code and install deps on all hosts                                                                                                   |
 | `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials                                                                           |
 | `deploy:reload`  | Hot-reload `config/sma-ng.yml` on every host (POST `/reload`). Pair with `config:roll` for non-restart-required changes                  |

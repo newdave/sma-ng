@@ -82,6 +82,10 @@ deploy:
   # Docker Compose profile to use (e.g. intel, nvenc, intel-pg).
   # docker_profile: intel
 
+  # Docker image repo/tag used by deploy:redeploy and deploy:docker.
+  # image: ghcr.io/newdave/sma-ng
+  # image_tag: latest
+
   # Directory containing docker-compose.yml (defaults to deploy_dir/docker).
   # docker_compose_dir: /opt/sma/docker
 

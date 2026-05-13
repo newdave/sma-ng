@@ -1195,11 +1195,14 @@ mise run deploy:setup
 #### Deploying code
 
 ```bash
-# Sync code and install dependencies
-mise run deploy:sync
+# Build/push the current code image and redeploy production Docker hosts
+mise run deploy:redeploy
 
-# Then restart the service
-mise run deploy:restart
+# Include config/sample/service changes in the same run
+ROLL_CONFIG=true mise run deploy:redeploy
+
+# Redeploy an already-pushed image without rebuilding
+BUILD_IMAGE=false IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:redeploy
 
 # Optional: stop Docker services on one host
 HOST=sma-master mise run deploy:dockerstop
@@ -1208,7 +1211,13 @@ HOST=sma-master mise run deploy:dockerstop
 HOSTS="sma-master sma-worker-1" mise run deploy:dockerstop
 ```
 
-`deploy:sync` does the following on each host in `deploy.hosts`:
+`deploy:redeploy` builds and pushes the current checkout, then runs `deploy:docker`
+for each selected host so Docker pulls the requested image tag and recreates only
+the SMA container.
+Use `HOST=<name>` or `HOSTS="<name1> <name2>"` to scope a redeploy.
+
+`deploy:sync` remains available for non-Docker/source-checkout maintenance.
+It does the following on each host in `deploy.hosts`:
 
 - rsyncs the repo (excluding `venv/`, `config/`, `logs/`, `__pycache__/`)
 - creates or repairs the virtualenv and installs base Python dependencies
@@ -1270,6 +1279,7 @@ Sends a graceful shutdown webhook to each host, waits for the daemon to drain, t
 | `deploy:check`   | Verify `setup/local.yml` exists and `deploy.hosts` is set                  |
 | `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, Docker install       |
 | `deploy:mise`    | Sync the local `.mise/` deploy control plane to each remote `deploy_dir`   |
+| `deploy:redeploy`| Build/push current code, optionally roll config, then recreate SMA Docker containers |
 | `deploy:sync`    | Sync code and install deps on all hosts                     |
 | `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials & overlays |
 | `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container |
