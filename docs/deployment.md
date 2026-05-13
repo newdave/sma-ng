@@ -12,13 +12,14 @@ curl https://mise.run | sh
 
 ### Setup
 
-| Task                      | Description                                                                     |
-| ------------------------- | ------------------------------------------------------------------------------- |
-| `mise run setup:venv`     | Create the Python virtual environment                                           |
-| `mise run setup:deps`     | Install base runtime dependencies from `setup/requirements.txt`                 |
-| `mise run setup:deps:dev` | Install dev dependencies (lint, test tools)                                     |
-| `mise run setup:deps:all` | Install all optional dependencies including qBittorrent and Deluge integrations |
-| `mise run setup:clean`    | Remove build artifacts, caches, and compiled bytecode                           |
+| Task                           | Description                                                                      |
+| ------------------------------ | -------------------------------------------------------------------------------- |
+| `mise run setup:venv`          | Create the Python virtual environment                                            |
+| `mise run setup:deps`          | Install base runtime dependencies from `setup/requirements.txt`                  |
+| `mise run setup:deps:dev`      | Install dev dependencies (lint, test tools)                                      |
+| `mise run setup:deps:all`      | Install all optional dependencies including qBittorrent and Deluge integrations  |
+| `mise run setup:clean`         | Remove build artifacts, caches, and compiled bytecode                            |
+| `mise run setup:docker:target` | Create Docker bind-mount directories, seed config files, and install CLI aliases |
 
 ### Development
 
@@ -47,40 +48,40 @@ curl https://mise.run | sh
 
 ### GPU and Configuration
 
-| Task                       | Description                                                                        |
-| -------------------------- | ---------------------------------------------------------------------------------- |
-| `mise run config:gpu`      | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
-| `mise run config:generate` | Generate `config/sma-ng.yml` with GPU auto-detection                         |
-| `mise run config:audit`    | Audit local config files against the YAML sample                                   |
-| `mise run daemon:smoke`    | Run daemon smoke-test config validation and exit                                   |
+| Task | Description |
+| --- | --- |
+| `mise run config:gpu` | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
+| `mise run config:generate` | Generate `config/sma-ng.yml` with GPU auto-detection |
+| `mise run config:audit` | Audit local config files against the YAML sample |
+| `mise run daemon:smoke` | Run daemon smoke-test config validation and exit |
 
 ### Docker Tasks
 
-| Task                    | Description                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------- |
-| `mise run build:docker` | Build the Docker image locally for the native platform                                |
-| `mise run build:push`   | Build and push a Docker image — requires `IMAGE=`, override platforms with `PLATFORM=` |
-| `mise run docker:run`   | Run the locally-built image — requires `SMA_DAEMON_DB_URL`                            |
-| `mise run build:shell`  | Open an interactive shell inside the locally-built image                              |
-| `mise run build:smoke`  | Smoke-test the image: verify Python imports and FFmpeg binary                         |
+| Task | Description |
+| --- | --- |
+| `mise run build:docker` | Build the Docker image locally for the native platform |
+| `mise run build:push` | Build and push a Docker image — requires `IMAGE=`, override platforms with `PLATFORM=` |
+| `mise run docker:run` | Run the locally-built image — requires `SMA_DAEMON_DB_URL` |
+| `mise run build:shell` | Open an interactive shell inside the locally-built image |
+| `mise run build:smoke` | Smoke-test the image: verify Python imports and FFmpeg binary |
 
 ### Deploy Tasks
 
-| Task                         | Description                                                                                 |
-| ---------------------------- | ------------------------------------------------------------------------------------------- |
-| `mise run deploy:check`      | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                  |
-| `mise run deploy:setup`      | First-time host prep: SSH key, apt deps, deploy dir, Docker install                        |
-| `mise run deploy:mise`       | Sync the local `.mise/` deploy control plane to all hosts (creates `deploy_dir` if missing, with sudo when `deploy.use_sudo: true`) |
-| `mise run deploy:redeploy`   | Build/push the current code image, then pull and recreate the SMA container on production hosts |
-| `mise run deploy:sync`       | Sync code and install dependencies on all hosts                            |
-| `mise run config:roll`       | Roll configs to remote hosts: create missing files, merge new keys, stamp credentials       |
-| `mise run deploy:reload`     | Hot-reload: POST `/reload` on every host so daemons re-read `config/sma-ng.yml` in place (no container restart). Use after `config:roll` when the change is hot-reloadable (api_key, scan_paths, routing, codec lists, profile overlays, audit settings). Worker count + bind host/port still require `deploy:restart`. |
-| `mise run deploy:restart`    | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container                  |
-| `mise run config:audit`      | Audit local configs                                                                         |
-| `mise run deploy:docker`     | Rsync code to Docker hosts, pull latest image, and recreate the SMA container               |
-| `mise run pg:restart`        | Restart bundled PostgreSQL on hosts using `*-pg` Docker profiles                            |
-| `mise run pg:recreate`       | Remove and recreate bundled PostgreSQL (destructive — removes `sma-pgdata` volume)          |
-| `mise run deploy:login`      | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token                              |
+| Task | Description |
+| --- | --- |
+| `mise run deploy:check` | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set |
+| `mise run deploy:setup` | First-time host prep: SSH key, apt deps, deploy dir, Docker install |
+| `mise run deploy:mise` | Sync the local `.mise/` deploy control plane to all hosts |
+| `mise run deploy:redeploy` | Build/push the current code image, then pull and recreate the SMA container on production hosts |
+| `mise run deploy:sync` | Sync code and install dependencies on all hosts |
+| `mise run config:roll` | Roll configs to remote hosts: create missing files, merge new keys, stamp credentials |
+| `mise run deploy:reload` | Hot-reload `config/sma-ng.yml` on every host with `POST /reload` |
+| `mise run deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container |
+| `mise run config:audit` | Audit local configs |
+| `mise run deploy:docker` | Rsync code to Docker hosts, pull latest image, and recreate the SMA container |
+| `mise run pg:restart` | Restart bundled PostgreSQL on hosts using `*-pg` Docker profiles |
+| `mise run pg:recreate` | Remove and recreate bundled PostgreSQL (destructive — removes `sma-pgdata` volume) |
+| `mise run deploy:login` | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token |
 
 Also available: `mise run deploy:dockerstop` to stop Docker services on selected nodes.
 Use `HOST=<host>` for one node or `HOSTS="<host1> <host2>"` for multiple nodes.
@@ -125,6 +126,23 @@ mise run build:docker && mise run build:smoke
 Builds a local `sma-ng:local` image and immediately verifies Python imports and FFmpeg availability inside it.
 No containers are left running afterwards.
 
+### Prepare a Docker target host
+
+```bash
+mise run setup:docker:target
+```
+
+This creates `/opt/sma/config`, `/opt/sma/logs`, `/opt/sma/cache`, and `/transcodes/sma`, then seeds
+`/opt/sma/config/sma-ng.yml` and `/opt/sma/config/daemon.env` if they are missing. It also installs
+`/opt/sma/sma-ng-docker-aliases.sh`; source that file in Bash to get aliases such as `sma-manual`,
+`sma-convert`, `sma-preview`, `sma-codecs`, and `sma-logs`.
+
+Override the default host paths when your compose mounts differ:
+
+```bash
+SMA_INSTALL_DIR=/srv/sma SMA_TRANSCODE_DIR=/srv/transcodes mise run setup:docker:target
+```
+
 ### Push a multi-architecture image to a registry
 
 ```bash
@@ -161,7 +179,7 @@ node should run a `*-pg` profile — that's the host that carries the bundled
 PostgreSQL the rest of the cluster connects to.
 
 | Profile | GPU stack | Bundled Postgres? | Use on |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `software` | none (CPU only) | no — needs `db_url` | a node without GPU + external DB |
 | `software-pg` | none (CPU only) | yes (`sma-pgsql` service) | single-node deployment, no GPU |
 | `intel` | Intel QSV / VAAPI | no | a slave with Intel GPU |
@@ -352,28 +370,28 @@ For each remote host:
 
 ### Deploy Tasks Reference
 
-| Task             | Description                                                                                                                               |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `deploy:check`   | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                                                                |
-| `deploy:setup`   | First-time host prep: SSH key, apt deps, deploy dir, Docker install                                                                      |
-| `deploy:mise`    | Sync the local `.mise/` deploy control plane to each remote `DEPLOY_DIR` (creates `deploy_dir` if missing, with sudo when `deploy.use_sudo: true`) |
-| `deploy:redeploy`| Build/push the current code image, optionally run `config:roll`, then run `deploy:docker` for selected hosts                             |
-| `deploy:sync`    | Sync code and install deps on all hosts                                                                                                   |
-| `config:roll`    | Roll configs: create missing, merge new keys, stamp credentials                                                                           |
-| `deploy:reload`  | Hot-reload `config/sma-ng.yml` on every host (POST `/reload`). Pair with `config:roll` for non-restart-required changes                  |
-| `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container                                                                |
-| `config:audit`   | Audit local configs                                                                                                                       |
-| `deploy:docker`  | Rsync the local codebase to each Docker host, stamp `SMA_NODE_NAME` into `daemon.env`, pull the latest image for that host's `DOCKER_PROFILE`, and recreate only the SMA container |
-| `pg:restart`     | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg`                                                                  |
-| `pg:recreate`    | Stop bundled PostgreSQL, remove its Docker volume, and recreate it on hosts whose `DOCKER_PROFILE` ends in `-pg`                          |
-| `cluster:start`  | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`)                                                                            |
-| `cluster:stop`   | `docker compose stop` for selected hosts                                                                                                  |
-| `cluster:restart`| `docker compose restart` for selected hosts (hard restart — interrupts in-flight jobs; prefer `cluster:upgrade` or `cluster:drain` first) |
-| `cluster:status` | `docker compose ps` for selected hosts                                                                                                    |
-| `cluster:drain`  | POST `/admin/nodes/<host>/drain` — workers finish active jobs then go idle                                                                |
-| `cluster:pause`  | POST `/admin/nodes/<host>/pause` — workers immediately stop picking up new jobs (active jobs continue)                                    |
-| `cluster:resume` | POST `/admin/nodes/<host>/resume` — clear drain or pause                                                                                  |
-| `cluster:upgrade`| Rolling upgrade: per host, drain → wait for `running_jobs=0` (`DRAIN_TIMEOUT`, default 1800s) → run `deploy:docker HOST=<host>`            |
+| Task | Description |
+| --- | --- |
+| `deploy:check` | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set |
+| `deploy:setup` | First-time host prep: SSH key, apt deps, deploy dir, Docker install |
+| `deploy:mise` | Sync the local `.mise/` deploy control plane to each remote `DEPLOY_DIR` |
+| `deploy:redeploy` | Build/push the current code image, optionally run `config:roll`, then run `deploy:docker` |
+| `deploy:sync` | Sync code and install deps on all hosts |
+| `config:roll` | Roll configs: create missing, merge new keys, stamp credentials |
+| `deploy:reload` | Hot-reload `config/sma-ng.yml` on every host with `POST /reload` |
+| `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container |
+| `config:audit` | Audit local configs |
+| `deploy:docker` | Rsync code to each Docker host, stamp `SMA_NODE_NAME`, pull the image, and recreate SMA |
+| `pg:restart` | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg` |
+| `pg:recreate` | Stop bundled PostgreSQL, remove its Docker volume, and recreate it |
+| `cluster:start` | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`) |
+| `cluster:stop` | `docker compose stop` for selected hosts |
+| `cluster:restart` | `docker compose restart` for selected hosts |
+| `cluster:status` | `docker compose ps` for selected hosts |
+| `cluster:drain` | `POST /admin/nodes/<host>/drain`; workers finish active jobs then go idle |
+| `cluster:pause` | `POST /admin/nodes/<host>/pause`; workers stop picking up new jobs |
+| `cluster:resume` | `POST /admin/nodes/<host>/resume`; clear drain or pause |
+| `cluster:upgrade` | Drain each host, wait for `running_jobs=0`, then run `deploy:docker HOST=<host>` |
 
 See [Cluster Operations](cluster-operations.md) for runbooks combining these.
 
@@ -421,7 +439,7 @@ The bundled PostgreSQL compose service publishes `5432` on the Docker host by de
 | `SMA_DAEMON_API_KEY`    |           | API key                                 |
 | `SMA_DAEMON_DB_URL`     |           | PostgreSQL connection URL (required)    |
 | `SMA_DAEMON_FFMPEG_DIR` |           | Directory containing `ffmpeg`/`ffprobe` |
-| `SMA_CONFIG`            |           | Override `sma-ng.yml` path         |
+| `SMA_CONFIG`            |           | Override `sma-ng.yml` path              |
 
 See also:
 
