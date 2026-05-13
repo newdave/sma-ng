@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.4.0](https://github.com/newdave/sma-ng/compare/sma-ng-v2.3.0...sma-ng-v2.4.0) (2026-05-13)
+
+
+### Features
+
+* Add SQLite database backend for single-node deployments ([a13a476](https://github.com/newdave/sma-ng/commit/a13a4760b702e92ede6fd9eff4fa39be639ad885))
+* Default Docker non-pg profiles to SQLite at /data/sma-ng.db ([3a6878e](https://github.com/newdave/sma-ng/commit/3a6878eab3e5bbbea4734f5ae1c9bcd9fbec3fca))
+
 ## [2.3.0](https://github.com/newdave/sma-ng/compare/sma-ng-v2.2.0...sma-ng-v2.3.0) (2026-05-13)
 
 
