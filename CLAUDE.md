@@ -1,283 +1,123 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This is the authoritative workflow file for Claude Code in this repository.
+Keep it compact: prefer pointers to project docs over duplicating reference material.
 
-## Documentation Rules
+## Mission
 
-- **Keep documentation in sync with code changes.** When you add, change, or remove a feature, update all relevant docs in the same commit (or immediately after).
-- **Documentation and tests that explain or validate a feature change belong to the same logical commit as that feature change.** Do not split one logical change into separate code, docs, or test commits just because the files differ.
-- **Every documentation change must be applied in three places:**
-  1. `docs/` — the canonical source in the main repo
-  2. GitHub wiki (`/tmp/sma-wiki/`) — the corresponding wiki page(s); push with `git add -A && git commit -m "docs: ..." && git push origin HEAD:master`
-  3. Web UI (`resources/docs.html`) — the inline help served at `http://localhost:8585/docs`
+SMA-NG is a Python 3.12+ media transcoding application built around FFmpeg/FFprobe.
+The core job is to convert media to MP4, preserve or transform audio/subtitle/video streams according to
+`sma-ng.yml`, tag output with metadata, and integrate with Sonarr, Radarr, Plex, and download clients.
 
-## Git Commit Rules
+Optimize work for:
 
-- Do not add any AI attribution (or Co-Authored-By lines) to commits whatsoever.
-- Break large changesets into smaller, contextual commits — each commit should represent one logical change.
-- Define “logical change” by behavior, feature, fix, or operational outcome — not by file type. A feature/fix and its tests/docs/config updates normally belong in the same commit.
-- Never create a single mixed commit when the work spans multiple logical areas.
-- Commit the full worktree as a series of small commits grouped by logical function when multiple areas are touched.
-- Before committing, review the diff and split staged changes by change boundary rather than by file category or directory.
-- If the user asks to "commit all changes", interpret that as committing the entire worktree using multiple logical commits, not one umbrella commit.
-- Do not bundle unrelated daemon changes, trigger changes, tests, docs, or workflow/config updates into one commit. But when those files all support the same underlying change, keep them together in a single logical commit.
-- Write informative commit messages that describe what changed and why (use conventional commit prefixes: `fix:`, `feat:`, `refactor:`, etc.).
-- Commit regularly rather than accumulating large diffs.
-- After each commit, run `git pull --rebase` then `git push`.
+- correct FFmpeg option generation and source probing
+- predictable daemon job handling and path-based config routing
+- safe config schema changes with generated samples
+- useful tests around media, daemon, and integration behavior
+- documentation that helps operators run the transcoder
 
-## Shell Script Rules
+## High-Signal Paths
 
-- Do not embed inline Python in shell scripts or shell commands committed to this repository. This includes `python -c`, `python3 -c`, and Python heredocs.
-- If shell-based automation needs Python logic, move that logic into a standalone `.py` helper and call it from the shell script.
-- Prefer keeping JSON parsing, payload construction, and non-trivial data transforms in those helper modules rather than re-embedding them in Bash.
-- Shell scripts must conform to ShellCheck best practices and must not produce any ShellCheck warnings or errors. Suppress a warning with a `# shellcheck disable=SCxxxx` comment only when the flag is genuinely a false positive, and always add an inline explanation for why the suppression is safe.
+- CLI: `manual.py`
+- Daemon entrypoint: `daemon.py`
+- Daemon package: `resources/daemon/`
+- Conversion pipeline: `resources/mediaprocessor.py`
+- Settings schema and projection: `resources/config_schema.py`, `resources/readsettings.py`
+- FFmpeg wrapper and codec/container definitions: `converter/ffmpeg.py`, `converter/avcodecs.py`, `converter/formats.py`
+- Metadata and integrations: `resources/metadata.py`, `resources/mediamanager.py`, `autoprocess/plex.py`, `triggers/`
+- Canonical docs: `docs/`, served help: `resources/docs.html`, wiki copy: `/tmp/sma-wiki/`
+- Generated/local files to avoid: `venv/`, `**/__pycache__/`, `*.pyc`, `config/sma-ng.yml`
 
-## Logging Rules
+## Working Rules
 
-- One log record == one line. Multi-line application messages are rejected by `scripts/lint-logging.py`. Tracebacks emitted by `log.exception(...)` are exempt — `SingleLineFormatter` renders them on subsequent lines with a `  | ` prefix so the application message itself stays one line.
-- Do not pass `indent=` to `json.dumps(...)` inside `log.<level>(...)` calls or `print(json.dumps(...))`. The formatter compacts JSON-shaped substrings automatically; an explicit `indent=` produces multi-line records the lint rule rejects.
-- Do not use `print(...)` inside `resources/daemon/`. The worker captures the stdout of subprocess invocations into the per-config log file, so a stray `print` becomes uncontrolled log output. Append `# noqa: log-print` to the line if the call is genuinely interactive (rare here).
-- Do not write secrets into log messages. `RedactingFilter` walks `record.args` and `extra=` for keys in `SECRET_KEYS ∪ SERVICE_SECRET_FIELDS` (`api_key`, `db_url`, `username`, `password`, `node_id`, `apikey`, `token`) and replaces values with `***`; `SingleLineFormatter` runs a final text pass to catch pre-formatted `key=value` strings the filter can't reach. Add new secret-bearing fields to `resources.daemon.constants` so every redaction site picks them up.
-- Width cap: records longer than `SMA_LOG_MAX_WIDTH` (default 1024) are truncated with a `…+N` tail marker. The PostgreSQL `logs` table receives the full record (the cap applies only to console/file handlers).
-- See `docs/brainstorming/2026-04-27-logging-refactor.md` for the design rationale.
+- Read the nearby implementation and tests before changing code.
+- Keep changes small and aligned with existing Python patterns.
+- Do not add abstractions, settings, or integrations unless the task requires them.
+- Keep shell entrypoints POSIX/ShellCheck clean.
+  Do not embed inline Python in shell scripts or committed shell commands; move Python logic to a `.py` helper.
+- Keep application log records single-line.
+  Do not use `print(...)` in `resources/daemon/` except with a justified `# noqa: log-print`.
+  Do not log secrets such as API keys, DB URLs, usernames, passwords, tokens, or node IDs.
+- Markdown must pass markdownlint: ATX headings, fenced code languages, blank lines around blocks, and prose lines up
+  to 120 characters.
+- Do not add AI attribution or `Co-Authored-By` lines to commits.
+- Do not create manual `v*` tags; release-please owns releases.
 
-## Test Coverage
+## Documentation And Commits
 
-- The pytest suite is gated on **≥90% global line coverage** plus a **≥70%
-  per-module floor** for production modules of ≥100 statements. Both gates
-  must pass before merge.
-- `mise run test:cov` runs the suite with `--cov-fail-under=${COV_FAIL_UNDER:-90}`.
-  Set `COV_FAIL_UNDER=0` to bypass the global gate for WIP commits.
-- `python scripts/check-coverage-floor.py` enforces the per-module floor.
-- See [`docs/test-coverage.md`](docs/test-coverage.md) for policy, exclusions,
-  and how to recover when the gate fails.
-- Don't add `# pragma: no cover` to mask uncovered logic. Don't lower the
-  threshold. Add a test instead.
-
-## Markdown Rules
-
-- Markdown files must conform to markdownlint best practices and must not produce any markdownlint warnings or errors.
-- Use ATX-style headings (`#`), fenced code blocks (` ``` `), and consistent list markers.
-- Every fenced code block must declare a language identifier.
-- Blank lines are required before and after headings, lists, and code blocks.
-- Lines must not exceed 120 characters (prose) or be wrapped mid-sentence; prefer semantic line breaks for long paragraphs.
-
-## Development Environment
-
-```bash
-# Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r setup/requirements.txt
-
-# For qBittorrent integration
-pip install -r setup/requirements-qbittorrent.txt
-
-# For Deluge integration
-pip install -r setup/requirements-deluge.txt
-
-# Generate config with auto-detected GPU (nvenc, qsv, vaapi, videotoolbox, or software)
-make config
-
-# Override GPU detection: make config GPU=nvenc
-# Detect GPU without generating config: make detect-gpu
-```
-
-Requires Python 3.12+ and FFmpeg installed on system.
-
-## Project Overview
-
-SMA-NG (Next-Generation Media Automator) is a Python-based media conversion and tagging automation tool. It converts media files to MP4 format using FFmpeg and tags them with metadata from TMDB. It integrates with media managers (Sonarr, Radarr) and downloaders (NZBGet, SABNZBD, Deluge, uTorrent, qBittorrent).
+- Code, tests, config samples, and docs for one behavior change belong in the same logical change.
+- For user-facing behavior changes, update all relevant docs in the same change:
+  `docs/`, matching `/tmp/sma-wiki/` pages, and `resources/docs.html`.
+- If asked to commit multiple areas, split by behavior or operational outcome, not file type.
+- If asked to "commit all changes", commit the whole worktree as multiple logical commits.
+- Use conventional commit prefixes such as `fix:`, `feat:`, `refactor:`, `docs:`.
+- After each requested commit, run `git pull --rebase` and `git push`.
 
 ## Common Commands
 
+Prefer `mise` tasks when available.
+
 ```bash
-# Install dependencies
-pip install -r setup/requirements.txt
-
-# Manual conversion with auto-tagging (guesses metadata from filename)
-python manual.py -i "/path/to/file.mkv" -a
-
-# Manual conversion with specific TMDB ID
-python manual.py -i "/path/to/movie.mkv" -tmdb 603
-
-# TV episode with TVDB ID
-python manual.py -i "/path/to/episode.mkv" -tvdb 73871 -s 3 -e 10
-
-# Process directory in batch mode
-python manual.py -i "/path/to/directory" -a
-
-# Show conversion options without converting
-python manual.py -i "/path/to/file.mkv" -oo
-
-# List supported codecs
-python manual.py -cl
-
-# Start daemon (HTTP webhook server)
-python daemon.py --host 0.0.0.0 --port 8585 --workers 4
-
-# Start daemon with API key authentication
-python daemon.py --host 0.0.0.0 --port 8585 --workers 4 --api-key YOUR_SECRET_KEY
+mise install
+mise run setup:deps
+mise run setup:deps:dev
+mise run test
+mise run test:lint
+mise run dev:lint
+mise run config:gpu
+mise run config:generate
+mise run daemon:start
+mise run media:convert -- /path/to/file.mkv
+mise run media:preview -- /path/to/file.mkv
+mise run media:codecs
 ```
 
-## Architecture
+Direct commands that are often useful:
 
-### Entry Points
+```bash
+python manual.py -i "/path/to/file.mkv" -a
+python manual.py -i "/path/to/file.mkv" -oo
+python manual.py -cl
+python daemon.py --host 0.0.0.0 --port 8585 --workers 4
+python daemon.py --smoke-test
+```
 
-- `manual.py` - CLI tool for manual conversion/tagging
-- `daemon.py` - Thin entry point (~170 lines): imports `resources.daemon.*`, runs `main()`
-- `triggers/media_managers/sonarr.sh` / `radarr.sh` - Bash scripts triggered by Sonarr/Radarr
-- `triggers/usenet/` / `triggers/torrents/` - Bash scripts for download client integrations
+## Validation Matrix
 
-### Daemon Package (`resources/daemon/`)
+Run the smallest meaningful check for the files touched.
 
-The daemon is a package under `resources/daemon/`. `daemon.py` at project root is a thin entry point that re-exports all names for backward compatibility with tests.
+- Daemon: `venv/bin/python -m pytest tests/test_daemon.py tests/test_handler.py tests/test_worker.py -q`
+- Media/FFmpeg: `venv/bin/python -m pytest tests/test_mediaprocessor.py tests/test_metadata.py -q`
+- Rename/log helpers: `venv/bin/python -m pytest tests/test_rename.py tests/test_log.py -q`
+- Docker/compose: `venv/bin/python -m pytest tests/test_docker.py -q`
+- Broad pass: `mise run test`
+- Coverage policy: global line coverage is at least 90%, and production modules with at least 100 statements need
+  at least 70% per-module coverage. Do not lower thresholds or hide logic with `# pragma: no cover`.
 
-| Module         | Contents                                                     |
-| -------------- | ------------------------------------------------------------ |
-| `constants.py` | `SCRIPT_DIR`, `DEFAULT_*`, `STATUS_*` constants              |
-| `db.py`        | `PostgreSQLJobDatabase`                                      |
-| `config.py`    | `ConfigLockManager`, `ConfigLogManager`, `PathConfigManager` |
-| `handler.py`   | `WebhookHandler` + HTML helpers, multi-page docs routing     |
-| `threads.py`   | `_StoppableThread`, `HeartbeatThread`, `ScannerThread`       |
-| `worker.py`    | `ConversionWorker`, `WorkerPool`                             |
-| `server.py`    | `DaemonServer`, `_validate_hwaccel`                          |
+## Change Recipes
 
-### Core Modules
+- New codec: update `converter/avcodecs.py`; add tests for option mapping and compatibility.
+- New config field: update `resources/config_schema.py`; regenerate `setup/sma-ng.yml.sample` with
+  `mise run config:sample`; add `resources/readsettings.py` projection only for legacy `settings.*` consumers.
+- New daemon option: update `daemon.py`, `resources/daemon/config.py`, `setup/sma-ng.yml.sample`, and
+  `docs/daemon.md`; use `SMA_DAEMON_*` env naming.
+- New daemon endpoint: update `resources/daemon/handler.py` route tables and handler tests.
+- New downloader/media-manager integration: add script under `triggers/`; keep Python logic in helper modules; add
+  schema/sample/docs support as needed.
+- New or changed `mise` task: add an executable script under `.mise/tasks/<group>/` with
+  `#MISE description=...`; keep shared helpers outside `.mise/tasks/`; update wiki `Mise-Tasks.md`.
 
-#### `resources/`
+## Configuration Model
 
-- `mediaprocessor.py` - Central class `MediaProcessor` handling the full conversion pipeline
-- `config_schema.py` - Pydantic `SmaConfig` model — single source of truth for `sma-ng.yml` defaults and validation
-- `config_loader.py` - Loads + validates `sma-ng.yml` against the schema
-- `readsettings.py` - `ReadSettings` adapter — flattens the validated YAML tree onto the `settings.*` attributes the rest of the codebase reads
-- `yamlconfig.py` - Shared YAML I/O (`_load_with_dedup` for self-healing duplicate-key configs, plus path/extension normalisers)
-- `metadata.py` - `Metadata` class fetches and writes tags from TMDB using `tmdbsimple` and `mutagen`
-- `postprocess.py` - Runs custom post-process scripts from `post_process/` directory
-- `extensions.py` - File extension definitions
+The main config is YAML: `config/sma-ng.yml` copied from `setup/sma-ng.yml.sample`.
+Top-level buckets are `daemon:`, `base:`, `profiles:`, and `services:`.
+Use kebab-case in YAML.
+Daemon settings resolve as CLI flag, then `SMA_DAEMON_*` environment, then `sma-ng.yml`, then default.
+See `docs/configuration.md` and `docs/daemon.md` for full reference.
 
-#### `converter/`
+## Claude Tooling Surface
 
-- `ffmpeg.py` - FFmpeg/FFprobe wrapper with `MediaFormatInfo`, `MediaStreamInfo`, progress parsing
-- `avcodecs.py` - Codec definitions with FFmpeg encoder mappings
-- `formats.py` - Container format definitions
-
-#### `autoprocess/`
-
-- `plex.py` - Plex library refresh integration
-
-### Configuration
-
-The main config file is `config/sma-ng.yml` (copy from `setup/sma-ng.yml.sample`). Override location via `SMA_CONFIG` environment variable. INI-format configs are not supported — pointing `SMA_CONFIG` at a `.ini` file is rejected at startup.
-
-Top-level YAML buckets:
-
-- `daemon:` — daemon-only settings (api_key, db_url, ffmpeg_dir, routing, scan_paths, path_rewrites, media_extensions, node_id)
-- `base:` — conversion defaults (`base.converter`, `base.video`, `base.hdr`, `base.audio`, `base.subtitle`, `base.metadata`, `base.permissions`, `base.naming`, etc.)
-- `profiles:` — named overlays referenced from `daemon.routing[].profile` or `manual.py --profile <name>` (e.g. `profiles.rq`, `profiles.lq`)
-- `services:` — per-instance media manager and download client config (`services.sonarr.<name>`, `services.radarr.<name>`, `services.plex.<name>`, `services.sabnzbd`, `services.deluge`, `services.qbittorrent`, `services.utorrent`)
-
-The schema accepts both `kebab-case` (canonical YAML form) and `snake_case` (Python form) field names — pydantic uses `populate_by_name=True` with an `alias_generator` that maps between them. Use kebab-case in hand-written YAML.
-
-See [docs/configuration.md](docs/configuration.md) for full reference.
-
-### Daemon Configuration
-
-`config/sma-ng.yml` (copy from `setup/sma-ng.yml.sample`) controls path-based config routing, API key, PostgreSQL URL, FFmpeg dir, scan paths, and path rewrites via its `daemon:` section.
-
-All daemon settings follow: **CLI flag > environment variable > sma-ng.yml > default**.
-
-- API key: `--api-key` / `SMA_DAEMON_API_KEY` / `sma-ng.yml daemon.api_key`
-- DB URL: `SMA_DAEMON_DB_URL` / `sma-ng.yml daemon.db_url` (no CLI flag — credentials must not appear in `ps`)
-- FFmpeg dir: `--ffmpeg-dir` / `SMA_DAEMON_FFMPEG_DIR` / `sma-ng.yml daemon.ffmpeg_dir`
-
-See [docs/daemon.md](docs/daemon.md) for full daemon documentation.
-
-### Recycle Bin
-
-When `base.converter.delete-original` is `true`, set `base.converter.recycle-bin` to copy the original to a directory before deletion. Uses atomic copy + `.2`/`.3` suffix collision handling.
-
-### Processing Flow
-
-1. `MediaProcessor.isValidSource()` validates input using FFprobe
-2. `MediaProcessor.process()` builds FFmpeg options based on settings and source info
-3. Conversion runs with optional progress reporting
-4. `Metadata.writeTags()` embeds metadata using mutagen (MP4 tags)
-5. `qtfaststart` relocates moov atom for streaming optimization
-6. Files copied/moved to destination directories
-7. Post-process scripts run, Plex/media manager notified
-
-## Documentation
-
-Full documentation is in [docs/](docs/) and served at `http://localhost:8585/docs` when the daemon is running:
-
-- [docs/README.md](docs/README.md) — Architecture and module reference
-- [docs/getting-started.md](docs/getting-started.md) — Installation, quick start, CLI
-- [docs/configuration.md](docs/configuration.md) — `sma-ng.yml` reference
-- [docs/daemon.md](docs/daemon.md) — Daemon mode, API, clustering
-- [docs/integrations.md](docs/integrations.md) — Sonarr, Radarr, download clients
-- [docs/hardware-acceleration.md](docs/hardware-acceleration.md) — GPU config
-- [docs/deployment.md](docs/deployment.md) — mise tasks, Docker, CI/release
-- [docs/troubleshooting.md](docs/troubleshooting.md) — Logs, common issues
-
-## CI / Release
-
-| Workflow      | Trigger                       | What it does                                                                                   |
-| ------------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
-| `ci.yml`      | PR / push to main             | Runs tests                                                                                     |
-| `docker.yml`  | PR / push to main or `v*` tag | PR: build-only; main/tag: build + push to GHCR                                                 |
-| `release.yml` | Push to main                  | release-please manages release PR + version bump; on release: wheel/sdist + Docker semver tags |
-
-Releases are driven by [release-please](https://github.com/googleapis/release-please). **Do not manually create `v*` tags.**
-
-This repository uses release-please's `always-bump-patch` versioning strategy by default, so point releases are the norm and patch numbers are effectively unbounded (for example `1.2.12323` is valid).
-
-Conventional commit types still describe the change, but default release bumps remain patch releases unless intentionally overridden.
-
-## Claude Code Slash Commands
-
-- `/project:convert <file>` - Run conversion with auto-tagging
-- `/project:preview <file>` - Show FFmpeg options without converting
-- `/project:codecs` - List all supported codecs
-- `/project:daemon` - Start the HTTP webhook daemon server
-
-## Key Files for Modifications
-
-When adding new codec support:
-
-- `converter/avcodecs.py` - Add codec class with FFmpeg encoder mapping
-
-When adding new settings:
-
-- `resources/config_schema.py` - Add the field to the relevant pydantic model (single source of truth for defaults + validation)
-- `setup/sma-ng.yml.sample` - regenerate via `mise run config:sample` so the sample stays in lockstep with the schema
-- `resources/readsettings.py` - if the new field needs a flat `settings.<name>` attribute for legacy consumers, add the projection there
-
-When adding new API endpoints to the daemon:
-
-- `resources/daemon/handler.py` - Add route handler + register in `_GET_ROUTES` or `_POST_ROUTES`
-
-When adding new downloader/manager integration:
-
-- Create new bash script in `triggers/` (usenet/, torrents/, or media_managers/)
-- Do not embed inline Python in the shell entrypoint; place Python logic in a standalone helper module and invoke it
-- Add the service block to `resources/config_schema.py` (under `Services`) and a sample stanza to `setup/sma-ng.yml.sample` so deploys can stamp it
-
-When adding new daemon options:
-
-- Add CLI arg in `daemon.py` `main()`
-- Add env var support with `SMA_DAEMON_*` naming
-- Add to `sma-ng.yml` `daemon:` section via `PathConfigManager.load_config()` in `resources/daemon/config.py`
-- Update `setup/sma-ng.yml.sample`
-- Document in `docs/daemon.md`
-
-When adding or modifying `mise` tasks:
-
-- Define runnable tasks as executable scripts under grouped `.mise/tasks/<group>/` subdirectories with a
-  `#MISE description=...` header
-- Keep `mise.toml` limited to tool and environment configuration; do not add inline `[tasks.*]` definitions
-- Shared helper code for task scripts belongs outside `.mise/tasks/` (for example `.mise/shared/`) so it is not
-  exposed as a runnable task
-- Update wiki `Mise-Tasks.md` to document the task name, description, and usage
+The `.claude/` directory is active configuration, not legacy metadata.
+Keep slash commands, agents, and skills short and specific to this Python FFmpeg transcoder.
+When workflow rules change, update this file first and sync `AGENTS.md` plus any matching `.codex/` mirrors.

@@ -10,9 +10,10 @@ Options can include: --host, --port, --workers, --config
 python daemon.py $ARGUMENTS
 ```
 
-Default: listens on 127.0.0.1:8585 with 2 worker threads.
+Default: listens on 127.0.0.1:8585 with 1 worker thread.
 
 Examples:
+
 - `/project:daemon` - Start with defaults
 - `/project:daemon --host 0.0.0.0` - Listen on all interfaces
 - `/project:daemon --port 9000 --workers 4` - Custom port and workers

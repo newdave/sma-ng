@@ -6,4 +6,6 @@ description:
 disable-model-invocation: true
 ---
 
+# Research
+
 Invoke the researching skill and follow it.

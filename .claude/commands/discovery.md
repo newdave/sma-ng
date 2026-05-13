@@ -6,4 +6,6 @@ description:
 disable-model-invocation: true
 ---
 
+# Discovery
+
 Invoke the discovering skill and follow it.

@@ -6,6 +6,8 @@ description:
 disable-model-invocation: true
 ---
 
+# Implement
+
 Use the implementer agent.
 
 If an approved blueprint is missing, invoke the blueprinting skill first.

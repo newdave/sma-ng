@@ -6,4 +6,6 @@ description:
 disable-model-invocation: true
 ---
 
+# Blueprint
+
 Invoke the blueprinting skill and follow it.

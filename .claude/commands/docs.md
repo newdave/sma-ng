@@ -1,9 +1,10 @@
 ---
 name: docs
 description:
-  Use when need to create or update README, API docs, JSDoc, contributing guide,
-  or other documentation
+  Use when updating SMA-NG operator, daemon, configuration, integration, or developer documentation
 disable-model-invocation: true
 ---
+
+# Docs
 
 Use the documentation-writer agent.
