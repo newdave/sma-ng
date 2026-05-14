@@ -134,16 +134,14 @@ curl -X POST http://localhost:8585/webhook/generic \
 API key priority order:
 
 1. `--api-key` CLI argument
-2. `SMA_DAEMON_API_KEY` environment variable
-3. `Daemon.api_key` in `sma-ng.yml`
+2. `Daemon.api_key` in `sma-ng.yml`
 
 ```mermaid
 flowchart LR
     A["--api-key\nCLI flag"] -->|highest priority| V["Resolved\nAPI Key"]
-    B["SMA_DAEMON_API_KEY\nenv var"] --> V
     C["api_key\n`daemon:` section in `sma-ng.yml`"] --> V
     D["none\nauth disabled"] -->|lowest priority| V
-    A -.->|overrides| B -.->|overrides| C -.->|overrides| D
+    A -.->|overrides| C -.->|overrides| D
 ```
 
 Send the key via header:
@@ -234,7 +232,7 @@ auto-profile selection happens for one-shot conversions. Pass
 | `host` / `port` / `workers` | HTTP listen address and worker pool size                                                                                             |
 | `api_key`                   | API authentication key                                                                                                               |
 | `username` / `password`     | Optional HTTP-basic credentials for the web dashboard                                                                                |
-| `db_url`                    | PostgreSQL URL for distributed mode (env-only also supported via `SMA_DAEMON_DB_URL`)                                                |
+| `db_url`                    | SQLite or PostgreSQL URL for daemon job persistence. This value is loaded only from `sma-ng.yml`.                                    |
 | `ffmpeg_dir`                | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion                                              |
 | `node_id`                   | Stable identity in cluster mode (auto-generated UUID on first start; override for human-readable identity)                           |
 | `media_extensions`          | File extensions considered media for directory scanning and `/browse`                                                                |
@@ -456,7 +454,7 @@ stateDiagram-v2
 
 ## Job Persistence
 
-Jobs are stored in a PostgreSQL database configured via `SMA_DAEMON_DB_URL` or `db_url` in `daemon:` section in `sma-ng.yml`. The database provides restart recovery, job history, cluster coordination, and deduplication across nodes.
+Jobs are stored in the SQLite or PostgreSQL database configured by `db_url` in the `daemon:` section in `sma-ng.yml`. The database provides restart recovery, job history, cluster coordination, and deduplication across nodes.
 
 ```bash
 curl http://localhost:8585/stats
@@ -479,19 +477,13 @@ scanned_files(path, scanned_at)
 
 For multi-node deployments, configure a shared PostgreSQL database so no two nodes ever process the same file.
 
-**Configure (priority order):**
+**Configure:**
 
-1. `SMA_DAEMON_DB_URL` environment variable
-2. `Daemon.db_url` in `sma-ng.yml`
+Set `daemon.db_url` in `sma-ng.yml`. Database connection details are not read from environment variables.
 
 ```yaml
 daemon:
   db_url: postgresql://sma:password@db-host:5432/sma
-```
-
-```bash
-# daemon.env
-SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
 ```
 
 **Cluster-specific options:**
@@ -586,18 +578,7 @@ All CLI flags (`--host`, `--port`, `--workers`, etc.) are preserved across resta
 
 ## Environment Variables
 
-| Variable                | Description                                                 |
-| ----------------------- | ----------------------------------------------------------- |
-| `SMA_DAEMON_API_KEY`    | API key (overrides `--api-key`)                             |
-| `SMA_DAEMON_DB_URL`     | PostgreSQL connection URL                                   |
-| `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` (prepended to PATH) |
-| `SMA_DAEMON_HOST`       | Bind host (Docker default: `0.0.0.0`)                       |
-| `SMA_DAEMON_PORT`       | Port (Docker default: `8585`)                               |
-| `SMA_DAEMON_WORKERS`    | Number of concurrent workers (Docker default: `2`)          |
-| `SMA_DAEMON_CONFIG`     | Path to daemon config, normally `config/sma-ng.yml`   |
-| `SMA_DAEMON_LOGS_DIR`   | Directory for per-config log files                          |
-
-`SMA_NODE_NAME` sets the explicit cluster node ID and is recommended for Docker and multi-node deployments.
+The daemon no longer reads `SMA_*` environment variables for runtime configuration. Use CLI flags for process-level options and `sma-ng.yml` for persistent daemon settings.
 
 ---
 
@@ -612,17 +593,16 @@ node count, so any deployment can opt in by simply pointing additional daemons a
 
 The daemon resolves its identity in this priority order on every startup:
 
-1. `SMA_NODE_NAME` env var — the canonical deploy-time identity. `mise run config:roll` stamps each host's name into its `config/daemon.env` (e.g. `SMA_NODE_NAME=sma-node1`), so this is the recommended path for any managed deployment. Stable across container recreates and meaningful in dashboards/logs.
-2. `daemon.node_id` already persisted in `sma-ng.yml` — used when no env var is set. Preserves any UUID an earlier daemon generated so existing approved rows in `cluster_nodes` stay attached to this node.
-3. A fresh UUID, generated on the spot and persisted to `sma-ng.yml`. Only reached when neither (1) nor (2) is set. If the persist fails (read-only config dir, wrong uid), the daemon logs a warning and keeps the in-memory UUID for that run; the next restart will generate a new one. Set `SMA_NODE_NAME` to side-step UUID generation entirely.
+1. `daemon.node_id` already persisted in `sma-ng.yml`. Preserves any UUID an earlier daemon generated so existing approved rows in `cluster_nodes` stay attached to this node.
+2. A fresh UUID, generated on the spot and persisted to `sma-ng.yml`. If the persist fails (read-only config dir, wrong uid), the daemon logs a warning and keeps the in-memory UUID for that run; the next restart will generate a new one.
 
 ```yaml
 daemon:
-  # Optional: pin a human-readable identity. SMA_NODE_NAME wins over this.
+  # Optional: pin a human-readable identity.
   node_id: media-server-prod-1
 ```
 
-Whichever value is resolved is also used as the in-container hostname when running under the bundled `docker/docker-compose.yml`, since each `sma-*` profile sets `hostname: ${SMA_NODE_NAME:-sma-ng-<profile>}` so `socket.gethostname()` matches the cluster identity.
+Whichever value is resolved is used as the cluster identity.
 
 ### Shared Work Queue
 
@@ -685,8 +665,7 @@ curl -X POST "http://localhost:8585/admin/nodes/media-server-2/resume" -H "X-API
 ```
 
 Or, from your operator workstation, via mise wrappers that target each
-host's local daemon (uses the host key as `node_id` — same value
-`config:roll` stamps into `daemon.env` as `SMA_NODE_NAME`):
+host's local daemon (uses the host key as `node_id`):
 
 ```bash
 mise run cluster:drain  HOST=media-server-2
@@ -851,7 +830,7 @@ Add these fields to the `daemon:` section of `sma-ng.yml`:
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `daemon.node_id` | *(auto-generated UUID)* | Unique node identity. Generated on first start and persisted. Override with `SMA_NODE_NAME` or by setting this field explicitly. |
+| `daemon.node_id` | *(auto-generated UUID)* | Unique node identity. Generated on first start and persisted. Set this field explicitly for a human-readable stable identity. |
 | `daemon.log_ttl_days` | `30` | Days to retain cluster log entries in PostgreSQL. Set to `0` to disable TTL cleanup. |
 | `daemon.node_expiry_days` | `0` | Days after which offline nodes are hard-deleted. Set to `0` to disable automatic expiry. |
 | `daemon.log_archive_dir` | `null` | Filesystem path for gzipped JSONL log archives. Set to `null` to disable archival. |

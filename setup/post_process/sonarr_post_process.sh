@@ -4,30 +4,30 @@
 # Submits a conversion job to the SMA-NG daemon webhook and waits for completion.
 # Configure via environment variables:
 #
-#   SMA_DAEMON_HOST   Daemon host (default: 127.0.0.1)
-#   SMA_DAEMON_PORT   Daemon port (default: 8585)
-#   SMA_DAEMON_API_KEY  API key if authentication is enabled
-#   SMA_POLL_INTERVAL   Seconds between status checks (default: 5)
-#   SMA_TIMEOUT         Max seconds to wait for completion (default: 0 = unlimited)
+#   DAEMON_HOST   Daemon host (default: 127.0.0.1)
+#   DAEMON_PORT   Daemon port (default: 8585)
+#   DAEMON_API_KEY  API key if authentication is enabled
+#   POLL_INTERVAL   Seconds between status checks (default: 5)
+#   TIMEOUT         Max seconds to wait for completion (default: 0 = unlimited)
 #
 # Sonarr environment variables are provided automatically when the script is
 # called as a Sonarr Custom Script connection.
 
 set -euo pipefail
 
-SMA_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
-SMA_PORT="${SMA_DAEMON_PORT:-8585}"
-SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
-POLL_INTERVAL="${SMA_POLL_INTERVAL:-5}"
-TIMEOUT="${SMA_TIMEOUT:-0}"
+DAEMON_HOST_VALUE="${DAEMON_HOST:-127.0.0.1}"
+DAEMON_PORT_VALUE="${DAEMON_PORT:-8585}"
+DAEMON_BASE="http://${DAEMON_HOST_VALUE}:${DAEMON_PORT_VALUE}"
+POLL_INTERVAL="${POLL_INTERVAL:-5}"
+TIMEOUT="${TIMEOUT:-0}"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 log() { echo "[sonarr_post_process] $*" >&2; }
 
 auth_header() {
-    if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
-        echo "-H" "X-API-Key: ${SMA_DAEMON_API_KEY}"
+    if [[ -n "${DAEMON_API_KEY:-}" ]]; then
+        echo "-H" "X-API-Key: ${DAEMON_API_KEY}"
     fi
 }
 
@@ -55,7 +55,7 @@ wait_for_job() {
 
     while true; do
         local response status elapsed
-        response=$(curl_get "${SMA_BASE}/jobs/${job_id}" 2>/dev/null) || {
+        response=$(curl_get "${DAEMON_BASE}/jobs/${job_id}" 2>/dev/null) || {
             log "ERROR: Lost contact with daemon while polling job ${job_id}."
             return 1
         }
@@ -153,10 +153,10 @@ print(json.dumps({'path': '${INPUTFILE}', 'args': $(echo "$ARGS")}))
 
 # ── submit job ─────────────────────────────────────────────────────────────────
 
-log "Submitting job to ${SMA_BASE}/webhook..."
+log "Submitting job to ${DAEMON_BASE}/webhook..."
 
-RESPONSE=$(curl_post_json "${SMA_BASE}/webhook" "$PAYLOAD") || {
-    log "ERROR: Failed to connect to SMA-NG daemon at ${SMA_BASE}. Is the daemon running?"
+RESPONSE=$(curl_post_json "${DAEMON_BASE}/webhook" "$PAYLOAD") || {
+    log "ERROR: Failed to connect to SMA-NG daemon at ${DAEMON_BASE}. Is the daemon running?"
     exit 1
 }
 

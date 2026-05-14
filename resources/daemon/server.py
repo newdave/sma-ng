@@ -44,7 +44,7 @@ def _resolve_advertised_host(bind_host, node_id, prefer_node_id=False):
   Docker), resolve the node hostname to an address and fall back to the
   outbound interface address before ultimately falling back to the hostname.
   When ``prefer_node_id`` is True, return ``node_id`` directly. This is used
-  when ``SMA_NODE_NAME`` is configured so cluster host identity remains stable
+  when a stable daemon node ID is configured so cluster host identity remains stable
   and human-readable across restarts.
   """
   if prefer_node_id:
@@ -143,14 +143,13 @@ class DaemonServer(ThreadingHTTPServer):
       self.notify_workers()
 
     # Start heartbeat thread (only does real work with PostgreSQL backend)
-    configured_node_name = os.environ.get("SMA_NODE_NAME", "").strip()
     self.heartbeat_thread = HeartbeatThread(
       job_db=job_db,
       node_id=self.node_id,
       host=_resolve_advertised_host(
         server_address[0],
         self.node_id,
-        prefer_node_id=bool(configured_node_name),
+        prefer_node_id=bool(self.node_id),
       ),
       worker_count=worker_count,
       server=self,
@@ -161,7 +160,7 @@ class DaemonServer(ThreadingHTTPServer):
       version=_VERSION,
       hwaccel=self.detected_hwaccel,
       log_ttl_days=self.path_config_manager.log_ttl_days,
-      node_name=configured_node_name or None,
+      node_name=self.node_id,
     )
     self.heartbeat_thread.start()
     logger.debug("Started heartbeat thread (interval: %ds, stale after: %ds)" % (heartbeat_interval, stale_seconds))
@@ -269,17 +268,10 @@ class DaemonServer(ThreadingHTTPServer):
       self.logger.error("Configuration reload failed; keeping previous runtime settings.")
       return False
 
-    # Re-apply api_key priority: CLI arg > env var > config file
-    self.api_key = self._cli_api_key or os.environ.get("SMA_DAEMON_API_KEY") or self.path_config_manager.api_key
-
-    # Re-apply basic_auth priority: CLI arg > env vars > config file
-    env_user = os.environ.get("SMA_DAEMON_USERNAME")
-    env_pass = os.environ.get("SMA_DAEMON_PASSWORD")
-    env_basic = (env_user, env_pass) if env_user and env_pass else None
-    self.basic_auth = self._cli_basic_auth or env_basic or self.path_config_manager.basic_auth
-
-    # Re-apply ffmpeg_dir priority: CLI arg > env var > config file
-    new_ffmpeg_dir = self._cli_ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or self.path_config_manager.ffmpeg_dir
+    # Re-apply runtime settings from CLI/config only.
+    self.api_key = self._cli_api_key or self.path_config_manager.api_key
+    self.basic_auth = self._cli_basic_auth or self.path_config_manager.basic_auth
+    new_ffmpeg_dir = self._cli_ffmpeg_dir or self.path_config_manager.ffmpeg_dir
     for worker in self.worker_pool._workers:
       worker.ffmpeg_dir = new_ffmpeg_dir
       worker.job_timeout_seconds = self.path_config_manager.job_timeout_seconds

@@ -47,7 +47,7 @@ class TestBuildRadarrEnv:
     monkeypatch.setenv("radarr_moviefile_path", "/movies/The Matrix.mkv")
     monkeypatch.setenv("radarr_movie_tmdbid", "603")
     monkeypatch.setenv("radarr_movie_imdbid", "tt0133093")
-    monkeypatch.setenv("SMA_CONFIG", "/cfg.ini")
+    monkeypatch.setenv("CONFIG", "/cfg.ini")
     args = json_tools.build_parser().parse_args(["build-radarr-env"])
     rc = args.func(args)
     out = capsys.readouterr().out.strip()

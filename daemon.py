@@ -53,31 +53,6 @@ _SMOKE_TEST_FIXTURE = os.path.join(SCRIPT_DIR, "tests", "fixtures", "test1.mkv")
 DEFAULT_DAEMON_CONFIG = os.path.join(SCRIPT_DIR, "config", "sma-ng.yml")
 
 
-def _build_db_url_from_env():
-  """Construct a PostgreSQL URL from SMA_DAEMON_DB_* component env vars.
-
-  Returns None if SMA_DAEMON_DB_HOST is not set (the minimum required field).
-  """
-  host = os.environ.get("SMA_DAEMON_DB_HOST", "")
-  if not host:
-    return None
-  user = os.environ.get("SMA_DAEMON_DB_USER", "sma")
-  password = os.environ.get("SMA_DAEMON_DB_PASSWORD", "")
-  port = os.environ.get("SMA_DAEMON_DB_PORT", "5432")
-  dbname = os.environ.get("SMA_DAEMON_DB_NAME", "sma")
-  if password:
-    return "postgresql://%s:%s@%s:%s/%s" % (user, password, host, port, dbname)
-  return "postgresql://%s@%s:%s/%s" % (user, host, port, dbname)
-
-
-def _db_url_from_env_aliases():
-  """Return db URL from supported direct env vars.
-
-  Preferred order keeps backward compatibility while accepting SMA_DB_URL.
-  """
-  return os.environ.get("SMA_DAEMON_DB_URL") or os.environ.get("SMA_DB_URL")
-
-
 def _create_job_database(db_url, logger):
   """Create the configured job database backend."""
   if db_url.startswith("sqlite:"):
@@ -141,9 +116,10 @@ def run_smoke_test(path_config_manager, ffmpeg_dir, logger):
 def main():
   """Parse CLI arguments, configure the daemon, and start the HTTP server.
 
-  Resolves configuration from CLI flags, environment variables, and
-  the ``Daemon`` config section (in that priority order). Initialises the job database
-  backend, sets up per-config logging and concurrency locks,
+  Resolves runtime options from CLI flags, environment variables, and
+  the ``Daemon`` config section. The job database URL is only loaded from
+  ``daemon.db_url`` in ``sma-ng.yml``. Initialises the job database backend,
+  sets up per-config logging and concurrency locks,
   and then serves requests until interrupted.
   """
   parser = argparse.ArgumentParser(description="SMA-NG Daemon - HTTP webhook server for media conversion")
@@ -162,7 +138,7 @@ def main():
     default=120,
     help="Seconds without a heartbeat before a node is declared stale and its running jobs are requeued (default: 120). Only used with PostgreSQL backend.",
   )
-  parser.add_argument("--api-key", help="API key for authentication (or set SMA_DAEMON_API_KEY env var)")
+  parser.add_argument("--api-key", help="API key for authentication")
   parser.add_argument("--smoke-test", action="store_true", help="Run a dry-run option-generation check against all configured config files at startup, then exit with 0 on success or 1 on failure")
   parser.add_argument(
     "--job-timeout",
@@ -182,17 +158,14 @@ def main():
   config_lock_manager = ConfigLockManager(max_per_config=args.workers, logger=log)
   path_config_manager = PathConfigManager(args.daemon_config, logger=log)
 
-  # Determine API key (priority: CLI arg > env var > config file)
-  api_key = args.api_key or os.environ.get("SMA_DAEMON_API_KEY") or path_config_manager.api_key
+  # Determine API key (priority: CLI arg > config file)
+  api_key = args.api_key or path_config_manager.api_key
 
-  # Determine Basic Auth credentials (priority: env vars > config file)
-  # Note: not accepted on CLI to prevent credentials appearing in ps output.
-  _env_user = os.environ.get("SMA_DAEMON_USERNAME")
-  _env_pass = os.environ.get("SMA_DAEMON_PASSWORD")
-  basic_auth = (_env_user, _env_pass) if _env_user and _env_pass else path_config_manager.basic_auth
+  # Determine Basic Auth credentials from config file.
+  basic_auth = path_config_manager.basic_auth
 
-  # Determine FFmpeg directory (priority: CLI --ffmpeg-dir > env var > config file)
-  ffmpeg_dir = args.ffmpeg_dir or os.environ.get("SMA_DAEMON_FFMPEG_DIR") or path_config_manager.ffmpeg_dir
+  # Determine FFmpeg directory (priority: CLI --ffmpeg-dir > config file)
+  ffmpeg_dir = args.ffmpeg_dir or path_config_manager.ffmpeg_dir
 
   # Determine job timeout (priority: CLI --job-timeout > config; 0 means no timeout)
   job_timeout_seconds = args.job_timeout or path_config_manager.job_timeout_seconds
@@ -206,13 +179,10 @@ def main():
     if args.smoke_test:
       sys.exit(0)
 
-  # Determine database (priority: env var > component env vars > config file)
-  # Note: PostgreSQL URL is not accepted on the CLI to prevent credentials appearing in ps output.
-  db_url = _db_url_from_env_aliases() or _build_db_url_from_env() or path_config_manager.db_url
+  # Determine database from sma-ng.yml only.
+  db_url = path_config_manager.db_url
   if not db_url:
-    log.error(
-      "No database URL configured. Set SMA_DAEMON_DB_URL or SMA_DB_URL (sqlite:////data/sma-ng.db for single-node Docker, or PostgreSQL for cluster mode) or db_url in the Daemon config section"
-    )
+    log.error("No database URL configured. Set daemon.db_url in sma-ng.yml (sqlite:////data/sma-ng.db for single-node Docker, or PostgreSQL for cluster mode).")
     sys.exit(1)
   job_db, db_label = _create_job_database(db_url, log)
 

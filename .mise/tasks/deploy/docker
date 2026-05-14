@@ -19,7 +19,6 @@ init_host_context() {
     dir=$($cfg deploy_dir ~/sma)
     port=$($cfg ssh_port 22)
     key=$($cfg ssh_key "")
-    ffmpeg_dir=$($cfg ffmpeg_dir "")
     auto_create_venv=$($cfg auto_create_venv true)
     venv_dir=$($cfg venv_dir venv)
     python_bin=$($cfg python_bin /usr/bin/python3)
@@ -34,9 +33,6 @@ init_host_context() {
     fi
 
     command_env=""
-    if [ -n "$ffmpeg_dir" ]; then
-        command_env="SMA_DAEMON_FFMPEG_DIR=$ffmpeg_dir"
-    fi
 
     return 0
 }
@@ -136,90 +132,6 @@ ensure_remote_install_dirs() {
     fi
 }
 
-# Idempotently stamp SMA_NODE_NAME=<host> into the daemon.env file used by
-# docker-compose (env_file). Without this the recreated container starts with
-# no SMA_NODE_NAME, the daemon falls through to a generated UUID, and the
-# previously-approved cluster_nodes row is replaced by a new pending one on
-# every `deploy:docker` run. config:roll already does this stamping, but
-# deploy:docker does not depend on config:roll, so it must self-heal.
-# Requires init_host_context (or equivalent) to have populated ssh_opts and
-# ssh_target for the host.
-ensure_remote_node_name() {
-    local host="$1"
-    local install_dir
-    # shellcheck disable=SC2154  # $cfg is populated by init_host_context for the current host
-    install_dir=$($cfg sma_install_dir "/opt/sma")
-    local env_path="${install_dir}/config/daemon.env"
-    local sample_path="${dir}/setup/daemon.env.sample"
-
-    # Pass the use_sudo flag (not the prefix string) — SSH re-tokenizes
-    # positional args and strips the trailing space from "sudo ", which would
-    # leave the remote side running "sudogrep", "sudocat", etc.
-    local use_sudo_flag="false"
-    if [ -n "${sudo_prefix:-}" ]; then
-        use_sudo_flag="true"
-    fi
-
-    echo "  stamping SMA_NODE_NAME=${host} into ${env_path}"
-    # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by the caller; env_path/host/sample_path expand client-side (intentional)
-  ssh $ssh_opts "$ssh_target" "bash -s" "$env_path" "$host" "$sample_path" "$use_sudo_flag" "$remote_user" <<'REMOTE'
-    set -euo pipefail
-    env_path="$1"
-    node_name="$2"
-    sample_path="$3"
-    use_sudo="${4:-false}"
-    owner="${5:-}"
-
-    if [ "$use_sudo" = "true" ]; then
-      _run() { sudo "$@"; }
-    else
-      _run() { "$@"; }
-    fi
-
-    if [ ! -f "$env_path" ]; then
-      if [ -f "$sample_path" ]; then
-        if [ -n "$owner" ]; then
-          _run install -o "$owner" -g "$owner" -m 640 "$sample_path" "$env_path"
-        else
-          _run install -m 640 "$sample_path" "$env_path"
-        fi
-      else
-        _run touch "$env_path"
-        _run chmod 640 "$env_path"
-        if [ -n "$owner" ]; then
-          _run chown "$owner:$owner" "$env_path" 2>/dev/null || _run chown "$owner:" "$env_path"
-        fi
-      fi
-    elif [ -n "$owner" ]; then
-      # Self-heal a previously root-owned daemon.env from older deploys.
-      current_owner=$(stat -c '%U' "$env_path" 2>/dev/null || stat -f '%Su' "$env_path" 2>/dev/null || echo "")
-      if [ -n "$current_owner" ] && [ "$current_owner" != "$owner" ]; then
-        _run chown "$owner:$owner" "$env_path" 2>/dev/null || _run chown "$owner:" "$env_path"
-      fi
-    fi
-
-    desired="SMA_NODE_NAME=${node_name}"
-    current=$(_run grep -E '^[#[:space:]]*SMA_NODE_NAME=' "$env_path" | head -n1 || true)
-
-    if [ "$current" = "$desired" ]; then
-      exit 0
-    fi
-
-    # Build the new contents in a tmp file, then rewrite env_path in place
-    # via tee — this preserves the original file's owner/group/mode rather
-    # than re-creating it as the (sudo) writer.
-    tmp=$(mktemp)
-    trap 'rm -f "$tmp"' EXIT
-    if [ -n "$current" ]; then
-      _run sed -E "0,/^[#[:space:]]*SMA_NODE_NAME=.*/{s|^[#[:space:]]*SMA_NODE_NAME=.*|${desired}|}" "$env_path" > "$tmp"
-    else
-      _run cat "$env_path" > "$tmp"
-      printf '%s\n' "$desired" >> "$tmp"
-    fi
-    _run tee "$env_path" < "$tmp" > /dev/null
-REMOTE
-}
-
 init_docker_host_context() {
     local host="$1"
 
@@ -230,14 +142,8 @@ init_docker_host_context() {
     profile=$($cfg docker_profile "")
     compose_dir=$($cfg docker_compose_dir "$dir/docker")
 
-    sma_db_url=$($cfg db_url "")
-    sma_db_host=$($cfg db_host "")
-    sma_db_port=$($cfg db_port "")
-    sma_db_user=$($cfg db_user "")
-    sma_db_password=$($cfg db_password "")
-    sma_db_name=$($cfg db_name "")
-    sma_image="${SMA_IMAGE:-$($cfg image "")}"
-    sma_image_tag="${SMA_IMAGE_TAG:-$($cfg image_tag "")}"
+    sma_image="${IMAGE:-$($cfg image "")}"
+    sma_image_tag="${IMAGE_TAG:-$($cfg image_tag "")}"
 
     pg_env_str=""
     _append_env() {
@@ -245,15 +151,8 @@ init_docker_host_context() {
             pg_env_str="${pg_env_str}$1=$(printf '%q' "$2") "
         fi
     }
-    _append_env SMA_DAEMON_DB_URL      "$sma_db_url"
-    _append_env SMA_DB_URL             "$sma_db_url"
-    _append_env SMA_DAEMON_DB_HOST     "$sma_db_host"
-    _append_env SMA_DAEMON_DB_PORT     "$sma_db_port"
-    _append_env SMA_DAEMON_DB_USER     "$sma_db_user"
-    _append_env SMA_DAEMON_DB_PASSWORD "$sma_db_password"
-    _append_env SMA_DAEMON_DB_NAME     "$sma_db_name"
-    _append_env SMA_IMAGE              "$sma_image"
-    _append_env SMA_IMAGE_TAG          "$sma_image_tag"
+    _append_env IMAGE              "$sma_image"
+    _append_env IMAGE_TAG          "$sma_image_tag"
 
     if [ "$use_sudo" = "true" ] && [ -n "$pg_env_str" ]; then
         compose_cmd="sudo env ${pg_env_str}docker compose"
@@ -627,17 +526,6 @@ for host in $DEPLOY_HOSTS; do
         continue
     fi
 
-    # Pin the cluster identity into daemon.env before recreating the
-    # container. Without this, a host whose daemon.env was seeded but never
-    # passed through config:roll comes up with no SMA_NODE_NAME, the daemon
-    # generates a fresh UUID, and the previously-approved node row gets
-    # replaced by a new pending one on every redeploy.
-    if ! ensure_remote_node_name "$host"; then
-        echo "ERROR: [$host] could not stamp SMA_NODE_NAME into daemon.env" >&2
-        failed="$failed $host"
-        continue
-    fi
-
     # Make sure Docker itself is on the host before any compose call.
     if ! ensure_remote_docker "$host"; then
         echo "ERROR: [$host] Docker installation failed — aborting" >&2
@@ -654,7 +542,7 @@ for host in $DEPLOY_HOSTS; do
     fi
 
     if docker_profile_is_pg "$profile"; then
-        echo "==> [$host] profile $profile expects external PostgreSQL (SMA_DB_URL/SMA_DAEMON_DB_URL)"
+        echo "==> [$host] profile $profile expects external PostgreSQL in daemon.db-url"
     fi
 
     # Drop legacy per-profile SMA daemon containers (sma-ng-software,

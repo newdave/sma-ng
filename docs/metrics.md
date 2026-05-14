@@ -5,8 +5,8 @@ duration, and compression efficiency across all cluster nodes.
 
 ## Requirements
 
-Cluster metrics require PostgreSQL mode. Set `SMA_DAEMON_DB_URL` (or `daemon.db_url` in
-`sma-ng.yml`) to enable. In standalone (in-memory) mode the metrics page shows an
+Cluster metrics require PostgreSQL mode. Set `daemon.db_url` in `sma-ng.yml`
+to enable. In standalone (in-memory) mode the metrics page shows an
 "unavailable" notice.
 
 ## Accessing Metrics

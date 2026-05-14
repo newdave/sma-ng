@@ -55,8 +55,7 @@ class TestSQLiteJobDatabase:
     db.close()
 
   def test_running_jobs_reset_on_reopen_for_same_node(self, tmp_path, monkeypatch):
-    set_node_id_cache("")
-    monkeypatch.setenv("SMA_NODE_NAME", "node-a")
+    set_node_id_cache("node-a")
     db = _db(tmp_path)
     job_id = db.add_job("/mnt/media/movie.mkv", "/config/sma-ng.yml")
     db.claim_next_job(worker_id=1, node_id="node-a")

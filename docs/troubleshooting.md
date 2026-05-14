@@ -20,11 +20,11 @@ Every application log record is exactly one line. Useful invariants when greppin
 
 - Newlines inside an application message are rendered as a visible `⏎` marker (`first ⏎ second`) so a single record stays on a single line.
 - JSON-shaped substrings are compacted (no whitespace, no `indent=`). A long `daemon` block in a config dump renders as `{"daemon":{"host":"0.0.0.0",...}}` on one line.
-- Records longer than `SMA_LOG_MAX_WIDTH` (default 1024) are truncated with a `…+N` tail marker so you can see how much was dropped. The PostgreSQL `logs` table stores the full untruncated record.
+- Records longer than the built-in 1024 character width cap are truncated with a `…+N` tail marker so you can see how much was dropped. The PostgreSQL `logs` table stores the full untruncated record.
 - Tracebacks from `log.exception(...)` are emitted on subsequent lines, each prefixed with two spaces + `|`. Filter them with `grep '^  |'` to isolate the trace, or `grep -v '^  |'` to drop them.
 - Secrets (`api_key`, `db_url`, `username`, `password`, `node_id`, `apikey`, `token`) are replaced with `***` before the record is written. Add new secret-bearing fields to `resources/daemon/constants.py` so every redaction site picks them up.
 
-The width cap is a per-record format guard, not a database column limit. Override with `SMA_LOG_MAX_WIDTH=4096 python daemon.py …` to relax it during deep debugging.
+The width cap is a per-record format guard, not a database column limit.
 
 You can also view and filter logs through the dashboard log viewer or via the API:
 
@@ -105,14 +105,4 @@ If `Daemon.smoke_test: true` is set in `sma-ng.yml` or `--smoke-test` is passed:
 
 ## Environment Variables
 
-| Variable | Description |
-| --- | --- |
-| `SMA_CONFIG` | Override path to `sma-ng.yml` |
-| `SMA_DAEMON_API_KEY` | Daemon API key |
-| `SMA_DAEMON_DB_URL` | PostgreSQL connection URL for distributed mode |
-| `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` (prepended to PATH) |
-| `SMA_DAEMON_HOST` | Daemon bind host (Docker default: `0.0.0.0`) |
-| `SMA_DAEMON_PORT` | Daemon port (Docker default: `8585`) |
-| `SMA_DAEMON_WORKERS` | Number of concurrent workers (Docker default: `2`) |
-| `SMA_DAEMON_CONFIG` | Path to daemon config, normally `config/sma-ng.yml` |
-| `SMA_DAEMON_LOGS_DIR` | Directory for per-config log files |
+The daemon no longer reads `SMA_*` environment variables for runtime configuration. Use CLI flags for process-level options and `sma-ng.yml` for persistent daemon settings.

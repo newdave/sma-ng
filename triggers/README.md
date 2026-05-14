@@ -33,9 +33,9 @@ All scripts read daemon connection settings from environment variables:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SMA_DAEMON_HOST` | `127.0.0.1` | Daemon hostname or IP |
-| `SMA_DAEMON_PORT` | `8585` | Daemon port |
-| `SMA_DAEMON_API_KEY` | _(none)_ | API key if authentication is enabled |
+| `DAEMON_HOST` | `127.0.0.1` | Daemon hostname or IP |
+| `DAEMON_PORT` | `8585` | Daemon port |
+| `DAEMON_API_KEY` | _(none)_ | API key if authentication is enabled |
 
 ---
 
@@ -123,13 +123,13 @@ Config → Switches → Post-Processing Script (global).
 
 SABnzbd passes arguments positionally: `$1`=path, `$5`=category, `$7`=status.
 
-Set bypass categories via `SMA_BYPASS_CATS` (comma-separated, e.g. `bypass,skip`).
+Set bypass categories via `BYPASS_CATS` (comma-separated, e.g. `bypass,skip`).
 
 ---
 
 ## Torrents
 
-All torrent triggers support bypass labels via `SMA_BYPASS_LABELS` (comma-separated).
+All torrent triggers support bypass labels via `BYPASS_LABELS` (comma-separated).
 
 ### `torrents/deluge.sh`
 

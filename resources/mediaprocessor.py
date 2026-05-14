@@ -1266,6 +1266,8 @@ class MediaProcessor:
     scodecs_image = self.ffprobeSafeCodecs(self.settings.scodec_image)
     self.log.debug("Pool of subtitle image based codecs is %s." % (scodecs_image))
 
+    prefer_non_hi_subs = "hearing_impaired" in [BaseCodec.DISPO_ALTS.get(x, x) for x in self.settings.ignored_subtitle_dispositions] and len(info.subtitle) > 1
+
     if not self.settings.ignore_embedded_subs:
       for s in info.subtitle:
         self.log.info("Subtitle detected for stream %s - %s %s." % (s.index, s.codec, s.metadata["language"]))
@@ -1280,6 +1282,7 @@ class MediaProcessor:
           valid_external_subs,
           ripsubopts,
           tagdata,
+          prefer_non_hi_subs=prefer_non_hi_subs,
           scodecs=scodecs,
           scodecs_image=scodecs_image,
         )
@@ -1295,8 +1298,22 @@ class MediaProcessor:
     if not self.settings.embedonlyinternalsubs:
       valid_external_subs = self.subtitles.scanForExternalSubs(inputfile, swl, valid_external_subs)
 
+    prefer_non_hi_external_subs = prefer_non_hi_subs or (
+      "hearing_impaired" in [BaseCodec.DISPO_ALTS.get(x, x) for x in self.settings.ignored_subtitle_dispositions] and (len(info.subtitle) + len(valid_external_subs)) > 1
+    )
+
     for external_sub in valid_external_subs:
-      self._process_external_sub(external_sub, inputfile, swl, blocked_subtitle_languages, blocked_subtitle_dispositions, subtitle_settings, sources, tagdata)
+      self._process_external_sub(
+        external_sub,
+        inputfile,
+        swl,
+        blocked_subtitle_languages,
+        blocked_subtitle_dispositions,
+        subtitle_settings,
+        sources,
+        tagdata,
+        prefer_non_hi_subs=prefer_non_hi_external_subs,
+      )
 
     try:
       self.setDefaultSubtitleStream(subtitle_settings)
@@ -1919,7 +1936,7 @@ class MediaProcessor:
       return None
     return "copy" if source_codec in pool else pool[0]
 
-  def _subtitle_passes_filter(self, stream, swl, blocked_subtitle_languages, blocked_subtitle_dispositions):
+  def _subtitle_passes_filter(self, stream, swl, blocked_subtitle_languages, blocked_subtitle_dispositions, prefer_non_hi_subs=True):
     """Return True if a subtitle stream passes language and disposition filters.
 
     Works with both embedded stream objects (MediaStreamInfo) and external
@@ -1931,12 +1948,28 @@ class MediaProcessor:
     lang_blocklist = [] if stream.disposition.get("forced") else blocked_subtitle_languages
     if not self.validLanguage(stream.metadata["language"], swl, lang_blocklist):
       return False
-    if not self.validDisposition(stream, self.settings.ignored_subtitle_dispositions, self.settings.unique_subtitle_dispositions, stream.metadata["language"], blocked_subtitle_dispositions):
+    ignored_subtitle_dispositions = list(self.settings.ignored_subtitle_dispositions)
+    if not prefer_non_hi_subs:
+      ignored_subtitle_dispositions = [x for x in ignored_subtitle_dispositions if BaseCodec.DISPO_ALTS.get(x, x) != "hearing_impaired"]
+    if not self.validDisposition(stream, ignored_subtitle_dispositions, self.settings.unique_subtitle_dispositions, stream.metadata["language"], blocked_subtitle_dispositions):
       return False
     return True
 
   def _process_subtitle_stream(
-    self, s, inputfile, info, swl, blocked_subtitle_languages, blocked_subtitle_dispositions, subtitle_settings, valid_external_subs, ripsubopts, tagdata, scodecs=None, scodecs_image=None
+    self,
+    s,
+    inputfile,
+    info,
+    swl,
+    blocked_subtitle_languages,
+    blocked_subtitle_dispositions,
+    subtitle_settings,
+    valid_external_subs,
+    ripsubopts,
+    tagdata,
+    prefer_non_hi_subs=True,
+    scodecs=None,
+    scodecs_image=None,
   ):
     """
     Evaluate a single embedded subtitle stream and update subtitle_settings, valid_external_subs, or ripsubopts.
@@ -1954,7 +1987,7 @@ class MediaProcessor:
     except Exception:
       self.log.exception("Custom subtitle stream skip check error for stream %s." % (s.index))
 
-    if not self._subtitle_passes_filter(s, swl, blocked_subtitle_languages, blocked_subtitle_dispositions):
+    if not self._subtitle_passes_filter(s, swl, blocked_subtitle_languages, blocked_subtitle_dispositions, prefer_non_hi_subs=prefer_non_hi_subs):
       return
 
     try:
@@ -1999,7 +2032,18 @@ class MediaProcessor:
         if self.settings.sub_first_language_stream and not s.disposition["forced"]:
           blocked_subtitle_languages.append(s.metadata["language"])
 
-  def _process_external_sub(self, external_sub, inputfile, swl, blocked_subtitle_languages, blocked_subtitle_dispositions, subtitle_settings, sources, tagdata):
+  def _process_external_sub(
+    self,
+    external_sub,
+    inputfile,
+    swl,
+    blocked_subtitle_languages,
+    blocked_subtitle_dispositions,
+    subtitle_settings,
+    sources,
+    tagdata,
+    prefer_non_hi_subs=True,
+  ):
     """
     Evaluate a single external subtitle file and append a settings entry to subtitle_settings if appropriate.
 
@@ -2021,7 +2065,7 @@ class MediaProcessor:
       self.log.info("Skipping external subtitle file %s, no appropriate codecs found or embed disabled." % (os.path.basename(external_sub.path)))
       return
 
-    if not self._subtitle_passes_filter(stream, swl, blocked_subtitle_languages, blocked_subtitle_dispositions):
+    if not self._subtitle_passes_filter(stream, swl, blocked_subtitle_languages, blocked_subtitle_dispositions, prefer_non_hi_subs=prefer_non_hi_subs):
       return
 
     if external_sub.path not in sources:
@@ -2830,7 +2874,7 @@ class MediaProcessor:
   def _write_ffmpeg_stderr_sidecar(self, e):
     """Persist the full ffmpeg stderr from a failed convert to a sidecar file.
 
-    Per-line log records are truncated at ``SMA_LOG_MAX_WIDTH`` (default
+    Per-line log records are truncated at the built-in width cap (default
     1024 chars), which is fine for streaming progress lines but loses the
     multi-KB stderr that ffmpeg emits on a hard failure (full encoder
     config, the offending option, the parse error). This helper writes

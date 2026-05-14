@@ -529,7 +529,7 @@ class PostgreSQLJobDatabase:
 
   Usage:
       db = PostgreSQLJobDatabase("postgresql://user:pass@host/sma")
-      SMA_DAEMON_DB_URL=postgresql://user:pass@host/sma python daemon.py
+      Set daemon.db_url in sma-ng.yml before starting daemon.py.
   """
 
   is_distributed: bool = True

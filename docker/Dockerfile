@@ -154,17 +154,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     VIRTUAL_ENV=/venv \
-    PATH="/venv/bin:/usr/local/bin:$PATH" \
-    # SMA paths — override via environment or volume mounts
-    SMA_CONFIG=/config/sma-ng.yml \
-    SMA_FFMPEG=/usr/local/bin/ffmpeg \
-    SMA_FFPROBE=/usr/local/bin/ffprobe \
-    # Daemon runtime defaults — override any of these with -e / env_file
-    SMA_DAEMON_HOST=0.0.0.0 \
-    SMA_DAEMON_PORT=8585 \
-    SMA_DAEMON_WORKERS=2 \
-    SMA_DAEMON_CONFIG=/config/sma-ng.yml \
-    SMA_DAEMON_LOGS_DIR=/logs
+    PATH="/venv/bin:/usr/local/bin:$PATH"
 
 # Runtime shared libraries required by the FFmpeg binary.
 # Each entry maps to a --enable-* flag used at build time.
@@ -314,12 +304,12 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8585/health')" || exit 1
 
 # tini as PID 1 → entrypoint seeds /app/config → daemon starts
-# All daemon options are driven by environment variables so they can be
-# overridden at runtime with -e / --env-file without rebuilding the image.
+# Daemon options are passed explicitly; persistent settings live in
+# /config/sma-ng.yml.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["sh", "-c", "exec python3 daemon.py \
-    --host      \"${SMA_DAEMON_HOST}\" \
-    --port      \"${SMA_DAEMON_PORT}\" \
-    --workers   \"${SMA_DAEMON_WORKERS}\" \
-    --daemon-config \"${SMA_DAEMON_CONFIG}\" \
-    --logs-dir  \"${SMA_DAEMON_LOGS_DIR}\""]
+    --host 0.0.0.0 \
+    --port 8585 \
+    --workers 2 \
+    --daemon-config /config/sma-ng.yml \
+    --logs-dir /logs"]

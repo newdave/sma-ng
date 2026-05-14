@@ -60,7 +60,7 @@ def _build_radarr_env(_: argparse.Namespace) -> int:
     "movie": movie,
     "movieFile": {"path": os.environ.get("radarr_moviefile_path", "")},
   }
-  config = os.environ.get("SMA_CONFIG", "").strip()
+  config = os.environ.get("CONFIG", "").strip()
   if config:
     payload["config"] = config
   print(json.dumps(payload))
@@ -93,7 +93,7 @@ def _build_sonarr_env(_: argparse.Namespace) -> int:
     "episodes": episodes,
     "episodeFile": {"path": os.environ.get("sonarr_episodefile_path", "")},
   }
-  config = os.environ.get("SMA_CONFIG", "").strip()
+  config = os.environ.get("CONFIG", "").strip()
   if config:
     payload["config"] = config
   print(json.dumps(payload))

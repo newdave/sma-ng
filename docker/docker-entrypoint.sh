@@ -13,10 +13,6 @@
 # Environment
 # ───────────
 #  CONFIG_DIR   Directory to seed (default: /config)
-#  SMA_FFMPEG   Path to ffmpeg binary (default: /usr/local/bin/ffmpeg)
-#  SMA_FFPROBE  Path to ffprobe binary (default: /usr/local/bin/ffprobe)
-#  SMA_GPU      Force GPU backend: nvenc | qsv | vaapi | software
-#               (default: auto-detected on first run via detect-gpu.sh)
 set -e
 
 CONFIG_DIR="${CONFIG_DIR:-/config}"
@@ -85,8 +81,8 @@ log "defaults/ refreshed with latest samples"
 # Only patch lines that still hold the bare default ("ffmpeg" / "ffprobe").
 # User-defined absolute paths are left alone.
 
-FFMPEG="${SMA_FFMPEG:-/usr/local/bin/ffmpeg}"
-FFPROBE="${SMA_FFPROBE:-/usr/local/bin/ffprobe}"
+FFMPEG="/usr/local/bin/ffmpeg"
+FFPROBE="/usr/local/bin/ffprobe"
 
 CONFIG="$CONFIG_DIR/sma-ng.yml"
 
@@ -108,20 +104,12 @@ _patch_yaml "ffprobe" "$FFPROBE"
 log "FFmpeg: $FFMPEG  FFprobe: $FFPROBE"
 
 # ── GPU auto-detection (first-run only; preserves user edits on restart) ──────
-# SMA_GPU overrides detection at any time; detect-gpu.sh runs on first run only.
-if [ -n "${SMA_GPU:-}" ]; then
-    GPU="$SMA_GPU"
-    tmp="${CONFIG}.patching"
-    sed "s|^    gpu:.*|    gpu: ${GPU}|" "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
-    log "GPU: ${GPU} (from SMA_GPU)"
-elif [ "$_config_is_new" = "true" ]; then
+if [ "$_config_is_new" = "true" ]; then
     GPU="$(/app/scripts/detect-gpu.sh 2>/dev/null || echo software)"
     tmp="${CONFIG}.patching"
     sed "s|^    gpu:.*|    gpu: ${GPU}|" "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
     log "GPU: ${GPU} (auto-detected)"
 fi
-
-export SMA_CONFIG="${SMA_CONFIG:-$CONFIG}"
 
 log "Config directory ready: $CONFIG_DIR"
 

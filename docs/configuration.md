@@ -2,8 +2,8 @@
 
 Configuration lives in `config/sma-ng.yml` (YAML). Copy from
 `setup/sma-ng.yml.sample` or generate it with `make config` /
-`mise run config:generate`. Override the path via the `SMA_CONFIG`
-environment variable.
+`mise run config:generate`. Use command-specific `-c/--config` flags where
+available to load a different file.
 
 INI-format configs and flat-shape YAML are not supported. Pointing
 SMA-NG at a `.ini` file or a flat-shape YAML (top-level `converter:`,

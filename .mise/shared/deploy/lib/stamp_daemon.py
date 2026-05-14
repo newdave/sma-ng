@@ -233,43 +233,5 @@ else:
   print("  WARNING: config/sma-ng.yml not found, skipping daemon YAML stamping")
 
 
-# ── daemon.env ────────────────────────────────────────────────────────────
-env_path = os.path.join(deploy_dir, "config", "daemon.env")
-if os.path.exists(env_path):
-  env_vars = {
-    "SMA_NODE_NAME": node_name,
-    "SMA_DAEMON_API_KEY": api_key,
-    "SMA_DAEMON_DB_URL": db_url,
-    "SMA_DB_URL": db_url,
-    "SMA_DAEMON_DB_USER": db_user,
-    "SMA_DAEMON_DB_PASSWORD": db_pw,
-    "SMA_DAEMON_DB_NAME": db_name,
-    "SMA_DAEMON_FFMPEG_DIR": ffmpeg_dir,
-  }
-  with open(env_path) as f:
-    lines = f.readlines()
-
-  import re
-
-  out = []
-  seen = set()
-  for line in lines:
-    m = re.match(r"^#?\s*((?:SMA_DAEMON_\w+)|SMA_NODE_NAME)\s*=", line)
-    if m:
-      var = m.group(1)
-      val = env_vars.get(var, "")
-      if val and var not in seen:
-        old = line.rstrip()
-        line = f"{var}={val}\n"
-        if old != line.rstrip():
-          print(f"  daemon.env {var}: updated")
-        seen.add(var)
-    out.append(line)
-  for var, val in env_vars.items():
-    if val and var not in seen:
-      print(f"  daemon.env {var}: added")
-      out.append(f"{var}={val}\n")
-  with open(env_path, "w") as f:
-    f.writelines(out)
-else:
-  print("  WARNING: config/daemon.env not found, skipping")
+# daemon.env is intentionally not stamped with runtime overrides. Daemon runtime
+# settings live in config/sma-ng.yml.

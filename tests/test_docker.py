@@ -242,17 +242,15 @@ class TestDockerfileRuntime:
     assert any("daemon.py" in c for c in cmds)
 
   def test_cmd_binds_all_interfaces(self, dockerfile_raw):
-    # Host is set via SMA_DAEMON_HOST env var, referenced in CMD
-    assert "SMA_DAEMON_HOST=0.0.0.0" in dockerfile_raw
-    assert "SMA_DAEMON_HOST" in dockerfile_raw
+    assert "--host 0.0.0.0" in dockerfile_raw
+    assert "SMA_DAEMON_HOST" not in dockerfile_raw
 
   def test_cmd_includes_config_and_logs_paths(self, dockerfile_raw):
-    # Paths are set via env vars, referenced in CMD
-    assert "SMA_DAEMON_CONFIG=/config/sma-ng.yml" in dockerfile_raw
-    assert "SMA_DAEMON_LOGS_DIR=/logs" in dockerfile_raw
+    assert "--daemon-config /config/sma-ng.yml" in dockerfile_raw
+    assert "--logs-dir /logs" in dockerfile_raw
 
-  def test_sma_config_env_points_to_volume(self, dockerfile_raw):
-    assert "SMA_CONFIG=/config/sma-ng.yml" in dockerfile_raw
+  def test_no_sma_config_env_in_image(self, dockerfile_raw):
+    assert "SMA_CONFIG=" not in dockerfile_raw
 
   def test_no_uid_gid_args(self, dockerfile):
     # ubuntu:24.04 built-in 'ubuntu' user is used directly; ARG UID/GID
@@ -315,9 +313,9 @@ class TestComposeBaseService:
     volumes = compose["services"]["sma-software"]["volumes"]
     assert any("/mnt" in str(v) for v in volumes)
 
-  def test_sma_config_env_set(self, compose):
-    env = compose["services"]["sma-software"]["environment"]
-    assert any("SMA_CONFIG" in str(e) for e in env)
+  def test_sma_config_env_not_set(self, compose):
+    env = compose["services"]["sma-software"].get("environment", {}) or {}
+    assert "SMA_CONFIG" not in str(env)
 
   def test_restart_policy(self, compose):
     assert compose["services"]["sma-software"]["restart"] == "unless-stopped"
@@ -360,10 +358,8 @@ class TestComposeGpuProfiles:
     assert "intel-pg" in compose["services"]["sma-intel-pg"]["profiles"]
 
   def test_daemon_services_pin_stable_hostname(self, compose):
-    # Each profile must declare an explicit hostname so the daemon's
-    # node_id (resolved from socket.gethostname()) survives container
-    # recreate. The hostname defaults to a profile-specific value but
-    # honors SMA_NODE_NAME for per-host overrides.
+    # Each profile must declare an explicit hostname so socket.gethostname()
+    # remains stable across container recreates.
     for service_name in (
       "sma-software",
       "sma-software-pg",
@@ -374,7 +370,7 @@ class TestComposeGpuProfiles:
     ):
       hostname = compose["services"][service_name].get("hostname")
       assert hostname, f"{service_name} is missing a hostname pin"
-      assert "${SMA_NODE_NAME" in hostname, f"{service_name} hostname must allow SMA_NODE_NAME override, got {hostname!r}"
+      assert "SMA_NODE_NAME" not in hostname
 
   def test_intel_exposes_render_node(self, compose):
     # Headless QSV/VAAPI encoding needs at least the render node. Either
@@ -426,19 +422,22 @@ class TestComposePostgres:
     for svc in ("sma-software", "sma-intel", "sma-nvidia"):
       assert "depends_on" not in compose["services"][svc]
 
-  def test_non_pg_profiles_default_to_sqlite(self, compose):
+  def test_non_pg_profiles_do_not_set_db_url_env(self, compose):
     for svc in ("sma-software", "sma-intel", "sma-nvidia"):
       svc_def = compose["services"][svc]
       env = svc_def.get("environment", {}) or {}
-      assert env["SMA_DAEMON_DB_URL"] == "${SMA_DAEMON_DB_URL:-${SMA_DB_URL:-sqlite:////data/sma-ng.db}}"
+      assert "SMA_DAEMON_DB_URL" not in env
+      assert "SMA_DB_URL" not in env
       env_files = svc_def.get("env_file", [])
-      assert any((isinstance(ef, dict) and ef.get("path") == "/opt/sma/config/daemon.env") or ef == "/opt/sma/config/daemon.env" for ef in env_files)
+      assert any(
+        (isinstance(ef, dict) and ef.get("path") in ("/opt/sma/config/daemon.env", "../config/daemon.env")) or ef in ("/opt/sma/config/daemon.env", "../config/daemon.env") for ef in env_files
+      )
       assert "/opt/sma/data:/data" in svc_def["volumes"]
 
-  def test_pg_profiles_use_external_db_url_env(self, compose):
+  def test_pg_profiles_do_not_set_db_url_env(self, compose):
     for svc in ("sma-software-pg", "sma-intel-pg", "sma-nvidia-pg"):
-      env = compose["services"][svc]["environment"]
-      assert env["SMA_DAEMON_DB_URL"] == "${SMA_DAEMON_DB_URL:-${SMA_DB_URL:-}}"
+      env = compose["services"][svc].get("environment", {}) or {}
+      assert "SMA_DAEMON_DB_URL" not in env
 
 
 # ──────────────────────────────────────────────────────────────────────────────

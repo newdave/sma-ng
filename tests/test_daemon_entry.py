@@ -117,7 +117,7 @@ class TestRunSmokeTest:
 
 
 class TestDaemonMainArgParsing:
-  """Test that main() correctly reads CLI args and env vars."""
+  """Test that main() correctly reads CLI args, env vars, and daemon config."""
 
   def _run_main_with_args(self, argv, env=None, db_url="postgresql://localhost/sma"):
     """Helper: patch everything to isolate arg/env reading, capture managers created."""
@@ -186,7 +186,7 @@ class TestDaemonMainArgParsing:
       kwargs = mock_ds.call_args[1]
       assert kwargs.get("api_key") == "cli-secret"
 
-  def test_api_key_from_env_var(self):
+  def test_api_key_from_env_var_is_ignored(self):
     pcm = _make_pcm(db_url="postgresql://localhost/sma")
     pcm.api_key = None
     mock_server = _make_server()
@@ -205,9 +205,9 @@ class TestDaemonMainArgParsing:
                       pass
     if mock_ds.call_args:
       kwargs = mock_ds.call_args[1]
-      assert kwargs.get("api_key") == "env-secret"
+      assert kwargs.get("api_key") is None
 
-  def test_api_key_cli_takes_priority_over_env(self):
+  def test_api_key_cli_still_applies_when_env_is_set(self):
     pcm = _make_pcm(db_url="postgresql://localhost/sma")
     pcm.api_key = None
     mock_server = _make_server()
@@ -231,61 +231,37 @@ class TestDaemonMainArgParsing:
   def test_no_db_url_exits_1(self):
     pcm = _make_pcm(db_url=None)
 
-    with patch.dict(os.environ, {}, clear=False):
-      # Remove env vars if set
-      env_backup = os.environ.pop("SMA_DAEMON_DB_URL", None)
-      env_alias_backup = os.environ.pop("SMA_DB_URL", None)
-      try:
-        with patch("sys.argv", ["daemon.py"]):
-          with patch("daemon.PathConfigManager", return_value=pcm):
-            with patch("daemon.ConfigLogManager", return_value=MagicMock()):
-              with patch("daemon.ConfigLockManager", return_value=MagicMock()):
-                with pytest.raises(SystemExit) as exc:
-                  daemon_entry.main()
-      finally:
-        if env_backup is not None:
-          os.environ["SMA_DAEMON_DB_URL"] = env_backup
-        if env_alias_backup is not None:
-          os.environ["SMA_DB_URL"] = env_alias_backup
+    with patch("sys.argv", ["daemon.py"]):
+      with patch("daemon.PathConfigManager", return_value=pcm):
+        with patch("daemon.ConfigLogManager", return_value=MagicMock()):
+          with patch("daemon.ConfigLockManager", return_value=MagicMock()):
+            with pytest.raises(SystemExit) as exc:
+              daemon_entry.main()
     assert exc.value.code == 1
 
-  def test_db_url_from_env_var(self):
+  def test_db_url_from_env_var_is_ignored(self):
     pcm = _make_pcm(db_url=None)
-    mock_server = _make_server()
 
     with patch.dict(os.environ, {"SMA_DAEMON_DB_URL": "postgresql://env/sma"}, clear=False):
       with patch("sys.argv", ["daemon.py"]):
         with patch("daemon.PathConfigManager", return_value=pcm):
           with patch("daemon.ConfigLogManager", return_value=MagicMock()):
             with patch("daemon.ConfigLockManager", return_value=MagicMock()):
-              with patch("daemon.PostgreSQLJobDatabase", return_value=MagicMock()) as mock_db:
-                with patch("daemon.DaemonServer", return_value=mock_server):
-                  with patch("daemon._validate_hwaccel"):
-                    try:
-                      daemon_entry.main()
-                    except (KeyboardInterrupt, SystemExit):
-                      pass
-    if mock_db.call_args:
-      assert mock_db.call_args[0][0] == "postgresql://env/sma"
+              with pytest.raises(SystemExit) as exc:
+                daemon_entry.main()
+    assert exc.value.code == 1
 
-  def test_db_url_from_env_alias_var(self):
+  def test_db_url_from_env_alias_var_is_ignored(self):
     pcm = _make_pcm(db_url=None)
-    mock_server = _make_server()
 
     with patch.dict(os.environ, {"SMA_DB_URL": "postgresql://env-alias/sma"}, clear=False):
       with patch("sys.argv", ["daemon.py"]):
         with patch("daemon.PathConfigManager", return_value=pcm):
           with patch("daemon.ConfigLogManager", return_value=MagicMock()):
             with patch("daemon.ConfigLockManager", return_value=MagicMock()):
-              with patch("daemon.PostgreSQLJobDatabase", return_value=MagicMock()) as mock_db:
-                with patch("daemon.DaemonServer", return_value=mock_server):
-                  with patch("daemon._validate_hwaccel"):
-                    try:
-                      daemon_entry.main()
-                    except (KeyboardInterrupt, SystemExit):
-                      pass
-    if mock_db.call_args:
-      assert mock_db.call_args[0][0] == "postgresql://env-alias/sma"
+              with pytest.raises(SystemExit) as exc:
+                daemon_entry.main()
+    assert exc.value.code == 1
 
   def test_sqlite_db_url_uses_sqlite_backend(self):
     db = MagicMock()
@@ -335,9 +311,9 @@ class TestDaemonMainArgParsing:
                       pass
     if mock_ds.call_args:
       kwargs = mock_ds.call_args[1]
-      assert kwargs.get("ffmpeg_dir") == "/env/ffmpeg"
+      assert kwargs.get("ffmpeg_dir") is None
 
-  def test_basic_auth_from_env_vars(self):
+  def test_basic_auth_from_env_vars_is_ignored(self):
     pcm = _make_pcm(db_url="postgresql://localhost/sma")
     pcm.basic_auth = None
     mock_server = _make_server()
@@ -356,7 +332,7 @@ class TestDaemonMainArgParsing:
                       pass
     if mock_ds.call_args:
       kwargs = mock_ds.call_args[1]
-      assert kwargs.get("basic_auth") == ("user", "pass")
+      assert kwargs.get("basic_auth") is None
 
   def test_smoke_test_cli_flag_exits_0(self):
     pcm = _make_pcm()

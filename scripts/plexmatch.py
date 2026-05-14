@@ -12,14 +12,11 @@ Options:
     -imdb <id>              IMDB ID override (tt prefix optional)
     -s, --season <n>        Season number (TV)
     -e, --episode <n>       Episode number (TV)
-    -c, --config <path>     Override sma-ng.yml location (also: $SMA_CONFIG)
+    -c, --config <path>     Override sma-ng.yml location
     --movie                 Force movie type when auto-detection is ambiguous
     --tv                    Force TV type when auto-detection is ambiguous
     -r, --recursive         Process all media files under a directory
     -h, --help              Show this help
-
-Environment:
-    SMA_CONFIG              Path to sma-ng.yml (overrides default location)
 
 Each input file is processed independently: metadata is fetched from TMDB using
 guessit filename inference (or the supplied IDs), then update_plexmatch() writes
@@ -184,14 +181,10 @@ def main():
 
   log = _setup_logging(args.verbose)
 
-  # Override config path if supplied
-  if args.config:
-    os.environ["SMA_CONFIG"] = args.config
-
   from resources.readsettings import ReadSettings
 
   try:
-    settings = ReadSettings()
+    settings = ReadSettings(configFile=args.config)
   except Exception:
     log.exception("Failed to load settings")
     sys.exit(1)

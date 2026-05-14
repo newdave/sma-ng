@@ -3,11 +3,11 @@
 # Source this file from Bash after the sma-ng container is running:
 #   source /opt/sma/sma-ng-docker-aliases.sh
 
-SMA_CONTAINER="${SMA_CONTAINER:-sma-ng}"
-SMA_DOCKER="${SMA_DOCKER:-docker}"
+CONTAINER="${CONTAINER:-sma-ng}"
+DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 _sma_exec() {
-  "$SMA_DOCKER" exec -it "$SMA_CONTAINER" "$@"
+  "$DOCKER_BIN" exec -it "$CONTAINER" "$@"
 }
 
 sma_manual() {
@@ -47,7 +47,7 @@ sma_rename() {
 }
 
 sma_logs() {
-  "$SMA_DOCKER" logs -f "$SMA_CONTAINER" "$@"
+  "$DOCKER_BIN" logs -f "$CONTAINER" "$@"
 }
 
 alias sma-shell='_sma_exec bash'

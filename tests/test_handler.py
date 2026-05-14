@@ -937,19 +937,19 @@ class TestParseSonarrBody:
 
   def test_empty_body_returns_400(self):
     h = _make_handler(headers={"Content-Length": "0"})
-    path, args = h._parse_sonarr_body()
+    path, args, profile, tag_ids = h._parse_sonarr_body()
     assert path is None
     assert h._response_code == 400
 
   def test_test_event_returns_200(self):
     h = self._sonarr_body({"eventType": "Test"})
-    path, args = h._parse_sonarr_body()
+    path, args, profile, tag_ids = h._parse_sonarr_body()
     assert path is None
     assert h._response_code == 200
 
   def test_unsupported_event_returns_400(self):
     h = self._sonarr_body({"eventType": "Grab"})
-    path, args = h._parse_sonarr_body()
+    path, args, profile, tag_ids = h._parse_sonarr_body()
     assert path is None
     assert h._response_code == 400
 
@@ -961,11 +961,13 @@ class TestParseSonarrBody:
       "episodes": [{"seasonNumber": 1, "episodeNumber": 1}],
     }
     h = self._sonarr_body(payload)
-    path, args = h._parse_sonarr_body()
+    path, args, profile, tag_ids = h._parse_sonarr_body()
     assert path == "/tv/Show/S01E01.mkv"
     assert "--tv" in args
     assert "-tvdb" in args
     assert "12345" in args
+    assert profile is None
+    assert tag_ids == []
 
   def test_missing_episode_file_path_returns_400(self):
     payload = {
@@ -975,7 +977,7 @@ class TestParseSonarrBody:
       "episodes": [],
     }
     h = self._sonarr_body(payload)
-    path, args = h._parse_sonarr_body()
+    path, args, profile, tag_ids = h._parse_sonarr_body()
     assert path is None
     assert h._response_code == 400
 
@@ -987,7 +989,7 @@ class TestParseSonarrBody:
       "episodes": [],
     }
     h = self._sonarr_body(payload)
-    path, args = h._parse_sonarr_body()
+    path, args, profile, tag_ids = h._parse_sonarr_body()
     assert "-imdb" in args
     assert "tt0472308" in args
 
@@ -999,7 +1001,7 @@ class TestParseSonarrBody:
       "episodes": [],
     }
     h = self._sonarr_body(payload)
-    path, args = h._parse_sonarr_body()
+    path, args, profile, tag_ids = h._parse_sonarr_body()
     assert "-tvdb" in args
     assert "350665" in args
 
@@ -1011,7 +1013,7 @@ class TestParseSonarrBody:
       "episodes": [],
     }
     h = self._sonarr_body(payload)
-    path, args = h._parse_sonarr_body()
+    path, args, profile, tag_ids = h._parse_sonarr_body()
     assert "12345" in args
     assert "999" not in args
 
@@ -1023,16 +1025,41 @@ class TestParseSonarrBody:
       "episodes": [{"seasonNumber": 3, "episodeNumber": 10}],
     }
     h = self._sonarr_body(payload)
-    path, args = h._parse_sonarr_body()
+    path, args, profile, tag_ids = h._parse_sonarr_body()
     assert "-s" in args
     assert "3" in args
     assert "-e" in args
     assert "10" in args
 
+  def test_extracts_profile_override_from_tag_label(self):
+    payload = {
+      "eventType": "Download",
+      "episodeFile": {"path": "/tv/ep.mkv"},
+      "series": {"tags": ["sma-profile-lq"]},
+      "episodes": [],
+    }
+    h = self._sonarr_body(payload)
+    path, args, profile, tag_ids = h._parse_sonarr_body()
+    assert path == "/tv/ep.mkv"
+    assert profile == "lq"
+    assert tag_ids == []
+
+  def test_extracts_tag_ids_for_later_lookup(self):
+    payload = {
+      "eventType": "Download",
+      "episodeFile": {"path": "/tv/ep.mkv"},
+      "series": {"tags": [101, "202"]},
+      "episodes": [],
+    }
+    h = self._sonarr_body(payload)
+    path, args, profile, tag_ids = h._parse_sonarr_body()
+    assert profile is None
+    assert tag_ids == [101, 202]
+
   def test_invalid_json_returns_400(self):
     body = b"not json"
     h = _make_handler(body=body, headers={"Content-Length": str(len(body)), "Content-Type": "application/json"})
-    path, args = h._parse_sonarr_body()
+    path, args, profile, tag_ids = h._parse_sonarr_body()
     assert path is None
     assert h._response_code == 400
 
@@ -1053,19 +1080,19 @@ class TestParseRadarrBody:
 
   def test_empty_body_returns_400(self):
     h = _make_handler(headers={"Content-Length": "0"})
-    path, args = h._parse_radarr_body()
+    path, args, profile, tag_ids = h._parse_radarr_body()
     assert path is None
     assert h._response_code == 400
 
   def test_test_event_returns_200(self):
     h = self._radarr_body({"eventType": "Test"})
-    path, args = h._parse_radarr_body()
+    path, args, profile, tag_ids = h._parse_radarr_body()
     assert path is None
     assert h._response_code == 200
 
   def test_unsupported_event_returns_400(self):
     h = self._radarr_body({"eventType": "Grab"})
-    path, args = h._parse_radarr_body()
+    path, args, profile, tag_ids = h._parse_radarr_body()
     assert path is None
     assert h._response_code == 400
 
@@ -1076,11 +1103,13 @@ class TestParseRadarrBody:
       "movie": {"tmdbId": 603},
     }
     h = self._radarr_body(payload)
-    path, args = h._parse_radarr_body()
+    path, args, profile, tag_ids = h._parse_radarr_body()
     assert path == "/movies/Matrix.mkv"
     assert "--movie" in args
     assert "-tmdb" in args
     assert "603" in args
+    assert profile is None
+    assert tag_ids == []
 
   def test_missing_movie_file_path_returns_400(self):
     payload = {
@@ -1089,7 +1118,7 @@ class TestParseRadarrBody:
       "movie": {},
     }
     h = self._radarr_body(payload)
-    path, args = h._parse_radarr_body()
+    path, args, profile, tag_ids = h._parse_radarr_body()
     assert path is None
     assert h._response_code == 400
 
@@ -1100,7 +1129,7 @@ class TestParseRadarrBody:
       "movie": {"imdbId": "tt0133093"},
     }
     h = self._radarr_body(payload)
-    path, args = h._parse_radarr_body()
+    path, args, profile, tag_ids = h._parse_radarr_body()
     assert "-imdb" in args
     assert "tt0133093" in args
 
@@ -1111,7 +1140,7 @@ class TestParseRadarrBody:
       "movie": {},
     }
     h = self._radarr_body(payload)
-    path, args = h._parse_radarr_body()
+    path, args, profile, tag_ids = h._parse_radarr_body()
     assert "-tmdb" in args
     assert "603" in args
 
@@ -1122,14 +1151,26 @@ class TestParseRadarrBody:
       "movie": {"tmdbId": 603},
     }
     h = self._radarr_body(payload)
-    path, args = h._parse_radarr_body()
+    path, args, profile, tag_ids = h._parse_radarr_body()
     assert "603" in args
     assert "999" not in args
+
+  def test_extracts_profile_override_from_movie_tag_label(self):
+    payload = {
+      "eventType": "Download",
+      "movieFile": {"path": "/movies/film.mkv"},
+      "movie": {"tags": ["sma-profile-rq"]},
+    }
+    h = self._radarr_body(payload)
+    path, args, profile, tag_ids = h._parse_radarr_body()
+    assert path == "/movies/film.mkv"
+    assert profile == "rq"
+    assert tag_ids == []
 
   def test_invalid_json_returns_400(self):
     body = b"not json"
     h = _make_handler(body=body, headers={"Content-Length": str(len(body)), "Content-Type": "application/json"})
-    path, args = h._parse_radarr_body()
+    path, args, profile, tag_ids = h._parse_radarr_body()
     assert path is None
     assert h._response_code == 400
 
@@ -1969,6 +2010,41 @@ class TestHandleSonarrWebhook:
       h._handle_sonarr_webhook()
     assert h._response_code == 500
 
+  def test_applies_profile_override_from_arr_tag_lookup(self, tmp_path):
+    media = tmp_path / "ep.mkv"
+    media.write_text("x")
+    body = json.dumps(
+      {
+        "eventType": "Download",
+        "episodeFile": {"path": str(media)},
+        "series": {"tags": [11]},
+        "episodes": [],
+      }
+    ).encode()
+    h = _make_handler(
+      method="POST",
+      body=body,
+      headers={"Content-Length": str(len(body)), "Content-Type": "application/json"},
+    )
+    h.server.path_config_manager.get_services_for_path.return_value = ["sonarr.main"]
+    h.server.path_config_manager.get_service_instance.return_value = {"url": "http://sonarr.local", "apikey": "secret"}
+    h.server.path_config_manager.get_profile_for_path.return_value = "hq"
+    h.server.job_db.add_job.return_value = 1
+
+    with (
+      patch("resources.daemon.handler.requests.get") as mock_get,
+      patch("os.path.exists", return_value=True),
+      patch("os.path.isdir", return_value=False),
+    ):
+      mock_get.return_value.raise_for_status.return_value = None
+      mock_get.return_value.json.return_value = [{"id": 11, "label": "sma-profile-lq"}]
+      h._handle_sonarr_webhook()
+
+    queued_args = h.server.job_db.add_job.call_args[0][2]
+    assert "--profile" in queued_args
+    assert "lq" in queued_args
+    assert "hq" not in queued_args
+
 
 class TestHandleRadarrWebhook:
   def test_test_event_returns_200(self):
@@ -1992,6 +2068,32 @@ class TestHandleRadarrWebhook:
     with patch("os.path.exists", return_value=True), patch("os.path.isdir", return_value=False):
       h._handle_radarr_webhook()
     assert h._response_code == 500
+
+  def test_applies_profile_override_from_movie_tag_label(self, tmp_path):
+    media = tmp_path / "film.mkv"
+    media.write_text("x")
+    body = json.dumps(
+      {
+        "eventType": "Download",
+        "movieFile": {"path": str(media)},
+        "movie": {"tags": ["sma-profile-rq"]},
+      }
+    ).encode()
+    h = _make_handler(
+      method="POST",
+      body=body,
+      headers={"Content-Length": str(len(body)), "Content-Type": "application/json"},
+    )
+    h.server.path_config_manager.get_profile_for_path.return_value = "hq"
+    h.server.job_db.add_job.return_value = 1
+
+    with patch("os.path.exists", return_value=True), patch("os.path.isdir", return_value=False):
+      h._handle_radarr_webhook()
+
+    queued_args = h.server.job_db.add_job.call_args[0][2]
+    assert "--profile" in queued_args
+    assert "rq" in queued_args
+    assert "hq" not in queued_args
 
 
 # ---------------------------------------------------------------------------

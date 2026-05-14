@@ -244,15 +244,15 @@ class TestFFmpegPatching:
     config = open(os.path.join(empty_config, "sma-ng.yml")).read()
     assert "    ffprobe: /usr/local/bin/ffprobe" in config
 
-  def test_custom_ffmpeg_path_via_env(self, empty_config):
+  def test_custom_ffmpeg_path_env_is_ignored(self, empty_config):
     _run(empty_config, env_extra={"SMA_FFMPEG": "/opt/bin/ffmpeg"})
     config = open(os.path.join(empty_config, "sma-ng.yml")).read()
-    assert "    ffmpeg: /opt/bin/ffmpeg" in config
+    assert "    ffmpeg: /usr/local/bin/ffmpeg" in config
 
-  def test_custom_ffprobe_path_via_env(self, empty_config):
+  def test_custom_ffprobe_path_env_is_ignored(self, empty_config):
     _run(empty_config, env_extra={"SMA_FFPROBE": "/opt/bin/ffprobe"})
     config = open(os.path.join(empty_config, "sma-ng.yml")).read()
-    assert "    ffprobe: /opt/bin/ffprobe" in config
+    assert "    ffprobe: /usr/local/bin/ffprobe" in config
 
   def test_user_custom_ffmpeg_path_preserved(self, populated_config):
     """If the user has already set a custom path, the patch must not change it."""

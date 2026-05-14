@@ -102,7 +102,7 @@ _ANSI_RESET = "\033[0m"
 # Goals (see docs/brainstorming/2026-04-27-logging-refactor.md):
 #   - Every application log record fits on exactly one line on disk.
 #   - JSON-shaped substrings render compactly (no indent=).
-#   - Records exceeding SMA_LOG_MAX_WIDTH are truncated with a "…+N" suffix.
+#   - Records exceeding the built-in width cap are truncated with a "…+N" suffix.
 #   - Tracebacks (exc_info) are emitted on subsequent lines, each prefixed
 #     with two spaces + "| " so they're greppable as a group while leaving
 #     the application-level message a single line.
@@ -301,10 +301,7 @@ class SingleLineFormatter(logging.Formatter):
   def __init__(self, fmt=None, datefmt=None, style="%", max_width=None):
     super().__init__(fmt, datefmt, style)  # type: ignore[arg-type]
     if max_width is None:
-      try:
-        max_width = int(os.environ.get("SMA_LOG_MAX_WIDTH", _DEFAULT_MAX_WIDTH))
-      except (TypeError, ValueError):
-        max_width = _DEFAULT_MAX_WIDTH
+      max_width = _DEFAULT_MAX_WIDTH
     self._max_width = max_width
     self._redact_pattern = _build_text_redact_pattern(_redact_keys())
 

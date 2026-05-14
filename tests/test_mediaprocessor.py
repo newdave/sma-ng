@@ -795,7 +795,7 @@ class TestFFMpegStderrSidecar:
     assert "ffmpeg cmd:" in contents
     assert "ffmpeg -i in.mkv out.mp4" in contents
     assert "Error opening output files: Invalid argument" in contents
-    # Full payload preserved (not truncated at SMA_LOG_MAX_WIDTH)
+    # Full payload preserved (not truncated at the log formatter width cap)
     assert "X" * 8000 in contents
 
   def test_returns_none_when_no_output(self, tmp_path):
@@ -3960,6 +3960,30 @@ class TestSubtitlePassesFilter:
     mp.settings.force_subtitle_defaults = True
     s = self._make_stream("deu", disposition={"default": True, "forced": False, "comment": False})
     assert mp._subtitle_passes_filter(s, ["eng"], [], []) is True
+
+  def test_hearing_impaired_filtered_when_multiple_subs(self):
+    mp = self._make_mp()
+    mp.settings.ignored_subtitle_dispositions = ["comment", "hearing_impaired"]
+    s = self._make_stream("eng", disposition={"default": False, "forced": False, "comment": False, "hearing_impaired": True})
+    assert mp._subtitle_passes_filter(s, ["eng"], [], [], prefer_non_hi_subs=True) is False
+
+  def test_hearing_impaired_kept_when_single_sub(self):
+    mp = self._make_mp()
+    mp.settings.ignored_subtitle_dispositions = ["comment", "hearing_impaired"]
+    s = self._make_stream("eng", disposition={"default": False, "forced": False, "comment": False, "hearing_impaired": True})
+    assert mp._subtitle_passes_filter(s, ["eng"], [], [], prefer_non_hi_subs=False) is True
+
+  def test_hearing_impaired_filtered_when_multiple_subs(self):
+    mp = self._make_mp()
+    mp.settings.ignored_subtitle_dispositions = ["comment", "hearing_impaired"]
+    s = self._make_stream("eng", disposition={"default": False, "forced": False, "comment": False, "hearing_impaired": True})
+    assert mp._subtitle_passes_filter(s, ["eng"], [], [], prefer_non_hi_subs=True) is False
+
+  def test_hearing_impaired_kept_when_single_sub(self):
+    mp = self._make_mp()
+    mp.settings.ignored_subtitle_dispositions = ["comment", "hearing_impaired"]
+    s = self._make_stream("eng", disposition={"default": False, "forced": False, "comment": False, "hearing_impaired": True})
+    assert mp._subtitle_passes_filter(s, ["eng"], [], [], prefer_non_hi_subs=False) is True
 
 
 # ---------------------------------------------------------------------------

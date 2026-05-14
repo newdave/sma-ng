@@ -1,14 +1,14 @@
 # ── Daemon settings ──────────────────────────────────────────────────
 # Only used when running daemon.py. manual.py ignores this section.
-# Per-flag precedence: CLI > env (SMA_DAEMON_*) > sma-ng.yml > default.
+# Per-flag precedence: CLI > sma-ng.yml > default.
 daemon:
   host: 0.0.0.0
   port: 8585
   workers: 4
   api-key:
-  # Single-node Docker defaults to sqlite:////data/sma-ng.db via compose.
-  # Use postgresql://... here or SMA_DAEMON_DB_URL for clustered deployments.
-  db-url:
+  # Use sqlite:////data/sma-ng.db for single-node Docker or postgresql://...
+  # for clustered deployments.
+  db-url: sqlite:////data/sma-ng.db
   ffmpeg-dir:
   node-id:
   username: ''

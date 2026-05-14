@@ -9,10 +9,10 @@
 #          %N = torrent name, %I = info hash
 #
 # Configure daemon connection via environment variables:
-#   SMA_DAEMON_HOST     Daemon host (default: 127.0.0.1)
-#   SMA_DAEMON_PORT     Daemon port (default: 8585)
-#   SMA_DAEMON_API_KEY  API key if authentication is enabled
-#   SMA_BYPASS_LABELS   Comma-separated label prefixes to skip (default: bypass)
+#   DAEMON_HOST     Daemon host (default: 127.0.0.1)
+#   DAEMON_PORT     Daemon port (default: 8585)
+#   DAEMON_API_KEY  API key if authentication is enabled
+#   BYPASS_LABELS   Comma-separated label prefixes to skip (default: bypass)
 
 set -euo pipefail
 
@@ -20,10 +20,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../lib/common.sh
 . "${SCRIPT_DIR}/../lib/common.sh"
 
-SMA_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
-SMA_PORT="${SMA_DAEMON_PORT:-8585}"
-SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
-BYPASS_LABELS="${SMA_BYPASS_LABELS:-bypass}"
+DAEMON_HOST_VALUE="${DAEMON_HOST:-127.0.0.1}"
+DAEMON_PORT_VALUE="${DAEMON_PORT:-8585}"
+DAEMON_BASE="http://${DAEMON_HOST_VALUE}:${DAEMON_PORT_VALUE}"
+BYPASS_LABELS="${BYPASS_LABELS:-bypass}"
 sma_init_daemon
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ submit_file() {
         -H "Content-Type: application/json" \
         "${AUTH_ARGS[@]}" \
         -d "$payload" \
-        "${SMA_BASE}/webhook/generic" > /dev/null
+        "${DAEMON_BASE}/webhook/generic" > /dev/null
 }
 
 submit_path() {

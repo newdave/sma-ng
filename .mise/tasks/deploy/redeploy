@@ -102,7 +102,7 @@ failed=""
 for host in $DEPLOY_HOSTS; do
   echo ""
   echo "==> [$host] redeploying ${DEPLOY_IMAGE}:${DEPLOY_IMAGE_TAG}"
-  if ! SMA_IMAGE="$DEPLOY_IMAGE" SMA_IMAGE_TAG="$DEPLOY_IMAGE_TAG" HOST="$host" mise run deploy:docker; then
+  if ! IMAGE="$DEPLOY_IMAGE" IMAGE_TAG="$DEPLOY_IMAGE_TAG" HOST="$host" mise run deploy:docker; then
     failed="$failed $host"
   fi
 done
