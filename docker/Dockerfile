@@ -139,7 +139,7 @@ COPY pyproject.toml ./
 COPY README.md ./
 
 RUN python3 -m venv /venv \
-    && /venv/bin/pip install --upgrade pip \
+    && /venv/bin/pip install --upgrade pip setuptools wheel \
     && /venv/bin/pip install --no-warn-script-location -r requirements.txt
 
 # ──────────────────────────────────────────────────────────────────────────────
