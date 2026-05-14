@@ -4,13 +4,13 @@
 # Submits a conversion job to the SMA-NG daemon webhook and waits for completion.
 # Configure via environment variables:
 #
-#   SMA_DAEMON_HOST     Daemon host (default: 127.0.0.1)
-#   SMA_DAEMON_PORT     Daemon port (default: 8585)
-#   SMA_DAEMON_API_KEY  API key if token authentication is enabled
-#   SMA_DAEMON_USERNAME Username if HTTP Basic Auth is enabled
-#   SMA_DAEMON_PASSWORD Password if HTTP Basic Auth is enabled
-#   SMA_POLL_INTERVAL   Seconds between status checks (default: 5)
-#   SMA_TIMEOUT         Max seconds to wait for completion (default: 0 = unlimited)
+#   DAEMON_HOST     Daemon host (default: 127.0.0.1)
+#   DAEMON_PORT     Daemon port (default: 8585)
+#   DAEMON_API_KEY  API key if token authentication is enabled
+#   DAEMON_USERNAME Username if HTTP Basic Auth is enabled
+#   DAEMON_PASSWORD Password if HTTP Basic Auth is enabled
+#   POLL_INTERVAL   Seconds between status checks (default: 5)
+#   TIMEOUT         Max seconds to wait for completion (default: 0 = unlimited)
 #
 # Sonarr environment variables are provided automatically when the script is
 # called as a Sonarr Custom Script connection.
@@ -34,19 +34,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ── configuration (override with environment variables) ───────────────────────
 
-SMA_DAEMON_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
-SMA_DAEMON_PORT="${SMA_DAEMON_PORT:-8585}"
-SMA_DAEMON_API_KEY="${SMA_DAEMON_API_KEY:-}"
-SMA_DAEMON_USERNAME="${SMA_DAEMON_USERNAME:-}"
-SMA_DAEMON_PASSWORD="${SMA_DAEMON_PASSWORD:-}"
-SMA_POLL_INTERVAL="${SMA_POLL_INTERVAL:-5}"
-SMA_TIMEOUT="${SMA_TIMEOUT:-0}"
+DAEMON_HOST="${DAEMON_HOST:-127.0.0.1}"
+DAEMON_PORT="${DAEMON_PORT:-8585}"
+DAEMON_API_KEY="${DAEMON_API_KEY:-}"
+DAEMON_USERNAME="${DAEMON_USERNAME:-}"
+DAEMON_PASSWORD="${DAEMON_PASSWORD:-}"
+POLL_INTERVAL="${POLL_INTERVAL:-5}"
+TIMEOUT="${TIMEOUT:-0}"
 
-SMA_HOST="$SMA_DAEMON_HOST"
-SMA_PORT="$SMA_DAEMON_PORT"
-SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
-POLL_INTERVAL="$SMA_POLL_INTERVAL"
-TIMEOUT="$SMA_TIMEOUT"
+DAEMON_HOST_VALUE="$DAEMON_HOST"
+DAEMON_PORT_VALUE="$DAEMON_PORT"
+DAEMON_BASE="http://${DAEMON_HOST_VALUE}:${DAEMON_PORT_VALUE}"
+POLL_INTERVAL="$POLL_INTERVAL"
+TIMEOUT="$TIMEOUT"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -86,34 +86,34 @@ EPISODE_NUMBERS="${sonarr_episodefile_episodenumbers:-}"
 log "Input file: ${INPUTFILE}"
 log "TVDB ID: ${sonarr_series_tvdbid:-}, S$(printf '%02d' "${SEASON:-0}")E$(echo "${EPISODE_NUMBERS:-0}" | cut -d, -f1 | xargs printf '%02d')"
 
-PAYLOAD=$(python3 "$SMA_JSON_TOOL" build-sonarr-env)
+PAYLOAD=$(python3 "$JSON_TOOL" build-sonarr-env)
 
 # ── submit job ─────────────────────────────────────────────────────────────────
 
-log "Submitting job to ${SMA_BASE}/webhook/sonarr..."
+log "Submitting job to ${DAEMON_BASE}/webhook/sonarr..."
 
 HTTP_CODE=$(curl -s -o /tmp/sma_response.json -w "%{http_code}" -X POST \
     -H "Content-Type: application/json" \
     "${AUTH_ARGS[@]}" \
     -d "$PAYLOAD" \
-    "${SMA_BASE}/webhook/sonarr" 2>/dev/null) || HTTP_CODE="000"
+    "${DAEMON_BASE}/webhook/sonarr" 2>/dev/null) || HTTP_CODE="000"
 
 RESPONSE=$(cat /tmp/sma_response.json 2>/dev/null || true)
 
 if [[ "$HTTP_CODE" == "000" ]]; then
-    log "ERROR: Failed to connect to SMA-NG daemon at ${SMA_BASE}. Is the daemon running?"
+    log "ERROR: Failed to connect to SMA-NG daemon at ${DAEMON_BASE}. Is the daemon running?"
     exit 1
 elif [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
     # Show which auth vars are set (mask secrets).
-    if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
-        _key_hint="SMA_DAEMON_API_KEY=${SMA_DAEMON_API_KEY:0:4}**** (set)"
+    if [[ -n "${DAEMON_API_KEY:-}" ]]; then
+        _key_hint="DAEMON_API_KEY=${DAEMON_API_KEY:0:4}**** (set)"
     else
-        _key_hint="SMA_DAEMON_API_KEY=(not set)"
+        _key_hint="DAEMON_API_KEY=(not set)"
     fi
-    if [[ -n "${SMA_DAEMON_USERNAME:-}" ]]; then
-        _user_hint="SMA_DAEMON_USERNAME=${SMA_DAEMON_USERNAME} SMA_DAEMON_PASSWORD=$([ -n "${SMA_DAEMON_PASSWORD:-}" ] && echo '[set]' || echo '[not set]')"
+    if [[ -n "${DAEMON_USERNAME:-}" ]]; then
+        _user_hint="DAEMON_USERNAME=${DAEMON_USERNAME} DAEMON_PASSWORD=$([ -n "${DAEMON_PASSWORD:-}" ] && echo '[set]' || echo '[not set]')"
     else
-        _user_hint="SMA_DAEMON_USERNAME=(not set)"
+        _user_hint="DAEMON_USERNAME=(not set)"
     fi
     log "ERROR: Daemon rejected request (HTTP ${HTTP_CODE}). Auth state: ${_key_hint}  ${_user_hint}"
     exit 1

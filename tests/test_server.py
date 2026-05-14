@@ -512,13 +512,13 @@ class TestDaemonServerReloadConfig:
       server.reload_config()
     assert server.api_key == "cli-key"
 
-  def test_reload_applies_env_api_key_when_no_cli_key(self, tmp_path):
+  def test_reload_ignores_env_api_key_when_no_cli_key(self, tmp_path):
     server, pcm, _ = self._make_reloadable_server(tmp_path)
     server._cli_api_key = None
     pcm.api_key = "config-key"
     with patch("resources.daemon.server.ScannerThread"), patch("resources.daemon.server.RecycleBinCleanerThread"), patch.dict("os.environ", {"SMA_DAEMON_API_KEY": "env-key"}):
       server.reload_config()
-    assert server.api_key == "env-key"
+    assert server.api_key == "config-key"
 
   def test_reload_updates_worker_runtime_settings(self, tmp_path):
     server, pcm, _ = self._make_reloadable_server(tmp_path)

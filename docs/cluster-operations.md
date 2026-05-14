@@ -313,7 +313,7 @@ need to re-approve them via `/admin`.
 
 | Profile | GPU stack | Bundled Postgres? | Use on |
 |---|---|---|---|
-| `software` | none (CPU only) | no — uses `db_url` from env | a node without GPU + with an external DB |
+| `software` | none (CPU only) | no — uses `daemon.db_url` from `sma-ng.yml` | a node without GPU + with an external DB |
 | `software-pg` | none (CPU only) | yes (`sma-pgsql` service) | a single-node deployment with no GPU |
 | `intel` | Intel QSV / VAAPI | no | a slave with Intel GPU |
 | `intel-pg` | Intel QSV / VAAPI | yes | the master in an Intel-GPU cluster |

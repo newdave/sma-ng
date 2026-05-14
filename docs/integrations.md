@@ -55,7 +55,7 @@ SMA-NG extracts `movieFile.path` and `movie.tmdbId` (or `imdbId` as fallback) an
    - Path: `/bin/bash`
    - Arguments: full path to `triggers/media_managers/radarr.sh`
 
-**Per-instance config override:** Same as Sonarr — set `SMA_CONFIG` in Radarr's environment.
+**Per-instance routing:** Same as Sonarr; choose instances with `daemon.routing` rules in `sma-ng.yml`.
 
 ### Multiple Instances
 

@@ -50,4 +50,4 @@ def resolve_node_id() -> str:
   """Return the stable cluster node identifier for this daemon instance."""
   if _node_id_cache:
     return _node_id_cache
-  return os.environ.get("SMA_NODE_NAME", "").strip() or socket.gethostname()
+  return socket.gethostname()

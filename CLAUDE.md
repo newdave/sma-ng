@@ -101,7 +101,7 @@ Run the smallest meaningful check for the files touched.
 - New config field: update `resources/config_schema.py`; regenerate `setup/sma-ng.yml.sample` with
   `mise run config:sample`; add `resources/readsettings.py` projection only for legacy `settings.*` consumers.
 - New daemon option: update `daemon.py`, `resources/daemon/config.py`, `setup/sma-ng.yml.sample`, and
-  `docs/daemon.md`; use `SMA_DAEMON_*` env naming.
+  `docs/daemon.md`; daemon runtime settings should live in `sma-ng.yml` or explicit CLI flags.
 - New daemon endpoint: update `resources/daemon/handler.py` route tables and handler tests.
 - New downloader/media-manager integration: add script under `triggers/`; keep Python logic in helper modules; add
   schema/sample/docs support as needed.
@@ -113,7 +113,8 @@ Run the smallest meaningful check for the files touched.
 The main config is YAML: `config/sma-ng.yml` copied from `setup/sma-ng.yml.sample`.
 Top-level buckets are `daemon:`, `base:`, `profiles:`, and `services:`.
 Use kebab-case in YAML.
-Daemon settings resolve as CLI flag, then `SMA_DAEMON_*` environment, then `sma-ng.yml`, then default.
+Daemon settings resolve as CLI flag, then `sma-ng.yml`, then default.
+The daemon no longer reads `SMA_*` environment variables for runtime configuration.
 See `docs/configuration.md` and `docs/daemon.md` for full reference.
 
 ## Claude Tooling Surface

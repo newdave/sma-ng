@@ -63,10 +63,11 @@ class TestNodeIdentityCache:
     monkeypatch.setattr(socket, "gethostname", lambda: "test-host")
     assert _constants.resolve_node_id() == "test-host"
 
-  def test_returns_env_var_when_cache_empty_and_env_set(self, monkeypatch):
+  def test_ignores_env_var_when_cache_empty(self, monkeypatch):
     monkeypatch.setattr(_constants, "_node_id_cache", None)
     monkeypatch.setenv("SMA_NODE_NAME", "env-node")
-    assert _constants.resolve_node_id() == "env-node"
+    monkeypatch.setattr(socket, "gethostname", lambda: "test-host")
+    assert _constants.resolve_node_id() == "test-host"
 
   def test_set_node_id_cache_causes_resolve_to_return_cached_value(self, monkeypatch):
     monkeypatch.setattr(_constants, "_node_id_cache", None)

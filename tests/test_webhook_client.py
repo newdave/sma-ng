@@ -26,17 +26,17 @@ class TestDaemonURL:
       assert url == "http://127.0.0.1:8585"
 
   def test_custom_host(self):
-    with patch.dict(os.environ, {"SMA_DAEMON_HOST": "10.0.0.5"}):
+    with patch.dict(os.environ, {"DAEMON_HOST": "10.0.0.5"}):
       url = get_daemon_url()
       assert "10.0.0.5" in url
 
   def test_custom_port(self):
-    with patch.dict(os.environ, {"SMA_DAEMON_PORT": "9090"}):
+    with patch.dict(os.environ, {"DAEMON_PORT": "9090"}):
       url = get_daemon_url()
       assert "9090" in url
 
   def test_custom_host_and_port(self):
-    with patch.dict(os.environ, {"SMA_DAEMON_HOST": "sma.local", "SMA_DAEMON_PORT": "7777"}):
+    with patch.dict(os.environ, {"DAEMON_HOST": "sma.local", "DAEMON_PORT": "7777"}):
       assert get_daemon_url() == "http://sma.local:7777"
 
 
@@ -48,7 +48,7 @@ class TestAPIKey:
       assert get_api_key() == ""
 
   def test_key_from_env(self):
-    with patch.dict(os.environ, {"SMA_DAEMON_API_KEY": "secret123"}):
+    with patch.dict(os.environ, {"DAEMON_API_KEY": "secret123"}):
       assert get_api_key() == "secret123"
 
 
@@ -62,7 +62,7 @@ class TestHeaders:
       assert "X-API-Key" not in h
 
   def test_headers_with_key(self):
-    with patch.dict(os.environ, {"SMA_DAEMON_API_KEY": "mykey"}):
+    with patch.dict(os.environ, {"DAEMON_API_KEY": "mykey"}):
       h = _headers()
       assert h["X-API-Key"] == "mykey"
 

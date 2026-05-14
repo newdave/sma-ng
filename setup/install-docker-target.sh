@@ -3,13 +3,13 @@ set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "${script_dir}/.." && pwd)
-install_dir="${SMA_INSTALL_DIR:-/opt/sma}"
-transcode_dir="${SMA_TRANSCODE_DIR:-/transcodes}"
-owner="${SMA_OWNER:-${SUDO_USER:-${USER:-}}}"
-snippet_path="${SMA_BASH_SNIPPET:-${install_dir}/sma-ng-docker-aliases.sh}"
-config_source="${SMA_CONFIG_SOURCE:-${repo_root}/setup/sma-ng.yml.sample}"
-env_source="${SMA_ENV_SOURCE:-${repo_root}/setup/daemon.env.sample}"
-use_sudo="${SMA_USE_SUDO:-auto}"
+install_dir="${INSTALL_DIR:-/opt/sma}"
+transcode_dir="${TRANSCODE_DIR:-/transcodes}"
+owner="${OWNER:-${SUDO_USER:-${USER:-}}}"
+snippet_path="${BASH_SNIPPET:-${install_dir}/sma-ng-docker-aliases.sh}"
+config_source="${CONFIG_SOURCE:-${repo_root}/setup/sma-ng.yml.sample}"
+env_source="${ENV_SOURCE:-${repo_root}/setup/daemon.env.sample}"
+use_sudo="${USE_SUDO:-auto}"
 
 usage() {
   cat <<'EOF'
@@ -18,13 +18,13 @@ Usage: setup/install-docker-target.sh
 Creates host-side directories and seed files for the SMA-NG Docker Compose
 container. Override paths with environment variables:
 
-  SMA_INSTALL_DIR=/opt/sma
-  SMA_TRANSCODE_DIR=/transcodes
-  SMA_OWNER="$USER"
-  SMA_BASH_SNIPPET=/opt/sma/sma-ng-docker-aliases.sh
-  SMA_CONFIG_SOURCE=setup/sma-ng.yml.sample
-  SMA_ENV_SOURCE=setup/daemon.env.sample
-  SMA_USE_SUDO=auto
+  INSTALL_DIR=/opt/sma
+  TRANSCODE_DIR=/transcodes
+  OWNER="$USER"
+  BASH_SNIPPET=/opt/sma/sma-ng-docker-aliases.sh
+  CONFIG_SOURCE=setup/sma-ng.yml.sample
+  ENV_SOURCE=setup/daemon.env.sample
+  USE_SUDO=auto
 EOF
 }
 
@@ -34,7 +34,7 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 fi
 
 if [ -z "$owner" ]; then
-  echo "ERROR: could not determine SMA_OWNER; set SMA_OWNER=user[:group]" >&2
+  echo "ERROR: could not determine OWNER; set OWNER=user[:group]" >&2
   exit 1
 fi
 

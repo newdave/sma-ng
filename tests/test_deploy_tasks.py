@@ -332,11 +332,11 @@ class TestDockerTargetInstaller:
 
     env = {
       **os.environ,
-      "SMA_INSTALL_DIR": str(install_dir),
-      "SMA_TRANSCODE_DIR": str(transcode_dir),
-      "SMA_BASH_SNIPPET": str(snippet_path),
-      "SMA_USE_SUDO": "false",
-      "SMA_OWNER": f"{os.getuid()}:{os.getgid()}",
+      "INSTALL_DIR": str(install_dir),
+      "TRANSCODE_DIR": str(transcode_dir),
+      "BASH_SNIPPET": str(snippet_path),
+      "USE_SUDO": "false",
+      "OWNER": f"{os.getuid()}:{os.getgid()}",
     }
     result = subprocess.run(
       ["bash", "setup/install-docker-target.sh"],
@@ -604,7 +604,7 @@ class TestDeployLibHelpers:
     assert parsed["services"]["autoscan"]["main"]["url"] == "http://autoscan"
     assert parsed["services"]["autoscan"]["main"]["username"] == "u"
 
-  def test_stamp_daemon_writes_sma_node_name_to_daemon_env(self, tmp_path):
+  def test_stamp_daemon_does_not_write_sma_node_name_to_daemon_env(self, tmp_path):
     deploy_dir = tmp_path / "deploy"
     config_dir = deploy_dir / "config"
     config_dir.mkdir(parents=True)
@@ -612,7 +612,7 @@ class TestDeployLibHelpers:
     result = self._run_stamp_daemon(deploy_dir, {}, node_name="sma-slave0")
     assert result.returncode == 0, result.stderr or result.stdout
     content = (config_dir / "daemon.env").read_text()
-    assert "SMA_NODE_NAME=sma-slave0" in content
+    assert "SMA_NODE_NAME" not in content
 
 
 class TestDeployMiseTask:
@@ -636,17 +636,18 @@ class TestDeployMiseTask:
     assert "mise run build:push" in text
     assert "mise run config:roll" in text
     assert "mise run deploy:docker" in text
-    assert 'SMA_IMAGE="$DEPLOY_IMAGE" SMA_IMAGE_TAG="$DEPLOY_IMAGE_TAG"' in text
+    assert 'IMAGE="$DEPLOY_IMAGE" IMAGE_TAG="$DEPLOY_IMAGE_TAG"' in text
 
   def test_deploy_docker_can_override_compose_image_and_tag(self):
     lib = _read(".mise/shared/deploy/lib.sh")
     compose = _read("docker/docker-compose.yml")
-    assert 'sma_image="${SMA_IMAGE:-$($cfg image "")}"' in lib
-    assert 'sma_image_tag="${SMA_IMAGE_TAG:-$($cfg image_tag "")}"' in lib
-    assert '_append_env SMA_IMAGE              "$sma_image"' in lib
-    assert '_append_env SMA_IMAGE_TAG          "$sma_image_tag"' in lib
-    assert '_append_env SMA_DB_URL             "$sma_db_url"' in lib
-    assert "image: ${SMA_IMAGE:-ghcr.io/newdave/sma-ng}:${SMA_IMAGE_TAG:-latest}" in compose
+    assert 'sma_image="${IMAGE:-$($cfg image "")}"' in lib
+    assert 'sma_image_tag="${IMAGE_TAG:-$($cfg image_tag "")}"' in lib
+    assert '_append_env IMAGE              "$sma_image"' in lib
+    assert '_append_env IMAGE_TAG          "$sma_image_tag"' in lib
+    assert "_append_env SMA_DB_URL" not in lib
+    assert "_append_env SMA_DAEMON_DB_URL" not in lib
+    assert "image: ${IMAGE:-ghcr.io/newdave/sma-ng}:${IMAGE_TAG:-latest}" in compose
 
   def test_build_push_platform_is_overridable(self):
     text = _read(".mise/tasks/build/push")

@@ -131,9 +131,7 @@ def _illustrative_routing() -> list[dict]:
 
 _SECTION_COMMENTS: dict[str, str] = {
   "daemon": (
-    "── Daemon settings ──────────────────────────────────────────────────\n"
-    "Only used when running daemon.py. manual.py ignores this section.\n"
-    "Per-flag precedence: CLI > env (SMA_DAEMON_*) > sma-ng.yml > default."
+    "── Daemon settings ──────────────────────────────────────────────────\nOnly used when running daemon.py. manual.py ignores this section.\nPer-flag precedence: CLI > sma-ng.yml > default."
   ),
   "base": ("── Base media-conversion settings ───────────────────────────────────\nDefaults applied to every conversion. Profiles below shallow-merge on top\nof these per-section."),
   "profiles": (

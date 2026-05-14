@@ -6,7 +6,7 @@
 # resources/daemon/threads.py:_execute_command) so the dashboard reflects
 # the action immediately. node_id is taken from the host key in
 # setup/local.yml — that's the same value config:roll stamps into
-# daemon.env as SMA_NODE_NAME.
+# daemon.node-id in sma-ng.yml.
 #
 # Usage: source "$(dirname "$0")/../../shared/deploy/cluster_action.sh"
 #        cluster_action drain        # all hosts

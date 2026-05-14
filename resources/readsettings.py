@@ -48,7 +48,6 @@ class ReadSettings:
   CONFIG_DEFAULT = "sma-ng.yml"
   CONFIG_DIRECTORY = "./config"
   RELATIVE_TO_ROOT = "../"
-  ENV_CONFIG_VAR = "SMA_CONFIG"
 
   # Hardware acceleration profiles: maps a single hwaccel value to all derived settings.
   HWACCEL_PROFILES = {
@@ -111,7 +110,7 @@ class ReadSettings:
     """Load and parse the SMA-NG configuration file.
 
     Resolution order for the config path: explicit ``configFile`` arg,
-    ``$SMA_CONFIG`` env var, then ``config/sma-ng.yml`` relative to the
+    ``config/sma-ng.yml`` relative to the
     SMA root.
 
     Args:
@@ -166,7 +165,7 @@ class ReadSettings:
     self._validate_binaries()
 
   def _resolve_path(self, configFile):
-    """Resolve the config file path: arg > $SMA_CONFIG > default."""
+    """Resolve the config file path: arg > default."""
     return self.resolve_config_path(configFile, logger=self.log)
 
   @classmethod
@@ -181,11 +180,7 @@ class ReadSettings:
     rootpath = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), cls.RELATIVE_TO_ROOT))
     default_path = os.path.normpath(os.path.join(rootpath, cls.CONFIG_DIRECTORY, cls.CONFIG_DEFAULT))
 
-    env_path = os.environ.get(cls.ENV_CONFIG_VAR)
-    if env_path and os.path.exists(os.path.realpath(env_path)):
-      configFile = os.path.realpath(env_path)
-      log.debug("%s environment variable override found." % cls.ENV_CONFIG_VAR)
-    elif not configFile:
+    if not configFile:
       configFile = default_path
       log.debug("Loading default config file.")
 

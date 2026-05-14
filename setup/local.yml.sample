@@ -82,7 +82,7 @@ deploy:
   # db_user: sma
   # db_password: ""
   # db_name: sma
-  # db_url: ""                        # full URL; stamped to SMA_DAEMON_DB_URL and SMA_DB_URL
+  # db_url: ""                        # full URL; stamped to daemon.db-url in sma-ng.yml
 
   # Docker Compose profile to use (e.g. intel, nvenc, intel-pg).
   # docker_profile: intel
@@ -123,14 +123,14 @@ hosts:
 # config/daemon.env by `mise run config:roll`. These are global — not per-host.
 
 daemon:
-  # API key for protecting daemon endpoints (SMA_DAEMON_API_KEY).
+  # API key for protecting daemon endpoints.
   # api_key: ""
 
   # PostgreSQL connection URL — derived from deploy db_* keys if not set.
   # Required for hosts using *-pg docker_profile (external PostgreSQL).
   # db_url: ""
 
-  # ffmpeg/ffprobe directory (SMA_DAEMON_FFMPEG_DIR). Overrides deploy.ffmpeg_dir.
+  # ffmpeg/ffprobe directory. Overrides deploy.ffmpeg_dir.
   # ffmpeg_dir: ""
 
 # ── services ─────────────────────────────────────────────────────────────────

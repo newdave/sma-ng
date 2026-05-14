@@ -200,13 +200,13 @@ class TestShouldSkipSameExtension:
 
 
 class TestNodeIdResolution:
-  def test_resolve_node_id_prefers_sma_node_name_env(self, monkeypatch):
+  def test_resolve_node_id_ignores_sma_node_name_env(self, monkeypatch):
     import resources.daemon.constants as _constants
 
     monkeypatch.setattr(_constants, "_node_id_cache", None)
     monkeypatch.setenv("SMA_NODE_NAME", "sma-slave0")
     monkeypatch.setattr("socket.gethostname", lambda: "docker-hostname")
-    assert resolve_node_id() == "sma-slave0"
+    assert resolve_node_id() == "docker-hostname"
 
   def test_resolve_node_id_falls_back_to_hostname(self, monkeypatch):
     import resources.daemon.constants as _constants
@@ -216,14 +216,7 @@ class TestNodeIdResolution:
     monkeypatch.setattr("socket.gethostname", lambda: "docker-hostname")
     assert resolve_node_id() == "docker-hostname"
 
-  def test_ensure_node_id_prefers_env_over_yaml_uuid(self, tmp_path, monkeypatch):
-    """SMA_NODE_NAME is the deploy-stamped per-host identity and must win.
-
-    Without this, every container restart on a host that already has
-    daemon.node_id in sma-ng.yml would still re-use the UUID, but a
-    fresh host with a read-only config dir would silently regenerate a
-    new UUID per startup and pile up pending rows in cluster_nodes.
-    """
+  def test_ensure_node_id_ignores_env_and_uses_yaml_uuid(self, tmp_path, monkeypatch):
     import resources.daemon.constants as _constants
 
     monkeypatch.setattr(_constants, "_node_id_cache", None)
@@ -232,8 +225,8 @@ class TestNodeIdResolution:
     config_file = str(tmp_path / "sma-ng.yml")
     _dump_daemon_yaml(config_file, {"node_id": "76534590-2fae-4512-9b2d-dad77b5d015e"})
     pcm = PathConfigManager(config_file)
-    assert pcm.node_id == "sma-node1"
-    assert resolve_node_id() == "sma-node1"
+    assert pcm.node_id == "76534590-2fae-4512-9b2d-dad77b5d015e"
+    assert resolve_node_id() == "76534590-2fae-4512-9b2d-dad77b5d015e"
 
   def test_ensure_node_id_uses_yaml_uuid_when_no_env(self, tmp_path, monkeypatch):
     import resources.daemon.constants as _constants

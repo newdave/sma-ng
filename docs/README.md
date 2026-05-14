@@ -181,7 +181,7 @@ flowchart TD
 
 Configuration lives in `config/sma-ng.yml` (YAML format). Copy from `setup/sma-ng.yml.sample`.
 
-Override path via `SMA_CONFIG` environment variable.
+Pass `-c/--config` to commands that support an alternate config path.
 
 ### [Converter]
 
@@ -571,8 +571,7 @@ curl -X POST http://localhost:8585/webhook \
 API key can be set via (priority order):
 
 1. `--api-key` CLI argument
-2. `SMA_DAEMON_API_KEY` environment variable
-3. `Daemon.api_key` in `sma-ng.yml`
+2. `Daemon.api_key` in `sma-ng.yml`
 
 Send via header: `X-API-Key: SECRET` or `Authorization: Bearer SECRET`
 
@@ -606,9 +605,9 @@ Daemon:
 | Key                | Description                                                                                                                                        |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `default_config`   | Config file used when no `path_configs` prefix matches                                                                                             |
-| `api_key`          | API authentication key (overridable via `--api-key` or `SMA_DAEMON_API_KEY`)                                                                       |
-| `db_url`           | PostgreSQL URL for distributed mode (overridable via `--db-url` or `SMA_DAEMON_DB_URL`)                                                            |
-| `ffmpeg_dir`       | Directory containing `ffmpeg`/`ffprobe` binaries. Prepended to PATH for each conversion. Overridable via `--ffmpeg-dir` or `SMA_DAEMON_FFMPEG_DIR` |
+| `api_key`          | API authentication key (overridable via `--api-key`)                                                                                               |
+| `db_url`           | SQLite or PostgreSQL URL for daemon job persistence. This value is loaded only from `sma-ng.yml`.                                                   |
+| `ffmpeg_dir`       | Directory containing `ffmpeg`/`ffprobe` binaries. Prepended to PATH for each conversion. Overridable via `--ffmpeg-dir`                            |
 | `media_extensions` | File extensions considered media files for directory scanning and `/browse` (default: `.mkv .m4v .avi .mov .wmv .ts .flv .webm`)                   |
 | `path_rewrites`    | Prefix substitutions applied before config matching; overlapping rewrites are matched longest-prefix-first                                         |
 | `scan_paths`       | Directories for scheduled background scanning. See [Scheduled Directory Scanning](#scheduled-directory-scanning)                                   |
@@ -694,7 +693,7 @@ The daemon supports two database modes:
   persisted on the host at `/opt/sma/data/sma-ng.db`.
 - PostgreSQL for clustered deployments, shared job queues, cluster logs, metrics, and cluster administration.
 
-Configure the connection via either:
+Configure the connection in `sma-ng.yml`:
 
 ```yaml
 # config/sma-ng.yml
@@ -702,19 +701,7 @@ daemon:
   db_url: sqlite:////data/sma-ng.db
 ```
 
-Or via the environment (preferred when running under Docker, since secrets stay out of `ps` output):
-
-```bash
-SMA_DAEMON_DB_URL=sqlite:////data/sma-ng.db python daemon.py
-SMA_DAEMON_DB_URL=postgresql://sma:secret@db.example.com:5432/sma python daemon.py
-# or split into parts and let the daemon assemble the URL
-SMA_DAEMON_DB_HOST=db.example.com
-SMA_DAEMON_DB_USER=sma
-SMA_DAEMON_DB_PASSWORD=secret
-SMA_DAEMON_DB_NAME=sma
-```
-
-There is no `--db-url` CLI flag — credentials must not appear in `ps`. The daemon's startup order is `SMA_DAEMON_DB_URL` env → assembled `SMA_DAEMON_DB_*` parts → `daemon.db_url` in `sma-ng.yml`. If none is set, startup fails fast with an error.
+There is no `--db-url` CLI flag, and database connection details are not read from environment variables. If `daemon.db_url` is empty, startup fails fast with an error.
 
 Common queries (all hit the same Postgres instance):
 
@@ -784,7 +771,7 @@ This is useful when Sonarr imports files to a staging/download path that doesn't
    - Arguments: Full path to `triggers/media_managers/radarr.sh`
 3. Multiple instances: Add `[Radarr-4K]`, `[Radarr-Kids]` etc.
 
-**Per-instance config override:** Set `SMA_CONFIG` in Radarr's environment to force a specific config, same as Sonarr above.
+**Per-instance routing:** Same as Sonarr; choose instances with `daemon.routing` rules in `sma-ng.yml`.
 
 ### Multiple Instance Support
 
@@ -1127,7 +1114,7 @@ mise run media:codecs           # List supported codecs
 
 ```bash
 mise run build:docker     # Build image locally (TAG=sma-ng:local to override)
-SMA_DAEMON_DB_URL=postgresql://user:pass@host/db mise run docker:run
+mise run docker:run       # Uses daemon.db_url from config/sma-ng.yml
 mise run build:shell      # Open shell in locally-built image
 mise run test:smoke       # Smoke-test imports and ffmpeg
 ```
@@ -1248,9 +1235,8 @@ For each host it:
 - **Stamps `services.<type>.<instance>`** from `setup/local.yml` into `services:` and
   rebuilds `daemon.routing` from every instance carrying both `path` and `profile`
   (longest match first)
-- **Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir`** (kebab-case) into
-  `daemon:` and writes the corresponding `SMA_DAEMON_*` env vars plus `SMA_NODE_NAME`
-  into `config/daemon.env`
+- **Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir` / `daemon.node-id`**
+  (kebab-case) into `daemon:`
 - **Stamps `base.converter.{ffmpeg,ffprobe}`** from the host's resolved `ffmpeg_dir`
 - **Deploys post-process scripts** from `setup/post_process/` to `post_process/`,
   stamping in Plex/Jellyfin/Emby credentials and updating shebangs to the venv Python
@@ -1356,24 +1342,7 @@ The daemon also writes per-config rotating log files in `logs/`:
 
 ### Environment Variables
 
-| Variable | Description |
-| --- | --- |
-| `SMA_CONFIG` | Override path to `sma-ng.yml` |
-| `SMA_DAEMON_API_KEY` | Daemon API key |
-| `SMA_DAEMON_DB_URL` | SQLite or PostgreSQL connection URL |
-| `SMA_DAEMON_FFMPEG_DIR` | Directory containing `ffmpeg`/`ffprobe` |
-| `SMA_DAEMON_HOST` | Daemon bind host (Docker default: empty = 0.0.0.0) |
-| `SMA_DAEMON_PORT` | Daemon port (Docker default: 8585) |
-| `SMA_DAEMON_WORKERS` | Number of concurrent workers (Docker default: 4) |
-| `SMA_DAEMON_CONFIG` | Path to daemon config, normally `config/sma-ng.yml` |
-| `SMA_DAEMON_API_KEY` | API key (overrides `daemon.api_key` in `sma-ng.yml`) |
-| `SMA_DAEMON_DB_HOST` | PostgreSQL host (used when `SMA_DAEMON_DB_URL` is not set) |
-| `SMA_DAEMON_DB_USER` | PostgreSQL user (used with `SMA_DAEMON_DB_HOST`) |
-| `SMA_DAEMON_DB_PASSWORD` | PostgreSQL password (used with `SMA_DAEMON_DB_HOST`) |
-| `SMA_DAEMON_DB_NAME` | PostgreSQL database name (default: `sma`) |
-| `SMA_DAEMON_DB_PORT` | PostgreSQL port (default: `5432`) |
-| `SMA_NODE_NAME` | Cluster node identity (overrides `socket.gethostname()`) |
-| `SMA_DAEMON_LOGS_DIR` | Directory for per-config log files |
+The daemon no longer reads `SMA_*` environment variables for runtime configuration. Use CLI flags for process-level options and `sma-ng.yml` for persistent daemon settings.
 
 ---
 

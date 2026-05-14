@@ -105,11 +105,11 @@ def _run(script_key, args=(), env_override=None, timeout=10, response_status=200
   with MockDaemon(response_status=response_status, response_error=response_error) as daemon:
     env = {
       **os.environ,
-      "SMA_DAEMON_HOST": "127.0.0.1",
-      "SMA_DAEMON_PORT": str(daemon.port),
+      "DAEMON_HOST": "127.0.0.1",
+      "DAEMON_PORT": str(daemon.port),
       # Prevent real polling — scripts exit after submit for most tests
-      "SMA_TIMEOUT": "1",
-      "SMA_POLL_INTERVAL": "1",
+      "TIMEOUT": "1",
+      "POLL_INTERVAL": "1",
     }
     if env_override:
       env.update(env_override)
@@ -131,10 +131,10 @@ def _run_no_daemon(script_key, args=(), env_override=None, timeout=10):
   port = _free_port()
   env = {
     **os.environ,
-    "SMA_DAEMON_HOST": "127.0.0.1",
-    "SMA_DAEMON_PORT": str(port),
-    "SMA_TIMEOUT": "1",
-    "SMA_POLL_INTERVAL": "1",
+    "DAEMON_HOST": "127.0.0.1",
+    "DAEMON_PORT": str(port),
+    "TIMEOUT": "1",
+    "POLL_INTERVAL": "1",
   }
   if env_override:
     env.update(env_override)
@@ -204,14 +204,14 @@ class TestPostRadarr:
   def test_sma_config_included_in_payload(self):
     result, submissions = _run(
       "radarr",
-      env_override={**self._env(), "SMA_CONFIG": "/config/sma-ng.movies.yml"},
+      env_override={**self._env(), "CONFIG": "/config/sma-ng.movies.yml"},
     )
     assert result.returncode == 0
     assert submissions[0].get("config") == "/config/sma-ng.movies.yml"
 
   def test_no_sma_config_omits_config_key(self):
     env = {**self._env()}
-    env.pop("SMA_CONFIG", None)
+    env.pop("CONFIG", None)
     result, submissions = _run("radarr", env_override=env)
     assert result.returncode == 0
     assert "config" not in submissions[0]
@@ -224,12 +224,12 @@ class TestPostRadarr:
   def test_daemon_returns_401_shows_api_key_hint(self):
     result, submissions = _run("radarr", env_override=self._env(), response_status=401)
     assert result.returncode != 0
-    assert "SMA_DAEMON_API_KEY" in result.stderr
+    assert "DAEMON_API_KEY" in result.stderr
 
   def test_daemon_returns_403_shows_api_key_hint(self):
     result, submissions = _run("radarr", env_override=self._env(), response_status=403)
     assert result.returncode != 0
-    assert "SMA_DAEMON_API_KEY" in result.stderr
+    assert "DAEMON_API_KEY" in result.stderr
 
   def test_daemon_returns_500_shows_error_body(self):
     result, submissions = _run(
@@ -242,12 +242,12 @@ class TestPostRadarr:
     assert "500" in result.stderr
 
   def test_api_key_sent_in_header(self):
-    """When SMA_DAEMON_API_KEY is set the daemon still receives the request
+    """When DAEMON_API_KEY is set the daemon still receives the request
     (the mock doesn't check auth; we just verify the script doesn't crash
     and the job is submitted successfully)."""
     result, submissions = _run(
       "radarr",
-      env_override={**self._env(), "SMA_DAEMON_API_KEY": "secret123"},
+      env_override={**self._env(), "DAEMON_API_KEY": "secret123"},
     )
     assert result.returncode == 0
     assert len(submissions) == 1
@@ -309,14 +309,14 @@ class TestPostSonarr:
   def test_sma_config_included_in_payload(self):
     result, submissions = _run(
       "sonarr",
-      env_override={**self._env(), "SMA_CONFIG": "/config/sma-ng.tv.yml"},
+      env_override={**self._env(), "CONFIG": "/config/sma-ng.tv.yml"},
     )
     assert result.returncode == 0
     assert submissions[0].get("config") == "/config/sma-ng.tv.yml"
 
   def test_no_sma_config_omits_config_key(self):
     env = {**self._env()}
-    env.pop("SMA_CONFIG", None)
+    env.pop("CONFIG", None)
     result, submissions = _run("sonarr", env_override=env)
     assert result.returncode == 0
     assert "config" not in submissions[0]
@@ -329,12 +329,12 @@ class TestPostSonarr:
   def test_daemon_returns_401_shows_api_key_hint(self):
     result, submissions = _run("sonarr", env_override=self._env(), response_status=401)
     assert result.returncode != 0
-    assert "SMA_DAEMON_API_KEY" in result.stderr
+    assert "DAEMON_API_KEY" in result.stderr
 
   def test_daemon_returns_403_shows_api_key_hint(self):
     result, submissions = _run("sonarr", env_override=self._env(), response_status=403)
     assert result.returncode != 0
-    assert "SMA_DAEMON_API_KEY" in result.stderr
+    assert "DAEMON_API_KEY" in result.stderr
 
   def test_daemon_returns_500_shows_error_body(self):
     result, submissions = _run(
@@ -349,7 +349,7 @@ class TestPostSonarr:
   def test_api_key_sent_in_header(self):
     result, submissions = _run(
       "sonarr",
-      env_override={**self._env(), "SMA_DAEMON_API_KEY": "secret123"},
+      env_override={**self._env(), "DAEMON_API_KEY": "secret123"},
     )
     assert result.returncode == 0
     assert len(submissions) == 1

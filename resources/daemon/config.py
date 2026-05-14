@@ -22,8 +22,7 @@ def _write_node_id_to_yaml(config_file: str, node_id: str) -> None:
   Failures are logged but not raised — the daemon will still run with the
   in-memory UUID. Surfacing the warning matters: if the config directory
   is read-only, every restart generates a new UUID, which spams
-  ``cluster_nodes`` with new pending rows. Set ``SMA_NODE_NAME`` to side-
-  step UUID generation entirely.
+  ``cluster_nodes`` with new pending rows.
   """
   from ruamel.yaml import YAML
 
@@ -46,7 +45,7 @@ def _write_node_id_to_yaml(config_file: str, node_id: str) -> None:
     log.warning(
       "Could not persist generated node_id to %s — daemon will keep its in-memory UUID this run, "
       "but a future restart will generate a new one and register a new pending node. "
-      "Set SMA_NODE_NAME in config/daemon.env to use a stable identity instead.",
+      "Set daemon.node_id in sma-ng.yml to use a stable identity instead.",
       config_file,
       exc_info=True,
     )
@@ -295,7 +294,7 @@ class PathConfigManager:
     self._cfg: SmaConfig | None = None  # validated config tree, populated by load_config
 
     if not config_file:
-      config_file = os.environ.get("SMA_CONFIG") or DEFAULT_PROCESS_CONFIG
+      config_file = DEFAULT_PROCESS_CONFIG
     self._config_file = os.path.realpath(config_file) if os.path.exists(config_file) else None
     self.default_config = config_file
     if self._config_file:
@@ -409,26 +408,14 @@ class PathConfigManager:
 
     Priority order:
 
-    1. ``SMA_NODE_NAME`` env var — set per host by ``mise run config:roll``
-       and the canonical deploy-time identity. Stable across container
-       recreates, the same value across daemon restarts, and meaningful
-       to humans (matches the host's name in ``setup/local.yml``).
-    2. ``daemon.node_id`` already persisted in ``sma-ng.yml`` — preserves
+    1. ``daemon.node_id`` already persisted in ``sma-ng.yml`` — preserves
        any UUID an earlier daemon generated so existing approved rows
        in ``cluster_nodes`` stay attached to this node.
-    3. Generate a fresh UUID and try to persist it to ``sma-ng.yml``.
-
-    Previously this function only consulted (2) and (3), so a config dir
-    bind-mounted read-only (or owned by a different uid) made every
-    daemon restart generate a new UUID and register a new pending row
-    in ``cluster_nodes``.
+    2. Generate a fresh UUID and try to persist it to ``sma-ng.yml``.
     """
     from resources.daemon.constants import set_node_id_cache
 
-    env_name = os.environ.get("SMA_NODE_NAME", "").strip()
-    if env_name:
-      node_id = env_name
-    elif self._node_id:
+    if self._node_id:
       node_id = self._node_id
     else:
       node_id = str(uuid.uuid4())
@@ -604,6 +591,25 @@ class PathConfigManager:
       return []
     res = self._loader.resolve_routing(self._cfg, file_path)
     return list(res.services)
+
+  def get_service_instance(self, service_type: str, instance_name: str):
+    """Return one ``services.<type>.<name>`` instance as a plain dict.
+
+    Used by daemon webhook handlers for service-specific API lookups
+    (e.g. Sonarr/Radarr tag label fetches).
+    """
+    if self._cfg is None:
+      return None
+    service_map = getattr(self._cfg.services, service_type, None)
+    if not isinstance(service_map, dict):
+      return None
+    instance = service_map.get(instance_name)
+    if instance is None:
+      return None
+    try:
+      return instance.model_dump(by_alias=True)
+    except Exception:
+      return None
 
   def rewrite_path(self, path):
     """Apply the first matching path_rewrites prefix substitution, or return path unchanged."""

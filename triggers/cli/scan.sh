@@ -17,9 +17,9 @@
 #   -h, --help            Show this help
 #
 # Environment variables:
-#   SMA_DAEMON_HOST     Daemon host (default: 127.0.0.1)
-#   SMA_DAEMON_PORT     Daemon port (default: 8585)
-#   SMA_DAEMON_API_KEY  API key if authentication is enabled
+#   DAEMON_HOST     Daemon host (default: 127.0.0.1)
+#   DAEMON_PORT     Daemon port (default: 8585)
+#   DAEMON_API_KEY  API key if authentication is enabled
 #
 # Examples:
 #   scan.sh /media/movies/film.mkv
@@ -34,10 +34,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../lib/common.sh
 . "${SCRIPT_DIR}/../lib/common.sh"
 
-# Auto-load daemon.env if SMA_DAEMON_API_KEY is not already set
-if [[ -z "${SMA_DAEMON_API_KEY:-}" ]]; then
+# Auto-load daemon.env if DAEMON_API_KEY is not already set
+if [[ -z "${DAEMON_API_KEY:-}" ]]; then
     for _env in \
-        "${SMA_INSTALL_DIR:-/opt/sma}/config/daemon.env" \
+        "${INSTALL_DIR:-/opt/sma}/config/daemon.env" \
         "$(dirname "$(dirname "$(dirname "$(realpath "$0")")")")/config/daemon.env"
     do
         if [[ -f "$_env" ]]; then
@@ -51,9 +51,9 @@ if [[ -z "${SMA_DAEMON_API_KEY:-}" ]]; then
     unset _env
 fi
 
-SMA_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
-SMA_PORT="${SMA_DAEMON_PORT:-8585}"
-SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
+DAEMON_HOST_VALUE="${DAEMON_HOST:-127.0.0.1}"
+DAEMON_PORT_VALUE="${DAEMON_PORT:-8585}"
+DAEMON_BASE="http://${DAEMON_HOST_VALUE}:${DAEMON_PORT_VALUE}"
 sma_init_daemon
 
 WAIT=false
@@ -63,8 +63,8 @@ TMDB_ID=""
 TVDB_ID=""
 SEASON=""
 EPISODE=""
-TIMEOUT="${SMA_TIMEOUT:-0}"
-POLL_INTERVAL="${SMA_POLL_INTERVAL:-5}"
+TIMEOUT="${TIMEOUT:-0}"
+POLL_INTERVAL="${POLL_INTERVAL:-5}"
 TARGET=""
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -79,8 +79,8 @@ die()  { echo "[scan] ERROR: $*" >&2; exit 1; }
 
 curl_get() {
     local url="$1"
-    if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
-        curl -sf -H "X-API-Key: ${SMA_DAEMON_API_KEY}" "$url"
+    if [[ -n "${DAEMON_API_KEY:-}" ]]; then
+        curl -sf -H "X-API-Key: ${DAEMON_API_KEY}" "$url"
     else
         curl -sf "$url"
     fi
@@ -91,10 +91,10 @@ curl_post_json() {
     local body="$2"
     local http_code response_body tmp
     tmp=$(mktemp)
-    if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
+    if [[ -n "${DAEMON_API_KEY:-}" ]]; then
         http_code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST \
             -H "Content-Type: application/json" \
-            -H "X-API-Key: ${SMA_DAEMON_API_KEY}" \
+            -H "X-API-Key: ${DAEMON_API_KEY}" \
             -d "$body" \
             "$url" 2>/dev/null) || { rm -f "$tmp"; return 1; }
     else
@@ -154,8 +154,8 @@ log "Submitting: $TARGET"
 [[ "${#EXTRA_ARGS[@]}" -gt 0 ]] && log "Extra args: ${EXTRA_ARGS[*]}"
 [[ -n "$CONFIG_OVERRIDE" ]] && log "Config:     $CONFIG_OVERRIDE"
 
-response=$(curl_post_json "${SMA_BASE}/webhook/generic" "$payload") || {
-    die "Submission failed. Check daemon is running at ${SMA_BASE}."
+response=$(curl_post_json "${DAEMON_BASE}/webhook/generic" "$payload") || {
+    die "Submission failed. Check daemon is running at ${DAEMON_BASE}."
 }
 
 job_id=$(sma_json_get_field "$response" "job_id" "")

@@ -7,6 +7,8 @@ from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
+import requests
+
 from resources.daemon.config import _strip_secrets
 from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
@@ -531,7 +533,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         503,
         {
           "available": False,
-          "reason": "Cluster metrics are only available in distributed (PostgreSQL) mode. Set SMA_DAEMON_DB_URL to enable.",
+          "reason": "Cluster metrics are only available in distributed (PostgreSQL) mode. Set daemon.db_url in sma-ng.yml to enable.",
           "docs_url": "/docs/daemon",
         },
       )
@@ -1113,6 +1115,84 @@ class WebhookHandler(BaseHTTPRequestHandler):
       merged.extend(["--profile", profile])
     return merged
 
+  @staticmethod
+  def _extract_profile_from_tag_labels(tag_labels):
+    """Return ``sma-profile-<name>`` override from tag labels, or ``None``."""
+    prefix = "sma-profile-"
+    for label in tag_labels or []:
+      raw = str(label).strip()
+      lowered = raw.lower()
+      if lowered.startswith(prefix) and len(lowered) > len(prefix):
+        profile = raw[len(prefix) :].strip()
+        if profile:
+          return profile
+    return None
+
+  def _resolve_arr_tag_profile(self, arr_type, path, tag_ids):
+    """Resolve profile override from ARR tag IDs via service API lookup.
+
+    Returns profile name (without ``sma-profile-`` prefix) or ``None``.
+    """
+    if not tag_ids:
+      return None
+    pcm = self.server.path_config_manager
+    get_services = getattr(pcm, "get_services_for_path", None)
+    if not callable(get_services):
+      return None
+
+    service_refs = get_services(path)
+    if not isinstance(service_refs, (list, tuple)):
+      service_refs = []
+    get_service_instance = getattr(pcm, "get_service_instance", None)
+    if not callable(get_service_instance):
+      return None
+
+    for ref in service_refs:
+      if isinstance(ref, str):
+        if "." not in ref:
+          continue
+        service_type, instance_name = ref.split(".", 1)
+      elif isinstance(ref, (list, tuple)) and len(ref) == 2:
+        service_type, instance_name = ref
+      else:
+        continue
+
+      if service_type != arr_type:
+        continue
+
+      service = get_service_instance(service_type, instance_name)
+      if not isinstance(service, dict):
+        continue
+      base_url = (service.get("url") or "").strip().rstrip("/")
+      api_key = (service.get("apikey") or "").strip()
+      if not base_url or not api_key:
+        continue
+
+      try:
+        response = requests.get(
+          base_url + "/api/v3/tag",
+          headers={"X-Api-Key": api_key},
+          timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+      except Exception:
+        self.server.logger.warning("Unable to fetch %s tag labels for profile override; using routing profile." % arr_type)
+        continue
+
+      labels_by_id = {}
+      if isinstance(payload, list):
+        for row in payload:
+          if isinstance(row, dict) and isinstance(row.get("id"), int) and isinstance(row.get("label"), str):
+            labels_by_id[row["id"]] = row["label"]
+
+      labels = [labels_by_id[x] for x in tag_ids if x in labels_by_id]
+      profile = self._extract_profile_from_tag_labels(labels)
+      if profile:
+        self.server.logger.info("Applying %s profile override from ARR tag: %s" % (arr_type, profile))
+        return profile
+    return None
+
   def _queue_directory(self, path, extra_args, config_override, max_retries=0):
     """Expand directory to media files, queue each, respond.
 
@@ -1221,7 +1301,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
   def _parse_sonarr_body(self):
     """Parse a Sonarr-native webhook payload.
 
-    Returns (path, extra_args) on success, or (None, []) with an error
+    Returns (path, extra_args, profile_override, tag_ids) on success, or (None, [], None, []) with an error
     response already sent on failure.  Test events return (None, []) with
     a 200 response already sent.
 
@@ -1240,7 +1320,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
   def _parse_radarr_body(self):
     """Parse a Radarr-native webhook payload.
 
-    Returns (path, extra_args) on success, or (None, []) with an error
+    Returns (path, extra_args, profile_override, tag_ids) on success, or (None, [], None, []) with an error
     response already sent on failure.  Test events return (None, []) with
     a 200 response already sent.
 
@@ -1279,9 +1359,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
   def _handle_sonarr_webhook(self):
     try:
-      path, extra_args = self._parse_sonarr_body()
+      path, extra_args, profile_override, tag_ids = self._parse_sonarr_body()
       if path is None:
         return
+      if not profile_override:
+        profile_override = self._resolve_arr_tag_profile("sonarr", path, tag_ids)
+      if profile_override:
+        extra_args = self._merge_profile_arg(extra_args, profile_override)
       self._dispatch_path(path, extra_args)
     except Exception as e:
       self.server.logger.exception("Error handling Sonarr webhook: %s" % e)
@@ -1289,9 +1373,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
   def _handle_radarr_webhook(self):
     try:
-      path, extra_args = self._parse_radarr_body()
+      path, extra_args, profile_override, tag_ids = self._parse_radarr_body()
       if path is None:
         return
+      if not profile_override:
+        profile_override = self._resolve_arr_tag_profile("radarr", path, tag_ids)
+      if profile_override:
+        extra_args = self._merge_profile_arg(extra_args, profile_override)
       self._dispatch_path(path, extra_args)
     except Exception as e:
       self.server.logger.exception("Error handling Radarr webhook: %s" % e)

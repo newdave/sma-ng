@@ -17,8 +17,8 @@
 # Use --reset to ignore history and resubmit everything.
 #
 # Environment variables:
-#   SMA_DAEMON_URL    Base URL (default: http://127.0.0.1:8585)
-#   SMA_API_KEY       API key (overrides config/sma-ng.yml)
+#   DAEMON_URL    Base URL (default: http://127.0.0.1:8585)
+#   API_KEY       API key (overrides config/sma-ng.yml)
 #
 # Files with these extensions are skipped (already-converted or non-media):
 #   mp4, nfo, txt, log, md, jpg, jpeg, png, gif, xml, srt, ass, vtt, sup, py, pyc, ds_store
@@ -40,7 +40,7 @@ die() { echo "Error: $*" >&2; exit 1; }
 
 [[ -x "$WEBHOOK" ]] || die "sma-webhook.sh not found or not executable at $WEBHOOK"
 
-: "${SMA_DAEMON_URL:=http://127.0.0.1:8585}"
+: "${DAEMON_URL:=http://127.0.0.1:8585}"
 
 # --- Parse arguments ---
 scan_dir=""
@@ -78,12 +78,12 @@ scan_dir="$(cd "$scan_dir" && pwd)"  # canonicalise
 
 # --- Auth headers ---
 DAEMON_CONFIG="$SCRIPT_DIR/../config/sma-ng.yml"
-if [[ -z "${SMA_API_KEY:-}" && -f "$DAEMON_CONFIG" ]]; then
-    SMA_API_KEY=$(python3 "$SCRIPT_DIR/local-config.py" "$DAEMON_CONFIG" daemon api_key 2>/dev/null || true)
+if [[ -z "${API_KEY:-}" && -f "$DAEMON_CONFIG" ]]; then
+    API_KEY=$(python3 "$SCRIPT_DIR/local-config.py" "$DAEMON_CONFIG" daemon api_key 2>/dev/null || true)
 fi
-: "${SMA_API_KEY:=}"
+: "${API_KEY:=}"
 auth_headers=()
-[[ -n "$SMA_API_KEY" ]] && auth_headers=(-H "X-API-Key: $SMA_API_KEY")
+[[ -n "$API_KEY" ]] && auth_headers=(-H "X-API-Key: $API_KEY")
 
 # Build a grep pattern from the skip list for fast extension filtering.
 skip_pattern=$(echo "$SKIP_EXTENSIONS" | tr ' ' '\n' | sed 's/.*/\\.&$/' | paste -sd '|')
@@ -118,7 +118,7 @@ else
         "${auth_headers[@]+"${auth_headers[@]}"}" \
         -H "Content-Type: application/json" \
         -d "$json" \
-        "$SMA_DAEMON_URL/scan/filter") || die "Failed to reach daemon at $SMA_DAEMON_URL"
+        "$DAEMON_URL/scan/filter") || die "Failed to reach daemon at $DAEMON_URL"
 
     mapfile -t unscanned < <(echo "$response" | jq -r '.unscanned[]')
     skipped_done=$(( ${#candidates[@]} - ${#unscanned[@]} ))
@@ -149,7 +149,7 @@ for filepath in "${unscanned[@]}"; do
         "${auth_headers[@]+"${auth_headers[@]}"}" \
         -H "Content-Type: application/json" \
         -d "$(jq -nc --arg p "$filepath" '{paths: [$p]}')" \
-        "$SMA_DAEMON_URL/scan/record" > /dev/null
+        "$DAEMON_URL/scan/record" > /dev/null
 
     (( submitted++ )) || true
     [[ "$delay" -gt 0 ]] && sleep "$delay"

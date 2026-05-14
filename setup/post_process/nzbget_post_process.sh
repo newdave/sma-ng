@@ -9,7 +9,7 @@
 # NOTE: This script requires NZBGet v11.0+.
 #
 # NOTE: Configure the daemon connection via environment variables:
-#   SMA_DAEMON_HOST, SMA_DAEMON_PORT, SMA_DAEMON_API_KEY
+#   DAEMON_HOST, DAEMON_PORT, DAEMON_API_KEY
 #
 ##############################################################################
 ### OPTIONS                                                                ###
@@ -36,9 +36,9 @@ POSTPROCESS_SUCCESS=93
 POSTPROCESS_ERROR=94
 POSTPROCESS_NONE=95
 
-SMA_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
-SMA_PORT="${SMA_DAEMON_PORT:-8585}"
-SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
+DAEMON_HOST_VALUE="${DAEMON_HOST:-127.0.0.1}"
+DAEMON_PORT_VALUE="${DAEMON_PORT:-8585}"
+DAEMON_BASE="http://${DAEMON_HOST_VALUE}:${DAEMON_PORT_VALUE}"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,8 +48,8 @@ warn() { log "WARNING: $*"; }
 err()  { log "ERROR: $*"; }
 
 auth_args() {
-    if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
-        echo "-H" "X-API-Key: ${SMA_DAEMON_API_KEY}"
+    if [[ -n "${DAEMON_API_KEY:-}" ]]; then
+        echo "-H" "X-API-Key: ${DAEMON_API_KEY}"
     fi
 }
 
@@ -61,7 +61,7 @@ submit_file() {
         -H "Content-Type: application/json" \
         $(auth_args) \
         -d "$payload" \
-        "${SMA_BASE}/webhook" > /dev/null
+        "${DAEMON_BASE}/webhook" > /dev/null
 }
 
 # ── validate NZBGet environment ───────────────────────────────────────────────

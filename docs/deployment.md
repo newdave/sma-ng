@@ -140,7 +140,7 @@ This creates `/opt/sma/config`, `/opt/sma/logs`, `/opt/sma/cache`, `/opt/sma/dat
 Override the default host paths when your compose mounts differ:
 
 ```bash
-SMA_INSTALL_DIR=/srv/sma SMA_TRANSCODE_DIR=/srv/transcodes mise run setup:docker:target
+INSTALL_DIR=/srv/sma TRANSCODE_DIR=/srv/transcodes mise run setup:docker:target
 ```
 
 ### Push a multi-architecture image to a registry
@@ -205,7 +205,7 @@ top-level section is consumed by `mise run config:roll` as follows:
 | ---------- | ------------------------------------------------------------------------------------------ |
 | `deploy`   | Project-wide defaults read by `scripts/local-config.py` for any host-context lookup        |
 | `hosts`    | Per-host overrides for any `deploy:` key (`address` and `user` are required for SSH)       |
-| `daemon`   | Stamped into `daemon:` (kebab-cased) and `config/daemon.env` (`SMA_DAEMON_*` env vars)     |
+| `daemon`   | Stamped into `daemon:` (kebab-cased)                                                       |
 | `base`     | Deep-merged into `base:` — locks encoder defaults (gpu, codec, crf-profiles, audio…)       |
 | `profiles` | Deep-merged into `profiles:` — overlay rules selected by routing                           |
 | `services` | Stamped into `services.<type>.<instance>` and auto-converted into `daemon.routing` rules   |
@@ -345,9 +345,9 @@ mise run pg:recreate
 `config:roll` depends on `deploy:mise`, so the remote host gets the current local
 `.mise/` helper and task code before any config mutation runs.
 
-For managed deployments, `config:roll` also stamps the host's `SMA_NODE_NAME`
-from `setup/local.yml` into `config/daemon.env`, and the daemon uses that
-value as its cluster node ID.
+For managed deployments, `config:roll` also stamps the host key from
+`setup/local.yml` into `daemon.node-id`, and the daemon uses that value as its
+cluster node ID.
 
 For each remote host:
 
@@ -363,9 +363,8 @@ For each remote host:
 7. Stamps each `services.<type>.<instance>` from `setup/local.yml` into the
    `services:` block, and rebuilds `daemon.routing` from every instance
    carrying both `path` and `profile` (longest match first)
-8. Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir` (kebab-case)
-   into `daemon:` and writes the corresponding `SMA_DAEMON_*` env vars plus
-   `SMA_NODE_NAME` into `config/daemon.env`
+8. Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir` /
+   `daemon.node-id` (kebab-case) into `daemon:`
 9. Deploys post-process scripts with the correct interpreter shebang and
    Plex/Jellyfin/Emby credentials
 
@@ -382,7 +381,7 @@ For each remote host:
 | `deploy:reload` | Hot-reload `config/sma-ng.yml` on every host with `POST /reload` |
 | `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container |
 | `config:audit` | Audit local configs |
-| `deploy:docker` | Rsync code to each Docker host, stamp `SMA_NODE_NAME`, pull the image, and recreate SMA |
+| `deploy:docker` | Rsync code to each Docker host, pull the image, and recreate SMA |
 | `pg:restart` | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg` |
 | `pg:recreate` | Stop bundled PostgreSQL, remove its Docker volume, and recreate it |
 | `cluster:start` | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`) |
@@ -423,8 +422,7 @@ make docker-build
 # Run locally-built image with SQLite at ./data/sma-ng.db
 make docker-run
 
-# Or point at PostgreSQL explicitly
-SMA_DAEMON_DB_URL=postgresql://user:pass@host/db make docker-run
+# Or point at PostgreSQL explicitly by setting daemon.db_url in config/sma-ng.yml
 ```
 
 **Tags:** `latest`, `1`, `1.2`, `1.2.3` (semver), `main` (rolling build from main branch).
@@ -433,17 +431,7 @@ For hardware acceleration diagnostics in containers, the runtime image includes 
 For Intel/QSV setups, use either the Intel profile (`docker compose --profile intel up`) or the bundled-PostgreSQL Intel profile (`docker compose --profile intel-pg up`) so `/dev/dri` is mapped into the container. This is important on SR-IOV guests where the Intel VF may appear as `card1` while still using `renderD128`.
 The bundled PostgreSQL compose service publishes `5432` on the Docker host by default using `PGSQL_BIND_IP`/`PGSQL_PORT` from `docker/.env` (defaults: `0.0.0.0` and `5432`). That makes the database reachable via the Docker host IP unless you intentionally restrict it to `127.0.0.1` or a more specific interface.
 
-**Environment variables for Docker:**
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `SMA_DAEMON_HOST` | `0.0.0.0` | Bind host |
-| `SMA_DAEMON_PORT` | `8585` | Port |
-| `SMA_DAEMON_WORKERS` | `2` | Worker count |
-| `SMA_DAEMON_API_KEY` | | API key |
-| `SMA_DAEMON_DB_URL` | `sqlite:////data/sma-ng.db` | SQLite or PostgreSQL connection URL |
-| `SMA_DAEMON_FFMPEG_DIR` | | Directory containing `ffmpeg`/`ffprobe` |
-| `SMA_CONFIG` | | Override `sma-ng.yml` path |
+Docker runtime settings live in `/config/sma-ng.yml`; the daemon no longer reads `SMA_*` environment variables.
 
 See also:
 

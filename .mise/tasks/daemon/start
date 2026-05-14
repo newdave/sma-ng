@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Start the daemon server (requires SQLite/PostgreSQL db_url in env or config)"
+#MISE description="Start the daemon server (requires SQLite/PostgreSQL daemon.db-url in sma-ng.yml)"
 #MISE aliases=["media:daemon:start"]
 set -euo pipefail
 

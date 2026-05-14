@@ -14,17 +14,17 @@
 #   $8  Failure URL (if any)
 #
 # Configure daemon connection via environment variables:
-#   SMA_DAEMON_HOST     Daemon host (default: 127.0.0.1)
-#   SMA_DAEMON_PORT     Daemon port (default: 8585)
-#   SMA_DAEMON_API_KEY  API key if authentication is enabled
-#   SMA_BYPASS_CATS     Comma-separated category prefixes to skip (default: bypass)
+#   DAEMON_HOST     Daemon host (default: 127.0.0.1)
+#   DAEMON_PORT     Daemon port (default: 8585)
+#   DAEMON_API_KEY  API key if authentication is enabled
+#   BYPASS_CATS     Comma-separated category prefixes to skip (default: bypass)
 
 set -euo pipefail
 
-SMA_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
-SMA_PORT="${SMA_DAEMON_PORT:-8585}"
-SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
-BYPASS_CATS="${SMA_BYPASS_CATS:-bypass}"
+DAEMON_HOST_VALUE="${DAEMON_HOST:-127.0.0.1}"
+DAEMON_PORT_VALUE="${DAEMON_PORT:-8585}"
+DAEMON_BASE="http://${DAEMON_HOST_VALUE}:${DAEMON_PORT_VALUE}"
+BYPASS_CATS="${BYPASS_CATS:-bypass}"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -33,8 +33,8 @@ info() { log "INFO: $*"; }
 err()  { log "ERROR: $*"; }
 
 auth_args() {
-    if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
-        echo "-H" "X-API-Key: ${SMA_DAEMON_API_KEY}"
+    if [[ -n "${DAEMON_API_KEY:-}" ]]; then
+        echo "-H" "X-API-Key: ${DAEMON_API_KEY}"
     fi
 }
 
@@ -46,7 +46,7 @@ submit_file() {
         -H "Content-Type: application/json" \
         $(auth_args) \
         -d "$payload" \
-        "${SMA_BASE}/webhook" > /dev/null
+        "${DAEMON_BASE}/webhook" > /dev/null
 }
 
 is_bypassed() {
@@ -99,7 +99,7 @@ if [[ -f "$PATH_ARG" ]]; then
     if submit_file "$PATH_ARG"; then
         info "Submitted: ${PATH_ARG}"
     else
-        err "Failed to submit job to daemon at ${SMA_BASE}."
+        err "Failed to submit job to daemon at ${DAEMON_BASE}."
         exit 1
     fi
 elif [[ -d "$PATH_ARG" ]]; then

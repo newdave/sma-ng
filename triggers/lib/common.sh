@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 
-SMA_TRIGGERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SMA_JSON_TOOL="${SMA_TRIGGERS_DIR}/lib/json_tools.py"
+TRIGGERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+JSON_TOOL="${TRIGGERS_DIR}/lib/json_tools.py"
 
 sma_init_daemon() {
-    SMA_HOST="${SMA_DAEMON_HOST:-127.0.0.1}"
-    SMA_PORT="${SMA_DAEMON_PORT:-8585}"
-    SMA_BASE="http://${SMA_HOST}:${SMA_PORT}"
+    DAEMON_HOST_VALUE="${DAEMON_HOST:-127.0.0.1}"
+    DAEMON_PORT_VALUE="${DAEMON_PORT:-8585}"
+    DAEMON_BASE="http://${DAEMON_HOST_VALUE}:${DAEMON_PORT_VALUE}"
 
     AUTH_ARGS=()
-    if [[ -n "${SMA_DAEMON_API_KEY:-}" ]]; then
-        AUTH_ARGS=(-H "X-API-Key: ${SMA_DAEMON_API_KEY}")
-    elif [[ -n "${SMA_DAEMON_USERNAME:-}" && -n "${SMA_DAEMON_PASSWORD:-}" ]]; then
-        AUTH_ARGS=(--user "${SMA_DAEMON_USERNAME}:${SMA_DAEMON_PASSWORD}")
+    if [[ -n "${DAEMON_API_KEY:-}" ]]; then
+        AUTH_ARGS=(-H "X-API-Key: ${DAEMON_API_KEY}")
+    elif [[ -n "${DAEMON_USERNAME:-}" && -n "${DAEMON_PASSWORD:-}" ]]; then
+        AUTH_ARGS=(--user "${DAEMON_USERNAME}:${DAEMON_PASSWORD}")
     fi
 }
 
@@ -20,7 +20,7 @@ sma_json_get_field() {
     local json_payload="$1"
     local field="$2"
     local default_value="${3:-}"
-    printf '%s' "$json_payload" | python3 "$SMA_JSON_TOOL" get --field "$field" --default "$default_value"
+    printf '%s' "$json_payload" | python3 "$JSON_TOOL" get --field "$field" --default "$default_value"
 }
 
 sma_build_generic_payload() {
@@ -28,7 +28,7 @@ sma_build_generic_payload() {
     local config="${2:-}"
     shift 2 || true
 
-    local cmd=(python3 "$SMA_JSON_TOOL" build-generic --path "$path")
+    local cmd=(python3 "$JSON_TOOL" build-generic --path "$path")
     if [[ -n "$config" ]]; then
         cmd+=(--config "$config")
     fi
@@ -52,7 +52,7 @@ sma_wait_for_job() {
     echo "[${label}] Waiting for job ${job_id} to complete (polling every ${poll_interval}s)..." >&2
 
     while true; do
-        response=$(curl -sf "${AUTH_ARGS[@]}" "${SMA_BASE}/jobs/${job_id}" 2>/dev/null) || {
+        response=$(curl -sf "${AUTH_ARGS[@]}" "${DAEMON_BASE}/jobs/${job_id}" 2>/dev/null) || {
             echo "[${label}] ERROR: Lost contact with daemon while polling job ${job_id}." >&2
             return 1
         }

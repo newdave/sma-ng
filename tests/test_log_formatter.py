@@ -85,11 +85,11 @@ class TestWidthCap:
     fmt = SingleLineFormatter("%(message)s", max_width=100)
     assert fmt.format(_record("short")) == "short"
 
-  def test_env_var_default(self, monkeypatch):
+  def test_env_var_default_is_ignored(self, monkeypatch):
     monkeypatch.setenv("SMA_LOG_MAX_WIDTH", "50")
     fmt = SingleLineFormatter("%(message)s")
     out = fmt.format(_record("y" * 200))
-    assert len(out) <= 50
+    assert len(out) > 50
 
 
 class TestTraceback:

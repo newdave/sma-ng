@@ -78,11 +78,7 @@ Set the same database URL on every node:
 }
 ```
 
-Or with environment variables:
-
-```bash
-SMA_DAEMON_DB_URL=postgresql://sma:password@db-host:5432/sma
-```
+Database URLs are intentionally read only from `sma-ng.yml`; environment variables are ignored for this setting.
 
 ### Recommended PostgreSQL Placement
 
@@ -243,8 +239,8 @@ For Docker-based clusters:
 - point every `sma-ng` container at the same PostgreSQL if clustering across hosts
 - publish a distinct port per instance on the same host
 - mount the same media paths into the container on every node
-- set a distinct `SMA_NODE_NAME` for every daemon instance; the daemon uses
-  that value from `daemon.env` as its cluster node ID
+- set a distinct `daemon.node_id` for every daemon instance in its
+  `sma-ng.yml`
 
 If you want a quick starting point, see [Docker Compose Quick Start](docker-compose-quickstart.md).
 
