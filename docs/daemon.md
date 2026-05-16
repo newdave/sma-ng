@@ -262,6 +262,9 @@ override. Per-rule customisation is expressed by selecting a different
 `--workers` controls how many conversions run at the same time.
 
 - Jobs run up to `--workers` at a time; excess jobs queue
+- Resolution order: `--workers` CLI flag > `daemon.workers` in `sma-ng.yml` > schema default (4)
+- In Docker, the `SMA_WORKERS` env var is translated to `--workers` by the image's CMD shim,
+  so containers can be retuned via `daemon.env` without editing the mounted `sma-ng.yml`
 
 ```text
 Job 1: /TV/show1.mkv     -> sma-ng.yml profile rq [starts immediately]

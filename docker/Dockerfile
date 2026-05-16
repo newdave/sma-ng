@@ -306,10 +306,18 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 # tini as PID 1 → entrypoint seeds /app/config → daemon starts
 # Daemon options are passed explicitly; persistent settings live in
 # /config/sma-ng.yml.
+#
+# Worker count resolution (highest precedence first):
+#   1. SMA_WORKERS env var (injected as --workers via the shell shim below)
+#   2. daemon.workers in /config/sma-ng.yml
+#   3. Schema default (4)
+# The ${SMA_WORKERS:+--workers "$SMA_WORKERS"} form only emits the flag when
+# the variable is set and non-empty — otherwise the daemon falls through to
+# the config file value.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["sh", "-c", "exec python3 daemon.py \
     --host 0.0.0.0 \
     --port 8585 \
-    --workers 2 \
+    ${SMA_WORKERS:+--workers \"$SMA_WORKERS\"} \
     --daemon-config /config/sma-ng.yml \
     --logs-dir /logs"]

@@ -271,6 +271,7 @@ class PathConfigManager:
     self.basic_auth = None
     self.db_url = None
     self.ffmpeg_dir = None
+    self.workers = 1
     self.job_timeout_seconds = 0
     self.progress_log_interval = 60
     self.smoke_test = False
@@ -370,6 +371,7 @@ class PathConfigManager:
     self.basic_auth = (d.username, d.password) if d.username and d.password else None
     self.db_url = d.db_url
     self.ffmpeg_dir = d.ffmpeg_dir
+    self.workers = d.workers
     self.job_timeout_seconds = d.job_timeout_seconds
     self.progress_log_interval = d.progress_log_interval
     self.smoke_test = d.smoke_test
