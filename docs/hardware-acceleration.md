@@ -190,7 +190,111 @@ environment:
 
 - The usable Intel VF may appear as `card1` with `renderD128`, or as higher-numbered render nodes, depending on the guest.
 - The Intel Docker Compose profiles mount the whole `/dev/dri` tree so FFmpeg and VAAPI can see the matching `card*` and `renderD*` nodes together.
-- The container entrypoint runs as root, stats the mapped `/dev/dri/*` device nodes, and adds the runtime user to whatever groups own them before dropping privileges. No `RENDER_GID`/`VIDEO_GID` tuning is required regardless of host GID assignments.
+- The container's `ubuntu` runtime user joins the host's `video` and `render` groups declaratively via `docker-compose.yml`'s `group_add: [video, render, 992]` stanza. The image's baked-in numeric 992 render GID serves as a fallback for hosts where neither group name resolves.
+- Bare-`docker run` users on hosts with non-standard render GIDs can opt back in to the legacy entrypoint behaviour by setting `SMA_ENTRYPOINT_FIX_GIDS=1`. The entrypoint will then stat the mapped `/dev/dri/*` device nodes and add the runtime user to whatever groups own them before dropping privileges via `setpriv`.
 - Validate inside the guest first with `ls -l /dev/dri`, then inside the container with `docker compose exec sma-intel vainfo`.
 
 The official Docker image now includes `vainfo` and VAAPI userspace drivers to simplify diagnostics.
+
+---
+
+## Phase 1 observability: `/health`, fallback policy, capability probe
+
+SMA-NG 2.4+ surfaces hardware status as structured fields on the daemon's
+`/health` endpoint so operators can answer "is QSV/NVENC actually working
+on this node?" from a single `curl`, without grepping daemon logs.
+
+### Capability probe
+
+At daemon startup, `scripts/probe-hw.py` shells out to `vainfo`,
+`ffmpeg -hwaccels`, `ffmpeg -encoders`, `ffmpeg -decoders`,
+`nvidia-smi -L`, and the `/dev/dri/renderD*` node list, then writes a
+typed JSON snapshot to `<config_dir>/cache/hw_capabilities.json`. The
+probe is **fail-open** — any subprocess error yields
+`gpu_status: unknown` so daemon startup never blocks on it.
+
+The snapshot is regenerated when the cache file predates the current
+daemon start time (e.g. after a host kernel or driver upgrade).
+
+### `/health` schema additions
+
+`GET /health` returns three additive top-level fields on top of the
+existing payload (consumers MUST ignore unknown keys per
+`docs/daemon.md`):
+
+```json
+{
+  "status": "ok",
+  "node": "sma-master",
+  "gpu_status": "ok",                       // ok | degraded | unreachable | unknown
+  "selected_backend": "qsv",                // qsv | nvenc | vaapi | videotoolbox | software
+  "capabilities": {
+    "hwaccels": ["qsv", "vaapi"],
+    "encoders": {"h264_qsv": true, "hevc_qsv": true},
+    "decoders": {"h264_qsv": true},
+    "render_nodes": ["/dev/dri/renderD128"],
+    "vainfo_driver": "iHD",
+    "vainfo_version": "23.4.0",
+    "ffmpeg_version": "8.1",
+    "nvidia": false
+  },
+  "fallback": [
+    {"from": "hw", "to": "sw_decode", "reason": "device_open_failed", "count": 2}
+  ]
+}
+```
+
+`fallback` accumulates per-tier transition counters keyed by
+`(from_tier, to_tier, failure_class)`. Counters populate as worker
+subprocesses emit the `ffmpeg.attempts` structured log line (single-line
+JSON, picked up by the worker stdout parser).
+
+### `fallback-policy` (replaces the deprecated boolean `software-fallback`)
+
+`base.converter.fallback-policy` selects how far the hardware → software
+fallback ladder is allowed to descend on failure:
+
+```yaml
+base:
+  converter:
+    fallback-policy: aggressive   # try hw → sw_decode → full_sw (default)
+    # fallback-policy: sw_decode_only   # try hw → sw_decode; never swap encoder
+    # fallback-policy: hw_only          # surface hw failures immediately; no retries
+```
+
+The deprecated boolean form continues to work for one minor release:
+
+| Legacy YAML                 | Equivalent new policy |
+| --------------------------- | --------------------- |
+| `software-fallback: true`   | `fallback-policy: aggressive` |
+| `software-fallback: false`  | `fallback-policy: hw_only` |
+
+Loading a config with the deprecated key emits one `WARNING` log per
+daemon startup pointing operators at the new field.
+
+### Why `hw_only` matters
+
+Operators running production QSV nodes typically want hardware failures
+to surface **immediately** — a silent CPU fallback masks real
+infrastructure problems (lost `/dev/dri` permissions, missing oneVPL
+runtime, kernel-driver mismatch). Set `fallback-policy: hw_only` to
+fail loudly; the structured log line and `/health` counter still record
+the failure class so the alert path is observable.
+
+### Failure-class taxonomy
+
+`/health` and the structured log line classify ffmpeg stderr tails into
+six stable buckets (the values are pinned by a regression test; external
+dashboards can rely on them):
+
+| Class                | Typical cause                                      |
+| -------------------- | -------------------------------------------------- |
+| `device_open_failed` | `/dev/dri` permissions, missing libva/oneVPL runtime |
+| `decoder_init_failed`| HW decoder rejects this codec/profile (e.g. AV1 on pre-Arc) |
+| `encoder_init_failed`| HW encoder rejects pix_fmt / profile / level         |
+| `filter_init_failed` | Filter graph build (e.g. `scale_qsv` unavailable)    |
+| `runtime_error`      | ffmpeg started OK then failed mid-encode             |
+| `other`              | Unrecognised stderr (drift in upstream ffmpeg messages) |
+
+A spike in `other` is the signal to update the classifier in
+`resources/processor/failures.py`.
