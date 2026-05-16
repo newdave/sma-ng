@@ -3478,14 +3478,16 @@ class TestConvert:
     assert result is None
 
   def test_software_fallback_disabled_skips_retries(self, tmp_path):
-    """When `software_fallback=False`, the first ffmpeg failure must surface
-    immediately instead of triggering the SW-decode and full-SW retries.
-    Operators flip this off to diagnose real hardware issues (e.g. /dev/dri
-    permissions) that the fallback would otherwise mask."""
+    """When `fallback_policy=HW_ONLY` (legacy `software-fallback: false`),
+    the first ffmpeg failure must surface immediately instead of triggering
+    the SW-decode and full-SW retries. Operators flip this on to diagnose
+    real hardware issues (e.g. /dev/dri permissions) that the fallback
+    would otherwise mask."""
     from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
 
     mp = self._make_mp(tmp_path)
-    mp.settings.software_fallback = False
+    mp.settings.fallback_policy = FallbackPolicy.HW_ONLY
     src = tmp_path / "input.mkv"
     src.write_bytes(b"x")
     out = tmp_path / "input.mp4"
@@ -3516,6 +3518,85 @@ class TestConvert:
     # Encoder must not be swapped to its software counterpart when the
     # fallback is disabled.
     assert options["video"]["codec"] == "h265qsv"
+
+  def test_fallback_policy_sw_decode_only_skips_full_software_tier(self, tmp_path):
+    """`fallback_policy=SW_DECODE_ONLY` runs hw → sw_decode but never
+    swaps the encoder to its software counterpart."""
+    from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.fallback_policy = FallbackPolicy.SW_DECODE_ONLY
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"x")
+
+    options = {
+      "source": [str(src)],
+      "audio": [{"codec": "aac"}],
+      "video": {"codec": "h265qsv"},
+      "subtitle": [],
+    }
+    preopts = ["-hwaccel", "qsv", "-vcodec", "hevc_qsv"]
+
+    call_count = 0
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      nonlocal call_count
+      call_count += 1
+      yield None, ["ffmpeg"]
+      raise FFMpegConvertError("cmd", "output", 1)
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    result, _ = mp.convert(options, preopts, [], False, None)
+    assert result is None
+    # Two attempts: hw + sw_decode. No third (full_sw) attempt.
+    assert call_count == 2
+    # Encoder must not be swapped under SW_DECODE_ONLY.
+    assert options["video"]["codec"] == "h265qsv"
+
+  def test_attempt_ladder_emits_structured_log_line(self, tmp_path):
+    """The ladder must emit one structured log line under the
+    `ffmpeg.attempts` event so /health and operators can see which tier
+    ran and what failed."""
+    import json as _json
+
+    from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.fallback_policy = FallbackPolicy.HW_ONLY
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"x")
+
+    options = {
+      "source": [str(src)],
+      "audio": [{"codec": "aac"}],
+      "video": {"codec": "h265qsv"},
+      "subtitle": [],
+    }
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      yield None, ["ffmpeg"]
+      raise FFMpegConvertError("cmd", "output", "VA-API failed to initialize")
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    mp.convert(options, ["-hwaccel", "qsv", "-vcodec", "hevc_qsv"], [], False, None)
+
+    # Find the JSON line emitted by _emit_attempt_log.
+    info_calls = [c.args[0] for c in mp.log.info.call_args_list if c.args]
+    json_lines = []
+    for line in info_calls:
+      if isinstance(line, str) and line.startswith("{") and "ffmpeg.attempts" in line:
+        json_lines.append(_json.loads(line))
+    assert len(json_lines) == 1
+    payload = json_lines[0]
+    assert payload["event"] == "ffmpeg.attempts"
+    assert payload["result"] == "failed"
+    assert len(payload["attempts"]) == 1
+    assert payload["attempts"][0]["tier"] == "hw"
+    assert payload["attempts"][0]["failure_class"] == "device_open_failed"
 
   def test_input_same_as_output_renames_input(self, tmp_path):
     mp = self._make_mp(tmp_path)
@@ -5559,14 +5640,16 @@ class TestConvert:
     assert result is None
 
   def test_software_fallback_disabled_skips_retries(self, tmp_path):
-    """When `software_fallback=False`, the first ffmpeg failure must surface
-    immediately instead of triggering the SW-decode and full-SW retries.
-    Operators flip this off to diagnose real hardware issues (e.g. /dev/dri
-    permissions) that the fallback would otherwise mask."""
+    """When `fallback_policy=HW_ONLY` (legacy `software-fallback: false`),
+    the first ffmpeg failure must surface immediately instead of triggering
+    the SW-decode and full-SW retries. Operators flip this on to diagnose
+    real hardware issues (e.g. /dev/dri permissions) that the fallback
+    would otherwise mask."""
     from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
 
     mp = self._make_mp(tmp_path)
-    mp.settings.software_fallback = False
+    mp.settings.fallback_policy = FallbackPolicy.HW_ONLY
     src = tmp_path / "input.mkv"
     src.write_bytes(b"x")
     out = tmp_path / "input.mp4"
@@ -5597,6 +5680,85 @@ class TestConvert:
     # Encoder must not be swapped to its software counterpart when the
     # fallback is disabled.
     assert options["video"]["codec"] == "h265qsv"
+
+  def test_fallback_policy_sw_decode_only_skips_full_software_tier(self, tmp_path):
+    """`fallback_policy=SW_DECODE_ONLY` runs hw → sw_decode but never
+    swaps the encoder to its software counterpart."""
+    from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.fallback_policy = FallbackPolicy.SW_DECODE_ONLY
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"x")
+
+    options = {
+      "source": [str(src)],
+      "audio": [{"codec": "aac"}],
+      "video": {"codec": "h265qsv"},
+      "subtitle": [],
+    }
+    preopts = ["-hwaccel", "qsv", "-vcodec", "hevc_qsv"]
+
+    call_count = 0
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      nonlocal call_count
+      call_count += 1
+      yield None, ["ffmpeg"]
+      raise FFMpegConvertError("cmd", "output", 1)
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    result, _ = mp.convert(options, preopts, [], False, None)
+    assert result is None
+    # Two attempts: hw + sw_decode. No third (full_sw) attempt.
+    assert call_count == 2
+    # Encoder must not be swapped under SW_DECODE_ONLY.
+    assert options["video"]["codec"] == "h265qsv"
+
+  def test_attempt_ladder_emits_structured_log_line(self, tmp_path):
+    """The ladder must emit one structured log line under the
+    `ffmpeg.attempts` event so /health and operators can see which tier
+    ran and what failed."""
+    import json as _json
+
+    from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.fallback_policy = FallbackPolicy.HW_ONLY
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"x")
+
+    options = {
+      "source": [str(src)],
+      "audio": [{"codec": "aac"}],
+      "video": {"codec": "h265qsv"},
+      "subtitle": [],
+    }
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      yield None, ["ffmpeg"]
+      raise FFMpegConvertError("cmd", "output", "VA-API failed to initialize")
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    mp.convert(options, ["-hwaccel", "qsv", "-vcodec", "hevc_qsv"], [], False, None)
+
+    # Find the JSON line emitted by _emit_attempt_log.
+    info_calls = [c.args[0] for c in mp.log.info.call_args_list if c.args]
+    json_lines = []
+    for line in info_calls:
+      if isinstance(line, str) and line.startswith("{") and "ffmpeg.attempts" in line:
+        json_lines.append(_json.loads(line))
+    assert len(json_lines) == 1
+    payload = json_lines[0]
+    assert payload["event"] == "ffmpeg.attempts"
+    assert payload["result"] == "failed"
+    assert len(payload["attempts"]) == 1
+    assert payload["attempts"][0]["tier"] == "hw"
+    assert payload["attempts"][0]["failure_class"] == "device_open_failed"
 
   def test_input_same_as_output_renames_input(self, tmp_path):
     mp = self._make_mp(tmp_path)

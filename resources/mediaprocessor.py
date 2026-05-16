@@ -128,14 +128,18 @@ def _swap_qsv_codec_to_sw(options):
   return codec
 
 
+from typing import Callable
+
 from converter import Converter, FFMpegConvertError
 from converter.avcodecs import BaseCodec
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
+from resources.config_schema import FallbackPolicy
 from resources.extensions import bad_sub_extensions, subtitle_codec_extensions
 from resources.lang import getAlpha3TCode
 from resources.metadata import Metadata
 from resources.openvino_analyzer import OpenVINOAnalyzerBackend, OpenVINOAnalyzerError
 from resources.postprocess import PostProcessor
+from resources.processor.failures import TAIL_BYTES, AttemptRecord, FfmpegFailureClass, parse_ffmpeg_failure
 from resources.subtitles import SubtitleProcessor
 
 try:
@@ -174,6 +178,10 @@ class MediaProcessor:
     self.converter = Converter(settings.ffmpeg, settings.ffprobe)
     self.deletesubs = set()
     self.subtitles = SubtitleProcessor(self)
+    # Per-fallback-attempt telemetry hook. The daemon overrides this with a
+    # bound method of DaemonServer so per-tier counters land on /health.
+    # CLI/manual invocations leave the no-op in place.
+    self._increment_fallback_counter: Callable[[str, str, str], None] = lambda from_tier, to_tier, reason: None
 
   def fullprocess(self, inputfile, mediatype, reportProgress=False, original=None, info=None, tmdbid=None, tvdbid=None, imdbid=None, season=None, episode=None, language=None, tagdata=None, post=True):
     """
@@ -2873,6 +2881,141 @@ class MediaProcessor:
     self.log.debug("canBypassConvert returned False.")
     return False
 
+  def _attempt_ladder(self, preopts, options, outputfile, run_fn):
+    """Run the convert pipeline with the configured fallback policy.
+
+    Replaces the inline try/except triple that previously lived in
+    ``convert()``. Each tier records an :class:`AttemptRecord`; on
+    completion (success or final failure) one structured JSON log line
+    is emitted via ``self.log.info`` under the ``ffmpeg.attempts`` event
+    so /health and operators can see which tier ran and why earlier
+    tiers fell over.
+
+    Tier transitions remain the historical helpers
+    (``_strip_hw_decoder_from_preopts``,
+    ``_strip_qsv_input_pipeline_from_preopts``, ``_swap_qsv_codec_to_sw``)
+    — the typed-pipeline rewrite that retires them is Phase 2 work.
+
+    Args:
+        preopts: argv slice that precedes the input (``-i``) marker.
+        options: mutable convert options dict (the encoder swap mutates
+            ``options['video']['codec']`` in place).
+        outputfile: path of the in-progress output (used to clean up
+            partial files between tier retries).
+        run_fn: callable that drives the converter generator; takes one
+            ``preopts`` arg and raises :class:`FFMpegConvertError` on
+            failure.
+    """
+    policy = getattr(self.settings, "fallback_policy", FallbackPolicy.AGGRESSIVE)
+    records: list[AttemptRecord] = []
+
+    def _ms(start: float) -> int:
+      return int((time.monotonic() - start) * 1000)
+
+    def _classify(err: FFMpegConvertError) -> FfmpegFailureClass:
+      blob = getattr(err, "output", "") or ""
+      return parse_ffmpeg_failure(blob[-TAIL_BYTES:] if isinstance(blob, str) else blob)
+
+    first_err: FFMpegConvertError | None = None
+    second_err: FFMpegConvertError | None = None
+
+    # Tier 1: hardware
+    t0 = time.monotonic()
+    try:
+      run_fn(preopts)
+      records.append(AttemptRecord(tier="hw", failure_class=None, duration_ms=_ms(t0)))
+      self._emit_attempt_log(records, "ok")
+      return
+    except FFMpegConvertError as err:
+      first_err = err
+      cls = _classify(err)
+      records.append(AttemptRecord(tier="hw", failure_class=cls, duration_ms=_ms(t0)))
+      if policy == FallbackPolicy.HW_ONLY:
+        self.log.warning(
+          "Conversion failed with hardware decoder and fallback-policy=hw_only; surfacing original error (cause=%s)." % cls.value,
+        )
+        self._emit_attempt_log(records, "failed")
+        raise
+
+    # Tier 2: sw decode (hw encode retained)
+    retry_preopts = _strip_hw_decoder_from_preopts(preopts)
+    if retry_preopts is None:
+      self._emit_attempt_log(records, "failed")
+      assert first_err is not None
+      raise first_err
+    cls0 = records[-1].failure_class
+    self.log.warning(
+      "Conversion failed with hardware decoder (cause=%s); retrying with software decode (stripping `-vcodec` from preopts). Original error: %s"
+      % (cls0.value if cls0 else "unknown", str(first_err)[:300]),
+    )
+    getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("hw", "sw_decode", cls0.value if cls0 else "other")
+    if outputfile is not None and os.path.isfile(outputfile):
+      self.removeFile(outputfile)
+    t1 = time.monotonic()
+    try:
+      run_fn(retry_preopts)
+      records.append(AttemptRecord(tier="sw_decode", failure_class=None, duration_ms=_ms(t1)))
+      self._emit_attempt_log(records, "ok")
+      return
+    except FFMpegConvertError as err:
+      second_err = err
+      cls = _classify(err)
+      records.append(AttemptRecord(tier="sw_decode", failure_class=cls, duration_ms=_ms(t1)))
+      if policy == FallbackPolicy.SW_DECODE_ONLY:
+        self.log.warning(
+          "Conversion failed with sw decode and fallback-policy=sw_decode_only; surfacing error (cause=%s)." % cls.value,
+        )
+        self._emit_attempt_log(records, "failed")
+        raise
+
+    # Tier 3: full software (encoder swap)
+    sw_preopts = _strip_qsv_input_pipeline_from_preopts(preopts) or []
+    original_codec = _swap_qsv_codec_to_sw(options)
+    if original_codec is None:
+      self._emit_attempt_log(records, "failed")
+      assert second_err is not None
+      raise second_err
+    cls1 = records[-1].failure_class
+    self.log.warning(
+      "Software-decode retry also failed (cause=%s); falling back to full software pipeline (swapping encoder %s -> %s). Error: %s"
+      % (cls1.value if cls1 else "unknown", original_codec, options["video"]["codec"], str(second_err)[:300]),
+    )
+    getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("sw_decode", "full_sw", cls1.value if cls1 else "other")
+    if outputfile is not None and os.path.isfile(outputfile):
+      self.removeFile(outputfile)
+    t2 = time.monotonic()
+    try:
+      run_fn(sw_preopts)
+      records.append(AttemptRecord(tier="full_sw", failure_class=None, duration_ms=_ms(t2)))
+      self._emit_attempt_log(records, "ok")
+      return
+    except FFMpegConvertError as third_err:
+      cls = _classify(third_err)
+      records.append(AttemptRecord(tier="full_sw", failure_class=cls, duration_ms=_ms(t2)))
+      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("full_sw", "failed", cls.value)
+      self._emit_attempt_log(records, "failed")
+      raise
+
+  def _emit_attempt_log(self, records: list[AttemptRecord], result: str) -> None:
+    """Emit one structured JSON line summarising the fallback ladder run.
+
+    Single-line per :doc:`brainstorming/2026-04-27-logging-refactor`; new
+    structured fields go in the JSON payload, not multiple log records.
+    """
+    payload = {
+      "event": "ffmpeg.attempts",
+      "result": result,
+      "attempts": [
+        {
+          "tier": r.tier,
+          "failure_class": r.failure_class.value if r.failure_class else None,
+          "duration_ms": r.duration_ms,
+        }
+        for r in records
+      ],
+    }
+    self.log.info(json.dumps(payload, sort_keys=True))
+
   def _write_ffmpeg_stderr_sidecar(self, e):
     """Persist the full ffmpeg stderr from a failed convert to a sidecar file.
 
@@ -3064,47 +3207,7 @@ class MediaProcessor:
       self.setPermissions(outputfile)
 
     try:
-      try:
-        _run_convert(preopts)
-      except FFMpegConvertError as first_err:
-        if not getattr(self.settings, "software_fallback", True):
-          # Operator opted out of the fallback chain — surface the
-          # original hardware error immediately so it isn't masked by
-          # retries (e.g. /dev/dri permissions, missing QSV runtime).
-          self.log.warning("Conversion failed with hardware decoder and software-fallback is disabled; surfacing original error.")
-          raise
-        # Tier 1: strip the input-side `-vcodec <hw_decoder>` (e.g.
-        # av1_qsv on a pre-Arc Intel iGPU that lists the decoder but
-        # can't actually init it) and retry with software decode. The
-        # QSV ENCODE path in `options` is left intact.
-        retry_preopts = _strip_hw_decoder_from_preopts(preopts)
-        if retry_preopts is None:
-          raise
-        self.log.warning("Conversion failed with hardware decoder; retrying once with software decode (stripping `-vcodec` from preopts). Original error: %s" % str(first_err)[:300])
-        if outputfile is not None and os.path.isfile(outputfile):
-          # Clear any partial output written by the failed attempt.
-          self.removeFile(outputfile)
-        try:
-          _run_convert(retry_preopts)
-        except FFMpegConvertError as second_err:
-          # Tier 2: full software pipeline. Some combinations (4K HDR10+
-          # HEVC on weaker iGPUs) fail even with SW decode because the
-          # QSV upload + scale_qsv filter chain still can't handle the
-          # input. Strip the QSV input pipeline entirely AND swap the
-          # encoder to its software counterpart so libx265/libx264/libaom
-          # picks up the conversion.
-          sw_preopts = _strip_qsv_input_pipeline_from_preopts(preopts) or []
-          original_codec = _swap_qsv_codec_to_sw(options)
-          if original_codec is None:
-            # No QSV encoder to swap — second retry won't help.
-            raise
-          self.log.warning(
-            "Software-decode retry also failed; falling back to full software pipeline "
-            "(swapping encoder %s -> %s, stripping QSV input pipeline). Error: %s" % (original_codec, options["video"]["codec"], str(second_err)[:300])
-          )
-          if outputfile is not None and os.path.isfile(outputfile):
-            self.removeFile(outputfile)
-          _run_convert(sw_preopts)
+      self._attempt_ladder(preopts, options, outputfile, _run_convert)
     except FFMpegConvertError as e:
       self.log.exception("Error converting file, FFMPEG error.")
       self.log.error(e.cmd)

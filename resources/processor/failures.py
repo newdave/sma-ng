@@ -121,8 +121,9 @@ def parse_ffmpeg_failure(stderr: str | bytes | None) -> FfmpegFailureClass:
 
   Only the last TAIL_BYTES characters are inspected — earlier ffmpeg output
   is progress noise. Returns OTHER for any input that doesn't match a known
-  pattern (deliberate: drift in upstream ffmpeg messages should surface as
-  an `other` metric, not a crash).
+  pattern, is empty, or isn't a string/bytes blob (deliberate: drift in
+  upstream ffmpeg messages should surface as an `other` metric, not a
+  crash).
   """
   if stderr is None:
     return FfmpegFailureClass.OTHER
@@ -132,8 +133,11 @@ def parse_ffmpeg_failure(stderr: str | bytes | None) -> FfmpegFailureClass:
       text = stderr.decode("utf-8", errors="replace")
     except Exception:
       return FfmpegFailureClass.OTHER
-  else:
+  elif isinstance(stderr, str):
     text = stderr
+  else:
+    # Anything else (int, list, mock, …) is treated as unclassifiable.
+    return FfmpegFailureClass.OTHER
 
   if not text:
     return FfmpegFailureClass.OTHER
