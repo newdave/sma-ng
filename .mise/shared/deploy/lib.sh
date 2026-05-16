@@ -19,6 +19,8 @@ init_host_context() {
   dir=$($cfg deploy_dir ~/sma)
   port=$($cfg ssh_port 22)
   key=$($cfg ssh_key "")
+  # shellcheck disable=SC2034  # ffmpeg_dir is consumed by task scripts that source this library
+  ffmpeg_dir=$($cfg ffmpeg_dir "")
   auto_create_venv=$($cfg auto_create_venv true)
   venv_dir=$($cfg venv_dir venv)
   python_bin=$($cfg python_bin /usr/bin/python3)
