@@ -18,6 +18,7 @@ import difflib
 import io
 import os
 import sys
+from enum import Enum
 from pathlib import Path
 
 from ruamel.yaml import YAML
@@ -39,6 +40,10 @@ def _to_commented(obj):
     return cm
   if isinstance(obj, list):
     return [_to_commented(x) for x in obj]
+  if isinstance(obj, Enum):
+    # ruamel.yaml has no representer for IntEnum/StrEnum subclasses.
+    # Convert to the underlying scalar so dumping just emits e.g. `aggressive`.
+    return obj.value
   return obj
 
 

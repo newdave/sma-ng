@@ -34,7 +34,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from resources.config_loader import ConfigError, ConfigLoader
-from resources.config_schema import AutoscanInstance, EmbyInstance, JellyfinInstance, PlexInstance, SmaConfig, SonarrInstance
+from resources.config_schema import AutoscanInstance, EmbyInstance, FallbackPolicy, JellyfinInstance, PlexInstance, SmaConfig, SonarrInstance
 from resources.yamlconfig import cfg_getdirectories, cfg_getdirectory, cfg_getextension, cfg_getextensions, cfg_getpath
 
 
@@ -379,7 +379,15 @@ class ReadSettings:
     self.postprocess = cfg.post_process
     self.waitpostprocess = cfg.wait_post_process
     self.detailedprogress = cfg.detailed_progress
-    self.software_fallback = cfg.software_fallback
+    self.fallback_policy = cfg.fallback_policy
+    # Legacy attribute consumed by older code paths: True iff the policy
+    # permits any tier of software fallback. Removed once the boolean
+    # `software-fallback` alias is dropped.
+    self.software_fallback = cfg.fallback_policy != FallbackPolicy.HW_ONLY
+    if getattr(cfg, "_software_fallback_deprecated", False) or "_software_fallback_deprecated" in (getattr(cfg, "model_extra", None) or {}):
+      self.log.warning(
+        "config: 'software-fallback' is deprecated; use 'fallback-policy: %s' instead." % self.fallback_policy.value,
+      )
     self.preopts = self._as_list(cfg.preopts, lower=False, replace=[])
     self.postopts = self._as_list(cfg.postopts, lower=False, replace=[])
     self.regex = cfg.regex_directory_replace

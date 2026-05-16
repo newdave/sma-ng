@@ -6,9 +6,7 @@ daemon:
   port: 8585
   workers: 4
   api-key:
-  # Use sqlite:////data/sma-ng.db for single-node Docker or postgresql://...
-  # for clustered deployments.
-  db-url: sqlite:////data/sma-ng.db
+  db-url:
   ffmpeg-dir:
   node-id:
   username: ''
@@ -105,7 +103,7 @@ base:
     post-process: false
     wait-post-process: false
     detailed-progress: false
-    software-fallback: false
+    fallback-policy: aggressive
     preopts: []
     postopts: []
     regex-directory-replace: '[^\w\-_\. ]'
