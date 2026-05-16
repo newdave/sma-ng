@@ -1,0 +1,10 @@
+ffmpeg version 8.1 Copyright (c) 2000-2025 the FFmpeg developers
+Input #0, matroska,webm, from 'movie.mkv':
+  Duration: 01:30:00.00, start: 0.000000, bitrate: 12345 kb/s
+  Stream #0:0(und): Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084), 3840x2160
+Stream mapping:
+  Stream #0:0 -> #0:0 (hevc (native) -> hevc (hevc_qsv))
+[hevc_qsv @ 0x55c8b500] Error initializing an internal MFX session: unsupported (-3)
+[hevc_qsv @ 0x55c8b500] Specified pixel format yuv420p10le is invalid or not supported
+Could not open encoder for stream #0:0: Function not implemented
+Error initializing output stream 0:0 -- Error while opening encoder for output stream #0:0 - maybe incorrect parameters such as bit_rate, rate, width or height

@@ -1,0 +1,8 @@
+ffmpeg version 8.1 Copyright (c) 2000-2025 the FFmpeg developers
+Stream mapping:
+  Stream #0:0 -> #0:0 (hevc (hevc_qsv) -> hevc (hevc_qsv))
+[Parsed_scale_qsv_0 @ 0x55c8c000] No such filter: 'scale_qsv'
+[fc#0 @ 0x55c8c800] Error opening filter 'scale_qsv'
+[fc#0 @ 0x55c8c800] Cannot create the complex filtergraph
+Error opening filtergraph 'scale_qsv=w=1920:h=1080:format=p010le'
+Failed to configure output pad on Parsed_scale_qsv_0

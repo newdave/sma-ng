@@ -1,0 +1,11 @@
+ffmpeg version 8.1 Copyright (c) 2000-2025 the FFmpeg developers
+  built with gcc 13 (Ubuntu 13.2.0-23ubuntu4)
+  configuration: --prefix=/usr/local --enable-vaapi --enable-libvpl --enable-ffnvcodec
+libva info: VA-API version 1.23.0
+libva info: Trying to open /dev/dri/renderD128
+libva info: va_openDriver() returns -1
+libva error: /dev/dri/renderD128: Permission denied
+[AVHWDeviceContext @ 0x55c8a4a0] Failed to initialize the VA-API device.
+Device creation failed: -1.
+Failed to set value '/dev/dri/renderD128' for option 'qsv_device': Generic error in an external library
+Error parsing global options: Generic error in an external library
