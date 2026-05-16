@@ -168,10 +168,18 @@ services:
       - /transcodes:/transcodes
     devices:
       - /dev/dri:/dev/dri
-    # No group_add: the entrypoint runs as root, stats the mapped /dev/dri
-    # device nodes, adds the `ubuntu` runtime user to whatever groups own
-    # them, then drops privileges via setpriv. Works regardless of the
-    # host's render/video GID assignments.
+    # Declarative GPU access: the container's `ubuntu` runtime user joins
+    # the host's `video` / `render` groups (and the image's baked-in
+    # numeric 992 fallback for hosts where neither group name exists).
+    # No root-mode entrypoint GID reconciliation needed.
+    #
+    # If your host has a non-standard render GID and the names above don't
+    # resolve, set SMA_ENTRYPOINT_FIX_GIDS=1 to fall back to the legacy
+    # entrypoint behaviour (stats /dev/dri, joins whatever group owns it).
+    group_add:
+      - "video"
+      - "render"
+      - "992"
     env_file:
       - path: ../config/daemon.env
         required: true
@@ -202,10 +210,14 @@ services:
     devices:
       - /dev/dri/card1:/dev/dri/card0
       - /dev/dri/renderD128:/dev/dri/renderD128
-    # No group_add: the entrypoint runs as root, stats the mapped /dev/dri
-    # device nodes, adds the `ubuntu` runtime user to whatever groups own
-    # them, then drops privileges via setpriv. Works regardless of the
-    # host's render/video GID assignments.
+    # Declarative GPU access (mirrors sma-intel). Set
+    # SMA_ENTRYPOINT_FIX_GIDS=1 in the environment to fall back to the
+    # legacy entrypoint reconciliation on hosts with non-standard render
+    # GIDs that neither `video` nor `render` nor `992` resolves.
+    group_add:
+      - "video"
+      - "render"
+      - "992"
     env_file:
       - path: ../config/daemon.env
         required: true

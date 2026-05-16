@@ -33,13 +33,18 @@ seed_file() {
     fi
 }
 
-# ── reconcile /dev/dri device GIDs (root only) ────────────────────────────────
-# Render nodes on the host can be owned by `render`/`video` groups whose GIDs
-# don't match the ones baked into the image. Rather than asking the operator
-# to set RENDER_GID/VIDEO_GID in .env, stat the actual device files and add
-# the `ubuntu` runtime user to whatever groups own them. Falls through silently
-# if no /dev/dri devices are mapped (NVENC / software-only deployments).
-if [ "$(id -u)" = "0" ] && [ -d /dev/dri ]; then
+# ── reconcile /dev/dri device GIDs (opt-in, root only) ───────────────────────
+# Default deployment path is now declarative: docker-compose's `group_add:
+# [video, render, 992]` joins the container `ubuntu` user to the host's
+# render/video groups at container start, so the daemon process runs as
+# unprivileged from PID-1 onward.
+#
+# Operators running bare `docker run` on hosts with non-standard render
+# GIDs (where neither `video` nor `render` resolves and 992 doesn't match)
+# can opt back in to the legacy behaviour by setting
+# SMA_ENTRYPOINT_FIX_GIDS=1. The block below stats the actual device files
+# and adds the `ubuntu` user to whatever groups own them.
+if [ "${SMA_ENTRYPOINT_FIX_GIDS:-0}" = "1" ] && [ "$(id -u)" = "0" ] && [ -d /dev/dri ]; then
     for dev in /dev/dri/card0 /dev/dri/card1 /dev/dri/renderD128 /dev/dri/renderD129; do
         [ -e "$dev" ] || continue
         gid="$(stat -c '%g' "$dev" 2>/dev/null || true)"
