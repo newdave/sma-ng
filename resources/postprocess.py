@@ -61,9 +61,8 @@ class PostProcessor:
       if os.path.splitext(script)[1] in bad_post_extensions or os.path.isdir(os.path.join(post_process_directory, script)) or script in bad_post_files:
         self.log.debug("Skipping %s." % script)
         continue
-      else:
-        self.log.debug("Script added: %s." % script)
-        scripts.append(os.path.join(post_process_directory, script))
+      self.log.debug("Script added: %s." % script)
+      scripts.append(os.path.join(post_process_directory, script))
     return scripts
 
   def setEnv(self, mediatype, tmdbid, season=None, episode=None):

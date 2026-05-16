@@ -263,7 +263,7 @@ class TestAnalyzeNoNumpy:
     # analyze() calls _import_numpy() before _load_compiled_model; stub it so the
     # test runs without numpy installed.  The numpy reference is unused because
     # _load_compiled_model returns None and the inference branch is skipped.
-    monkeypatch.setattr(backend, "_import_numpy", lambda: object())
+    monkeypatch.setattr(backend, "_import_numpy", lambda: object())  # noqa: PLW0108 — replacement must match the original callable shape
     backend.analyze(core=core, inputfile="/fake/video.mkv")
     assert loaded_paths == [str(xml_path)]
 

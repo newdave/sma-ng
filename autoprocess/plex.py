@@ -13,7 +13,7 @@ from resources.log import getLogger
 from resources.readsettings import ReadSettings
 
 
-def refreshPlex(settings: ReadSettings, path: Optional[str] = None, logger: Optional[logging.Logger] = None):
+def refreshPlex(settings: ReadSettings, path: str | None = None, logger: logging.Logger | None = None):
   """Trigger a targeted Plex library section refresh for a converted file's directory.
 
   Applies any configured path mappings before looking up which library
@@ -52,7 +52,7 @@ def refreshPlex(settings: ReadSettings, path: Optional[str] = None, logger: Opti
   log.info("Checking if any sections contain the path %s." % (targetpath))
 
   if plex:
-    sections: List[LibrarySection] = plex.library.sections()
+    sections: list[LibrarySection] = plex.library.sections()
 
     section: LibrarySection
     for section in sections:
@@ -66,7 +66,7 @@ def refreshPlex(settings: ReadSettings, path: Optional[str] = None, logger: Opti
     log.error("Unable to establish Plex server connection.")
 
 
-def getPlexServer(settings: ReadSettings, logger: Optional[logging.Logger] = None) -> Optional[PlexServer]:
+def getPlexServer(settings: ReadSettings, logger: logging.Logger | None = None) -> PlexServer | None:
   """Establish a connection to a Plex Media Server.
 
   Connects directly to a local or reachable Plex Media Server using the
@@ -86,8 +86,8 @@ def getPlexServer(settings: ReadSettings, logger: Optional[logging.Logger] = Non
     log.error("No Plex host/token configured, please update your configuration file.")
     return None
 
-  plex: Optional[PlexServer] = None
-  session: Optional[requests.Session] = None
+  plex: PlexServer | None = None
+  session: requests.Session | None = None
 
   if settings.Plex.get("ignore-certs"):
     session = requests.Session()

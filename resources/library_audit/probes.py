@@ -37,7 +37,7 @@ def ffprobe_check(path: str, ffmpeg_dir: str | None = None) -> dict[str, Any] | 
     else:
       ffmpeg = FFMpeg()
     info = ffmpeg.probe(path)
-  except Exception as exc:  # noqa: BLE001 - probe wraps subprocess
+  except Exception as exc:
     return {"reason": "probe_exception", "error": str(exc)[:512], "size_bytes": size}
   if info is None:
     return {"reason": "probe_returned_none", "size_bytes": size}
@@ -119,9 +119,9 @@ def preconv_original_check(path: str) -> dict[str, Any] | None:
 
 __all__ = [
   "ffprobe_check",
-  "sidecar_orphan_check",
-  "tmp_artifact_check",
-  "preconv_original_check",
   "is_sidecar",
   "is_tmp_artifact",
+  "preconv_original_check",
+  "sidecar_orphan_check",
+  "tmp_artifact_check",
 ]

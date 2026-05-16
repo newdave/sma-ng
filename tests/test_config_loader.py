@@ -96,7 +96,7 @@ class TestLoadErrors:
 
   def test_rejects_unknown_routing_service_ref(self, loader, write_yaml):
     p = write_yaml("daemon:\n  routing:\n    - match: /tv\n      services: [sonarr.ghost]\nservices:\n  sonarr:\n    main: {url: 'http://x'}\n")
-    with pytest.raises(ConfigError, match="sonarr.ghost"):
+    with pytest.raises(ConfigError, match=r"sonarr\.ghost"):
       loader.load(p)
 
 

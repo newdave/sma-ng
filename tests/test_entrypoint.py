@@ -47,7 +47,7 @@ def _run(config_dir, env_extra=None, cmd="true"):
   fake_app = tempfile.mkdtemp(prefix="sma-app-")
   try:
     fake_setup = os.path.join(fake_app, "setup")
-    os.symlink(SETUP_DIR, fake_setup)
+    os.symlink(SETUP_DIR, fake_setup)  # noqa: PTH211 — fixture mirrors entrypoint shell, not user code
 
     # Patch the SETUP_DIR path in the script so it points at our fake_app
     with open(ENTRYPOINT) as fh:

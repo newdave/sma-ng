@@ -128,7 +128,7 @@ def _swap_qsv_codec_to_sw(options):
   return codec
 
 
-from typing import Callable
+from collections.abc import Callable
 
 from converter import Converter, FFMpegConvertError
 from converter.avcodecs import BaseCodec
@@ -2291,8 +2291,7 @@ class MediaProcessor:
             self.log.debug("Decoder formats:")
             self.log.debug(self.converter.ffmpeg.decoder_formats(decoder))
             break
-          else:
-            self.log.debug("Decoder %s is supported but cannot support bit depth %d of format %s." % (decoder, bit_depth, pix_fmt))
+          self.log.debug("Decoder %s is supported but cannot support bit depth %d of format %s." % (decoder, bit_depth, pix_fmt))
     return opts, device
 
   # Using sorting and filtering to determine which audio track should be flagged as default, only one track will be selected

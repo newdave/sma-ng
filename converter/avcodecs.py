@@ -2,7 +2,7 @@
 """Codec class definitions mapping SMA-NG codec names to FFmpeg encoder/decoder identifiers."""
 
 
-class BaseCodec(object):
+class BaseCodec:
   """
   Base audio/video/subtitle codec class.
   """
@@ -60,7 +60,7 @@ class BaseCodec(object):
     """
     if "codec" not in opt or opt["codec"] != self.codec_name:
       raise ValueError("invalid codec name")
-    return None
+    return
 
   def _codec_specific_parse_options(self, safe):
     """Apply codec-specific validation and transformation to the safe options dict.
@@ -174,7 +174,7 @@ class BaseCodec(object):
     return optlist
 
 
-class BaseDecoder(object):
+class BaseDecoder:
   """
   Base decoder class.
   """
@@ -235,7 +235,7 @@ class AudioCodec(BaseCodec):
     -disposition, and -map tokens for the given stream index. Delegates
     codec-specific flags to _codec_specific_produce_ffmpeg_list.
     """
-    super(AudioCodec, self).parse_options(opt)
+    super().parse_options(opt)
     safe = self.safe_options(opt)
     stream = str(stream)
 
@@ -349,7 +349,7 @@ class SubtitleCodec(BaseCodec):
     language), and -disposition tokens for the given stream index.
     Delegates codec-specific flags to _codec_specific_produce_ffmpeg_list.
     """
-    super(SubtitleCodec, self).parse_options(opt)
+    super().parse_options(opt)
     stream = str(stream)
     safe = self.safe_options(opt)
 
@@ -516,7 +516,7 @@ class VideoCodec(BaseCodec):
     -aspect, -bsf:v, and -metadata tokens. Multiple -vf arguments are
     consolidated into a single comma-separated filter chain.
     """
-    super(VideoCodec, self).parse_options(opt)
+    super().parse_options(opt)
 
     safe = self.safe_options(opt)
 
@@ -1084,11 +1084,11 @@ class H264Codec(VideoCodec):
     return ffprobe_level / 10.0
 
   def _codec_specific_parse_options(self, safe, stream=0):
-    if "width" in safe and safe["width"]:
+    if safe.get("width"):
       safe["width"] = 2 * round(safe["width"] / 2)
       safe["wscale"] = safe["width"]
       del safe["width"]
-    if "height" in safe and safe["height"]:
+    if safe.get("height"):
       if safe["height"] % 2 == 0:
         safe["hscale"] = safe["height"]
       del safe["height"]
@@ -1167,11 +1167,11 @@ class HWAccelVideoCodec:
   def _hw_parse_scale(self, safe):
     """Convert width/height to hw-prefixed scale variables."""
     p = self.hw_prefix
-    if "width" in safe and safe["width"]:
+    if safe.get("width"):
       safe["width"] = 2 * round(safe["width"] / 2)
       safe[p + "_wscale"] = safe["width"]
       del safe["width"]
-    if "height" in safe and safe["height"]:
+    if safe.get("height"):
       if safe["height"] % 2 == 0:
         safe[p + "_hscale"] = safe["height"]
       del safe["height"]
@@ -1261,7 +1261,7 @@ class NVEncH264Codec(HWAccelVideoCodec, H264Codec):
     return safe
 
   def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
-    optlist = super(NVEncH264Codec, self)._codec_specific_produce_ffmpeg_list(safe, stream)
+    optlist = super()._codec_specific_produce_ffmpeg_list(safe, stream)
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
     optlist.extend(self._hw_scale_opts(safe))
@@ -1356,7 +1356,7 @@ class H264VAAPICodec(VAAPIVideoCodec, H264Codec):
     return safe
 
   def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
-    optlist = super(H264VAAPICodec, self)._codec_specific_produce_ffmpeg_list(safe, stream)
+    optlist = super()._codec_specific_produce_ffmpeg_list(safe, stream)
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
     optlist.extend(self._hw_vaapi_scale_opts(safe))
@@ -1393,7 +1393,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
   )
 
   def _codec_specific_parse_options(self, safe, stream=0):
-    safe = super(H264QSVCodec, self)._codec_specific_parse_options(safe, stream)
+    safe = super()._codec_specific_parse_options(safe, stream)
     self._hw_parse_scale(safe)
     self._hw_parse_quality(safe)
     self._hw_parse_pix_fmt(safe)
@@ -1422,7 +1422,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
       optlist.extend(scale)
     elif fmtstr:
       optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
-    optlist.extend(super(H264QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
+    optlist.extend(super()._codec_specific_produce_ffmpeg_list(safe, stream))
     look_ahead_depth = safe.get("look_ahead_depth", 0)
     if look_ahead_depth and look_ahead_depth > 0:
       optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth)])
@@ -1486,11 +1486,11 @@ class H265Codec(VideoCodec):
     return ffprobe_level / 30.0
 
   def _codec_specific_parse_options(self, safe, stream=0):
-    if "width" in safe and safe["width"]:
+    if safe.get("width"):
       safe["width"] = 2 * round(safe["width"] / 2)
       safe["wscale"] = safe["width"]
       del safe["width"]
-    if "height" in safe and safe["height"]:
+    if safe.get("height"):
       if safe["height"] % 2 == 0:
         safe["hscale"] = safe["height"]
       del safe["height"]
@@ -1498,9 +1498,9 @@ class H265Codec(VideoCodec):
 
   def safe_framedata(self, opts):
     params = ""
-    if "hdr" in opts and opts["hdr"]:
+    if opts.get("hdr"):
       params += "hdr-opt=1:"
-    if "repeat-headers" in opts and opts["repeat-headers"]:
+    if opts.get("repeat-headers"):
       params += "repeat-headers=1:"
     if "color_primaries" in opts:
       params += "colorprim=" + opts["color_primaries"] + ":"
@@ -1603,7 +1603,7 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
   )
 
   def _codec_specific_parse_options(self, safe, stream=0):
-    safe = super(H265QSVCodec, self)._codec_specific_parse_options(safe, stream)
+    safe = super()._codec_specific_parse_options(safe, stream)
     self._hw_parse_scale(safe)
     self._hw_parse_quality(safe)
     self._hw_parse_pix_fmt(safe)
@@ -1632,7 +1632,7 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
       optlist.extend(scale)
     elif fmtstr:
       optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
-    optlist.extend(super(H265QSVCodec, self)._codec_specific_produce_ffmpeg_list(safe, stream))
+    optlist.extend(super()._codec_specific_produce_ffmpeg_list(safe, stream))
     look_ahead_depth = safe.get("look_ahead_depth", 0)
     if look_ahead_depth and look_ahead_depth > 0:
       # `-extra_hw_frames` is a device/hwframe-context option, not an encoder
@@ -1731,7 +1731,7 @@ class H265VAAPICodec(VAAPIVideoCodec, H265Codec):
     return safe
 
   def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
-    optlist = super(H265VAAPICodec, self)._codec_specific_produce_ffmpeg_list(safe, stream)
+    optlist = super()._codec_specific_produce_ffmpeg_list(safe, stream)
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
     optlist.extend(self._hw_vaapi_scale_opts(safe))
@@ -1789,7 +1789,7 @@ class NVEncH265Codec(HWAccelVideoCodec, H265Codec):
     return safe
 
   def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
-    optlist = super(NVEncH265Codec, self)._codec_specific_produce_ffmpeg_list(safe, stream)
+    optlist = super()._codec_specific_produce_ffmpeg_list(safe, stream)
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
     fmtstr = ":format=%s" % safe["nvenc_pix_fmt"] if "nvenc_pix_fmt" in safe else ""
@@ -1839,7 +1839,7 @@ class NVEncH265CodecPatched(NVEncH265Codec):
   color_space = {"bt2020nc": 9, "bt709": 1}
 
   def _codec_specific_parse_options(self, safe, stream=0):
-    safe = super(NVEncH265CodecPatched, self)._codec_specific_parse_options(safe, stream)
+    safe = super()._codec_specific_parse_options(safe, stream)
     if "framedata" in safe:
       if "bsf" in safe:
         safe["bsf"] = safe["bsf"] + "," + self.safe_framedata(safe["framedata"])
@@ -1959,7 +1959,7 @@ class Vp9Codec(VideoCodec):
     return safe
 
   def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
-    optlist = super(Vp9Codec, self)._codec_specific_produce_ffmpeg_list(safe, stream)
+    optlist = super()._codec_specific_produce_ffmpeg_list(safe, stream)
     if "profile" in safe:
       optlist.extend(["-profile:v", safe["profile"]])
     if "color_primaries" in safe:
@@ -2057,7 +2057,7 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
   )
 
   def _codec_specific_parse_options(self, safe, stream=0):
-    safe = super(AV1QSVCodec, self)._codec_specific_parse_options(safe, stream)
+    safe = super()._codec_specific_parse_options(safe, stream)
     self._hw_parse_scale(safe)
     self._hw_parse_quality(safe)
     self._hw_parse_pix_fmt(safe)
@@ -2106,7 +2106,7 @@ class AV1VAAPICodec(VAAPIVideoCodec, AV1Codec):
   )
 
   def _codec_specific_parse_options(self, safe, stream=0):
-    safe = super(AV1VAAPICodec, self)._codec_specific_parse_options(safe, stream)
+    safe = super()._codec_specific_parse_options(safe, stream)
     self._hw_parse_scale(safe)
     self._hw_parse_quality(safe)
     self._hw_parse_pix_fmt(safe)
@@ -2160,7 +2160,7 @@ class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
 
   def _codec_specific_parse_options(self, safe, stream=0):
     if "framedata" in safe:
-      safe = super(Vp9QSVCodec, self)._codec_specific_parse_options(safe, stream)
+      safe = super()._codec_specific_parse_options(safe, stream)
     self._hw_parse_scale(safe)
     self._hw_parse_quality(safe)
     self._hw_parse_pix_fmt(safe)

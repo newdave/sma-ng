@@ -4,7 +4,7 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from urllib.parse import unquote, urlparse
 
 import yaml as _yaml
@@ -38,7 +38,7 @@ _METRICS_WINDOW_MAP = {
 
 
 def _utc_now():
-  return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+  return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def _sqlite_path_from_url(db_url):
@@ -226,7 +226,7 @@ class SQLiteJobDatabase:
     self.log.debug("Job %d completed" % job_id)
 
   def fail_job(self, job_id, error=None):
-    now = datetime.now(timezone.utc).replace(microsecond=0)
+    now = datetime.now(UTC).replace(microsecond=0)
     with self._conn() as conn:
       row = conn.execute("SELECT retry_count, max_retries FROM jobs WHERE id = ?", (job_id,)).fetchone()
       if row and row["retry_count"] < row["max_retries"]:
@@ -283,7 +283,7 @@ class SQLiteJobDatabase:
       return [dict(r) for r in conn.execute("SELECT * FROM jobs WHERE status = ?", (STATUS_RUNNING,)).fetchall()]
 
   def cleanup_old_jobs(self, days=30):
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).replace(microsecond=0).isoformat()
+    cutoff = (datetime.now(UTC) - timedelta(days=days)).replace(microsecond=0).isoformat()
     with self._conn() as conn:
       cur = conn.execute("DELETE FROM jobs WHERE status IN (?, ?) AND completed_at < ?", (STATUS_COMPLETED, STATUS_FAILED, cutoff))
       deleted = cur.rowcount
@@ -323,7 +323,7 @@ class SQLiteJobDatabase:
         """,
         (node_id, host, workers, now, started, node_id, version, hwaccel, node_name or None),
       )
-    return None
+    return
 
   def is_node_approved(self, node_id):
     return True
@@ -1240,7 +1240,7 @@ class PostgreSQLJobDatabase:
                 """,
           (node_id, host, workers, started_at, node_id, version, hwaccel, node_name or None),
         )
-    return None
+    return
 
   def is_node_approved(self, node_id):
     """Return True when node approval_status is approved."""

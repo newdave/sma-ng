@@ -2,7 +2,7 @@
 """Container format definitions mapping SMA-NG names to FFmpeg muxer identifiers."""
 
 
-class BaseFormat(object):
+class BaseFormat:
   """
   Base format class.
 

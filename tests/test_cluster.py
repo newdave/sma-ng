@@ -14,6 +14,7 @@ import os
 import socket
 import threading
 import uuid
+from datetime import UTC
 from unittest import mock
 
 import pytest
@@ -736,7 +737,7 @@ class TestLogArchivalUnit:
   def _fake_record(self, node_id="node-1", date_str="2025-01-15", message="test"):
     from datetime import date, datetime, timezone
 
-    ts = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    ts = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
     return {"node_id": node_id, "level": "INFO", "logger": "test", "message": message, "timestamp": ts}
 
   def test_write_archive_creates_gz_file(self, tmp_path):
@@ -839,7 +840,7 @@ class TestLogArchivalUnit:
     from resources.daemon.log_archiver import LogArchiver
 
     archiver = LogArchiver(str(tmp_path), archive_after_days=7, delete_after_days=30, logger=mock.MagicMock())
-    ts = datetime(2025, 1, 10, 10, 0, 0, tzinfo=timezone.utc)
+    ts = datetime(2025, 1, 10, 10, 0, 0, tzinfo=UTC)
     records = [{"node_id": "node-1", "level": "INFO", "logger": "test", "message": "msg", "timestamp": ts}]
     db = mock.MagicMock()
     db.get_logs_for_archival.return_value = records
@@ -854,7 +855,7 @@ class TestLogArchivalUnit:
     from resources.daemon.log_archiver import LogArchiver
 
     archiver = LogArchiver(str(tmp_path), archive_after_days=7, delete_after_days=30, logger=mock.MagicMock())
-    ts = datetime(2025, 1, 10, 10, 0, 0, tzinfo=timezone.utc)
+    ts = datetime(2025, 1, 10, 10, 0, 0, tzinfo=UTC)
     records = [{"node_id": "node-1", "level": "INFO", "logger": "test", "message": "msg", "timestamp": ts}]
     db = mock.MagicMock()
     db.get_logs_for_archival.return_value = records

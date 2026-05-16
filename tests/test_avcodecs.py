@@ -416,7 +416,7 @@ class TestSubtitleCodecs:
   def test_empty_title_blanked(self):
     codec = MOVTextCodec()
     opts = codec.parse_options({"codec": "mov_text", "language": "eng"})
-    assert any("title=" == o for o in opts)
+    assert any(o == "title=" for o in opts)
 
   def test_undefined_language_default(self):
     codec = MOVTextCodec()
@@ -796,7 +796,7 @@ class TestVideoCodecParsing:
   def test_video_no_title(self):
     codec = H264Codec()
     opts = codec.parse_options({"codec": "h264"})
-    assert any("title=" == o for o in opts)
+    assert any(o == "title=" for o in opts)
 
   def test_pix_fmt(self):
     codec = H264Codec()
@@ -857,7 +857,7 @@ class TestSanitizeAndBuildMetadata:
   def test_build_stream_metadata_no_title(self):
     safe = {"language": "eng"}
     result = BaseCodec._build_stream_metadata(safe, "a", "0")
-    assert any("title=" == o for o in result)
+    assert any(o == "title=" for o in result)
     assert any("language=eng" in o for o in result)
 
   def test_build_stream_metadata_no_language_defaults_und(self):
@@ -1853,7 +1853,7 @@ class TestVideoCodecAdditionalBranches:
     codec = H264Codec()
     opts = codec.parse_options({"codec": "h264", "title": ""})
     # The empty title gets deleted before codec-specific, so only the blank metadata is emitted
-    assert any("title=" == o for o in opts)
+    assert any(o == "title=" for o in opts)
 
   def test_aspect_emitted_with_dimensions(self):
     """When both w and h are present, scale filter is used (not -s)."""
@@ -1905,7 +1905,7 @@ class TestSubtitleCodecBranches:
 
     codec = SrtCodec()
     opts = codec.parse_options({"codec": "srt", "title": ""})
-    assert any("title=" == o for o in opts)
+    assert any(o == "title=" for o in opts)
 
 
 class TestAudioCodecDispositionBranch:
@@ -1920,12 +1920,12 @@ class TestAudioCodecDispositionBranch:
   def test_empty_title_removed_audio(self):
     codec = AacCodec()
     opts = codec.parse_options({"codec": "aac", "title": ""})
-    assert any("title=" == o for o in opts)
+    assert any(o == "title=" for o in opts)
 
   def test_audio_no_title_emits_blank(self):
     codec = AacCodec()
     opts = codec.parse_options({"codec": "aac"})
-    assert any("title=" == o for o in opts)
+    assert any(o == "title=" for o in opts)
 
   def test_audio_with_bsf(self):
     codec = AacCodec()
@@ -1953,7 +1953,7 @@ class TestVideoCopyCodecBranches:
 
     codec = VideoCopyCodec()
     opts = codec.parse_options({"codec": "copy", "map": 0, "title": ""})
-    assert any("title=" == o for o in opts)
+    assert any(o == "title=" for o in opts)
 
   def test_fps_valid_emitted(self):
     from converter.avcodecs import VideoCopyCodec

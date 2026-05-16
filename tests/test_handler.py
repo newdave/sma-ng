@@ -4,7 +4,7 @@ import io
 import json
 import os
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -36,7 +36,7 @@ def _make_server(
   server.node_id = "test-node-1"
   server.worker_count = 2
   server.stale_seconds = 120
-  server.started_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+  server.started_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
   server.logger = MagicMock()
   server._job_progress = {}
   server._job_processes = {}
@@ -577,7 +577,7 @@ class TestJsonSerialization:
   def test_health_serializes_started_at_in_local_timezone(self):
     local_tz = timezone(timedelta(hours=-5))
     h = _make_handler()
-    h.server.started_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    h.server.started_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
     with (
       patch("resources.daemon.handler._LOCAL_TIMEZONE", local_tz),
       patch(
@@ -2155,7 +2155,7 @@ class TestClusterLogsRoute:
 
   def test_returns_logs_in_distributed_mode(self):
     h = _make_handler(is_distributed=True)
-    ts = datetime(2026, 5, 5, 10, 0, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 5, 5, 10, 0, 0, tzinfo=UTC)
     h.server.job_db.get_logs.return_value = [
       {"timestamp": ts, "level": "INFO", "message": "hello", "node_id": "n1"},
     ]

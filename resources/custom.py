@@ -23,4 +23,4 @@ try:
 except ImportError:
   streamTitle = None
 
-__all__ = ["validation", "blockVideoCopy", "blockAudioCopy", "skipStream", "skipUA", "streamTitle"]
+__all__ = ["blockAudioCopy", "blockVideoCopy", "skipStream", "skipUA", "streamTitle", "validation"]

@@ -49,7 +49,7 @@ class TestRun:
     fake_job_db.delete_logs_before.assert_not_called()
 
   def test_run_archives_and_deletes(self, archiver, fake_job_db, tmp_path):
-    ts = datetime.datetime(2026, 5, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
+    ts = datetime.datetime(2026, 5, 1, 10, 0, 0, tzinfo=datetime.UTC)
     fake_job_db.get_logs_for_archival.return_value = [
       {"id": 1, "node_id": "n1", "level": "INFO", "logger": "app", "message": "hi", "timestamp": ts},
       {"id": 2, "node_id": "n1", "level": "ERROR", "logger": "app", "message": "oops", "timestamp": ts},
