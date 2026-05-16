@@ -90,3 +90,6 @@ docker/.env
 /coverage.json
 /htmlcov/
 /coverage.xml
+
+# Accidental directory from tests that pass an unmocked MagicMock to Path(...)
+/MagicMock/
