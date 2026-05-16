@@ -17,9 +17,28 @@ ConfigLoader after validation — see brainstorming/2026-04-26-config-restructur
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+
+
+class FallbackPolicy(str, Enum):
+  """Policy for the QSV/HW → SW fallback ladder in MediaProcessor.
+
+  Values are stable strings consumed by /health metrics and ops dashboards;
+  do not rename existing entries.
+
+  - AGGRESSIVE: try hw → sw_decode → full_sw (legacy default behaviour
+    selected by the deprecated ``software-fallback: true``).
+  - SW_DECODE_ONLY: try hw → sw_decode; never swap encoder to software.
+  - HW_ONLY: surface hw failures immediately; no retries. Equivalent to
+    the deprecated ``software-fallback: false``.
+  """
+
+  AGGRESSIVE = "aggressive"
+  SW_DECODE_ONLY = "sw_decode_only"
+  HW_ONLY = "hw_only"
 
 
 def _to_kebab(name: str) -> str:
@@ -64,18 +83,52 @@ class ConverterSettings(_Base):
   post_process: bool = False
   wait_post_process: bool = False
   detailed_progress: bool = False
-  # When True, QSV/hardware-accelerated conversions that fail are retried
-  # with software decode and, if that also fails, with a full software
-  # pipeline. Defaults to False so the original FFmpeg error surfaces
-  # immediately; the retry chain mutates argv in-place and historically
-  # masked real hardware issues (e.g. /dev/dri permissions, QSV runtime
-  # missing) by completing on the CPU instead of failing fast. Operators
-  # who prefer the legacy "always finish, even if it ends up in software"
-  # behavior can set this to True per-profile or globally.
-  software_fallback: bool = False
+  # Fallback ladder policy for hardware-accelerated conversions. Three
+  # tiers exist in MediaProcessor: hw → sw_decode → full_sw. The policy
+  # selects how far the ladder is allowed to descend on failure:
+  #   - hw_only        — surface hw failures immediately (recommended on
+  #                      production nodes where a /dev/dri or QSV runtime
+  #                      problem should fail loudly, not get masked by a
+  #                      silent CPU encode);
+  #   - sw_decode_only — try hw, then sw decode; never swap the encoder;
+  #   - aggressive     — full legacy ladder (hw → sw_decode → full_sw).
+  # Default mirrors the prior `software-fallback: true` semantics so
+  # operators upgrading from the boolean see no behaviour change.
+  fallback_policy: FallbackPolicy = FallbackPolicy.AGGRESSIVE
+  # Deprecated alias: legacy `software-fallback: bool` is migrated to
+  # `fallback-policy` by the model validator below. Removed in a future
+  # minor release.
+  software_fallback: bool | None = Field(default=None, exclude=True)
   preopts: list[str] = Field(default_factory=list)
   postopts: list[str] = Field(default_factory=list)
   regex_directory_replace: str = r"[^\w\-_\. ]"
+
+  @model_validator(mode="before")
+  @classmethod
+  def _migrate_software_fallback(cls, data):
+    """Map the deprecated boolean ``software-fallback`` onto ``fallback-policy``.
+
+    Skipped when ``fallback-policy`` is already provided (new key wins).
+    Sets a sentinel ``_software_fallback_deprecated`` so ReadSettings can
+    emit a single load-time deprecation warning.
+    """
+    if not isinstance(data, dict):
+      return data
+    # Accept both YAML kebab-case and Python snake_case input keys.
+    has_new = "fallback-policy" in data or "fallback_policy" in data
+    legacy_key = None
+    for k in ("software-fallback", "software_fallback"):
+      if k in data:
+        legacy_key = k
+        break
+    if has_new or legacy_key is None:
+      return data
+    legacy_value = data.pop(legacy_key)
+    if legacy_value is None:
+      return data
+    data["fallback-policy"] = FallbackPolicy.AGGRESSIVE.value if bool(legacy_value) else FallbackPolicy.HW_ONLY.value
+    data["_software_fallback_deprecated"] = True
+    return data
 
 
 class PermissionSettings(_Base):
@@ -586,6 +639,7 @@ __all__ = [
   "ProfileOverlay",
   "Services",
   "ConverterSettings",
+  "FallbackPolicy",
   "PermissionSettings",
   "MetadataSettings",
   "VideoSettings",
