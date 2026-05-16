@@ -42,12 +42,10 @@ def _dump_daemon_yaml(path: str, daemon_data: dict, profiles: dict | None = None
 
 import pytest
 
-import resources.daemon.constants as _daemon_constants
 from daemon import (
   STATUS_COMPLETED,
   STATUS_FAILED,
   STATUS_PENDING,
-  STATUS_RUNNING,
   ConfigLockManager,
   ConfigLogManager,
   DaemonServer,
@@ -498,7 +496,7 @@ class TestWantsHtml:
 
   def _make_handler(self, accept):
     handler = WebhookHandler.__new__(WebhookHandler)
-    handler.headers = {"Accept": accept}
+    handler.headers = {"Accept": accept}  # type: ignore[assignment]
     return handler
 
   def test_browser_request(self):
@@ -931,7 +929,7 @@ class TestPathConfigManagerExtended:
 
 def _make_fake_psycopg2():
   """Return a MagicMock tree that mimics psycopg2's pool / extras interface."""
-  from unittest.mock import MagicMock, patch
+  from unittest.mock import MagicMock
 
   pool_mod = MagicMock()
   extras_mod = MagicMock()
@@ -1033,8 +1031,6 @@ class TestPostgreSQLJobDatabase:
   # ------------------------------------------------------------------
 
   def test_conn_commits_on_success(self):
-    from unittest.mock import MagicMock
-
     db, pool_mock, conn_mock, _ = _make_db_with_mock_pool()
     with db._conn():
       pass
@@ -1042,8 +1038,6 @@ class TestPostgreSQLJobDatabase:
     pool_mock.putconn.assert_called_once_with(conn_mock)
 
   def test_conn_rolls_back_and_reraises_on_exception(self):
-    from unittest.mock import MagicMock
-
     db, pool_mock, conn_mock, _ = _make_db_with_mock_pool()
     with pytest.raises(ValueError):
       with db._conn():
@@ -1062,12 +1056,12 @@ class TestPostgreSQLJobDatabase:
     cur.rowcount = 3
     cur.fetchone.return_value = None
     cur.fetchall.return_value = []
-    db, pool_mock, conn_mock, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
     result = db._requeue_running_jobs_for_node("node1")
     assert result == 3
 
   def test_reset_running_jobs_logs_when_interrupted(self):
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     db, _, _, _ = _make_db_with_mock_pool()
     with patch.object(db, "_requeue_running_jobs_for_node", return_value=2) as mock_req:
@@ -1077,7 +1071,7 @@ class TestPostgreSQLJobDatabase:
         mock_log.assert_called_once()
 
   def test_reset_running_jobs_no_log_when_zero(self):
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     db, _, _, _ = _make_db_with_mock_pool()
     with patch.object(db, "_requeue_running_jobs_for_node", return_value=0):
@@ -1090,7 +1084,7 @@ class TestPostgreSQLJobDatabase:
   # ------------------------------------------------------------------
 
   def test_add_job_returns_id_when_no_duplicate(self):
-    from unittest.mock import MagicMock, call
+    from unittest.mock import MagicMock
 
     cur = MagicMock()
     # First fetchone: no existing job; second fetchone: new id
@@ -1161,7 +1155,7 @@ class TestPostgreSQLJobDatabase:
   # ------------------------------------------------------------------
 
   def test_claim_next_job_returns_none_when_no_pending(self):
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock
 
     cur = MagicMock()
     cur.fetchone.return_value = None
@@ -1183,7 +1177,7 @@ class TestPostgreSQLJobDatabase:
       assert result == full_row
 
   def test_claim_next_job_uses_exclude_configs(self):
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock
 
     cur = MagicMock()
     cur.fetchone.return_value = None
@@ -1308,7 +1302,7 @@ class TestPostgreSQLJobDatabase:
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
     db.complete_job(job_id=8)
     cur.execute.assert_called_once()
-    sql, params = cur.execute.call_args[0]
+    _sql, params = cur.execute.call_args[0]
     assert STATUS_COMPLETED in params
     assert 8 in params
 
@@ -1325,7 +1319,7 @@ class TestPostgreSQLJobDatabase:
     db.fail_job(job_id=11, error="oops")
     # Second execute should mark as failed
     last_call = cur.execute.call_args_list[-1]
-    sql, params = last_call[0]
+    _sql, params = last_call[0]
     assert STATUS_FAILED in params
     assert "oops" in params
 
@@ -1337,7 +1331,7 @@ class TestPostgreSQLJobDatabase:
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
     db.fail_job(job_id=12, error="transient")
     last_call = cur.execute.call_args_list[-1]
-    sql, params = last_call[0]
+    _sql, params = last_call[0]
     # Should use STATUS_PENDING and include retry_count=1
     assert STATUS_PENDING in params
     assert 1 in params  # retry_count
@@ -1352,7 +1346,7 @@ class TestPostgreSQLJobDatabase:
     db.fail_job(job_id=99, error="not found")
     # Ensure we still try to mark as failed
     last_call = cur.execute.call_args_list[-1]
-    sql, params = last_call[0]
+    _sql, params = last_call[0]
     assert STATUS_FAILED in params
 
   # ------------------------------------------------------------------
@@ -1609,6 +1603,7 @@ class TestPostgreSQLJobDatabase:
     cur.fetchone.return_value = {"node_id": "n1", "approval_status": "approved"}
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
     updated = db.set_node_approval("n1", approved=True, actor="admin", note="ok")
+    assert updated is not None
     assert updated["approval_status"] == "approved"
 
   def test_delete_node_returns_true_when_deleted(self):
@@ -1931,11 +1926,11 @@ class TestHTTPEndpoints:
     assert data["path"] == "/movie.mkv"
 
   def test_job_by_id_not_found(self, live_server):
-    data, status = self._get(live_server, "/jobs/9999")
+    _data, status = self._get(live_server, "/jobs/9999")
     assert status == 404
 
   def test_job_by_id_invalid(self, live_server):
-    data, status = self._get(live_server, "/jobs/notanumber")
+    _data, status = self._get(live_server, "/jobs/notanumber")
     assert status == 400
 
   def test_stats_endpoint(self, live_server):
@@ -1951,11 +1946,11 @@ class TestHTTPEndpoints:
     assert "path_configs" in data
 
   def test_not_found_returns_404(self, live_server):
-    data, status = self._get(live_server, "/nonexistent")
+    _data, status = self._get(live_server, "/nonexistent")
     assert status == 404
 
   def test_webhook_empty_body(self, live_server):
-    data, status = self._post(live_server, "/webhook/generic", data=None)
+    _data, status = self._post(live_server, "/webhook/generic", data=None)
     assert status == 400
 
   def test_webhook_nonexistent_path(self, live_server):
@@ -1986,7 +1981,7 @@ class TestHTTPEndpoints:
   def test_webhook_duplicate_submission(self, live_server, tmp_path):
     f = tmp_path / "movie.mkv"
     f.touch()
-    data1, _ = self._post(live_server, "/webhook/generic", data={"path": str(f)})
+    _data1, _ = self._post(live_server, "/webhook/generic", data={"path": str(f)})
     data2, status2 = self._post(live_server, "/webhook/generic", data={"path": str(f)})
     assert status2 == 200
     assert data2["status"] == "duplicate"
@@ -1995,7 +1990,7 @@ class TestHTTPEndpoints:
     """JSON body where args is a string gets split into a list."""
     f = tmp_path / "movie.mkv"
     f.touch()
-    data, status = self._post(live_server, "/webhook/generic", data={"path": str(f), "args": "-tmdb 603"})
+    _data, status = self._post(live_server, "/webhook/generic", data={"path": str(f), "args": "-tmdb 603"})
     assert status == 202
 
   def test_webhook_directory_returns_queued_entries(self, live_server, tmp_path):
@@ -2043,15 +2038,15 @@ class TestHTTPEndpoints:
 
   def test_requeue_single_non_failed_job(self, live_server):
     jid = live_server.job_db.add_job("/a.mkv", "/cfg.ini")
-    data, status = self._post(live_server, "/jobs/%d/requeue" % jid)
+    _data, status = self._post(live_server, "/jobs/%d/requeue" % jid)
     assert status == 409
 
   def test_requeue_nonexistent_job(self, live_server):
-    data, status = self._post(live_server, "/jobs/9999/requeue")
+    _data, status = self._post(live_server, "/jobs/9999/requeue")
     assert status == 404
 
   def test_post_not_found(self, live_server):
-    data, status = self._post(live_server, "/nonexistent")
+    _data, status = self._post(live_server, "/nonexistent")
     assert status == 404
 
   def test_webhook_rejects_recycle_bin_path(self, live_server, tmp_path):
@@ -2092,7 +2087,7 @@ class TestHTTPEndpoints:
 
     f = media / "movie.mkv"
     f.touch()
-    data, status = self._post(live_server, "/webhook/generic", data={"path": str(f)})
+    _data, status = self._post(live_server, "/webhook/generic", data={"path": str(f)})
     assert status == 202
 
 
@@ -2198,7 +2193,7 @@ class TestJobCancelAndPriority:
 
   def test_priority_affects_claim_order(self, job_db):
     """Higher priority jobs should be claimed before lower priority ones."""
-    jid_low = job_db.add_job("/low.mkv", "/cfg.ini")
+    _jid_low = job_db.add_job("/low.mkv", "/cfg.ini")
     jid_high = job_db.add_job("/high.mkv", "/cfg.ini")
     job_db.set_job_priority(jid_high, 10)
     claimed = job_db.claim_next_job(worker_id=1, node_id="node1")
@@ -2385,9 +2380,9 @@ class TestAuthentication:
   def test_no_api_key_allows_all(self):
     server, job_db = self._make_server(self._get_db_url(), api_key=None)
     try:
-      data, status = self._get(server, "/health")
+      _data, status = self._get(server, "/health")
       assert status == 200
-      data, status = self._get(server, "/jobs")
+      _data, status = self._get(server, "/jobs")
       assert status == 200
     finally:
       server.shutdown()
@@ -2408,7 +2403,7 @@ class TestAuthentication:
   def test_x_api_key_header_accepted(self):
     server, job_db = self._make_server(self._get_db_url(), api_key="secret123")
     try:
-      data, status = self._get(server, "/jobs", api_key="secret123")
+      _data, status = self._get(server, "/jobs", api_key="secret123")
       assert status == 200
     finally:
       server.shutdown()
@@ -2418,10 +2413,10 @@ class TestAuthentication:
   def test_bearer_token_accepted(self):
     server, job_db = self._make_server(self._get_db_url(), api_key="secret123")
     try:
-      data, status = self._get(server, "/jobs")  # no key -> 401
+      _data, status = self._get(server, "/jobs")  # no key -> 401
       assert status == 401
       # Now with bearer
-      host, port = server.server_address
+      host, port = server.server_address[0], server.server_address[1]
       url = "http://%s:%d/jobs" % (host, port)
       req = urllib.request.Request(url, headers={"Authorization": "Bearer secret123"})
       with urllib.request.urlopen(req) as resp:
@@ -2434,7 +2429,7 @@ class TestAuthentication:
   def test_wrong_key_returns_401(self):
     server, job_db = self._make_server(self._get_db_url(), api_key="secret123")
     try:
-      data, status = self._get(server, "/jobs", api_key="wrongkey")
+      _data, status = self._get(server, "/jobs", api_key="wrongkey")
       assert status == 401
     finally:
       server.shutdown()
@@ -2445,7 +2440,7 @@ class TestAuthentication:
     server, job_db = self._make_server(self._get_db_url(), api_key="secret123")
     try:
       # /health is public
-      data, status = self._get(server, "/health")
+      _data, status = self._get(server, "/health")
       assert status == 200
     finally:
       server.shutdown()
@@ -2455,7 +2450,7 @@ class TestAuthentication:
   def test_post_requires_auth(self):
     server, job_db = self._make_server(self._get_db_url(), api_key="secret123")
     try:
-      data, status = self._post(server, "/cleanup")
+      _data, status = self._post(server, "/cleanup")
       assert status == 401
     finally:
       server.shutdown()
@@ -2496,15 +2491,15 @@ class TestJobCancelPriorityHTTP:
     jid = live_server.job_db.add_job("/movie.mkv", "/cfg.ini")
     live_server.job_db.start_job(jid, worker_id=1)
     live_server.job_db.complete_job(jid)
-    data, status = self._post(live_server, "/jobs/%d/cancel" % jid)
+    _data, status = self._post(live_server, "/jobs/%d/cancel" % jid)
     assert status == 409
 
   def test_cancel_nonexistent_job_returns_404(self, live_server):
-    data, status = self._post(live_server, "/jobs/9999/cancel")
+    _data, status = self._post(live_server, "/jobs/9999/cancel")
     assert status == 404
 
   def test_cancel_invalid_job_id_returns_400(self, live_server):
-    data, status = self._post(live_server, "/jobs/notanumber/cancel")
+    _data, status = self._post(live_server, "/jobs/notanumber/cancel")
     assert status == 400
 
   def test_set_priority_pending_job(self, live_server):
@@ -2517,11 +2512,11 @@ class TestJobCancelPriorityHTTP:
   def test_set_priority_running_job_returns_409(self, live_server):
     jid = live_server.job_db.add_job("/movie.mkv", "/cfg.ini")
     live_server.job_db.start_job(jid, worker_id=1)
-    data, status = self._post(live_server, "/jobs/%d/priority" % jid, data={"priority": 5})
+    _data, status = self._post(live_server, "/jobs/%d/priority" % jid, data={"priority": 5})
     assert status == 409
 
   def test_set_priority_nonexistent_job_returns_404(self, live_server):
-    data, status = self._post(live_server, "/jobs/9999/priority", data={"priority": 5})
+    _data, status = self._post(live_server, "/jobs/9999/priority", data={"priority": 5})
     assert status == 404
 
   def test_set_priority_missing_field_returns_400(self, live_server):
@@ -2532,7 +2527,7 @@ class TestJobCancelPriorityHTTP:
 
   def test_set_priority_invalid_value_returns_400(self, live_server):
     jid = live_server.job_db.add_job("/movie.mkv", "/cfg.ini")
-    data, status = self._post(live_server, "/jobs/%d/priority" % jid, data={"priority": "high"})
+    _data, status = self._post(live_server, "/jobs/%d/priority" % jid, data={"priority": "high"})
     assert status == 400
 
 
@@ -2657,7 +2652,7 @@ class TestDocsEndpoint:
     assert "Getting Started" in html
 
   def test_docs_nonexistent_page_returns_404(self, live_server):
-    html, status = self._get_html(live_server, "/docs/nonexistent-page")
+    _html, status = self._get_html(live_server, "/docs/nonexistent-page")
     assert status == 404
 
   def test_docs_index_contains_nav(self, live_server):
@@ -2669,7 +2664,7 @@ class TestDocsEndpoint:
     """Docs endpoints should be accessible without auth even when API key is set."""
     live_server.api_key = "secret"
     try:
-      html, status = self._get_html(live_server, "/docs")
+      _html, status = self._get_html(live_server, "/docs")
       assert status == 200
     finally:
       live_server.api_key = None
@@ -2704,8 +2699,8 @@ class _FakeResponse:
     self.status = None
     self.data = None
 
-  def capture(self, status, data):
-    self.status = status
+  def capture(self, status_code, data):
+    self.status = status_code
     self.data = data
 
 
@@ -2715,10 +2710,10 @@ def _make_media_handler(payload: dict) -> "tuple[WebhookHandler, _FakeResponse]"
 
   body = json.dumps(payload).encode()
   handler = WebhookHandler.__new__(WebhookHandler)
-  handler.headers = {"Content-Length": str(len(body)), "Content-Type": "application/json"}
+  handler.headers = {"Content-Length": str(len(body)), "Content-Type": "application/json"}  # type: ignore[assignment]
   handler.rfile = io.BytesIO(body)
   resp = _FakeResponse()
-  handler.send_json_response = resp.capture
+  handler.send_json_response = resp.capture  # type: ignore[method-assign]
   return handler, resp
 
 
@@ -2733,7 +2728,7 @@ class TestParseSonarrBody:
       "episodes": [{"seasonNumber": 1, "episodeNumber": 1}],
     }
     handler, _ = _make_media_handler(payload)
-    path, args = handler._parse_sonarr_body()
+    path, args, _profile, _tags = handler._parse_sonarr_body()
     assert path == "/mnt/TV/Show/S01E01.mkv"
     assert "--tv" in args
     assert "-tvdb" in args
@@ -2753,7 +2748,7 @@ class TestParseSonarrBody:
       ],
     }
     handler, _ = _make_media_handler(payload)
-    path, args = handler._parse_sonarr_body()
+    path, args, _profile, _tags = handler._parse_sonarr_body()
     assert path == "/mnt/TV/Show/S02E01E02.mkv"
     assert args.count("-e") == 2
 
@@ -2765,7 +2760,7 @@ class TestParseSonarrBody:
       "episodes": [],
     }
     handler, _ = _make_media_handler(payload)
-    path, args = handler._parse_sonarr_body()
+    path, args, _profile, _tags = handler._parse_sonarr_body()
     assert path == "/mnt/TV/Show/ep.mkv"
     assert "-imdb" in args
     assert "tt0306414" in args
@@ -2773,7 +2768,7 @@ class TestParseSonarrBody:
   def test_test_event_returns_none_and_200(self):
     payload = {"eventType": "Test"}
     handler, resp = _make_media_handler(payload)
-    path, args = handler._parse_sonarr_body()
+    path, args, _profile, _tags = handler._parse_sonarr_body()
     assert path is None
     assert args == []
     assert resp.status == 200
@@ -2781,7 +2776,7 @@ class TestParseSonarrBody:
   def test_unsupported_event_type_returns_none_and_400(self):
     payload = {"eventType": "Grab"}
     handler, resp = _make_media_handler(payload)
-    path, args = handler._parse_sonarr_body()
+    path, _args, _profile, _tags = handler._parse_sonarr_body()
     assert path is None
     assert resp.status == 400
 
@@ -2793,7 +2788,7 @@ class TestParseSonarrBody:
       "episodes": [],
     }
     handler, resp = _make_media_handler(payload)
-    path, args = handler._parse_sonarr_body()
+    path, _args, _profile, _tags = handler._parse_sonarr_body()
     assert path is None
     assert resp.status == 400
 
@@ -2801,11 +2796,11 @@ class TestParseSonarrBody:
     import io
 
     handler = WebhookHandler.__new__(WebhookHandler)
-    handler.headers = {"Content-Length": "0"}
+    handler.headers = {"Content-Length": "0"}  # type: ignore[assignment]
     handler.rfile = io.BytesIO(b"")
     resp = _FakeResponse()
-    handler.send_json_response = resp.capture
-    path, args = handler._parse_sonarr_body()
+    handler.send_json_response = resp.capture  # type: ignore[method-assign]
+    path, _args, _profile, _tags = handler._parse_sonarr_body()
     assert path is None
     assert resp.status == 400
 
@@ -2820,7 +2815,7 @@ class TestParseRadarrBody:
       "movie": {"tmdbId": 603},
     }
     handler, _ = _make_media_handler(payload)
-    path, args = handler._parse_radarr_body()
+    path, args, _profile, _tags = handler._parse_radarr_body()
     assert path == "/mnt/Movies/The Matrix (1999).mkv"
     assert "--movie" in args
     assert "-tmdb" in args
@@ -2833,7 +2828,7 @@ class TestParseRadarrBody:
       "movie": {"imdbId": "tt0133093"},
     }
     handler, _ = _make_media_handler(payload)
-    path, args = handler._parse_radarr_body()
+    path, args, _profile, _tags = handler._parse_radarr_body()
     assert path == "/mnt/Movies/film.mkv"
     assert "-imdb" in args
     assert "tt0133093" in args
@@ -2846,7 +2841,7 @@ class TestParseRadarrBody:
       "movie": {},
     }
     handler, _ = _make_media_handler(payload)
-    path, args = handler._parse_radarr_body()
+    path, args, _profile, _tags = handler._parse_radarr_body()
     assert path == "/mnt/Movies/film.mkv"
     assert "--movie" in args
     assert "-tmdb" not in args
@@ -2855,7 +2850,7 @@ class TestParseRadarrBody:
   def test_test_event_returns_none_and_200(self):
     payload = {"eventType": "Test"}
     handler, resp = _make_media_handler(payload)
-    path, args = handler._parse_radarr_body()
+    path, args, _profile, _tags = handler._parse_radarr_body()
     assert path is None
     assert args == []
     assert resp.status == 200
@@ -2863,7 +2858,7 @@ class TestParseRadarrBody:
   def test_unsupported_event_type_returns_none_and_400(self):
     payload = {"eventType": "Grab"}
     handler, resp = _make_media_handler(payload)
-    path, args = handler._parse_radarr_body()
+    path, _args, _profile, _tags = handler._parse_radarr_body()
     assert path is None
     assert resp.status == 400
 
@@ -2874,7 +2869,7 @@ class TestParseRadarrBody:
       "movie": {"tmdbId": 1},
     }
     handler, resp = _make_media_handler(payload)
-    path, args = handler._parse_radarr_body()
+    path, _args, _profile, _tags = handler._parse_radarr_body()
     assert path is None
     assert resp.status == 400
 
@@ -2882,11 +2877,11 @@ class TestParseRadarrBody:
     import io
 
     handler = WebhookHandler.__new__(WebhookHandler)
-    handler.headers = {"Content-Length": "0"}
+    handler.headers = {"Content-Length": "0"}  # type: ignore[assignment]
     handler.rfile = io.BytesIO(b"")
     resp = _FakeResponse()
-    handler.send_json_response = resp.capture
-    path, args = handler._parse_radarr_body()
+    handler.send_json_response = resp.capture  # type: ignore[method-assign]
+    path, _args, _profile, _tags = handler._parse_radarr_body()
     assert path is None
     assert resp.status == 400
 
@@ -2896,7 +2891,7 @@ class TestParseRadarrBody:
 # ---------------------------------------------------------------------------
 
 
-class TestPathConfigManagerExtended:
+class TestPathConfigManagerExtendedYaml:
   def _yaml(self, tmp_path, body: dict) -> str:
     cfg = str(tmp_path / "sma-ng.yml")
     _dump_daemon_yaml(cfg, body)
@@ -3150,6 +3145,7 @@ class TestPGExtendedMocked:
     db, _, _, cur = _make_db_with_mock_pool()
     cur.fetchone.return_value = {"node_id": "n1", "approval_status": "approved"}
     out = db.set_node_approval("n1", approved=True, actor="ui", note="ok")
+    assert out is not None
     assert out["node_id"] == "n1"
 
   def test_set_node_approval_returns_none_when_node_missing(self):
@@ -3161,6 +3157,7 @@ class TestPGExtendedMocked:
     db, _, _, cur = _make_db_with_mock_pool()
     cur.fetchone.return_value = {"node_id": "n1", "approval_status": "rejected"}
     out = db.set_node_approval("n1", approved=False)
+    assert out is not None
     assert out["approval_status"] == "rejected"
     args = cur.execute.call_args[0][1]
     assert "rejected" in args
@@ -3311,7 +3308,7 @@ class TestPGExtendedMocked:
     assert out == ["dead1", "dead2"]
 
   def test_cleanup_orphaned_commands_noop_for_empty(self):
-    db, _, _, cur = _make_db_with_mock_pool()
+    db, _, _, _cur = _make_db_with_mock_pool()
     assert db.cleanup_orphaned_commands([]) == 0
 
   def test_cleanup_orphaned_commands_returns_rowcount(self):
@@ -3382,7 +3379,7 @@ class TestPGExtendedMocked:
     cur.execute.assert_not_called()
 
   def test_delete_jobs_none_returns_empty(self):
-    db, _, _, cur = _make_db_with_mock_pool()
+    db, _, _, _cur = _make_db_with_mock_pool()
     assert db.delete_jobs(None) == []
 
   def test_delete_offline_nodes(self):
@@ -3510,6 +3507,7 @@ class TestPGLibraryAuditMocked:
     cur.fetchone.return_value = {"id": 5, "status": "completed"}
     cur.fetchall.return_value = [{"claimed_by": "n1", "units": 10}]
     out = db.get_audit_run(5)
+    assert out is not None
     assert out["id"] == 5
     assert out["per_node_progress"] == [{"claimed_by": "n1", "units": 10}]
 
@@ -3588,7 +3586,9 @@ class TestPGLibraryAuditMocked:
   def test_get_finding_returns_dict(self):
     db, _, _, cur = _make_db_with_mock_pool()
     cur.fetchone.return_value = {"id": 1, "kind": "ffprobe_failed"}
-    assert db.get_finding(1)["id"] == 1
+    finding = db.get_finding(1)
+    assert finding is not None
+    assert finding["id"] == 1
 
   def test_get_finding_returns_none_when_missing(self):
     db, _, _, cur = _make_db_with_mock_pool()
@@ -3796,14 +3796,14 @@ class TestConfigLogManagerMore:
   def test_get_all_log_files_returns_empty_when_dir_missing(self, tmp_path):
     from daemon import ConfigLogManager
 
-    log = MagicMock()
+    _log = MagicMock()
     m = ConfigLogManager(logs_dir=str(tmp_path / "missing"))
     assert m.get_all_log_files() == []
 
   def test_get_all_log_files_filters_non_logs(self, tmp_path):
     from daemon import ConfigLogManager
 
-    log = MagicMock()
+    _log = MagicMock()
     (tmp_path / "alpha.log").write_text("")
     (tmp_path / "notes.txt").write_text("")
     (tmp_path / "subdir").mkdir()
@@ -3816,8 +3816,6 @@ class TestConfigLogManagerMore:
 
 class TestPathConfigManagerLoadErrors:
   def test_load_config_propagates_other_exceptions(self, tmp_path):
-    from resources.config_loader import ConfigError
-
     cfg = tmp_path / "broken.yml"
     cfg.write_text("not: valid: yaml:")
     pcm = PathConfigManager.__new__(PathConfigManager)

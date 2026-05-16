@@ -292,7 +292,7 @@ class SubtitleProcessor:
         if self.settings.downloadforcedsubs:
           forced_subtitles = [
             s
-            for s in subliminal.list_subtitles([video], languages, providers=self.settings.subproviders, provider_configs=self.settings.subproviders_auth)[video]
+            for s in subliminal.list_subtitles([video], languages, providers=self.settings.subproviders, provider_configs=self.settings.subproviders_auth)[video]  # type: ignore[arg-type]
             if ".forced" in s.info.lower()  # type: ignore[arg-type]
           ]
           self.log.debug("Found %d potential forced subtitles." % (len(forced_subtitles)))
@@ -305,7 +305,7 @@ class SubtitleProcessor:
               os.rename(path, "%s.forced%s" % (base, ext))
         if self.settings.downloadsubs:
           subtitles = subliminal.download_best_subtitles(
-            [video],
+            [video],  # type: ignore[arg-type]
             languages,
             hearing_impaired=self.settings.hearing_impaired,
             providers=self.settings.subproviders,
