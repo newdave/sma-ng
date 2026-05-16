@@ -252,6 +252,12 @@ class DaemonServer(ThreadingHTTPServer):
     probe_script = repo_root / "scripts" / "probe-hw.py"
 
     config_file = getattr(self.path_config_manager, "_config_file", None) or getattr(self.path_config_manager, "default_config", None)
+    # Defensive type check: MagicMock auto-specs __fspath__ to return a synthetic
+    # "MagicMock/<name>/<id>" string AND satisfies os.PathLike, so Path(mock)
+    # silently succeeds and creates literal MagicMock/ trees on disk during tests
+    # that pass a bare MagicMock for path_config_manager. Require an actual str.
+    if not isinstance(config_file, str):
+      config_file = None
     config_dir = Path(config_file).parent if config_file else Path("/config")
     cache_path = config_dir / "cache" / "hw_capabilities.json"
 
