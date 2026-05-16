@@ -406,6 +406,7 @@ def _make_full_server(worker_count=1, pending_count=0, api_key=None):
     patch("resources.daemon.server.ScannerThread") as MockScan,
     patch("resources.daemon.server.RecycleBinCleanerThread") as MockRBC,
     patch("http.server.HTTPServer.__init__", return_value=None),
+    patch.object(DaemonServer, "_probe_hw_capabilities", return_value={"gpu_status": "unknown", "capabilities": {}, "errors": []}),
   ):
     mock_pool = MagicMock()
     MockPool.return_value = mock_pool
