@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "ffmpeg-hardware-acceleration",
+  "owner": "josiahsiegel",
+  "repo": "claude-plugin-marketplace",
+  "path": "plugins/ffmpeg-master/skills/ffmpeg-hardware-acceleration",
+  "branch": "main",
+  "sha": "f2cd5d6cef3c0eee4d905340a7a56be3b783af6e",
+  "source": "manual"
+}
