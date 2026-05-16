@@ -1,5 +1,8 @@
 # Task Breakdown — QSV Pipeline Phase 1: Foundation
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> All tasks merged; see commits `73c3bcf..19c6c3a` (T1: 73c3bcf, T2: d24946a, T3: 7ee4b05, T4: 3f7ea6e, T5: 783207b, T6: 1b36698, T7: 307d6fd, T8: 19c6c3a).
+
 Companion to [docs/prps/qsv-pipeline-phase1-foundation.md](../prps/qsv-pipeline-phase1-foundation.md).
 
 Eight commit-sized tasks delivering: failure taxonomy + fallback-policy enum
@@ -504,15 +507,15 @@ mise run test
 
 ## Done-checklist (whole epic)
 
-- [ ] T1 merged: `feat(processor): add ffmpeg failure taxonomy and parser`
-- [ ] T2 merged: `feat(config)!: replace software-fallback bool with fallback-policy enum`
-- [ ] T3 merged: `refactor(processor): extract _attempt_ladder with failure taxonomy`
-- [ ] T4 merged: `feat(scripts): add hardware capability probe`
-- [ ] T5 merged: `feat(daemon): surface gpu_status, capabilities, and fallback counters on /health`
-- [ ] T6 merged: `feat(docker): declarative /dev/dri permissions via group_add; gate entrypoint GID fix-up`
-- [ ] T7 merged: `chore(lint): expand ruff ruleset, add bandit, add pre-commit baseline`
-- [ ] T8 merged: `docs: document Phase 1 — fallback policy, capability probe, declarative GPU perms`
-- [ ] `curl /health` on `sma-master` returns `gpu_status: ok` and non-empty `capabilities`
-- [ ] Compose `intel` profile starts without root-mode entrypoint execution
-- [ ] Coverage ≥ 90% global, ≥ 70% per-module on modules ≥ 100 statements
-- [ ] No new `# pragma: no cover` or unjustified `# type: ignore`
+- [x] T1 merged: `feat(processor): add ffmpeg failure taxonomy and parser`
+- [x] T2 merged: `feat(config)!: replace software-fallback bool with fallback-policy enum`
+- [x] T3 merged: `refactor(processor): extract _attempt_ladder with failure taxonomy`
+- [x] T4 merged: `feat(scripts): add hardware capability probe`
+- [x] T5 merged: `feat(daemon): surface gpu_status, capabilities, and fallback counters on /health`
+- [x] T6 merged: `feat(docker): declarative /dev/dri permissions via group_add; gate entrypoint GID fix-up`
+- [x] T7 merged: `chore(lint): expand ruff ruleset, add bandit, add pre-commit baseline`
+- [x] T8 merged: `docs: document Phase 1 — fallback policy, capability probe, declarative GPU perms`
+- [x] `curl /health` on `sma-master` returns `gpu_status: ok` and non-empty `capabilities`
+- [x] Compose `intel` profile starts without root-mode entrypoint execution
+- [x] Coverage ≥ 90% global, ≥ 70% per-module on modules ≥ 100 statements
+- [x] No new `# pragma: no cover` or unjustified `# type: ignore`

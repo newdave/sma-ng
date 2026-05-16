@@ -1,5 +1,8 @@
 # PRP: Cluster Mode — Multi-Node Management (Phase 1)
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Phase 1 merged (heartbeat, node identity, drain/pause/resume, admin UI). See commits `173971b`, `b3dab2f`, `6623898`, `b26896e`, `198d0bb`, `5e05c14`, `f892831`. Continued in [cluster-mode-phase2](cluster-mode-phase2.md).
+
 ## Discovery Summary
 
 ### Initial Task Analysis
@@ -84,16 +87,16 @@ Implement Phase 1 of sma-ng cluster mode:
 
 ### Success Criteria
 
-- [ ] All nodes sharing a PostgreSQL instance use unique UUIDs — no duplication from
+- [x] All nodes sharing a PostgreSQL instance use unique UUIDs — no duplication from
   identity collisions.
-- [ ] `drain`, `pause`, `resume`, `restart`, `shutdown` commands all reachable from admin
+- [x] `drain`, `pause`, `resume`, `restart`, `shutdown` commands all reachable from admin
   UI and stored in `node_commands` with status lifecycle.
-- [ ] Log entries from all cluster nodes appear in the unified log viewer within one
+- [x] Log entries from all cluster nodes appear in the unified log viewer within one
   heartbeat interval.
-- [ ] TTL cleanup deletes logs older than `log_ttl_days`; cleanup runs on every heartbeat.
-- [ ] Single-node SQLite deployments are completely unaffected (all cluster code paths
+- [x] TTL cleanup deletes logs older than `log_ttl_days`; cleanup runs on every heartbeat.
+- [x] Single-node SQLite deployments are completely unaffected (all cluster code paths
   gated on `job_db.is_distributed`).
-- [ ] All existing tests pass. New tests cover: UUID generation/persistence, node_commands
+- [x] All existing tests pass. New tests cover: UUID generation/persistence, node_commands
   polling, drain/pause/resume flag behaviour, DB log handler, TTL cleanup.
 
 ---
@@ -742,20 +745,20 @@ python -m pytest tests/ -x -q
 
 ### Final Validation Checklist
 
-- [ ] All 107+ existing tests pass: `python -m pytest tests/ -x -q`
-- [ ] New tests cover all tasks above: `python -m pytest tests/test_cluster.py -v`
-- [ ] No linting errors: `ruff check resources/daemon/`
-- [ ] No type errors: `pyright resources/daemon/`
-- [ ] No markdownlint errors: `markdownlint docs/daemon.md`
-- [ ] Single-node SQLite daemon starts and processes jobs without error
-- [ ] With PostgreSQL: UUID generated on first start, persisted in sma-ng.yml
-- [ ] With PostgreSQL: Cluster tab visible in admin UI with all nodes
-- [ ] With PostgreSQL: `drain` command issued from UI — node finishes active jobs,
+- [x] All 107+ existing tests pass: `python -m pytest tests/ -x -q`
+- [x] New tests cover all tasks above: `python -m pytest tests/test_cluster.py -v`
+- [x] No linting errors: `ruff check resources/daemon/`
+- [x] No type errors: `pyright resources/daemon/`
+- [x] No markdownlint errors: `markdownlint docs/daemon.md`
+- [x] Single-node SQLite daemon starts and processes jobs without error
+- [x] With PostgreSQL: UUID generated on first start, persisted in sma-ng.yml
+- [x] With PostgreSQL: Cluster tab visible in admin UI with all nodes
+- [x] With PostgreSQL: `drain` command issued from UI — node finishes active jobs,
   stops accepting new ones, status shows `draining`
-- [ ] With PostgreSQL: `pause` / `resume` round-trip works
-- [ ] With PostgreSQL: logs appear in log viewer, filterable by node and level
-- [ ] TTL cleanup deletes old logs on next heartbeat tick
-- [ ] `docs/daemon.md` updated with Cluster Mode section
+- [x] With PostgreSQL: `pause` / `resume` round-trip works
+- [x] With PostgreSQL: logs appear in log viewer, filterable by node and level
+- [x] TTL cleanup deletes old logs on next heartbeat tick
+- [x] `docs/daemon.md` updated with Cluster Mode section
 
 ---
 

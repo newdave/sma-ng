@@ -1,3 +1,8 @@
+# Auto-reload sma-ng.yml on file change
+
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Auto-reload of `sma-ng.yml` on file change shipped via `ConfigWatcherThread`. See commits `37e2ff9`, `4c697c8`.
+
 name: "Auto-reload sma-ng.yml on file change"
 description: |
   Add a daemon-side watcher that detects changes to the active
@@ -148,27 +153,27 @@ threads, plus schema knobs and tests.
 
 ### Success Criteria
 
-- [ ] `daemon.config_watch` block exists in the schema with
+- [x] `daemon.config_watch` block exists in the schema with
       `enabled` (bool, default `true`), `interval_seconds`
       (int, default `5`), `debounce_seconds` (int, default `2`).
-- [ ] `DaemonServer` starts a `ConfigWatcherThread` when the
+- [x] `DaemonServer` starts a `ConfigWatcherThread` when the
       daemon is launched with a config file path AND
       `config_watch.enabled` is true AND `interval_seconds > 0`.
-- [ ] When `sma-ng.yml` is modified, `reload_config()` is called
+- [x] When `sma-ng.yml` is modified, `reload_config()` is called
       within `interval + debounce` seconds.
-- [ ] When `sma-ng.yml` is deleted then re-created (atomic rename
+- [x] When `sma-ng.yml` is deleted then re-created (atomic rename
       / `mv tmp config`), the watcher does not crash and triggers
       one reload after the new file settles.
-- [ ] When `reload_config()` raises or returns False, the watcher
+- [x] When `reload_config()` raises or returns False, the watcher
       logs a WARNING and keeps polling.
-- [ ] Setting `config_watch.enabled: false` (or `interval_seconds:
+- [x] Setting `config_watch.enabled: false` (or `interval_seconds:
       0`) skips the watcher entirely.
-- [ ] `graceful_restart` and `shutdown` stop the watcher cleanly
+- [x] `graceful_restart` and `shutdown` stop the watcher cleanly
       (mirrors how scanner_thread / recycle_cleaner_thread are
       stopped).
-- [ ] Tests cover: change-detected→reload, no-change→no-reload,
+- [x] Tests cover: change-detected→reload, no-change→no-reload,
       debounce, missing-file path, reload-failure path, opt-out.
-- [ ] All existing tests pass.
+- [x] All existing tests pass.
 
 ## All Needed Context
 
@@ -559,14 +564,14 @@ touch config/sma-ng.yml
 
 ## Final validation Checklist
 
-- [ ] `pytest` passes
-- [ ] `ruff check` / `ruff format --check` clean
-- [ ] `markdownlint` clean for edited markdown
-- [ ] `python scripts/lint-logging.py` clean
-- [ ] Live smoke shows reload within `interval + debounce` seconds
-- [ ] Setting `config_watch.enabled: false` suppresses the watcher
-- [ ] Three-place doc rule honored
-- [ ] One commit per logical area; no AI attribution
+- [x] `pytest` passes
+- [x] `ruff check` / `ruff format --check` clean
+- [x] `markdownlint` clean for edited markdown
+- [x] `python scripts/lint-logging.py` clean
+- [x] Live smoke shows reload within `interval + debounce` seconds
+- [x] Setting `config_watch.enabled: false` suppresses the watcher
+- [x] Three-place doc rule honored
+- [x] One commit per logical area; no AI attribution
 
 ---
 

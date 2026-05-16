@@ -1,3 +1,8 @@
+# Tune QSV HEVC encoding for ICQ + HDR + correct color tagging
+
+> **STATUS: COMPLETE — landed 2026-05-16**
+> ICQ tuning, preset whitelist, deeper look-ahead, 10-bit pix_fmt, and HDR color tags all shipped. See commits `333aa02`, `4809afd`, `fa95206`.
+
 name: "Tune QSV HEVC encoding for ICQ + HDR + correct color tagging"
 description: |
   Six related changes to the SMA-NG video encoder pipeline so that
@@ -175,33 +180,33 @@ Engine-side: six focused diffs to `converter/avcodecs.py`,
 
 ### Success Criteria
 
-- [ ] `base.video.preset: slower` produces `-preset slower` in the
+- [x] `base.video.preset: slower` produces `-preset slower` in the
       ffmpeg command line for hevc_qsv (today: silently stripped).
-- [ ] `base.video.look-ahead-depth: 40` produces both
+- [x] `base.video.look-ahead-depth: 40` produces both
       `-look_ahead_depth 40` and `-extra_hw_frames 44` for hevc_qsv
       (the +4 mirrors the AV1 QSV pattern at line 2138).
-- [ ] `base.video.global_quality: 23` produces `-global_quality 23`
+- [x] `base.video.global_quality: 23` produces `-global_quality 23`
       and suppresses `-b:v` / `-maxrate` / `-bufsize` for the
       hevc_qsv stream when no bitrate would otherwise be set.
       Default (`global_quality: 0`) preserves the codec's existing
       default of 25.
-- [ ] When `hdrOutput` is true, the ffmpeg command includes
+- [x] When `hdrOutput` is true, the ffmpeg command includes
       `-color_primaries <base.hdr.primaries[0]>`,
       `-color_trc <base.hdr.transfer[0]>`,
       `-colorspace <base.hdr.space[0]>` against the encoded
       video stream.
-- [ ] `base.hdr.pix-fmt: [p010le]` causes the scale_qsv chain to
+- [x] `base.hdr.pix-fmt: [p010le]` causes the scale_qsv chain to
       emit `:format=p010le` (already works — covered by an
       assertion test, no code change needed).
-- [ ] When `output_format == "mkv"` (or `output_extension` ends in
+- [x] When `output_format == "mkv"` (or `output_extension` ends in
       `mkv`) and `subtitle.codec` is `["mov_text"]`, config
       validation logs a WARNING at startup and substitutes
       `["srt"]` for the loaded settings. (Operator can opt out by
       explicitly listing `mov_text` together with at least one
       MKV-compatible codec, in which case mov_text is dropped
       silently with a debug log.)
-- [ ] All existing tests pass.
-- [ ] New tests cover: preset whitelist passthrough,
+- [x] All existing tests pass.
+- [x] New tests cover: preset whitelist passthrough,
       extra_hw_frames sizing, global_quality plumbing, color flag
       emission on HDR output, mov_text/mkv warning.
 
@@ -610,17 +615,17 @@ ffprobe -v error -select_streams v:0 \
 
 ## Final validation Checklist
 
-- [ ] `pytest` passes
-- [ ] `ruff check` / `ruff format --check` clean
-- [ ] `python scripts/lint-logging.py` clean
-- [ ] `markdownlint docs/ AGENTS.md /tmp/sma-wiki/` clean
-- [ ] `python manual.py -i SAMPLE -oo` shows the expected flag set
-- [ ] Live ffmpeg encode produces a file whose ffprobe output
+- [x] `pytest` passes
+- [x] `ruff check` / `ruff format --check` clean
+- [x] `python scripts/lint-logging.py` clean
+- [x] `markdownlint docs/ AGENTS.md /tmp/sma-wiki/` clean
+- [x] `python manual.py -i SAMPLE -oo` shows the expected flag set
+- [x] Live ffmpeg encode produces a file whose ffprobe output
       matches the expected color/pix_fmt
-- [ ] Three-place doc rule honored
-- [ ] One commit per logical area: schema, encoder, processor,
+- [x] Three-place doc rule honored
+- [x] One commit per logical area: schema, encoder, processor,
       validation, sample regen, tests, docs
-- [ ] No AI attribution / Co-Authored-By
+- [x] No AI attribution / Co-Authored-By
 
 ## Task Breakdown
 

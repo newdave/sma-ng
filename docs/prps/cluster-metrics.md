@@ -1,5 +1,8 @@
 # Cluster-Wide Transcoding Job Metrics
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> `/api/metrics` endpoint and cluster metrics dashboard shipped. See commits `1f99fd7`, `943a1f1`.
+
 ## Discovery Summary
 
 ### Initial Task Analysis
@@ -71,18 +74,18 @@ Build a cluster-wide metrics system for SMA-NG that:
 
 ### Success Criteria
 
-- [ ] Two new columns (`input_size_bytes BIGINT`, `output_size_bytes BIGINT`) added to `jobs`
+- [x] Two new columns (`input_size_bytes BIGINT`, `output_size_bytes BIGINT`) added to `jobs`
       table via idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` migration
-- [ ] Worker captures actual file sizes at job completion and persists them
-- [ ] `GET /api/metrics?window=24h|7d|30d|all` returns structured JSON with KPIs + time-series
-- [ ] Dashboard shows 4 new KPI cards (throughput, avg duration, failure rate, compression ratio)
+- [x] Worker captures actual file sizes at job completion and persists them
+- [x] `GET /api/metrics?window=24h|7d|30d|all` returns structured JSON with KPIs + time-series
+- [x] Dashboard shows 4 new KPI cards (throughput, avg duration, failure rate, compression ratio)
       that auto-refresh with the existing 5-second poll cycle
-- [ ] `/metrics` page renders with Chart.js — line, bar, and doughnut charts load correctly
-- [ ] Time-window selector (24h / 7d / 30d) updates all charts without page reload
-- [ ] In standalone (non-PostgreSQL) mode, `/api/metrics` returns `{"available": false, ...}` and
+- [x] `/metrics` page renders with Chart.js — line, bar, and doughnut charts load correctly
+- [x] Time-window selector (24h / 7d / 30d) updates all charts without page reload
+- [x] In standalone (non-PostgreSQL) mode, `/api/metrics` returns `{"available": false, ...}` and
       the UI shows a styled "not available" message
-- [ ] All existing tests pass; new handler tests added for the metrics endpoint
-- [ ] `ruff check` passes on all modified Python files
+- [x] All existing tests pass; new handler tests added for the metrics endpoint
+- [x] `ruff check` passes on all modified Python files
 
 ---
 
@@ -788,17 +791,17 @@ open http://localhost:8585/dashboard
 
 ## Final Validation Checklist
 
-- [ ] All existing tests pass: `source venv/bin/activate && python -m pytest tests/ -q`
-- [ ] No ruff errors: `ruff check resources/daemon/ tests/test_metrics.py`
-- [ ] `/api/metrics?window=24h` returns `{"available": true, "kpis": {...}, "timeseries": [...], "nodes": [...]}`
-- [ ] `/api/metrics` returns `{"available": false}` in standalone mode
-- [ ] `/metrics` page loads, all three charts render, window selector updates charts
-- [ ] Dashboard `/dashboard` shows KPI strip (only when PostgreSQL connected)
-- [ ] Dashboard `/dashboard` shows nav link to `/metrics`
-- [ ] `input_size_bytes` and `output_size_bytes` populated on completed jobs in DB
-- [ ] `OSError` from `os.path.getsize` is caught and logged — does not fail the job
-- [ ] Invalid `window` param (e.g. `?window=999d`) falls back to default `24h`
-- [ ] Documentation updated: `docs/metrics.md`, `docs/daemon.md`, `resources/docs.html`
+- [x] All existing tests pass: `source venv/bin/activate && python -m pytest tests/ -q`
+- [x] No ruff errors: `ruff check resources/daemon/ tests/test_metrics.py`
+- [x] `/api/metrics?window=24h` returns `{"available": true, "kpis": {...}, "timeseries": [...], "nodes": [...]}`
+- [x] `/api/metrics` returns `{"available": false}` in standalone mode
+- [x] `/metrics` page loads, all three charts render, window selector updates charts
+- [x] Dashboard `/dashboard` shows KPI strip (only when PostgreSQL connected)
+- [x] Dashboard `/dashboard` shows nav link to `/metrics`
+- [x] `input_size_bytes` and `output_size_bytes` populated on completed jobs in DB
+- [x] `OSError` from `os.path.getsize` is caught and logged — does not fail the job
+- [x] Invalid `window` param (e.g. `?window=999d`) falls back to default `24h`
+- [x] Documentation updated: `docs/metrics.md`, `docs/daemon.md`, `resources/docs.html`
 
 ---
 

@@ -1,3 +1,8 @@
+# Library Audit — distributed scanner that locates errors, stale extras, and TMDB/TVDB duplicates
+
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Distributed library auditor shipped under `resources/library_audit/` with recycler, tag_reader, engine, enumerator, threads. See commits `32148b7`, `8f09059`, `bbc8dc4`.
+
 name: "Library Audit — distributed scanner that locates errors, stale extras, and TMDB/TVDB duplicates"
 description: |
   Add a daemon-resident library auditor that enumerates configured paths, persists findings
@@ -112,29 +117,29 @@ A `library_audit` subsystem with:
 
 ### Success Criteria
 
-- [ ] `library_findings` and `library_audit_queue` / `library_audit_runs` tables created idempotently
+- [x] `library_findings` and `library_audit_queue` / `library_audit_runs` tables created idempotently
       via `_init_db()`.
-- [ ] `daemon.audit_paths`, `audit_interval_seconds`, `audit_skip_dirs`, `audit_concurrency`,
+- [x] `daemon.audit_paths`, `audit_interval_seconds`, `audit_skip_dirs`, `audit_concurrency`,
       `audit_auto_fix` fields added to pydantic schema with kebab-case YAML aliases.
-- [ ] `LibraryAuditThread` (scheduler/enumerator) and `LibraryAuditWorkerThread` (per-node probe)
+- [x] `LibraryAuditThread` (scheduler/enumerator) and `LibraryAuditWorkerThread` (per-node probe)
       registered in `DaemonServer.start()` and restarted on config reload (mirror existing
       `ScannerThread` / `RecycleBinCleanerThread` reload at server.py:263-283).
-- [ ] Two-node smoke test: a 200-file audit run with one slow node and one fast node completes
+- [x] Two-node smoke test: a 200-file audit run with one slow node and one fast node completes
       with both nodes contributing units (`SELECT claimed_by, COUNT(*) FROM library_audit_queue
       WHERE audit_id=… GROUP BY claimed_by` shows >0 for both).
-- [ ] Killing a node mid-claim does not stall the run — the stale-claim sweep recovers within
+- [x] Killing a node mid-claim does not stall the run — the stale-claim sweep recovers within
       `audit_claim_stale_seconds`.
-- [ ] CLI `manual.py --audit /tmp/sample` runs without a daemon (single-process: enumerates and
+- [x] CLI `manual.py --audit /tmp/sample` runs without a daemon (single-process: enumerates and
       probes inline; does not touch the cluster tables).
-- [ ] Findings dedupe on `(kind, path)` with `ON CONFLICT DO UPDATE SET last_seen_at=NOW()`.
-- [ ] Auto-fix dry-run is the default; `audit_auto_fix.sidecars: true` plus a confirmed run actually
+- [x] Findings dedupe on `(kind, path)` with `ON CONFLICT DO UPDATE SET last_seen_at=NOW()`.
+- [x] Auto-fix dry-run is the default; `audit_auto_fix.sidecars: true` plus a confirmed run actually
       moves files via the recycle-bin helper.
-- [ ] Auto-queued conversion jobs use `add_job` (db.py:252) and trigger `notify_workers()` exactly
+- [x] Auto-queued conversion jobs use `add_job` (db.py:252) and trigger `notify_workers()` exactly
       like `_queue_file` (handler.py:908-922).
-- [ ] All log lines pass `mise run test:lint` (single-line rule).
-- [ ] OpenAPI spec updated and `mise run test:openapi` passes.
-- [ ] Docs added in three places: `docs/library-audit.md`, wiki mirror, doc index in `docs/README.md`.
-- [ ] Release-please footer `Release-As: 1.7.0` present on the merge commit so the release lands
+- [x] All log lines pass `mise run test:lint` (single-line rule).
+- [x] OpenAPI spec updated and `mise run test:openapi` passes.
+- [x] Docs added in three places: `docs/library-audit.md`, wiki mirror, doc index in `docs/README.md`.
+- [x] Release-please footer `Release-As: 1.7.0` present on the merge commit so the release lands
       as 1.7.0 instead of the next patch bump.
 
 ## All Needed Context
@@ -795,20 +800,20 @@ psql "$TEST_DB_URL" -c \
 
 ## Final validation Checklist
 
-- [ ] `mise run test` green
-- [ ] `mise run test:lint` green (logging rules)
-- [ ] `mise run test:openapi` green
-- [ ] `mise run dev:lint` clean
-- [ ] `mise run dev:format` clean
-- [ ] Two-node smoke: both nodes contributed claims
-- [ ] Killed-node drill: run completes after stale sweep
-- [ ] Auto-fix dry_run default verified — no files moved when `audit_auto_fix.*: false`
-- [ ] CLI `python manual.py --audit /path` returns non-zero with seeded broken file
-- [ ] `setup/sma-ng.yml.sample` regenerated via `mise run config:sample` (not hand-edited)
-- [ ] `docs/library-audit.md` + `docs/README.md` updated
-- [ ] `/tmp/sma-wiki/Library-Audit.md` mirrored and pushed
-- [ ] `Release-As: 1.7.0` trailer present on the merge/squash commit
-- [ ] Release-please PR shows v1.7.0 (not the next patch)
+- [x] `mise run test` green
+- [x] `mise run test:lint` green (logging rules)
+- [x] `mise run test:openapi` green
+- [x] `mise run dev:lint` clean
+- [x] `mise run dev:format` clean
+- [x] Two-node smoke: both nodes contributed claims
+- [x] Killed-node drill: run completes after stale sweep
+- [x] Auto-fix dry_run default verified — no files moved when `audit_auto_fix.*: false`
+- [x] CLI `python manual.py --audit /path` returns non-zero with seeded broken file
+- [x] `setup/sma-ng.yml.sample` regenerated via `mise run config:sample` (not hand-edited)
+- [x] `docs/library-audit.md` + `docs/README.md` updated
+- [x] `/tmp/sma-wiki/Library-Audit.md` mirrored and pushed
+- [x] `Release-As: 1.7.0` trailer present on the merge/squash commit
+- [x] Release-please PR shows v1.7.0 (not the next patch)
 
 ---
 

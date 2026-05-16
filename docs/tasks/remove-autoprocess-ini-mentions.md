@@ -1,5 +1,8 @@
 # Task Breakdown — Remove autoProcess.ini Mentions
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Active code, docs, tests, and wiki swept clean of `autoProcess.ini`. See commits `231f1e3`, `9770cbb`, `d6d48a9`, `e68fb81`, `6d28ac4`. Only historical CHANGELOG entries remain.
+
 Companion to [docs/prps/remove-autoprocess-ini-mentions.md](../prps/remove-autoprocess-ini-mentions.md).
 
 Mechanical sweep of residual `autoProcess.ini` references in active

@@ -1,5 +1,8 @@
 # Task Breakdown — Tune QSV HEVC encoding for ICQ + HDR
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> ICQ tuning, preset whitelist, deeper look-ahead, 10-bit pix_fmt, and HDR color tags all shipped. See commits `333aa02`, `4809afd`, `fa95206`.
+
 Companion to [docs/prps/qsv-hevc-icq-encoding.md](../prps/qsv-hevc-icq-encoding.md).
 
 Six engine changes split into eight commit-sized tasks. Operator-side

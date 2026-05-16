@@ -1,5 +1,8 @@
 # Task Breakdown — Auto-reload sma-ng.yml on file change
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Auto-reload of `sma-ng.yml` on file change shipped via `ConfigWatcherThread`. See commits `37e2ff9`, `4c697c8`.
+
 Companion to [docs/prps/config-file-watcher.md](../prps/config-file-watcher.md).
 
 Add a polling watcher that calls the existing

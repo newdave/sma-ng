@@ -1,3 +1,8 @@
+# PRP — sma-ng.yml Config Restructure
+
+> **STATUS: COMPLETE — landed 2026-05-16**
+> `sma-ng.yml` four-block layout, pydantic schema, sample generator, and INI removal all landed. See commits `621b90e`, `d169810`, `d5148b0`, plus `230+ INI cleanup commits.
+
 name: "PRP — sma-ng.yml Config Restructure"
 description: |
 
@@ -147,25 +152,25 @@ User-visible behaviour:
 
 ### Success Criteria
 
-- [ ] `setup/sma-ng.yml.sample` reflects the four-bucket layout
-- [ ] Loading any old-shape `sma-ng.yml` (top-level `converter:` etc.)
+- [x] `setup/sma-ng.yml.sample` reflects the four-bucket layout
+- [x] Loading any old-shape `sma-ng.yml` (top-level `converter:` etc.)
       produces a hard error pointing at the missing `base:` block
-- [ ] Loading an `.ini` file via `SMA_CONFIG` produces a hard error
-- [ ] Unknown keys produce WARN-level log lines with full dotted path
-- [ ] Type errors produce hard fail with pydantic's error message including
+- [x] Loading an `.ini` file via `SMA_CONFIG` produces a hard error
+- [x] Unknown keys produce WARN-level log lines with full dotted path
+- [x] Type errors produce hard fail with pydantic's error message including
       the dotted path
-- [ ] Routing: `/media/tv/kids/foo.mkv` → `services.sonarr.kids` notified;
+- [x] Routing: `/media/tv/kids/foo.mkv` → `services.sonarr.kids` notified;
       `/media/tv/4k/bar.mkv` → `services.sonarr.main` notified;
       `/media/movies/baz.mkv` (no matching rule) → bare `base`, no services
       notified
-- [ ] `manual.py --profile rq -i file.mkv` overrides path-routing
-- [ ] CI workflow `config-sample-consistency` fails on a hand-edited
+- [x] `manual.py --profile rq -i file.mkv` overrides path-routing
+- [x] CI workflow `config-sample-consistency` fails on a hand-edited
       `sma-ng.yml.sample` that diverges from generator output
-- [ ] All existing tests pass (after fixture updates for `tmp_ini` →
+- [x] All existing tests pass (after fixture updates for `tmp_ini` →
       `tmp_yaml`)
-- [ ] `mise run dev:lint`, `mise run test`, `mise run dev:precommit` all
+- [x] `mise run dev:lint`, `mise run test`, `mise run dev:precommit` all
       green
-- [ ] `docs/configuration.md`, `docs/daemon.md`, GitHub wiki updated
+- [x] `docs/configuration.md`, `docs/daemon.md`, GitHub wiki updated
 
 ## All Needed Context
 
@@ -931,22 +936,22 @@ python manual.py --profile rq -i "/media/tv/kids/foo.mkv" -oo  # explicit profil
 
 ## Final validation Checklist
 
-- [ ] All tests pass: `source venv/bin/activate && mise run test`
-- [ ] No lint errors: `source venv/bin/activate && mise run dev:lint`
-- [ ] Pre-commit passes: `source venv/bin/activate && mise run dev:precommit`
-- [ ] Sample is up to date: `mise run config:generate-sample --check`
-- [ ] Old-shape config produces a clear error
-- [ ] `.ini` config produces a clear error
-- [ ] Unknown keys produce one WARN per dotted path
-- [ ] Routing resolves longest-prefix correctly with bare-base fallback
-- [ ] `--profile` flag overrides routing
-- [ ] All `ReadSettings` consumers (manual.py, rename.py, daemon.py,
+- [x] All tests pass: `source venv/bin/activate && mise run test`
+- [x] No lint errors: `source venv/bin/activate && mise run dev:lint`
+- [x] Pre-commit passes: `source venv/bin/activate && mise run dev:precommit`
+- [x] Sample is up to date: `mise run config:generate-sample --check`
+- [x] Old-shape config produces a clear error
+- [x] `.ini` config produces a clear error
+- [x] Unknown keys produce one WARN per dotted path
+- [x] Routing resolves longest-prefix correctly with bare-base fallback
+- [x] `--profile` flag overrides routing
+- [x] All `ReadSettings` consumers (manual.py, rename.py, daemon.py,
       update.py, plexmatch.py, mediaprocessor.py, plex.py, rename_util.py,
       docker_smoke_imports.py) work without changes
-- [ ] Sonarr multi-instance routing example runs end-to-end against a
+- [x] Sonarr multi-instance routing example runs end-to-end against a
       mock URL
-- [ ] Service secrets redacted in /configs admin endpoint
-- [ ] docs/configuration.md, docs/daemon.md, GitHub wiki updated
+- [x] Service secrets redacted in /configs admin endpoint
+- [x] docs/configuration.md, docs/daemon.md, GitHub wiki updated
 
 ---
 

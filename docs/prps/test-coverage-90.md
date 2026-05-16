@@ -1,3 +1,8 @@
+# Raise Python test coverage to ≥90% across SMA-NG
+
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Coverage gate enforced at 90% global / 70% per-module via `.mise/tasks/test/cov`. See commits `e68e3b6`, `3926130`, `1e0bbfa`, `8f09059`.
+
 name: "Raise Python test coverage to ≥90% across SMA-NG"
 description: |
   Targeted-backfill PRP to lift the test suite from the current
@@ -79,18 +84,18 @@ Developer-visible behaviour:
 
 ### Success Criteria
 
-- [ ] `mise run test:cov` reports ≥90.00% line coverage.
-- [ ] No production module ≥100 statements is below 80% line
+- [x] `mise run test:cov` reports ≥90.00% line coverage.
+- [x] No production module ≥100 statements is below 80% line
   coverage (excluding the documented hardware-bound list).
-- [ ] `pytest --cov-fail-under=90` is the default in
+- [x] `pytest --cov-fail-under=90` is the default in
   `mise run test:cov`; bypassing requires an explicit
   `COV_FAIL_UNDER=0` override.
-- [ ] CI has a `coverage-gate` step that runs the full suite
+- [x] CI has a `coverage-gate` step that runs the full suite
   with the gate enabled.
-- [ ] No existing test is removed or weakened. New tests follow
+- [x] No existing test is removed or weakened. New tests follow
   the existing module's style (factory fixtures, `unittest.mock`,
   `pytest.raises`).
-- [ ] `docs/test-coverage.md` documents the policy, the gate,
+- [x] `docs/test-coverage.md` documents the policy, the gate,
   the exclusion list, and the rationale for each exclusion.
 
 ## All Needed Context
@@ -504,18 +509,18 @@ COV_FAIL_UNDER=99 mise run test:cov
 
 ## Final Validation Checklist
 
-- [ ] `mise run test` — 2554+ passed
-- [ ] `mise run test:cov` — TOTAL ≥ 90.00%, exit 0
-- [ ] `mise run dev:lint` — All checks passed
-- [ ] `python scripts/check-coverage-floor.py` — all modules ≥100 stmts at ≥80%
-- [ ] `COV_FAIL_UNDER=99 mise run test:cov` — exits non-zero (gate sanity)
-- [ ] `htmlcov/index.html` regenerated; manually spot-check the modules
+- [x] `mise run test` — 2554+ passed
+- [x] `mise run test:cov` — TOTAL ≥ 90.00%, exit 0
+- [x] `mise run dev:lint` — All checks passed
+- [x] `python scripts/check-coverage-floor.py` — all modules ≥100 stmts at ≥80%
+- [x] `COV_FAIL_UNDER=99 mise run test:cov` — exits non-zero (gate sanity)
+- [x] `htmlcov/index.html` regenerated; manually spot-check the modules
       modified in Tasks 2–10 to confirm new tests are exercising the
       previously-red lines (not just adding new uncovered lines)
-- [ ] `docs/test-coverage.md` lists every exclusion in `.coveragerc`
+- [x] `docs/test-coverage.md` lists every exclusion in `.coveragerc`
       with a one-line reason
-- [ ] CI's `coverage-gate` step passes on the PR
-- [ ] No commits bundle "feat:" or "fix:" alongside test additions —
+- [x] CI's `coverage-gate` step passes on the PR
+- [x] No commits bundle "feat:" or "fix:" alongside test additions —
       per CLAUDE.md, this work commits as `test:` (or `chore:` for
       .coveragerc / mise-task / CI plumbing)
 

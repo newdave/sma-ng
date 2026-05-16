@@ -1,5 +1,8 @@
 # PRP: OpenVINO Analyzer Implementation
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> OpenVINO analyzer implemented in `resources/openvino_analyzer.py` with heuristic and inference paths. See commits `98019a5`, `9b04f1c`, `13a74f6`, `cb02533`, `c7624c9`.
+
 ## Discovery Summary
 
 ### Initial Task Analysis
@@ -77,12 +80,12 @@ preset, filter injection) that improve quality-per-bit across conversion jobs.
 
 ### Success Criteria
 
-- [ ] `source venv/bin/activate && python -m pytest tests/test_openvino_analyzer.py -v` — all pass
-- [ ] `source venv/bin/activate && python -m pytest tests/ -v` — full suite passes
-- [ ] `source venv/bin/activate && ruff check resources/openvino_analyzer.py scripts/prepare_models.py` — no errors
-- [ ] `source venv/bin/activate && python manual.py -i /path/to/file.mkv -oo` with `Analyzer.enabled: true` logs analyzer observations
-- [ ] On Intel GPU system: `core.available_devices` includes `"GPU"` and jobs run on GPU
-- [ ] On non-Intel system: analyzer completes on CPU with `AUTO:GPU,NPU,CPU` fallback
+- [x] `source venv/bin/activate && python -m pytest tests/test_openvino_analyzer.py -v` — all pass
+- [x] `source venv/bin/activate && python -m pytest tests/ -v` — full suite passes
+- [x] `source venv/bin/activate && ruff check resources/openvino_analyzer.py scripts/prepare_models.py` — no errors
+- [x] `source venv/bin/activate && python manual.py -i /path/to/file.mkv -oo` with `Analyzer.enabled: true` logs analyzer observations
+- [x] On Intel GPU system: `core.available_devices` includes `"GPU"` and jobs run on GPU
+- [x] On non-Intel system: analyzer completes on CPU with `AUTO:GPU,NPU,CPU` fallback
 
 ---
 
@@ -565,19 +568,19 @@ source venv/bin/activate && python manual.py -i /path/to/test.mkv -oo
 
 ## Final Validation Checklist
 
-- [ ] All tests pass: `source venv/bin/activate && python -m pytest -v`
-- [ ] No linting errors: `source venv/bin/activate && ruff check resources/openvino_analyzer.py scripts/prepare_models.py`
-- [ ] `analyze(core=core)` with no inputfile returns `AnalyzerObservations()` (existing test preserved)
-- [ ] `analyze(inputfile=path, info=info)` with no model returns heuristic observations (all 6 fields)
-- [ ] `analyze()` with valid model_dir returns model-based content_type classification
-- [ ] `interlace_confidence=0.95` when `info.video.field_order in ("tt","bb")`
-- [ ] `crop_filter` is a valid FFmpeg crop string or None
-- [ ] `OpenVINODependencyError` propagates when openvino not installed (caller catches it)
-- [ ] `_load_compiled_model()` returns None on model load failure (no crash)
-- [ ] `resources/models/__init__.py` created
-- [ ] `setup/requirements-openvino.txt` includes numpy
-- [ ] `scripts/prepare_models.py` exits with clear error when torch not installed
-- [ ] No `from openvino.runtime import` anywhere in codebase (deprecated API)
+- [x] All tests pass: `source venv/bin/activate && python -m pytest -v`
+- [x] No linting errors: `source venv/bin/activate && ruff check resources/openvino_analyzer.py scripts/prepare_models.py`
+- [x] `analyze(core=core)` with no inputfile returns `AnalyzerObservations()` (existing test preserved)
+- [x] `analyze(inputfile=path, info=info)` with no model returns heuristic observations (all 6 fields)
+- [x] `analyze()` with valid model_dir returns model-based content_type classification
+- [x] `interlace_confidence=0.95` when `info.video.field_order in ("tt","bb")`
+- [x] `crop_filter` is a valid FFmpeg crop string or None
+- [x] `OpenVINODependencyError` propagates when openvino not installed (caller catches it)
+- [x] `_load_compiled_model()` returns None on model load failure (no crash)
+- [x] `resources/models/__init__.py` created
+- [x] `setup/requirements-openvino.txt` includes numpy
+- [x] `scripts/prepare_models.py` exits with clear error when torch not installed
+- [x] No `from openvino.runtime import` anywhere in codebase (deprecated API)
 
 ---
 

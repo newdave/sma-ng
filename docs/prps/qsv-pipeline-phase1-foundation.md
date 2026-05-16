@@ -1,3 +1,8 @@
+# QSV Pipeline Phase 1 — Foundation: capability probe, declarative GPU permissions, lint baseline, failure taxonomy
+
+> **STATUS: COMPLETE — landed 2026-05-16**
+> All tasks merged; see commits `73c3bcf..19c6c3a` (T1: 73c3bcf, T2: d24946a, T3: 7ee4b05, T4: 3f7ea6e, T5: 783207b, T6: 1b36698, T7: 307d6fd, T8: 19c6c3a). Failure taxonomy, fallback-policy enum, capability probe, /health surfacing, declarative /dev/dri perms, and lint baseline all shipped.
+
 name: "QSV Pipeline Phase 1 — Foundation: capability probe, declarative GPU permissions, lint baseline, failure taxonomy"
 description: |
   Phase 1 of the QSV / Python-quality / Docker refactor program. Lands four
@@ -100,35 +105,35 @@ User-visible behaviour and technical requirements.
 
 ### Success Criteria
 
-- [ ] `GET /health` returns new top-level keys `gpu_status`, `capabilities`,
+- [x] `GET /health` returns new top-level keys `gpu_status`, `capabilities`,
   and `fallback` without breaking existing consumers (keys are additive).
-- [ ] `scripts/probe-hw.py` writes `/config/cache/hw_capabilities.json` on
+- [x] `scripts/probe-hw.py` writes `/config/cache/hw_capabilities.json` on
   daemon startup; takes < 2 seconds on a cold host.
-- [ ] `ConverterSettings.fallback_policy` enum field replaces the boolean
+- [x] `ConverterSettings.fallback_policy` enum field replaces the boolean
   `software_fallback` in `resources/config_schema.py`. Existing YAML with
   `software-fallback: false` loads with one deprecation warning and behaves
   identically to `fallback-policy: hw_only`.
-- [ ] `FfmpegFailureClass` enum + `parse_ffmpeg_failure(stderr_tail)` ship in
+- [x] `FfmpegFailureClass` enum + `parse_ffmpeg_failure(stderr_tail)` ship in
   `resources/processor/failures.py` (a new file — first inhabitant of the
   Phase 2 `processor/` package). 10+ stderr fixtures cover at least 4
   distinct failure classes.
-- [ ] The three-tier ladder in `mediaprocessor.py:3068-3105` is wrapped in an
+- [x] The three-tier ladder in `mediaprocessor.py:3068-3105` is wrapped in an
   `_attempt_ladder` helper that emits one structured log line per job
   containing `attempts: [{tier, failure_class, duration_ms}, ...]`. Behaviour
   is unchanged when `fallback-policy: aggressive` (the default).
-- [ ] `docker/docker-compose.yml` `sma-intel` and `sma-intel-pg` profiles add
+- [x] `docker/docker-compose.yml` `sma-intel` and `sma-intel-pg` profiles add
   `group_add: ["video", "render"]`. Entrypoint GID reconciliation runs only
   when `SMA_ENTRYPOINT_FIX_GIDS=1` is set.
-- [ ] `pyproject.toml [tool.ruff.lint] select` expanded to
+- [x] `pyproject.toml [tool.ruff.lint] select` expanded to
   `["E", "F", "W", "I", "B", "SIM", "RUF", "LOG", "RET", "PTH", "S", "PERF",
   "PLE", "PLW", "UP"]`. Resulting violations either fixed or explicitly
   ignored with a rationale comment per ignore.
-- [ ] `bandit` listed under `[project.optional-dependencies].dev`; invoked
+- [x] `bandit` listed under `[project.optional-dependencies].dev`; invoked
   from `.mise/tasks/test/lint` over `resources/daemon/`, `triggers/`,
   `daemon.py`, `manual.py`, `rename.py`.
-- [ ] `.pre-commit-config.yaml` committed with ruff + bandit + trailing-
+- [x] `.pre-commit-config.yaml` committed with ruff + bandit + trailing-
   whitespace hooks; documented in `docs/development.md`.
-- [ ] `mise run test` passes. Coverage gate (90% global, 70% per-module ≥ 100
+- [x] `mise run test` passes. Coverage gate (90% global, 70% per-module ≥ 100
   statements) holds.
 
 ## All Needed Context
@@ -759,22 +764,22 @@ curl -s localhost:8585/health | jq '.gpu_status, .capabilities, .fallback'
 
 ## Final validation Checklist
 
-- [ ] All tests pass: `mise run test`
-- [ ] No linting errors: `mise run test:lint` (ruff + bandit clean)
-- [ ] No type errors: `mise run dev:lint`
-- [ ] `curl /health` returns `gpu_status` + `capabilities` + `fallback`
-- [ ] Legacy `software-fallback: false` still loads with deprecation warning
-- [ ] `docker compose --profile intel up` works on a vanilla Intel iGPU
+- [x] All tests pass: `mise run test`
+- [x] No linting errors: `mise run test:lint` (ruff + bandit clean)
+- [x] No type errors: `mise run dev:lint`
+- [x] `curl /health` returns `gpu_status` + `capabilities` + `fallback`
+- [x] Legacy `software-fallback: false` still loads with deprecation warning
+- [x] `docker compose --profile intel up` works on a vanilla Intel iGPU
   host without the entrypoint running anything as root
-- [ ] `SMA_ENTRYPOINT_FIX_GIDS=1 docker run …` still works for bare-docker
+- [x] `SMA_ENTRYPOINT_FIX_GIDS=1 docker run …` still works for bare-docker
   users
-- [ ] `setup/sma-ng.yml.sample` regenerated and committed
-- [ ] `docs/hardware-acceleration.md`, `/tmp/sma-wiki/Hardware-Acceleration.md`,
+- [x] `setup/sma-ng.yml.sample` regenerated and committed
+- [x] `docs/hardware-acceleration.md`, `/tmp/sma-wiki/Hardware-Acceleration.md`,
   `resources/docs.html` synced (CLAUDE.md three-place rule)
-- [ ] Coverage ≥ 90% global, ≥ 70% per-module on modules ≥ 100 statements
-- [ ] No new `# pragma: no cover` or `# type: ignore` without rationale
-- [ ] Commit messages use conventional prefixes (`feat:`, `fix:`, `refactor:`)
-- [ ] One logical commit per task (per CLAUDE.md commit policy)
+- [x] Coverage ≥ 90% global, ≥ 70% per-module on modules ≥ 100 statements
+- [x] No new `# pragma: no cover` or `# type: ignore` without rationale
+- [x] Commit messages use conventional prefixes (`feat:`, `fix:`, `refactor:`)
+- [x] One logical commit per task (per CLAUDE.md commit policy)
 
 ---
 

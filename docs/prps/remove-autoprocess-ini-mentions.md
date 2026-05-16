@@ -1,3 +1,8 @@
+# Remove all mention of autoProcess.ini from the codebase
+
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Active code, docs, tests, and wiki swept clean of `autoProcess.ini`. See commits `231f1e3`, `9770cbb`, `d6d48a9`, `e68fb81`, `6d28ac4`. Only historical CHANGELOG entries remain.
+
 name: "Remove all mention of autoProcess.ini from the codebase"
 description: |
   Sweep the active codebase, docs, wiki, and tests of references to the
@@ -107,24 +112,24 @@ functional behavior and historical context.
 
 ### Success Criteria
 
-- [ ] `grep -rn "autoProcess\.ini" --include='*.py' --include='*.sh' --include='*.html'`
+- [x] `grep -rn "autoProcess\.ini" --include='*.py' --include='*.sh' --include='*.html'`
       returns zero hits.
-- [ ] `grep -rn "autoProcess\.ini"` outside `docs/brainstorming/`,
+- [x] `grep -rn "autoProcess\.ini"` outside `docs/brainstorming/`,
       `docs/prps/config-restructure.md`, `docs/tasks/config-restructure.md`
       returns zero hits.
-- [ ] `grep -rn "autoProcess"` in `/tmp/sma-wiki/` returns zero hits
+- [x] `grep -rn "autoProcess"` in `/tmp/sma-wiki/` returns zero hits
       (log-name examples updated to `sma-ng`).
-- [ ] `pytest` (full suite) passes.
-- [ ] `python scripts/lint-logging.py` passes (no logging regressions
+- [x] `pytest` (full suite) passes.
+- [x] `python scripts/lint-logging.py` passes (no logging regressions
       from edits).
-- [ ] `markdownlint docs/ AGENTS.md /tmp/sma-wiki/` passes.
-- [ ] `shellcheck` passes for any edited `.sh` files.
-- [ ] `python daemon.py --help` and `python manual.py --help` and
+- [x] `markdownlint docs/ AGENTS.md /tmp/sma-wiki/` passes.
+- [x] `shellcheck` passes for any edited `.sh` files.
+- [x] `python daemon.py --help` and `python manual.py --help` and
       `python rename.py --help` show no mention of `autoProcess.ini`.
-- [ ] Pointing `SMA_CONFIG` at a `.ini` file still fails fast with a
+- [x] Pointing `SMA_CONFIG` at a `.ini` file still fails fast with a
       clear, generic message that names the supported format
       (`sma-ng.yml`).
-- [ ] Wiki commit pushed to `master` per `CLAUDE.md` rules.
+- [x] Wiki commit pushed to `master` per `CLAUDE.md` rules.
 
 ## All Needed Context
 
@@ -486,17 +491,17 @@ except ConfigError as e:
 
 ## Final validation Checklist
 
-- [ ] `rg "autoProcess\.ini" --glob '!docs/brainstorming/**' --glob '!docs/prps/config-restructure.md' --glob '!docs/tasks/config-restructure.md'` → 0 hits
-- [ ] `rg "autoProcess" /tmp/sma-wiki/` → 0 hits
-- [ ] `pytest` passes
-- [ ] `python scripts/lint-logging.py` passes
-- [ ] `markdownlint` passes on edited docs
-- [ ] `shellcheck` passes on edited shell scripts
-- [ ] `--help` for `daemon.py`, `manual.py`, `rename.py`, `plexmatch.py` is clean
-- [ ] `.ini` rejection still raises `ConfigError` with the new message
-- [ ] Three-place doc rule honored for every doc edit
-- [ ] Wiki commit pushed to `origin/master` per `CLAUDE.md`
-- [ ] Commits split logically; no AI attribution
+- [x] `rg "autoProcess\.ini" --glob '!docs/brainstorming/**' --glob '!docs/prps/config-restructure.md' --glob '!docs/tasks/config-restructure.md'` → 0 hits
+- [x] `rg "autoProcess" /tmp/sma-wiki/` → 0 hits
+- [x] `pytest` passes
+- [x] `python scripts/lint-logging.py` passes
+- [x] `markdownlint` passes on edited docs
+- [x] `shellcheck` passes on edited shell scripts
+- [x] `--help` for `daemon.py`, `manual.py`, `rename.py`, `plexmatch.py` is clean
+- [x] `.ini` rejection still raises `ConfigError` with the new message
+- [x] Three-place doc rule honored for every doc edit
+- [x] Wiki commit pushed to `origin/master` per `CLAUDE.md`
+- [x] Commits split logically; no AI attribution
 
 ---
 

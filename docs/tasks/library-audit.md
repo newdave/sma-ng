@@ -1,5 +1,8 @@
 # Library Audit — Task Breakdown
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Distributed library auditor shipped under `resources/library_audit/` with recycler, tag_reader, engine, enumerator, threads. See commits `32148b7`, `8f09059`, `bbc8dc4`.
+
 **Source PRP**: [docs/prps/library-audit.md](../prps/library-audit.md)
 **Target release**: `1.7.0` (via `Release-As:` trailer; release-please default is `always-bump-patch`)
 
