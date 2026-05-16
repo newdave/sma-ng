@@ -1,0 +1,8 @@
+ffmpeg version 8.1 Copyright (c) 2000-2025 the FFmpeg developers
+[hevc @ 0x55c8a4a0] Stream #0:0 -> #0:0 (hevc (av1_qsv) -> hevc (hevc_qsv))
+[av1_qsv @ 0x55c8b100] Error initializing an MFX session: unsupported (-3).
+[av1_qsv @ 0x55c8b100] Failed setup for format qsv: hwaccel initialisation returned error.
+Decoder av1_qsv does not support the current device or codec profile.
+Stream mapping:
+  Stream #0:0 -> #0:0 (av1 (av1_qsv) -> hevc (hevc_qsv))
+Error while opening decoder for input stream #0:0 : Function not implemented

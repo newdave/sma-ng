@@ -1,0 +1,14 @@
+ffmpeg version 8.1 Copyright (c) 2000-2025 the FFmpeg developers
+Stream mapping:
+  Stream #0:0 -> #0:0 (hevc (hevc_qsv) -> hevc (hevc_qsv))
+  Stream #0:1 -> #0:1 (ac3 (native) -> copy)
+Press [q] to stop, [?] for help
+frame=  100 fps= 45 q=23.0 size=    1024kB time=00:00:04.00 bitrate=2097.2kbits/s speed= 1.8x
+frame=  500 fps= 47 q=23.0 size=    5120kB time=00:00:20.00 bitrate=2097.2kbits/s speed= 1.88x
+frame= 1000 fps= 48 q=23.0 size=   10240kB time=00:00:40.00 bitrate=2097.2kbits/s speed= 1.92x
+[hevc @ 0x55c8d000] Invalid data found when processing input
+[hevc @ 0x55c8d000] Error while decoding stream #0:0: Invalid data found when processing input
+Error submitting a packet for decoding: Invalid data found when processing input
+av_interleaved_write_frame(): Broken pipe
+Error muxing a packet
+Conversion failed!
