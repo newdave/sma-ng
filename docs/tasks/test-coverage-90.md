@@ -1,5 +1,8 @@
 # Task Breakdown — Raise Test Coverage to ≥90%
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Coverage gate enforced at 90% global / 70% per-module via `.mise/tasks/test/cov`. See commits `e68e3b6`, `3926130`, `1e0bbfa`, `8f09059`.
+
 PRP: [docs/prps/test-coverage-90.md](../prps/test-coverage-90.md)
 
 Each task is sized for a single PR (≤1 day's work for a developer

@@ -1,5 +1,8 @@
 # Task Breakdown: sma-ng.yml Config Restructure
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> `sma-ng.yml` four-block layout, pydantic schema, sample generator, and INI removal all landed. See commits `621b90e`, `d169810`, `d5148b0`, plus `230+ INI cleanup commits.
+
 **Source PRP**: [docs/prps/config-restructure.md](../prps/config-restructure.md)
 **Brainstorming**: [docs/brainstorming/2026-04-26-config-restructure.md](../brainstorming/2026-04-26-config-restructure.md)
 **Owner**: @dhill (single-maintainer)
@@ -132,13 +135,13 @@ Scenario: Service ref shape validated
 
 **Checklist**:
 
-- [ ] Every key in `DEFAULTS` (24-296) present with identical default value
-- [ ] `model_config = ConfigDict(extra="allow")` on the `_Base` class
-- [ ] `@model_validator(mode="after")` cross-references routing → services
+- [x] Every key in `DEFAULTS` (24-296) present with identical default value
+- [x] `model_config = ConfigDict(extra="allow")` on the `_Base` class
+- [x] `@model_validator(mode="after")` cross-references routing → services
       and routing → profiles
-- [ ] Downloader configs (SAB/deluge/qBittorrent/uTorrent) **not** in schema
-- [ ] `PathRewrite.from_` uses `Field(alias="from")`
-- [ ] Pyright sees no errors on the new file
+- [x] Downloader configs (SAB/deluge/qBittorrent/uTorrent) **not** in schema
+- [x] `PathRewrite.from_` uses `Field(alias="from")`
+- [x] Pyright sees no errors on the new file
 
 ---
 
@@ -165,9 +168,9 @@ Scenario: pyproject parity
 
 **Checklist**:
 
-- [ ] `pydantic>=2,<3` in `setup/requirements.txt`
-- [ ] Same constraint in `pyproject.toml` `[project.dependencies]`
-- [ ] CI install step passes (verified in WP-6 final validation)
+- [x] `pydantic>=2,<3` in `setup/requirements.txt`
+- [x] Same constraint in `pyproject.toml` `[project.dependencies]`
+- [x] CI install step passes (verified in WP-6 final validation)
 
 ---
 
@@ -257,14 +260,14 @@ Scenario: Profile shallow-merge preserved
 
 **Checklist**:
 
-- [ ] Public API: `load()`, `apply_profile()`, `resolve_routing()`,
+- [x] Public API: `load()`, `apply_profile()`, `resolve_routing()`,
       `RoutingResolution` dataclass/NamedTuple
-- [ ] Longest-prefix sort mirrors `resources/daemon/config.py:373`
-- [ ] Shallow-merge mirrors `resources/readsettings.py:497-504` (NOT deep)
-- [ ] Catches `pydantic.ValidationError`, re-raises as `ConfigError`
-- [ ] Recursive `_warn_unknown_keys` walks nested models and dict-of-models
+- [x] Longest-prefix sort mirrors `resources/daemon/config.py:373`
+- [x] Shallow-merge mirrors `resources/readsettings.py:497-504` (NOT deep)
+- [x] Catches `pydantic.ValidationError`, re-raises as `ConfigError`
+- [x] Recursive `_warn_unknown_keys` walks nested models and dict-of-models
       (services maps)
-- [ ] Uses `ruamel.yaml` (via existing `yamlconfig.load`); does **not**
+- [x] Uses `ruamel.yaml` (via existing `yamlconfig.load`); does **not**
       import `yaml`/PyYAML
 
 ---
@@ -310,15 +313,15 @@ Scenario: _validate_binaries preserved
 
 **Checklist**:
 
-- [ ] DEFAULTS dict deleted (replaced by schema defaults)
-- [ ] `_read_*` methods deleted
-- [ ] `_apply_profile` deleted (semantic moved to ConfigLoader)
-- [ ] `_read_sonarr_radarr` name-prefix scanning (909-943) deleted
-- [ ] INI auto-migration code path (350-362) deleted
-- [ ] **Open decision 1 resolved**: `migrateFromOld` YAML key-renames —
+- [x] DEFAULTS dict deleted (replaced by schema defaults)
+- [x] `_read_*` methods deleted
+- [x] `_apply_profile` deleted (semantic moved to ConfigLoader)
+- [x] `_read_sonarr_radarr` name-prefix scanning (909-943) deleted
+- [x] INI auto-migration code path (350-362) deleted
+- [x] **Open decision 1 resolved**: `migrateFromOld` YAML key-renames —
       either deleted entirely or kept as one-cycle warn (decide in commit
       message; default = delete)
-- [ ] Commit body includes `BREAKING CHANGE:` trailer
+- [x] Commit body includes `BREAKING CHANGE:` trailer
 
 ---
 
@@ -345,9 +348,9 @@ Scenario: No stale imports
 
 **Checklist**:
 
-- [ ] Function removed
-- [ ] `yamlconfig.load` untouched
-- [ ] Imports of `migrate_ini_to_yaml` removed from all sites
+- [x] Function removed
+- [x] `yamlconfig.load` untouched
+- [x] Imports of `migrate_ini_to_yaml` removed from all sites
 
 ---
 
@@ -404,12 +407,12 @@ Scenario: --check on clean tree
 
 **Checklist**:
 
-- [ ] Uses `ruamel.yaml` `YAML(typ="rt")` with `indent(mapping=2,
+- [x] Uses `ruamel.yaml` `YAML(typ="rt")` with `indent(mapping=2,
       sequence=4, offset=2)`
-- [ ] Includes illustrative entries for `profiles.rq`,
+- [x] Includes illustrative entries for `profiles.rq`,
       `services.sonarr.{main,kids}`, `daemon.routing` rules
-- [ ] Section comment headers preserved (operator-facing readability)
-- [ ] Does **not** import PyYAML
+- [x] Section comment headers preserved (operator-facing readability)
+- [x] Does **not** import PyYAML
 
 ---
 
@@ -435,11 +438,11 @@ Scenario: ShellCheck clean
 
 **Checklist**:
 
-- [ ] `#MISE description="Regenerate setup/sma-ng.yml.sample from pydantic
+- [x] `#MISE description="Regenerate setup/sma-ng.yml.sample from pydantic
       schema"` header
-- [ ] Executable bit set
-- [ ] No inline Python (CLAUDE.md shell rule)
-- [ ] Wiki `Mise-Tasks.md` updated to document the task
+- [x] Executable bit set
+- [x] No inline Python (CLAUDE.md shell rule)
+- [x] Wiki `Mise-Tasks.md` updated to document the task
 
 ---
 
@@ -488,10 +491,10 @@ Scenario: Clean PR passes
 
 **Checklist**:
 
-- [ ] New job name: `config-sample-consistency`
-- [ ] Step runs `mise run config:generate-sample --check`
-- [ ] Job runs in parallel with existing test jobs (no needs:)
-- [ ] Pip cache reused if existing CI uses one
+- [x] New job name: `config-sample-consistency`
+- [x] Step runs `mise run config:generate-sample --check`
+- [x] Job runs in parallel with existing test jobs (no needs:)
+- [x] Pip cache reused if existing CI uses one
 
 ---
 
@@ -560,12 +563,12 @@ Scenario: Service secrets redacted
 
 **Checklist**:
 
-- [ ] `_parse_config_data` (336-397) replaced
-- [ ] `get_recycle_bin` INI fallback (485-499) deleted
-- [ ] `_strip_secrets` (40-47) walks `data["services"]`
-- [ ] **Open decision 2 resolved**: per-routing `default_args` migrated or
+- [x] `_parse_config_data` (336-397) replaced
+- [x] `get_recycle_bin` INI fallback (485-499) deleted
+- [x] `_strip_secrets` (40-47) walks `data["services"]`
+- [x] **Open decision 2 resolved**: per-routing `default_args` migrated or
       dropped (default: drop, keep `daemon.default_args` global only)
-- [ ] `rewrite_path` (468-475) preserved as-is
+- [x] `rewrite_path` (468-475) preserved as-is
 
 ---
 
@@ -646,10 +649,10 @@ Scenario: Pre-existing CLI overrides survive
 
 **Checklist**:
 
-- [ ] Lines 349-356 rewired to `ConfigLoader.resolve_routing`
-- [ ] `-p/--profile` flag (line 825) untouched in declaration
-- [ ] Help text updated to mention "overrides path-routing"
-- [ ] `apply_cli_overrides` runs after profile resolution
+- [x] Lines 349-356 rewired to `ConfigLoader.resolve_routing`
+- [x] `-p/--profile` flag (line 825) untouched in declaration
+- [x] Help text updated to mention "overrides path-routing"
+- [x] `apply_cli_overrides` runs after profile resolution
 
 ---
 
@@ -1004,9 +1007,9 @@ Scenario: Release notes mention cutover
 
 **Checklist**:
 
-- [ ] No manual `v*` tag (release-please owns version bumps)
-- [ ] Commit message follows conventional commits (`feat!:` or `refactor!:`)
-- [ ] No AI attribution / no Co-Authored-By line (CLAUDE.md commit rule)
+- [x] No manual `v*` tag (release-please owns version bumps)
+- [x] Commit message follows conventional commits (`feat!:` or `refactor!:`)
+- [x] No AI attribution / no Co-Authored-By line (CLAUDE.md commit rule)
 
 ---
 

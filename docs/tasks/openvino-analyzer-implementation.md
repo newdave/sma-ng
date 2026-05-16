@@ -1,5 +1,8 @@
 # OpenVINO Analyzer Implementation — Sprint-Ready Task Breakdown
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> OpenVINO analyzer implemented in `resources/openvino_analyzer.py` with heuristic and inference paths. See commits `98019a5`, `9b04f1c`, `13a74f6`, `cb02533`, `c7624c9`.
+
 **Source PRP**: docs/prps/openvino-analyzer-implementation.md
 **Feature**: Implement `OpenVINOAnalyzerBackend.analyze()` in `resources/openvino_analyzer.py`
 **Overall complexity**: Moderate-complex (5 tasks, sequential with some parallelism)
@@ -101,10 +104,10 @@ Scenario 3: build-time extras visible but not installed
 
 #### Rule-Based Criteria (Checklist)
 
-- [ ] `numpy>=1.26` is a non-commented line in the file
-- [ ] `openvino>=2025.0,<2027` is preserved exactly
-- [ ] `torch` and `torchvision` appear only as comments, not as live requirements
-- [ ] Comment block uses `#` prefix on every comment line (no bare comment-only section headers)
+- [x] `numpy>=1.26` is a non-commented line in the file
+- [x] `openvino>=2025.0,<2027` is preserved exactly
+- [x] `torch` and `torchvision` appear only as comments, not as live requirements
+- [x] Comment block uses `#` prefix on every comment line (no bare comment-only section headers)
 
 ### Validation & Quality Gates
 
@@ -118,8 +121,8 @@ source venv/bin/activate && pip install -r setup/requirements-openvino.txt --dry
 
 ### Definition of Done
 
-- [ ] File saved with correct content
-- [ ] `git diff setup/requirements-openvino.txt` shows only additive changes
+- [x] File saved with correct content
+- [x] `git diff setup/requirements-openvino.txt` shows only additive changes
 
 ---
 
@@ -203,9 +206,9 @@ Scenario 2: importlib.resources resolves the package
 
 #### Rule-Based Criteria (Checklist)
 
-- [ ] File exists at `resources/models/__init__.py`
-- [ ] File does not contain any imports
-- [ ] `python -c "import resources.models"` exits 0
+- [x] File exists at `resources/models/__init__.py`
+- [x] File does not contain any imports
+- [x] `python -c "import resources.models"` exits 0
 
 ### Validation & Quality Gates
 
@@ -216,8 +219,8 @@ source venv/bin/activate && python -c "import importlib.resources; p = importlib
 
 ### Definition of Done
 
-- [ ] File created and committed
-- [ ] Import check command above exits 0
+- [x] File created and committed
+- [x] Import check command above exits 0
 
 ---
 
@@ -336,12 +339,12 @@ Scenario 3: --help flag
 
 #### Rule-Based Criteria (Checklist)
 
-- [ ] `ruff check scripts/prepare_models.py` passes with no errors
-- [ ] `python scripts/prepare_models.py --help` exits 0
-- [ ] Script produces `.xml` and `.bin` when prerequisites are installed
-- [ ] Missing-torch case exits 1 with a readable message (no bare traceback)
-- [ ] No `from openvino.runtime import` anywhere in the file
-- [ ] `resources/models/*.bin` added to `.gitignore` (large binary; xml is small enough to commit)
+- [x] `ruff check scripts/prepare_models.py` passes with no errors
+- [x] `python scripts/prepare_models.py --help` exits 0
+- [x] Script produces `.xml` and `.bin` when prerequisites are installed
+- [x] Missing-torch case exits 1 with a readable message (no bare traceback)
+- [x] No `from openvino.runtime import` anywhere in the file
+- [x] `resources/models/*.bin` added to `.gitignore` (large binary; xml is small enough to commit)
 
 ### Validation & Quality Gates
 
@@ -353,10 +356,10 @@ source venv/bin/activate && python scripts/prepare_models.py --help
 
 ### Definition of Done
 
-- [ ] Script file exists at `scripts/prepare_models.py`
-- [ ] ruff passes with no errors
-- [ ] `--help` exits 0
-- [ ] `.gitignore` updated to exclude `resources/models/*.bin`
+- [x] Script file exists at `scripts/prepare_models.py`
+- [x] ruff passes with no errors
+- [x] `--help` exits 0
+- [x] `.gitignore` updated to exclude `resources/models/*.bin`
 
 ---
 
@@ -620,16 +623,16 @@ Scenario 7: FFmpeg pipe failure returns empty observations
 
 #### Rule-Based Criteria (Checklist)
 
-- [ ] `ruff check resources/openvino_analyzer.py` passes with no errors
-- [ ] No `from openvino.runtime import` anywhere in the file
-- [ ] No module-level `import numpy` (lazy import inside methods only)
-- [ ] `_load_compiled_model()` compiles `ppp.build()` result, not the original model
-- [ ] `cache_dir` property set before `compile_model()` call
-- [ ] `create_infer_request()` used (not `compiled_model()`)
-- [ ] `np.frombuffer(...).copy()` used before reshape in `_extract_frames()`
-- [ ] `analyze(core=core)` with no inputfile returns `AnalyzerObservations()` (existing test passes)
-- [ ] `_classify_content_type()` is a `@staticmethod`
-- [ ] All four valid `content_type` strings used: `"animation"`, `"talking_head"`,
+- [x] `ruff check resources/openvino_analyzer.py` passes with no errors
+- [x] No `from openvino.runtime import` anywhere in the file
+- [x] No module-level `import numpy` (lazy import inside methods only)
+- [x] `_load_compiled_model()` compiles `ppp.build()` result, not the original model
+- [x] `cache_dir` property set before `compile_model()` call
+- [x] `create_infer_request()` used (not `compiled_model()`)
+- [x] `np.frombuffer(...).copy()` used before reshape in `_extract_frames()`
+- [x] `analyze(core=core)` with no inputfile returns `AnalyzerObservations()` (existing test passes)
+- [x] `_classify_content_type()` is a `@staticmethod`
+- [x] All four valid `content_type` strings used: `"animation"`, `"talking_head"`,
   `"sports_high_motion"`, `"general_live_action"`
 
 ### Validation & Quality Gates
@@ -661,12 +664,12 @@ source venv/bin/activate && grep -n "openvino.runtime" resources/openvino_analyz
 
 ### Definition of Done
 
-- [ ] `analyze()` stub body replaced with full implementation
-- [ ] All 5 private methods implemented (`_get_bundled_model_dir`, `_extract_frames`,
+- [x] `analyze()` stub body replaced with full implementation
+- [x] All 5 private methods implemented (`_get_bundled_model_dir`, `_extract_frames`,
   `_heuristic_signals`, `_load_compiled_model`, `_classify_content_type`)
-- [ ] Existing test `test_analyze_returns_placeholder_observations_after_validation` still passes
-- [ ] ruff passes with no errors
-- [ ] No `openvino.runtime` import anywhere in the file
+- [x] Existing test `test_analyze_returns_placeholder_observations_after_validation` still passes
+- [x] ruff passes with no errors
+- [x] No `openvino.runtime` import anywhere in the file
 
 ---
 
@@ -824,14 +827,14 @@ Scenario 6: _extract_frames returns [] on Popen OSError
 
 #### Rule-Based Criteria (Checklist)
 
-- [ ] All existing tests still pass (zero regressions)
-- [ ] `_extract_frames()` tested with mocked subprocess — no real FFmpeg needed
-- [ ] `_heuristic_signals()` boundary values verified numerically
-- [ ] `interlace_confidence=0.95` for `"tt"` and `"bb"` covered explicitly
-- [ ] `analyze()` no-inputfile branch covered
-- [ ] `analyze()` model-load-failure fallback covered
-- [ ] `FakeCompiledModel` and `FakeInferRequest` test doubles added
-- [ ] No test imports `openvino` directly (tests must run without openvino installed)
+- [x] All existing tests still pass (zero regressions)
+- [x] `_extract_frames()` tested with mocked subprocess — no real FFmpeg needed
+- [x] `_heuristic_signals()` boundary values verified numerically
+- [x] `interlace_confidence=0.95` for `"tt"` and `"bb"` covered explicitly
+- [x] `analyze()` no-inputfile branch covered
+- [x] `analyze()` model-load-failure fallback covered
+- [x] `FakeCompiledModel` and `FakeInferRequest` test doubles added
+- [x] No test imports `openvino` directly (tests must run without openvino installed)
 
 ### Validation & Quality Gates
 
@@ -851,11 +854,11 @@ source venv/bin/activate && ruff check tests/test_openvino_analyzer.py --fix
 
 ### Definition of Done
 
-- [ ] All new test cases pass
-- [ ] All existing test cases still pass
-- [ ] Coverage includes all branches of `analyze()` (no-inputfile, no-frames, heuristic, model)
-- [ ] No test requires real FFmpeg or real OpenVINO installation
-- [ ] ruff passes with no errors on the test file
+- [x] All new test cases pass
+- [x] All existing test cases still pass
+- [x] Coverage includes all branches of `analyze()` (no-inputfile, no-frames, heuristic, model)
+- [x] No test requires real FFmpeg or real OpenVINO installation
+- [x] ruff passes with no errors on the test file
 
 ---
 

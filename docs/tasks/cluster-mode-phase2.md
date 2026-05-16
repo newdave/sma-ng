@@ -1,5 +1,8 @@
 # Task Breakdown: Cluster Mode — Phase 2 (Config Sync, Node Expiry, Log Archival)
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Cluster config sync, node expiry, log archival shipped. See commits `ee408c9`, `c51f3c1`, `3e2314a`, `266c673`, `25ad5ab`, `2b4b352`, `6507025`, `b9b95f6`.
+
 **Source PRP**: [docs/prps/cluster-mode-phase2.md](../prps/cluster-mode-phase2.md)
 **Feature Branch Target**: `main`
 **Overall Complexity**: Moderate-to-Complex (14 tasks, 3 features, multiple integration points)
@@ -214,11 +217,11 @@ Scenario 3: Single-row enforcement
 
 **Rule-Based Checklist**:
 
-- [ ] `CREATE TABLE IF NOT EXISTS` — idempotent on repeated runs
-- [ ] `CHECK (id = 1)` constraint present on the `id` column
-- [ ] `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` present
-- [ ] No new indexes created (single-row table)
-- [ ] No FK constraints added
+- [x] `CREATE TABLE IF NOT EXISTS` — idempotent on repeated runs
+- [x] `CHECK (id = 1)` constraint present on the `id` column
+- [x] `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` present
+- [x] No new indexes created (single-row table)
+- [x] No FK constraints added
 
 #### Validation Commands
 
@@ -335,12 +338,12 @@ Scenario 5: Return type is dict, not string
 
 **Rule-Based Checklist**:
 
-- [ ] `get_cluster_config()` returns `None` (not `{}`) when the table is empty
-- [ ] `set_cluster_config()` strips all five `SECRET_KEYS` from the `daemon:` section
-- [ ] `set_cluster_config()` deep-copies the caller's dict before mutation
-- [ ] Both methods use `self._conn()` context manager
-- [ ] stdlib `yaml.safe_dump` used for serialisation (not ruamel.yaml)
-- [ ] `updated_at` is set to `NOW()` on every upsert
+- [x] `get_cluster_config()` returns `None` (not `{}`) when the table is empty
+- [x] `set_cluster_config()` strips all five `SECRET_KEYS` from the `daemon:` section
+- [x] `set_cluster_config()` deep-copies the caller's dict before mutation
+- [x] Both methods use `self._conn()` context manager
+- [x] stdlib `yaml.safe_dump` used for serialisation (not ruamel.yaml)
+- [x] `updated_at` is set to `NOW()` on every upsert
 
 #### Validation Commands
 
@@ -462,11 +465,11 @@ Scenario 5: Empty result when no expired nodes
 
 **Rule-Based Checklist**:
 
-- [ ] Only `status = 'offline'` nodes are selected for deletion
-- [ ] `cleanup_orphaned_commands()` called before `cluster_nodes` delete
-- [ ] `cleanup_orphaned_commands([])` returns `0` without hitting the DB
-- [ ] Both methods use `self._conn()` context manager
-- [ ] No FK constraints added
+- [x] Only `status = 'offline'` nodes are selected for deletion
+- [x] `cleanup_orphaned_commands()` called before `cluster_nodes` delete
+- [x] `cleanup_orphaned_commands([])` returns `0` without hitting the DB
+- [x] Both methods use `self._conn()` context manager
+- [x] No FK constraints added
 
 #### Validation Commands
 
@@ -573,11 +576,11 @@ Scenario 4: Returns dicts not cursor row objects
 
 **Rule-Based Checklist**:
 
-- [ ] `get_logs_for_archival()` orders by `node_id, timestamp`
-- [ ] Return type is `list[dict]` (not cursor rows)
-- [ ] `delete_logs_before()` returns `int` row count
-- [ ] Both methods use `self._conn()` context manager
-- [ ] Existing `cleanup_old_logs()` is unchanged
+- [x] `get_logs_for_archival()` orders by `node_id, timestamp`
+- [x] Return type is `list[dict]` (not cursor rows)
+- [x] `delete_logs_before()` returns `int` row count
+- [x] Both methods use `self._conn()` context manager
+- [x] Existing `cleanup_old_logs()` is unchanged
 
 #### Validation Commands
 
@@ -654,9 +657,9 @@ Scenario 2: Immutability
 
 **Rule-Based Checklist**:
 
-- [ ] `SECRET_KEYS` is a `frozenset` at module level
-- [ ] Contains exactly: `api_key`, `db_url`, `username`, `password`, `node_id`
-- [ ] No other existing constants in `constants.py` are modified
+- [x] `SECRET_KEYS` is a `frozenset` at module level
+- [x] Contains exactly: `api_key`, `db_url`, `username`, `password`, `node_id`
+- [x] No other existing constants in `constants.py` are modified
 
 #### Validation Commands
 
@@ -802,14 +805,14 @@ Scenario 6: _strip_secrets removes secret keys
 
 **Rule-Based Checklist**:
 
-- [ ] Four new properties added (`node_expiry_days`, `log_archive_dir`,
+- [x] Four new properties added (`node_expiry_days`, `log_archive_dir`,
   `log_archive_after_days`, `log_delete_after_days`)
-- [ ] `load_config()` signature is `load_config(self, config_file, job_db=None)`
-- [ ] Merge order: `{**db_parsed, **local_parsed}` (local wins)
-- [ ] DB fetch wrapped in `try/except Exception` with warning log
-- [ ] First startup with `job_db=None` does not attempt DB fetch
-- [ ] `server.py reload_config()` passes `job_db=self.job_db`
-- [ ] `_strip_secrets()` deep-copies before mutating
+- [x] `load_config()` signature is `load_config(self, config_file, job_db=None)`
+- [x] Merge order: `{**db_parsed, **local_parsed}` (local wins)
+- [x] DB fetch wrapped in `try/except Exception` with warning log
+- [x] First startup with `job_db=None` does not attempt DB fetch
+- [x] `server.py reload_config()` passes `job_db=self.job_db`
+- [x] `_strip_secrets()` deep-copies before mutating
 
 #### Validation Commands
 
@@ -953,12 +956,12 @@ Scenario 7: delete_after_days=0 disables pruning
 
 **Rule-Based Checklist**:
 
-- [ ] Atomic write: `.tmp` written first, then `os.replace(tmp, final)`
-- [ ] `delete_logs_before()` called only when all group writes succeed
-- [ ] `_write_archive()` returns `bool` (True/False)
-- [ ] `timestamp` serialised via `.isoformat()` before `json.dumps()`
-- [ ] `delete_after_days == 0` short-circuits `_prune_old_files()` immediately
-- [ ] No external dependencies beyond stdlib and existing project imports
+- [x] Atomic write: `.tmp` written first, then `os.replace(tmp, final)`
+- [x] `delete_logs_before()` called only when all group writes succeed
+- [x] `_write_archive()` returns `bool` (True/False)
+- [x] `timestamp` serialised via `.isoformat()` before `json.dumps()`
+- [x] `delete_after_days == 0` short-circuits `_prune_old_files()` immediately
+- [x] No external dependencies beyond stdlib and existing project imports
 
 #### Validation Commands
 
@@ -1079,11 +1082,11 @@ Scenario 5: Settings picked up after hot reload without restart
 
 **Rule-Based Checklist**:
 
-- [ ] Settings read from `path_config_manager` on each tick (not stored in `__init__`)
-- [ ] Both blocks gated on `self.job_db.is_distributed`
-- [ ] `node_expiry_days == 0` prevents `expire_offline_nodes()` call
-- [ ] `archive_dir is None` or `archive_after_days == 0` prevents archival
-- [ ] `LogArchiver` import is inside the conditional block (lazy import)
+- [x] Settings read from `path_config_manager` on each tick (not stored in `__init__`)
+- [x] Both blocks gated on `self.job_db.is_distributed`
+- [x] `node_expiry_days == 0` prevents `expire_offline_nodes()` call
+- [x] `archive_dir is None` or `archive_after_days == 0` prevents archival
+- [x] `LogArchiver` import is inside the conditional block (lazy import)
 
 #### Validation Commands
 
@@ -1243,12 +1246,12 @@ Scenario 6: Non-distributed mode returns 503
 
 **Rule-Based Checklist**:
 
-- [ ] `_get_admin_config()` and `_post_admin_config()` are NOT in `PUBLIC_ENDPOINTS`
-- [ ] `GET /admin/config` registered in `_get_routes()`
-- [ ] `POST /admin/config` registered in `_post_routes()`
-- [ ] `push-config` handled in `_post_admin_node_action()` — no new route entry needed
-- [ ] Secrets stripped before any `set_cluster_config()` call
-- [ ] `503` returned when `not job_db.is_distributed`
+- [x] `_get_admin_config()` and `_post_admin_config()` are NOT in `PUBLIC_ENDPOINTS`
+- [x] `GET /admin/config` registered in `_get_routes()`
+- [x] `POST /admin/config` registered in `_post_routes()`
+- [x] `push-config` handled in `_post_admin_node_action()` — no new route entry needed
+- [x] Secrets stripped before any `set_cluster_config()` call
+- [x] `503` returned when `not job_db.is_distributed`
 
 #### Validation Commands
 
@@ -1371,13 +1374,13 @@ Scenario 5: Loading state prevents double submission
 
 **Rule-Based Checklist**:
 
-- [ ] Five new Alpine.js data props present in `adminPage()`
-- [ ] `loadClusterConfig()`, `saveClusterConfig()`, `pushNodeConfig()` methods added
-- [ ] All three methods use `authHeaders()` for authenticated requests
-- [ ] `<textarea>` bound to `clusterConfig` with `x-model`
-- [ ] Save and push buttons present with loading/disabled states
-- [ ] Error and success feedback displayed
-- [ ] No new CDN dependencies added without checking existing scripts
+- [x] Five new Alpine.js data props present in `adminPage()`
+- [x] `loadClusterConfig()`, `saveClusterConfig()`, `pushNodeConfig()` methods added
+- [x] All three methods use `authHeaders()` for authenticated requests
+- [x] `<textarea>` bound to `clusterConfig` with `x-model`
+- [x] Save and push buttons present with loading/disabled states
+- [x] Error and success feedback displayed
+- [x] No new CDN dependencies added without checking existing scripts
 
 #### Validation Commands
 
@@ -1466,13 +1469,13 @@ Scenario 3: YAML remains valid
 
 **Rule-Based Checklist**:
 
-- [ ] `node_expiry_days: 0` present with comment about disable-with-zero behaviour
-- [ ] `log_archive_dir: null` present with comment about format and disable behaviour
-- [ ] `log_archive_after_days: 0` present with comment
-- [ ] `log_delete_after_days: 0` present with comment
-- [ ] All four appear after `log_ttl_days`
-- [ ] No existing keys removed or reindented
-- [ ] YAML is valid (parseable by ruamel.yaml)
+- [x] `node_expiry_days: 0` present with comment about disable-with-zero behaviour
+- [x] `log_archive_dir: null` present with comment about format and disable behaviour
+- [x] `log_archive_after_days: 0` present with comment
+- [x] `log_delete_after_days: 0` present with comment
+- [x] All four appear after `log_ttl_days`
+- [x] No existing keys removed or reindented
+- [x] YAML is valid (parseable by ruamel.yaml)
 
 #### Validation Commands
 
@@ -1603,12 +1606,12 @@ Scenario 3: Full suite unaffected
 
 **Rule-Based Checklist**:
 
-- [ ] All 20 test cases (REQ-1 through REQ-20) implemented
-- [ ] DB-dependent tests skip gracefully without `TEST_DB_URL`
-- [ ] Unit tests run without any external service
-- [ ] Filesystem tests use `tmp_path` fixture (not hardcoded paths)
-- [ ] Each DB test cleans up its rows (no cross-test contamination)
-- [ ] `_unique_node()` helper pattern used for DB tests that insert nodes
+- [x] All 20 test cases (REQ-1 through REQ-20) implemented
+- [x] DB-dependent tests skip gracefully without `TEST_DB_URL`
+- [x] Unit tests run without any external service
+- [x] Filesystem tests use `tmp_path` fixture (not hardcoded paths)
+- [x] Each DB test cleans up its rows (no cross-test contamination)
+- [x] `_unique_node()` helper pattern used for DB tests that insert nodes
 
 #### Validation Commands
 
@@ -1716,16 +1719,16 @@ Scenario 3: Wiki and docs.html in sync
 
 **Rule-Based Checklist**:
 
-- [ ] "Centralised Base Config" sub-section covers: merge order, local wins, secrets
+- [x] "Centralised Base Config" sub-section covers: merge order, local wins, secrets
   list, admin UI paths
-- [ ] "Node Expiry" sub-section covers: `node_expiry_days`, two-stage flow, 0=disabled
-- [ ] "Log Archival" sub-section covers: three config keys, file path format,
+- [x] "Node Expiry" sub-section covers: `node_expiry_days`, two-stage flow, 0=disabled
+- [x] "Log Archival" sub-section covers: three config keys, file path format,
   interaction with `log_ttl_days`
-- [ ] No markdownlint warnings
-- [ ] All fenced code blocks have language identifiers
-- [ ] Lines do not exceed 120 characters
-- [ ] Wiki page updated and pushed
-- [ ] `resources/docs.html` updated
+- [x] No markdownlint warnings
+- [x] All fenced code blocks have language identifiers
+- [x] Lines do not exceed 120 characters
+- [x] Wiki page updated and pushed
+- [x] `resources/docs.html` updated
 
 #### Validation Commands
 

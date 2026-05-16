@@ -1,5 +1,8 @@
 # Task Breakdown: Cluster Mode — Multi-Node Management (Phase 1)
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Phase 1 merged (heartbeat, node identity, drain/pause/resume, admin UI). See commits `173971b`, `b3dab2f`, `6623898`, `b26896e`, `198d0bb`, `5e05c14`, `f892831`. Continued in [cluster-mode-phase2](cluster-mode-phase2.md).
+
 **Source PRP**: [docs/prps/cluster-mode.md](../prps/cluster-mode.md)
 **Feature Branch Target**: `main`
 **Overall Complexity**: Complex (12 tasks, 3 phases, multiple integration points)
@@ -241,13 +244,13 @@ Scenario 5: poll_node_command() uses SKIP LOCKED
 
 **Rule-Based Checklist**:
 
-- [ ] `_init_db()` is idempotent on repeated runs
-- [ ] `pending_command` column is not dropped
-- [ ] `heartbeat()` signature accepts `version` and `hwaccel` kwargs
-- [ ] `heartbeat()` returns `None`
-- [ ] `poll_node_command()` uses `FOR UPDATE SKIP LOCKED`
-- [ ] All new methods use `self._conn()` context manager
-- [ ] No FK constraints added
+- [x] `_init_db()` is idempotent on repeated runs
+- [x] `pending_command` column is not dropped
+- [x] `heartbeat()` signature accepts `version` and `hwaccel` kwargs
+- [x] `heartbeat()` returns `None`
+- [x] `poll_node_command()` uses `FOR UPDATE SKIP LOCKED`
+- [x] All new methods use `self._conn()` context manager
+- [x] No FK constraints added
 
 #### Validation Commands
 
@@ -335,10 +338,10 @@ Scenario 3: Cache survives repeated calls
 
 **Rule-Based Checklist**:
 
-- [ ] `_node_id_cache` is a module-level variable (not class-level)
-- [ ] `set_node_id_cache()` uses `global _node_id_cache`
-- [ ] `resolve_node_id()` cache check comes before env-var/hostname fallback
-- [ ] Existing `SMA_NODE_NAME` / `socket.gethostname()` fallback is unchanged
+- [x] `_node_id_cache` is a module-level variable (not class-level)
+- [x] `set_node_id_cache()` uses `global _node_id_cache`
+- [x] `resolve_node_id()` cache check comes before env-var/hostname fallback
+- [x] Existing `SMA_NODE_NAME` / `socket.gethostname()` fallback is unchanged
 
 #### Validation Commands
 
@@ -463,12 +466,12 @@ Scenario 5: log_ttl_days default
 
 **Rule-Based Checklist**:
 
-- [ ] `yamlconfig.write()` is NOT used for node-id write-back
-- [ ] Write-back is atomic (`os.replace`)
-- [ ] Existing UUID is never overwritten
-- [ ] `set_node_id_cache()` called after UUID is resolved
-- [ ] `_config_file is None` case handled without exception
-- [ ] `log_ttl_days` property exists with default 30
+- [x] `yamlconfig.write()` is NOT used for node-id write-back
+- [x] Write-back is atomic (`os.replace`)
+- [x] Existing UUID is never overwritten
+- [x] `set_node_id_cache()` called after UUID is resolved
+- [x] `_config_file is None` case handled without exception
+- [x] `log_ttl_days` property exists with default 30
 
 #### Validation Commands
 
@@ -555,9 +558,9 @@ Scenario 3: HeartbeatThread receives hwaccel
 
 **Rule-Based Checklist**:
 
-- [ ] `_validate_hwaccel()` never returns `None`
-- [ ] Return value is captured and forwarded to `HeartbeatThread`
-- [ ] Software fallback returns `""` not `"software"`
+- [x] `_validate_hwaccel()` never returns `None`
+- [x] Return value is captured and forwarded to `HeartbeatThread`
+- [x] Software fallback returns `""` not `"software"`
 
 #### Validation Commands
 
@@ -688,12 +691,12 @@ Scenario 6: TTL cleanup runs each tick
 
 **Rule-Based Checklist**:
 
-- [ ] `heartbeat()` return value is no longer consumed for command dispatch
-- [ ] `poll_node_command()` called each tick when `is_distributed`
-- [ ] `_execute_command()` acks "executing" before dispatch
-- [ ] `restart`/`shutdown` return `True` to break run loop
-- [ ] TTL cleanup gated on `log_ttl_days > 0`
-- [ ] Exception in command execution logs but does not crash heartbeat loop
+- [x] `heartbeat()` return value is no longer consumed for command dispatch
+- [x] `poll_node_command()` called each tick when `is_distributed`
+- [x] `_execute_command()` acks "executing" before dispatch
+- [x] `restart`/`shutdown` return `True` to break run loop
+- [x] TTL cleanup gated on `log_ttl_days > 0`
+- [x] Exception in command execution logs but does not crash heartbeat loop
 
 #### Validation Commands
 
@@ -810,11 +813,11 @@ Scenario 4: Existing drain(timeout) unchanged
 
 **Rule-Based Checklist**:
 
-- [ ] `_drain_mode` and `_pause_mode` are `threading.Event` instances
-- [ ] `clear_paused()` calls `w.job_event.set()` for each worker
-- [ ] Pause check uses `_pause_mode.wait()` (blocking), not polling
-- [ ] Drain check uses `break` to exit the inner loop
-- [ ] Existing `drain(timeout)` method is unchanged
+- [x] `_drain_mode` and `_pause_mode` are `threading.Event` instances
+- [x] `clear_paused()` calls `w.job_event.set()` for each worker
+- [x] Pause check uses `_pause_mode.wait()` (blocking), not polling
+- [x] Drain check uses `break` to exit the inner loop
+- [x] Existing `drain(timeout)` method is unchanged
 
 #### Validation Commands
 
@@ -923,11 +926,11 @@ Scenario 5: close() drains remaining records
 
 **Rule-Based Checklist**:
 
-- [ ] `emit()` has a bare `except Exception: pass` guard
-- [ ] `flush()` has its own exception guard
-- [ ] Batch swap happens inside the lock before DB write
-- [ ] `close()` calls `flush()` then `super().close()`
-- [ ] Thread safety verified with concurrent emit calls
+- [x] `emit()` has a bare `except Exception: pass` guard
+- [x] `flush()` has its own exception guard
+- [x] Batch swap happens inside the lock before DB write
+- [x] `close()` calls `flush()` then `super().close()`
+- [x] Thread safety verified with concurrent emit calls
 
 #### Validation Commands
 
@@ -1005,9 +1008,9 @@ Scenario 2: Single-node SQLite mode
 
 **Rule-Based Checklist**:
 
-- [ ] Import is inside the `if job_db.is_distributed:` block (not at module top)
-- [ ] Handler level set to `logging.DEBUG`
-- [ ] No changes to SQLite code paths
+- [x] Import is inside the `if job_db.is_distributed:` block (not at module top)
+- [x] Handler level set to `logging.DEBUG`
+- [x] No changes to SQLite code paths
 
 #### Validation Commands
 
@@ -1137,13 +1140,13 @@ Scenario 5: Pagination controls work
 
 **Rule-Based Checklist**:
 
-- [ ] `drain`, `pause`, `resume` handled in `_post_admin_node_action()`
-- [ ] `/cluster/logs` not in `PUBLIC_ENDPOINTS`
-- [ ] Route registered in `routes.py` `_get_routes()`
-- [ ] Alpine.js data props and `loadClusterLogs()` method added
-- [ ] Log table columns: timestamp, node_id, level, logger, message
-- [ ] Level and node filter dropdowns present
-- [ ] Pagination offset/limit controls present
+- [x] `drain`, `pause`, `resume` handled in `_post_admin_node_action()`
+- [x] `/cluster/logs` not in `PUBLIC_ENDPOINTS`
+- [x] Route registered in `routes.py` `_get_routes()`
+- [x] Alpine.js data props and `loadClusterLogs()` method added
+- [x] Log table columns: timestamp, node_id, level, logger, message
+- [x] Level and node filter dropdowns present
+- [x] Pagination offset/limit controls present
 
 #### Validation Commands
 
@@ -1217,10 +1220,10 @@ Scenario 2: log_ttl_days documented
 
 **Rule-Based Checklist**:
 
-- [ ] `node_id: null` present with multi-line comment
-- [ ] `log_ttl_days: 30` present with comment noting `0 disables cleanup`
-- [ ] No existing keys removed or reindented
-- [ ] YAML is valid (parseable by ruamel.yaml)
+- [x] `node_id: null` present with multi-line comment
+- [x] `log_ttl_days: 30` present with comment noting `0 disables cleanup`
+- [x] No existing keys removed or reindented
+- [x] YAML is valid (parseable by ruamel.yaml)
 
 #### Validation Commands
 
@@ -1340,11 +1343,11 @@ Scenario 3: Integration tests run with PostgreSQL
 
 **Rule-Based Checklist**:
 
-- [ ] All 9 test_cluster.py requirements covered
-- [ ] All 4 test_threads.py extensions covered
-- [ ] All 3 test_worker.py extensions covered
-- [ ] DB-dependent tests skip gracefully without TEST_DB_URL
-- [ ] No test relies on global state (each test cleans up its DB rows)
+- [x] All 9 test_cluster.py requirements covered
+- [x] All 4 test_threads.py extensions covered
+- [x] All 3 test_worker.py extensions covered
+- [x] DB-dependent tests skip gracefully without TEST_DB_URL
+- [x] No test relies on global state (each test cleans up its DB rows)
 
 #### Validation Commands
 
@@ -1450,11 +1453,11 @@ Scenario 3: Wiki and docs.html in sync
 
 **Rule-Based Checklist**:
 
-- [ ] All five topics from REQ-1 covered
-- [ ] No markdownlint warnings
-- [ ] All fenced code blocks have language identifiers
-- [ ] Wiki page updated and pushed
-- [ ] `resources/docs.html` updated
+- [x] All five topics from REQ-1 covered
+- [x] No markdownlint warnings
+- [x] All fenced code blocks have language identifiers
+- [x] Wiki page updated and pushed
+- [x] `resources/docs.html` updated
 
 #### Validation Commands
 

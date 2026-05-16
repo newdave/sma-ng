@@ -1,3 +1,8 @@
+# Remove the .ini fallback in update.py
+
+> **STATUS: COMPLETE — landed 2026-05-16**
+> `update.py` deleted outright (file no longer exists). See commit `95cae5c`.
+
 name: "Remove the .ini fallback in update.py"
 description: |
   Drop the legacy INI handling from `update.py` (the boot-time
@@ -119,19 +124,19 @@ Adjust the Dockerfile shebang rewrite to drop the `update.py` entry
 
 ### Success Criteria
 
-- [ ] `update.py` and `tests/test_update.py` deleted from the repo.
-- [ ] `docker/Dockerfile` no longer references `update.py`.
-- [ ] `tests/test_docker.py` no longer asserts `update.py` is present.
-- [ ] `pytest` passes (overall count drops by the number of skipped
+- [x] `update.py` and `tests/test_update.py` deleted from the repo.
+- [x] `docker/Dockerfile` no longer references `update.py`.
+- [x] `tests/test_docker.py` no longer asserts `update.py` is present.
+- [x] `pytest` passes (overall count drops by the number of skipped
       tests in `test_update.py` — 11).
-- [ ] `docker/docker-entrypoint.sh` continues to patch ffmpeg paths
+- [x] `docker/docker-entrypoint.sh` continues to patch ffmpeg paths
       (smoke check: `bash docker/docker-entrypoint.sh --dry-run` if
       that flag exists, or visual review of the relevant lines).
-- [ ] `docker build .` succeeds (the `find -name update.py` no longer
+- [x] `docker build .` succeeds (the `find -name update.py` no longer
       matches anything; that's still valid syntax).
-- [ ] CHANGELOG / commit messages note the removal as a breaking
+- [x] CHANGELOG / commit messages note the removal as a breaking
       change for anyone manually invoking `update.py` (none expected).
-- [ ] No lingering references to `SMA_FFMPEG_PATH`, `SMA_FFPROBE_PATH`,
+- [x] No lingering references to `SMA_FFMPEG_PATH`, `SMA_FFPROBE_PATH`,
       or `SMA_RS` in the repo or wiki.
 
 ## All Needed Context
@@ -390,14 +395,14 @@ grep -A1 'converter:' /tmp/sma-cleanup/config/sma-ng.yml | head
 
 ## Final validation Checklist
 
-- [ ] `rg "update\.py" --glob '!CHANGELOG.md' --glob '!docs/brainstorming/**' --glob '!docs/prps/**' --glob '!docs/tasks/**'` → 0 hits (after Task 3+4)
-- [ ] `pytest` passes (skipped count drops by 11)
-- [ ] `shellcheck` clean for `docker-entrypoint.sh`
-- [ ] `docker build` succeeds
-- [ ] No remaining mention of `SMA_FFMPEG_PATH`, `SMA_FFPROBE_PATH`,
+- [x] `rg "update\.py" --glob '!CHANGELOG.md' --glob '!docs/brainstorming/**' --glob '!docs/prps/**' --glob '!docs/tasks/**'` → 0 hits (after Task 3+4)
+- [x] `pytest` passes (skipped count drops by 11)
+- [x] `shellcheck` clean for `docker-entrypoint.sh`
+- [x] `docker build` succeeds
+- [x] No remaining mention of `SMA_FFMPEG_PATH`, `SMA_FFPROBE_PATH`,
       `SMA_RS` outside historical docs
-- [ ] Single logical commit; no AI attribution
-- [ ] Wiki sweep done (per CLAUDE.md three-place rule)
+- [x] Single logical commit; no AI attribution
+- [x] Wiki sweep done (per CLAUDE.md three-place rule)
 
 ---
 

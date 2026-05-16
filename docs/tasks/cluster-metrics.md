@@ -1,5 +1,8 @@
 # Cluster-Wide Transcoding Metrics — Task Breakdown
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> `/api/metrics` endpoint and cluster metrics dashboard shipped. See commits `1f99fd7`, `943a1f1`.
+
 **Source PRP**: [docs/prps/cluster-metrics.md](../prps/cluster-metrics.md)
 
 **Feature**: Cluster-wide transcoding job statistics and interactive metrics dashboard

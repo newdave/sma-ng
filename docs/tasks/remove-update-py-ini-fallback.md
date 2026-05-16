@@ -1,5 +1,8 @@
 # Task Breakdown — Remove update.py .ini Fallback
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> `update.py` deleted outright (file no longer exists). See commit `95cae5c`.
+
 Companion to [docs/prps/remove-update-py-ini-fallback.md](../prps/remove-update-py-ini-fallback.md).
 
 The PRP recommends **deleting `update.py` outright** rather than

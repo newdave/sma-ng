@@ -1,5 +1,8 @@
 # PRP: Cluster Mode — Phase 2 (Config Sync, Node Expiry, Log Archival)
 
+> **STATUS: COMPLETE — landed 2026-05-16**
+> Cluster config sync, node expiry, log archival shipped. See commits `ee408c9`, `c51f3c1`, `3e2314a`, `266c673`, `25ad5ab`, `2b4b352`, `6507025`, `b9b95f6`.
+
 ## Discovery Summary
 
 ### Initial Task Analysis
@@ -109,23 +112,23 @@ Implement Phase 2 of sma-ng cluster mode:
 
 ### Success Criteria
 
-- [ ] `cluster_config` table is created idempotently on daemon startup.
-- [ ] `GET /admin/config` returns the current DB config blob (or `{}` if absent).
-- [ ] `POST /admin/config` stores a YAML blob; secrets (`api_key`, `db_url`,
+- [x] `cluster_config` table is created idempotently on daemon startup.
+- [x] `GET /admin/config` returns the current DB config blob (or `{}` if absent).
+- [x] `POST /admin/config` stores a YAML blob; secrets (`api_key`, `db_url`,
   `username`, `password`, `node_id`) are stripped before saving.
-- [ ] `POST /admin/nodes/<node_id>/push-config` reads the target node's local
+- [x] `POST /admin/nodes/<node_id>/push-config` reads the target node's local
   `sma-ng.yml`, strips secrets, and upserts into `cluster_config`.
-- [ ] On startup, `PathConfigManager` fetches and merges DB config; local
+- [x] On startup, `PathConfigManager` fetches and merges DB config; local
   values override DB values for every key.
-- [ ] `node_expiry_days: 0` (default) disables expiry entirely. When set,
+- [x] `node_expiry_days: 0` (default) disables expiry entirely. When set,
   offline nodes past the TTL are deleted along with their `node_commands` rows.
-- [ ] `log_archive_after_days: 0` disables archival. When set, DB rows are
+- [x] `log_archive_after_days: 0` disables archival. When set, DB rows are
   written to `.jsonl.gz` then deleted.
-- [ ] `log_delete_after_days: 0` disables filesystem pruning. When set, old
+- [x] `log_delete_after_days: 0` disables filesystem pruning. When set, old
   `.gz` files are deleted.
-- [ ] All new cluster paths are gated on `job_db.is_distributed`; SQLite
+- [x] All new cluster paths are gated on `job_db.is_distributed`; SQLite
   single-node deployments are unaffected.
-- [ ] All existing tests pass. New tests cover all new DB methods, config merge
+- [x] All existing tests pass. New tests cover all new DB methods, config merge
   logic, expiry logic, and archival logic.
 
 ---
@@ -868,21 +871,21 @@ python -m pytest tests/ -x -q
 
 ### Final Validation Checklist
 
-- [ ] All 2303+ existing tests pass: `python -m pytest tests/ -x -q`
-- [ ] New tests cover all three features: `python -m pytest tests/test_cluster.py -v`
-- [ ] No linting errors: `ruff check resources/daemon/`
-- [ ] No type errors: `pyright resources/daemon/`
-- [ ] No markdownlint errors: `markdownlint docs/daemon.md`
-- [ ] `GET /admin/config` returns `{}` on a fresh DB (no 500)
-- [ ] `POST /admin/config` with a payload containing `api_key` does NOT persist the key
-- [ ] `POST /admin/nodes/<id>/push-config` strips secrets from local config
-- [ ] `node_expiry_days: 0` (default) — no nodes deleted on heartbeat tick
-- [ ] `node_expiry_days: 1` — offline node with stale `last_seen` is removed on next tick
-- [ ] Log archival disabled when `log_archive_dir` is null
-- [ ] Archive `.gz` files written atomically (no corrupted files on kill)
-- [ ] DB rows deleted only after `.gz` write confirmed
-- [ ] Single-node SQLite daemon starts and processes jobs without touching any cluster path
-- [ ] `docs/daemon.md` updated with all three new sub-sections
+- [x] All 2303+ existing tests pass: `python -m pytest tests/ -x -q`
+- [x] New tests cover all three features: `python -m pytest tests/test_cluster.py -v`
+- [x] No linting errors: `ruff check resources/daemon/`
+- [x] No type errors: `pyright resources/daemon/`
+- [x] No markdownlint errors: `markdownlint docs/daemon.md`
+- [x] `GET /admin/config` returns `{}` on a fresh DB (no 500)
+- [x] `POST /admin/config` with a payload containing `api_key` does NOT persist the key
+- [x] `POST /admin/nodes/<id>/push-config` strips secrets from local config
+- [x] `node_expiry_days: 0` (default) — no nodes deleted on heartbeat tick
+- [x] `node_expiry_days: 1` — offline node with stale `last_seen` is removed on next tick
+- [x] Log archival disabled when `log_archive_dir` is null
+- [x] Archive `.gz` files written atomically (no corrupted files on kill)
+- [x] DB rows deleted only after `.gz` write confirmed
+- [x] Single-node SQLite daemon starts and processes jobs without touching any cluster path
+- [x] `docs/daemon.md` updated with all three new sub-sections
 
 ---
 
