@@ -243,7 +243,7 @@ class ConversionWorker(threading.Thread):
       self._job_processes[job_id] = process
 
       if process.stdout is None:
-        return
+        return None
       for line in process.stdout:
         line = line.strip()
         if not line:

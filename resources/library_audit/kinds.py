@@ -32,14 +32,14 @@ NON_MP4_CONTAINERS = frozenset({".mkv", ".avi", ".mov", ".m4v", ".ts", ".m2ts", 
 
 
 __all__ = [
-  "FindingKind",
   "KIND_HINT_MEDIA",
+  "KIND_HINT_PRECONV",
   "KIND_HINT_SIDECAR",
   "KIND_HINT_TMP",
-  "KIND_HINT_PRECONV",
+  "MEDIA_CONTAINER_EXTS",
+  "NON_MP4_CONTAINERS",
   "SIDECAR_EXTS",
   "TMP_EXTS",
   "TMP_SUFFIXES",
-  "MEDIA_CONTAINER_EXTS",
-  "NON_MP4_CONTAINERS",
+  "FindingKind",
 ]

@@ -42,7 +42,7 @@ import json
 import os
 import pathlib
 import re
-import subprocess  # noqa: S404 — required for vainfo/ffmpeg probing; argv is hardcoded
+import subprocess
 import sys
 
 # ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ _TIMEOUT = 5
 def _run(argv: list[str]) -> tuple[int, str, str]:
   """Run argv with a 5s timeout. Returns (rc, stdout, stderr); never raises."""
   try:
-    proc = subprocess.run(  # noqa: S603 — argv is hardcoded above
+    proc = subprocess.run(
       argv,
       capture_output=True,
       text=True,
@@ -302,7 +302,7 @@ def build_snapshot(ffmpeg: str, ffprobe: str, image_version: str) -> dict:
 
   return {
     "schema_version": 1,
-    "probed_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+    "probed_at": _dt.datetime.now(_dt.UTC).isoformat(),
     "host_signature": compute_host_signature(render_nodes, image_version),
     "image_version": image_version,
     "gpu_status": gpu_status,
@@ -335,10 +335,10 @@ def main(argv: list[str] | None = None) -> int:
 
   try:
     snapshot = build_snapshot(args.ffmpeg, args.ffprobe, args.image_version)
-  except Exception as e:  # noqa: BLE001 — fail open, never raise from the probe
+  except Exception as e:
     snapshot = {
       "schema_version": 1,
-      "probed_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+      "probed_at": _dt.datetime.now(_dt.UTC).isoformat(),
       "host_signature": "sha256:unknown",
       "image_version": args.image_version,
       "gpu_status": "unknown",

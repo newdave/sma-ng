@@ -274,13 +274,13 @@ class OpenVINOAnalyzerBackend:
     motion = 0.0
     if len(frames) >= 2:
       diffs = []
-      for a, b in zip(frames[:-1], frames[1:]):
+      for a, b in zip(frames[:-1], frames[1:], strict=False):  # noqa: RUF007 — analyzer needs explicit slice control, not pairwise
         ga = 0.299 * a[:, :, 0].astype(np.float32) + 0.587 * a[:, :, 1] + 0.114 * a[:, :, 2]
         gb = 0.299 * b[:, :, 0].astype(np.float32) + 0.587 * b[:, :, 1] + 0.114 * b[:, :, 2]
         diffs.append(float(np.mean(np.abs(ga - gb))))
       motion = min(1.0, float(np.mean(diffs)) / 50.0)
 
-    # Noise: Laplacian variance via 3×3 kernel (first 4 frames for speed).
+    # Noise: Laplacian variance via 3x3 kernel (first 4 frames for speed).
     noise_scores = []
     for frame in frames[:4]:
       gray = 0.299 * frame[:, :, 0].astype(np.float32) + 0.587 * frame[:, :, 1] + 0.114 * frame[:, :, 2]

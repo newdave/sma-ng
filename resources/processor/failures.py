@@ -150,4 +150,4 @@ def parse_ffmpeg_failure(stderr: str | bytes | None) -> FfmpegFailureClass:
   return FfmpegFailureClass.OTHER
 
 
-__all__ = ["AttemptRecord", "FfmpegFailureClass", "TAIL_BYTES", "parse_ffmpeg_failure"]
+__all__ = ["TAIL_BYTES", "AttemptRecord", "FfmpegFailureClass", "parse_ffmpeg_failure"]

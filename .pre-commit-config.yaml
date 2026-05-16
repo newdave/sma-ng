@@ -41,6 +41,18 @@ repos:
         args: [--fix]
       - id: ruff-format        # consistent formatting
 
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.10
+    hooks:
+      - id: bandit
+        # Mirror the scope of `mise run test:lint`: daemon HTTP surface,
+        # trigger scripts, and CLI entrypoints only. The converter library
+        # is too noisy for an initial pass and is covered by ruff's S*
+        # rules instead.
+        args: [-q, -c, pyproject.toml]
+        files: ^(resources/daemon/|triggers/|daemon\.py|manual\.py|rename\.py)
+        additional_dependencies: ["bandit[toml]"]
+
   - repo: local
     hooks:
       - id: bash-syntax

@@ -10,6 +10,6 @@ fresh hosts that have not yet been through deploy:sync.
 import sys
 
 try:
-  import ruamel.yaml  # noqa: F401
+  import ruamel.yaml
 except ImportError:
   sys.exit(1)

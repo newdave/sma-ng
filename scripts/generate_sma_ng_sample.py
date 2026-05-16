@@ -27,7 +27,7 @@ from ruamel.yaml.comments import CommentedMap
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from resources.config_schema import SmaConfig  # noqa: E402
+from resources.config_schema import SmaConfig
 
 SAMPLE_PATH = REPO_ROOT / "setup" / "sma-ng.yml.sample"
 

@@ -19,7 +19,7 @@ class ConverterError(Exception):
   """Raised when the Converter encounters a configuration or usage error."""
 
 
-class Converter(object):
+class Converter:
   """
   Converter class, encapsulates formats and codecs.
 

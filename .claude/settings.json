@@ -23,5 +23,8 @@
     "*.pyc",
     "config/autoProcess.ini",
     "config/sma-ng.yml"
-  ]
+  ],
+  "enabledPlugins": {
+    "voltagent-domains@voltagent-subagents": true
+  }
 }

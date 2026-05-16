@@ -78,7 +78,7 @@ def _load_with_dedup(path: str):
     _construct_merging_mapping,
   )
 
-  plain = _pyyaml.load(raw, _MergeLoader) or {}
+  plain = _pyyaml.load(raw, _MergeLoader) or {}  # noqa: S506 — _MergeLoader is a project-controlled SafeLoader subclass that adds !include support; never executes arbitrary objects
   plain = _canonicalize_keys(plain)
   buf = io.StringIO()
   yaml.dump(plain, buf)

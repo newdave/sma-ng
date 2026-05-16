@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-#MISE description="Run the ruff linter and report issues"
+#MISE description="Run the ruff linter (and bandit security scan) and report issues"
 #MISE aliases=["dev:lint:check"]
 set -euo pipefail
 
 "$PY" -m ruff check .
+
+# bandit: Python-level security scan over the daemon HTTP surface, trigger
+# entrypoints, and CLI scripts. Configuration lives in pyproject.toml under
+# [tool.bandit]. We deliberately do NOT sweep converter/* and autoprocess/*
+# — those are too noisy for the initial pass (legacy subprocess wrappers)
+# and the same classes of issues are already covered by ruff's S* rules.
+"$PY" -m bandit -q -c pyproject.toml -r resources/daemon triggers daemon.py manual.py rename.py

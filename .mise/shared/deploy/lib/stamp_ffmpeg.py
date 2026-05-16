@@ -39,7 +39,7 @@ config_dir = os.path.join(deploy_dir, "config")
 yaml_files = sorted(os.path.join(config_dir, f) for f in os.listdir(config_dir) if f.endswith((".yaml", ".yml")))
 
 sys.path.insert(0, deploy_dir)
-from resources.yamlconfig import _load_with_dedup  # noqa: E402
+from resources.yamlconfig import _load_with_dedup
 
 for yaml_path in yaml_files:
   data = _load_with_dedup(yaml_path) or {}

@@ -3657,7 +3657,7 @@ class TestPGGetMetricsMocked:
     if wdef:
       ts_rows = [
         {
-          "bucket": _dt.datetime(2026, 5, 5, 10, 0, 0, tzinfo=_dt.timezone.utc),
+          "bucket": _dt.datetime(2026, 5, 5, 10, 0, 0, tzinfo=_dt.UTC),
           "completed": 10,
           "failed": 1,
         },

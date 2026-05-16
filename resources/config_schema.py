@@ -598,7 +598,7 @@ class SmaConfig(_Base):
   services: Services = Field(default_factory=Services)
 
   @model_validator(mode="after")
-  def _propagate_universal_audio_shortcut(self) -> "SmaConfig":
+  def _propagate_universal_audio_shortcut(self) -> SmaConfig:
     """When ``base.audio.universal-audio`` is set, mirror it onto
     ``base.audio.universal.enabled`` (and the same for every profile
     overlay) so the shortcut behaves like operators expect."""
@@ -610,7 +610,7 @@ class SmaConfig(_Base):
     return self
 
   @model_validator(mode="after")
-  def _validate_routing_references(self) -> "SmaConfig":
+  def _validate_routing_references(self) -> SmaConfig:
     """Cross-reference every routing rule against profiles + services.
 
     A typo here (``sonarr.kid`` vs ``sonarr.kids``) is the most common
@@ -633,38 +633,38 @@ class SmaConfig(_Base):
 
 
 __all__ = [
-  "SmaConfig",
-  "DaemonConfig",
-  "BaseConfig",
-  "ProfileOverlay",
-  "Services",
-  "ConverterSettings",
-  "FallbackPolicy",
-  "PermissionSettings",
-  "MetadataSettings",
-  "VideoSettings",
-  "HDRSettings",
   "AnalyzerSettings",
-  "NamingSettings",
   "AudioSettings",
   "AudioSorting",
-  "UniversalAudio",
+  "AuditAutoFix",
+  "AuditPath",
+  "AuditSettings",
+  "AutoscanInstance",
+  "BaseConfig",
+  "CleanitSettings",
+  "ConverterSettings",
+  "DaemonConfig",
+  "EmbyInstance",
+  "FFSubsyncSettings",
+  "FallbackPolicy",
+  "HDRSettings",
+  "JellyfinInstance",
+  "MetadataSettings",
+  "NamingSettings",
+  "PathRewrite",
+  "PermissionSettings",
+  "PlexInstance",
+  "ProfileOverlay",
+  "RadarrInstance",
+  "RoutingRule",
+  "ScanPath",
+  "Services",
+  "SmaConfig",
+  "SonarrInstance",
+  "SubliminalAuth",
+  "SubliminalSettings",
   "SubtitleSettings",
   "SubtitleSorting",
-  "CleanitSettings",
-  "FFSubsyncSettings",
-  "SubliminalSettings",
-  "SubliminalAuth",
-  "SonarrInstance",
-  "RadarrInstance",
-  "PlexInstance",
-  "EmbyInstance",
-  "JellyfinInstance",
-  "AutoscanInstance",
-  "ScanPath",
-  "PathRewrite",
-  "RoutingRule",
-  "AuditPath",
-  "AuditAutoFix",
-  "AuditSettings",
+  "UniversalAudio",
+  "VideoSettings",
 ]

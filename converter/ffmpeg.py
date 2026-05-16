@@ -42,7 +42,7 @@ class FFMpegConvertError(Exception):
     @param    details: Optional error details.
     @type     details: C{str}
     """
-    super(FFMpegConvertError, self).__init__(message)
+    super().__init__(message)
 
     self.message = message
     self.cmd = cmd
@@ -58,7 +58,7 @@ class FFMpegConvertError(Exception):
     return self.__repr__()
 
 
-class MediaFormatInfo(object):
+class MediaFormatInfo:
   """
   Describes the media container format. The attributes are:
     * format - format (short) name (eg. "ogg")
@@ -102,7 +102,7 @@ class MediaFormatInfo(object):
     return "MediaFormatInfo(format=%s, duration=%.2f)" % (self.format, self.duration)
 
 
-class MediaStreamInfo(object):
+class MediaStreamInfo:
   """
   Describes one stream inside a media file. The general
   attributes are:
@@ -204,12 +204,12 @@ class MediaStreamInfo(object):
 
   @overload
   @staticmethod
-  def parse_float(val, default: None) -> Optional[float]: ...
+  def parse_float(val, default: None) -> float | None: ...
   @overload
   @staticmethod
   def parse_float(val, default: float = ...) -> float: ...
   @staticmethod
-  def parse_float(val, default: Optional[float] = 0.0) -> Optional[float]:
+  def parse_float(val, default: float | None = 0.0) -> float | None:
     """Convert val to float, returning default on failure."""
     try:
       return float(val)
@@ -218,12 +218,12 @@ class MediaStreamInfo(object):
 
   @overload
   @staticmethod
-  def parse_int(val, default: None) -> Optional[int]: ...
+  def parse_int(val, default: None) -> int | None: ...
   @overload
   @staticmethod
   def parse_int(val, default: int = ...) -> int: ...
   @staticmethod
-  def parse_int(val, default: Optional[int] = 0) -> Optional[int]:
+  def parse_int(val, default: int | None = 0) -> int | None:
     """Convert val to int, returning default on failure."""
     try:
       return int(val)
@@ -353,7 +353,7 @@ class MediaStreamInfo(object):
     return value
 
 
-class MediaInfo(object):
+class MediaInfo:
   """
   Information about media object, as parsed by ffprobe.
   The attributes are:
@@ -401,7 +401,7 @@ class MediaInfo(object):
       line = line.strip()
       if line == "":
         continue
-      elif line == "[STREAM]":
+      if line == "[STREAM]":
         current_stream = MediaStreamInfo()
       elif line == "[/STREAM]":
         if current_stream is not None and current_stream.type:
@@ -472,7 +472,7 @@ class MediaInfo(object):
     return result
 
 
-class FFMpeg(object):
+class FFMpeg:
   """
   FFMPeg wrapper object, takes care of calling the ffmpeg binaries,
   passing options and parsing the output.
@@ -537,7 +537,7 @@ class FFMpeg(object):
       encoders_match = self.CODECS_ENCODERS_RE.search(coders[1])
       self_encoder = [codec] if coders[0][1] == "E" else []
       self_decoder = [codec] if coders[0][0] == "D" else []
-      codecs[codec] = dict(decoders=decoders_match and decoders_match.group(1).split() or self_decoder, encoders=encoders_match and encoders_match.group(1).split() or self_encoder)
+      codecs[codec] = dict(decoders=(decoders_match and decoders_match.group(1).split()) or self_decoder, encoders=(encoders_match and encoders_match.group(1).split()) or self_encoder)
     return codecs
 
   @property
@@ -580,7 +580,7 @@ class FFMpeg(object):
     with the hwaccel name, e.g. 'h264' + 'cuvid' -> 'h264_cuvid'.
     """
     source_codec = self.DECODER_SYNONYMS.get(video_codec, video_codec)
-    return "{0}_{1}".format(source_codec, hwaccel)
+    return f"{source_codec}_{hwaccel}"
 
   def encoder_formats(self, encoder):
     """Return the list of pixel formats supported by the named encoder.
@@ -895,7 +895,7 @@ class FFMpeg(object):
     >>>                                   (10, '/tmp/shot2.png', None, 5)])
     """
     if not os.path.exists(fname):
-      raise IOError("No such file: " + fname)
+      raise OSError("No such file: " + fname)
 
     cmds = [self.ffmpeg_path, "-i", fname, "-y", "-an"]
     for thumb in option_list:

@@ -378,7 +378,7 @@ def triggerRescan(filepath, settings):
   Returns the new file path if arr renamed the file, otherwise None.
   """
   try:
-    import requests  # noqa: F401  # type: ignore[import-untyped]
+    import requests  # type: ignore[import-untyped]
   except ImportError:
     log.warning("Python module 'requests' not installed, skipping media manager rescan.")
     return None
@@ -513,13 +513,13 @@ def processFile(
   """
   if checkAlreadyProcessed(inputfile, processedList):
     log.debug("%s is already processed and will be skipped based on archive %s." % (inputfile, processedArchive))
-    return
+    return None
 
   # Process
   info = info or mp.isValidSource(inputfile)
   if not info:
     log.debug("Invalid file %s." % inputfile)
-    return
+    return None
 
   language = mp.settings.taglanguage or None
   tagdata = getInfo(
@@ -539,7 +539,7 @@ def processFile(
 
   if optionsOnly:
     displayOptions(inputfile, mp.settings, tagdata)
-    return
+    return None
 
   if not tagdata:
     log.info("Processing file %s" % inputfile)
@@ -562,7 +562,7 @@ def processFile(
         raise
       except Exception:
         log.exception("There was an error tagging the file")
-    return
+    return None
 
   output = mp.process(inputfile, True, info=info, original=original, tagdata=tagdata)
   if output:

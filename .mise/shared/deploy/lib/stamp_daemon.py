@@ -135,7 +135,7 @@ if os.path.exists(yaml_path):
   # keys are merged before we modify and write back; otherwise we'd
   # update the first copy and leave duplicate keys in place.
   sys.path.insert(0, deploy_dir)
-  from resources.yamlconfig import _load_with_dedup  # noqa: E402
+  from resources.yamlconfig import _load_with_dedup
 
   root = _load_with_dedup(yaml_path) or {}
 

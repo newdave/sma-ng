@@ -265,7 +265,7 @@ class DaemonServer(ThreadingHTTPServer):
       }
 
     try:
-      result = subprocess.run(  # noqa: S603 — argv hardcoded; sys.executable trusted
+      result = subprocess.run(
         [
           sys.executable,
           str(probe_script),
@@ -603,7 +603,7 @@ def _validate_hwaccel(path_config_manager, ffmpeg_dir, logger):
         codec_val = cp.get("Video", "video-codec", fallback="").strip().lower()
         if codec_val:
           logger.warning("Config %s uses legacy [Video] video-codec; use [Video] codec instead." % os.path.basename(config_path))
-    except Exception:
+    except Exception:  # noqa: S112 — best-effort scan; logging unparseable user configs adds noise
       continue
 
     for keyword, encoder in _hwaccel_map.items():

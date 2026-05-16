@@ -54,7 +54,7 @@ def read_media_ids(path: str) -> dict[str, Any]:
     video = MP4(path)
   except (MP4StreamInfoError, FileNotFoundError, KeyError, OSError):
     return {}
-  except Exception:  # type: ignore[unreachable]  # pragma: no cover  # noqa: BLE001
+  except Exception:  # type: ignore[unreachable]  # pragma: no cover
     return {}
 
   tags = video.tags or {}
@@ -136,4 +136,4 @@ def derive_media_id(ids: dict[str, Any]) -> str | None:
   return None
 
 
-__all__ = ["read_media_ids", "derive_media_id"]
+__all__ = ["derive_media_id", "read_media_ids"]
