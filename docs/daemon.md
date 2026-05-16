@@ -55,7 +55,7 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `GET`  | `/`                   | No   | Redirects to `/dashboard`                                               |
 | `GET`  | `/dashboard`          | No   | Web dashboard                                                           |
 | `GET`  | `/admin`              | No   | Admin panel (destructive actions)                                       |
-| `GET`  | `/health`             | No   | Health check with job stats (local node)                                |
+| `GET`  | `/health`             | No   | Health check with job stats + GPU capabilities + fallback counters     |
 | `GET`  | `/status`             | No   | Cluster-wide status across all nodes                                    |
 | `GET`  | `/docs`               | No   | Rendered documentation                                                  |
 | `GET`  | `/jobs`               | Yes  | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
@@ -273,6 +273,12 @@ Job 3: /TV/show2.mkv     -> sma-ng.yml profile rq [waits for an available worker
 ```
 
 Check active/waiting jobs: `curl http://localhost:8585/health`
+
+`/health` also returns three additive top-level fields covering hardware
+acceleration and fallback metrics — see
+[`docs/hardware-acceleration.md`](hardware-acceleration.md#phase-1-observability-health-fallback-policy-capability-probe)
+for the full schema. Consumers MUST ignore unknown keys; the daemon
+will continue to add additive fields without bumping the API version.
 
 ---
 
