@@ -53,8 +53,10 @@ class ConversionWorker(threading.Thread):
     job_processes=None,
     job_progress=None,
     pool=None,
+    fallback_counter_callback=None,
   ):
     super().__init__(daemon=True)
+    self._fallback_counter_callback = fallback_counter_callback
     self.worker_id = worker_id
     self.node_id = resolve_node_id()
     self.pool = pool
@@ -271,6 +273,13 @@ class ConversionWorker(threading.Thread):
             _last_progress_log = now
         else:
           config_logger.info(line)
+        # Capture MediaProcessor's structured ffmpeg.attempts event so the
+        # daemon's /health fallback counters reflect work done in worker
+        # subprocesses. The event is single-line JSON per the logging
+        # contract; we look for the event marker substring first to keep
+        # the hot path cheap.
+        if self._fallback_counter_callback is not None and '"event": "ffmpeg.attempts"' in line:
+          self._record_fallback_event(line)
 
       try:
         timeout = self.job_timeout_seconds if self.job_timeout_seconds > 0 else None
@@ -296,6 +305,50 @@ class ConversionWorker(threading.Thread):
       self._job_processes.pop(job_id, None)
       self._job_progress.pop(job_id, None)
       config_logger.info("")  # blank line separates jobs in the per-config log
+
+  def _record_fallback_event(self, line: str) -> None:
+    """Parse a single-line ffmpeg.attempts JSON record and bump daemon counters.
+
+    Worker output lines pass through the daemon's log formatter before
+    arriving here, so the JSON payload may be embedded in a prefix.
+    Tolerate both the bare-JSON case and the wrapped case by locating the
+    first ``{`` and parsing from there.
+    """
+    cb = self._fallback_counter_callback
+    if cb is None:
+      return
+    start = line.find("{")
+    if start < 0:
+      return
+    try:
+      payload = json.loads(line[start:])
+    except (ValueError, json.JSONDecodeError):
+      return
+    if payload.get("event") != "ffmpeg.attempts":
+      return
+    attempts = payload.get("attempts") or []
+    if not isinstance(attempts, list):
+      return
+    # Each tier that failed produces one counter increment. The to_tier is
+    # the next attempted tier, or "failed" if this was the last attempt and
+    # the overall result is "failed".
+    result = payload.get("result")
+    for idx, rec in enumerate(attempts):
+      if not isinstance(rec, dict):
+        continue
+      failure_class = rec.get("failure_class")
+      if not failure_class:
+        continue
+      from_tier = rec.get("tier") or "unknown"
+      next_rec = attempts[idx + 1] if idx + 1 < len(attempts) else None
+      if next_rec is not None and isinstance(next_rec, dict):
+        to_tier = next_rec.get("tier") or "unknown"
+      else:
+        to_tier = "failed" if result == "failed" else "unknown"
+      try:
+        cb(from_tier, to_tier, failure_class)
+      except Exception:
+        self.log.exception("Failed to record fallback counter increment")
 
   def _build_progress_payload(self, line, time_match, total_duration_secs, start_time, now):
     elapsed_secs = now - start_time
@@ -355,8 +408,10 @@ class WorkerPool:
     progress_log_interval=_DEFAULT_PROGRESS_LOG_INTERVAL,
     job_processes=None,
     job_progress=None,
+    fallback_counter_callback=None,
   ):
     self._workers = []
+    self._fallback_counter_callback = fallback_counter_callback
     self._worker_count = worker_count
     self._job_db = job_db
     self._path_config_manager = path_config_manager
@@ -394,6 +449,7 @@ class WorkerPool:
         job_processes=self._job_processes,
         job_progress=self._job_progress,
         pool=self,
+        fallback_counter_callback=self._fallback_counter_callback,
       )
       worker.start()
       self._workers.append(worker)

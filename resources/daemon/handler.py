@@ -155,19 +155,31 @@ class WebhookHandler(BaseHTTPRequestHandler):
     stats = self.server.job_db.get_stats()
     now = _local_now()
     uptime = int((now - self.server.started_at).total_seconds())
-    self.send_json_response(
-      200,
-      {
-        "status": "ok",
-        "node": self.server.node_id,
-        "started_at": self.server.started_at,
-        "uptime_seconds": uptime,
-        "workers": self.server.worker_count,
-        "jobs": stats,
-        "active": lock_status["active"],
-        "waiting": lock_status["waiting"],
-      },
-    )
+    hw_caps = getattr(self.server, "hw_capabilities", None)
+    if not isinstance(hw_caps, dict):
+      hw_caps = {}
+    fallback_summary_fn = getattr(self.server, "fallback_summary", None)
+    fallback = fallback_summary_fn() if callable(fallback_summary_fn) else []
+    if not isinstance(fallback, list):
+      fallback = []
+    payload = {
+      "status": "ok",
+      "node": self.server.node_id,
+      "started_at": self.server.started_at,
+      "uptime_seconds": uptime,
+      "workers": self.server.worker_count,
+      "jobs": stats,
+      "active": lock_status["active"],
+      "waiting": lock_status["waiting"],
+      # New top-level fields (additive — consumers MUST ignore unknown keys
+      # per docs/daemon.md). Operators query these for GPU health and
+      # per-tier fallback counters without grepping logs.
+      "gpu_status": hw_caps.get("gpu_status", "unknown"),
+      "selected_backend": hw_caps.get("selected_backend", "software"),
+      "capabilities": hw_caps.get("capabilities", {}) if isinstance(hw_caps.get("capabilities"), dict) else {},
+      "fallback": fallback,
+    }
+    self.send_json_response(200, payload)
 
   def _get_status(self):
     nodes = self.server.job_db.get_cluster_nodes()

@@ -734,3 +734,47 @@ class TestConversionWorkerChainWake:
     worker.job_event.wait = fake_wait
     worker.run()
     worker.pool.notify_one.assert_not_called()
+
+
+class TestFallbackEventParsing:
+  """ConversionWorker._record_fallback_event increments daemon counters from
+  the structured ffmpeg.attempts log line emitted by MediaProcessor in the
+  worker subprocess."""
+
+  def _worker_with_cb(self):
+    calls = []
+    worker = _make_worker()
+    worker._fallback_counter_callback = lambda *a: calls.append(a)
+    return worker, calls
+
+  def test_records_increment_for_each_failed_tier(self):
+    worker, calls = self._worker_with_cb()
+    line = (
+      '{"attempts": [{"tier": "hw", "failure_class": "device_open_failed", "duration_ms": 12},'
+      ' {"tier": "sw_decode", "failure_class": null, "duration_ms": 100}],'
+      ' "event": "ffmpeg.attempts", "result": "ok"}'
+    )
+    worker._record_fallback_event(line)
+    assert calls == [("hw", "sw_decode", "device_open_failed")]
+
+  def test_final_failure_uses_to_failed(self):
+    worker, calls = self._worker_with_cb()
+    line = '{"attempts": [{"tier": "hw", "failure_class": "encoder_init_failed", "duration_ms": 5}], "event": "ffmpeg.attempts", "result": "failed"}'
+    worker._record_fallback_event(line)
+    assert calls == [("hw", "failed", "encoder_init_failed")]
+
+  def test_ignores_non_attempt_events(self):
+    worker, calls = self._worker_with_cb()
+    worker._record_fallback_event('prefix {"event": "other", "x": 1}')
+    assert calls == []
+
+  def test_tolerates_log_prefix_around_json(self):
+    worker, calls = self._worker_with_cb()
+    line = 'INFO foo: {"attempts": [{"tier": "hw", "failure_class": "runtime_error", "duration_ms": 9}], "event": "ffmpeg.attempts", "result": "failed"}'
+    worker._record_fallback_event(line)
+    assert calls == [("hw", "failed", "runtime_error")]
+
+  def test_no_callback_is_safe(self):
+    worker = _make_worker()
+    worker._fallback_counter_callback = None
+    worker._record_fallback_event('{"event": "ffmpeg.attempts", "attempts": [], "result": "ok"}')  # must not raise

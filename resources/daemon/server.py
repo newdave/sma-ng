@@ -1,5 +1,6 @@
 import configparser
 import ipaddress
+import json
 import os
 import socket
 import subprocess
@@ -7,6 +8,7 @@ import sys
 import threading
 from datetime import datetime
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 try:
   import importlib.metadata as _importlib_metadata
@@ -120,6 +122,15 @@ class DaemonServer(ThreadingHTTPServer):
     self._job_progress = {}  # job_id -> structured progress payload from FFmpeg output
     self._reload_lock = threading.Lock()  # serializes auto-watcher and POST /reload
 
+    # Hardware capability snapshot — invoked once at startup. Result is
+    # cached on disk (so the admin UI can read it even when the daemon
+    # restarts) and surfaced on /health as `gpu_status` + `capabilities`.
+    # Fail open — probe errors never block startup.
+    self.hw_capabilities: dict = self._probe_hw_capabilities()
+    self._fallback_counters_lock = threading.Lock()
+    # key: (from_tier, to_tier, reason) -> count
+    self.fallback_counters: dict[tuple[str, str, str], int] = {}
+
     # Start worker threads via WorkerPool — each worker gets its own Event
     # so workers never race to clear a shared flag.
     self.worker_pool = WorkerPool(
@@ -134,6 +145,7 @@ class DaemonServer(ThreadingHTTPServer):
       progress_log_interval=progress_log_interval,
       job_processes=self._job_processes,
       job_progress=self._job_progress,
+      fallback_counter_callback=self.increment_fallback_counter,
     )
 
     # Wake all workers if there are jobs waiting from a previous run.
@@ -221,6 +233,97 @@ class DaemonServer(ThreadingHTTPServer):
         logger.info("Config watcher disabled.")
     except Exception:
       logger.exception("Could not start config watcher; auto-reload disabled.")
+
+  # ------------------------------------------------------------------
+  # Hardware capability probe + fallback metrics
+  # ------------------------------------------------------------------
+
+  def _probe_hw_capabilities(self) -> dict:
+    """Invoke scripts/probe-hw.py and return the resulting JSON snapshot.
+
+    Fail open: any subprocess or parse error yields
+    ``{"gpu_status": "unknown", "capabilities": {}, "errors": [...]}``
+    so daemon startup never blocks on the probe. The snapshot is also
+    cached to disk under ``<config_dir>/cache/hw_capabilities.json`` so
+    consumers (admin UI, support diagnostics) can read it independently
+    of daemon liveness.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    probe_script = repo_root / "scripts" / "probe-hw.py"
+
+    config_file = getattr(self.path_config_manager, "_config_file", None) or getattr(self.path_config_manager, "default_config", None)
+    config_dir = Path(config_file).parent if config_file else Path("/config")
+    cache_path = config_dir / "cache" / "hw_capabilities.json"
+
+    if not probe_script.exists():
+      self.logger.warning("hw capability probe script missing at %s; gpu_status=unknown" % probe_script)
+      return {
+        "gpu_status": "unknown",
+        "selected_backend": "software",
+        "capabilities": {},
+        "errors": ["probe_script_missing"],
+      }
+
+    try:
+      result = subprocess.run(  # noqa: S603 — argv hardcoded; sys.executable trusted
+        [
+          sys.executable,
+          str(probe_script),
+          "--output",
+          str(cache_path),
+          "--image-version",
+          _VERSION,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+      )
+      if result.returncode != 0:
+        self.logger.warning(
+          "hw capability probe exit=%d: %s" % (result.returncode, (result.stderr or "")[:200]),
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+      self.logger.warning("hw capability probe failed to launch: %s" % e)
+      return {
+        "gpu_status": "unknown",
+        "selected_backend": "software",
+        "capabilities": {},
+        "errors": ["probe_launch_failed: %s" % e],
+      }
+
+    if not cache_path.exists():
+      return {
+        "gpu_status": "unknown",
+        "selected_backend": "software",
+        "capabilities": {},
+        "errors": ["probe_produced_no_snapshot"],
+      }
+    try:
+      return json.loads(cache_path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+      self.logger.warning("hw capability snapshot unreadable at %s: %s" % (cache_path, e))
+      return {
+        "gpu_status": "unknown",
+        "selected_backend": "software",
+        "capabilities": {},
+        "errors": ["snapshot_unreadable: %s" % e],
+      }
+
+  def increment_fallback_counter(self, from_tier: str, to_tier: str, reason: str) -> None:
+    """Increment the per-(from_tier, to_tier, reason) fallback counter.
+
+    Called by ``MediaProcessor._attempt_ladder`` (wired up by ``WorkerPool``
+    when constructing the per-job processor). Thread-safe.
+    """
+    key = (from_tier, to_tier, reason)
+    with self._fallback_counters_lock:
+      self.fallback_counters[key] = self.fallback_counters.get(key, 0) + 1
+
+  def fallback_summary(self) -> list[dict]:
+    """Snapshot of fallback counters for /health rendering."""
+    with self._fallback_counters_lock:
+      return [{"from": from_tier, "to": to_tier, "reason": reason, "count": count} for (from_tier, to_tier, reason), count in sorted(self.fallback_counters.items())]
 
   def notify_workers(self):
     """Wake all worker threads by setting each worker's individual event."""
