@@ -40,6 +40,95 @@ def _make_server():
   return server
 
 
+# ---------------------------------------------------------------------------
+# Hardware capability probe + fallback counters (T5)
+# ---------------------------------------------------------------------------
+
+
+class TestHwCapabilityProbe:
+  """Bare-init coverage for `_probe_hw_capabilities` and fallback counters."""
+
+  def _bare(self, tmp_path):
+    server = object.__new__(DaemonServer)
+    server.logger = MagicMock()
+    server.path_config_manager = MagicMock()
+    server.path_config_manager._config_file = str(tmp_path / "sma-ng.yml")
+    server.path_config_manager.default_config = server.path_config_manager._config_file
+    return server
+
+  def test_probe_failure_yields_unknown(self, tmp_path):
+    server = self._bare(tmp_path)
+    with patch("subprocess.run", side_effect=OSError("no python")):
+      with patch("pathlib.Path.exists", return_value=True):
+        snap = server._probe_hw_capabilities()
+    assert snap["gpu_status"] == "unknown"
+    assert "errors" in snap
+    assert snap["selected_backend"] == "software"
+
+  def test_probe_script_missing_yields_unknown(self, tmp_path):
+    server = self._bare(tmp_path)
+    # Force the existence check to fail.
+    with patch("pathlib.Path.exists", return_value=False):
+      snap = server._probe_hw_capabilities()
+    assert snap["gpu_status"] == "unknown"
+    assert "probe_script_missing" in snap["errors"]
+
+  def test_probe_success_returns_cached_json(self, tmp_path):
+    server = self._bare(tmp_path)
+    cache = tmp_path / "cache" / "hw_capabilities.json"
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text('{"gpu_status": "ok", "selected_backend": "qsv", "capabilities": {"hwaccels": ["qsv"]}}')
+
+    def _fake_run(*_a, **_kw):
+      proc = MagicMock()
+      proc.returncode = 0
+      proc.stderr = ""
+      return proc
+
+    with patch("subprocess.run", side_effect=_fake_run):
+      with patch("pathlib.Path.exists", return_value=True):
+        with patch("pathlib.Path.read_text", return_value=cache.read_text()):
+          snap = server._probe_hw_capabilities()
+    assert snap["gpu_status"] == "ok"
+    assert snap["selected_backend"] == "qsv"
+
+
+class TestFallbackCounters:
+  """`increment_fallback_counter` is thread-safe and feeds `fallback_summary`."""
+
+  def _bare(self):
+    server = object.__new__(DaemonServer)
+    import threading
+
+    server._fallback_counters_lock = threading.Lock()
+    server.fallback_counters = {}
+    return server
+
+  def test_increment_starts_at_one(self):
+    s = self._bare()
+    s.increment_fallback_counter("hw", "sw_decode", "device_open_failed")
+    assert s.fallback_summary() == [
+      {"from": "hw", "to": "sw_decode", "reason": "device_open_failed", "count": 1},
+    ]
+
+  def test_increment_accumulates(self):
+    s = self._bare()
+    for _ in range(3):
+      s.increment_fallback_counter("hw", "sw_decode", "device_open_failed")
+    s.increment_fallback_counter("sw_decode", "full_sw", "encoder_init_failed")
+    summary = {(e["from"], e["to"], e["reason"]): e["count"] for e in s.fallback_summary()}
+    assert summary[("hw", "sw_decode", "device_open_failed")] == 3
+    assert summary[("sw_decode", "full_sw", "encoder_init_failed")] == 1
+
+  def test_summary_is_sorted_deterministic(self):
+    s = self._bare()
+    s.increment_fallback_counter("sw_decode", "full_sw", "encoder_init_failed")
+    s.increment_fallback_counter("hw", "sw_decode", "device_open_failed")
+    # Sorted by tuple key.
+    keys = [(e["from"], e["to"], e["reason"]) for e in s.fallback_summary()]
+    assert keys == sorted(keys)
+
+
 def _make_pool(worker_count=3):
   """Create a WorkerPool with ConversionWorker patched so no real threads start."""
   mock_workers = [MagicMock() for _ in range(worker_count)]
@@ -838,3 +927,77 @@ class TestValidateHwaccelExtra:
     with patch("subprocess.run") as mock_run:
       _validate_hwaccel(pcm, None, logger)
     mock_run.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# DaemonServer hardware capability probe + fallback counters (Phase 1 T5)
+# ---------------------------------------------------------------------------
+
+
+def _bare_server_with_probe(tmp_path):
+  server = object.__new__(DaemonServer)
+  server.logger = MagicMock()
+  pcm = MagicMock()
+  pcm._config_file = str(tmp_path / "sma-ng.yml")
+  pcm.default_config = pcm._config_file
+  server.path_config_manager = pcm
+  return server
+
+
+class TestProbeHwCapabilities:
+  def test_returns_snapshot_when_probe_writes_cache(self, tmp_path):
+    server = _bare_server_with_probe(tmp_path)
+    cache = tmp_path / "cache" / "hw_capabilities.json"
+
+    def fake_run(argv, **kwargs):
+      cache.parent.mkdir(parents=True, exist_ok=True)
+      cache.write_text('{"gpu_status": "ok", "selected_backend": "qsv", "capabilities": {"hwaccels": ["qsv"]}}')
+      return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with patch("resources.daemon.server.subprocess.run", side_effect=fake_run):
+      snap = server._probe_hw_capabilities()
+    assert snap["gpu_status"] == "ok"
+    assert snap["selected_backend"] == "qsv"
+    assert "qsv" in snap["capabilities"]["hwaccels"]
+
+  def test_fail_open_when_probe_launch_errors(self, tmp_path):
+    server = _bare_server_with_probe(tmp_path)
+    with patch(
+      "resources.daemon.server.subprocess.run",
+      side_effect=subprocess.TimeoutExpired(cmd="probe", timeout=15),
+    ):
+      snap = server._probe_hw_capabilities()
+    assert snap["gpu_status"] == "unknown"
+    assert any("probe_launch_failed" in e for e in snap["errors"])
+
+  def test_fail_open_when_snapshot_unreadable(self, tmp_path):
+    server = _bare_server_with_probe(tmp_path)
+    cache = tmp_path / "cache" / "hw_capabilities.json"
+
+    def fake_run(argv, **kwargs):
+      cache.parent.mkdir(parents=True, exist_ok=True)
+      cache.write_text("not json {{{")
+      return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with patch("resources.daemon.server.subprocess.run", side_effect=fake_run):
+      snap = server._probe_hw_capabilities()
+    assert snap["gpu_status"] == "unknown"
+    assert any("snapshot_unreadable" in e for e in snap["errors"])
+
+
+class TestFallbackCounters:
+  def test_increment_and_summary(self, tmp_path):
+    server = _bare_server_with_probe(tmp_path)
+    server._fallback_counters_lock = threading.Lock()
+    server.fallback_counters = {}
+    server.increment_fallback_counter("hw", "sw_decode", "device_open_failed")
+    server.increment_fallback_counter("hw", "sw_decode", "device_open_failed")
+    server.increment_fallback_counter("sw_decode", "full_sw", "encoder_init_failed")
+    summary = server.fallback_summary()
+    assert {"from": "hw", "to": "sw_decode", "reason": "device_open_failed", "count": 2} in summary
+    assert {
+      "from": "sw_decode",
+      "to": "full_sw",
+      "reason": "encoder_init_failed",
+      "count": 1,
+    } in summary

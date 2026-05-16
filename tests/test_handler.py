@@ -101,6 +101,17 @@ def _make_server(
   server.graceful_restart.return_value = None
   server.reload_config.return_value = None
 
+  # Hardware capability snapshot + fallback counters (Phase 1 / T5).
+  # Defaults below mirror what the daemon attaches when probe-hw.py is
+  # missing or fails open, so /health stays JSON-serialisable in tests
+  # that don't override these.
+  server.hw_capabilities = {
+    "gpu_status": "ok",
+    "selected_backend": "software",
+    "capabilities": {},
+  }
+  server.fallback_summary.return_value = []
+
   return server
 
 
@@ -313,6 +324,39 @@ class TestGetHealth:
     body = _get_response_body(h)
     assert "active" in body
     assert "waiting" in body
+
+  def test_returns_gpu_status_and_capabilities(self):
+    h = _make_handler(path="/health")
+    h.server.hw_capabilities = {
+      "gpu_status": "ok",
+      "selected_backend": "qsv",
+      "capabilities": {"hwaccels": ["qsv", "vaapi"], "encoders": {"h264_qsv": True}},
+    }
+    h._get_health()
+    body = _get_response_body(h)
+    assert body["gpu_status"] == "ok"
+    assert body["selected_backend"] == "qsv"
+    assert "qsv" in body["capabilities"]["hwaccels"]
+
+  def test_returns_fallback_summary(self):
+    h = _make_handler(path="/health")
+    h.server.fallback_summary.return_value = [
+      {"from": "hw", "to": "sw_decode", "reason": "device_open_failed", "count": 2},
+    ]
+    h._get_health()
+    body = _get_response_body(h)
+    assert body["fallback"] == [
+      {"from": "hw", "to": "sw_decode", "reason": "device_open_failed", "count": 2},
+    ]
+
+  def test_returns_unknown_gpu_status_when_capabilities_missing(self):
+    h = _make_handler(path="/health")
+    h.server.hw_capabilities = {}
+    h._get_health()
+    body = _get_response_body(h)
+    assert body["gpu_status"] == "unknown"
+    assert body["selected_backend"] == "software"
+    assert body["capabilities"] == {}
 
 
 # ---------------------------------------------------------------------------
