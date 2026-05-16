@@ -125,7 +125,7 @@ def main():
   parser = argparse.ArgumentParser(description="SMA-NG Daemon - HTTP webhook server for media conversion")
   parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
   parser.add_argument("--port", type=int, default=8585, help="Port to listen on (default: 8585)")
-  parser.add_argument("--workers", type=int, default=1, help="Number of worker threads (default: 1)")
+  parser.add_argument("--workers", type=int, default=None, help="Number of worker threads (default: daemon.workers in sma-ng.yml, or 4 if unset)")
   parser.add_argument("-d", "--daemon-config", help="Path to daemon config file (defaults to sma-ng.yml)")
   parser.add_argument("--logs-dir", default=LOGS_DIR, help="Directory for per-config log files (default: logs/)")
   parser.add_argument(
@@ -155,8 +155,11 @@ def main():
 
   # Initialize managers
   config_log_manager = ConfigLogManager(args.logs_dir)
-  config_lock_manager = ConfigLockManager(max_per_config=args.workers, logger=log)
   path_config_manager = PathConfigManager(args.daemon_config, logger=log)
+
+  # Resolve worker count: CLI flag > daemon.workers in sma-ng.yml > schema default.
+  workers = args.workers if args.workers is not None else path_config_manager.workers
+  config_lock_manager = ConfigLockManager(max_per_config=workers, logger=log)
 
   # Determine API key (priority: CLI arg > config file)
   api_key = args.api_key or path_config_manager.api_key
@@ -233,7 +236,7 @@ def main():
       config_log_manager,
       config_lock_manager,
       log,
-      worker_count=args.workers,
+      worker_count=workers,
       api_key=api_key,
       basic_auth=basic_auth,
       heartbeat_interval=args.heartbeat_interval,
@@ -247,7 +250,7 @@ def main():
     )
 
     log.info("Listening on http://%s:%d" % (args.host, args.port))
-    log.debug("Worker threads: %d" % args.workers)
+    log.debug("Worker threads: %d" % workers)
     if path_config_manager.scan_paths:
       log.debug("Scheduled scans: %d path(s)" % len(path_config_manager.scan_paths))
       for sp in path_config_manager.scan_paths:
