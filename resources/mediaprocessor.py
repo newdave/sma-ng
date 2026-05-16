@@ -112,6 +112,8 @@ def _swap_qsv_codec_to_sw(options):
   if isinstance(codec, list):
     # codec list is a fallback chain; rewrite first entry only
     head = codec[0] if codec else None
+    if head is None:
+      return None
     sw = _QSV_CODEC_TO_SW.get(head)
     if not sw:
       return None
