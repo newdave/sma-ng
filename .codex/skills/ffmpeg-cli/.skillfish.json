@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "ffmpeg-cli",
+  "owner": "henkisdabro",
+  "repo": "wookstar-claude-plugins",
+  "path": "plugins/ffmpeg/skills/ffmpeg-cli",
+  "branch": "main",
+  "sha": "22a8a18e89c716a2b58cce4da74f068b5fd61a1a",
+  "source": "manual"
+}
