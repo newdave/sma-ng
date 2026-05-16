@@ -208,6 +208,16 @@ class TestDockerfileRuntime:
     assert "getent group render" in dockerfile_raw
     assert "groupadd -g 992 render" in dockerfile_raw
 
+  def test_entrypoint_gid_fixup_is_opt_in(self, entrypoint_raw):
+    """The /dev/dri GID reconciliation block must be gated behind
+    SMA_ENTRYPOINT_FIX_GIDS=1 (T6). The default path is declarative
+    `group_add` in docker-compose.yml; the entrypoint block is the
+    bare-`docker run` fallback only."""
+    assert "SMA_ENTRYPOINT_FIX_GIDS" in entrypoint_raw
+    # Make sure the guard is wrapped around the /dev/dri loop, not the
+    # chown of /config/logs.
+    assert "SMA_ENTRYPOINT_FIX_GIDS:-0" in entrypoint_raw
+
   def test_ubuntu_user_added_to_render_group(self, dockerfile_raw):
     assert "usermod -aG render ubuntu" in dockerfile_raw
 
@@ -383,13 +393,20 @@ class TestComposeGpuProfiles:
     assert _exposes_dri(compose["services"]["sma-intel"]["devices"])
     assert _exposes_dri(compose["services"]["sma-intel-pg"]["devices"])
 
-  def test_intel_no_static_group_add(self, compose):
-    # The entrypoint runs as root, stats the mapped /dev/dri device nodes,
-    # adds the runtime user to whatever groups own them, then drops to ubuntu
-    # via setpriv. Static group_add lines would shadow the auto-detection
-    # and reintroduce host-GID skew bugs, so they must not be present.
-    assert "group_add" not in compose["services"]["sma-intel"]
-    assert "group_add" not in compose["services"]["sma-intel-pg"]
+  def test_intel_declarative_group_add(self, compose):
+    """Intel profiles ship declarative group_add for /dev/dri access.
+
+    The container's ubuntu user joins the host's `video` and `render`
+    groups (and the image's baked-in numeric 992 fallback for hosts
+    where neither group name exists). This replaces the prior
+    root-mode entrypoint GID reconciliation, which is now opt-in via
+    SMA_ENTRYPOINT_FIX_GIDS=1.
+    """
+    for svc in ("sma-intel", "sma-intel-pg"):
+      groups = compose["services"][svc].get("group_add") or []
+      assert "video" in groups, "%s missing 'video' group_add" % svc
+      assert "render" in groups, "%s missing 'render' group_add" % svc
+      assert "992" in groups, "%s missing numeric '992' render-GID fallback" % svc
 
   def test_software_profiles_exist(self, compose):
     assert "software" in compose["services"]["sma-software"]["profiles"]
