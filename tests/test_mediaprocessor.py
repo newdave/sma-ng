@@ -3485,7 +3485,8 @@ class TestQsvVppPassthroughInjection:
     mp.isDolbyVision = MagicMock(return_value=False)
     options = {"format": "mp4", "audio": [], "video": {"filter": None}}
     preopts, _ = mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], self._info(), {}, {}, options, [])
-    assert options["video"]["filter"] == "vpp_qsv"
+    # Source is 10-bit by default in _info(); passthrough must pin output format.
+    assert options["video"]["filter"] == "vpp_qsv=format=p010le"
     assert "-hwaccel_output_format" in preopts
 
   def test_misaligned_height_pads_vpp_qsv_to_mod16(self):
@@ -3501,7 +3502,7 @@ class TestQsvVppPassthroughInjection:
     info.video.video_height = 872
     options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p"}}
     mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
-    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=880"
+    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=880:format=nv12"
 
   def test_10bit_output_uses_mod32_alignment(self):
     # Gen11+ Intel QSV requires mod-32 alignment for 10-bit surfaces.
@@ -3514,7 +3515,7 @@ class TestQsvVppPassthroughInjection:
     info.video.video_height = 1080
     options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "p010le"}}
     mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
-    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1088"
+    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1088:format=p010le"
 
   def test_8bit_output_keeps_mod16_alignment(self):
     mp = self._mp()
@@ -3526,8 +3527,8 @@ class TestQsvVppPassthroughInjection:
     info.video.video_height = 1088
     options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p"}}
     mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
-    # 1088 is mod-16 — plain vpp_qsv is fine for 8-bit.
-    assert options["video"]["filter"] == "vpp_qsv"
+    # 1088 is mod-16 — only the format pin is needed.
+    assert options["video"]["filter"] == "vpp_qsv=format=nv12"
 
   def test_aligned_dims_uses_plain_vpp_qsv(self):
     mp = self._mp()
@@ -3538,7 +3539,24 @@ class TestQsvVppPassthroughInjection:
     info.video.video_height = 1088
     options = {"format": "mp4", "audio": [], "video": {"filter": None}}
     mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
-    assert options["video"]["filter"] == "vpp_qsv"
+    # Source is 10-bit in _info() — format pinned to p010le.
+    assert options["video"]["filter"] == "vpp_qsv=format=p010le"
+
+  def test_10bit_to_8bit_pipeline_pins_nv12_to_prevent_pink_frames(self):
+    # Regression: SDR coerce downgrades 10-bit source to 8-bit output but
+    # vpp_qsv was being emitted without an explicit format token. The
+    # encoder then received a P010 surface while expecting NV12, producing
+    # pink/magenta-tinted output frames. Always pin format=nv12.
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    info = self._info()
+    info.video.pix_fmt = "yuv420p10le"
+    info.video.video_width = 1920
+    info.video.video_height = 1080
+    options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p"}}
+    mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
+    assert "format=nv12" in options["video"]["filter"]
 
   def test_does_not_overwrite_existing_filter(self):
     mp = self._mp()

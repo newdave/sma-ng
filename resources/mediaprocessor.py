@@ -2989,30 +2989,49 @@ class MediaProcessor:
   def _qsv_passthrough_filter(self, info, output_pix_fmt=None):
     """Build the implicit ``vpp_qsv`` filter, padding to encoder alignment.
 
-    hevc_qsv (and h264_qsv) refuse to initialize when the input surface
-    dimensions are not multiples of 16; this is a hard runtime check in
-    libvpl, not a soft warning. When SMA chose to keep source dimensions
-    (no scale/crop) and the source happens to be e.g. 1920x872, we still
-    need a tiny resize so the encoder's alignment check passes. Use
-    ``vpp_qsv=w=W:h=H`` so the GPU surface is rounded up; the height
-    delta is small (≤15 lines) and stays within the GPU pipeline.
+    Three responsibilities baked into one filter to keep the QSV pipeline
+    on-GPU and visually correct:
 
-    For 10/12-bit output (P010, yuv420p10le, …) Gen11+ Intel QSV tightens
-    the alignment requirement from 16 to 32. Use the wider alignment in
-    that case so the pre-flight matches the encoder's expectation.
+    1. **Encoder alignment**: hevc_qsv refuses to initialize on dims that
+       aren't a multiple of 16 (or 32 for 10-bit on Gen11+ Intel). Pad
+       up to the next multiple via ``vpp_qsv=w=W:h=H``.
+    2. **Explicit output surface format**: vpp_qsv without an explicit
+       ``format=`` token can hand the encoder a P010 (10-bit) surface
+       when the encoder expects NV12 (8-bit) — the classic cause of
+       *pink/magenta chroma frames* in ffmpeg 7.x/8.x QSV transcodes.
+       Always pin the output format to match the chosen pix_fmt.
+    3. **Surface dim preservation**: when nothing else changes we still
+       want vpp_qsv in the chain to defeat ffmpeg 8.x's auto_scale
+       interposition between decoder and encoder.
     """
     width = getattr(info.video, "video_width", None)
     height = getattr(info.video, "video_height", None)
-    is_10bit = output_pix_fmt in self._QSV_10BIT_PIX_FMTS if output_pix_fmt else getattr(info.video, "pix_fmt", None) in self._QSV_10BIT_PIX_FMTS
+    src_pix_fmt = getattr(info.video, "pix_fmt", None)
+    is_10bit = output_pix_fmt in self._QSV_10BIT_PIX_FMTS if output_pix_fmt else src_pix_fmt in self._QSV_10BIT_PIX_FMTS
+    surface_format = "p010le" if is_10bit else "nv12"
     align = self._QSV_ENCODER_ALIGNMENT_10BIT if is_10bit else self._QSV_ENCODER_ALIGNMENT
-    if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0:
-      return "vpp_qsv"
-    if width % align == 0 and height % align == 0:
-      return "vpp_qsv"
-    aw = ((width + align - 1) // align) * align
-    ah = ((height + align - 1) // align) * align
-    self.log.info("Source %dx%d is not aligned to %d; QSV encoder requires alignment, padding via vpp_qsv to %dx%d [adaptive-qsv-alignment]." % (width, height, align, aw, ah))
-    return "vpp_qsv=w=%d:h=%d" % (aw, ah)
+
+    parts: list[str] = []
+    if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+      if width % align or height % align:
+        aw = ((width + align - 1) // align) * align
+        ah = ((height + align - 1) // align) * align
+        parts.append("w=%d" % aw)
+        parts.append("h=%d" % ah)
+        self.log.info("Source %dx%d is not aligned to %d; QSV encoder requires alignment, padding via vpp_qsv to %dx%d [adaptive-qsv-alignment]." % (width, height, align, aw, ah))
+
+    # Always pin format. Without this, vpp_qsv may emit P010 surfaces to
+    # an NV12-expecting encoder (or vice-versa) and the output frames
+    # come out tinted pink/magenta. This is the explicit-output-format
+    # workaround required since ffmpeg 7.x for QSV bit-depth transitions.
+    parts.append("format=%s" % surface_format)
+    # Log when source bit-depth differs from output bit-depth so the
+    # operator can correlate any colour artefact with the conversion.
+    src_is_10bit = src_pix_fmt in self._QSV_10BIT_PIX_FMTS
+    if src_is_10bit != is_10bit:
+      self.log.info("QSV pipeline converting %s -> %s via vpp_qsv format=%s [adaptive-qsv-format]." % (src_pix_fmt, output_pix_fmt or surface_format, surface_format))
+
+    return "vpp_qsv=" + ":".join(parts)
 
   # Check if video stream meets criteria to be considered HDR
   def isHDRInput(self, videostream):
