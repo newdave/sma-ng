@@ -7,6 +7,11 @@ SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 DEFAULT_PROCESS_CONFIG = os.path.join(SCRIPT_DIR, "config", "sma-ng.yml")
 DAEMON_SECTION = "daemon"
 LOGS_DIR = os.path.join(SCRIPT_DIR, "logs")
+# Canonical location for per-failure ffmpeg stderr sidecars. Overridable
+# via daemon.ffmpeg-stderr-dir in sma-ng.yml. Kept under LOGS_DIR so it
+# rotates/archives alongside the daemon log instead of contaminating
+# /transcodes with diagnostic files.
+FFMPEG_STDERR_DIR = os.path.join(LOGS_DIR, "ffmpeg-stderr")
 STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"

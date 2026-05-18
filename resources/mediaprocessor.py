@@ -3123,39 +3123,24 @@ class MediaProcessor:
     the complete ``cmd`` + ``output`` payload to a per-job sidecar so the
     operator has the full story without changing the line-length cap.
 
-    The sidecar lives next to the per-config rotating log file (we read
-    ``baseFilename`` off the logger's ``RotatingFileHandler``). On a
-    daemon job, the path is ``logs/stderr/<config>.job<id>.<ts>.stderr.log``.
-    Returns the absolute sidecar path on success or ``None`` if no log
-    directory could be resolved.
+    The path is fixed at ``<project_root>/logs/ffmpeg-stderr/`` (see
+    ``FFMPEG_STDERR_DIR`` in ``resources.daemon.constants``). The previous
+    implementation walked the logger handler chain looking for a
+    ``RotatingFileHandler`` and silently returned ``None`` when one
+    wasn't found — which is exactly the case under Docker, where the
+    daemon log goes to stdout. That left operators with no way to fetch
+    the full stderr on failure. The directory is created on demand.
+
+    Returns the absolute sidecar path on success or ``None`` if the
+    exception has no captured output.
     """
     if not getattr(e, "output", None):
       return None
     try:
-      import logging as _logging
+      from resources.daemon.constants import FFMPEG_STDERR_DIR
 
-      log_dir = None
-      log_basename = "ffmpeg"
-      logger = self.log
-      # Bound the parent-chain walk: real loggers terminate at the root
-      # (parent is None), but a Mock's `.parent` is always a fresh Mock.
-      # Stop after 32 hops or once we leave the real Logger hierarchy.
-      for _ in range(32):
-        if not isinstance(logger, _logging.Logger):
-          break
-        for handler in getattr(logger, "handlers", ()):
-          base = getattr(handler, "baseFilename", None)
-          if base:
-            log_dir = os.path.dirname(base)
-            log_basename = os.path.splitext(os.path.basename(base))[0]
-            break
-        if log_dir:
-          break
-        logger = getattr(logger, "parent", None)
-        if logger is None:
-          break
-      if not log_dir:
-        return None
+      stderr_dir = FFMPEG_STDERR_DIR
+      os.makedirs(stderr_dir, exist_ok=True)
 
       try:
         from resources.daemon.context import _job_id
@@ -3164,10 +3149,8 @@ class MediaProcessor:
       except Exception:
         job_id = "-"
 
-      stderr_dir = os.path.join(log_dir, "stderr")
-      os.makedirs(stderr_dir, exist_ok=True)
       ts = time.strftime("%Y%m%d-%H%M%S")
-      sidecar = os.path.join(stderr_dir, "%s.job%s.%s.stderr.log" % (log_basename, job_id, ts))
+      sidecar = os.path.join(stderr_dir, "ffmpeg.job%s.%s.stderr.log" % (job_id, ts))
       with open(sidecar, "w", encoding="utf-8") as f:
         f.write("# ffmpeg cmd:\n")
         f.write(getattr(e, "cmd", "") or "")
