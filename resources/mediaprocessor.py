@@ -1430,6 +1430,17 @@ class MediaProcessor:
       except Exception:
         self.log.exception("Error when trying to determine hardware acceleration support.")
 
+    # VFR-source preservation: when remuxing a Matroska variable-frame-rate
+    # source into mp4, ffmpeg's default vsync can produce non-monotonic DTS
+    # and the mux fails. Pass -fps_mode passthrough so original timestamps
+    # are preserved. We do this only for mp4 outputs, and only when the
+    # source looks like it might be VFR (unknown field order, or an unusual
+    # non-integer fps).
+    if options.get("format") == "mp4" and self._source_likely_vfr(info):
+      if "-fps_mode" not in postopts and "-vsync" not in postopts:
+        self.log.info("Source looks VFR; passing -fps_mode passthrough to preserve PTS/DTS [adaptive-vfr-passthrough].")
+        postopts.extend(["-fps_mode", "passthrough"])
+
     preopts.extend(self.settings.preopts)
     postopts.extend(self.settings.postopts)
 
@@ -2872,6 +2883,32 @@ class MediaProcessor:
   _HEVC_MAIN_MAX_B_FRAMES = 4
   _HEVC_MAIN_MAX_REF_FRAMES = 4
   _H264_BASELINE_MAX_B_FRAMES = 0
+
+  # Common CFR frame rates. Anything else is treated as "possibly VFR" so we
+  # opt into -fps_mode passthrough; the worst case is preserving timestamps
+  # for a CFR source, which is harmless.
+  _COMMON_CFR_RATES = (23.976, 24.0, 25.0, 29.97, 30.0, 48.0, 50.0, 59.94, 60.0)
+  _CFR_RATE_TOLERANCE = 0.05
+
+  def _source_likely_vfr(self, info):
+    """Heuristically decide whether the source video is variable-frame-rate.
+
+    True when field_order is "unknown" or the reported fps doesn't match
+    a common CFR rate within a small tolerance. Used to opt into
+    ``-fps_mode passthrough`` on mp4 remux to avoid non-monotonic DTS
+    failures.
+    """
+    try:
+      video = info.video
+    except AttributeError:
+      return False
+    field_order = getattr(video, "field_order", None)
+    fps = getattr(video, "fps", None)
+    if isinstance(field_order, str) and field_order.lower() == "unknown":
+      return True
+    if not isinstance(fps, (int, float)) or fps <= 0:
+      return False
+    return not any(abs(fps - cfr) < self._CFR_RATE_TOLERANCE for cfr in self._COMMON_CFR_RATES)
 
   def _cap_frames_to_profile(self, vcodec, vprofile, vb_frames, vref_frames):
     """Cap b-frames / ref-frames to the limits of the chosen encoder profile.
