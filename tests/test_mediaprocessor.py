@@ -3565,6 +3565,66 @@ class TestQsvVppPassthroughInjection:
     assert not options["video"]["filter"]
 
 
+class TestAdaptiveStrictExperimentalAudio:
+  """`_build_preopts_postopts` adds `-strict experimental` once for mp4
+  outputs that mux audio codecs ffmpeg considers experimental in MP4."""
+
+  def _mp(self):
+    mp = _make_mp()
+    mp.converter = MagicMock()
+    mp.settings.hwdevices = {}
+    mp.settings.preopts = []
+    mp.settings.postopts = []
+    mp.getCodecFromOptions = lambda a, info: a["codec"]
+    mp.isDolbyVision = MagicMock(return_value=False)
+    mp.setAcceleration = MagicMock(return_value=([], None))
+    return mp
+
+  def _info(self):
+    info = MagicMock()
+    info.video.codec = "h264"
+    info.video.framedata = {}
+    return info
+
+  def test_truehd_adds_strict_experimental(self):
+    mp = self._mp()
+    options = {"format": "mp4", "audio": [{"codec": "truehd"}], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
+    assert postopts.count("-strict") == 1
+    assert "experimental" in postopts
+
+  def test_opus_adds_strict_experimental(self):
+    mp = self._mp()
+    options = {"format": "mp4", "audio": [{"codec": "opus"}], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
+    assert "-strict" in postopts
+    assert "experimental" in postopts
+
+  def test_dts_adds_strict_experimental(self):
+    mp = self._mp()
+    options = {"format": "mp4", "audio": [{"codec": "dts"}], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
+    assert "-strict" in postopts
+
+  def test_strict_not_added_for_aac(self):
+    mp = self._mp()
+    options = {"format": "mp4", "audio": [{"codec": "aac"}], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
+    assert "-strict" not in postopts
+
+  def test_strict_added_only_once_for_multiple_experimental(self):
+    mp = self._mp()
+    options = {"format": "mp4", "audio": [{"codec": "truehd"}, {"codec": "opus"}, {"codec": "dts"}], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
+    assert postopts.count("-strict") == 1
+
+  def test_strict_not_added_for_mkv(self):
+    mp = self._mp()
+    options = {"format": "mkv", "audio": [{"codec": "opus"}], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
+    assert "-strict" not in postopts
+
+
 class TestCoerceSdrOutput:
   """`_coerce_sdr_output` enforces the SDR-in → SDR-out guarantee."""
 

@@ -1383,9 +1383,12 @@ class MediaProcessor:
     preopts = []
     postopts = ["-threads", str(self.settings.threads), "-metadata:g", "encoding_tool=SMA-NG"] + metadata_map
 
-    if options.get("format") in ["mp4"] and any(a for a in options["audio"] if self.getCodecFromOptions(a, info) == "truehd"):
-      self.log.debug("Adding experimental flag for mp4 with trueHD as a trueHD stream is being copied.")
-      postopts.extend(["-strict", "experimental"])
+    if options.get("format") in ["mp4"]:
+      strict_codecs = {"truehd", "opus", "dts"}
+      flagged_codecs = sorted({c for a in options["audio"] if (c := self.getCodecFromOptions(a, info)) in strict_codecs})
+      if flagged_codecs:
+        self.log.info("Adding -strict experimental for mp4 muxing of %s [adaptive-strict-experimental]." % ", ".join(flagged_codecs))
+        postopts.extend(["-strict", "experimental"])
 
     if self.isDolbyVision(info.video.framedata):
       postopts.extend(["-strict", "unofficial"])
