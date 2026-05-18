@@ -229,6 +229,38 @@ class WebhookHandler(BaseHTTPRequestHandler):
     except ValueError:
       self.send_json_response(400, {"error": "Invalid job ID"})
 
+  def _get_job_ffmpeg_stderr(self, path):
+    """Return the stored ffmpeg stderr blob for a job as plain text.
+
+    Path: /jobs/<id>/ffmpeg-stderr. 404 if the job doesn't exist or has
+    no stored stderr; the daemon worker ingests sidecars on failure, so
+    a successful or in-progress job will normally return 404.
+    """
+    parts = path.strip("/").split("/")
+    # Expect ["jobs", "<id>", "ffmpeg-stderr"]
+    if len(parts) != 3 or parts[0] != "jobs" or parts[2] != "ffmpeg-stderr":
+      self.send_json_response(404, {"error": "Not found"})
+      return
+    try:
+      job_id = int(parts[1])
+    except ValueError:
+      self.send_json_response(400, {"error": "Invalid job ID"})
+      return
+    job = self.server.job_db.get_job(job_id)
+    if not job:
+      self.send_json_response(404, {"error": "Job not found"})
+      return
+    stderr = job.get("ffmpeg_stderr")
+    if not stderr:
+      self.send_json_response(404, {"error": "No ffmpeg stderr stored for this job", "job_id": job_id})
+      return
+    body = stderr.encode("utf-8")
+    self.send_response(200)
+    self.send_header("Content-Type", "text/plain; charset=utf-8")
+    self.send_header("Content-Length", str(len(body)))
+    self.end_headers()
+    self.wfile.write(body)
+
   def _get_browse(self, query):
     """List directories and media files under a path, constrained to configured roots."""
     path = query.get("path", [""])[0].strip()

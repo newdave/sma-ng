@@ -504,6 +504,33 @@ class TestGetJob:
     assert "progress" not in body
 
 
+class TestGetJobFfmpegStderr:
+  def test_returns_plain_text_when_stored(self):
+    h = _make_handler()
+    h.server.job_db.get_job.return_value = {"id": 7, "ffmpeg_stderr": "ffmpeg: bad option"}
+    h._get_job_ffmpeg_stderr("/jobs/7/ffmpeg-stderr")
+    assert h._response_code == 200
+    assert h._response_headers["Content-Type"] == "text/plain; charset=utf-8"
+    assert _get_response_bytes(h) == b"ffmpeg: bad option"
+
+  def test_returns_404_when_job_missing(self):
+    h = _make_handler()
+    h.server.job_db.get_job.return_value = None
+    h._get_job_ffmpeg_stderr("/jobs/99/ffmpeg-stderr")
+    assert h._response_code == 404
+
+  def test_returns_404_when_stderr_empty(self):
+    h = _make_handler()
+    h.server.job_db.get_job.return_value = {"id": 7, "ffmpeg_stderr": None}
+    h._get_job_ffmpeg_stderr("/jobs/7/ffmpeg-stderr")
+    assert h._response_code == 404
+
+  def test_returns_400_for_invalid_id(self):
+    h = _make_handler()
+    h._get_job_ffmpeg_stderr("/jobs/notanint/ffmpeg-stderr")
+    assert h._response_code == 400
+
+
 # ---------------------------------------------------------------------------
 # TestGetConfigs
 # ---------------------------------------------------------------------------
