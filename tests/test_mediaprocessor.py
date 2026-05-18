@@ -3278,6 +3278,92 @@ class TestStripQsvInputPipelineFromPreopts:
     assert f(["-qsv_device", "/dev/dri/renderD128", "-fix_sub_duration"]) == ["-fix_sub_duration"]
 
 
+class TestResolveHdrColorTags:
+  """`_resolve_hdr_color_tags` only stamps HDR10 metadata when the source
+  was actually HDR. A 10-bit SDR source (yuv420p10le bt709) must not be
+  tagged as bt2020 / smpte2084 / bt2020nc just because the encoder output
+  is 10-bit, or players will tone-map SDR content as HDR."""
+
+  HDR_SETTINGS = {"primaries": ["bt2020"], "transfer": ["smpte2084"], "space": ["bt2020nc"]}
+
+  def test_sdr_input_sdr_output_returns_none(self):
+    from resources.mediaprocessor import _resolve_hdr_color_tags
+
+    assert _resolve_hdr_color_tags(False, False, self.HDR_SETTINGS) == (None, None, None)
+
+  def test_sdr_input_10bit_output_does_not_tag_as_hdr(self):
+    """Regression: 10-bit SDR source got bt2020/smpte2084 tags applied
+    because isHDROutput returns True for any 10-bit pix_fmt."""
+    from resources.mediaprocessor import _resolve_hdr_color_tags
+
+    assert _resolve_hdr_color_tags(False, True, self.HDR_SETTINGS) == (None, None, None)
+
+  def test_hdr_input_hdr_output_applies_configured_tags(self):
+    from resources.mediaprocessor import _resolve_hdr_color_tags
+
+    assert _resolve_hdr_color_tags(True, True, self.HDR_SETTINGS) == ("bt2020", "smpte2084", "bt2020nc")
+
+  def test_missing_hdr_lists_yield_none(self):
+    from resources.mediaprocessor import _resolve_hdr_color_tags
+
+    assert _resolve_hdr_color_tags(True, True, {"primaries": [], "transfer": [], "space": []}) == (None, None, None)
+
+
+class TestQsvVppPassthroughInjection:
+  """`_build_preopts_postopts` injects a `vpp_qsv` passthrough filter when
+  the QSV full-GPU pipeline (`-hwaccel_output_format qsv`) is active and no
+  explicit `-vf` is configured. Without it FFmpeg 8.x inserts auto_scale
+  between decoder and `hevc_qsv` encoder and filter negotiation fails."""
+
+  def _mp(self):
+    mp = _make_mp()
+    mp.converter = MagicMock()
+    mp.settings.hwdevices = {}
+    mp.settings.preopts = []
+    mp.settings.postopts = []
+    return mp
+
+  def _info(self):
+    info = MagicMock()
+    info.video.codec = "hevc"
+    info.video.pix_fmt = "yuv420p10le"
+    info.video.framedata = {}
+    return info
+
+  def test_injects_vpp_qsv_when_full_gpu_qsv_and_no_filter(self):
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    options = {"format": "mp4", "audio": [], "video": {"filter": None}}
+    preopts, _ = mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], self._info(), {}, {}, options, [])
+    assert options["video"]["filter"] == "vpp_qsv"
+    assert "-hwaccel_output_format" in preopts
+
+  def test_does_not_overwrite_existing_filter(self):
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    options = {"format": "mp4", "audio": [], "video": {"filter": "scale=1280:720"}}
+    mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], self._info(), {}, {}, options, [])
+    assert options["video"]["filter"] == "scale=1280:720"
+
+  def test_skipped_when_hwaccel_output_format_is_nv12(self):
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "nv12"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    options = {"format": "mp4", "audio": [], "video": {"filter": None}}
+    mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], self._info(), {}, {}, options, [])
+    assert not options["video"]["filter"]
+
+  def test_skipped_when_encoder_is_not_qsv(self):
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    options = {"format": "mp4", "audio": [], "video": {"filter": None}}
+    mp._build_preopts_postopts("hevc_vaapi", ["hevc_vaapi"], self._info(), {}, {}, options, [])
+    assert not options["video"]["filter"]
+
+
 class TestSwapQsvCodecToSw:
   """`_swap_qsv_codec_to_sw` swaps QSV encoders in the options dict to
   their software counterparts for the second-tier full-software fallback."""
