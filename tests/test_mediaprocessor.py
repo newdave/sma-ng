@@ -3651,6 +3651,45 @@ class TestAdaptiveVfrPassthrough:
     assert "-fps_mode" not in postopts
 
 
+class TestCapAudioSamplerate:
+  """`_cap_audio_samplerate` lowers the output samplerate when the chosen
+  encoder doesn't support the source rate (libfdk_aac / opus → 48 kHz)."""
+
+  def test_aac_resamples_96k_source(self):
+    mp = _make_mp()
+    assert mp._cap_audio_samplerate("aac", 96000, None) == 48000
+
+  def test_libfdk_aac_resamples_192k_source(self):
+    mp = _make_mp()
+    assert mp._cap_audio_samplerate("libfdk_aac", 192000, None) == 48000
+
+  def test_opus_resamples_88k_source(self):
+    mp = _make_mp()
+    assert mp._cap_audio_samplerate("opus", 88200, None) == 48000
+
+  def test_aac_passes_through_48k(self):
+    mp = _make_mp()
+    assert mp._cap_audio_samplerate("aac", 48000, None) is None
+
+  def test_aac_passes_through_44k(self):
+    mp = _make_mp()
+    assert mp._cap_audio_samplerate("aac", 44100, None) is None
+
+  def test_copy_codec_no_resample(self):
+    mp = _make_mp()
+    assert mp._cap_audio_samplerate("copy", 96000, None) is None
+
+  def test_unknown_codec_passthrough(self):
+    mp = _make_mp()
+    # eac3, flac etc handle high sample rates natively
+    assert mp._cap_audio_samplerate("eac3", 96000, None) is None
+
+  def test_caps_current_samplerate_too(self):
+    # If something already configured 96k for asample, still cap.
+    mp = _make_mp()
+    assert mp._cap_audio_samplerate("aac", 96000, 96000) == 48000
+
+
 class TestCapFramesToProfile:
   """`_cap_frames_to_profile` lowers operator-configured b/ref-frame counts
   to the limits of the chosen encoder profile so the encoder doesn't fail

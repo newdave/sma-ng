@@ -1940,6 +1940,12 @@ class MediaProcessor:
 
     absf = "aac_adtstoasc" if acodec == "copy" and a.codec == "aac" and self.settings.aac_adtstoasc else None
 
+    # Auto-resample for encoders with a native max sample rate. libfdk_aac
+    # and the AAC encoders top out at 48 kHz; opus is 48 kHz native. If
+    # source is higher (96 kHz / 192 kHz studio captures) the encoder
+    # refuses to initialise. Force a downsample so the transcode succeeds.
+    asample = self._cap_audio_samplerate(acodec, a.audio_samplerate, asample)
+
     self.log.info("Creating %s audio stream from source stream %d." % (acodec, a.index))
     audio_setting = {
       "map": a.index,
@@ -2899,6 +2905,33 @@ class MediaProcessor:
   _HEVC_MAIN_MAX_B_FRAMES = 4
   _HEVC_MAIN_MAX_REF_FRAMES = 4
   _H264_BASELINE_MAX_B_FRAMES = 0
+
+  # Encoders with a native max sample rate. Sources above the cap need to be
+  # downsampled on the encode pass or the encoder refuses to initialise.
+  _AUDIO_ENCODER_MAX_SAMPLERATE = {
+    "aac": 48000,
+    "libfdk_aac": 48000,
+    "opus": 48000,
+    "libopus": 48000,
+  }
+
+  def _cap_audio_samplerate(self, acodec, source_samplerate, current_samplerate):
+    """Cap the output audio samplerate to the encoder's native maximum.
+
+    Operates only when the encoder has a known cap and the *effective*
+    output rate (current_samplerate if set, else the source rate) is
+    above it. Returns the (possibly lowered) samplerate.
+    """
+    if acodec in (None, "copy"):
+      return current_samplerate
+    cap = self._AUDIO_ENCODER_MAX_SAMPLERATE.get(acodec)
+    if not cap:
+      return current_samplerate
+    effective = current_samplerate or source_samplerate
+    if not isinstance(effective, int) or effective <= cap:
+      return current_samplerate
+    self.log.info("Encoder %s caps samplerate at %d Hz; resampling from %d Hz [adaptive-audio-resample]." % (acodec, cap, effective))
+    return cap
 
   # Common CFR frame rates. Anything else is treated as "possibly VFR" so we
   # opt into -fps_mode passthrough; the worst case is preserving timestamps
