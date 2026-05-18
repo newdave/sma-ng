@@ -751,6 +751,97 @@ class TestPrintableFFMPEGCommand:
     assert "'title=5.1 Channel'" in result
 
 
+class TestEmitFailureDiagnosis:
+  """`_emit_failure_diagnosis` writes a structured JSON line on FFmpeg failure.
+
+  This event is the canonical place future readers (operators / AI assistants)
+  look to understand a failed transcode without parsing prose stderr.
+  """
+
+  def _make_processor(self):
+    with patch("resources.mediaprocessor.Converter"):
+      with patch("resources.readsettings.ReadSettings._validate_binaries"):
+        from resources.mediaprocessor import MediaProcessor
+
+        mp = MediaProcessor.__new__(MediaProcessor)
+        mp.settings = MagicMock()
+        mp.log = MagicMock()
+        return mp
+
+  def _options(self, **video_overrides):
+    video = {
+      "codec": "h265qsv",
+      "pix_fmt": "yuv420p10le",
+      "profile": "main",
+      "bitrate": 2500,
+      "maxrate": "2500k",
+      "bufsize": "5000k",
+      "filter": "vpp_qsv",
+      "level": 5.2,
+      "b_frames": 3,
+      "ref_frames": 3,
+    }
+    video.update(video_overrides)
+    return {
+      "source": ["/mnt/local/Media/sample.mkv"],
+      "format": "mp4",
+      "video": video,
+      "audio": [{"codec": "copy"}, {"codec": "eac3"}],
+    }
+
+  def test_emits_structured_alignment_diagnosis(self):
+    import json
+
+    from converter.ffmpeg import FFMpegConvertError
+
+    mp = self._make_processor()
+    e = FFMpegConvertError("Exited with code 1", "ffmpeg ...", "[hevc_qsv] width 1920 height 872 not aligned\n", pid=1)
+    mp._emit_failure_diagnosis(e, self._options(), "/logs/ffmpeg-stderr/job1.log")
+    # Most recent error log call is the JSON payload
+    args, _ = mp.log.error.call_args
+    payload = json.loads(args[0])
+    assert payload["event"] == "ffmpeg.failure_diagnosis"
+    assert payload["cause"] == "qsv_alignment"
+    assert payload["video"]["codec"] == "h265qsv"
+    assert payload["source"] == "/mnt/local/Media/sample.mkv"
+    assert payload["sidecar"] == "/logs/ffmpeg-stderr/job1.log"
+
+  def test_emits_unknown_when_stderr_does_not_match(self):
+    import json
+
+    from converter.ffmpeg import FFMpegConvertError
+
+    mp = self._make_processor()
+    e = FFMpegConvertError("Exited with code 1", "ffmpeg ...", "something completely unknown\n", pid=1)
+    mp._emit_failure_diagnosis(e, self._options(), None)
+    args, _ = mp.log.error.call_args
+    payload = json.loads(args[0])
+    assert payload["cause"] == "unknown"
+    assert payload["sidecar"] is None
+
+  def test_handles_missing_options(self):
+    from converter.ffmpeg import FFMpegConvertError
+
+    mp = self._make_processor()
+    e = FFMpegConvertError("boom", "cmd", "MFX_ERR_GPU_HANG\n", pid=1)
+    # Should not raise even with degenerate options
+    mp._emit_failure_diagnosis(e, {}, None)
+    mp._emit_failure_diagnosis(e, None, None)
+
+  def test_gpu_hang_logs_hypothesis(self):
+    import json
+
+    from converter.ffmpeg import FFMpegConvertError
+
+    mp = self._make_processor()
+    e = FFMpegConvertError("boom", "cmd", "MFX_ERR_GPU_HANG: GPU hang\n", pid=1)
+    mp._emit_failure_diagnosis(e, self._options(), None)
+    args, _ = mp.log.error.call_args
+    payload = json.loads(args[0])
+    assert payload["cause"] == "qsv_gpu_hang"
+    assert "bitrate" in payload["hypothesis"].lower() or "preset" in payload["hypothesis"].lower()
+
+
 class TestFFMpegStderrSidecar:
   """Tests for _write_ffmpeg_stderr_sidecar (full ffmpeg stderr capture on failure).
 
@@ -2795,6 +2886,35 @@ class TestBitrateProfileIntegration:
     assert options is not None
     assert options["video"]["maxrate"] is None
     assert options["video"]["bufsize"] is None
+
+  def test_uhd_does_not_clamp_to_hd_profile(self, tmp_yaml, make_media_info):
+    # Regression: a 4K source with no UHD profiles was getting clamped by
+    # the HD profile's 2500k cap and crashing hevc_qsv mid-stream.
+    hd_profiles = [{"source_kbps": 0, "target": 2000, "maxrate": 2500}]
+    mp = self._make_mp(tmp_yaml, vbitrate_profiles=[], vmaxbitrate=0)
+    mp.settings.vbitrate_profiles_hd = hd_profiles
+    mp.settings.vbitrate_profiles_uhd = []
+    info = make_media_info(video_codec="h264", video_bitrate=20000000, video_width=3840, video_height=2160, total_bitrate=20128000, audio_bitrate=128000)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    # UHD must not pick up the HD profile's 2500k maxrate.
+    assert options["video"]["maxrate"] != "2500k"
+
+  def test_sdr_10bit_source_does_not_produce_main10(self, tmp_yaml, make_media_info):
+    # Regression: SDR yuv420p10le sources copied profile=main10 through
+    # to the output and got labelled "FHD HDR" with no HDR metadata.
+    mp = self._make_mp(tmp_yaml, vbitrate_profiles=[], vmaxbitrate=0)
+    info = make_media_info(video_codec="h265", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
+    info.video.pix_fmt = "yuv420p10le"
+    info.video.profile = "main10"
+    info.video.framedata = {"color_space": "bt709", "color_primaries": "bt709", "color_transfer": "bt709"}
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    # SDR-coerce must downgrade the chosen pix_fmt and profile.
+    assert options["video"]["pix_fmt"] != "yuv420p10le"
+    assert options["video"]["profile"] not in ("main10", "main12", "high10", "high12")
 
 
 # ===========================================================================

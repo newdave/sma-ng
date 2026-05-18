@@ -90,3 +90,108 @@ def test_failure_class_values_are_stable() -> None:
   assert FfmpegFailureClass.FILTER_INIT_FAILED.value == "filter_init_failed"
   assert FfmpegFailureClass.RUNTIME_ERROR.value == "runtime_error"
   assert FfmpegFailureClass.OTHER.value == "other"
+
+
+# ---------------------------------------------------------------------------
+# diagnose_ffmpeg_failure — structured cause + hypothesis layer
+# ---------------------------------------------------------------------------
+
+from resources.processor.failures import (  # noqa: E402
+  FailureDiagnosis,
+  FfmpegFailureCause,
+  diagnose_ffmpeg_failure,
+)
+
+
+class TestDiagnoseFfmpegFailure:
+  def test_qsv_alignment_detected(self):
+    stderr = "[hevc_qsv @ 0x7f] width 1920 height 872 not aligned\nConversion failed!\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.QSV_ALIGNMENT
+    assert "aligned" in d.hypothesis.lower()
+    assert "not aligned" in d.signal_line
+
+  def test_gpu_hang_detected(self):
+    stderr = "Encoding frame 12345...\n[hevc_qsv] MFX_ERR_GPU_HANG: GPU hang\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.QSV_GPU_HANG
+    assert "GPU hang" in d.signal_line or "MFX_ERR_GPU_HANG" in d.signal_line
+
+  def test_autoscale_failure_detected(self):
+    stderr = "Impossible to convert between the formats supported by the filter 'auto_scale_0' and the filter 'Parsed_vpp_qsv_0'\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.QSV_AUTOSCALE_FAILURE
+
+  def test_hevc_ref_frame_limit_detected(self):
+    stderr = "More than 3 reference frames are not supported by this profile\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.HEVC_REF_FRAME_LIMIT
+
+  def test_disk_full_detected(self):
+    stderr = "av_interleaved_write_frame(): No space left on device\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.DISK_FULL
+
+  def test_permission_denied_detected(self):
+    stderr = "[mp4 @ 0x7f] Could not write header: Permission denied\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.PERMISSION_DENIED
+
+  def test_source_unavailable_detected(self):
+    stderr = "[matroska,webm @ 0x7f] Read error: Input/output error\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.SOURCE_UNAVAILABLE
+
+  def test_truncated_input_detected(self):
+    stderr = "Truncating packet of size 1234567 to 65536\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.INPUT_TRUNCATED
+
+  def test_unsupported_profile_detected(self):
+    stderr = "Encoder profile main10 not supported\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.QSV_UNSUPPORTED_PROFILE
+
+  def test_surface_pool_exhausted_detected(self):
+    stderr = "no free surfaces available in the pool\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.QSV_SURFACE_POOL_EXHAUSTED
+
+  def test_unknown_for_unmatched_stderr(self):
+    d = diagnose_ffmpeg_failure("ffmpeg version 8.1\nsome weird new error wording\n")
+    assert d.cause == FfmpegFailureCause.UNKNOWN
+
+  def test_empty_stderr(self):
+    d = diagnose_ffmpeg_failure("")
+    assert d.cause == FfmpegFailureCause.UNKNOWN
+    assert d.signal_line == ""
+
+  def test_none_stderr(self):
+    d = diagnose_ffmpeg_failure(None)
+    assert d.cause == FfmpegFailureCause.UNKNOWN
+
+  def test_bytes_stderr_decoded(self):
+    stderr = b"width 1920 height 872 not aligned\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.QSV_ALIGNMENT
+
+  def test_non_string_input_unknown(self):
+    assert diagnose_ffmpeg_failure(123).cause == FfmpegFailureCause.UNKNOWN  # type: ignore[arg-type]
+
+  def test_as_log_dict_round_trip(self):
+    d = FailureDiagnosis(
+      failure_class=FfmpegFailureClass.RUNTIME_ERROR,
+      cause=FfmpegFailureCause.QSV_GPU_HANG,
+      hypothesis="GPU hang",
+      signal_line="MFX_ERR_GPU_HANG",
+    )
+    out = d.as_log_dict()
+    assert out["failure_class"] == "runtime_error"
+    assert out["cause"] == "qsv_gpu_hang"
+    assert out["hypothesis"] == "GPU hang"
+    assert out["signal"] == "MFX_ERR_GPU_HANG"
+
+  def test_signal_line_extracts_full_line(self):
+    stderr = "ffmpeg version 8.1 boilerplate\n[hevc_qsv @ 0xff] width 1920 height 872 not aligned to 16\nmore noise after\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.signal_line == "[hevc_qsv @ 0xff] width 1920 height 872 not aligned to 16"

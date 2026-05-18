@@ -155,7 +155,7 @@ from resources.lang import getAlpha3TCode
 from resources.metadata import Metadata
 from resources.openvino_analyzer import OpenVINOAnalyzerBackend, OpenVINOAnalyzerError
 from resources.postprocess import PostProcessor
-from resources.processor.failures import TAIL_BYTES, AttemptRecord, FfmpegFailureClass, parse_ffmpeg_failure
+from resources.processor.failures import TAIL_BYTES, AttemptRecord, FfmpegFailureClass, diagnose_ffmpeg_failure, parse_ffmpeg_failure
 from resources.subtitles import SubtitleProcessor
 
 try:
@@ -3163,6 +3163,55 @@ class MediaProcessor:
       self.log.debug("Could not write ffmpeg stderr sidecar.", exc_info=True)
       return None
 
+  def _emit_failure_diagnosis(self, e, options, sidecar_path):
+    """Emit a single-line structured JSON diagnosis of an ffmpeg failure.
+
+    This is the log record future readers (operators, AI assistants)
+    should grep for when investigating a transcode crash. It carries the
+    coarse failure class, a specific cause, a human-readable hypothesis
+    about what likely went wrong, the stderr line that triggered the
+    classification, and a snapshot of the video/audio params SMA-NG
+    chose. With this in the log there is no need to ask "what does this
+    error mean?" — the hypothesis IS the answer, machine-readable.
+
+    Output schema (all keys stable; values may evolve):
+
+    ``{"event": "ffmpeg.failure_diagnosis", "failure_class": ...,
+    "cause": ..., "hypothesis": ..., "signal": "<stderr line>",
+    "video": {...}, "audio_codecs": [...], "format": ...,
+    "source": "<path>", "sidecar": "<path>"}``
+    """
+    try:
+      import json as _json
+
+      diagnosis = diagnose_ffmpeg_failure(getattr(e, "output", ""))
+      video_settings = (options or {}).get("video") or {}
+      audio_settings = (options or {}).get("audio") or []
+      source = (options or {}).get("source") or []
+      payload = {
+        "event": "ffmpeg.failure_diagnosis",
+        **diagnosis.as_log_dict(),
+        "video": {
+          "codec": video_settings.get("codec"),
+          "pix_fmt": video_settings.get("pix_fmt"),
+          "profile": video_settings.get("profile"),
+          "bitrate": video_settings.get("bitrate"),
+          "maxrate": video_settings.get("maxrate"),
+          "bufsize": video_settings.get("bufsize"),
+          "filter": video_settings.get("filter"),
+          "level": video_settings.get("level"),
+          "b_frames": video_settings.get("b_frames"),
+          "ref_frames": video_settings.get("ref_frames"),
+        },
+        "audio_codecs": [a.get("codec") for a in audio_settings if isinstance(a, dict)],
+        "format": (options or {}).get("format"),
+        "source": source[0] if source else None,
+        "sidecar": sidecar_path,
+      }
+      self.log.error(_json.dumps(payload, default=str))
+    except Exception:
+      self.log.debug("Could not emit ffmpeg failure diagnosis.", exc_info=True)
+
   # Generate copy/paste friendly FFMPEG command
   def printableFFMPEGCommand(self, cmds):
     """Format an FFmpeg command list as a copy/paste-safe shell string.
@@ -3295,6 +3344,7 @@ class MediaProcessor:
       sidecar_path = self._write_ffmpeg_stderr_sidecar(e)
       if sidecar_path:
         self.log.error("Full ffmpeg stderr written to %s" % sidecar_path)
+      self._emit_failure_diagnosis(e, options, sidecar_path)
       if outputfile is not None and os.path.isfile(outputfile):
         self.removeFile(outputfile)
         self.log.error("%s deleted." % outputfile)

@@ -150,4 +150,206 @@ def parse_ffmpeg_failure(stderr: str | bytes | None) -> FfmpegFailureClass:
   return FfmpegFailureClass.OTHER
 
 
-__all__ = ["TAIL_BYTES", "AttemptRecord", "FfmpegFailureClass", "parse_ffmpeg_failure"]
+class FfmpegFailureCause(str, Enum):
+  """Specific, actionable failure causes layered under :class:`FfmpegFailureClass`.
+
+  Where ``FfmpegFailureClass`` is the coarse bucket used for /health
+  aggregation, ``FfmpegFailureCause`` is the precise diagnosis the
+  pipeline can act on — alignment mismatch, VBV starvation, GPU hang,
+  pool exhaustion, etc. Add new causes freely; never rename existing
+  values (downstream dashboards consume them).
+
+  When future operators (or assistants reading these logs) need to
+  understand *why* a transcode died, this is the first field they should
+  read. The accompanying ``hypotheses`` strings in
+  :class:`FailureDiagnosis` explain what the operator can do about it.
+  """
+
+  # QSV / Intel-specific
+  QSV_ALIGNMENT = "qsv_alignment"
+  QSV_GPU_HANG = "qsv_gpu_hang"
+  QSV_DEVICE_BUSY = "qsv_device_busy"
+  QSV_SURFACE_POOL_EXHAUSTED = "qsv_surface_pool_exhausted"
+  QSV_UNSUPPORTED_PROFILE = "qsv_unsupported_profile"
+  QSV_UNSUPPORTED_PIX_FMT = "qsv_unsupported_pix_fmt"
+  QSV_AUTOSCALE_FAILURE = "qsv_autoscale_failure"
+  # Codec / encoder
+  HEVC_REF_FRAME_LIMIT = "hevc_ref_frame_limit"
+  VBV_UNDERRUN = "vbv_underrun"
+  BITRATE_TOO_LOW_FOR_RESOLUTION = "bitrate_too_low_for_resolution"
+  # Stream content
+  INPUT_TRUNCATED = "input_truncated"
+  AUDIO_CHANNEL_LAYOUT_MISMATCH = "audio_channel_layout_mismatch"
+  SUBTITLE_MUX_FAIL = "subtitle_mux_fail"
+  HDR_TAGGING_MISMATCH = "hdr_tagging_mismatch"
+  # Environment
+  DISK_FULL = "disk_full"
+  PERMISSION_DENIED = "permission_denied"
+  SOURCE_UNAVAILABLE = "source_unavailable"
+  # Catch-all
+  UNKNOWN = "unknown"
+
+
+# (regex, cause, hypothesis). The first matching entry wins. Patterns are
+# tuned against real ffmpeg 7.x/8.x stderr; if upstream wording changes
+# the worst case is the diagnosis falls back to UNKNOWN.
+_CAUSE_PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureCause, str], ...] = (
+  # ── QSV specifics ────────────────────────────────────────────────
+  (
+    re.compile(r"(?:width|height).*(?:not aligned|alignment)|MFX_ERR_INVALID_VIDEO_PARAM.*(?:width|height)", re.IGNORECASE),
+    FfmpegFailureCause.QSV_ALIGNMENT,
+    "Source dimensions are not aligned to the QSV encoder's required boundary (typically 16 for HEVC, 32 for 10-bit). Pad/scale to mod-16 via vpp_qsv=w=W:h=H.",
+  ),
+  (
+    re.compile(r"MFX_ERR_GPU_HANG|GPU hang|device lost|VAAPI ERROR.*HW_HANG", re.IGNORECASE),
+    FfmpegFailureCause.QSV_GPU_HANG,
+    "QSV/VAAPI reported a GPU hang. Common causes: bitrate cap too low for resolution+preset, b-frames/refs beyond hardware limit, driver bug. Try raising maxrate/bufsize or relaxing preset.",
+  ),
+  (
+    re.compile(r"MFX_WRN_DEVICE_BUSY|Device is busy", re.IGNORECASE),
+    FfmpegFailureCause.QSV_DEVICE_BUSY,
+    "QSV device returned busy. Reduce concurrent transcodes or lower extra_hw_frames.",
+  ),
+  (
+    re.compile(r"no free surfaces|MFX_ERR_MORE_(?:DATA|SURFACE).*surface|Surface pool", re.IGNORECASE),
+    FfmpegFailureCause.QSV_SURFACE_POOL_EXHAUSTED,
+    "QSV surface pool exhausted. Increase -extra_hw_frames, or reduce -async_depth / look_ahead_depth.",
+  ),
+  (
+    re.compile(r"profile.*(?:not supported|unsupported)|MFX_ERR_INVALID_VIDEO_PARAM.*profile", re.IGNORECASE),
+    FfmpegFailureCause.QSV_UNSUPPORTED_PROFILE,
+    "Encoder profile not supported (e.g. main10 on a hardware generation that only does main). Drop to main and 8-bit pix_fmt.",
+  ),
+  (
+    re.compile(r"Specified pixel format .* is invalid|unsupported pixel format", re.IGNORECASE),
+    FfmpegFailureCause.QSV_UNSUPPORTED_PIX_FMT,
+    "Pix-fmt not supported by the encoder. Check pix_fmts list and the encoder's max-depth.",
+  ),
+  (
+    re.compile(r"Impossible to convert between.*auto_scale", re.IGNORECASE),
+    FfmpegFailureCause.QSV_AUTOSCALE_FAILURE,
+    "ffmpeg 8.x inserted auto_scale between the decoder and QSV encoder; QSV surfaces can't pass through auto_scale. Inject vpp_qsv (already handled by _qsv_passthrough_filter).",
+  ),
+  # ── Codec / encoder ──────────────────────────────────────────────
+  (
+    re.compile(r"more (?:than \d+ )?reference frames|MaxNumRefFrame", re.IGNORECASE),
+    FfmpegFailureCause.HEVC_REF_FRAME_LIMIT,
+    "HEVC reference frame count exceeds hardware/profile limit. Lower -refs / ref_frames.",
+  ),
+  (
+    re.compile(r"VBV (?:underflow|underrun)|buffer underflow|rc_buffer_size", re.IGNORECASE),
+    FfmpegFailureCause.VBV_UNDERRUN,
+    "VBV buffer underflowed. The maxrate/bufsize/preset combination starves the encoder. Raise maxrate, increase bufsize to 2x maxrate, or relax preset.",
+  ),
+  # ── Stream content ───────────────────────────────────────────────
+  (
+    re.compile(r"Truncating packet|truncated.*input|premature end of file", re.IGNORECASE),
+    FfmpegFailureCause.INPUT_TRUNCATED,
+    "Source file ended unexpectedly. Likely the source mount went away mid-read or the file is incomplete. Verify the source path is still mounted and bytes match.",
+  ),
+  (
+    re.compile(r"channel layout|MFX_WRN_OUT_OF_RANGE.*channel", re.IGNORECASE),
+    FfmpegFailureCause.AUDIO_CHANNEL_LAYOUT_MISMATCH,
+    "Audio channel layout couldn't be negotiated. Force -ac N or pick a different audio codec.",
+  ),
+  (
+    re.compile(r"Subtitle encoding (?:not|currently) supported|subtitle\(s\) too large|mov_text", re.IGNORECASE),
+    FfmpegFailureCause.SUBTITLE_MUX_FAIL,
+    "Subtitle stream couldn't be muxed (size/codec). Drop the offending sub or convert to a different format.",
+  ),
+  (
+    re.compile(r"bt2020|smpte2084|HDR.*metadata|color_(?:primaries|transfer|space).*conflict", re.IGNORECASE),
+    FfmpegFailureCause.HDR_TAGGING_MISMATCH,
+    "HDR metadata conflict between input and output. Check that SDR coercion is enabled and the output isn't being tagged with bt2020/smpte2084 for a bt709 source.",
+  ),
+  # ── Environment ──────────────────────────────────────────────────
+  (
+    re.compile(r"No space left|ENOSPC", re.IGNORECASE),
+    FfmpegFailureCause.DISK_FULL,
+    "Output filesystem is full. Free space or change output_directory.",
+  ),
+  (
+    re.compile(r"Permission denied|EACCES", re.IGNORECASE),
+    FfmpegFailureCause.PERMISSION_DENIED,
+    "Filesystem permission denied. Check base.permissions.chmod (must be quoted octal like '0664') and the SMA process UID/GID against the mount.",
+  ),
+  (
+    re.compile(r"No such file or directory|ENOENT|Input/output error|Transport endpoint", re.IGNORECASE),
+    FfmpegFailureCause.SOURCE_UNAVAILABLE,
+    "Source vanished mid-transcode. Usually a mergerfs/rclone mount reconnect. Check that the source path still resolves.",
+  ),
+)
+
+
+@dataclass(frozen=True)
+class FailureDiagnosis:
+  """Structured diagnosis of an ffmpeg failure.
+
+  Designed to be JSON-serialised verbatim into the daemon log so future
+  readers (humans or AI assistants) can act on the diagnosis without
+  re-parsing prose stderr. Always populated — falls back to UNKNOWN
+  cause when no pattern matched.
+  """
+
+  failure_class: FfmpegFailureClass
+  cause: FfmpegFailureCause
+  hypothesis: str
+  signal_line: str  # the stderr line that matched, or "" if none
+
+  def as_log_dict(self) -> dict:
+    return {
+      "failure_class": self.failure_class.value,
+      "cause": self.cause.value,
+      "hypothesis": self.hypothesis,
+      "signal": self.signal_line,
+    }
+
+
+def diagnose_ffmpeg_failure(stderr: str | bytes | None) -> FailureDiagnosis:
+  """Return a structured diagnosis layered over :func:`parse_ffmpeg_failure`.
+
+  Walks ``_CAUSE_PATTERNS`` against the stderr tail and returns the first
+  matching cause + a human-readable hypothesis. Falls back to UNKNOWN
+  with an empty hypothesis when nothing matches — keep the diagnosis
+  visible in the log even when the cause can't be pinned, so the
+  operator at least sees the failure class and the signal line.
+  """
+  failure_class = parse_ffmpeg_failure(stderr)
+  if stderr is None:
+    return FailureDiagnosis(failure_class, FfmpegFailureCause.UNKNOWN, "", "")
+
+  if isinstance(stderr, bytes):
+    try:
+      text = stderr.decode("utf-8", errors="replace")
+    except Exception:
+      return FailureDiagnosis(failure_class, FfmpegFailureCause.UNKNOWN, "", "")
+  elif isinstance(stderr, str):
+    text = stderr
+  else:
+    return FailureDiagnosis(failure_class, FfmpegFailureCause.UNKNOWN, "", "")
+
+  if not text:
+    return FailureDiagnosis(failure_class, FfmpegFailureCause.UNKNOWN, "", "")
+
+  tail = text[-TAIL_BYTES:] if len(text) > TAIL_BYTES else text
+  for pattern, cause, hypothesis in _CAUSE_PATTERNS:
+    m = pattern.search(tail)
+    if m:
+      # Extract the whole stderr line containing the match so the log
+      # shows a useful excerpt, not just the matched fragment.
+      line_start = tail.rfind("\n", 0, m.start()) + 1
+      line_end = tail.find("\n", m.end())
+      line = tail[line_start : line_end if line_end != -1 else len(tail)].strip()
+      return FailureDiagnosis(failure_class, cause, hypothesis, line)
+  return FailureDiagnosis(failure_class, FfmpegFailureCause.UNKNOWN, "", "")
+
+
+__all__ = [
+  "TAIL_BYTES",
+  "AttemptRecord",
+  "FailureDiagnosis",
+  "FfmpegFailureCause",
+  "FfmpegFailureClass",
+  "diagnose_ffmpeg_failure",
+  "parse_ffmpeg_failure",
+]
