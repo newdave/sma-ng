@@ -52,6 +52,14 @@ def dispatch_post_job_action(handler, path):
     handler.send_json_response(404, {"error": "Not found"})
 
 
+def _dispatch_get_job(handler, path):
+  """Route GET /jobs/<id> vs GET /jobs/<id>/ffmpeg-stderr."""
+  if path.endswith("/ffmpeg-stderr"):
+    handler._get_job_ffmpeg_stderr(path)
+  else:
+    handler._get_job(path)
+
+
 def dispatch_post_finding_action(handler, path):
   if path.endswith("/ack"):
     handler._post_library_finding_action(path, "acked")
@@ -90,7 +98,7 @@ def _get_routes():
 def _get_prefix_routes():
   return [
     ("/docs/", lambda handler, path, query: handler._get_docs(path, query)),
-    ("/jobs/", lambda handler, path, query: handler._get_job(path)),
+    ("/jobs/", lambda handler, path, query: _dispatch_get_job(handler, path)),
     ("/logs/", lambda handler, path, query: handler._get_log_content(path, query)),
     ("/library/audit/", lambda handler, path, query: handler._get_library_audit_run(path)),
     ("/library/findings/", lambda handler, path, query: handler._get_library_finding(path)),
