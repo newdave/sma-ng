@@ -191,6 +191,56 @@ class TestDiagnoseFfmpegFailure:
     assert out["hypothesis"] == "GPU hang"
     assert out["signal"] == "MFX_ERR_GPU_HANG"
 
+  def test_nvenc_session_limit_detected(self):
+    stderr = "[h264_nvenc @ 0x55] OpenEncodeSessionEx failed: out of memory (10): (no details)\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.NVENC_SESSION_LIMIT
+
+  def test_vaapi_profile_lost_detected(self):
+    stderr = "[vaapi @ 0x55] VAAPI ERROR: VA_STATUS_ERROR_PROFILE_LOST\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.VAAPI_PROFILE_LOST
+
+  def test_av1_oom_detected(self):
+    stderr = "[libsvtav1 @ 0x55] SVT-AV1: out of memory allocating frame buffer\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.AV1_ENCODER_OOM
+
+  def test_strict_flag_required_detected(self):
+    stderr = "[opus @ 0x55] Codec is experimental but experimental codecs are not enabled, add -strict experimental flag to use it\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.STRICT_FLAG_REQUIRED
+
+  def test_pts_dts_nonmonotonic_detected(self):
+    stderr = "[mp4 @ 0x55] Application provided invalid, non monotonic dts to muxer in stream 0: 12345 < 12346\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.PTS_DTS_NONMONOTONIC
+
+  def test_bframe_copy_incompatible_detected(self):
+    stderr = "[mp4 @ 0x55] track 1: codec frame size is not set\nToo many B-frames in stream copy mode\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.BFRAME_COPY_INCOMPATIBLE
+
+  def test_audio_sample_rate_mismatch_detected(self):
+    stderr = "[libfdk_aac @ 0x55] Invalid sample rate 96000\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.AUDIO_SAMPLE_RATE_MISMATCH
+
+  def test_image_sub_to_text_detected(self):
+    stderr = "[mov_text @ 0x55] Subtitle hdmv_pgs_subtitle cannot be muxed as mov_text\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.IMAGE_SUBTITLE_TO_TEXT
+
+  def test_attachment_mux_fail_detected(self):
+    stderr = "[mp4 @ 0x55] Could not find tag for codec none in stream #5, codec attachment not supported by mp4\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.ATTACHMENT_MUX_FAIL
+
+  def test_dolby_vision_strict_detected(self):
+    stderr = "[mp4 @ 0x55] dvhe profile 7 not supported without -strict unofficial\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.DOLBY_VISION_REQUIRES_STRICT
+
   def test_signal_line_extracts_full_line(self):
     stderr = "ffmpeg version 8.1 boilerplate\n[hevc_qsv @ 0xff] width 1920 height 872 not aligned to 16\nmore noise after\n"
     d = diagnose_ffmpeg_failure(stderr)
