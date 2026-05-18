@@ -128,6 +128,22 @@ def _swap_qsv_codec_to_sw(options):
   return codec
 
 
+def _resolve_hdr_color_tags(hdr_input, hdr_output, hdr_settings):
+  """Return (primaries, transfer, space) tags to stamp on the output stream.
+
+  HDR color tags are only applied when the source was HDR. `isHDROutput`
+  alone is true for any 10-bit pix_fmt (e.g. yuv420p10le SDR), and tagging
+  bt709 SDR content as HDR10 (bt2020 / smpte2084 / bt2020nc) causes players
+  to tone-map it incorrectly.
+  """
+  if not (hdr_input and hdr_output):
+    return None, None, None
+  primaries = (hdr_settings.get("primaries") or [None])[0]
+  transfer = (hdr_settings.get("transfer") or [None])[0]
+  space = (hdr_settings.get("space") or [None])[0]
+  return primaries, transfer, space
+
+
 from collections.abc import Callable
 
 from converter import Converter, FFMpegConvertError
@@ -1365,6 +1381,14 @@ class MediaProcessor:
       try:
         opts, device = self.setAcceleration(info.video.codec, info.video.pix_fmt, codecs, pix_fmts)
         preopts.extend(opts)
+        # FFmpeg 8.x inserts an implicit auto_scale between the decoder and a
+        # QSV encoder when -hwaccel_output_format=qsv is in effect and no -vf
+        # is supplied. auto_scale cannot pass qsv surfaces through, so filter
+        # negotiation fails ("Impossible to convert between ... 'auto_scale_0'").
+        # Inject a vpp_qsv passthrough so the GPU pipeline stays intact.
+        if "qsv" in vcodec and "-hwaccel_output_format" in opts and opts[opts.index("-hwaccel_output_format") + 1] == "qsv" and not (options.get("video") or {}).get("filter"):
+          options["video"]["filter"] = "vpp_qsv"
+          self.log.debug("Injected vpp_qsv passthrough filter to preserve QSV GPU pipeline [hwaccel-output-format].")
         for k in self.settings.hwdevices:
           if k in vcodec:
             match = self.settings.hwdevices[k]
@@ -1597,19 +1621,7 @@ class MediaProcessor:
 
     hdrOutput = self.isHDROutput(vpix_fmt, bit_depth)
 
-    vcolor_primaries = None
-    vcolor_transfer = None
-    vcolor_space = None
-    if hdrOutput:
-      hdr_primaries = self.settings.hdr.get("primaries") or []
-      hdr_transfer = self.settings.hdr.get("transfer") or []
-      hdr_space = self.settings.hdr.get("space") or []
-      if hdr_primaries:
-        vcolor_primaries = hdr_primaries[0]
-      if hdr_transfer:
-        vcolor_transfer = hdr_transfer[0]
-      if hdr_space:
-        vcolor_space = hdr_space[0]
+    vcolor_primaries, vcolor_transfer, vcolor_space = _resolve_hdr_color_tags(hdrInput, hdrOutput, self.settings.hdr)
 
     vbsf = None
     if self.settings.removebvs and self.hasBitstreamVideoSubs(info.video.framedata):
