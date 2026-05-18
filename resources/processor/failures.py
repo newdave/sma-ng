@@ -173,15 +173,26 @@ class FfmpegFailureCause(str, Enum):
   QSV_UNSUPPORTED_PROFILE = "qsv_unsupported_profile"
   QSV_UNSUPPORTED_PIX_FMT = "qsv_unsupported_pix_fmt"
   QSV_AUTOSCALE_FAILURE = "qsv_autoscale_failure"
+  # NVENC / VAAPI / AMF
+  NVENC_SESSION_LIMIT = "nvenc_session_limit"
+  VAAPI_PROFILE_LOST = "vaapi_profile_lost"
+  AV1_ENCODER_OOM = "av1_encoder_oom"
   # Codec / encoder
   HEVC_REF_FRAME_LIMIT = "hevc_ref_frame_limit"
   VBV_UNDERRUN = "vbv_underrun"
   BITRATE_TOO_LOW_FOR_RESOLUTION = "bitrate_too_low_for_resolution"
+  STRICT_FLAG_REQUIRED = "strict_flag_required"
+  PTS_DTS_NONMONOTONIC = "pts_dts_nonmonotonic"
+  BFRAME_COPY_INCOMPATIBLE = "bframe_copy_incompatible"
   # Stream content
   INPUT_TRUNCATED = "input_truncated"
   AUDIO_CHANNEL_LAYOUT_MISMATCH = "audio_channel_layout_mismatch"
+  AUDIO_SAMPLE_RATE_MISMATCH = "audio_sample_rate_mismatch"
   SUBTITLE_MUX_FAIL = "subtitle_mux_fail"
+  IMAGE_SUBTITLE_TO_TEXT = "image_subtitle_to_text"
+  ATTACHMENT_MUX_FAIL = "attachment_mux_fail"
   HDR_TAGGING_MISMATCH = "hdr_tagging_mismatch"
+  DOLBY_VISION_REQUIRES_STRICT = "dolby_vision_requires_strict"
   # Environment
   DISK_FULL = "disk_full"
   PERMISSION_DENIED = "permission_denied"
@@ -216,6 +227,11 @@ _CAUSE_PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureCause, str], ...] = (
     "QSV surface pool exhausted. Increase -extra_hw_frames, or reduce -async_depth / look_ahead_depth.",
   ),
   (
+    re.compile(r"(?:Dolby Vision|dvhe|dvh1).*(?:strict|unofficial)|(?:dvhe|dvh1|Dolby Vision).*profile.*not.*supported", re.IGNORECASE),
+    FfmpegFailureCause.DOLBY_VISION_REQUIRES_STRICT,
+    "Dolby Vision profile requires -strict unofficial in mp4. SMA-NG handles this when isDolbyVision detects the side-data.",
+  ),
+  (
     re.compile(r"profile.*(?:not supported|unsupported)|MFX_ERR_INVALID_VIDEO_PARAM.*profile", re.IGNORECASE),
     FfmpegFailureCause.QSV_UNSUPPORTED_PROFILE,
     "Encoder profile not supported (e.g. main10 on a hardware generation that only does main). Drop to main and 8-bit pix_fmt.",
@@ -230,6 +246,22 @@ _CAUSE_PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureCause, str], ...] = (
     FfmpegFailureCause.QSV_AUTOSCALE_FAILURE,
     "ffmpeg 8.x inserted auto_scale between the decoder and QSV encoder; QSV surfaces can't pass through auto_scale. Inject vpp_qsv (already handled by _qsv_passthrough_filter).",
   ),
+  # ── NVENC / VAAPI / AMF ──────────────────────────────────────────
+  (
+    re.compile(r"OpenEncodeSessionEx failed|Out of memory.*nvenc|maximum.*\d+.*concurrent.*encoding session", re.IGNORECASE),
+    FfmpegFailureCause.NVENC_SESSION_LIMIT,
+    "NVENC concurrent encoding-session limit reached (consumer GPUs cap at 3). Reduce daemon worker count or use Linux unlocked-NVENC patch.",
+  ),
+  (
+    re.compile(r"VAAPI.*PROFILE_LOST|vaapi.*Invalid VA-API session", re.IGNORECASE),
+    FfmpegFailureCause.VAAPI_PROFILE_LOST,
+    "VAAPI session was invalidated, usually after a driver reload or suspend. Restart the daemon and retry.",
+  ),
+  (
+    re.compile(r"SVT-AV1.*(?:out of memory|allocation failed)|libaom.*failed to allocate", re.IGNORECASE),
+    FfmpegFailureCause.AV1_ENCODER_OOM,
+    "AV1 software encoder ran out of memory. Lower preset (higher number = faster + less RAM), or transcode 2160p sources to lower resolution first.",
+  ),
   # ── Codec / encoder ──────────────────────────────────────────────
   (
     re.compile(r"more (?:than \d+ )?reference frames|MaxNumRefFrame", re.IGNORECASE),
@@ -240,6 +272,21 @@ _CAUSE_PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureCause, str], ...] = (
     re.compile(r"VBV (?:underflow|underrun)|buffer underflow|rc_buffer_size", re.IGNORECASE),
     FfmpegFailureCause.VBV_UNDERRUN,
     "VBV buffer underflowed. The maxrate/bufsize/preset combination starves the encoder. Raise maxrate, increase bufsize to 2x maxrate, or relax preset.",
+  ),
+  (
+    re.compile(r"-strict.*experimental|requires -?strict.*(?:experimental|unofficial)|use.*-strict.*-?2|Use.*experimental.*flag", re.IGNORECASE),
+    FfmpegFailureCause.STRICT_FLAG_REQUIRED,
+    "Codec or container requires `-strict experimental` or `-strict unofficial`. SMA-NG adds this automatically for known cases (truehd/dts in mp4, Dolby Vision); if a new codec needs it the adaptive pre-flight should be extended.",
+  ),
+  (
+    re.compile(r"non[- ]monotonic.*(?:DTS|PTS)|DTS.*<.*PTS|PTS.*<.*DTS|invalid (?:DTS|PTS)", re.IGNORECASE),
+    FfmpegFailureCause.PTS_DTS_NONMONOTONIC,
+    "PTS/DTS ordering went non-monotonic — usually a VFR Matroska source remuxed as mp4. SMA-NG should pass -fps_mode passthrough (or -vsync 0) to preserve frame timestamps.",
+  ),
+  (
+    re.compile(r"too many B[- ]frames|B[- ]frames.*not (?:allowed|supported).*copy|cannot copy.*B[- ]frame", re.IGNORECASE),
+    FfmpegFailureCause.BFRAME_COPY_INCOMPATIBLE,
+    "Stream-copy chose a B-frame structure the target container can't take. Force a re-encode (vcodec != copy) for this stream.",
   ),
   # ── Stream content ───────────────────────────────────────────────
   (
@@ -253,9 +300,24 @@ _CAUSE_PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureCause, str], ...] = (
     "Audio channel layout couldn't be negotiated. Force -ac N or pick a different audio codec.",
   ),
   (
-    re.compile(r"Subtitle encoding (?:not|currently) supported|subtitle\(s\) too large|mov_text", re.IGNORECASE),
+    re.compile(r"Invalid sample rate|sample rate \d+ Hz not supported|libfdk_aac.*sample.*rate", re.IGNORECASE),
+    FfmpegFailureCause.AUDIO_SAMPLE_RATE_MISMATCH,
+    "Audio sample rate not supported by encoder (e.g. libfdk_aac wants 48 kHz). Auto-resample via -ar 48000 on the audio stream.",
+  ),
+  (
+    re.compile(r"image.*subtitle.*(?:cannot|not).*text|mov_text.*image|hdmv_pgs|dvd_subtitle.*mov_text", re.IGNORECASE),
+    FfmpegFailureCause.IMAGE_SUBTITLE_TO_TEXT,
+    "Tried to mux a bitmap subtitle (PGS / VOBSUB / DVB) into a text-subtitle codec (mov_text). Promote to external sidecar via OCR or drop the stream — direct conversion is impossible.",
+  ),
+  (
+    re.compile(r"Subtitle encoding (?:not|currently) supported|subtitle\(s\) too large|Could not write header.*subtitle", re.IGNORECASE),
     FfmpegFailureCause.SUBTITLE_MUX_FAIL,
     "Subtitle stream couldn't be muxed (size/codec). Drop the offending sub or convert to a different format.",
+  ),
+  (
+    re.compile(r"Attachment.*(?:not supported|cannot be muxed)|stream.*attachment.*invalid", re.IGNORECASE),
+    FfmpegFailureCause.ATTACHMENT_MUX_FAIL,
+    "Attachment stream (e.g. embedded font/cover art) can't be muxed into the target container. Skip with `-map -0:t`.",
   ),
   (
     re.compile(r"bt2020|smpte2084|HDR.*metadata|color_(?:primaries|transfer|space).*conflict", re.IGNORECASE),
