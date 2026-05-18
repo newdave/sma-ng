@@ -3565,6 +3565,56 @@ class TestQsvVppPassthroughInjection:
     assert not options["video"]["filter"]
 
 
+class TestAdaptiveVfrPassthrough:
+  """`_build_preopts_postopts` injects -fps_mode passthrough for mp4 outputs
+  whose source looks variable-frame-rate, preventing non-monotonic DTS at mux."""
+
+  def _mp(self):
+    mp = _make_mp()
+    mp.converter = MagicMock()
+    mp.settings.hwdevices = {}
+    mp.settings.preopts = []
+    mp.settings.postopts = []
+    mp.getCodecFromOptions = lambda a, info: a["codec"]
+    mp.isDolbyVision = MagicMock(return_value=False)
+    mp.setAcceleration = MagicMock(return_value=([], None))
+    return mp
+
+  def _info(self, *, field_order="progressive", fps=23.976):
+    info = MagicMock()
+    info.video.codec = "h264"
+    info.video.framedata = {}
+    info.video.field_order = field_order
+    info.video.fps = fps
+    return info
+
+  def test_unknown_field_order_triggers_passthrough(self):
+    mp = self._mp()
+    options = {"format": "mp4", "audio": [], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(field_order="unknown"), {}, {}, options, [])
+    assert "-fps_mode" in postopts
+    assert "passthrough" in postopts
+
+  def test_nonstandard_fps_triggers_passthrough(self):
+    mp = self._mp()
+    options = {"format": "mp4", "audio": [], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(fps=37.5), {}, {}, options, [])
+    assert "-fps_mode" in postopts
+
+  def test_standard_fps_no_passthrough(self):
+    mp = self._mp()
+    options = {"format": "mp4", "audio": [], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(fps=23.976), {}, {}, options, [])
+    assert "-fps_mode" not in postopts
+
+  def test_mkv_output_no_passthrough(self):
+    # mkv handles VFR natively, no need for the fps_mode workaround.
+    mp = self._mp()
+    options = {"format": "mkv", "audio": [], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(field_order="unknown"), {}, {}, options, [])
+    assert "-fps_mode" not in postopts
+
+
 class TestCapFramesToProfile:
   """`_cap_frames_to_profile` lowers operator-configured b/ref-frame counts
   to the limits of the chosen encoder profile so the encoder doesn't fail
