@@ -3565,6 +3565,52 @@ class TestQsvVppPassthroughInjection:
     assert not options["video"]["filter"]
 
 
+class TestCapFramesToProfile:
+  """`_cap_frames_to_profile` lowers operator-configured b/ref-frame counts
+  to the limits of the chosen encoder profile so the encoder doesn't fail
+  with "too many reference frames"."""
+
+  def test_hevc_main_caps_b_frames_at_4(self):
+    mp = _make_mp()
+    b, r = mp._cap_frames_to_profile("hevc_qsv", "main", 8, 2)
+    assert b == 4
+    assert r == 2
+
+  def test_hevc_main_caps_ref_frames_at_4(self):
+    mp = _make_mp()
+    b, r = mp._cap_frames_to_profile("hevc", "main", 2, 8)
+    assert b == 2
+    assert r == 4
+
+  def test_hevc_main10_not_capped(self):
+    mp = _make_mp()
+    b, r = mp._cap_frames_to_profile("hevc_qsv", "main10", 8, 8)
+    assert b == 8
+    assert r == 8
+
+  def test_h264_baseline_forbids_b_frames(self):
+    mp = _make_mp()
+    b, _ = mp._cap_frames_to_profile("h264", "baseline", 3, 4)
+    assert b == 0
+
+  def test_h264_main_keeps_b_frames(self):
+    mp = _make_mp()
+    b, _ = mp._cap_frames_to_profile("h264_qsv", "main", 3, 4)
+    assert b == 3
+
+  def test_copy_codec_passthrough(self):
+    mp = _make_mp()
+    b, r = mp._cap_frames_to_profile("copy", "main", 8, 8)
+    assert b == 8
+    assert r == 8
+
+  def test_sentinel_minus_one_preserved(self):
+    mp = _make_mp()
+    b, r = mp._cap_frames_to_profile("hevc_qsv", "main", -1, -1)
+    assert b == -1
+    assert r == -1
+
+
 class TestAdaptiveStrictExperimentalAudio:
   """`_build_preopts_postopts` adds `-strict experimental` once for mp4
   outputs that mux audio codecs ffmpeg considers experimental in MP4."""

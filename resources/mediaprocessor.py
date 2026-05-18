@@ -1670,6 +1670,13 @@ class MediaProcessor:
     self.log.debug("Video bit depth: %d." % bit_depth)
     self.log.debug("Video bsf: %s." % vbsf)
     self.log.debug("Video codec parameters %s." % vparams)
+
+    # Cap b-frames / ref-frames to profile limits so HEVC main / H.264 baseline
+    # don't crash the encoder with "too many reference frames" or "B-frames not
+    # allowed". Adaptive pre-flight per the golden rule: degrade settings
+    # rather than fail.
+    vb_frames, vref_frames = self._cap_frames_to_profile(vcodec, vprofile, vb_frames, vref_frames)
+
     self.log.info("Creating %s video stream from source stream %d." % (vcodec, info.video.index))
 
     video_settings = {
@@ -2857,6 +2864,41 @@ class MediaProcessor:
     if bit_depth > 8:
       bit_depth = 8
     return vpix_fmt, vprofile, vcodec, bit_depth, coerced
+
+  # Profile-specific limits on b-frames and reference frames. When the user
+  # configured a higher count we cap to the spec maximum and INFO-log it so
+  # the encoder doesn't fail with "too many reference frames" /
+  # "B-frames not allowed in baseline profile".
+  _HEVC_MAIN_MAX_B_FRAMES = 4
+  _HEVC_MAIN_MAX_REF_FRAMES = 4
+  _H264_BASELINE_MAX_B_FRAMES = 0
+
+  def _cap_frames_to_profile(self, vcodec, vprofile, vb_frames, vref_frames):
+    """Cap b-frames / ref-frames to the limits of the chosen encoder profile.
+
+    Operates only on positive (operator-configured) values; the sentinel
+    ``-1`` means "leave it to the encoder default" and is passed through.
+    """
+    if vcodec == "copy" or not vprofile:
+      return vb_frames, vref_frames
+
+    profile = vprofile.lower()
+    is_hevc = any(t in (vcodec or "") for t in ("hevc", "h265", "x265"))
+    is_h264 = any(t in (vcodec or "") for t in ("h264", "x264")) and not is_hevc
+
+    if is_hevc and profile == "main":
+      if isinstance(vb_frames, int) and vb_frames > self._HEVC_MAIN_MAX_B_FRAMES:
+        self.log.info("HEVC main profile caps b-frames at %d; lowering from %d [adaptive-profile-cap]." % (self._HEVC_MAIN_MAX_B_FRAMES, vb_frames))
+        vb_frames = self._HEVC_MAIN_MAX_B_FRAMES
+      if isinstance(vref_frames, int) and vref_frames > self._HEVC_MAIN_MAX_REF_FRAMES:
+        self.log.info("HEVC main profile caps ref-frames at %d; lowering from %d [adaptive-profile-cap]." % (self._HEVC_MAIN_MAX_REF_FRAMES, vref_frames))
+        vref_frames = self._HEVC_MAIN_MAX_REF_FRAMES
+    elif is_h264 and profile == "baseline":
+      if isinstance(vb_frames, int) and vb_frames > self._H264_BASELINE_MAX_B_FRAMES:
+        self.log.info("H.264 baseline profile forbids b-frames; lowering from %d to 0 [adaptive-profile-cap]." % vb_frames)
+        vb_frames = self._H264_BASELINE_MAX_B_FRAMES
+
+    return vb_frames, vref_frames
 
   def _qsv_passthrough_filter(self, info, output_pix_fmt=None):
     """Build the implicit ``vpp_qsv`` filter, padding to encoder alignment.
