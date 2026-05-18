@@ -87,8 +87,12 @@ def test_tmp_artifact_check(tmp_path):
   p2.write_bytes(b"")
   p3 = tmp_path / "fine.mp4"
   p3.write_bytes(b"")
-  assert tmp_artifact_check(str(p1))["reason"] == "leftover_artifact"
-  assert tmp_artifact_check(str(p2))["reason"] == "leftover_artifact"
+  r1 = tmp_artifact_check(str(p1))
+  assert r1 is not None
+  assert r1["reason"] == "leftover_artifact"
+  r2 = tmp_artifact_check(str(p2))
+  assert r2 is not None
+  assert r2["reason"] == "leftover_artifact"
   assert tmp_artifact_check(str(p3)) is None
 
 

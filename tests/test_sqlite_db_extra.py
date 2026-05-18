@@ -55,6 +55,7 @@ class TestSQLiteHelpers:
     db.add_job("/m/b.mkv", "/c2.yml")
     # Excluding c1 only leaves c2
     job = db.claim_next_job(worker_id=1, node_id="n", exclude_configs=["/c1.yml"])
+    assert job is not None
     assert job["config"] == "/c2.yml"
     # Exclude both -> no claimable job
     db.add_job("/m/c.mkv", "/c1.yml")
@@ -75,6 +76,7 @@ class TestSQLiteHelpers:
     db.add_job("/m/b.mkv", "/c2.yml")
     assert len(db.get_pending_jobs()) == 2
     nxt = db.get_next_pending_job()
+    assert nxt is not None
     assert nxt["path"] == "/m/a.mkv"
     assert db.pending_count() == 2
     assert db.pending_count_for_config("/c.yml") == 1
@@ -85,6 +87,7 @@ class TestSQLiteHelpers:
     jid = db.add_job("/m/a.mkv", "/c.yml")
     db.start_job(jid, worker_id=42)
     job = db.get_job(jid)
+    assert job is not None
     assert job["status"] == STATUS_RUNNING
     assert job["worker_id"] == 42
     db.close()
@@ -96,17 +99,22 @@ class TestSQLiteHelpers:
     db.fail_job(jid, "transient")
     # Should be pending again with retry_count incremented
     row = db.get_job(jid)
+    assert row is not None
     assert row["status"] == STATUS_PENDING
     assert row["retry_count"] == 1
     assert row["next_attempt_at"] is not None
     # Second failure -> still pending (retry 2)
     db.start_job(jid, 1)
     db.fail_job(jid, "transient2")
-    assert db.get_job(jid)["retry_count"] == 2
+    _row = db.get_job(jid)
+    assert _row is not None
+    assert _row["retry_count"] == 2
     # Third failure -> exhausted, FAILED
     db.start_job(jid, 1)
     db.fail_job(jid, "fatal")
-    assert db.get_job(jid)["status"] == STATUS_FAILED
+    _row = db.get_job(jid)
+    assert _row is not None
+    assert _row["status"] == STATUS_FAILED
     db.close()
 
   def test_get_jobs_filters(self, tmp_path):
@@ -177,11 +185,17 @@ class TestSQLiteHelpers:
     db.fail_job(j2, "boom")
     # config filter requeues only one
     assert db.requeue_failed_jobs(config="/c1.yml") == 1
-    assert db.get_job(j1)["status"] == STATUS_PENDING
-    assert db.get_job(j2)["status"] == STATUS_FAILED
+    _row = db.get_job(j1)
+    assert _row is not None
+    assert _row["status"] == STATUS_PENDING
+    _row = db.get_job(j2)
+    assert _row is not None
+    assert _row["status"] == STATUS_FAILED
     # global requeue grabs the rest
     assert db.requeue_failed_jobs() == 1
-    assert db.get_job(j2)["status"] == STATUS_PENDING
+    _row = db.get_job(j2)
+    assert _row is not None
+    assert _row["status"] == STATUS_PENDING
     # Nothing to do
     assert db.requeue_failed_jobs() == 0
     db.close()
@@ -190,13 +204,17 @@ class TestSQLiteHelpers:
     db = _db(tmp_path)
     jid = db.add_job("/m/a.mkv", "/c.yml")
     assert db.set_job_priority(jid, 5) is True
-    assert db.get_job(jid)["priority"] == 5
+    _row = db.get_job(jid)
+    assert _row is not None
+    assert _row["priority"] == 5
     # Priority only updates pending rows: claim and try again
     db.claim_next_job(worker_id=1, node_id="n")
     assert db.set_job_priority(jid, 9) is False
     # Cancel running job
     assert db.cancel_job(jid) is True
-    assert db.get_job(jid)["status"] == "cancelled"
+    _row = db.get_job(jid)
+    assert _row is not None
+    assert _row["status"] == "cancelled"
     # Already cancelled -> no-op
     assert db.cancel_job(jid) is False
     db.close()
@@ -266,7 +284,9 @@ class TestSQLiteHelpers:
       db.heartbeat("nodeB", "h", 1, _dt.datetime.now(_dt.UTC))
       db.mark_node_offline("nodeB", remove=False)
       # Job back to pending, node set offline
-      assert db.get_job(jid)["status"] == STATUS_PENDING
+      _row = db.get_job(jid)
+      assert _row is not None
+      assert _row["status"] == STATUS_PENDING
       with db._conn() as conn:
         row = conn.execute("SELECT status FROM cluster_nodes WHERE node_id = ?", ("nodeB",)).fetchone()
       assert row["status"] == "offline"
