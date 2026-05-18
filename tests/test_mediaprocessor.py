@@ -3565,6 +3565,42 @@ class TestQsvVppPassthroughInjection:
     assert not options["video"]["filter"]
 
 
+class TestAdaptiveStripAttachments:
+  """`_build_preopts_postopts` drops attachment streams for mp4 outputs."""
+
+  def _mp(self):
+    mp = _make_mp()
+    mp.converter = MagicMock()
+    mp.settings.hwdevices = {}
+    mp.settings.preopts = []
+    mp.settings.postopts = []
+    mp.getCodecFromOptions = lambda a, info: a["codec"]
+    mp.isDolbyVision = MagicMock(return_value=False)
+    mp.setAcceleration = MagicMock(return_value=([], None))
+    return mp
+
+  def _info(self):
+    info = MagicMock()
+    info.video.codec = "h264"
+    info.video.framedata = {}
+    return info
+
+  def test_mp4_strips_attachments(self):
+    mp = self._mp()
+    options = {"format": "mp4", "audio": [], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
+    # -map -0:t must appear adjacent in the postopts list.
+    pairs = list(zip(postopts, postopts[1:]))
+    assert ("-map", "-0:t") in pairs
+
+  def test_mkv_keeps_attachments(self):
+    mp = self._mp()
+    options = {"format": "mkv", "audio": [], "video": {"filter": None}}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
+    pairs = list(zip(postopts, postopts[1:]))
+    assert ("-map", "-0:t") not in pairs
+
+
 class TestAdaptiveVfrPassthrough:
   """`_build_preopts_postopts` injects -fps_mode passthrough for mp4 outputs
   whose source looks variable-frame-rate, preventing non-monotonic DTS at mux."""
