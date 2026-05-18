@@ -3280,6 +3280,17 @@ class MediaProcessor:
     the complete ``cmd`` + ``output`` payload to a per-job sidecar so the
     operator has the full story without changing the line-length cap.
 
+    The sidecar is a transient cross-process bridge: this MediaProcessor
+    runs in a subprocess spawned by the daemon worker, and the worker
+    cannot capture stderr that ffmpeg has already buffered into
+    ``FFMpegConvertError``. After the subprocess exits the daemon worker
+    finds the sidecar by job id (see
+    ``ConversionWorker._ingest_ffmpeg_stderr_sidecars``), copies its
+    contents into ``jobs.ffmpeg_stderr`` in the job database, and
+    deletes the sidecar. The on-disk file is therefore short-lived;
+    consumers should query the database (or
+    ``GET /jobs/<id>/ffmpeg-stderr``) rather than scrape this directory.
+
     The path is fixed at ``<project_root>/logs/ffmpeg-stderr/`` (see
     ``FFMPEG_STDERR_DIR`` in ``resources.daemon.constants``). The previous
     implementation walked the logger handler chain looking for a

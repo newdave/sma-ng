@@ -301,6 +301,77 @@ class TestConversionWorkerStop:
     assert worker.job_event.is_set()
 
 
+class TestIngestFfmpegStderrSidecars:
+  """Worker ingests ffmpeg stderr sidecars into the DB on job failure."""
+
+  def test_concatenates_sidecars_oldest_first_and_deletes(self, tmp_path, monkeypatch):
+    import os
+    import time
+
+    monkeypatch.setattr("resources.daemon.worker.FFMPEG_STDERR_DIR", str(tmp_path))
+    # Create two sidecars for job 42 with distinct mtimes
+    older = tmp_path / "ffmpeg.job42.20240101-000000.stderr.log"
+    older.write_text("OLDER OUTPUT")
+    os.utime(older, (1000, 1000))
+    newer = tmp_path / "ffmpeg.job42.20240101-000005.stderr.log"
+    newer.write_text("NEWER OUTPUT")
+    os.utime(newer, (2000, 2000))
+    # Unrelated job, must not be touched
+    other = tmp_path / "ffmpeg.job99.20240101-000000.stderr.log"
+    other.write_text("OTHER JOB")
+
+    db = mock.MagicMock()
+    worker = _make_worker(job_db=db)
+    worker._ingest_ffmpeg_stderr_sidecars(42)
+
+    db.update_job_ffmpeg_stderr.assert_called_once()
+    args, _ = db.update_job_ffmpeg_stderr.call_args
+    assert args[0] == 42
+    assert args[1].startswith("OLDER OUTPUT")
+    assert "NEWER OUTPUT" in args[1]
+    assert args[1].index("OLDER OUTPUT") < args[1].index("NEWER OUTPUT")
+    assert not older.exists()
+    assert not newer.exists()
+    assert other.exists()
+
+  def test_no_sidecars_is_noop(self, tmp_path, monkeypatch):
+    monkeypatch.setattr("resources.daemon.worker.FFMPEG_STDERR_DIR", str(tmp_path))
+    db = mock.MagicMock()
+    worker = _make_worker(job_db=db)
+    worker._ingest_ffmpeg_stderr_sidecars(7)
+    db.update_job_ffmpeg_stderr.assert_not_called()
+
+  def test_db_without_method_skips_silently(self, tmp_path, monkeypatch):
+    monkeypatch.setattr("resources.daemon.worker.FFMPEG_STDERR_DIR", str(tmp_path))
+    sidecar = tmp_path / "ffmpeg.job5.20240101-000000.stderr.log"
+    sidecar.write_text("payload")
+    db = mock.MagicMock(spec=[])  # no update_job_ffmpeg_stderr attribute
+    worker = _make_worker(job_db=db)
+    worker._ingest_ffmpeg_stderr_sidecars(5)
+    # Sidecar not deleted because DB cannot accept the ingest
+    assert sidecar.exists()
+
+  def test_failed_job_triggers_ingestion(self, tmp_path, monkeypatch):
+    monkeypatch.setattr("resources.daemon.worker.FFMPEG_STDERR_DIR", str(tmp_path))
+    sidecar = tmp_path / "ffmpeg.job8.20240101-000000.stderr.log"
+    sidecar.write_text("ffmpeg failure stderr")
+
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+    worker._run_conversion = mock.MagicMock(return_value=False)
+    worker.process_job({"id": 8, "path": str(media), "config": "/cfg.ini", "args": None})
+
+    db.fail_job.assert_called_once_with(8, "Conversion process failed")
+    db.update_job_ffmpeg_stderr.assert_called_once()
+    args, _ = db.update_job_ffmpeg_stderr.call_args
+    assert args[0] == 8
+    assert "ffmpeg failure stderr" in args[1]
+    assert not sidecar.exists()
+
+
 # ---------------------------------------------------------------------------
 # ConversionWorker._run_conversion_inner
 # ---------------------------------------------------------------------------

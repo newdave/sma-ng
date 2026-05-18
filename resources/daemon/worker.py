@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 import re as _re
@@ -6,7 +7,7 @@ import sys
 import threading
 import time
 
-from resources.daemon.constants import SCRIPT_DIR, resolve_node_id
+from resources.daemon.constants import FFMPEG_STDERR_DIR, SCRIPT_DIR, resolve_node_id
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.log import getLogger
 
@@ -188,14 +189,56 @@ class ConversionWorker(threading.Thread):
         current = self.job_db.get_job(job_id)
         if current and current.get("status") != "cancelled":
           self.job_db.fail_job(job_id, "Conversion process failed")
+          self._ingest_ffmpeg_stderr_sidecars(job_id)
     except Exception as e:
       self.log.exception("Job %d failed: %s" % (job_id, e))
       current = self.job_db.get_job(job_id)
       if current and current.get("status") != "cancelled":
         self.job_db.fail_job(job_id, str(e))
+        self._ingest_ffmpeg_stderr_sidecars(job_id)
     finally:
       self.config_lock_manager.release(config_file, job_id)
       self.current_job_id = None
+
+  def _ingest_ffmpeg_stderr_sidecars(self, job_id):
+    """Read every ffmpeg.job<id>.*.stderr.log sidecar for *job_id*, write the
+    concatenated payload (oldest first) into ``jobs.ffmpeg_stderr`` via the
+    job DB, then delete the sidecar files.
+
+    MediaProcessor writes one sidecar per failed tier of the fallback
+    ladder, so a single job can produce multiple files; we concatenate by
+    mtime so the operator reads them in the order they were emitted.
+    Failures here are swallowed and logged: the daemon should never crash
+    a worker because a diagnostic file is missing or unreadable.
+    """
+    if not hasattr(self.job_db, "update_job_ffmpeg_stderr"):
+      return
+    try:
+      pattern = os.path.join(FFMPEG_STDERR_DIR, "ffmpeg.job%s.*.stderr.log" % job_id)
+      paths = sorted(glob.glob(pattern), key=lambda p: os.path.getmtime(p))
+      if not paths:
+        return
+      chunks = []
+      for p in paths:
+        try:
+          with open(p, encoding="utf-8", errors="replace") as fh:
+            chunks.append(fh.read())
+        except OSError:
+          self.log.debug("Could not read ffmpeg stderr sidecar: %s" % p, exc_info=True)
+      payload = "\n".join(chunks)
+      if payload:
+        try:
+          self.job_db.update_job_ffmpeg_stderr(job_id, payload)
+        except Exception:
+          self.log.exception("Failed to persist ffmpeg stderr to DB for job %d" % job_id)
+          return
+      for p in paths:
+        try:
+          os.unlink(p)
+        except OSError:
+          self.log.debug("Could not delete ffmpeg stderr sidecar: %s" % p, exc_info=True)
+    except Exception:
+      self.log.exception("Failed to ingest ffmpeg stderr sidecars for job %d" % job_id)
 
   def _run_conversion(self, job_id, path, config_file, extra_args):
     """Run the actual conversion process. Returns True on success."""
