@@ -3339,6 +3339,31 @@ class TestQsvVppPassthroughInjection:
     assert options["video"]["filter"] == "vpp_qsv"
     assert "-hwaccel_output_format" in preopts
 
+  def test_misaligned_height_pads_vpp_qsv_to_mod16(self):
+    # Regression: hevc_qsv refuses 1920x872 with bare `vpp_qsv` because
+    # the encoder demands mod-16 alignment. We must request explicit
+    # rounded-up dims so the GPU surface is acceptable.
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    info = self._info()
+    info.video.video_width = 1920
+    info.video.video_height = 872
+    options = {"format": "mp4", "audio": [], "video": {"filter": None}}
+    mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
+    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=880"
+
+  def test_aligned_dims_uses_plain_vpp_qsv(self):
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    info = self._info()
+    info.video.video_width = 1920
+    info.video.video_height = 1088
+    options = {"format": "mp4", "audio": [], "video": {"filter": None}}
+    mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
+    assert options["video"]["filter"] == "vpp_qsv"
+
   def test_does_not_overwrite_existing_filter(self):
     mp = self._mp()
     mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
@@ -3362,6 +3387,43 @@ class TestQsvVppPassthroughInjection:
     options = {"format": "mp4", "audio": [], "video": {"filter": None}}
     mp._build_preopts_postopts("hevc_vaapi", ["hevc_vaapi"], self._info(), {}, {}, options, [])
     assert not options["video"]["filter"]
+
+
+class TestCoerceSdrOutput:
+  """`_coerce_sdr_output` enforces the SDR-in → SDR-out guarantee."""
+
+  PIX_FMTS = {"yuv420p": 8, "yuv420p10le": 10, "yuv422p10le": 10, "p010le": 10}
+
+  def test_10bit_sdr_pix_fmt_forced_to_8bit(self):
+    mp = _make_mp()
+    vpix, vprof, vcodec, depth, coerced = mp._coerce_sdr_output("yuv420p10le", "main", "copy", ["hevc_qsv"], 10, self.PIX_FMTS)
+    assert vpix == "yuv420p"
+    assert depth == 8
+    assert vcodec == "hevc_qsv"  # copy was promoted because we had to re-encode
+    assert coerced is True
+
+  def test_main10_profile_forced_to_main(self):
+    mp = _make_mp()
+    _, vprof, _, _, coerced = mp._coerce_sdr_output("yuv420p", "main10", "hevc_qsv", ["hevc_qsv"], 8, self.PIX_FMTS)
+    assert vprof == "main"
+    assert coerced is True
+
+  def test_high10_profile_forced_to_high(self):
+    mp = _make_mp()
+    _, vprof, _, _, _ = mp._coerce_sdr_output("yuv420p", "high10", "h264_qsv", ["h264_qsv"], 8, self.PIX_FMTS)
+    assert vprof == "high"
+
+  def test_already_8bit_sdr_is_untouched(self):
+    mp = _make_mp()
+    vpix, vprof, vcodec, depth, coerced = mp._coerce_sdr_output("yuv420p", "main", "copy", ["hevc_qsv"], 8, self.PIX_FMTS)
+    assert (vpix, vprof, vcodec, depth, coerced) == ("yuv420p", "main", "copy", 8, False)
+
+  def test_p010le_10bit_pix_fmt_also_downgraded(self):
+    mp = _make_mp()
+    vpix, _, _, depth, coerced = mp._coerce_sdr_output("p010le", "main", "hevc_qsv", ["hevc_qsv"], 10, self.PIX_FMTS)
+    assert vpix == "yuv420p"
+    assert depth == 8
+    assert coerced is True
 
 
 class TestSwapQsvCodecToSw:

@@ -1387,8 +1387,8 @@ class MediaProcessor:
         # negotiation fails ("Impossible to convert between ... 'auto_scale_0'").
         # Inject a vpp_qsv passthrough so the GPU pipeline stays intact.
         if "qsv" in vcodec and "-hwaccel_output_format" in opts and opts[opts.index("-hwaccel_output_format") + 1] == "qsv" and not (options.get("video") or {}).get("filter"):
-          options["video"]["filter"] = "vpp_qsv"
-          self.log.debug("Injected vpp_qsv passthrough filter to preserve QSV GPU pipeline [hwaccel-output-format].")
+          options["video"]["filter"] = self._qsv_passthrough_filter(info)
+          self.log.debug("Injected %s to preserve QSV GPU pipeline [hwaccel-output-format]." % options["video"]["filter"])
         for k in self.settings.hwdevices:
           if k in vcodec:
             match = self.settings.hwdevices[k]
@@ -1619,7 +1619,13 @@ class MediaProcessor:
       # range_filter = "scale=in_range=full:out_range=limited"
       # vfilter = vfilter + "," + range_filter if vfilter else range_filter
 
-    hdrOutput = self.isHDROutput(vpix_fmt, bit_depth)
+    # Hard guarantee: SDR sources must never produce 10-bit / HDR output.
+    if not hdrInput:
+      vpix_fmt, vprofile, vcodec, bit_depth, coerced = self._coerce_sdr_output(vpix_fmt, vprofile, vcodec, vcodecs, bit_depth, pix_fmts)
+      if coerced:
+        vdebug = vdebug + ".sdr-no-hdr"
+
+    hdrOutput = self.isHDROutput(vpix_fmt, bit_depth) and hdrInput
 
     vcolor_primaries, vcolor_transfer, vcolor_space = _resolve_hdr_color_tags(hdrInput, hdrOutput, self.settings.hdr)
 
@@ -2789,6 +2795,71 @@ class MediaProcessor:
     except Exception:
       return False
     return False
+
+  _QSV_ENCODER_ALIGNMENT = 16
+
+  _HDR_PIX_FMTS = (
+    "yuv420p10le",
+    "yuv422p10le",
+    "yuv444p10le",
+    "yuv420p12le",
+    "yuv422p12le",
+    "yuv444p12le",
+    "p010le",
+  )
+  _HDR_PROFILES = ("main10", "main12", "high10", "high12")
+
+  def _coerce_sdr_output(self, vpix_fmt, vprofile, vcodec, vcodecs, bit_depth, pix_fmts):
+    """Force SDR sources to produce 8-bit non-HDR output.
+
+    A 10-bit SDR source (yuv420p10le bt709) would otherwise copy its
+    pix_fmt and profile through to the output, producing a main10 MP4
+    labelled "FHD HDR" with no actual HDR colour metadata. Operators
+    asked for a hard guarantee that SDR-in always means SDR-out.
+
+    Returns the coerced ``(vpix_fmt, vprofile, vcodec, bit_depth,
+    coerced)`` tuple. ``coerced`` is True when any value changed and the
+    caller should bump its debug tag to include ``.sdr-no-hdr``.
+    """
+    coerced = False
+    if vpix_fmt in self._HDR_PIX_FMTS:
+      self.log.info("SDR source has 10/12-bit pix_fmt %s; forcing 8-bit yuv420p output [sdr-no-hdr]." % vpix_fmt)
+      vpix_fmt = "yuv420p"
+      coerced = True
+    if vprofile in self._HDR_PROFILES:
+      replacement = "main" if vprofile.startswith("main") else "high"
+      self.log.info("SDR source had profile %s; forcing %s profile [sdr-no-hdr]." % (vprofile, replacement))
+      vprofile = replacement
+      coerced = True
+    if coerced and vcodec == "copy" and vcodecs:
+      vcodec = vcodecs[0]
+    bit_depth = pix_fmts.get(vpix_fmt, bit_depth) or 8
+    if bit_depth > 8:
+      bit_depth = 8
+    return vpix_fmt, vprofile, vcodec, bit_depth, coerced
+
+  def _qsv_passthrough_filter(self, info):
+    """Build the implicit ``vpp_qsv`` filter, padding to encoder alignment.
+
+    hevc_qsv (and h264_qsv) refuse to initialize when the input surface
+    dimensions are not multiples of 16; this is a hard runtime check in
+    libvpl, not a soft warning. When SMA chose to keep source dimensions
+    (no scale/crop) and the source happens to be e.g. 1920x872, we still
+    need a tiny resize so the encoder's alignment check passes. Use
+    ``vpp_qsv=w=W:h=H`` so the GPU surface is rounded up; the height
+    delta is small (≤15 lines) and stays within the GPU pipeline.
+    """
+    width = getattr(info.video, "video_width", None)
+    height = getattr(info.video, "video_height", None)
+    align = self._QSV_ENCODER_ALIGNMENT
+    if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0:
+      return "vpp_qsv"
+    if width % align == 0 and height % align == 0:
+      return "vpp_qsv"
+    aw = ((width + align - 1) // align) * align
+    ah = ((height + align - 1) // align) * align
+    self.log.info("Source %dx%d is not aligned to %d; QSV encoder requires alignment, padding via vpp_qsv to %dx%d." % (width, height, align, aw, ah))
+    return "vpp_qsv=w=%d:h=%d" % (aw, ah)
 
   # Check if video stream meets criteria to be considered HDR
   def isHDRInput(self, videostream):
