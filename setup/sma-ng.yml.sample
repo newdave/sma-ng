@@ -128,6 +128,7 @@ base:
     bitrate-ratio: {}
     crf-profiles: ''
     crf-profiles-hd: ''
+    crf-profiles-uhd: ''
     preset: ''
     codec-parameters: ''
     dynamic-parameters: false

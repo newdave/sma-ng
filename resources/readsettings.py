@@ -442,6 +442,7 @@ class ReadSettings:
     self.vbitrateratio = self._as_dict(cfg.bitrate_ratio, value_modifier=float)
     self.vbitrate_profiles = self._parse_bitrate_profiles(cfg.crf_profiles)
     self.vbitrate_profiles_hd = self._parse_bitrate_profiles(cfg.crf_profiles_hd)
+    self.vbitrate_profiles_uhd = self._parse_bitrate_profiles(cfg.crf_profiles_uhd)
     self.preset = cfg.preset
     self.codec_params = cfg.codec_parameters
     self.dynamic_params = cfg.dynamic_parameters

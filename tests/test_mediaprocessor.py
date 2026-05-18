@@ -2706,6 +2706,38 @@ class TestMatchBitrateProfile:
     result = mp._match_bitrate_profile(1000)
     assert result == {"source_kbps": 1000, "target": 2000, "maxrate": 4000}
 
+  def test_uhd_uses_uhd_profiles_when_configured(self):
+    mp = _make_mp()
+    mp.settings.vbitrate_profiles = [{"source_kbps": 1000, "target": 2000, "maxrate": 2500}]
+    mp.settings.vbitrate_profiles_hd = [{"source_kbps": 5000, "target": 4000, "maxrate": 6000}]
+    mp.settings.vbitrate_profiles_uhd = [{"source_kbps": 15000, "target": 12000, "maxrate": 25000}]
+    result = mp._match_bitrate_profile(20000, uhd=True)
+    assert result == {"source_kbps": 15000, "target": 12000, "maxrate": 25000}
+
+  def test_uhd_without_uhd_profiles_returns_none(self):
+    # Regression: a 4K source with no uhd profiles was previously falling
+    # back to the HD profile list and getting clamped to a 1080p-tier
+    # bitrate cap (e.g. 2500 kbps), which starved hevc_qsv mid-stream and
+    # crashed the job. UHD with no UHD profiles must yield None so the
+    # general max-bitrate path applies instead.
+    mp = _make_mp()
+    mp.settings.vbitrate_profiles = [{"source_kbps": 1000, "target": 2000, "maxrate": 2500}]
+    mp.settings.vbitrate_profiles_hd = [{"source_kbps": 5000, "target": 4000, "maxrate": 6000}]
+    mp.settings.vbitrate_profiles_uhd = []
+    assert mp._match_bitrate_profile(20000, uhd=True) is None
+
+  def test_hd_no_longer_includes_2160p(self):
+    """`is_hd` now excludes 2160p so HD profile caps don't crush 4K."""
+    mp = _make_mp()
+    mp.settings.vbitrate_profiles = [{"source_kbps": 1000, "target": 2000, "maxrate": 2500}]
+    mp.settings.vbitrate_profiles_hd = [{"source_kbps": 5000, "target": 4000, "maxrate": 6000}]
+    mp.settings.vbitrate_profiles_uhd = []
+    # hd=False, uhd=True for 2160p — caller decides; test that the function
+    # honours uhd preference and does not silently consult hd profiles.
+    assert mp._match_bitrate_profile(20000, hd=False, uhd=True) is None
+    # hd=True for 1080p still works as before
+    assert mp._match_bitrate_profile(20000, hd=True) == {"source_kbps": 5000, "target": 4000, "maxrate": 6000}
+
 
 class TestBitrateProfileIntegration:
   """Test that a matching crf-profile forces transcode and sets vbitrate/maxrate/bufsize."""

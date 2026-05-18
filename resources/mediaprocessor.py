@@ -787,11 +787,19 @@ class MediaProcessor:
         return min_video_bitrate if min_video_bitrate and min_video_bitrate < (info.format.bitrate / 1000) else (info.format.bitrate / 1000)
     return min_video_bitrate
 
-  def _match_bitrate_profile(self, source_kbps, hd=False):
+  def _match_bitrate_profile(self, source_kbps, hd=False, uhd=False):
     """Return the best-matching crf-profile for *source_kbps*, or ``None``.
 
-    When *hd* is ``True`` and ``crf-profiles-hd`` is configured, the HD
-    profiles are used; otherwise falls back to ``crf-profiles``.
+    Resolution tier selects the profile list:
+
+    * ``uhd=True`` → ``crf-profiles-uhd`` only. When no UHD profiles are
+      configured the function returns ``None`` rather than silently
+      clamping a 2160p source to an HD bitrate cap — applying a 1080p
+      bitrate ceiling (e.g. 2500 kbps) to a 4K HEVC source can starve
+      QSV's encoder mid-stream and crash the job.
+    * ``hd=True`` → ``crf-profiles-hd`` if configured, otherwise
+      ``crf-profiles``.
+    * neither → ``crf-profiles``.
 
     Profiles are sorted by ``source_kbps`` ascending.  The matched profile
     is the one with the highest ``source_kbps`` threshold that is still
@@ -799,7 +807,12 @@ class MediaProcessor:
     floor the source meets or exceeds.  Returns ``None`` when no profiles
     are configured or the source bitrate is unknown/zero.
     """
-    profiles = (self.settings.vbitrate_profiles_hd or self.settings.vbitrate_profiles) if hd else self.settings.vbitrate_profiles
+    if uhd:
+      profiles = self.settings.vbitrate_profiles_uhd
+    elif hd:
+      profiles = self.settings.vbitrate_profiles_hd or self.settings.vbitrate_profiles
+    else:
+      profiles = self.settings.vbitrate_profiles
     if not profiles or not source_kbps:
       return None
     match = None
@@ -1515,8 +1528,10 @@ class MediaProcessor:
 
     vmaxrate = None
     vbufsize = None
-    is_hd = info.video.video_height is not None and info.video.video_height > 1080
-    profile_match = self._match_bitrate_profile(vbitrate_estimate, hd=is_hd)
+    vheight = info.video.video_height
+    is_uhd = vheight is not None and vheight > 1080
+    is_hd = vheight is not None and 720 <= vheight <= 1080
+    profile_match = self._match_bitrate_profile(vbitrate_estimate, hd=is_hd, uhd=is_uhd)
     if profile_match:
       vbitrate = profile_match["target"]
       vmaxrate = "%dk" % profile_match["maxrate"]
