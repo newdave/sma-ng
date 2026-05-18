@@ -986,7 +986,7 @@ class TestProbeHwCapabilities:
     assert any("snapshot_unreadable" in e for e in snap["errors"])
 
 
-class TestFallbackCounters:
+class TestFallbackCountersDup:
   def test_increment_and_summary(self, tmp_path):
     server = _bare_server_with_probe(tmp_path)
     server._fallback_counters_lock = threading.Lock()

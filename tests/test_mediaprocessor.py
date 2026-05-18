@@ -4647,13 +4647,13 @@ class TestSubtitlePassesFilter:
     s = self._make_stream("eng", disposition={"default": False, "forced": False, "comment": False, "hearing_impaired": True})
     assert mp._subtitle_passes_filter(s, ["eng"], [], [], prefer_non_hi_subs=False) is True
 
-  def test_hearing_impaired_filtered_when_multiple_subs(self):
+  def test_hearing_impaired_filtered_when_multiple_subs_dup(self):
     mp = self._make_mp()
     mp.settings.ignored_subtitle_dispositions = ["comment", "hearing_impaired"]
     s = self._make_stream("eng", disposition={"default": False, "forced": False, "comment": False, "hearing_impaired": True})
     assert mp._subtitle_passes_filter(s, ["eng"], [], [], prefer_non_hi_subs=True) is False
 
-  def test_hearing_impaired_kept_when_single_sub(self):
+  def test_hearing_impaired_kept_when_single_sub_dup(self):
     mp = self._make_mp()
     mp.settings.ignored_subtitle_dispositions = ["comment", "hearing_impaired"]
     s = self._make_stream("eng", disposition={"default": False, "forced": False, "comment": False, "hearing_impaired": True})
@@ -5528,7 +5528,7 @@ class TestWarnUnsupportedEncoders:
 # ===========================================================================
 
 
-def _build_mp_with_real_settings(tmp_yaml_factory):
+def _build_mp_with_real_settings_dup(tmp_yaml_factory):
   """Build a MediaProcessor with real ReadSettings and a mocked Converter."""
   with patch("resources.readsettings.ReadSettings._validate_binaries"):
     from resources.mediaprocessor import MediaProcessor
@@ -5563,7 +5563,7 @@ def _build_mp_with_real_settings(tmp_yaml_factory):
 # ---------------------------------------------------------------------------
 
 
-class TestFullProcess:
+class TestFullProcessDup:
   """Tests for the fullprocess() orchestration method."""
 
   def _make_mp(self):
@@ -5755,7 +5755,7 @@ class TestFullProcess:
 # ---------------------------------------------------------------------------
 
 
-class TestPost:
+class TestPostDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.postprocess = False
@@ -5798,7 +5798,7 @@ class TestPost:
 # ---------------------------------------------------------------------------
 
 
-class TestProcess:
+class TestProcessDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.delete = False
@@ -5888,7 +5888,7 @@ class TestProcess:
 # ---------------------------------------------------------------------------
 
 
-class TestRunFfmpeg:
+class TestRunFfmpegDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.embedsubs = True
@@ -5924,7 +5924,7 @@ class TestRunFfmpeg:
     assert outputfile is None
 
 
-class TestStripHwDecoderFromPreopts:
+class TestStripHwDecoderFromPreoptsDup:
   """`_strip_hw_decoder_from_preopts` removes the input-side hardware
   decoder so the conversion can be retried with software decode when
   the GPU's QSV decoder fails to init at runtime (e.g. av1_qsv on
@@ -5958,7 +5958,7 @@ class TestStripHwDecoderFromPreopts:
     assert f(["-vcodec", "av1_qsv", "-vcodec", "h264_qsv"]) == ["-vcodec", "h264_qsv"]
 
 
-class TestStripQsvInputPipelineFromPreopts:
+class TestStripQsvInputPipelineFromPreoptsDup:
   """`_strip_qsv_input_pipeline_from_preopts` removes the QSV input
   pipeline (-hwaccel, -hwaccel_output_format, -extra_hw_frames,
   -init_hw_device, etc.) for the second-tier full-software fallback."""
@@ -6033,7 +6033,7 @@ class TestStripQsvInputPipelineFromPreopts:
     assert f(["-qsv_device", "/dev/dri/renderD128", "-fix_sub_duration"]) == ["-fix_sub_duration"]
 
 
-class TestSwapQsvCodecToSw:
+class TestSwapQsvCodecToSwDup:
   """`_swap_qsv_codec_to_sw` swaps QSV encoders in the options dict to
   their software counterparts for the second-tier full-software fallback."""
 
@@ -6086,7 +6086,7 @@ class TestSwapQsvCodecToSw:
 # ---------------------------------------------------------------------------
 
 
-class TestCleanupInput:
+class TestCleanupInputDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.recycle_bin = None
@@ -6164,7 +6164,7 @@ class TestCleanupInput:
 # ---------------------------------------------------------------------------
 
 
-class TestConvert:
+class TestConvertDup:
   def _make_mp(self, tmp_path):
     mp = _make_mp()
     mp.settings.output_extension = "mp4"
@@ -6400,7 +6400,7 @@ class TestConvert:
 # ---------------------------------------------------------------------------
 
 
-class TestDisplayProgressBar:
+class TestDisplayProgressBarDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.detailedprogress = False
@@ -6454,7 +6454,7 @@ class TestDisplayProgressBar:
 # ---------------------------------------------------------------------------
 
 
-class TestQTFS:
+class TestQTFSDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.relocate_moov = True
@@ -6514,7 +6514,7 @@ class TestQTFS:
 # ---------------------------------------------------------------------------
 
 
-class TestGetSubOutputFile:
+class TestGetSubOutputFileDup:
   def _make_mp(self, tmp_path):
     mp = _make_mp()
     mp.settings.output_dir = None
@@ -6570,7 +6570,7 @@ class TestGetSubOutputFile:
 # ---------------------------------------------------------------------------
 
 
-class TestGenerateRipSubOpts:
+class TestGenerateRipSubOptsDup:
   def _make_mp(self):
     mp = _make_mp()
     return mp
@@ -6591,7 +6591,7 @@ class TestGenerateRipSubOpts:
 # ---------------------------------------------------------------------------
 
 
-class TestGenerateSourceDict:
+class TestGenerateSourceDictDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.titleDispositionCheck = MagicMock()
@@ -6619,7 +6619,7 @@ class TestGenerateSourceDict:
 # ---------------------------------------------------------------------------
 
 
-class TestEstimateVideoBitrateException:
+class TestEstimateVideoBitrateExceptionDup:
   def _make_mp(self):
     mp = _make_mp()
     return mp
@@ -6655,7 +6655,7 @@ class TestEstimateVideoBitrateException:
 # ---------------------------------------------------------------------------
 
 
-class TestRestoreFromOutput:
+class TestRestoreFromOutputDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.moveto = None
@@ -6692,7 +6692,7 @@ class TestRestoreFromOutput:
 # ---------------------------------------------------------------------------
 
 
-class TestSelectSubtitleCodec:
+class TestSelectSubtitleCodecDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.embedsubs = True
@@ -6762,7 +6762,7 @@ class TestSelectSubtitleCodec:
 # ---------------------------------------------------------------------------
 
 
-class TestSubtitlePassesFilter:
+class TestSubtitlePassesFilterDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.ignored_subtitle_dispositions = ["comment"]
@@ -6804,7 +6804,7 @@ class TestSubtitlePassesFilter:
 # ---------------------------------------------------------------------------
 
 
-class TestProcessAudioStream:
+class TestProcessAudioStreamDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.acodec = ["aac"]
@@ -6984,7 +6984,7 @@ class TestProcessAudioStream:
 # ---------------------------------------------------------------------------
 
 
-class TestProcessSubtitleStream:
+class TestProcessSubtitleStreamDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.embedsubs = True
@@ -7081,7 +7081,7 @@ class TestProcessSubtitleStream:
 # ---------------------------------------------------------------------------
 
 
-class TestProcessExternalSubStream:
+class TestProcessExternalSubStreamDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.deletesubs = set()
@@ -7162,7 +7162,7 @@ class TestProcessExternalSubStream:
 # ---------------------------------------------------------------------------
 
 
-class TestCleanExternalSub:
+class TestCleanExternalSubDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.cleanit = False
@@ -7198,7 +7198,7 @@ class TestCleanExternalSub:
 # ---------------------------------------------------------------------------
 
 
-class TestVideoStreamTitleExtended:
+class TestVideoStreamTitleExtendedDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.keep_titles = False
@@ -7252,7 +7252,7 @@ class TestVideoStreamTitleExtended:
 # ---------------------------------------------------------------------------
 
 
-class TestAudioStreamTitleExtended:
+class TestAudioStreamTitleExtendedDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.keep_titles = False
@@ -7292,7 +7292,7 @@ class TestAudioStreamTitleExtended:
 # ---------------------------------------------------------------------------
 
 
-class TestNormalizeFramedata:
+class TestNormalizeFramedataDup:
   def _make_mp(self):
     return _make_mp()
 
@@ -7340,7 +7340,7 @@ class TestNormalizeFramedata:
 # ---------------------------------------------------------------------------
 
 
-class TestIsValidSourceExtended:
+class TestIsValidSourceExtendedDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.ignored_extensions = ["nfo"]
@@ -7395,7 +7395,7 @@ class TestIsValidSourceExtended:
 # ---------------------------------------------------------------------------
 
 
-class TestCanBypassConvertExtended:
+class TestCanBypassConvertExtendedDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.output_extension = "mp4"
@@ -7438,7 +7438,7 @@ class TestCanBypassConvertExtended:
 # ---------------------------------------------------------------------------
 
 
-class TestInitHwDeviceOpts:
+class TestInitHwDeviceOptsDup:
   def test_qsv_uses_qsv_device_flag(self):
     from resources.mediaprocessor import MediaProcessor
 
@@ -7458,7 +7458,7 @@ class TestInitHwDeviceOpts:
 # ---------------------------------------------------------------------------
 
 
-class TestPurgeDuplicateStreams:
+class TestPurgeDuplicateStreamsDup:
   def _make_mp(self):
     mp = _make_mp()
     return mp
@@ -7506,7 +7506,7 @@ class TestPurgeDuplicateStreams:
 # ---------------------------------------------------------------------------
 
 
-class TestSetAccelerationExtended:
+class TestSetAccelerationExtendedDup:
   def test_qsv_device_uses_qsv_flag(self):
     mp = _make_mp()
     mp.converter = MagicMock()
@@ -7544,7 +7544,7 @@ class TestSetAccelerationExtended:
 # ---------------------------------------------------------------------------
 
 
-class TestOutputDirHasFreeSpaceExtended:
+class TestOutputDirHasFreeSpaceExtendedDup:
   def _make_mp(self):
     mp = _make_mp()
     return mp
@@ -7577,7 +7577,7 @@ class TestOutputDirHasFreeSpaceExtended:
 # ---------------------------------------------------------------------------
 
 
-class TestReplicateExtended:
+class TestReplicateExtendedDup:
   def _make_mp(self):
     mp = _make_mp()
     mp.settings.copyto = []
@@ -7625,7 +7625,7 @@ class TestReplicateExtended:
 # ---------------------------------------------------------------------------
 
 
-class TestWarnUnsupportedEncoders:
+class TestWarnUnsupportedEncodersDup:
   def _make_mp(self):
     mp = _make_mp()
     return mp
