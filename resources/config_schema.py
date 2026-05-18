@@ -178,6 +178,7 @@ class VideoSettings(_Base):
   bitrate_ratio: dict[str, float] = Field(default_factory=dict)
   crf_profiles: str = ""
   crf_profiles_hd: str = ""
+  crf_profiles_uhd: str = ""
   preset: str = ""
   codec_parameters: str = ""
   dynamic_parameters: bool = False
