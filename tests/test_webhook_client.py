@@ -152,6 +152,7 @@ class TestGetJobStatus:
     mock_requests.get.return_value = mock_response
 
     result = get_job_status(42)
+    assert result is not None
     assert result["status"] == "running"
 
   @patch("resources.webhook_client.requests")
@@ -181,6 +182,7 @@ class TestWaitForCompletion:
     mock_status.return_value = {"id": 1, "status": "completed"}
 
     result = wait_for_completion(1, poll_interval=1)
+    assert result is not None
     assert result["status"] == "completed"
 
   @patch("resources.webhook_client.get_job_status")
@@ -194,6 +196,7 @@ class TestWaitForCompletion:
     ]
 
     result = wait_for_completion(1, poll_interval=1)
+    assert result is not None
     assert result["status"] == "completed"
     assert mock_status.call_count == 3
 
@@ -204,6 +207,7 @@ class TestWaitForCompletion:
     mock_status.return_value = {"id": 1, "status": "failed", "error": "Conversion error"}
 
     result = wait_for_completion(1, poll_interval=1)
+    assert result is not None
     assert result["status"] == "failed"
 
   @patch("resources.webhook_client.get_job_status")
@@ -245,6 +249,7 @@ class TestSubmitAndWait:
     mock_wait.return_value = {"id": 42, "status": "completed"}
 
     result = submit_and_wait("/file.mkv")
+    assert result is not None
     assert result["status"] == "completed"
     mock_wait.assert_called_once_with(42, logger=None, poll_interval=5, timeout=0)
 

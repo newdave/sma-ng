@@ -274,6 +274,7 @@ class TestTmdbSearch:
     mock_search.results = [{"id": 1399, "name": "Game of Thrones"}]
     with patch("manual.tmdb.Search", return_value=mock_search):
       result = _tmdb_search("tv", "Game of Thrones", None)
+    assert result is not None
     assert result["id"] == 1399
 
 

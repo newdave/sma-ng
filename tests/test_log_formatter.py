@@ -146,6 +146,7 @@ class TestRedactingFilter:
       args=({"token": "xxxxxx", "url": "http://x"}, {"apikey": "yyy"}),
     )
     f.filter(rec)
+    assert rec.args is not None
     assert rec.args[0]["token"] == "***"
     assert rec.args[0]["url"] == "http://x"
     assert rec.args[1]["apikey"] == "***"
@@ -153,6 +154,7 @@ class TestRedactingFilter:
     # Single-dict args (LogRecord unwraps to bare mapping).
     rec2 = _record("dump %(token)s", args={"token": "zzz", "host": "h"})
     f.filter(rec2)
+    assert rec2.args is not None
     assert rec2.args["token"] == "***"
     assert rec2.args["host"] == "h"
 

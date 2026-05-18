@@ -14,16 +14,21 @@ class TestSQLiteJobDatabase:
     assert db.add_job("/mnt/media/movie.mkv", "/config/sma-ng.yml") is None
 
     job = db.claim_next_job(worker_id=1, node_id="node-a")
+    assert job is not None
     assert job["id"] == job_id
     assert job["status"] == STATUS_RUNNING
     assert job["args"] == '["--profile", "rq"]'
 
     db.complete_job(job_id, input_size=100, output_size=60)
-    assert db.get_job(job_id)["status"] == STATUS_COMPLETED
+    _row = db.get_job(job_id)
+    assert _row is not None
+    assert _row["status"] == STATUS_COMPLETED
     db.close()
 
     reopened = _db(tmp_path)
-    assert reopened.get_job(job_id)["status"] == STATUS_COMPLETED
+    _row = reopened.get_job(job_id)
+    assert _row is not None
+    assert _row["status"] == STATUS_COMPLETED
     assert reopened.get_stats()["total"] == 1
     reopened.close()
 
@@ -32,12 +37,18 @@ class TestSQLiteJobDatabase:
     failed_id = db.add_job("/mnt/media/bad.mkv", "/config/sma-ng.yml")
     db.claim_next_job(worker_id=1, node_id="node-a")
     db.fail_job(failed_id, "boom")
-    assert db.get_job(failed_id)["status"] == STATUS_FAILED
+    _row = db.get_job(failed_id)
+    assert _row is not None
+    assert _row["status"] == STATUS_FAILED
 
     assert db.requeue_job(failed_id) is True
-    assert db.get_job(failed_id)["status"] == STATUS_PENDING
+    _row = db.get_job(failed_id)
+    assert _row is not None
+    assert _row["status"] == STATUS_PENDING
     assert db.cancel_job(failed_id) is True
-    assert db.get_job(failed_id)["status"] == "cancelled"
+    _row = db.get_job(failed_id)
+    assert _row is not None
+    assert _row["status"] == "cancelled"
 
     failed_id_2 = db.add_job("/mnt/media/bad2.mkv", "/config/sma-ng.yml")
     db.claim_next_job(worker_id=1, node_id="node-a")
@@ -88,22 +99,30 @@ class TestSQLiteJobDatabase:
     db = _db(tmp_path)
     job_id = db.add_job("/mnt/media/movie.mkv", "/config/sma-ng.yml")
     db.update_job_ffmpeg_stderr(job_id, "first failure\nstderr line")
-    assert db.get_job(job_id)["ffmpeg_stderr"] == "first failure\nstderr line"
+    _row = db.get_job(job_id)
+    assert _row is not None
+    assert _row["ffmpeg_stderr"] == "first failure\nstderr line"
 
     # Overwrites
     db.update_job_ffmpeg_stderr(job_id, "second")
-    assert db.get_job(job_id)["ffmpeg_stderr"] == "second"
+    _row = db.get_job(job_id)
+    assert _row is not None
+    assert _row["ffmpeg_stderr"] == "second"
 
     # Truncates to last _FFMPEG_STDERR_MAX_BYTES, tail preserved
     big = ("x" * db_mod._FFMPEG_STDERR_MAX_BYTES) + "TAIL"
     db.update_job_ffmpeg_stderr(job_id, big)
-    stored = db.get_job(job_id)["ffmpeg_stderr"]
+    _row = db.get_job(job_id)
+    assert _row is not None
+    stored = _row["ffmpeg_stderr"]
     assert len(stored.encode("utf-8")) <= db_mod._FFMPEG_STDERR_MAX_BYTES
     assert stored.endswith("TAIL")
 
     # None is a no-op
     db.update_job_ffmpeg_stderr(job_id, None)
-    assert db.get_job(job_id)["ffmpeg_stderr"] == stored
+    _row = db.get_job(job_id)
+    assert _row is not None
+    assert _row["ffmpeg_stderr"] == stored
     db.close()
 
   def test_running_jobs_reset_on_reopen_for_same_node(self, tmp_path, monkeypatch):
@@ -114,6 +133,8 @@ class TestSQLiteJobDatabase:
     db.close()
 
     reopened = _db(tmp_path)
-    assert reopened.get_job(job_id)["status"] == STATUS_PENDING
+    _row = reopened.get_job(job_id)
+    assert _row is not None
+    assert _row["status"] == STATUS_PENDING
     reopened.close()
     set_node_id_cache("")
