@@ -2478,7 +2478,7 @@ class TestBulkJobActions:
     h.server.cancel_job.assert_called_with(1)
 
 
-class TestPostJobPriority:
+class TestPostJobPriorityDup:
   def test_invalid_id_returns_400(self):
     h = _make_handler(method="POST", path="/jobs/abc/priority")
     h._post_job_priority("/jobs/abc/priority")
@@ -2773,7 +2773,7 @@ class TestParseHelpers:
     assert h._response_code == 400
 
 
-class TestPostReload:
+class TestPostReloadDup:
   def test_post_reload_returns_202(self):
     h = _make_handler(method="POST")
     h._post_reload("/reload", {})

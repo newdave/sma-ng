@@ -963,7 +963,7 @@ class TestPlexmatchHelpers:
     assert not (tmp_path / "missing-dir" / ".plexmatch").exists()
 
 
-class TestSetHD:
+class TestSetHDDup:
   def _make_metadata(self):
     m = Metadata.__new__(Metadata)
     m.log = MagicMock()
@@ -1040,7 +1040,7 @@ class TestGetShortDescription:
     assert m.shortDescription == "Hello world."
 
 
-class TestGetRating:
+class TestGetRatingDup:
   def _make_movie_metadata(self):
     m = Metadata.__new__(Metadata)
     m.log = MagicMock()
@@ -1133,7 +1133,7 @@ class TestXmlProperty:
     assert "Nolan" in m.xml
 
 
-class TestGetDefaultLanguage:
+class TestGetDefaultLanguageDup:
   @patch("resources.metadata.tmdb.Movies")
   def test_movie_returns_language(self, mock_movies_cls):
     mock_query = MagicMock()
@@ -1327,7 +1327,7 @@ class TestWriteTagsMutagen:
     assert result is False
 
 
-class TestGetArtwork:
+class TestGetArtworkDup:
   def _make_metadata(self, mediatype=MediaType.Movie):
     m = Metadata.__new__(Metadata)
     m.log = MagicMock()
@@ -1389,7 +1389,7 @@ class TestGetArtwork:
     assert result == "/tmp/poster-603.jpg"
 
 
-class TestWriteTvPlexmatch:
+class TestWriteTvPlexmatchDup:
   def _make_tagdata(self, showname="Breaking Bad", season=1, episode=1, tmdbid=1396):
     t = MagicMock()
     t.showname = showname
@@ -1468,7 +1468,7 @@ class TestWriteTvPlexmatch:
     assert "Guid: tmdb://9999" in content
 
 
-class TestWriteMoviePlexmatch:
+class TestWriteMoviePlexmatchDup:
   def _make_tagdata(self, title="The Matrix", date="1999-03-31", tmdbid=603, imdbid=None):
     t = MagicMock()
     t.title = title
