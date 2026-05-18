@@ -10,9 +10,7 @@ import datetime as _dt
 
 import pytest
 
-from resources.daemon import db as db_mod
 from resources.daemon.constants import (
-  STATUS_COMPLETED,
   STATUS_FAILED,
   STATUS_PENDING,
   STATUS_RUNNING,

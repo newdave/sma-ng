@@ -1,12 +1,9 @@
 """Tests for rename.py — CLI argument parsing, helpers, and main() flow."""
 
-import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-import rename
 from rename import _iter_media_files, _load_path_config_manager, _print_results, _rename_directory, main
 
 # ---------------------------------------------------------------------------

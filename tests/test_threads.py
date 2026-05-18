@@ -5,8 +5,6 @@ import os
 import time
 import unittest.mock as mock
 
-import pytest
-
 from resources.daemon.threads import HeartbeatThread, RecycleBinCleanerThread, ScannerThread
 
 # ---------------------------------------------------------------------------

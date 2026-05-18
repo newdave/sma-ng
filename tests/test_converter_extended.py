@@ -1,8 +1,7 @@
 """Extended tests for converter/__init__.py covering tag(), convert(), probe(),
 framedata(), thumbnail(), and thumbnails() delegation paths."""
 
-import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

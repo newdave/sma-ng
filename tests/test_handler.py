@@ -2,8 +2,6 @@
 
 import io
 import json
-import os
-import threading
 from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
@@ -11,8 +9,6 @@ import pytest
 
 from resources.daemon.handler import (
   WebhookHandler,
-  _inline,
-  _render_markdown_to_html,
 )
 
 _tail_lines = WebhookHandler._tail_lines

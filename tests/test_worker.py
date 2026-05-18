@@ -306,7 +306,6 @@ class TestIngestFfmpegStderrSidecars:
 
   def test_concatenates_sidecars_oldest_first_and_deletes(self, tmp_path, monkeypatch):
     import os
-    import time
 
     monkeypatch.setattr("resources.daemon.worker.FFMPEG_STDERR_DIR", str(tmp_path))
     # Create two sidecars for job 42 with distinct mtimes

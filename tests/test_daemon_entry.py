@@ -2,8 +2,7 @@
 and run_smoke_test(). These cover the thin entry-point layer at lines 71-290."""
 
 import os
-import sys
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

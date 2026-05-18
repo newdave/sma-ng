@@ -6,7 +6,7 @@ import logging
 import os
 from configparser import RawConfigParser
 from logging.handlers import RotatingFileHandler
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

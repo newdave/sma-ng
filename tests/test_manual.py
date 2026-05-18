@@ -2,7 +2,6 @@
 
 import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,7 +10,6 @@ import pytest
 # Helpers to import manual.py without executing module-level side effects that
 # require TMDB or FFmpeg at import time.
 # ---------------------------------------------------------------------------
-import manual
 from manual import (
   SkipFileException,
   _find_arr_instance,
