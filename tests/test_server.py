@@ -18,7 +18,7 @@ def _dump_daemon_yaml(path: str, daemon_data: dict) -> None:
 
 
 from resources.daemon.server import DaemonServer, _validate_hwaccel
-from resources.daemon.worker import ConversionWorker, WorkerPool
+from resources.daemon.worker import WorkerPool
 
 # ---------------------------------------------------------------------------
 # Helpers

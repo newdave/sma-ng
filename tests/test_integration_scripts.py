@@ -9,10 +9,7 @@ import json
 import os
 import socket
 import subprocess
-import sys
 import threading
-
-import pytest
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

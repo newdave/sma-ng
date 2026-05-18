@@ -1657,7 +1657,7 @@ class TestBaseDecoderSupportsBitDepth:
   """Test BaseDecoder.supportsBitDepth."""
 
   def test_decoder_supports_depth_within_max(self):
-    from converter.avcodecs import BaseDecoder, H264CuvidDecoder
+    from converter.avcodecs import H264CuvidDecoder
 
     dec = H264CuvidDecoder()
     assert dec.supportsBitDepth(8) is True

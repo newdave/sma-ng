@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
-
 from resources.library_audit.enumerator import enumerate_paths
 from resources.library_audit.kinds import (
   KIND_HINT_MEDIA,

@@ -1,6 +1,5 @@
 """Tests for resources/subtitles.py SubtitleProcessor."""
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -625,7 +624,6 @@ class TestDownloadSubtitles:
 
   def test_downloads_best_subtitles(self):
     import resources.subtitles as sub_module
-    from resources.metadata import MediaType
 
     original_sub = sub_module.subliminal
     original_lang = sub_module.Language

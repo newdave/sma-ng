@@ -3,14 +3,11 @@ by test_ffmpeg.py, including codecs, hwaccels, encoders, decoders, pix_fmts,
 hwaccel_decoder, encoder_formats, decoder_formats, framedata, probe, convert, and thumbnails."""
 
 import json
-import os
-from io import BytesIO
-from subprocess import Popen
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from converter.ffmpeg import FFMpeg, FFMpegError, MediaFormatInfo, MediaInfo, MediaStreamInfo
+from converter.ffmpeg import FFMpeg, FFMpegError, MediaInfo, MediaStreamInfo
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -14,7 +14,7 @@ import os.path
 import re
 import signal
 from subprocess import PIPE, Popen
-from typing import Optional, overload
+from typing import overload
 
 from converter.avcodecs import BaseCodec, video_codec_list
 

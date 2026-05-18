@@ -735,7 +735,7 @@ class TestLogArchivalUnit:
     return LogArchiver(str(tmp_path), archive_after, delete_after, mock.MagicMock())
 
   def _fake_record(self, node_id="node-1", date_str="2025-01-15", message="test"):
-    from datetime import date, datetime, timezone
+    from datetime import datetime
 
     ts = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
     return {"node_id": node_id, "level": "INFO", "logger": "test", "message": message, "timestamp": ts}
@@ -835,7 +835,7 @@ class TestLogArchivalUnit:
     mock_prune.assert_called_once()
 
   def test_archive_from_db_deletes_rows_after_successful_write(self, tmp_path):
-    from datetime import date, datetime, timezone
+    from datetime import datetime
 
     from resources.daemon.log_archiver import LogArchiver
 
@@ -850,7 +850,7 @@ class TestLogArchivalUnit:
     db.delete_logs_before.assert_called_once_with(7)
 
   def test_archive_from_db_skips_delete_on_write_failure(self, tmp_path):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from resources.daemon.log_archiver import LogArchiver
 
@@ -881,8 +881,6 @@ class TestConfigMerge:
     return PathConfigManager(str(cfg)), str(cfg)
 
   def test_db_config_provides_base_when_local_missing_key(self, tmp_path):
-    from resources.daemon.config import PathConfigManager
-
     yml = "daemon:\n  log_ttl_days: 15\n"
     mgr, cfg_path = self._make_manager(tmp_path, yml)
 
@@ -894,8 +892,6 @@ class TestConfigMerge:
     assert mgr.node_expiry_days == 42
 
   def test_local_config_wins_over_db(self, tmp_path):
-    from resources.daemon.config import PathConfigManager
-
     yml = "daemon:\n  log_ttl_days: 99\n"
     mgr, cfg_path = self._make_manager(tmp_path, yml)
 
@@ -907,8 +903,6 @@ class TestConfigMerge:
     assert mgr.log_ttl_days == 99
 
   def test_none_db_config_does_not_crash(self, tmp_path):
-    from resources.daemon.config import PathConfigManager
-
     yml = "daemon:\n  log_ttl_days: 10\n"
     mgr, cfg_path = self._make_manager(tmp_path, yml)
 
@@ -920,8 +914,6 @@ class TestConfigMerge:
     assert mgr.log_ttl_days == 10
 
   def test_no_db_merge_when_job_db_not_passed(self, tmp_path):
-    from resources.daemon.config import PathConfigManager
-
     yml = "daemon:\n  log_ttl_days: 20\n"
     mgr, cfg_path = self._make_manager(tmp_path, yml)
 
@@ -932,8 +924,6 @@ class TestConfigMerge:
     db.get_cluster_config.assert_not_called()
 
   def test_non_distributed_db_skips_merge(self, tmp_path):
-    from resources.daemon.config import PathConfigManager
-
     yml = "daemon:\n  log_ttl_days: 5\n"
     mgr, cfg_path = self._make_manager(tmp_path, yml)
 

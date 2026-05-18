@@ -1,10 +1,7 @@
 """Extended tests for resources/subtitles.py covering downloadSubtitles,
 syncExternalSub, burnSubtitleFilter external-sub paths, and ripSubs errors."""
 
-import os
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from resources.subtitles import SubtitleProcessor
 
