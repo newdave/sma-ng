@@ -45,7 +45,7 @@ SECRET_KEYS: frozenset = frozenset({"api_key", "db_url", "username", "password",
 SERVICE_SECRET_FIELDS: frozenset = frozenset({"apikey", "token", "password"})
 
 
-def set_node_id_cache(value: str) -> None:
+def set_node_id_cache(value: str | None) -> None:
   """Store the resolved node identity so resolve_node_id() returns it without re-deriving."""
   global _node_id_cache
   _node_id_cache = value

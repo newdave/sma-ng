@@ -239,7 +239,7 @@ class SQLiteJobDatabase:
       )
     self.log.debug("Job %d completed" % job_id)
 
-  def update_job_ffmpeg_stderr(self, job_id: int, stderr: str) -> None:
+  def update_job_ffmpeg_stderr(self, job_id: int, stderr: str | None) -> None:
     """Store the full ffmpeg stderr blob for *job_id*.
 
     Truncates to ``_FFMPEG_STDERR_MAX_BYTES`` (keeping the tail, since
@@ -991,7 +991,7 @@ class PostgreSQLJobDatabase:
         )
     self.log.debug("Job %d completed" % job_id)
 
-  def update_job_ffmpeg_stderr(self, job_id: int, stderr: str) -> None:
+  def update_job_ffmpeg_stderr(self, job_id: int, stderr: str | None) -> None:
     """Store the full ffmpeg stderr blob for *job_id*.
 
     Truncates to ``_FFMPEG_STDERR_MAX_BYTES`` (tail-preserving) so a

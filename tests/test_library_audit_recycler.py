@@ -87,6 +87,7 @@ class TestMoveToRecycleBin:
     bin_dir = tmp_path / "bin"
     dst = move_to_recycle_bin(str(src), str(bin_dir))
     assert dst == str(bin_dir / "movie.mkv")
+    assert dst is not None
     assert os.path.isfile(dst)
     assert open(dst, "rb").read() == b"data"
     assert not src.exists()
@@ -109,6 +110,7 @@ class TestMoveToRecycleBin:
     src.write_bytes(b"new")
     dst = move_to_recycle_bin(str(src), str(bin_dir))
     assert dst == str(bin_dir / "movie.2.mkv")
+    assert dst is not None
     assert open(dst, "rb").read() == b"new"
     assert open(bin_dir / "movie.mkv", "rb").read() == b"old"
     assert not src.exists()

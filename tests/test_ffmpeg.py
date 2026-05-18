@@ -171,7 +171,7 @@ class TestMinStrict:
 
   def test_single_strict_unchanged(self):
     cmds = ["ffmpeg", "-strict", "experimental", "-i", "input.mkv"]
-    FFMpeg.minstrict(None, cmds)  # Static-like call (method modifies in place)
+    FFMpeg.minstrict(None, cmds)  # pyright: ignore[reportArgumentType]
 
   def test_multiple_strict_uses_least(self):
     # We need an FFMpeg instance, but minstrict works on lists
@@ -479,6 +479,7 @@ bit_rate=10000000
     assert info.format.format == "matroska,webm"
     assert info.format.duration == pytest.approx(7200.0)
     assert len(info.streams) == 3
+    assert info.video is not None
     assert info.video.codec == "h264"
     assert info.video.video_width == 1920
     assert len(info.audio) == 1

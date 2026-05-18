@@ -178,18 +178,21 @@ class TestResolveMetadata:
     proc = self._proc()
     proc.mp.isValidSource.return_value = MagicMock()
     info, tagdata = proc._resolve_metadata("/media/downloads/some.mp4", type_hint="movie")
+    assert tagdata is not None
     assert tagdata.mediatype == MediaType.Movie
 
   def test_type_hint_tv_uses_tv(self):
     proc = self._proc()
     proc.mp.isValidSource.return_value = MagicMock()
     info, tagdata = proc._resolve_metadata("/media/downloads/some.mp4", type_hint="tv")
+    assert tagdata is not None
     assert tagdata.mediatype == MediaType.TV
 
   def test_season_arg_forces_tv(self):
     proc = self._proc()
     proc.mp.isValidSource.return_value = MagicMock()
     info, tagdata = proc._resolve_metadata("/media/downloads/some.mp4", season=1)
+    assert tagdata is not None
     assert tagdata.mediatype == MediaType.TV
 
   def test_tv_with_id_but_no_season_uses_stub(self):

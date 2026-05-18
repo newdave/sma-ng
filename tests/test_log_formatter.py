@@ -6,6 +6,7 @@ be reasoned about as the single point of enforcement for log shape.
 """
 
 import logging
+from typing import cast
 
 import pytest
 
@@ -146,17 +147,17 @@ class TestRedactingFilter:
       args=({"token": "xxxxxx", "url": "http://x"}, {"apikey": "yyy"}),
     )
     f.filter(rec)
-    assert rec.args is not None
-    assert rec.args[0]["token"] == "***"
-    assert rec.args[0]["url"] == "http://x"
-    assert rec.args[1]["apikey"] == "***"
+    args_tuple = cast(tuple, rec.args)
+    assert args_tuple[0]["token"] == "***"
+    assert args_tuple[0]["url"] == "http://x"
+    assert args_tuple[1]["apikey"] == "***"
 
     # Single-dict args (LogRecord unwraps to bare mapping).
     rec2 = _record("dump %(token)s", args={"token": "zzz", "host": "h"})
     f.filter(rec2)
-    assert rec2.args is not None
-    assert rec2.args["token"] == "***"
-    assert rec2.args["host"] == "h"
+    args_map = cast(dict, rec2.args)
+    assert args_map["token"] == "***"
+    assert args_map["host"] == "h"
 
   def test_filter_leaves_empty_secret_alone(self):
     """Don't bother masking None/'' — the user clearly didn't set it."""

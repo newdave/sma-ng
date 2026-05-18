@@ -5134,6 +5134,7 @@ class TestAudioStreamTitleExtended:
     stream.profile = "Dolby TrueHD + Atmos"
     with patch("resources.mediaprocessor.streamTitle", None):
       title = mp.audioStreamTitle(stream, {"channels": 8, "codec": "copy"})
+    assert title is not None
     assert "Atmos" in title
 
   def test_custom_stream_title_exception_falls_through(self, make_stream):
@@ -7273,6 +7274,7 @@ class TestAudioStreamTitleExtendedDup:
     stream.profile = "Dolby TrueHD + Atmos"
     with patch("resources.mediaprocessor.streamTitle", None):
       title = mp.audioStreamTitle(stream, {"channels": 8, "codec": "copy"})
+    assert title is not None
     assert "Atmos" in title
 
   def test_custom_stream_title_exception_falls_through(self, make_stream):

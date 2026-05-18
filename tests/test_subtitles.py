@@ -8,7 +8,7 @@ from converter import ConverterError, FFMpegConvertError
 from resources.subtitles import SubtitleProcessor
 
 
-def _make_sp(sdl="eng"):
+def _make_sp(sdl: str | None = "eng"):
   """Create a SubtitleProcessor backed by a mock MediaProcessor."""
   mp = MagicMock()
   mp.settings.sdl = sdl

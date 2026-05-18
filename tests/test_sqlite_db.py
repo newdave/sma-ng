@@ -98,6 +98,7 @@ class TestSQLiteJobDatabase:
 
     db = _db(tmp_path)
     job_id = db.add_job("/mnt/media/movie.mkv", "/config/sma-ng.yml")
+    assert job_id is not None
     db.update_job_ffmpeg_stderr(job_id, "first failure\nstderr line")
     _row = db.get_job(job_id)
     assert _row is not None

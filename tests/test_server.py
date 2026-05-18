@@ -683,7 +683,7 @@ class TestDaemonServerConcurrency:
       server, thread = self._make_live_server()
     except PermissionError as exc:
       pytest.skip("socket bind not permitted in this environment: %s" % exc)
-    host, port = server.server_address
+    host, port = server.server_address[:2]
 
     def request_block():
       with urllib.request.urlopen("http://%s:%d/block" % (host, port), timeout=3) as resp:
