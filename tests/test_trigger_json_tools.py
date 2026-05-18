@@ -7,8 +7,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODULE_PATH = os.path.join(PROJECT_ROOT, "triggers", "lib", "json_tools.py")
 
 spec = importlib.util.spec_from_file_location("trigger_json_tools", MODULE_PATH)
-json_tools = importlib.util.module_from_spec(spec)
+assert spec is not None
 assert spec.loader is not None
+json_tools = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(json_tools)
 
 

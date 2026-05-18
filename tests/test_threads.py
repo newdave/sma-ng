@@ -12,7 +12,7 @@ from resources.daemon.threads import HeartbeatThread, RecycleBinCleanerThread, S
 # ---------------------------------------------------------------------------
 
 
-def _make_cleaner(path_config_manager=None, max_age_days=30, min_free_gb=0):
+def _make_cleaner(path_config_manager=None, max_age_days=30, min_free_gb: float = 0):
   if path_config_manager is None:
     path_config_manager = mock.MagicMock()
     path_config_manager.get_all_configs.return_value = []

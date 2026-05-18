@@ -12,7 +12,7 @@ from autoprocess.emby import refreshEmby
 from autoprocess.jellyfin import refreshJellyfin
 
 
-def _instance(kind="emby", **overrides):
+def _instance(kind: str = "emby", **overrides):
   base = {
     "section": "main",
     "kind": kind,
@@ -91,7 +91,7 @@ class TestTriggerRefresh:
   def test_ignore_certs_disables_verify(self, mock_post):
     mock_post.return_value = MagicMock(status_code=200, text="ok")
     trigger_refresh(
-      [_instance(ssl=True, **{"ignore-certs": True})],
+      [_instance(ssl=True, **{"ignore-certs": True})],  # pyright: ignore[reportArgumentType]
       "/library/Media/Show/file.mp4",
       product_label="Emby",
       logger=MagicMock(),
@@ -102,7 +102,7 @@ class TestTriggerRefresh:
   def test_path_mapping_rewrites_dir(self, mock_post):
     mock_post.return_value = MagicMock(status_code=204, text="")
     trigger_refresh(
-      [_instance(**{"path-mapping": {"/library/Media": "/data/Media"}})],
+      [_instance(**{"path-mapping": {"/library/Media": "/data/Media"}})],  # pyright: ignore[reportArgumentType]
       "/library/Media/Show/file.mp4",
       product_label="Emby",
       logger=MagicMock(),

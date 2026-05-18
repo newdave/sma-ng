@@ -1064,12 +1064,14 @@ class TestGetRatingDup:
   def test_unknown_rating_movie_returns_not_rated(self):
     m = self._make_movie_metadata()
     result = m.getRating("X")
+    assert result is not None
     assert "mpaa" in result
     assert "Not Rated" in result
 
   def test_unknown_rating_tv_returns_not_rated(self):
     m = self._make_tv_metadata()
     result = m.getRating("UNKNOWN")
+    assert result is not None
     assert "us-tv" in result
 
   def test_case_insensitive(self):
@@ -1469,7 +1471,7 @@ class TestWriteTvPlexmatchDup:
 
 
 class TestWriteMoviePlexmatchDup:
-  def _make_tagdata(self, title="The Matrix", date="1999-03-31", tmdbid=603, imdbid=None):
+  def _make_tagdata(self, title="The Matrix", date="1999-03-31", tmdbid: int | None = 603, imdbid=None):
     t = MagicMock()
     t.title = title
     t.date = date
@@ -1621,7 +1623,7 @@ class TestWriteTagsFFmpegFallback:
 
 
 class TestGetArtworkEdgeCases:
-  def _make_metadata(self, poster_path="/poster.jpg"):
+  def _make_metadata(self, poster_path: str | None = "/poster.jpg"):
     m = Metadata.__new__(Metadata)
     m.log = MagicMock()
     m.mediatype = MediaType.Movie

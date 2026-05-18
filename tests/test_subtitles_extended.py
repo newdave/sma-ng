@@ -10,7 +10,7 @@ from resources.subtitles import SubtitleProcessor
 # ---------------------------------------------------------------------------
 
 
-def _make_sp(sdl="eng", **kwargs):
+def _make_sp(sdl: str | None = "eng", **kwargs):
   mp = MagicMock()
   mp.settings.sdl = sdl
   mp.settings.burn_subtitles = False

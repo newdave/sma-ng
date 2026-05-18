@@ -994,6 +994,7 @@ class TestVideoCodecFpsBitrateBranches:
     codec = H264Codec()
     # Source: 4:3, target: 16:9 → crop top/bottom
     w, h, filters = codec._aspect_corrections(640, 480, 1280, 720, "crop")
+    assert filters is not None
     assert "crop=" in filters
 
   def test_pad_mode_taller_target(self):
@@ -1001,6 +1002,7 @@ class TestVideoCodecFpsBitrateBranches:
     codec = H264Codec()
     # Source: 16:9 (1280x720), target: 4:3 (800x600) — target is narrower
     w, h, filters = codec._aspect_corrections(1280, 720, 800, 600, "pad")
+    assert filters is not None
     assert "pad=" in filters
 
 
