@@ -1979,6 +1979,11 @@ class MediaProcessor:
 
     return allowua
 
+  # Subtitle codecs that only carry text. Pairing one of these as the output
+  # of an image-based source (PGS, VOBSUB, DVB) is impossible without OCR —
+  # the adaptive pre-flight skips the stream with a WARNING.
+  _TEXT_ONLY_SUBTITLE_CODECS = frozenset({"mov_text", "srt", "subrip", "ass", "ssa", "webvtt", "text"})
+
   def _select_subtitle_codec(self, source_codec, image_based, embed, scodecs=None, scodecs_image=None):
     """Return the output codec string for a subtitle stream, or None if it should be skipped.
 
@@ -1998,7 +2003,11 @@ class MediaProcessor:
       enabled = self.settings.embedsubs if embed else not self.settings.embedsubs
     if not (enabled and pool):
       return None
-    return "copy" if source_codec in pool else pool[0]
+    chosen = "copy" if source_codec in pool else pool[0]
+    if image_based and chosen != "copy" and chosen in self._TEXT_ONLY_SUBTITLE_CODECS:
+      self.log.warning("Skipping image-based subtitle (source codec %s): cannot convert directly to text-only codec %s without OCR [adaptive-image-sub-skip]." % (source_codec, chosen))
+      return None
+    return chosen
 
   def _subtitle_passes_filter(self, stream, swl, blocked_subtitle_languages, blocked_subtitle_dispositions, prefer_non_hi_subs=True):
     """Return True if a subtitle stream passes language and disposition filters.

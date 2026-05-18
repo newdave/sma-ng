@@ -4480,6 +4480,26 @@ class TestSelectSubtitleCodec:
     result = mp._select_subtitle_codec("mov_text", False, embed=True)
     assert result is None
 
+  def test_image_source_with_text_only_target_skipped(self):
+    # Misconfiguration: operator put mov_text in scodec_image. We can't
+    # OCR PGS into text, so skip the stream with a WARNING rather than
+    # letting ffmpeg crash mid-mux.
+    mp = self._make_mp()
+    mp.settings.embedimgsubs = True
+    mp.settings.scodec_image = ["mov_text"]
+    result = mp._select_subtitle_codec("hdmv_pgs_subtitle", True, embed=True)
+    assert result is None
+    mp.log.warning.assert_called()
+
+  def test_image_source_copy_still_allowed(self):
+    # If the image-sub codec pool includes the source codec itself,
+    # we copy as before.
+    mp = self._make_mp()
+    mp.settings.embedimgsubs = True
+    mp.settings.scodec_image = ["hdmv_pgs_subtitle"]
+    result = mp._select_subtitle_codec("hdmv_pgs_subtitle", True, embed=True)
+    assert result == "copy"
+
 
 # ---------------------------------------------------------------------------
 # _subtitle_passes_filter()
@@ -6622,6 +6642,26 @@ class TestSelectSubtitleCodec:
     mp.settings.scodec = []
     result = mp._select_subtitle_codec("mov_text", False, embed=True)
     assert result is None
+
+  def test_image_source_with_text_only_target_skipped(self):
+    # Misconfiguration: operator put mov_text in scodec_image. We can't
+    # OCR PGS into text, so skip the stream with a WARNING rather than
+    # letting ffmpeg crash mid-mux.
+    mp = self._make_mp()
+    mp.settings.embedimgsubs = True
+    mp.settings.scodec_image = ["mov_text"]
+    result = mp._select_subtitle_codec("hdmv_pgs_subtitle", True, embed=True)
+    assert result is None
+    mp.log.warning.assert_called()
+
+  def test_image_source_copy_still_allowed(self):
+    # If the image-sub codec pool includes the source codec itself,
+    # we copy as before.
+    mp = self._make_mp()
+    mp.settings.embedimgsubs = True
+    mp.settings.scodec_image = ["hdmv_pgs_subtitle"]
+    result = mp._select_subtitle_codec("hdmv_pgs_subtitle", True, embed=True)
+    assert result == "copy"
 
 
 # ---------------------------------------------------------------------------
