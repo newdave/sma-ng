@@ -292,6 +292,20 @@ Each config gets a separate rotating log file in `logs/` named after the config 
 
 Rotation: 10MB max, 5 backups. Use `--logs-dir` to change the directory.
 
+### FFmpeg Failure Sidecars
+
+When a transcode fails, SMA writes the **complete** ffmpeg stderr (the multi-KB
+diagnostic that the daemon log truncates per-line) to a deterministic location:
+
+```text
+logs/ffmpeg-stderr/ffmpeg.job<id>.<YYYYMMDD-HHMMSS>.stderr.log
+```
+
+The file has two sections: `# ffmpeg cmd:` followed by `# ffmpeg stderr:`.
+Each failed conversion also logs the absolute path of the sidecar at `ERROR`
+level so it is easy to find. The directory is created on demand and exists
+regardless of whether the daemon log goes to a file or stdout (Docker).
+
 ---
 
 ## Log Viewer API

@@ -206,6 +206,9 @@ def main():
     log.debug("FFmpeg/FFprobe directory: %s" % ffmpeg_dir)
   log.debug("Heartbeat interval: %ds (stale after %ds)" % (args.heartbeat_interval, args.stale_seconds))
   log.debug("Logs directory: %s" % config_log_manager.logs_dir)
+  from resources.daemon.constants import FFMPEG_STDERR_DIR
+
+  log.info("FFmpeg failure stderr sidecars: %s" % FFMPEG_STDERR_DIR)
   log.debug("Concurrency: One process per config (jobs for same config queue)")
   if job_timeout_seconds:
     log.debug("Job timeout: %ds" % job_timeout_seconds)
