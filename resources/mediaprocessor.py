@@ -1430,6 +1430,13 @@ class MediaProcessor:
       except Exception:
         self.log.exception("Error when trying to determine hardware acceleration support.")
 
+    # MP4 cannot carry attachment streams (embedded fonts, cover art) — they
+    # cause "Attachment stream not supported" mux errors. Drop them with
+    # `-map -0:t` for mp4 outputs; keep them for mkv where they are valid.
+    if options.get("format") == "mp4":
+      postopts.extend(["-map", "-0:t"])
+      self.log.info("Dropping attachment streams for mp4 output [adaptive-strip-attachments].")
+
     # VFR-source preservation: when remuxing a Matroska variable-frame-rate
     # source into mp4, ffmpeg's default vsync can produce non-monotonic DTS
     # and the mux fails. Pass -fps_mode passthrough so original timestamps
