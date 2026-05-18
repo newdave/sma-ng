@@ -1400,7 +1400,7 @@ class MediaProcessor:
         # negotiation fails ("Impossible to convert between ... 'auto_scale_0'").
         # Inject a vpp_qsv passthrough so the GPU pipeline stays intact.
         if "qsv" in vcodec and "-hwaccel_output_format" in opts and opts[opts.index("-hwaccel_output_format") + 1] == "qsv" and not (options.get("video") or {}).get("filter"):
-          options["video"]["filter"] = self._qsv_passthrough_filter(info)
+          options["video"]["filter"] = self._qsv_passthrough_filter(info, (options.get("video") or {}).get("pix_fmt"))
           self.log.debug("Injected %s to preserve QSV GPU pipeline [hwaccel-output-format]." % options["video"]["filter"])
         for k in self.settings.hwdevices:
           if k in vcodec:
@@ -2812,6 +2812,8 @@ class MediaProcessor:
     return False
 
   _QSV_ENCODER_ALIGNMENT = 16
+  _QSV_ENCODER_ALIGNMENT_10BIT = 32
+  _QSV_10BIT_PIX_FMTS = frozenset({"yuv420p10le", "yuv422p10le", "yuv444p10le", "yuv420p12le", "yuv422p12le", "yuv444p12le", "p010le", "p012le"})
 
   _HDR_PIX_FMTS = (
     "yuv420p10le",
@@ -2853,7 +2855,7 @@ class MediaProcessor:
       bit_depth = 8
     return vpix_fmt, vprofile, vcodec, bit_depth, coerced
 
-  def _qsv_passthrough_filter(self, info):
+  def _qsv_passthrough_filter(self, info, output_pix_fmt=None):
     """Build the implicit ``vpp_qsv`` filter, padding to encoder alignment.
 
     hevc_qsv (and h264_qsv) refuse to initialize when the input surface
@@ -2863,17 +2865,22 @@ class MediaProcessor:
     need a tiny resize so the encoder's alignment check passes. Use
     ``vpp_qsv=w=W:h=H`` so the GPU surface is rounded up; the height
     delta is small (≤15 lines) and stays within the GPU pipeline.
+
+    For 10/12-bit output (P010, yuv420p10le, …) Gen11+ Intel QSV tightens
+    the alignment requirement from 16 to 32. Use the wider alignment in
+    that case so the pre-flight matches the encoder's expectation.
     """
     width = getattr(info.video, "video_width", None)
     height = getattr(info.video, "video_height", None)
-    align = self._QSV_ENCODER_ALIGNMENT
+    is_10bit = output_pix_fmt in self._QSV_10BIT_PIX_FMTS if output_pix_fmt else getattr(info.video, "pix_fmt", None) in self._QSV_10BIT_PIX_FMTS
+    align = self._QSV_ENCODER_ALIGNMENT_10BIT if is_10bit else self._QSV_ENCODER_ALIGNMENT
     if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0:
       return "vpp_qsv"
     if width % align == 0 and height % align == 0:
       return "vpp_qsv"
     aw = ((width + align - 1) // align) * align
     ah = ((height + align - 1) // align) * align
-    self.log.info("Source %dx%d is not aligned to %d; QSV encoder requires alignment, padding via vpp_qsv to %dx%d." % (width, height, align, aw, ah))
+    self.log.info("Source %dx%d is not aligned to %d; QSV encoder requires alignment, padding via vpp_qsv to %dx%d [adaptive-qsv-alignment]." % (width, height, align, aw, ah))
     return "vpp_qsv=w=%d:h=%d" % (aw, ah)
 
   # Check if video stream meets criteria to be considered HDR

@@ -3496,11 +3496,38 @@ class TestQsvVppPassthroughInjection:
     mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
     mp.isDolbyVision = MagicMock(return_value=False)
     info = self._info()
+    info.video.pix_fmt = "yuv420p"
     info.video.video_width = 1920
     info.video.video_height = 872
-    options = {"format": "mp4", "audio": [], "video": {"filter": None}}
+    options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p"}}
     mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
     assert options["video"]["filter"] == "vpp_qsv=w=1920:h=880"
+
+  def test_10bit_output_uses_mod32_alignment(self):
+    # Gen11+ Intel QSV requires mod-32 alignment for 10-bit surfaces.
+    # 1920x1080 is mod-16 but NOT mod-32, so we must pad height to 1088.
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    info = self._info()
+    info.video.video_width = 1920
+    info.video.video_height = 1080
+    options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "p010le"}}
+    mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
+    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1088"
+
+  def test_8bit_output_keeps_mod16_alignment(self):
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    info = self._info()
+    info.video.pix_fmt = "yuv420p"
+    info.video.video_width = 1920
+    info.video.video_height = 1088
+    options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p"}}
+    mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
+    # 1088 is mod-16 — plain vpp_qsv is fine for 8-bit.
+    assert options["video"]["filter"] == "vpp_qsv"
 
   def test_aligned_dims_uses_plain_vpp_qsv(self):
     mp = self._mp()
