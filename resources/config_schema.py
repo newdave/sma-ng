@@ -134,8 +134,9 @@ class ConverterSettings(_Base):
 class PermissionSettings(_Base):
   # `mode` is accepted as an alias for `chmod` — Linux/Unix users
   # naturally reach for "mode" when describing file-permission bits.
-  # Plain integer values like `0664` (often written unquoted in YAML)
-  # are coerced to the canonical zero-padded octal string.
+  # Bare integers in YAML (`mode: 777`, `chmod: 664`) are interpreted as
+  # the user's typed *octal digits*, matching how operators talk about
+  # POSIX file modes — never as decimal-encoded mode bits.
   chmod: str = Field(default="0664", validation_alias=AliasChoices("chmod", "mode"))
   uid: int = -1
   gid: int = -1
@@ -145,12 +146,17 @@ class PermissionSettings(_Base):
   def _stringify_chmod(cls, data):
     if not isinstance(data, dict):
       return data
-    for k in ("chmod", "mode"):
-      v = data.get(k)
-      if isinstance(v, int):
-        # YAML loads `0664` (or `420`) as an int; render as zero-padded
-        # octal so `int(value, 8)` downstream still works.
-        data[k] = "0%o" % v if v < 0o1000 else "%o" % v
+    if "mode" in data and "chmod" not in data:
+      data["chmod"] = data.pop("mode")
+    v = data.get("chmod")
+    if isinstance(v, int):
+      # Treat the int as the operator's typed octal digits: `777` → "0777",
+      # `664` → "0664". Reject anything that isn't a valid 3-or-4-digit
+      # octal mode so silent typos like `mode: 999` don't slip through.
+      s = str(v)
+      if v < 0 or any(c not in "01234567" for c in s) or len(s) > 4:
+        raise ValueError(f"chmod must be a 3-4 digit octal mode, got {v!r}")
+      data["chmod"] = s.zfill(4) if len(s) == 4 else "0" + s.zfill(3)
     return data
 
 

@@ -88,6 +88,40 @@ class TestSchemaDefaultsContract:
     assert cfg.base.metadata.tag is True
     assert cfg.base.permissions.chmod == "0664"
 
+  def test_chmod_octal_int_777_is_not_decimal_1411(self):
+    # Operators reach for `mode: 777` meaning rwxrwxrwx (octal 0o777).
+    # The validator must store that as "0777" so int("0777", 8) → 0o777,
+    # not 0o1411 which would leave files unwritable.
+    cfg = SmaConfig.model_validate({"base": {"permissions": {"mode": 777}}})
+    assert cfg.base.permissions.chmod == "0777"
+    assert int(cfg.base.permissions.chmod, 8) == 0o777
+
+  def test_chmod_octal_int_664(self):
+    cfg = SmaConfig.model_validate({"base": {"permissions": {"chmod": 664}}})
+    assert cfg.base.permissions.chmod == "0664"
+    assert int(cfg.base.permissions.chmod, 8) == 0o664
+
+  def test_chmod_string_passthrough(self):
+    cfg = SmaConfig.model_validate({"base": {"permissions": {"chmod": "0664"}}})
+    assert cfg.base.permissions.chmod == "0664"
+
+  def test_chmod_rejects_non_octal_digit(self):
+    # `999` looks like a mode but has decimal-only digits; reject it
+    # instead of silently producing a nonsense bit pattern.
+    with pytest.raises(Exception, match="octal"):
+      SmaConfig.model_validate({"base": {"permissions": {"mode": 999}}})
+
+  def test_mode_alias_does_not_warn_as_unknown(self, caplog):
+    import logging
+
+    from resources.config_loader import ConfigLoader
+
+    loader = ConfigLoader()
+    cfg = SmaConfig.model_validate({"base": {"permissions": {"mode": 664}}})
+    with caplog.at_level(logging.WARNING):
+      loader._warn_extras(cfg, "")
+    assert not any("base.permissions.mode" in r.message for r in caplog.records)
+
   def test_routing_rule_requires_dotted_service_ref(self):
     with pytest.raises(Exception, match=r"<type>\.<instance>"):
       SmaConfig.model_validate(

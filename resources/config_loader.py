@@ -24,10 +24,29 @@ import logging
 import os
 from dataclasses import dataclass
 
-from pydantic import BaseModel, ValidationError
+from pydantic import AliasChoices, BaseModel, ValidationError
 
 from resources import yamlconfig
 from resources.config_schema import BaseConfig, RoutingRule, SmaConfig
+
+
+def _collect_alias_choices(model_cls: type[BaseModel]) -> set[str]:
+  """Return every alias name accepted by ``model_cls`` via ``AliasChoices``.
+
+  Pydantic stores extras under their raw input name, including names that
+  were already consumed by a field's ``validation_alias``. Those aren't
+  unknown keys, so callers use this set to suppress the typo warning.
+  """
+  names: set[str] = set()
+  for field in model_cls.model_fields.values():
+    alias = field.validation_alias
+    if isinstance(alias, AliasChoices):
+      for choice in alias.choices:
+        if isinstance(choice, str):
+          names.add(choice)
+    elif isinstance(alias, str):
+      names.add(alias)
+  return names
 
 
 class ConfigError(Exception):
@@ -166,10 +185,17 @@ class ConfigLoader:
 
     extras = getattr(model, "__pydantic_extra__", None) or {}
     field_names = set(type(model).model_fields.keys())
+    alias_choices = _collect_alias_choices(type(model))
     for key in extras:
       # Skip the warning if this extra is the snake form of an existing
       # field whose kebab alias already populated it.
       if "_" in key and key in field_names:
+        continue
+      # Skip keys that are accepted alternate aliases for a real field
+      # (e.g. `mode` is a validation alias for `chmod`). Pydantic leaves
+      # the alias name in __pydantic_extra__ even when it successfully
+      # populated the target field.
+      if key in alias_choices:
         continue
       dotted = f"{prefix}.{key}" if prefix else key
       self.logger.warning("Unknown config key: %s", dotted)
