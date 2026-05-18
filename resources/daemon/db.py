@@ -4,7 +4,7 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote, urlparse
 
 import yaml as _yaml
