@@ -30,6 +30,13 @@ from resources.log import getLogger
 
 log = getLogger("DAEMON")
 
+# Cap stored ffmpeg stderr per job at 1 MiB. ffmpeg can emit unbounded
+# stderr (e.g. on a tight retry loop or with -loglevel debug). Storing
+# the raw blob would bloat the jobs row to the point of slowing
+# unrelated queries; 1 MiB is enough to keep the encoder banner, the
+# offending option line, and several hundred lines of context.
+_FFMPEG_STDERR_MAX_BYTES = 1024 * 1024
+
 _METRICS_WINDOW_MAP = {
   "24h": {"trunc": "hour", "filter": "24 hours", "series_offset": "23 hours", "step": "1 hour", "throughput_hours": 24.0},
   "7d": {"trunc": "day", "filter": "7 days", "series_offset": "6 days", "step": "1 day", "throughput_hours": 168.0},
@@ -111,9 +118,16 @@ class SQLiteJobDatabase:
           next_attempt_at TEXT,
           priority INTEGER DEFAULT 0,
           input_size_bytes INTEGER,
-          output_size_bytes INTEGER
+          output_size_bytes INTEGER,
+          ffmpeg_stderr TEXT
         )
       """)
+      # Idempotent migration: older deployments may already have a `jobs`
+      # table created before ffmpeg_stderr existed. PRAGMA table_info is
+      # the SQLite-portable way to introspect schema without an ALTER race.
+      existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+      if "ffmpeg_stderr" not in existing_cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ffmpeg_stderr TEXT")
       conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
       conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_config ON jobs(config)")
       conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at)")
@@ -224,6 +238,22 @@ class SQLiteJobDatabase:
         (STATUS_COMPLETED, _utc_now(), input_size, output_size, job_id),
       )
     self.log.debug("Job %d completed" % job_id)
+
+  def update_job_ffmpeg_stderr(self, job_id: int, stderr: str) -> None:
+    """Store the full ffmpeg stderr blob for *job_id*.
+
+    Truncates to ``_FFMPEG_STDERR_MAX_BYTES`` (keeping the tail, since
+    the meaningful error is usually at the end of an ffmpeg run) so a
+    runaway stderr doesn't blow up the row.
+    """
+    if stderr is None:
+      return
+    payload = stderr if isinstance(stderr, str) else str(stderr)
+    encoded = payload.encode("utf-8", errors="replace")
+    if len(encoded) > _FFMPEG_STDERR_MAX_BYTES:
+      payload = encoded[-_FFMPEG_STDERR_MAX_BYTES:].decode("utf-8", errors="replace")
+    with self._conn() as conn:
+      conn.execute("UPDATE jobs SET ffmpeg_stderr = ? WHERE id = ?", (payload, job_id))
 
   def fail_job(self, job_id, error=None):
     now = datetime.now(UTC).replace(microsecond=0)
@@ -583,6 +613,7 @@ class PostgreSQLJobDatabase:
                         worker_id    INTEGER,
                         node_id      TEXT,
                         error        TEXT,
+                        ffmpeg_stderr TEXT,
                         created_at   TIMESTAMPTZ DEFAULT NOW(),
                         started_at   TIMESTAMPTZ,
                         completed_at TIMESTAMPTZ
@@ -662,6 +693,7 @@ class PostgreSQLJobDatabase:
           "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_retries INTEGER DEFAULT 0",
           "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ",
           "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 0",
+          "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ffmpeg_stderr TEXT",
         ]:
           cur.execute(col_sql)
         cur.execute("""
@@ -958,6 +990,23 @@ class PostgreSQLJobDatabase:
           (STATUS_COMPLETED, input_size, output_size, job_id),
         )
     self.log.debug("Job %d completed" % job_id)
+
+  def update_job_ffmpeg_stderr(self, job_id: int, stderr: str) -> None:
+    """Store the full ffmpeg stderr blob for *job_id*.
+
+    Truncates to ``_FFMPEG_STDERR_MAX_BYTES`` (tail-preserving) so a
+    runaway stderr doesn't blow up the row. PostgreSQL TEXT is unbounded
+    but multi-MB blobs slow detoasting on queries that return the row.
+    """
+    if stderr is None:
+      return
+    payload = stderr if isinstance(stderr, str) else str(stderr)
+    encoded = payload.encode("utf-8", errors="replace")
+    if len(encoded) > _FFMPEG_STDERR_MAX_BYTES:
+      payload = encoded[-_FFMPEG_STDERR_MAX_BYTES:].decode("utf-8", errors="replace")
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("UPDATE jobs SET ffmpeg_stderr = %s WHERE id = %s", (payload, job_id))
 
   def fail_job(self, job_id, error=None):
     """Mark a job as failed, or requeue with exponential backoff if retries remain."""

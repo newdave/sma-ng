@@ -54,6 +54,58 @@ class TestSQLiteJobDatabase:
     assert db.filter_unscanned(paths) == [paths[1]]
     db.close()
 
+  def test_jobs_table_has_ffmpeg_stderr_column(self, tmp_path):
+    db = _db(tmp_path)
+    with db._conn() as conn:
+      cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    assert "ffmpeg_stderr" in cols
+    db.close()
+
+  def test_migrates_existing_jobs_table_to_add_ffmpeg_stderr(self, tmp_path):
+    """Pre-existing deployments have a jobs table without ffmpeg_stderr.
+    Reopening with the current code must add the column idempotently."""
+    import sqlite3
+
+    db_path = tmp_path / "sma-ng.db"
+    raw = sqlite3.connect(str(db_path))
+    raw.execute(
+      "CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, "
+      "config TEXT NOT NULL, args TEXT, status TEXT, worker_id INTEGER, node_id TEXT, "
+      "error TEXT, created_at TEXT, started_at TEXT, completed_at TEXT)"
+    )
+    raw.commit()
+    raw.close()
+
+    db = SQLiteJobDatabase(f"sqlite:///{db_path}")
+    with db._conn() as conn:
+      cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    assert "ffmpeg_stderr" in cols
+    db.close()
+
+  def test_update_job_ffmpeg_stderr_persists_and_truncates(self, tmp_path):
+    from resources.daemon import db as db_mod
+
+    db = _db(tmp_path)
+    job_id = db.add_job("/mnt/media/movie.mkv", "/config/sma-ng.yml")
+    db.update_job_ffmpeg_stderr(job_id, "first failure\nstderr line")
+    assert db.get_job(job_id)["ffmpeg_stderr"] == "first failure\nstderr line"
+
+    # Overwrites
+    db.update_job_ffmpeg_stderr(job_id, "second")
+    assert db.get_job(job_id)["ffmpeg_stderr"] == "second"
+
+    # Truncates to last _FFMPEG_STDERR_MAX_BYTES, tail preserved
+    big = ("x" * db_mod._FFMPEG_STDERR_MAX_BYTES) + "TAIL"
+    db.update_job_ffmpeg_stderr(job_id, big)
+    stored = db.get_job(job_id)["ffmpeg_stderr"]
+    assert len(stored.encode("utf-8")) <= db_mod._FFMPEG_STDERR_MAX_BYTES
+    assert stored.endswith("TAIL")
+
+    # None is a no-op
+    db.update_job_ffmpeg_stderr(job_id, None)
+    assert db.get_job(job_id)["ffmpeg_stderr"] == stored
+    db.close()
+
   def test_running_jobs_reset_on_reopen_for_same_node(self, tmp_path, monkeypatch):
     set_node_id_cache("node-a")
     db = _db(tmp_path)
