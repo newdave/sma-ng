@@ -98,5 +98,4 @@ mask uncovered logic.
 
 ## Related
 
-- [PRP: docs/prps/test-coverage-90.md](prps/test-coverage-90.md)
-- [Task breakdown: docs/tasks/test-coverage-90.md](tasks/test-coverage-90.md)
+- Coverage policy summary in [CLAUDE.md](../CLAUDE.md) under *Validation Matrix*.

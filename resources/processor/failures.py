@@ -1,8 +1,7 @@
 """FFmpeg failure classification for the transcode pipeline.
 
-Inhabitant zero of the `resources.processor` package introduced by
-docs/prps/qsv-pipeline-phase1-foundation.md. Provides a coarse but
-stable taxonomy over FFmpeg stderr tails so the convert loop can:
+Inhabitant zero of the `resources.processor` package. Provides a coarse
+but stable taxonomy over FFmpeg stderr tails so the convert loop can:
 
 - emit per-attempt structured telemetry with a named cause;
 - drive the fallback-policy decision (HW_ONLY vs SW_DECODE_ONLY vs

@@ -206,8 +206,14 @@ daemon:
    `<type>.<instance>` references and the corresponding instances under
    `services.sonarr` / `services.radarr` / `services.plex` are notified
    after conversion.
-5. **No matching rule** → conversion runs against bare `base` with no
-   profile and no service notification (silent passthrough).
+5. **No matching rule** → behaviour depends on `daemon.strict-routing`:
+   - `false` (default): conversion runs against bare `base` with no
+     profile and no service notification, and the daemon emits a
+     `[routing-miss]` WARNING so silent passthroughs surface in the log.
+   - `true`: the daemon refuses the job. Webhook submissions get
+     HTTP 400 with `reason: no_routing_match`; the background scanner
+     skips the file. Use this to guarantee every ingest path has an
+     explicit rule.
 
 `services:` is optional on a routing rule — omitting it converts
 matching files but skips notifications.
@@ -239,6 +245,7 @@ auto-profile selection happens for one-shot conversions. Pass
 | `path_rewrites`             | Prefix substitutions applied to incoming webhook paths before routing; overlapping rewrites are matched longest-prefix-first |
 | `scan_paths`                | Directories for scheduled background scanning                                                                                |
 | `routing`                   | Path-to-profile / path-to-services mapping (see above)                                                                       |
+| `strict_routing`            | Refuse jobs whose paths don't match any `routing` rule (default `false`; webhook gets HTTP 400, scanner skips the file)      |
 | `default_args`              | Args prepended to every conversion regardless of which routing rule matched                                                  |
 | `smoke_test`                | Run option-generation dry-run against the loaded config at startup. Exits 1 on failure.                                      |
 | `job_timeout_seconds`       | Maximum seconds a conversion may run (0 = no timeout)                                                                        |

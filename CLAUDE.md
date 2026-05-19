@@ -46,13 +46,41 @@ Optimize work for:
 
 ## Documentation And Commits
 
+**Documentation is part of the change, not a follow-up.** Any code change that
+alters observable behavior MUST include matching doc updates in the same
+commit (or split commit series). "Behavior" includes: new or changed config
+keys, new or changed CLI flags, new or changed HTTP endpoints, new or
+changed mise tasks, new failure modes / error messages operators will see,
+schema field additions/removals/renames, and changes to the deploy flow.
+
+Concrete rule per change type:
+
+| Change                                              | Doc that MUST be updated in the same commit                                                          |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| New / changed config key                            | `docs/configuration.md`, `docs/daemon.md` (if under `daemon:`), regenerated `setup/sma-ng.yml.sample` |
+| New / changed CLI flag (`manual.py`, `daemon.py`)   | `docs/getting-started.md` or `docs/daemon.md` flag table; usage examples                             |
+| New / changed HTTP endpoint                         | `docs/daemon.md` endpoint section AND `docs/openapi.yaml`                                            |
+| New / changed mise task                             | `docs/deployment.md` task table; description in the task's `#MISE description=`                      |
+| New failure mode / diagnoser pattern                | `docs/troubleshooting.md` if operator-actionable                                                     |
+| Changed deploy flow                                 | `docs/deployment.md`, `docs/cluster-operations.md` if cluster-affecting                              |
+| New integration (Sonarr/Radarr/Plex/Emby/Jellyfin)  | `docs/integrations.md`                                                                               |
+| Bug fix that changes *visible* behavior             | The doc that described the old behavior (don't leave the wrong description live)                     |
+
+If a change has no operator-visible effect (internal refactor, test-only,
+private helper rename, dead-code removal), the doc-update requirement is
+waived — say so explicitly in the commit message ("internal refactor, no
+doc impact"). Don't invent a doc change to satisfy the rule.
+
+Other rules:
+
 - Code, tests, config samples, and docs for one behavior change belong in the same logical change.
-- For user-facing behavior changes, update all relevant docs in the same change:
-  `docs/`, matching `/tmp/sma-wiki/` pages, and `resources/docs.html`.
 - If asked to commit multiple areas, split by behavior or operational outcome, not file type.
 - If asked to "commit all changes", commit the whole worktree as multiple logical commits.
 - Use conventional commit prefixes such as `fix:`, `feat:`, `refactor:`, `docs:`.
 - After each requested commit, run `git pull --rebase` and `git push`.
+- Don't author new PRPs / task breakdowns into `docs/prps/` or `docs/tasks/`.
+  Shipped-state planning docs go stale fast and the git history already preserves intent.
+  Write the rationale into the commit message and the operator-facing doc instead.
 
 ## Common Commands
 
