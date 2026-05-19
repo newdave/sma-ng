@@ -1695,6 +1695,29 @@ class MediaProcessor:
     # rather than fail.
     vb_frames, vref_frames = self._cap_frames_to_profile(vcodec, vprofile, vb_frames, vref_frames)
 
+    # Same-family re-encode (e.g. hevc -> hevc_qsv) at a bitrate far above
+    # the source's effective bitrate just bloats the output without quality
+    # gain. Hardware encoders need some headroom over the source so we cap
+    # at a 1.2× soft ceiling rather than the source kbps directly.
+    if vcodec != "copy" and isinstance(vbitrate, (int, float)) and vbitrate_estimate:
+      source_family = self._codec_family(info.video.codec)
+      output_family = self._codec_family(vcodec)
+      if source_family and source_family == output_family:
+        soft_cap = vbitrate_estimate * 1.2
+        if vbitrate > soft_cap:
+          self.log.warning(
+            "Output video bitrate %.0fk exceeds 1.2x source bitrate %.0fk for same-family %s -> %s re-encode; clamping to %.0fk [video-same-family-bitrate-clamp]."
+            % (vbitrate, vbitrate_estimate, info.video.codec, vcodec, soft_cap)
+          )
+          vbitrate = soft_cap
+          if vmaxrate and isinstance(vmaxrate, str) and vmaxrate.endswith("k"):
+            try:
+              if int(vmaxrate[:-1]) > soft_cap * 1.5:
+                vmaxrate = "%dk" % int(soft_cap * 1.5)
+                vbufsize = "%dk" % int(soft_cap * 3.0)
+            except ValueError:
+              pass
+
     self.log.info("Creating %s video stream from source stream %d." % (vcodec, info.video.index))
 
     video_settings = {
