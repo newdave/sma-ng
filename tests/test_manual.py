@@ -201,34 +201,34 @@ class TestFindArrInstance:
 
   def test_no_instances_returns_none(self):
     s = self._settings_with()
-    inst, kind = _find_arr_instance("/mnt/media/TV/show.mkv", s)
+    inst, kind = _find_arr_instance("/mnt/unionfs/Media/TV/show.mkv", s)
     assert inst is None
     assert kind is None
 
   def test_sonarr_match_by_path_prefix(self):
-    instance = {"path": "/mnt/media/TV", "apikey": "abc", "section": "sonarr"}
+    instance = {"path": "/mnt/unionfs/Media/TV", "apikey": "abc", "section": "sonarr"}
     s = self._settings_with(sonarr=[instance])
-    inst, kind = _find_arr_instance("/mnt/media/TV/show/ep.mkv", s)
+    inst, kind = _find_arr_instance("/mnt/unionfs/Media/TV/show/ep.mkv", s)
     assert inst is instance
     assert kind == "sonarr"
 
   def test_radarr_match_by_path_prefix(self):
-    instance = {"path": "/mnt/media/Movies", "apikey": "xyz", "section": "radarr"}
+    instance = {"path": "/mnt/unionfs/Media/Movies", "apikey": "xyz", "section": "radarr"}
     s = self._settings_with(radarr=[instance])
-    inst, kind = _find_arr_instance("/mnt/media/Movies/film.mkv", s)
+    inst, kind = _find_arr_instance("/mnt/unionfs/Media/Movies/film.mkv", s)
     assert inst is instance
     assert kind == "radarr"
 
   def test_no_match_when_path_not_prefix(self):
-    instance = {"path": "/mnt/media/TV", "apikey": "abc", "section": "sonarr"}
+    instance = {"path": "/mnt/unionfs/Media/TV", "apikey": "abc", "section": "sonarr"}
     s = self._settings_with(sonarr=[instance])
-    inst, kind = _find_arr_instance("/mnt/media/Movies/film.mkv", s)
+    inst, kind = _find_arr_instance("/mnt/unionfs/Media/Movies/film.mkv", s)
     assert inst is None
 
   def test_no_match_when_apikey_missing(self):
-    instance = {"path": "/mnt/media/TV", "section": "sonarr"}  # no apikey
+    instance = {"path": "/mnt/unionfs/Media/TV", "section": "sonarr"}  # no apikey
     s = self._settings_with(sonarr=[instance])
-    inst, kind = _find_arr_instance("/mnt/media/TV/ep.mkv", s)
+    inst, kind = _find_arr_instance("/mnt/unionfs/Media/TV/ep.mkv", s)
     assert inst is None
 
 

@@ -91,8 +91,8 @@ Database URLs are intentionally read only from `sma-ng.yml`; environment variabl
 The safest clustered layout is for all nodes to see the same media roots under the same paths:
 
 ```text
-/mnt/media/TV
-/mnt/media/Movies
+/mnt/unionfs/Media/TV
+/mnt/unionfs/Media/Movies
 /downloads
 ```
 
@@ -101,8 +101,8 @@ If that is not possible, normalize incoming paths with `path_rewrites`:
 ```json
 {
   "path_rewrites": [
-    {"from": "/srv/media", "to": "/mnt/media"},
-    {"from": "/volume1/media", "to": "/mnt/media"}
+    {"from": "/srv/media", "to": "/mnt/unionfs/Media"},
+    {"from": "/volume1/media", "to": "/mnt/unionfs/Media"}
   ]
 }
 ```
@@ -150,7 +150,7 @@ Daemon:
   api_key: tv-secret
   db_url: postgresql://sma:password@127.0.0.1:5432/sma
   path_configs:
-    - path: /mnt/media/TV
+    - path: /mnt/unionfs/Media/TV
       profile: rq
 ```
 
@@ -160,7 +160,7 @@ Daemon:
   api_key: movies-secret
   db_url: postgresql://sma:password@127.0.0.1:5432/sma
   path_configs:
-    - path: /mnt/media/Movies
+    - path: /mnt/unionfs/Media/Movies
       profile: rq
 ```
 
@@ -296,9 +296,9 @@ Daemon:
     - from: /downloads
       to: /mnt/downloads
   path_configs:
-    - path: /mnt/media/TV
+    - path: /mnt/unionfs/Media/TV
       profile: rq
-    - path: /mnt/media/Movies
+    - path: /mnt/unionfs/Media/Movies
       profile: lq
 ```
 

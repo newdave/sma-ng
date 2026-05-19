@@ -369,8 +369,8 @@ class TestDockerTargetInstaller:
       shopt -s expand_aliases
       docker() { printf '%s\\n' "$*"; }
       source setup/sma-ng-docker-aliases.sh
-      sma-convert /mnt/media/movie.mkv --profile rq
-      sma-preview /mnt/media/movie.mkv
+      sma-convert /mnt/unionfs/Media/movie.mkv --profile rq
+      sma-preview /mnt/unionfs/Media/movie.mkv
       sma-codecs
       """
     )
@@ -385,8 +385,8 @@ class TestDockerTargetInstaller:
 
     assert result.returncode == 0, result.stderr or result.stdout
     lines = result.stdout.splitlines()
-    assert lines[0] == "exec -it sma-ng python manual.py -i /mnt/media/movie.mkv -a --profile rq"
-    assert lines[1] == "exec -it sma-ng python manual.py -i /mnt/media/movie.mkv -oo"
+    assert lines[0] == "exec -it sma-ng python manual.py -i /mnt/unionfs/Media/movie.mkv -a --profile rq"
+    assert lines[1] == "exec -it sma-ng python manual.py -i /mnt/unionfs/Media/movie.mkv -oo"
     assert lines[2] == "exec -it sma-ng python manual.py -cl"
 
 

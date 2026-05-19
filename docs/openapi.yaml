@@ -613,7 +613,7 @@ paths:
             example:
               eventType: Download
               episodeFile:
-                path: /mnt/media/TV/Show/Season 1/S01E01.mkv
+                path: /mnt/unionfs/Media/TV/Show/Season 1/S01E01.mkv
               series:
                 tvdbId: 73871
               episodes:
@@ -689,7 +689,7 @@ paths:
             example:
               eventType: Download
               movieFile:
-                path: /mnt/media/Movies/The Matrix (1999).mkv
+                path: /mnt/unionfs/Media/Movies/The Matrix (1999).mkv
               movie:
                 tmdbId: 603
       responses:

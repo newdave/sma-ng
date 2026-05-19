@@ -20,7 +20,7 @@
 #   "eventType":   "Download",
 #   "series":      { "tvdbId": 73871, "imdbId": "tt0472308" },
 #   "episodes":    [ { "seasonNumber": 3, "episodeNumber": 10 } ],
-#   "episodeFile": { "path": "/mnt/media/TV/Show/S03E10.mkv" }
+#   "episodeFile": { "path": "/mnt/unionfs/Media/TV/Show/S03E10.mkv" }
 # }
 #
 # Alternatively, configure Sonarr → Settings → Connect → Webhook and point it

@@ -1373,7 +1373,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       "eventType": "Download",
       "series":      { "tvdbId": 73871, "imdbId": "tt0472308" },
       "episodes":    [ { "seasonNumber": 3, "episodeNumber": 10 } ],
-      "episodeFile": { "path": "/mnt/media/TV/Show/S03E10.mkv" }
+      "episodeFile": { "path": "/mnt/unionfs/Media/TV/Show/S03E10.mkv" }
     }
     """
     content_length = int(self.headers.get("Content-Length", 0))
@@ -1391,7 +1391,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     {
       "eventType": "Download",
       "movie":     { "tmdbId": 603, "imdbId": "tt0133093" },
-      "movieFile": { "path": "/mnt/media/Movies/The Matrix.mkv" }
+      "movieFile": { "path": "/mnt/unionfs/Media/Movies/The Matrix.mkv" }
     }
     """
     content_length = int(self.headers.get("Content-Length", 0))

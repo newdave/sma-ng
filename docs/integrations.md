@@ -29,7 +29,7 @@ SMA-NG extracts `episodeFile.path`, `series.tvdbId`, and episode numbers from th
 ```yaml
 Daemon:
   path_configs:
-    - path: /mnt/media/TV
+    - path: /mnt/unionfs/Media/TV
       profile: rq
 ```
 
@@ -80,21 +80,21 @@ services:
 
 daemon:
   routing:
-    - match: /mnt/media/TV
+    - match: /mnt/unionfs/Media/TV
       profile: rq
       services: [sonarr.main]
-    - match: /mnt/media/TV-Kids
+    - match: /mnt/unionfs/Media/TV-Kids
       profile: lq
       services: [sonarr.kids]
-    - match: /mnt/media/Movies
+    - match: /mnt/unionfs/Media/Movies
       profile: rq
       services: [radarr.main]
-    - match: /mnt/media/Movies/4K
+    - match: /mnt/unionfs/Media/Movies/4K
       profile: rq
       services: [radarr.4k]
 ```
 
-When `manual.py` processes `/mnt/media/Movies/4K/film.mkv`, the matcher picks the `/mnt/media/Movies/4K` rule (longest prefix) and triggers a rescan on `radarr.4k`.
+When `manual.py` processes `/mnt/unionfs/Media/Movies/4K/film.mkv`, the matcher picks the `/mnt/unionfs/Media/Movies/4K` rule (longest prefix) and triggers a rescan on `radarr.4k`.
 
 The deploy tooling stamps these rules automatically: list each instance with `path` + `profile` under `services.sonarr` / `services.radarr` in `setup/local.yml` and `mise run config:roll` rebuilds `daemon.routing` longest-prefix-first on every roll. See [Deployment](deployment.md).
 
@@ -131,7 +131,7 @@ match, identical to Sonarr/Radarr/Autoscan):
 ```yaml
 daemon:
   routing:
-    - match: /mnt/media/Movies
+    - match: /mnt/unionfs/Media/Movies
       profile: rq
       services: [radarr.main, emby.main]
 ```
@@ -167,13 +167,13 @@ routing rule when one converted file should refresh both servers.
 
 ### Emby / Jellyfin troubleshooting
 
-| Symptom | Likely cause |
-|---|---|
-| 401 returned | Wrong `apikey`, or apikey not granted access in admin |
-| 404 returned | `webroot` mismatch — server is mounted under a path prefix |
-| No POST issued | File's directory isn't a prefix of any `daemon.routing[].match` that lists `emby.<name>` / `jellyfin.<name>`, OR `refresh: false` |
-| Library not updated despite 204 | Path mismatch — the server doesn't recognise the directory; add a `path-mapping` entry |
-| `apikey not configured` warning | The instance is reachable but the apikey field is empty |
+| Symptom                         | Likely cause                                                                                                                      |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 401 returned                    | Wrong `apikey`, or apikey not granted access in admin                                                                             |
+| 404 returned                    | `webroot` mismatch — server is mounted under a path prefix                                                                        |
+| No POST issued                  | File's directory isn't a prefix of any `daemon.routing[].match` that lists `emby.<name>` / `jellyfin.<name>`, OR `refresh: false` |
+| Library not updated despite 204 | Path mismatch — the server doesn't recognise the directory; add a `path-mapping` entry                                            |
+| `apikey not configured` warning | The instance is reachable but the apikey field is empty                                                                           |
 
 ### Autoscan
 
@@ -204,10 +204,10 @@ converted files trigger it:
 ```yaml
 daemon:
   routing:
-    - match: /mnt/media/TV
+    - match: /mnt/unionfs/Media/TV
       profile: rq
       services: [sonarr.main, autoscan.main]
-    - match: /mnt/media/Movies
+    - match: /mnt/unionfs/Media/Movies
       profile: rq
       services: [radarr.main, autoscan.main]
 ```
@@ -239,12 +239,12 @@ mount points (e.g. `/library/Media` here, `/data/Media` there). Use the same
 
 #### Autoscan troubleshooting
 
-| Symptom | Likely cause |
-|---|---|
-| 401 returned | Wrong `username` / `password`, or Autoscan instance has no auth configured |
-| 404 returned | `webroot` mismatch, or Autoscan running on a different path prefix |
-| No POST issued | File's directory isn't a prefix of any `daemon.routing[].match` that lists `autoscan.<name>` |
-| Wrong `dir` sent | Add a `path-mapping` entry rewriting SMA's path to Autoscan's |
+| Symptom          | Likely cause                                                                                 |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| 401 returned     | Wrong `username` / `password`, or Autoscan instance has no auth configured                   |
+| 404 returned     | `webroot` mismatch, or Autoscan running on a different path prefix                           |
+| No POST issued   | File's directory isn't a prefix of any `daemon.routing[].match` that lists `autoscan.<name>` |
+| Wrong `dir` sent | Add a `path-mapping` entry rewriting SMA's path to Autoscan's                                |
 
 ### Integration Flow
 
