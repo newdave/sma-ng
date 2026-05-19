@@ -1827,16 +1827,17 @@ class TestDaemonServerShutdownLifecycle:
     server.job_db.is_distributed = True
     return server
 
-  def test_shutdown_removes_node_from_cluster_registry(self):
+  def test_shutdown_marks_node_offline_without_removing(self):
     server = self._make_server_for_shutdown()
 
     with patch("resources.daemon.server.ThreadingHTTPServer.shutdown", autospec=True) as super_shutdown:
       DaemonServer.shutdown(server)
 
-    server.job_db.mark_node_offline.assert_called_once_with("node-1", remove=True)
+    # Preserve approval_status across redeploys — see server.py shutdown().
+    server.job_db.mark_node_offline.assert_called_once_with("node-1")
     super_shutdown.assert_called_once_with(server)
 
-  def test_graceful_restart_removes_node_from_cluster_registry(self):
+  def test_graceful_restart_marks_node_offline_without_removing(self):
     server = self._make_server_for_shutdown()
 
     with patch("resources.daemon.server.ThreadingHTTPServer.shutdown", autospec=True) as super_shutdown:
@@ -1845,7 +1846,7 @@ class TestDaemonServerShutdownLifecycle:
           with patch("resources.daemon.server.sys.argv", ["daemon.py"]):
             DaemonServer.graceful_restart(server)
 
-    server.job_db.mark_node_offline.assert_called_once_with("node-1", remove=True)
+    server.job_db.mark_node_offline.assert_called_once_with("node-1")
     super_shutdown.assert_called_once_with(server)
     execv.assert_called_once_with("python3", ["python3", "daemon.py"])
 
