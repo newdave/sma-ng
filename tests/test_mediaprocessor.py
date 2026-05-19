@@ -4789,7 +4789,9 @@ class TestProcessAudioStream:
     mp = self._make_mp()
     mp.settings.abitrate = 256
     mp.settings.amaxbitrate = 256
-    a = self._make_audio_stream("aac", channels=8)  # 8*256=2048 > 256
+    # ac3 source -> aac output, so the same-codec source-bitrate clamp does
+    # not apply and amaxbitrate is the binding cap.
+    a = self._make_audio_stream("ac3", channels=8)
     info = self._make_info([a])
     audio_settings = []
     with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
@@ -4838,6 +4840,45 @@ class TestProcessAudioStream:
     with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
       mp._process_audio_stream(a, "/fake/input.mkv", info, [], False, [], [], audio_settings, None, acodecs=["aac"], ua_codecs=[])
     assert audio_settings[0]["bsf"] == "aac_adtstoasc"
+
+  def test_same_codec_reencode_clamps_to_source_bitrate(self):
+    mp = self._make_mp()
+    mp.settings.acodec = ["ac3"]
+    mp.settings.abitrate = 256
+    mp.settings.afilter = "loudnorm"
+    mp.settings.aforcefilter = True
+    a = self._make_audio_stream("ac3", channels=2, bitrate=192000)
+    info = self._make_info([a])
+    audio_settings = []
+    with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
+      mp._process_audio_stream(a, "/fake/input.mkv", info, [], False, [], [], audio_settings, None, acodecs=["ac3"], ua_codecs=[])
+    assert audio_settings[0]["bitrate"] == 192
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list if c.args]
+    assert any("audio-same-codec-bitrate-clamp" in w for w in warnings)
+
+  def test_same_codec_reencode_below_source_not_changed(self):
+    mp = self._make_mp()
+    mp.settings.acodec = ["ac3"]
+    mp.settings.abitrate = 64
+    mp.settings.afilter = "loudnorm"
+    mp.settings.aforcefilter = True
+    a = self._make_audio_stream("ac3", channels=2, bitrate=384000)
+    info = self._make_info([a])
+    audio_settings = []
+    with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
+      mp._process_audio_stream(a, "/fake/input.mkv", info, [], False, [], [], audio_settings, None, acodecs=["ac3"], ua_codecs=[])
+    assert audio_settings[0]["bitrate"] == 128
+
+  def test_different_codec_reencode_not_clamped(self):
+    mp = self._make_mp()
+    mp.settings.acodec = ["aac"]
+    mp.settings.abitrate = 256
+    a = self._make_audio_stream("ac3", channels=2, bitrate=128000)
+    info = self._make_info([a])
+    audio_settings = []
+    with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
+      mp._process_audio_stream(a, "/fake/input.mkv", info, [], False, [], [], audio_settings, None, acodecs=["aac"], ua_codecs=[])
+    assert audio_settings[0]["bitrate"] == 512
 
 
 # ---------------------------------------------------------------------------
@@ -6929,7 +6970,9 @@ class TestProcessAudioStreamDup:
     mp = self._make_mp()
     mp.settings.abitrate = 256
     mp.settings.amaxbitrate = 256
-    a = self._make_audio_stream("aac", channels=8)  # 8*256=2048 > 256
+    # ac3 source -> aac output, so the same-codec source-bitrate clamp does
+    # not apply and amaxbitrate is the binding cap.
+    a = self._make_audio_stream("ac3", channels=8)
     info = self._make_info([a])
     audio_settings = []
     with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
@@ -6978,6 +7021,45 @@ class TestProcessAudioStreamDup:
     with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
       mp._process_audio_stream(a, "/fake/input.mkv", info, [], False, [], [], audio_settings, None, acodecs=["aac"], ua_codecs=[])
     assert audio_settings[0]["bsf"] == "aac_adtstoasc"
+
+  def test_same_codec_reencode_clamps_to_source_bitrate(self):
+    mp = self._make_mp()
+    mp.settings.acodec = ["ac3"]
+    mp.settings.abitrate = 256
+    mp.settings.afilter = "loudnorm"
+    mp.settings.aforcefilter = True
+    a = self._make_audio_stream("ac3", channels=2, bitrate=192000)
+    info = self._make_info([a])
+    audio_settings = []
+    with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
+      mp._process_audio_stream(a, "/fake/input.mkv", info, [], False, [], [], audio_settings, None, acodecs=["ac3"], ua_codecs=[])
+    assert audio_settings[0]["bitrate"] == 192
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list if c.args]
+    assert any("audio-same-codec-bitrate-clamp" in w for w in warnings)
+
+  def test_same_codec_reencode_below_source_not_changed(self):
+    mp = self._make_mp()
+    mp.settings.acodec = ["ac3"]
+    mp.settings.abitrate = 64
+    mp.settings.afilter = "loudnorm"
+    mp.settings.aforcefilter = True
+    a = self._make_audio_stream("ac3", channels=2, bitrate=384000)
+    info = self._make_info([a])
+    audio_settings = []
+    with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
+      mp._process_audio_stream(a, "/fake/input.mkv", info, [], False, [], [], audio_settings, None, acodecs=["ac3"], ua_codecs=[])
+    assert audio_settings[0]["bitrate"] == 128
+
+  def test_different_codec_reencode_not_clamped(self):
+    mp = self._make_mp()
+    mp.settings.acodec = ["aac"]
+    mp.settings.abitrate = 256
+    a = self._make_audio_stream("ac3", channels=2, bitrate=128000)
+    info = self._make_info([a])
+    audio_settings = []
+    with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
+      mp._process_audio_stream(a, "/fake/input.mkv", info, [], False, [], [], audio_settings, None, acodecs=["aac"], ua_codecs=[])
+    assert audio_settings[0]["bitrate"] == 512
 
 
 # ---------------------------------------------------------------------------

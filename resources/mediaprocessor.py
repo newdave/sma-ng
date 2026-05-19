@@ -1918,6 +1918,16 @@ class MediaProcessor:
       abitrate = self.settings.amaxbitrate
       acodec = acodecs[0]
 
+    # Same-codec re-encode never benefits from a higher target bitrate than
+    # the source — it just bloats the file with no quality gain. Clamp the
+    # chosen bitrate down to the source bitrate when we're re-encoding into
+    # the same codec we read.
+    if acodec != "copy" and acodec == a.codec and a.bitrate:
+      source_kbps = int(a.bitrate / 1000)
+      if source_kbps > 0 and abitrate > source_kbps:
+        self.log.warning("Output audio bitrate %dk exceeds source bitrate %dk for same-codec %s re-encode; clamping to source [audio-same-codec-bitrate-clamp]." % (abitrate, source_kbps, acodec))
+        abitrate = source_kbps
+
     # Force copy if Atmos
     if self.settings.audio_atmos_force_copy and self.isAudioStreamAtmos(a):
       self.log.debug("Source audio stream contains Atmos data, forcing codec copy to preserve [audio-atmos-force-copy].")
