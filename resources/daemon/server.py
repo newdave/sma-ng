@@ -461,7 +461,9 @@ class DaemonServer(ThreadingHTTPServer):
 
     if self.job_db.is_distributed:
       try:
-        self.job_db.mark_node_offline(self.node_id, remove=True)
+        # Mark offline but keep the row — removing it drops approval_status
+        # and the operator would have to re-approve after every restart.
+        self.job_db.mark_node_offline(self.node_id)
       except Exception:
         pass
 
@@ -499,10 +501,13 @@ class DaemonServer(ThreadingHTTPServer):
 
     self.logger.info("All workers finished, shutting down.")
 
-    # Mark this node offline in the cluster table on clean shutdown
+    # Mark this node offline in the cluster table on clean shutdown.
+    # Do NOT remove the row — that drops approval_status and the operator
+    # would have to re-approve after every redeploy. delete_node remains
+    # available via the admin API for genuine decommissions.
     if self.job_db.is_distributed:
       try:
-        self.job_db.mark_node_offline(self.node_id, remove=True)
+        self.job_db.mark_node_offline(self.node_id)
       except Exception:
         pass
 
