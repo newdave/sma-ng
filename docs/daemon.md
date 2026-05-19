@@ -568,7 +568,7 @@ Not reloaded (require full restart): `--host`, `--port`, `--workers`.
 
 ### Auto-reload on file change
 
-The daemon also watches `sma-ng.yml` and triggers the same reload when the file changes. Editor saves, `mise run config:roll` deploys, and rsync updates all take effect within `interval-seconds + debounce-seconds` (default 7s) with no operator action.
+The daemon also watches `sma-ng.yml` and triggers the same reload when the file changes. Editor saves, `mise run deploy:config` deploys, and rsync updates all take effect within `interval-seconds + debounce-seconds` (default 7s) with no operator action.
 
 | Key                                    | Type | Default | Description                                                                                                                                                |
 | -------------------------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |

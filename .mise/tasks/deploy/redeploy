@@ -72,7 +72,6 @@ IMAGE="${IMAGE:-$(image_from_config)}"
 split_image_ref "$IMAGE"
 
 BUILD_IMAGE="${BUILD_IMAGE:-true}"
-ROLL_CONFIG="${ROLL_CONFIG:-false}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 
 echo "Redeploy targets: $DEPLOY_HOSTS"
@@ -87,22 +86,11 @@ else
   echo "==> Skipping image build (BUILD_IMAGE=false)"
 fi
 
-if [ "$ROLL_CONFIG" = "true" ]; then
-  echo ""
-  echo "==> Rolling config before redeploy"
-  for host in $DEPLOY_HOSTS; do
-    HOST="$host" mise run config:roll
-  done
-else
-  echo ""
-  echo "==> Skipping config roll (set ROLL_CONFIG=true to include it)"
-fi
-
 failed=""
 for host in $DEPLOY_HOSTS; do
   echo ""
   echo "==> [$host] redeploying ${DEPLOY_IMAGE}:${DEPLOY_IMAGE_TAG}"
-  if ! IMAGE="$DEPLOY_IMAGE" IMAGE_TAG="$DEPLOY_IMAGE_TAG" HOST="$host" mise run deploy:docker; then
+  if ! IMAGE="$DEPLOY_IMAGE" IMAGE_TAG="$DEPLOY_IMAGE_TAG" HOST="$host" mise run deploy:remote; then
     failed="$failed $host"
   fi
 done

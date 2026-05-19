@@ -92,6 +92,7 @@ services = json.loads(base64.b64decode(sys.argv[9]).decode()) if len(sys.argv) >
 base_overrides = json.loads(base64.b64decode(sys.argv[10]).decode()) if len(sys.argv) > 10 and sys.argv[10] else {}
 profiles_overrides = json.loads(base64.b64decode(sys.argv[11]).decode()) if len(sys.argv) > 11 and sys.argv[11] else {}
 workers_raw = _b64arg(12)
+daemon_overrides = json.loads(base64.b64decode(sys.argv[13]).decode()) if len(sys.argv) > 13 and sys.argv[13] else {}
 
 
 def _parse_positive_int(raw):
@@ -155,9 +156,30 @@ if os.path.exists(yaml_path):
       print(f"  sma-ng.yml profiles.{path_}: {old!r} -> {new!r}")
       changed = True
 
-  # daemon credentials
+  # daemon overrides from local.yml (deep-merge before credential
+  # stamping so the credentials/workers blocks below still win, and so
+  # routing is rebuilt from services further down). Carries through
+  # arbitrary daemon-section keys like path-rewrites, strict-routing,
+  # config-watch, scan-paths, etc. that don't have dedicated stamping.
   daemon_block = root.setdefault("daemon", {})
-  for field, val in (("api-key", api_key), ("db-url", db_url), ("ffmpeg-dir", ffmpeg_dir)):
+  if daemon_overrides:
+    # Routing is rebuilt below from services — don't let local.yml's
+    # daemon.routing overwrite that. Same for credential fields we
+    # explicitly stamp from local.yml.daemon below.
+    filtered = {k: v for k, v in daemon_overrides.items() if k not in ("routing",)}
+    for path_, old, new in _deep_merge(daemon_block, filtered):
+      print(f"  sma-ng.yml daemon.{path_}: {old!r} -> {new!r}")
+      changed = True
+
+  # daemon credentials + cluster identity. node-id pins the stable
+  # cluster identifier to the host alias from setup/local.yml so the
+  # cluster_nodes row matches across redeploys.
+  for field, val in (
+    ("api-key", api_key),
+    ("db-url", db_url),
+    ("ffmpeg-dir", ffmpeg_dir),
+    ("node-id", node_name),
+  ):
     if val and daemon_block.get(field) != val:
       print(f"  sma-ng.yml daemon.{field}: {daemon_block.get(field)!r} -> {val!r}")
       daemon_block[field] = val

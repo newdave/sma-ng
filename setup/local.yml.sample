@@ -3,7 +3,7 @@
 # Copy this file to setup/local.yml and customise it.
 # setup/local.yml is gitignored and never committed.
 #
-# Top-level sections and how `mise run config:roll` consumes each:
+# Top-level sections and how `mise run deploy:config` consumes each:
 #
 #   deploy   — project-wide defaults shared by every host. Resolved by
 #              scripts/local-config.py for any host-context lookup,
@@ -120,7 +120,7 @@ hosts:
 
 # ── daemon configuration ──────────────────────────────────────────────────────
 # Stamped into config/sma-ng.yml (daemon block, kebab-case) and
-# config/daemon.env by `mise run config:roll`. These are global — not per-host.
+# config/daemon.env by `mise run deploy:config`. These are global — not per-host.
 
 daemon:
   # API key for protecting daemon endpoints.
@@ -139,7 +139,7 @@ daemon:
 # where <type> is one of sonarr, radarr, plex, jellyfin, emby and <instance>
 # is any name you choose (e.g. main, kids, 4k).
 #
-# `mise run config:roll` stamps each instance into sma-ng.yml under
+# `mise run deploy:config` stamps each instance into sma-ng.yml under
 # `services.<type>.<instance>` and rebuilds `daemon.routing` from every
 # instance that defines both `path:` and `profile:`. The `path` and
 # `profile` keys live here only so routing can be derived; they are not
@@ -191,7 +191,7 @@ daemon:
 #       enabled: true
 
 # ── base overrides ───────────────────────────────────────────────────────────
-# Deep-merged into config/sma-ng.yml `base:` on every `mise run config:roll`.
+# Deep-merged into config/sma-ng.yml `base:` on every `mise run deploy:config`.
 # Use this to lock per-deployment defaults — for example, force every host
 # to use Intel QSV and encode HEVC by default:
 #

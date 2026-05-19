@@ -9,7 +9,7 @@ description: |
   ``sma-ng.yml`` and triggers the existing in-place reload. Today the
   operator has to ``curl -X POST /reload`` (or send `SIGHUP` for a
   full restart) to pick up edits; this PRP wires that up automatically
-  so changes made via ``mise run config:roll``, an editor save, or a
+  so changes made via ``mise run deploy:config``, an editor save, or a
   remote rsync take effect within a few seconds with no operator
   action.
 
@@ -137,7 +137,7 @@ within a few seconds.
 
 ## Why
 
-- Operator running `mise run config:roll` against three nodes today
+- Operator running `mise run deploy:config` against three nodes today
   has to either restart each daemon or POST `/reload` to each one.
   The watcher closes that loop.
 - Editor-save iteration on a single host is an obvious developer-
@@ -242,7 +242,7 @@ threads, plus schema knobs and tests.
 #   at server.py:204).
 
 # CRITICAL: The watched file's realpath may change if the operator
-#   atomically rewrites it via mise run config:roll's tmp+rename
+#   atomically rewrites it via mise run deploy:config's tmp+rename
 #   pattern. The realpath returned by os.path.realpath() at startup
 #   will resolve to the post-rename inode for the same path string
 #   on every stat, so polling the original *path string* (not a

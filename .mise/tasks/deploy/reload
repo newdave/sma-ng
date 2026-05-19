@@ -3,7 +3,7 @@
 #MISE depends=["deploy:mise"]
 set -euo pipefail
 
-# Hot-reload counterpart to deploy:restart. Use after `mise run config:roll`
+# Hot-reload counterpart to deploy:restart. Use after `mise run deploy:config`
 # when the change is hot-reloadable (api_key, scan_paths, audit settings,
 # routing rules, codec lists, profile overlays, etc.). Worker count and
 # API server bind host/port still require deploy:restart.

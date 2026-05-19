@@ -1220,7 +1220,7 @@ runs `deploy:setup` for that host and retries.
 #### Rolling config to remote hosts
 
 ```bash
-mise run config:roll
+mise run deploy:config
 ```
 
 This task manages `config/sma-ng.yml` on remote hosts without overwriting your customisations.
@@ -1272,7 +1272,7 @@ Sends a graceful shutdown webhook to each host, waits for the daemon to drain, t
 | `deploy:mise`     | Sync the local `.mise/` deploy control plane to each remote `deploy_dir`             |
 | `deploy:redeploy` | Build/push current code, optionally roll config, then recreate SMA Docker containers |
 | `deploy:sync`     | Sync code and install deps on all hosts                                              |
-| `config:roll`     | Roll configs: create missing, merge new keys, stamp credentials and overlays         |
+| `deploy:config`     | Roll configs: create missing, merge new keys, stamp credentials and overlays         |
 | `deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container    |
 | `deploy:docker`   | Rsync the local code to Docker hosts, pull the latest image, recreate SMA            |
 | `pg:restart`      | Restart bundled PostgreSQL on hosts whose `docker_profile` ends in `-pg`             |
