@@ -1346,6 +1346,21 @@ class TestQSVAdvancedOptions:
     vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
     assert any("p010le" in v for v in vf_parts)
 
+  def test_h264qsv_pix_fmt_yuv420p_translated_to_nv12(self):
+    """scale_qsv/vpp_qsv reject yuv420p; must translate to nv12."""
+    codec = H264QSVCodec()
+    opts = codec.parse_options({"codec": "h264qsv", "pix_fmt": "yuv420p"})
+    vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
+    assert any("nv12" in v for v in vf_parts)
+    assert not any("yuv420p" in v for v in vf_parts)
+
+  def test_h264qsv_pix_fmt_yuv420p10le_translated_to_p010le(self):
+    codec = H264QSVCodec()
+    opts = codec.parse_options({"codec": "h264qsv", "pix_fmt": "yuv420p10le"})
+    vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
+    assert any("p010le" in v for v in vf_parts)
+    assert not any("yuv420p10le" in v for v in vf_parts)
+
   def test_h264qsv_profile_valid(self):
     codec = H264QSVCodec()
     opts = codec.parse_options({"codec": "h264qsv", "profile": "high"})
