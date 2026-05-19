@@ -96,7 +96,7 @@ daemon:
 
 When `manual.py` processes `/mnt/unionfs/Media/Movies/4K/film.mkv`, the matcher picks the `/mnt/unionfs/Media/Movies/4K` rule (longest prefix) and triggers a rescan on `radarr.4k`.
 
-The deploy tooling stamps these rules automatically: list each instance with `path` + `profile` under `services.sonarr` / `services.radarr` in `setup/local.yml` and `mise run config:roll` rebuilds `daemon.routing` longest-prefix-first on every roll. See [Deployment](deployment.md).
+The deploy tooling stamps these rules automatically: list each instance with `path` + `profile` under `services.sonarr` / `services.radarr` in `setup/local.yml` and `mise run deploy:config` rebuilds `daemon.routing` longest-prefix-first on every roll. See [Deployment](deployment.md).
 
 ### Plex
 
@@ -212,7 +212,7 @@ daemon:
       services: [radarr.main, autoscan.main]
 ```
 
-**Deploy fan-out.** Under `mise run config:roll`, an Autoscan instance in
+**Deploy fan-out.** Under `mise run deploy:config`, an Autoscan instance in
 `setup/local.yml` that has no `path:` or `profile:` is treated as a fan-out
 target — its ref is appended to every routing rule generated from
 sonarr/radarr instances. So a single global Autoscan block:

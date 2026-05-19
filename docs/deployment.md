@@ -72,13 +72,14 @@ curl https://mise.run | sh
 | `mise run deploy:check`    | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                       |
 | `mise run deploy:setup`    | First-time host prep: SSH key, apt deps, deploy dir, Docker install                             |
 | `mise run deploy:mise`     | Sync the local `.mise/` deploy control plane to all hosts                                       |
-| `mise run deploy:redeploy` | Build/push the current code image, then pull and recreate the SMA container on production hosts |
+| `mise run deploy:redeploy` | Build/push the current code image, then run `deploy:remote` against production hosts            |
+| `mise run deploy:remote`   | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker)                |
+| `mise run deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry                |
 | `mise run deploy:sync`     | Sync code and install dependencies on all hosts                                                 |
-| `mise run config:roll`     | Roll configs to remote hosts: create missing files, merge new keys, stamp credentials           |
 | `mise run deploy:reload`   | Hot-reload `config/sma-ng.yml` on every host with `POST /reload`                                |
 | `mise run deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container               |
 | `mise run config:audit`    | Audit local configs                                                                             |
-| `mise run deploy:docker`   | Rsync code to Docker hosts, pull latest image, and recreate the SMA container                   |
+| `mise run deploy:docker`   | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate`         |
 | `mise run pg:restart`      | Restart bundled PostgreSQL on hosts using `*-pg` Docker profiles                                |
 | `mise run pg:recreate`     | Remove and recreate bundled PostgreSQL (destructive — removes `sma-pgdata` volume)              |
 | `mise run deploy:login`    | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token                                  |
@@ -199,7 +200,7 @@ cp setup/local.yml.sample setup/local.yml
 `setup/local.yml` is gitignored. It is the single source of truth for everything
 that distinguishes this deployment from the upstream defaults — deploy targets,
 per-host overrides, credentials, encoder defaults, and quality profiles. Each
-top-level section is consumed by `mise run config:roll` as follows:
+top-level section is consumed by `mise run deploy:config` as follows:
 
 | Section    | Effect on each host's `config/sma-ng.yml`                                                |
 | ---------- | ---------------------------------------------------------------------------------------- |
@@ -320,7 +321,7 @@ mise run deploy:mise
 mise run deploy:sync
 
 # 4. Push configs (create missing, merge new keys, stamp credentials)
-mise run config:roll
+mise run deploy:config
 
 # 5. Restart daemon on all hosts
 mise run deploy:restart
@@ -340,12 +341,12 @@ mise run pg:restart
 mise run pg:recreate
 ```
 
-### What `config:roll` Does
+### What `deploy:config` Does
 
-`config:roll` depends on `deploy:mise`, so the remote host gets the current local
+`deploy:config` depends on `deploy:mise`, so the remote host gets the current local
 `.mise/` helper and task code before any config mutation runs.
 
-For managed deployments, `config:roll` also stamps the host key from
+For managed deployments, `deploy:config` also stamps the host key from
 `setup/local.yml` into `daemon.node-id`, and the daemon uses that value as its
 cluster node ID.
 
@@ -375,13 +376,14 @@ For each remote host:
 | `deploy:check`    | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                 |
 | `deploy:setup`    | First-time host prep: SSH key, apt deps, deploy dir, Docker install                       |
 | `deploy:mise`     | Sync the local `.mise/` deploy control plane to each remote `DEPLOY_DIR`                  |
-| `deploy:redeploy` | Build/push the current code image, optionally run `config:roll`, then run `deploy:docker` |
+| `deploy:redeploy` | Build/push the current code image, then run `deploy:remote` per host                      |
+| `deploy:remote`   | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker)          |
+| `deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry          |
 | `deploy:sync`     | Sync code and install deps on all hosts                                                   |
-| `config:roll`     | Roll configs: create missing, merge new keys, stamp credentials                           |
 | `deploy:reload`   | Hot-reload `config/sma-ng.yml` on every host with `POST /reload`                          |
 | `deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container         |
 | `config:audit`    | Audit local configs                                                                       |
-| `deploy:docker`   | Rsync code to each Docker host, pull the image, and recreate SMA                          |
+| `deploy:docker`   | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate`   |
 | `pg:restart`      | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg`                  |
 | `pg:recreate`     | Stop bundled PostgreSQL, remove its Docker volume, and recreate it                        |
 | `cluster:start`   | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`)                            |

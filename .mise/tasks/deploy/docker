@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-#MISE description="Sync code to remote hosts, pull the configured Docker image, and recreate SMA containers"
+#MISE description="Push docker/docker-compose.yml to each host, pull the latest image, then `docker compose down` + `up -d --force-recreate`"
 #MISE aliases=["deploy:docker:upgrade"]
-#MISE depends=["deploy:mise"]
+#MISE depends=["deploy:check"]
 set -euo pipefail
 
 # shellcheck disable=SC1091
-# lib.sh is sourced relative to this script's directory at runtime.
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
 
 ALL_HOSTS=$(lc deploy hosts "")
@@ -25,8 +24,7 @@ HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-120}
 failed=""
 for host in $DEPLOY_HOSTS; do
   init_docker_host_context "$host"
-  # shellcheck disable=SC2154  # cfg/profile/ssh_opts/ssh_target/sudo_prefix populated by init_docker_host_context above
-  rsync_extra=$($cfg rsync_extra "")
+  # shellcheck disable=SC2154  # cfg/profile/ssh_opts/ssh_target/sudo_prefix populated by init_docker_host_context
   daemon_port=$($cfg daemon_port 8585)
   daemon_api_key=$($cfg daemon_api_key "")
 
@@ -39,30 +37,35 @@ for host in $DEPLOY_HOSTS; do
   service="sma-${profile}"
 
   echo ""
-  echo "==> [$host] upgrading $service (profile: $profile)"
-
-  if ! sync_codebase_to_host "$host" "$rsync_extra"; then
-    echo "ERROR: [$host] rsync failed" >&2
-    failed="$failed $host"
-    continue
-  fi
+  echo "==> [$host] redeploying $service (profile: $profile)"
 
   # Make sure the bind-mount targets exist before bringing the container up.
-  # Otherwise docker compose would create the volume dirs root-owned.
   if ! ensure_remote_install_dirs "$host"; then
     echo "ERROR: [$host] could not create install dirs" >&2
     failed="$failed $host"
     continue
   fi
 
-  # Make sure Docker itself is on the host before any compose call.
   if ! ensure_remote_docker "$host"; then
     echo "ERROR: [$host] Docker installation failed — aborting" >&2
     failed="$failed $host"
     continue
   fi
 
-  # Pull the latest image for this profile
+  # Minimal payload: just docker/docker-compose.yml. The daemon code lives
+  # inside the image; .mise/ control-plane scripts only need to be on disk
+  # when deploy:setup runs initial provisioning.
+  echo "==> [$host] syncing docker/docker-compose.yml"
+  # shellcheck disable=SC2086,SC2154  # ssh_opts must word-split; ssh_target/dir set by init_docker_host_context
+  if ! rsync -az -e "ssh $ssh_opts" \
+    docker/docker-compose.yml \
+    "$ssh_target:$dir/docker/docker-compose.yml"; then
+    echo "ERROR: [$host] rsync of docker-compose.yml failed" >&2
+    failed="$failed $host"
+    continue
+  fi
+  chown_remote_path_to_ssh_user "$host" "$dir/docker/docker-compose.yml"
+
   echo "==> [$host] pulling latest image"
   if ! run_remote_compose "$host" "--profile $profile pull"; then
     echo "ERROR: [$host] docker compose pull failed" >&2
@@ -74,25 +77,33 @@ for host in $DEPLOY_HOSTS; do
     echo "==> [$host] profile $profile expects external PostgreSQL in daemon.db-url"
   fi
 
-  # Drop legacy per-profile SMA daemon containers (sma-ng-software,
-  # sma-ng-intel, sma-ng-intel-pg, etc.) left over from before the
-  # canonical container_name standardized on `sma-ng`. New deploys
-  # use compose's --force-recreate to replace the same-named
-  # container in place, so this is purely a one-time migration step
-  # for hosts still carrying the old per-profile names.
+  # One-time migration: drop legacy per-profile container names.
   if ! remove_stale_sma_containers "$host"; then
     echo "  WARNING: [$host] stale-container cleanup reported errors — continuing" >&2
   fi
 
-  # Recreate only the SMA service
-  echo "==> [$host] recreating $service"
+  echo "==> [$host] stopping $service"
+  if ! run_remote_compose "$host" "--profile $profile down --remove-orphans"; then
+    echo "  WARNING: [$host] docker compose down reported errors — continuing" >&2
+  fi
+
+  # `compose down` only stops containers belonging to the active profile.
+  # If the canonical `sma-ng` container was last brought up under a
+  # different profile (e.g. switching from intel-pg to intel), it survives
+  # `down` and then collides with `up`'s container_name. Force-remove by
+  # name as a belt-and-suspenders sweep before recreating.
+  # shellcheck disable=SC2154  # sudo_prefix populated by init_docker_host_context
+  if ! run_remote_command "$host" "${sudo_prefix}docker rm -f sma-ng >/dev/null 2>&1 || true"; then
+    echo "  WARNING: [$host] could not force-remove pre-existing sma-ng container" >&2
+  fi
+
+  echo "==> [$host] starting $service (--force-recreate)"
   if ! run_remote_compose "$host" "--profile $profile up -d --force-recreate --no-deps $service"; then
     echo "ERROR: [$host] docker compose up failed" >&2
     failed="$failed $host"
     continue
   fi
 
-  # Poll the health endpoint until the daemon is ready
   echo "==> [$host] waiting for $service to become healthy (timeout: ${HEALTH_TIMEOUT}s)"
   if [ -n "$daemon_api_key" ]; then
     health_cmd="curl -sf -H 'X-API-Key: ${daemon_api_key}' http://127.0.0.1:${daemon_port}/health"
@@ -117,8 +128,6 @@ for host in $DEPLOY_HOSTS; do
     echo "==> [$host] $service healthy (${elapsed}s)"
   fi
 
-  # Print running container summary (canonical container_name is
-  # `sma-ng` regardless of profile)
   print_remote_container_summary "$host" "sma-ng"
 
   echo "==> [$host] done"
@@ -126,9 +135,9 @@ done
 
 if [ -n "$failed" ]; then
   echo ""
-  echo "ERROR: docker upgrade failed for:$failed" >&2
+  echo "ERROR: docker redeploy failed for:$failed" >&2
   exit 1
 fi
 
 echo ""
-echo "Docker upgrade complete: $DEPLOY_HOSTS"
+echo "Docker redeploy complete: $DEPLOY_HOSTS"

@@ -93,3 +93,6 @@ docker/.env
 
 # Accidental directory from tests that pass an unmocked MagicMock to Path(...)
 /MagicMock/
+
+# deploy:config staging dir (per-host generated sma-ng.yml before push)
+.deploy-staging/

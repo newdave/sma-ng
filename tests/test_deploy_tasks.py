@@ -228,8 +228,8 @@ class TestMiseTaskLayout:
 
     assert result.returncode == 0, result.stderr or result.stdout
     completions = [re.split(r"(?<!\\):", line, maxsplit=1)[0].replace("\\:", ":") for line in result.stdout.splitlines()]
-    assert "config:roll" in completions
     assert "config:sample" in completions
+    assert "config:generate" in completions
 
   def test_alias_task_names_are_exposed_to_completion(self, tmp_path):
     if not shutil.which("usage"):
@@ -276,7 +276,7 @@ class TestMiseTaskLayout:
     assert not os.path.exists(os.path.join(PROJECT_ROOT, ".mise/tasks/deploy/lib"))
     assert os.path.exists(os.path.join(PROJECT_ROOT, ".mise/shared/deploy/lib"))
 
-  def test_deploy_config_tasks_are_config_aliases(self):
+  def test_deploy_remote_orchestrator_tasks_exist(self):
     result = subprocess.run(
       ["mise", "tasks", "--json"],
       cwd=PROJECT_ROOT,
@@ -288,9 +288,12 @@ class TestMiseTaskLayout:
     assert result.returncode == 0, result.stderr or result.stdout
     tasks = {task["name"]: set(task["aliases"]) for task in json.loads(result.stdout)}
 
-    assert "config:roll" in tasks
+    assert "deploy:config" in tasks
+    assert "deploy:docker" in tasks
+    assert "deploy:remote" in tasks
+    # Legacy task removed in favour of deploy:config (local generation).
+    assert "config:roll" not in tasks
     assert "deploy:config:roll" not in tasks
-    assert "deploy:config:roll" in tasks["config:roll"]
 
   def test_mise_tasks_do_not_call_make(self):
     task_root = os.path.join(PROJECT_ROOT, ".mise/tasks")
@@ -395,41 +398,49 @@ class TestDeployConfigTask:
     """deploy/config must not contain <<PY or <<PYREMOTE heredocs."""
     import re
 
-    text = _read(".mise/tasks/config/roll")
-    # Match any heredoc delimiter starting with PY (case-insensitive)
+    text = _read(".mise/tasks/deploy/config")
     heredoc_pattern = re.compile(r"<<'?PYREMOTE|<<'?PY\b", re.IGNORECASE)
     matches = heredoc_pattern.findall(text)
     assert matches == [], f"Found {len(matches)} inline Python heredoc(s) in deploy/config: {matches}"
 
   def test_deploy_config_uses_lib_helpers_for_python(self):
     """deploy/config must delegate Python work via lib/ helper files."""
-    text = _read(".mise/tasks/config/roll")
-    assert "lib/stamp_ffmpeg.py" in text
+    text = _read(".mise/tasks/deploy/config")
     assert "lib/stamp_daemon.py" in text
-    assert "lib/stamp_postprocess.py" in text
+    assert "lib/stamp_ffmpeg.py" in text
 
-  def test_deploy_config_depends_on_deploy_mise(self):
-    """config:roll must depend on deploy:mise so remote helper code is current."""
-    text = _read(".mise/tasks/config/roll")
-    assert '#MISE depends=["deploy:mise"]' in text
+  def test_deploy_config_depends_on_deploy_check(self):
+    """deploy:config must depend on deploy:check so local.yml and DEPLOY_HOSTS are validated first."""
+    text = _read(".mise/tasks/deploy/config")
+    assert '#MISE depends=["deploy:check"]' in text
 
-  def test_deploy_config_has_backup_step(self):
-    """deploy/config must create a timestamped backup before mutating configs."""
-    text = _read(".mise/tasks/config/roll")
-    assert ".backup/" in text
+  def test_deploy_remote_chains_config_then_docker(self):
+    text = _read(".mise/tasks/deploy/remote")
+    cfg_pos = text.find("mise run deploy:config")
+    dkr_pos = text.find("mise run deploy:docker")
+    assert cfg_pos != -1, "deploy:remote must run deploy:config"
+    assert dkr_pos != -1, "deploy:remote must run deploy:docker"
+    assert cfg_pos < dkr_pos, "deploy:config must run before deploy:docker"
 
-  def test_yaml_merge_called_with_sort_and_deprecate(self):
-    """sync_yaml_keys must pass --sort and --deprecate to yaml_merge.py."""
-    text = _read(".mise/tasks/config/roll")
-    assert "yaml_merge.py" in text
-    assert "--sort" in text
-    assert "--deprecate" in text
-    assert "--additions" in text
+  def test_deploy_docker_runs_down_then_up_force_recreate(self):
+    text = _read(".mise/tasks/deploy/docker")
+    down_pos = text.find('"--profile $profile down')
+    up_pos = text.find('"--profile $profile up -d --force-recreate')
+    assert down_pos != -1, "deploy:docker must run `compose down` before `up`"
+    assert up_pos != -1, "deploy:docker must run `compose up -d --force-recreate`"
+    assert down_pos < up_pos, "compose down must precede compose up"
+
+  def test_deploy_docker_pushes_only_compose_yml(self):
+    """deploy:docker should not rsync the whole codebase any more."""
+    text = _read(".mise/tasks/deploy/docker")
+    assert "docker/docker-compose.yml" in text
+    assert "sync_codebase_to_host" not in text
 
 
 class TestDeployLibHelpers:
-  def _run_stamp_daemon(self, deploy_dir, services, *, api_key="", db_url="", ffmpeg_dir="", node_name="", workers=""):
+  def _run_stamp_daemon(self, deploy_dir, services, *, api_key="", db_url="", ffmpeg_dir="", node_name="", workers="", daemon_overrides=None):
     services_b64 = b64encode(json.dumps(services).encode()).decode()
+    daemon_overrides_b64 = b64encode(json.dumps(daemon_overrides).encode()).decode() if daemon_overrides else ""
     args = [
       PYTHON,
       ".mise/shared/deploy/lib/stamp_daemon.py",
@@ -445,6 +456,7 @@ class TestDeployLibHelpers:
       "",  # base_overrides_b64
       "",  # profiles_overrides_b64
       b64encode(str(workers).encode()).decode() if workers != "" else "",
+      daemon_overrides_b64,
     ]
     return subprocess.run(args, cwd=PROJECT_ROOT, capture_output=True, text=True, check=False)
 
@@ -614,6 +626,28 @@ class TestDeployLibHelpers:
     content = (config_dir / "daemon.env").read_text()
     assert "SMA_NODE_NAME" not in content
 
+  def test_stamp_daemon_propagates_daemon_overrides(self, tmp_path):
+    """Generic daemon-section keys from setup/local.yml (path-rewrites,
+    strict-routing, etc.) must deep-merge into the generated daemon block."""
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "sma-ng.yml").write_text("daemon: {}\n")
+    overrides = {
+      "strict-routing": True,
+      "path-rewrites": [{"from": "/mnt/local/", "to": "/mnt/unionfs/"}],
+      "routing": [{"match": "/should-be-ignored", "profile": "rq"}],
+    }
+    result = self._run_stamp_daemon(deploy_dir, {}, daemon_overrides=overrides)
+    assert result.returncode == 0, result.stderr or result.stdout
+    content = (config_dir / "sma-ng.yml").read_text()
+    assert "strict-routing: true" in content
+    assert "from: /mnt/local/" in content
+    assert "to: /mnt/unionfs/" in content
+    # daemon.routing is rebuilt from services, so override entries must NOT
+    # leak through.
+    assert "/should-be-ignored" not in content
+
 
 class TestDeployMiseTask:
   def test_deploy_mise_task_syncs_repo_control_plane(self):
@@ -630,12 +664,13 @@ class TestDeployMiseTask:
     text = _read(".mise/tasks/deploy/restart")
     assert 'source "$(dirname "$0")/../../shared/deploy/lib.sh"' in text
 
-  def test_deploy_redeploy_orchestrates_build_config_and_docker_steps(self):
+  def test_deploy_redeploy_orchestrates_build_and_remote_steps(self):
     text = _read(".mise/tasks/deploy/redeploy")
     assert '#MISE depends=["deploy:check"]' in text
     assert "mise run build:push" in text
-    assert "mise run config:roll" in text
-    assert "mise run deploy:docker" in text
+    # deploy:remote = deploy:config + deploy:docker, which replaced the
+    # legacy config:roll + deploy:docker pair.
+    assert "mise run deploy:remote" in text
     assert 'IMAGE="$DEPLOY_IMAGE" IMAGE_TAG="$DEPLOY_IMAGE_TAG"' in text
 
   def test_deploy_docker_can_override_compose_image_and_tag(self):
@@ -667,10 +702,13 @@ class TestDeployMiseTask:
     assert offenders == [], f"Tasks still use quoted $CFG: {offenders}"
 
   def test_remote_deploy_tasks_depend_on_deploy_mise(self):
+    # deploy:config and deploy:docker run their helpers locally now (lib.sh
+    # is sourced from .mise/shared/ on the developer machine), so they no
+    # longer require the remote control-plane sync. Tasks that still
+    # invoke remote helper scripts or remote mise commands keep the
+    # deploy:mise dependency.
     for rel_path in (
-      ".mise/tasks/config/roll",
       ".mise/tasks/deploy/sync",
-      ".mise/tasks/deploy/docker",
       ".mise/tasks/cluster/stop",
       ".mise/tasks/cluster/start",
       ".mise/tasks/cluster/restart",

@@ -6,7 +6,7 @@ Usage::
 
 Writes ``base.converter.ffmpeg`` and ``base.converter.ffprobe`` in
 ``config/sma-ng.yml`` (and any other ``*.yml`` / ``*.yaml`` in the
-config dir) so ``mise run config:roll`` keeps the binary location in
+config dir) so ``mise run deploy:config`` keeps the binary location in
 sync with each host's ffmpeg_dir.
 """
 

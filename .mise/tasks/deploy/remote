@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#MISE description="Build sma-ng.yml locally and redeploy Docker on every selected host: deploy:config then deploy:docker"
+#MISE depends=["deploy:check"]
+set -euo pipefail
+
+# Hosts resolve identically in both sub-tasks; pass HOST/HOSTS through.
+if [ -n "${HOSTS:-}" ]; then
+  export HOSTS
+fi
+if [ -n "${HOST:-}" ]; then
+  export HOST
+fi
+
+echo "==> deploy:remote — step 1/2: deploy:config"
+mise run deploy:config
+
+echo ""
+echo "==> deploy:remote — step 2/2: deploy:docker"
+mise run deploy:docker
+
+echo ""
+echo "deploy:remote complete"

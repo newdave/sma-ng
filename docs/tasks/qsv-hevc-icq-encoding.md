@@ -391,7 +391,7 @@ base:
     transfer: [smpte2084]   # or [arib-std-b67] for HLG sources
 ```
 
-`mise run config:roll` will deploy these to remote hosts.
+`mise run deploy:config` will deploy these to remote hosts.
 
 ## Out of scope
 

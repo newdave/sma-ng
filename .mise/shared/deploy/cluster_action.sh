@@ -5,7 +5,7 @@
 # The daemon writes the requested status into cluster_nodes.status (see
 # resources/daemon/threads.py:_execute_command) so the dashboard reflects
 # the action immediately. node_id is taken from the host key in
-# setup/local.yml — that's the same value config:roll stamps into
+# setup/local.yml — that's the same value deploy:config stamps into
 # daemon.node-id in sma-ng.yml.
 #
 # Usage: source "$(dirname "$0")/../../shared/deploy/cluster_action.sh"

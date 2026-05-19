@@ -31,7 +31,7 @@ graph LR
   nodes connect to it as clients (their compose profile is the non-`-pg`
   variant).
 - Every node runs an identical `sma` container reading `config/sma-ng.yml` and
-  `config/daemon.env`. Both are stamped per-host by `mise run config:roll`.
+  `config/daemon.env`. Both are stamped per-host by `mise run deploy:config`.
 - Cluster identity comes from `SMA_NODE_NAME` (stamped into `daemon.env`,
   defaults to the host key in `setup/local.yml`). The same string is what every
   cluster API and `mise run cluster:*` command uses as `node_id`.
@@ -117,7 +117,7 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
    into the env file:
 
    ```bash
-   mise run config:roll
+   mise run deploy:config
    ```
 
 5. **Bring up the containers:**
@@ -152,7 +152,7 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
    ```bash
    mise run deploy:setup HOST=sma-slave2
    mise run deploy:sync   HOST=sma-slave2
-   mise run config:roll   HOST=sma-slave2
+   mise run deploy:config   HOST=sma-slave2
    mise run cluster:start HOST=sma-slave2
    ```
 
@@ -167,10 +167,10 @@ Edit `setup/local.yml` (or any file deep-merged into the rendered
 `config/sma-ng.yml` — `base.*`, `profiles.*`, `services.*`), then:
 
 ```bash
-mise run config:roll
+mise run deploy:config
 ```
 
-`config:roll` is non-destructive: it merges new keys into the existing
+`deploy:config` is non-destructive: it merges new keys into the existing
 `config/sma-ng.yml` on each host, leaving operator-tuned values in place. It
 does **not** restart the daemon. To apply changes that require a restart
 (routing, profile selection, codec defaults), follow with:
