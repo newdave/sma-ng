@@ -1191,10 +1191,27 @@ class HWAccelVideoCodec:
     if self.hw_quality_key not in safe and "bitrate" not in safe and self.hw_quality_default is not None:
       safe[self.hw_quality_key] = self.hw_quality_default
 
+  # CPU planar pix_fmts -> QSV surface formats. scale_qsv / vpp_qsv only
+  # accept hardware surface names (nv12, p010le, …) and reject the CPU
+  # equivalents (yuv420p, yuv420p10le) with "Unsupported pixel format".
+  _QSV_SURFACE_FMT_MAP = {
+    "yuv420p": "nv12",
+    "yuv420p10le": "p010le",
+    "yuv420p12le": "p012le",
+  }
+
   def _hw_parse_pix_fmt(self, safe):
-    """Move pix_fmt to hw-prefixed key."""
+    """Move pix_fmt to hw-prefixed key.
+
+    For QSV, also translate CPU planar names (yuv420p, yuv420p10le) to
+    the matching surface name (nv12, p010le) since scale_qsv/vpp_qsv
+    refuse the CPU names.
+    """
     if "pix_fmt" in safe:
-      safe[self.hw_prefix + "_pix_fmt"] = safe["pix_fmt"]
+      value = safe["pix_fmt"]
+      if self.hw_prefix == "qsv":
+        value = self._QSV_SURFACE_FMT_MAP.get(value, value)
+      safe[self.hw_prefix + "_pix_fmt"] = value
       del safe["pix_fmt"]
 
   def _hw_quality_opts(self, safe):
