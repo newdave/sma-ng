@@ -3506,12 +3506,8 @@ class MediaProcessor:
     try:
       self._attempt_ladder(preopts, options, outputfile, _run_convert)
     except FFMpegConvertError as e:
-      self.log.exception("Error converting file, FFMPEG error.")
-      self.log.error(e.cmd)
-      self.log.error(e.output)
       sidecar_path = self._write_ffmpeg_stderr_sidecar(e)
-      if sidecar_path:
-        self.log.error("Full ffmpeg stderr written to %s" % sidecar_path)
+      self.log.error("Error converting file, FFMPEG error (pid=%s, msg=%s). Full cmd + stderr in sidecar: %s" % (getattr(e, "pid", "?"), getattr(e, "message", "?"), sidecar_path or "<unavailable>"))
       self._emit_failure_diagnosis(e, options, sidecar_path)
       if outputfile is not None and os.path.isfile(outputfile):
         self.removeFile(outputfile)
