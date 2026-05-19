@@ -221,6 +221,11 @@ class TestDiagnoseFfmpegFailure:
     d = diagnose_ffmpeg_failure(stderr)
     assert d.cause == FfmpegFailureCause.BFRAME_COPY_INCOMPATIBLE
 
+  def test_invalid_frame_type_detected_as_pix_fmt(self):
+    stderr = "[hevc_qsv @ 0x5f0] Invalid FrameType:0.\n[vost#0:0/hevc_qsv @ 0xff] Error submitting video frame to the encoder\nConversion failed!\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.QSV_UNSUPPORTED_PIX_FMT
+
   def test_audio_sample_rate_mismatch_detected(self):
     stderr = "[libfdk_aac @ 0x55] Invalid sample rate 96000\n"
     d = diagnose_ffmpeg_failure(stderr)
