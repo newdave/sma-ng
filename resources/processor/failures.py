@@ -237,9 +237,9 @@ _CAUSE_PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureCause, str], ...] = (
     "Encoder profile not supported (e.g. main10 on a hardware generation that only does main). Drop to main and 8-bit pix_fmt.",
   ),
   (
-    re.compile(r"Specified pixel format .* is invalid|unsupported pixel format", re.IGNORECASE),
+    re.compile(r"Specified pixel format .* is invalid|unsupported pixel format|Invalid FrameType", re.IGNORECASE),
     FfmpegFailureCause.QSV_UNSUPPORTED_PIX_FMT,
-    "Pix-fmt not supported by the encoder. Check pix_fmts list and the encoder's max-depth.",
+    "Pix-fmt not supported by the encoder, or the vpp_qsv filter handed the encoder a surface whose bit-depth doesn't match the chosen profile (e.g. P010 surfaces into an 8-bit Main profile). Pin `format=nv12` (or p010le) on vpp_qsv to match the encoder profile.",
   ),
   (
     re.compile(r"Impossible to convert between.*auto_scale", re.IGNORECASE),
