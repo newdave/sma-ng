@@ -81,25 +81,25 @@ class TestPathConfigManager:
   def test_exact_match(self, tmp_path):
     cfg = self._yaml(
       tmp_path,
-      {"routing": [{"match": "/mnt/media/TV", "profile": "rq"}]},
+      {"routing": [{"match": "/mnt/unionfs/Media/TV", "profile": "rq"}]},
     )
     pcm = PathConfigManager(cfg)
-    assert pcm.get_config_for_path("/mnt/media/TV/show/ep.mkv") == cfg
-    assert pcm.get_profile_for_path("/mnt/media/TV/show/ep.mkv") == "rq"
+    assert pcm.get_config_for_path("/mnt/unionfs/Media/TV/show/ep.mkv") == cfg
+    assert pcm.get_profile_for_path("/mnt/unionfs/Media/TV/show/ep.mkv") == "rq"
 
   def test_longest_prefix_wins(self, tmp_path):
     cfg = self._yaml(
       tmp_path,
       {
         "routing": [
-          {"match": "/mnt/media/Movies", "profile": "movies"},
-          {"match": "/mnt/media/Movies/4K", "profile": "movies4k"},
+          {"match": "/mnt/unionfs/Media/Movies", "profile": "movies"},
+          {"match": "/mnt/unionfs/Media/Movies/4K", "profile": "movies4k"},
         ],
       },
     )
     pcm = PathConfigManager(cfg)
-    assert pcm.get_profile_for_path("/mnt/media/Movies/4K/film.mkv") == "movies4k"
-    assert pcm.get_profile_for_path("/mnt/media/Movies/regular.mkv") == "movies"
+    assert pcm.get_profile_for_path("/mnt/unionfs/Media/Movies/4K/film.mkv") == "movies4k"
+    assert pcm.get_profile_for_path("/mnt/unionfs/Media/Movies/regular.mkv") == "movies"
 
   def test_rewrite_match_uses_rewritten_path(self, tmp_path):
     cfg = self._yaml(
@@ -146,24 +146,24 @@ class TestShouldSkipSameExtension:
   def test_skips_when_ext_matches_default_output(self, tmp_path):
     cfg = self._write(tmp_path, {})
     pcm = PathConfigManager(cfg)
-    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mp4") is True
-    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mkv") is False
+    assert pcm.should_skip_same_extension("/mnt/unionfs/Media/Movies/x.mp4") is True
+    assert pcm.should_skip_same_extension("/mnt/unionfs/Media/Movies/x.mkv") is False
 
   def test_does_not_skip_when_force_convert(self, tmp_path):
     cfg = self._write(tmp_path, {"base": {"converter": {"force-convert": True}}})
     pcm = PathConfigManager(cfg)
-    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mp4") is False
+    assert pcm.should_skip_same_extension("/mnt/unionfs/Media/Movies/x.mp4") is False
 
   def test_does_not_skip_when_process_same_extensions_true(self, tmp_path):
     cfg = self._write(tmp_path, {"base": {"converter": {"process-same-extensions": True}}})
     pcm = PathConfigManager(cfg)
-    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mp4") is False
+    assert pcm.should_skip_same_extension("/mnt/unionfs/Media/Movies/x.mp4") is False
 
   def test_skips_with_alternative_output_extension(self, tmp_path):
     cfg = self._write(tmp_path, {"base": {"converter": {"output-extension": "mkv"}}})
     pcm = PathConfigManager(cfg)
-    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mkv") is True
-    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mp4") is False
+    assert pcm.should_skip_same_extension("/mnt/unionfs/Media/Movies/x.mkv") is True
+    assert pcm.should_skip_same_extension("/mnt/unionfs/Media/Movies/x.mp4") is False
 
   def test_profile_overlay_re_enables_processing(self, tmp_path):
     """Profile that flips process-same-extensions back on must un-skip."""
@@ -172,7 +172,7 @@ class TestShouldSkipSameExtension:
       {
         "daemon": {
           "routing": [
-            {"match": "/mnt/Media/Reprocess", "profile": "redo"},
+            {"match": "/mnt/unionfs/Media/Reprocess", "profile": "redo"},
           ],
         },
         "base": {"converter": {"process-same-extensions": False}},
@@ -182,19 +182,19 @@ class TestShouldSkipSameExtension:
     )
     pcm = PathConfigManager(cfg)
     # Outside the routing rule → base settings → mp4 skipped.
-    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.mp4") is True
+    assert pcm.should_skip_same_extension("/mnt/unionfs/Media/Movies/x.mp4") is True
     # Inside the routing rule → profile overlay → mp4 NOT skipped.
-    assert pcm.should_skip_same_extension("/mnt/Media/Reprocess/x.mp4") is False
+    assert pcm.should_skip_same_extension("/mnt/unionfs/Media/Reprocess/x.mp4") is False
 
   def test_case_insensitive_extension(self, tmp_path):
     cfg = self._write(tmp_path, {})
     pcm = PathConfigManager(cfg)
-    assert pcm.should_skip_same_extension("/mnt/Media/Movies/x.MP4") is True
+    assert pcm.should_skip_same_extension("/mnt/unionfs/Media/Movies/x.MP4") is True
 
   def test_no_extension_returns_false(self, tmp_path):
     cfg = self._write(tmp_path, {})
     pcm = PathConfigManager(cfg)
-    assert pcm.should_skip_same_extension("/mnt/Media/Movies/no_ext_file") is False
+    assert pcm.should_skip_same_extension("/mnt/unionfs/Media/Movies/no_ext_file") is False
 
 
 class TestNodeIdResolution:
@@ -252,7 +252,7 @@ class TestNodeIdResolution:
 
   def test_no_match_returns_loaded_config(self, tmp_path):
     config_file = str(tmp_path / "sma-ng.yml")
-    _dump_daemon_yaml(config_file, {"routing": [{"match": "/mnt/media/TV", "profile": "rq"}]})
+    _dump_daemon_yaml(config_file, {"routing": [{"match": "/mnt/unionfs/Media/TV", "profile": "rq"}]})
     pcm = PathConfigManager(config_file)
     # Single-config model: get_config_for_path always returns the loaded yml.
     assert pcm.get_config_for_path("/completely/different/path.mkv") == config_file
@@ -2903,16 +2903,16 @@ class TestPathConfigManagerExtendedYaml:
       tmp_path,
       {
         "routing": [
-          {"match": "/mnt/media/TV/**", "profile": "tv"},
-          {"match": "/mnt/media/Movies/*", "profile": "mov"},
+          {"match": "/mnt/unionfs/Media/TV/**", "profile": "tv"},
+          {"match": "/mnt/unionfs/Media/Movies/*", "profile": "mov"},
           {"match": "/mnt/exact", "profile": "exact"},
         ],
       },
     )
     pcm = PathConfigManager(cfg)
     out = pcm.routing_match_paths()
-    assert "/mnt/media/TV" in out
-    assert "/mnt/media/Movies" in out
+    assert "/mnt/unionfs/Media/TV" in out
+    assert "/mnt/unionfs/Media/Movies" in out
     assert "/mnt/exact" in out
 
   def test_routing_match_paths_skips_empty_matches(self, tmp_path):

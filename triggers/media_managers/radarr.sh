@@ -19,7 +19,7 @@
 # {
 #   "eventType": "Download",
 #   "movie":     { "tmdbId": 603, "imdbId": "tt0133093" },
-#   "movieFile": { "path": "/mnt/media/Movies/The Matrix.mkv" }
+#   "movieFile": { "path": "/mnt/unionfs/Media/Movies/The Matrix.mkv" }
 # }
 #
 # Alternatively, configure Radarr → Settings → Connect → Webhook and point it

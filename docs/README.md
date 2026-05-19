@@ -592,35 +592,35 @@ Daemon:
       rewrite_from: /mnt/local/Media
       rewrite_to: /mnt/unionfs/Media
   path_configs:
-    - path: /mnt/media/TV
+    - path: /mnt/unionfs/Media/TV
       profile: rq
-    - path: /mnt/media/Movies/4K
+    - path: /mnt/unionfs/Media/Movies/4K
       profile: rq
-    - path: /mnt/media/Movies
+    - path: /mnt/unionfs/Media/Movies
       profile: lq
 ```
 
 **Top-level keys:**
 
-| Key                | Description                                                                                                                                        |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `default_config`   | Config file used when no `path_configs` prefix matches                                                                                             |
-| `api_key`          | API authentication key (overridable via `--api-key`)                                                                                               |
-| `db_url`           | SQLite or PostgreSQL URL for daemon job persistence. This value is loaded only from `sma-ng.yml`.                                                   |
-| `ffmpeg_dir`       | Directory containing `ffmpeg`/`ffprobe` binaries. Prepended to PATH for each conversion. Overridable via `--ffmpeg-dir`                            |
-| `media_extensions` | File extensions considered media files for directory scanning and `/browse` (default: `.mkv .m4v .avi .mov .wmv .ts .flv .webm`)                   |
-| `path_rewrites`    | Prefix substitutions applied before config matching; overlapping rewrites are matched longest-prefix-first                                         |
-| `scan_paths`       | Directories for scheduled background scanning. See [Scheduled Directory Scanning](#scheduled-directory-scanning)                                   |
-| `path_configs`     | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection                                                             |
+| Key                | Description                                                                                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `default_config`   | Config file used when no `path_configs` prefix matches                                                                           |
+| `api_key`          | API authentication key (overridable via `--api-key`)                                                                             |
+| `db_url`           | SQLite or PostgreSQL URL for daemon job persistence. This value is loaded only from `sma-ng.yml`.                                |
+| `ffmpeg_dir`       | Directory containing `ffmpeg`/`ffprobe` binaries. Prepended to PATH for each conversion. Overridable via `--ffmpeg-dir`          |
+| `media_extensions` | File extensions considered media files for directory scanning and `/browse` (default: `.mkv .m4v .avi .mov .wmv .ts .flv .webm`) |
+| `path_rewrites`    | Prefix substitutions applied before config matching; overlapping rewrites are matched longest-prefix-first                       |
+| `scan_paths`       | Directories for scheduled background scanning. See [Scheduled Directory Scanning](#scheduled-directory-scanning)                 |
+| `path_configs`     | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection                                           |
 
-Matching is longest-prefix-first. `/mnt/media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`. If `path_rewrites` overlap, the most specific rewrite is applied before config matching.
+Matching is longest-prefix-first. `/mnt/unionfs/Media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`. If `path_rewrites` overlap, the most specific rewrite is applied before config matching.
 
 ### Per-Config Logging
 
 Each config gets a separate log file in `logs/`. The log filename is derived from the config file stem (filename without extension):
 
-| Config | Log File |
-| --- | --- |
+| Config              | Log File          |
+| ------------------- | ----------------- |
 | `config/sma-ng.yml` | `logs/sma-ng.log` |
 
 Log rotation: 10MB max, 5 backups.
@@ -655,34 +655,34 @@ The daemon tracks which files have been submitted in the `scanned_files` databas
 
 ```bash
 # Submit all unscanned media files in a directory
-bash scripts/sma-scan.sh /mnt/media/Movies
+bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies
 
 # Force resubmit everything (ignore scan history)
-bash scripts/sma-scan.sh /mnt/media/Movies --reset
+bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --reset
 
 # Dry-run: show what would be submitted
-bash scripts/sma-scan.sh /mnt/media/Movies --dry-run
+bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --dry-run
 
 # Use a specific config for all files
-bash scripts/sma-scan.sh /mnt/media/Movies --config config/sma-ng.yml
+bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --config config/sma-ng.yml
 ```
 
 **Scan API endpoints:**
 
 ```bash
 # Check which paths have NOT been scanned yet (small list)
-curl "http://localhost:8585/scan?path=/mnt/media/film1.mkv&path=/mnt/media/film2.mkv"
-# Returns: {"unscanned": ["/mnt/media/film2.mkv"], "total": 2, "already_scanned": 1}
+curl "http://localhost:8585/scan?path=/mnt/unionfs/Media/film1.mkv&path=/mnt/unionfs/Media/film2.mkv"
+# Returns: {"unscanned": ["/mnt/unionfs/Media/film2.mkv"], "total": 2, "already_scanned": 1}
 
 # Same check for large lists (POST)
 curl -X POST http://localhost:8585/scan/filter \
   -H 'Content-Type: application/json' \
-  -d '{"paths": ["/mnt/media/film1.mkv", "/mnt/media/film2.mkv"]}'
+  -d '{"paths": ["/mnt/unionfs/Media/film1.mkv", "/mnt/unionfs/Media/film2.mkv"]}'
 
 # Record paths as scanned (mark without submitting a job)
 curl -X POST http://localhost:8585/scan/record \
   -H 'Content-Type: application/json' \
-  -d '{"paths": ["/mnt/media/film1.mkv"]}'
+  -d '{"paths": ["/mnt/unionfs/Media/film1.mkv"]}'
 ```
 
 ### Job Persistence (SQLite or PostgreSQL)
@@ -756,7 +756,7 @@ The daemon stops accepting new jobs immediately, waits for all active conversion
 ```yaml
 Daemon:
   path_configs:
-    - path: /mnt/media/TV
+    - path: /mnt/unionfs/Media/TV
       profile: rq
 ```
 
@@ -779,27 +779,27 @@ Any config section starting with `Sonarr` or `Radarr` is automatically discovere
 
 ```ini
 [Sonarr]
-path = /mnt/media/TV
+path = /mnt/unionfs/Media/TV
 host = sonarr.example.com
 apikey = abc123...
 
 [Sonarr-Kids]
-path = /mnt/media/TV-Kids
+path = /mnt/unionfs/Media/TV-Kids
 host = sonarr-kids.example.com
 apikey = def456...
 
 [Radarr]
-path = /mnt/media/Movies
+path = /mnt/unionfs/Media/Movies
 host = radarr.example.com
 apikey = ghi789...
 
 [Radarr-4K]
-path = /mnt/media/Movies/4K
+path = /mnt/unionfs/Media/Movies/4K
 host = radarr-4k.example.com
 apikey = jkl012...
 ```
 
-When `manual.py` processes `/mnt/media/Movies/4K/film.mp4`, it matches `Radarr-4K` (longest prefix) and triggers a rescan on that instance.
+When `manual.py` processes `/mnt/unionfs/Media/Movies/4K/film.mp4`, it matches `Radarr-4K` (longest prefix) and triggers a rescan on that instance.
 
 ### Plex
 
@@ -1168,13 +1168,13 @@ services:                        # nested <type>.<instance>; auto-builds daemon.
     main:
       url: https://sonarr.example.com
       apikey: abc123...
-      path: /mnt/media/TV
+      path: /mnt/unionfs/Media/TV
       profile: rq
   radarr:
     main:
       url: https://radarr.example.com
       apikey: def456...
-      path: /mnt/media/Movies
+      path: /mnt/unionfs/Media/Movies
       profile: rq
 ```
 
@@ -1265,18 +1265,18 @@ Sends a graceful shutdown webhook to each host, waits for the daemon to drain, t
 
 #### Summary of deploy tasks
 
-| Task | Description |
-| --- | --- |
-| `deploy:check` | Verify `setup/local.yml` exists and `deploy.hosts` is set |
-| `deploy:setup` | First-time host prep: SSH key, apt deps, deploy dir, Docker install |
-| `deploy:mise` | Sync the local `.mise/` deploy control plane to each remote `deploy_dir` |
+| Task              | Description                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| `deploy:check`    | Verify `setup/local.yml` exists and `deploy.hosts` is set                            |
+| `deploy:setup`    | First-time host prep: SSH key, apt deps, deploy dir, Docker install                  |
+| `deploy:mise`     | Sync the local `.mise/` deploy control plane to each remote `deploy_dir`             |
 | `deploy:redeploy` | Build/push current code, optionally roll config, then recreate SMA Docker containers |
-| `deploy:sync` | Sync code and install deps on all hosts |
-| `config:roll` | Roll configs: create missing, merge new keys, stamp credentials and overlays |
-| `deploy:restart` | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container |
-| `deploy:docker` | Rsync the local code to Docker hosts, pull the latest image, recreate SMA |
-| `pg:restart` | Restart bundled PostgreSQL on hosts whose `docker_profile` ends in `-pg` |
-| `pg:recreate` | Stop bundled PostgreSQL, remove its Docker volume, and recreate |
+| `deploy:sync`     | Sync code and install deps on all hosts                                              |
+| `config:roll`     | Roll configs: create missing, merge new keys, stamp credentials and overlays         |
+| `deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container    |
+| `deploy:docker`   | Rsync the local code to Docker hosts, pull the latest image, recreate SMA            |
+| `pg:restart`      | Restart bundled PostgreSQL on hosts whose `docker_profile` ends in `-pg`             |
+| `pg:recreate`     | Stop bundled PostgreSQL, remove its Docker volume, and recreate                      |
 
 Additional Docker lifecycle helper: `deploy:dockerstop` (alias: `deploy:docker:stop`) stops
 services for selected hosts using each host's configured `DOCKER_PROFILE`.
@@ -1295,9 +1295,9 @@ journalctl -u sma-daemon -f
 
 The daemon also writes per-config rotating log files in `logs/`:
 
-| Config | Log File |
-| --- | --- |
-| `config/sma-ng.yml` | `logs/sma-ng.log` |
+| Config                 | Log File             |
+| ---------------------- | -------------------- |
+| `config/sma-ng.yml`    | `logs/sma-ng.log`    |
 | `config/sma-ng-tv.yml` | `logs/sma-ng-tv.log` |
 
 ### Common Issues

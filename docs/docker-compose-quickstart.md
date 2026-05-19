@@ -95,9 +95,9 @@ Daemon:
   api_key: change-me
   db_url: sqlite:////data/sma-ng.db
   path_configs:
-    - path: /mnt/media/TV
+    - path: /mnt/unionfs/Media/TV
       profile: rq
-    - path: /mnt/media/Movies
+    - path: /mnt/unionfs/Media/Movies
       profile: rq
 ```
 
@@ -144,16 +144,16 @@ source /opt/sma/sma-ng-docker-aliases.sh
 
 Useful aliases:
 
-| Alias | Command |
-| --- | --- |
-| `sma-manual` | Run `python manual.py` inside the `sma-ng` container |
-| `sma-convert /mnt/media/file.mkv` | Run `manual.py -i <file> -a` |
-| `sma-preview /mnt/media/file.mkv` | Run `manual.py -i <file> -oo` |
-| `sma-codecs` | Run `manual.py -cl` |
-| `sma-smoke` | Run `python daemon.py --smoke-test` |
-| `sma-rename` | Run `python rename.py` |
-| `sma-logs` | Follow `docker logs` for the `sma-ng` container |
-| `sma-shell` | Open an interactive shell in the `sma-ng` container |
+| Alias                                     | Command                                              |
+| ----------------------------------------- | ---------------------------------------------------- |
+| `sma-manual`                              | Run `python manual.py` inside the `sma-ng` container |
+| `sma-convert /mnt/unionfs/Media/file.mkv` | Run `manual.py -i <file> -a`                         |
+| `sma-preview /mnt/unionfs/Media/file.mkv` | Run `manual.py -i <file> -oo`                        |
+| `sma-codecs`                              | Run `manual.py -cl`                                  |
+| `sma-smoke`                               | Run `python daemon.py --smoke-test`                  |
+| `sma-rename`                              | Run `python rename.py`                               |
+| `sma-logs`                                | Follow `docker logs` for the `sma-ng` container      |
+| `sma-shell`                               | Open an interactive shell in the `sma-ng` container  |
 
 Paths passed to these aliases must be container-visible paths, such as `/mnt/...`, `/downloads/...`,
 `/transcodes/...`, or another path mounted into the compose service.
@@ -313,7 +313,7 @@ Plain text webhook:
 ```bash
 curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: change-me-too" \
-  -d "/mnt/media/Movies/Test Movie (2024)/movie.mkv"
+  -d "/mnt/unionfs/Media/Movies/Test Movie (2024)/movie.mkv"
 ```
 
 JSON webhook:
@@ -322,7 +322,7 @@ JSON webhook:
 curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: change-me-too" \
   -H "Content-Type: application/json" \
-  -d '{"path":"/mnt/media/Movies/Test Movie (2024)/movie.mkv"}'
+  -d '{"path":"/mnt/unionfs/Media/Movies/Test Movie (2024)/movie.mkv"}'
 ```
 
 ## Common Customizations
@@ -363,9 +363,9 @@ Database URLs in `/opt/sma/config/daemon.env` are ignored.
 Daemon:
   default_config: /config/sma-ng.yml
   path_configs:
-    - path: /mnt/media/TV
+    - path: /mnt/unionfs/Media/TV
       profile: rq
-    - path: /mnt/media/Movies
+    - path: /mnt/unionfs/Media/Movies
       profile: lq
 ```
 

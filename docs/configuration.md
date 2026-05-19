@@ -30,10 +30,10 @@ and to one or more service instances; full semantics are in the
 ```yaml
 daemon:
   routing:
-    - match: /mnt/media/TV
+    - match: /mnt/unionfs/Media/TV
       profile: rq
       services: [sonarr.main]
-    - match: /mnt/media/TV/Kids
+    - match: /mnt/unionfs/Media/TV/Kids
       profile: lq
       services: [sonarr.kids]
 ```
@@ -57,58 +57,58 @@ shell-trigger-only and configured in `triggers/`. See
 
 ## base.converter
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `ffmpeg` | path | `ffmpeg` | Path to FFmpeg binary |
-| `ffprobe` | path | `ffprobe` | Path to FFprobe binary |
-| `threads` | int | `0` | FFmpeg threads (0 = auto) |
-| `output-directory` | path | | Temporary output location (files moved back after) |
-| `output-format` | string | `mp4` | Container format: `mp4`, `mkv`, `mov` |
-| `output-extension` | string | `mp4` | Output file extension |
-| `temp-extension` | string | | Temporary file extension during conversion |
-| `temp-output` | bool | `true` | Use temporary output file during conversion |
-| `minimum-size` | int | `0` | Minimum source file size in MB (0 = disabled) |
-| `ignored-extensions` | list | `[nfo, ds_store]` | Extensions to skip |
-| `copy-to` | path(s) | | Copy output to additional directories |
-| `move-to` | path | | Move output to final destination |
-| `delete-original` | bool | `true` | Delete source file after successful conversion |
-| `recycle-bin` | path | | Copy original here before deleting (only when `delete-original = True`) |
-| `process-same-extensions` | bool | `false` | Reprocess files already in output format |
-| `bypass-if-copying-all` | bool | `false` | Skip conversion if all streams can be copied |
-| `force-convert` | bool | `false` | Force conversion even if codec matches |
-| `post-process` | bool | `false` | Run post-process scripts |
-| `wait-post-process` | bool | `false` | Wait for post-process scripts to finish |
-| `software-fallback` | bool | `false` | When `true`, retry hardware-accelerated failures with software decode and, if needed, a full software pipeline. Defaults to `false` so the original FFmpeg error surfaces immediately — the retry chain historically masked real hardware issues (e.g. `/dev/dri` permissions, missing QSV runtime) by silently completing jobs on the CPU. Set to `true` per-profile or globally to restore the legacy "always finish, even in software" behavior. |
-| `preopts` | list | | Extra FFmpeg options before input |
-| `postopts` | list | | Extra FFmpeg options after codec options |
+| Option                    | Type    | Default           | Description                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------- | ------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ffmpeg`                  | path    | `ffmpeg`          | Path to FFmpeg binary                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `ffprobe`                 | path    | `ffprobe`         | Path to FFprobe binary                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `threads`                 | int     | `0`               | FFmpeg threads (0 = auto)                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `output-directory`        | path    |                   | Temporary output location (files moved back after)                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `output-format`           | string  | `mp4`             | Container format: `mp4`, `mkv`, `mov`                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `output-extension`        | string  | `mp4`             | Output file extension                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `temp-extension`          | string  |                   | Temporary file extension during conversion                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `temp-output`             | bool    | `true`            | Use temporary output file during conversion                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `minimum-size`            | int     | `0`               | Minimum source file size in MB (0 = disabled)                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `ignored-extensions`      | list    | `[nfo, ds_store]` | Extensions to skip                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `copy-to`                 | path(s) |                   | Copy output to additional directories                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `move-to`                 | path    |                   | Move output to final destination                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `delete-original`         | bool    | `true`            | Delete source file after successful conversion                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `recycle-bin`             | path    |                   | Copy original here before deleting (only when `delete-original = True`)                                                                                                                                                                                                                                                                                                                                                                             |
+| `process-same-extensions` | bool    | `false`           | Reprocess files already in output format                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `bypass-if-copying-all`   | bool    | `false`           | Skip conversion if all streams can be copied                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `force-convert`           | bool    | `false`           | Force conversion even if codec matches                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `post-process`            | bool    | `false`           | Run post-process scripts                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `wait-post-process`       | bool    | `false`           | Wait for post-process scripts to finish                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `software-fallback`       | bool    | `false`           | When `true`, retry hardware-accelerated failures with software decode and, if needed, a full software pipeline. Defaults to `false` so the original FFmpeg error surfaces immediately — the retry chain historically masked real hardware issues (e.g. `/dev/dri` permissions, missing QSV runtime) by silently completing jobs on the CPU. Set to `true` per-profile or globally to restore the legacy "always finish, even in software" behavior. |
+| `preopts`                 | list    |                   | Extra FFmpeg options before input                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `postopts`                | list    |                   | Extra FFmpeg options after codec options                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ---
 
 ## base.video
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `codec` | list | `h265` | Video codecs in priority order. First is used for encoding, rest are copy-eligible |
-| `gpu` | string | | Hardware acceleration backend: `qsv`, `vaapi`, `nvenc`, `videotoolbox`, or empty for software |
-| `max-bitrate` | int | `0` | Maximum video bitrate in kbps (0 = unlimited) |
-| `bitrate-ratio` | dict | | Scale source bitrate per codec: `hevc:1.0, h264:0.65` |
-| `crf-profiles` | string | | Tiered bitrate targets by source bitrate. Format: `source_kbps:quality:target:maxrate` (comma-separated). Example: `0:22:3M:6M,8000:22:5M:10M`. Leave blank to use `bitrate-ratio` + `max-bitrate` instead. |
-| `crf-profiles-hd` | string | | Same format as `crf-profiles`, applied to sources above 1080p height. Falls back to `crf-profiles` when empty. |
-| `preset` | string | | Encoder preset: `ultrafast` to `veryslow` |
-| `profile` | list | | Video profile: `main`, `high`, `main10` |
-| `max-level` | float | | Maximum H.264/H.265 level (e.g., `5.2`) |
-| `max-width` | int | `0` | Maximum output width (0 = no limit) |
-| `pix-fmt` | list | | Pixel format whitelist |
-| `dynamic-parameters` | bool | `false` | Pass HDR/color metadata to encoder |
-| `prioritize-source-pix-fmt` | bool | `true` | Keep source pix_fmt if in whitelist |
-| `filter` | string | | Custom FFmpeg video filter |
-| `force-filter` | bool | `false` | Force re-encode when filter is set |
-| `codec-parameters` | string | | Extra codec params (e.g., `x265-params`) |
-| `look-ahead-depth` | int | `0` | Look-ahead frames for rate control (QSV: `la_depth`). `0` = encoder default. SMA-NG auto-sizes `-extra_hw_frames` to `look-ahead-depth + 4` (floor `20`, cap `100`) to keep the device frame pool from running dry. |
-| `extra-hw-frames` | int | `0` | QSV `-extra_hw_frames` pool size (input/device scope). `0` = auto: derived from `look-ahead-depth`. Any positive value overrides the auto-derived pool, clamped to ffmpeg's QSV ceiling of `100`. Profiles can override per path (`profiles.<name>.video.extra-hw-frames`). Only emitted when `gpu: qsv`. |
-| `global-quality` | int | `0` | ICQ quality target for QSV encodes (lower = better, typical `21–25` for 1080p HEVC). `0` lets the codec use its default. Ignored when a bitrate target is set via `crf-profiles` / `bitrate-ratio` / `max-bitrate`; ICQ and VBR are mutually exclusive. |
-| `b-frames` | int | `-1` | Number of B-frames. `-1` = encoder default. |
-| `ref-frames` | int | `-1` | Number of reference frames. `-1` = encoder default. |
+| Option                      | Type   | Default | Description                                                                                                                                                                                                                                                                                               |
+| --------------------------- | ------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `codec`                     | list   | `h265`  | Video codecs in priority order. First is used for encoding, rest are copy-eligible                                                                                                                                                                                                                        |
+| `gpu`                       | string |         | Hardware acceleration backend: `qsv`, `vaapi`, `nvenc`, `videotoolbox`, or empty for software                                                                                                                                                                                                             |
+| `max-bitrate`               | int    | `0`     | Maximum video bitrate in kbps (0 = unlimited)                                                                                                                                                                                                                                                             |
+| `bitrate-ratio`             | dict   |         | Scale source bitrate per codec: `hevc:1.0, h264:0.65`                                                                                                                                                                                                                                                     |
+| `crf-profiles`              | string |         | Tiered bitrate targets by source bitrate. Format: `source_kbps:quality:target:maxrate` (comma-separated). Example: `0:22:3M:6M,8000:22:5M:10M`. Leave blank to use `bitrate-ratio` + `max-bitrate` instead.                                                                                               |
+| `crf-profiles-hd`           | string |         | Same format as `crf-profiles`, applied to sources above 1080p height. Falls back to `crf-profiles` when empty.                                                                                                                                                                                            |
+| `preset`                    | string |         | Encoder preset: `ultrafast` to `veryslow`                                                                                                                                                                                                                                                                 |
+| `profile`                   | list   |         | Video profile: `main`, `high`, `main10`                                                                                                                                                                                                                                                                   |
+| `max-level`                 | float  |         | Maximum H.264/H.265 level (e.g., `5.2`)                                                                                                                                                                                                                                                                   |
+| `max-width`                 | int    | `0`     | Maximum output width (0 = no limit)                                                                                                                                                                                                                                                                       |
+| `pix-fmt`                   | list   |         | Pixel format whitelist                                                                                                                                                                                                                                                                                    |
+| `dynamic-parameters`        | bool   | `false` | Pass HDR/color metadata to encoder                                                                                                                                                                                                                                                                        |
+| `prioritize-source-pix-fmt` | bool   | `true`  | Keep source pix_fmt if in whitelist                                                                                                                                                                                                                                                                       |
+| `filter`                    | string |         | Custom FFmpeg video filter                                                                                                                                                                                                                                                                                |
+| `force-filter`              | bool   | `false` | Force re-encode when filter is set                                                                                                                                                                                                                                                                        |
+| `codec-parameters`          | string |         | Extra codec params (e.g., `x265-params`)                                                                                                                                                                                                                                                                  |
+| `look-ahead-depth`          | int    | `0`     | Look-ahead frames for rate control (QSV: `la_depth`). `0` = encoder default. SMA-NG auto-sizes `-extra_hw_frames` to `look-ahead-depth + 4` (floor `20`, cap `100`) to keep the device frame pool from running dry.                                                                                       |
+| `extra-hw-frames`           | int    | `0`     | QSV `-extra_hw_frames` pool size (input/device scope). `0` = auto: derived from `look-ahead-depth`. Any positive value overrides the auto-derived pool, clamped to ffmpeg's QSV ceiling of `100`. Profiles can override per path (`profiles.<name>.video.extra-hw-frames`). Only emitted when `gpu: qsv`. |
+| `global-quality`            | int    | `0`     | ICQ quality target for QSV encodes (lower = better, typical `21–25` for 1080p HEVC). `0` lets the codec use its default. Ignored when a bitrate target is set via `crf-profiles` / `bitrate-ratio` / `max-bitrate`; ICQ and VBR are mutually exclusive.                                                   |
+| `b-frames`                  | int    | `-1`    | Number of B-frames. `-1` = encoder default.                                                                                                                                                                                                                                                               |
+| `ref-frames`                | int    | `-1`    | Number of reference frames. `-1` = encoder default.                                                                                                                                                                                                                                                       |
 
 > **Note:** `codec-parameters` values are automatically cleared at runtime when `gpu` is not `qsv`. QSV-specific flags (e.g. `-low_power 1 -extbrc 1`) in the sample are silently ignored by other backends.
 >
@@ -120,24 +120,24 @@ shell-trigger-only and configured in `triggers/`. See
 
 Override video settings for HDR content (detected automatically).
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `codec` | list | Video codec for HDR content |
-| `pix-fmt` | list | Pixel format for HDR (e.g., `p010le`) |
-| `space` | list | Color space: `bt2020nc` |
-| `transfer` | list | Transfer function: `smpte2084` |
-| `primaries` | list | Color primaries: `bt2020` |
-| `preset` | string | Encoder preset override for HDR |
-| `profile` | string | Profile override for HDR |
-| `codec-parameters` | string | Extra params for HDR encoding |
-| `filter` | string | Video filter for HDR content |
-| `force-filter` | bool | Force re-encode for HDR filter |
-| `look-ahead-depth` | int | Look-ahead depth override for HDR encoding (default: `0`) |
-| `extra-hw-frames` | int | QSV pool override for HDR encoding (default: `0` = inherit from `base.video.extra-hw-frames`). The larger of the two values wins so neither pipeline starves. |
-| `global-quality` | int | ICQ quality target for HDR encodes (default: `0` = inherit from `base.video.global-quality`) |
-| `b-frames` | int | B-frames override for HDR encoding (default: `-1` = encoder default) |
-| `ref-frames` | int | Reference frames override for HDR encoding (default: `-1` = encoder default) |
-| `max-bitrate` | int | HDR-only override of `base.video.max-bitrate` in kbps. `-1` (default) inherits the SDR cap; `0` disables the cap entirely so HDR remuxes copy through; positive values cap HDR independently. |
+| Option             | Type   | Description                                                                                                                                                                                   |
+| ------------------ | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `codec`            | list   | Video codec for HDR content                                                                                                                                                                   |
+| `pix-fmt`          | list   | Pixel format for HDR (e.g., `p010le`)                                                                                                                                                         |
+| `space`            | list   | Color space: `bt2020nc`                                                                                                                                                                       |
+| `transfer`         | list   | Transfer function: `smpte2084`                                                                                                                                                                |
+| `primaries`        | list   | Color primaries: `bt2020`                                                                                                                                                                     |
+| `preset`           | string | Encoder preset override for HDR                                                                                                                                                               |
+| `profile`          | string | Profile override for HDR                                                                                                                                                                      |
+| `codec-parameters` | string | Extra params for HDR encoding                                                                                                                                                                 |
+| `filter`           | string | Video filter for HDR content                                                                                                                                                                  |
+| `force-filter`     | bool   | Force re-encode for HDR filter                                                                                                                                                                |
+| `look-ahead-depth` | int    | Look-ahead depth override for HDR encoding (default: `0`)                                                                                                                                     |
+| `extra-hw-frames`  | int    | QSV pool override for HDR encoding (default: `0` = inherit from `base.video.extra-hw-frames`). The larger of the two values wins so neither pipeline starves.                                 |
+| `global-quality`   | int    | ICQ quality target for HDR encodes (default: `0` = inherit from `base.video.global-quality`)                                                                                                  |
+| `b-frames`         | int    | B-frames override for HDR encoding (default: `-1` = encoder default)                                                                                                                          |
+| `ref-frames`       | int    | Reference frames override for HDR encoding (default: `-1` = encoder default)                                                                                                                  |
+| `max-bitrate`      | int    | HDR-only override of `base.video.max-bitrate` in kbps. `-1` (default) inherits the SDR cap; `0` disables the cap entirely so HDR remuxes copy through; positive values cap HDR independently. |
 
 When the output is HDR (10-bit pix_fmt and `space`/`transfer`/`primaries` set), SMA-NG emits the configured first values as FFmpeg output flags so HDR-aware players (Plex, Apple TV, etc.) tag the stream correctly:
 
@@ -171,20 +171,20 @@ Current backend status:
 - `model-dir`, `cache-dir`, `max-frames`, and `target-width` are forward-compatible analyzer settings; they are reserved for richer model-backed inference as the backend grows
 - if the backend is unavailable or a requested device such as `NPU` is missing, SMA-NG logs a warning and falls back to normal planning
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `enabled` | bool | `false` | Enable analyzer-assisted planning |
-| `backend` | string | `openvino` | Analyzer backend runtime. Current supported value: `openvino` |
-| `device` | string | `AUTO` | OpenVINO target device selector. Valid examples: `AUTO`, `CPU`, `GPU`, `NPU`, `AUTO:NPU,CPU`, `MULTI:NPU,GPU` |
-| `model-dir` | path | | Optional directory containing analyzer models (reserved for richer future inference) |
-| `cache-dir` | path | | Optional cache directory for compiled analyzer artifacts |
-| `max-frames` | int | `12` | Reserved sampling limit for future model-backed inference |
-| `target-width` | int | `960` | Reserved downscale width for future model-backed inference |
-| `allow-codec-reorder` | bool | `true` | Allow analyzer to reorder the configured video codec pool |
-| `allow-bitrate-adjustments` | bool | `true` | Allow analyzer to change bitrate multipliers / ceilings |
-| `allow-preset-adjustments` | bool | `true` | Allow analyzer to override encoder preset |
-| `allow-filter-adjustments` | bool | `true` | Allow analyzer to add bounded FFmpeg filters such as deinterlace/crop/denoise |
-| `allow-force-reencode` | bool | `true` | Allow analyzer to force re-encode when copy would otherwise be selected |
+| Option                      | Type   | Default    | Description                                                                                                   |
+| --------------------------- | ------ | ---------- | ------------------------------------------------------------------------------------------------------------- |
+| `enabled`                   | bool   | `false`    | Enable analyzer-assisted planning                                                                             |
+| `backend`                   | string | `openvino` | Analyzer backend runtime. Current supported value: `openvino`                                                 |
+| `device`                    | string | `AUTO`     | OpenVINO target device selector. Valid examples: `AUTO`, `CPU`, `GPU`, `NPU`, `AUTO:NPU,CPU`, `MULTI:NPU,GPU` |
+| `model-dir`                 | path   |            | Optional directory containing analyzer models (reserved for richer future inference)                          |
+| `cache-dir`                 | path   |            | Optional cache directory for compiled analyzer artifacts                                                      |
+| `max-frames`                | int    | `12`       | Reserved sampling limit for future model-backed inference                                                     |
+| `target-width`              | int    | `960`      | Reserved downscale width for future model-backed inference                                                    |
+| `allow-codec-reorder`       | bool   | `true`     | Allow analyzer to reorder the configured video codec pool                                                     |
+| `allow-bitrate-adjustments` | bool   | `true`     | Allow analyzer to change bitrate multipliers / ceilings                                                       |
+| `allow-preset-adjustments`  | bool   | `true`     | Allow analyzer to override encoder preset                                                                     |
+| `allow-filter-adjustments`  | bool   | `true`     | Allow analyzer to add bounded FFmpeg filters such as deinterlace/crop/denoise                                 |
+| `allow-force-reencode`      | bool   | `true`     | Allow analyzer to force re-encode when copy would otherwise be selected                                       |
 
 Example:
 
@@ -215,112 +215,112 @@ base:
 
 ## base.audio
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `codec` | list | `aac` | Audio codecs in priority order. Matching streams are copied; others re-encoded to first |
-| `languages` | list | | Language whitelist (ISO 639-3, e.g., `eng`). Empty = all |
-| `default-language` | string | `eng` | Default language for unlabeled streams |
-| `first-stream-of-language` | bool | `false` | Keep only first stream per language |
-| `allow-language-relax` | bool | `true` | If no whitelisted language found, keep all audio |
-| `include-original-language` | bool | `false` | Include original media language even if not in whitelist |
-| `channel-bitrate` | int | `128` | Bitrate per channel in kbps (0 = auto) |
-| `variable-bitrate` | int | `0` | VBR quality level (0 = disabled/CBR) |
-| `max-bitrate` | int | `0` | Maximum audio bitrate in kbps |
-| `max-channels` | int | `0` | Maximum audio channels (0 = unlimited, 6 = 5.1) |
-| `copy-original` | bool | `false` | Copy original audio stream in addition to transcoded |
-| `aac-adtstoasc` | bool | `true` | Apply AAC ADTS to ASC bitstream filter |
-| `ignored-dispositions` | list | | Skip streams with these dispositions: `comment`, `hearing_impaired` |
-| `unique-dispositions` | bool | `false` | One stream per disposition per language |
-| `stream-codec-combinations` | list | | Identify duplicate streams by codec combo |
-| `ignore-trudhd` | bool | `true` | Ignore TrueHD streams |
-| `atmos-force-copy` | bool | `false` | Always copy Atmos tracks |
-| `force-default` | bool | `false` | Override source default stream |
-| `relax-to-default` | bool | `false` | If preferred language absent, default to any |
+| Option                      | Type   | Default | Description                                                                             |
+| --------------------------- | ------ | ------- | --------------------------------------------------------------------------------------- |
+| `codec`                     | list   | `aac`   | Audio codecs in priority order. Matching streams are copied; others re-encoded to first |
+| `languages`                 | list   |         | Language whitelist (ISO 639-3, e.g., `eng`). Empty = all                                |
+| `default-language`          | string | `eng`   | Default language for unlabeled streams                                                  |
+| `first-stream-of-language`  | bool   | `false` | Keep only first stream per language                                                     |
+| `allow-language-relax`      | bool   | `true`  | If no whitelisted language found, keep all audio                                        |
+| `include-original-language` | bool   | `false` | Include original media language even if not in whitelist                                |
+| `channel-bitrate`           | int    | `128`   | Bitrate per channel in kbps (0 = auto)                                                  |
+| `variable-bitrate`          | int    | `0`     | VBR quality level (0 = disabled/CBR)                                                    |
+| `max-bitrate`               | int    | `0`     | Maximum audio bitrate in kbps                                                           |
+| `max-channels`              | int    | `0`     | Maximum audio channels (0 = unlimited, 6 = 5.1)                                         |
+| `copy-original`             | bool   | `false` | Copy original audio stream in addition to transcoded                                    |
+| `aac-adtstoasc`             | bool   | `true`  | Apply AAC ADTS to ASC bitstream filter                                                  |
+| `ignored-dispositions`      | list   |         | Skip streams with these dispositions: `comment`, `hearing_impaired`                     |
+| `unique-dispositions`       | bool   | `false` | One stream per disposition per language                                                 |
+| `stream-codec-combinations` | list   |         | Identify duplicate streams by codec combo                                               |
+| `ignore-trudhd`             | bool   | `true`  | Ignore TrueHD streams                                                                   |
+| `atmos-force-copy`          | bool   | `false` | Always copy Atmos tracks                                                                |
+| `force-default`             | bool   | `false` | Override source default stream                                                          |
+| `relax-to-default`          | bool   | `false` | If preferred language absent, default to any                                            |
 
 ### base.audio.sorting
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `sorting` | list | Sort order: `language, channels.d, map, d.comment` |
-| `default-sorting` | list | Sort order for default stream selection |
-| `codecs` | list | Codec priority for sorting |
+| Option            | Type | Description                                        |
+| ----------------- | ---- | -------------------------------------------------- |
+| `sorting`         | list | Sort order: `language, channels.d, map, d.comment` |
+| `default-sorting` | list | Sort order for default stream selection            |
+| `codecs`          | list | Codec priority for sorting                         |
 
 ### base.audio.universal
 
 Generates an additional stereo AAC stream for device compatibility.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `codec` | list | | UA codec (e.g., `aac`). Empty = disabled |
-| `channel-bitrate` | int | `128` | Bitrate per channel |
-| `first-stream-only` | bool | `true` | Only add UA for first audio stream |
+| Option              | Type | Default | Description                              |
+| ------------------- | ---- | ------- | ---------------------------------------- |
+| `codec`             | list |         | UA codec (e.g., `aac`). Empty = disabled |
+| `channel-bitrate`   | int  | `128`   | Bitrate per channel                      |
+| `first-stream-only` | bool | `true`  | Only add UA for first audio stream       |
 
 ---
 
 ## base.subtitle
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `codec` | list | `mov_text` | Subtitle codec for text-based subs. `mov_text` is MP4-only; if `converter.output-format` is `mkv` / `webm` and `codec` is left at the default, it is auto-substituted with `[srt]` at startup with a WARNING. Set the field explicitly to silence the substitution. |
-| `codec-image-based` | list | | Codec for image-based subs (PGS, VobSub) |
-| `languages` | list | | Language whitelist (ISO 639-3) |
-| `default-language` | string | `eng` | Default for unlabeled subs |
-| `first-stream-of-language` | bool | `false` | One subtitle per language |
-| `burn-subtitles` | bool | `false` | Burn subtitles into video |
-| `burn-dispositions` | list | `forced` | Only burn subs with these dispositions |
-| `embed-subs` | bool | `true` | Embed subtitle streams in output |
-| `embed-image-subs` | bool | `false` | Embed image-based subs |
-| `embed-only-internal-subs` | bool | `false` | Only embed subs from source (no external files) |
-| `ignored-dispositions` | list | | Skip subs with these dispositions |
-| `remove-bitstream-subs` | list | `true` | Remove bitstream subtitle formats |
-| `include-original-language` | bool | `false` | Include original language subs |
+| Option                      | Type   | Default    | Description                                                                                                                                                                                                                                                         |
+| --------------------------- | ------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `codec`                     | list   | `mov_text` | Subtitle codec for text-based subs. `mov_text` is MP4-only; if `converter.output-format` is `mkv` / `webm` and `codec` is left at the default, it is auto-substituted with `[srt]` at startup with a WARNING. Set the field explicitly to silence the substitution. |
+| `codec-image-based`         | list   |            | Codec for image-based subs (PGS, VobSub)                                                                                                                                                                                                                            |
+| `languages`                 | list   |            | Language whitelist (ISO 639-3)                                                                                                                                                                                                                                      |
+| `default-language`          | string | `eng`      | Default for unlabeled subs                                                                                                                                                                                                                                          |
+| `first-stream-of-language`  | bool   | `false`    | One subtitle per language                                                                                                                                                                                                                                           |
+| `burn-subtitles`            | bool   | `false`    | Burn subtitles into video                                                                                                                                                                                                                                           |
+| `burn-dispositions`         | list   | `forced`   | Only burn subs with these dispositions                                                                                                                                                                                                                              |
+| `embed-subs`                | bool   | `true`     | Embed subtitle streams in output                                                                                                                                                                                                                                    |
+| `embed-image-subs`          | bool   | `false`    | Embed image-based subs                                                                                                                                                                                                                                              |
+| `embed-only-internal-subs`  | bool   | `false`    | Only embed subs from source (no external files)                                                                                                                                                                                                                     |
+| `ignored-dispositions`      | list   |            | Skip subs with these dispositions                                                                                                                                                                                                                                   |
+| `remove-bitstream-subs`     | list   | `true`     | Remove bitstream subtitle formats                                                                                                                                                                                                                                   |
+| `include-original-language` | bool   | `false`    | Include original language subs                                                                                                                                                                                                                                      |
 
 ### base.subtitle.cleanit
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `enabled` | bool | Enable subtitle cleaning via cleanit |
-| `config-path` | path | Custom cleanit config |
-| `tags` | list | Cleanit tag sets: `default, no-style` |
+| Option        | Type | Description                           |
+| ------------- | ---- | ------------------------------------- |
+| `enabled`     | bool | Enable subtitle cleaning via cleanit  |
+| `config-path` | path | Custom cleanit config                 |
+| `tags`        | list | Cleanit tag sets: `default, no-style` |
 
 ### base.subtitle.ffsubsync
 
-| Option | Type | Description |
-| --- | --- | --- |
+| Option    | Type | Description                        |
+| --------- | ---- | ---------------------------------- |
 | `enabled` | bool | Enable subtitle sync via ffsubsync |
 
 ### base.subtitle.subliminal
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `download-subs` | bool | Download missing subtitles |
-| `providers` | list | Subtitle providers: `opensubtitles` |
-| `download-forced-subs` | bool | Download forced subtitle variants |
-| `download-hearing-impaired-subs` | bool | Include HI subs in downloads |
+| Option                           | Type | Description                         |
+| -------------------------------- | ---- | ----------------------------------- |
+| `download-subs`                  | bool | Download missing subtitles          |
+| `providers`                      | list | Subtitle providers: `opensubtitles` |
+| `download-forced-subs`           | bool | Download forced subtitle variants   |
+| `download-hearing-impaired-subs` | bool | Include HI subs in downloads        |
 
 ---
 
 ## base.metadata
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `relocate-moov` | bool | `true` | Move moov atom to file start (streaming optimization) |
-| `full-path-guess` | bool | `true` | Use full file path for guessit metadata matching |
-| `tag` | bool | `true` | Enable TMDB metadata tagging |
-| `tag-language` | string | `eng` | Language for TMDB metadata |
-| `download-artwork` | bool | `false` | Embed cover art from TMDB |
-| `strip-metadata` | bool | `true` | Remove existing metadata before tagging |
-| `keep-titles` | bool | `false` | Preserve original stream titles |
+| Option             | Type   | Default | Description                                           |
+| ------------------ | ------ | ------- | ----------------------------------------------------- |
+| `relocate-moov`    | bool   | `true`  | Move moov atom to file start (streaming optimization) |
+| `full-path-guess`  | bool   | `true`  | Use full file path for guessit metadata matching      |
+| `tag`              | bool   | `true`  | Enable TMDB metadata tagging                          |
+| `tag-language`     | string | `eng`   | Language for TMDB metadata                            |
+| `download-artwork` | bool   | `false` | Embed cover art from TMDB                             |
+| `strip-metadata`   | bool   | `true`  | Remove existing metadata before tagging               |
+| `keep-titles`      | bool   | `false` | Preserve original stream titles                       |
 
 ---
 
 ## base.permissions
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `chmod` | octal | `0664` | File permissions for output |
-| `uid` | int | `-1` | Owner UID (-1 = no change) |
-| `gid` | int | `-1` | Group GID (-1 = no change) |
+| Option  | Type  | Default | Description                 |
+| ------- | ----- | ------- | --------------------------- |
+| `chmod` | octal | `0664`  | File permissions for output |
+| `uid`   | int   | `-1`    | Owner UID (-1 = no change)  |
+| `gid`   | int   | `-1`    | Group GID (-1 = no change)  |
 
 ---
 
@@ -364,14 +364,14 @@ e.g. `sonarr.kids`, `radarr.4k`. The path-prefix derivation that drove
 multi-instance matching in the old INI shape is now expressed
 explicitly in routing rules.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `url` | string | required | Full base URL including scheme and port (e.g. `http://sonarr.local:8989`) |
-| `apikey` | string | | API key |
-| `force-rename` | bool | `false` | After import, trigger Sonarr/Radarr's own RenameFiles command. When enabled, SMA's naming templates are skipped and the arr instance applies its configured naming format instead. Requires `rescan = true`. |
-| `rescan` | bool | `true` | Trigger library rescan after processing |
-| `block-reprocess` | bool | `false` | Prevent reprocessing same-extension files |
-| `in-progress-check` | bool | `true` | Wait for in-progress scans before rescanning |
+| Option              | Type   | Default  | Description                                                                                                                                                                                                  |
+| ------------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `url`               | string | required | Full base URL including scheme and port (e.g. `http://sonarr.local:8989`)                                                                                                                                    |
+| `apikey`            | string |          | API key                                                                                                                                                                                                      |
+| `force-rename`      | bool   | `false`  | After import, trigger Sonarr/Radarr's own RenameFiles command. When enabled, SMA's naming templates are skipped and the arr instance applies its configured naming format instead. Requires `rescan = true`. |
+| `rescan`            | bool   | `true`   | Trigger library rescan after processing                                                                                                                                                                      |
+| `block-reprocess`   | bool   | `false`  | Prevent reprocessing same-extension files                                                                                                                                                                    |
+| `in-progress-check` | bool   | `true`   | Wait for in-progress scans before rescanning                                                                                                                                                                 |
 
 ```yaml
 services:
@@ -396,13 +396,13 @@ Hook each instance into routing:
 ```yaml
 daemon:
   routing:
-    - match: /mnt/media/TV
+    - match: /mnt/unionfs/Media/TV
       services: [sonarr.main]
-    - match: /mnt/media/TV-Kids
+    - match: /mnt/unionfs/Media/TV-Kids
       services: [sonarr.kids]
-    - match: /mnt/media/Movies
+    - match: /mnt/unionfs/Media/Movies
       services: [radarr.main]
-    - match: /mnt/media/Movies/4K
+    - match: /mnt/unionfs/Media/Movies/4K
       services: [radarr.4k]
 ```
 
@@ -422,14 +422,14 @@ Plex instances follow the same map-by-name shape. The first instance
 named `main` (or otherwise the first defined) is what the conversion
 pipeline notifies.
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `url` | string | Full base URL including scheme and port (e.g. `http://plex.local:32400`) |
-| `token` | string | Plex authentication token |
-| `refresh` | bool | Trigger library refresh after processing |
-| `ignore-certs` | bool | Skip SSL certificate verification |
+| Option         | Type   | Description                                                              |
+| -------------- | ------ | ------------------------------------------------------------------------ |
+| `url`          | string | Full base URL including scheme and port (e.g. `http://plex.local:32400`) |
+| `token`        | string | Plex authentication token                                                |
+| `refresh`      | bool   | Trigger library refresh after processing                                 |
+| `ignore-certs` | bool   | Skip SSL certificate verification                                        |
 | `path-mapping` | string | Map SMA-NG paths to Plex library paths (`local=remote`, comma-separated) |
-| `plexmatch` | bool | Write `.plexmatch` files for matched media |
+| `plexmatch`    | bool   | Write `.plexmatch` files for matched media                               |
 
 ```yaml
 services:

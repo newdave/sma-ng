@@ -128,9 +128,9 @@ def _illustrative_services() -> dict:
 
 def _illustrative_routing() -> list[dict]:
   return [
-    {"match": "/mnt/media/TV", "profile": "rq", "services": ["sonarr.main"]},
-    {"match": "/mnt/media/TV/Kids", "profile": "lq", "services": ["sonarr.kids"]},
-    {"match": "/mnt/media/Movies", "profile": "rq", "services": ["radarr.main"]},
+    {"match": "/mnt/unionfs/Media/TV", "profile": "rq", "services": ["sonarr.main"]},
+    {"match": "/mnt/unionfs/Media/TV/Kids", "profile": "lq", "services": ["sonarr.kids"]},
+    {"match": "/mnt/unionfs/Media/Movies", "profile": "rq", "services": ["radarr.main"]},
   ]
 
 

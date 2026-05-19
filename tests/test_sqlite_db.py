@@ -9,9 +9,9 @@ def _db(tmp_path):
 class TestSQLiteJobDatabase:
   def test_add_claim_complete_job_persists_to_file(self, tmp_path):
     db = _db(tmp_path)
-    job_id = db.add_job("/mnt/media/movie.mkv", "/config/sma-ng.yml", ["--profile", "rq"])
+    job_id = db.add_job("/mnt/unionfs/Media/movie.mkv", "/config/sma-ng.yml", ["--profile", "rq"])
     assert job_id == 1
-    assert db.add_job("/mnt/media/movie.mkv", "/config/sma-ng.yml") is None
+    assert db.add_job("/mnt/unionfs/Media/movie.mkv", "/config/sma-ng.yml") is None
 
     job = db.claim_next_job(worker_id=1, node_id="node-a")
     assert job is not None
@@ -34,7 +34,7 @@ class TestSQLiteJobDatabase:
 
   def test_failed_jobs_can_be_requeued_cancelled_and_deleted(self, tmp_path):
     db = _db(tmp_path)
-    failed_id = db.add_job("/mnt/media/bad.mkv", "/config/sma-ng.yml")
+    failed_id = db.add_job("/mnt/unionfs/Media/bad.mkv", "/config/sma-ng.yml")
     db.claim_next_job(worker_id=1, node_id="node-a")
     db.fail_job(failed_id, "boom")
     _row = db.get_job(failed_id)
@@ -50,7 +50,7 @@ class TestSQLiteJobDatabase:
     assert _row is not None
     assert _row["status"] == "cancelled"
 
-    failed_id_2 = db.add_job("/mnt/media/bad2.mkv", "/config/sma-ng.yml")
+    failed_id_2 = db.add_job("/mnt/unionfs/Media/bad2.mkv", "/config/sma-ng.yml")
     db.claim_next_job(worker_id=1, node_id="node-a")
     db.fail_job(failed_id_2, "boom")
     assert db.delete_failed_jobs() == 1
@@ -59,7 +59,7 @@ class TestSQLiteJobDatabase:
 
   def test_scanner_state_filters_recorded_paths(self, tmp_path):
     db = _db(tmp_path)
-    paths = ["/mnt/media/a.mkv", "/mnt/media/b.mkv"]
+    paths = ["/mnt/unionfs/Media/a.mkv", "/mnt/unionfs/Media/b.mkv"]
     assert db.filter_unscanned(paths) == paths
     db.record_scanned([paths[0]])
     assert db.filter_unscanned(paths) == [paths[1]]
@@ -97,7 +97,7 @@ class TestSQLiteJobDatabase:
     from resources.daemon import db as db_mod
 
     db = _db(tmp_path)
-    job_id = db.add_job("/mnt/media/movie.mkv", "/config/sma-ng.yml")
+    job_id = db.add_job("/mnt/unionfs/Media/movie.mkv", "/config/sma-ng.yml")
     assert job_id is not None
     db.update_job_ffmpeg_stderr(job_id, "first failure\nstderr line")
     _row = db.get_job(job_id)
@@ -129,7 +129,7 @@ class TestSQLiteJobDatabase:
   def test_running_jobs_reset_on_reopen_for_same_node(self, tmp_path, monkeypatch):
     set_node_id_cache("node-a")
     db = _db(tmp_path)
-    job_id = db.add_job("/mnt/media/movie.mkv", "/config/sma-ng.yml")
+    job_id = db.add_job("/mnt/unionfs/Media/movie.mkv", "/config/sma-ng.yml")
     db.claim_next_job(worker_id=1, node_id="node-a")
     db.close()
 

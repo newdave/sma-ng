@@ -237,7 +237,7 @@ apikey = abc123
 host = localhost
 port = 8990
 apikey = def456
-path = /mnt/media/4K/TV
+path = /mnt/unionfs/Media/4K/TV
 ```
 
 Instance selection is longest-prefix-first against the output file path. The `path` key determines which
@@ -314,16 +314,16 @@ SMA-NG stores daemon-specific settings in the `Daemon:` section of `sma-ng.yml` 
 
 Key options:
 
-| Key                   | Description                                                                  |
-| --------------------- | ---------------------------------------------------------------------------- |
-| `default_config`      | Path to the fallback `sma-ng.yml`                                       |
-| `api_key`             | Authentication key for the HTTP API                                          |
-| `db_url`              | PostgreSQL connection URL for distributed/multi-node mode                    |
+| Key                   | Description                                                                    |
+| --------------------- | ------------------------------------------------------------------------------ |
+| `default_config`      | Path to the fallback `sma-ng.yml`                                              |
+| `api_key`             | Authentication key for the HTTP API                                            |
+| `db_url`              | PostgreSQL connection URL for distributed/multi-node mode                      |
 | `path_configs`        | List of `{path, profile, default_args}` entries for path-based profile routing |
-| `path_rewrites`       | Path prefix substitutions applied before config matching                     |
-| `scan_paths`          | Scheduled background scanning definitions                                    |
-| `job_timeout_seconds` | Maximum runtime per job; `0` for unlimited                                   |
-| `ffmpeg_dir`          | Directory prepended to `PATH` for FFmpeg binaries                            |
+| `path_rewrites`       | Path prefix substitutions applied before config matching                       |
+| `scan_paths`          | Scheduled background scanning definitions                                      |
+| `job_timeout_seconds` | Maximum runtime per job; `0` for unlimited                                     |
+| `ffmpeg_dir`          | Directory prepended to `PATH` for FFmpeg binaries                              |
 
 ### Path-based config routing
 
@@ -373,18 +373,18 @@ The container image is published at `ghcr.io/newdave/sma-ng:latest`.
 
 ## New Features Not in the Original
 
-| Feature | Description |
-| --- | --- |
-| Hardware acceleration auto-detection | `make detect-gpu` or `mise run config:gpu` identifies available GPU encoders |
-| Multi-quality config profiles | Three bundled profiles: `sma-ng.yml`, `sma-ng.yml profile rq`, `sma-ng.yml profile lq` |
-| OpenVINO Analyzer | Optional `[Analyzer]` section for content-aware encoding decisions |
-| File renaming templates | `[Naming]` section with Sonarr/Radarr-style `{token}` templates |
-| Recycle bin | `recycle-bin` key copies originals before deletion |
-| Per-config rotating logs | Each config gets its own log file in `logs/`; rotates at 10 MB |
-| Job queue REST API | `/jobs`, `/health`, `/status`, `/stats` endpoints for monitoring |
-| Scheduled background scanning | `scan_paths` in `Daemon:` section in `sma-ng.yml` periodically scans directories for unprocessed files |
-| Graceful shutdown and restart | `POST /shutdown` and `POST /restart` drain active jobs before stopping |
-| PostgreSQL clustering | Optional `db_url` for multi-node distributed mode |
+| Feature                              | Description                                                                                            |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| Hardware acceleration auto-detection | `make detect-gpu` or `mise run config:gpu` identifies available GPU encoders                           |
+| Multi-quality config profiles        | Three bundled profiles: `sma-ng.yml`, `sma-ng.yml profile rq`, `sma-ng.yml profile lq`                 |
+| OpenVINO Analyzer                    | Optional `[Analyzer]` section for content-aware encoding decisions                                     |
+| File renaming templates              | `[Naming]` section with Sonarr/Radarr-style `{token}` templates                                        |
+| Recycle bin                          | `recycle-bin` key copies originals before deletion                                                     |
+| Per-config rotating logs             | Each config gets its own log file in `logs/`; rotates at 10 MB                                         |
+| Job queue REST API                   | `/jobs`, `/health`, `/status`, `/stats` endpoints for monitoring                                       |
+| Scheduled background scanning        | `scan_paths` in `Daemon:` section in `sma-ng.yml` periodically scans directories for unprocessed files |
+| Graceful shutdown and restart        | `POST /shutdown` and `POST /restart` drain active jobs before stopping                                 |
+| PostgreSQL clustering                | Optional `db_url` for multi-node distributed mode                                                      |
 
 ---
 

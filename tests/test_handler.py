@@ -922,10 +922,10 @@ class TestParseWebhookBody:
     assert h._response_code == 400
 
   def test_plain_text_body_returns_path(self):
-    body = b"/mnt/media/movie.mkv"
+    body = b"/mnt/unionfs/Media/movie.mkv"
     h = _make_handler(body=body, headers={"Content-Length": str(len(body)), "Content-Type": "text/plain"})
     path, args, config, retries = h._parse_webhook_body()
-    assert path == "/mnt/media/movie.mkv"
+    assert path == "/mnt/unionfs/Media/movie.mkv"
 
   def test_json_body_with_path_key(self):
     data = json.dumps({"path": "/mnt/movie.mkv"}).encode()

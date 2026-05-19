@@ -78,20 +78,20 @@ If you do not know the answers yet, start with:
 
 `mise run config:generate` and `make config` create one base YAML config with named quality profiles:
 
-| Profile | Video                                    | Audio             |
-| ------- | ---------------------------------------- | ----------------- |
-| base    | Regular-quality defaults                 | EAC3, 128 kbps/ch |
-| `rq`    | Explicit regular-quality override        | EAC3/AAC          |
-| `lq`    | Lower bitrate, stereo-focused override   | AAC, stereo       |
+| Profile | Video                                  | Audio             |
+| ------- | -------------------------------------- | ----------------- |
+| base    | Regular-quality defaults               | EAC3, 128 kbps/ch |
+| `rq`    | Explicit regular-quality override      | EAC3/AAC          |
+| `lq`    | Lower bitrate, stereo-focused override | AAC, stereo       |
 
 Use the `lq` profile for bandwidth-limited destinations. Route files to it via `Daemon.path_configs` in `sma-ng.yml`:
 
 ```yaml
 Daemon:
   path_configs:
-    - path: /mnt/media/TV
+    - path: /mnt/unionfs/Media/TV
       profile: rq
-    - path: /mnt/media/Mobile
+    - path: /mnt/unionfs/Media/Mobile
       profile: lq
 ```
 
@@ -246,10 +246,10 @@ Both commands use the same detection script. Then compare the result with your c
 
 The normal bootstrap path generates these files:
 
-| File                        | Purpose                                         |
-| --------------------------- | ----------------------------------------------- |
+| File                | Purpose                                               |
+| ------------------- | ----------------------------------------------------- |
 | `config/sma-ng.yml` | Main conversion config, profiles, and daemon settings |
-| `config/daemon.env`       | Optional daemon environment variables                |
+| `config/daemon.env` | Optional daemon environment variables                 |
 
 You can operate successfully with only:
 
