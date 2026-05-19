@@ -248,6 +248,13 @@ class TestResolveRouting:
     res = loader.resolve_routing(cfg, "/media/movies/foo.mkv")
     assert res.profile is None
     assert res.services == []
+    assert res.matched is False
+
+  def test_match_sets_matched_true(self, loader, write_yaml):
+    p = write_yaml(self._yaml_with_two_rules())
+    cfg = loader.load(p)
+    res = loader.resolve_routing(cfg, "/media/tv/4k/movie.mkv")
+    assert res.matched is True
 
   def test_directory_boundary_avoids_overmatch(self, loader, write_yaml):
     """`/media/tv` rule must NOT match `/media/tvshow/...`."""

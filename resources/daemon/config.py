@@ -272,6 +272,7 @@ class PathConfigManager:
     self.db_url = None
     self.ffmpeg_dir = None
     self.workers = 1
+    self.strict_routing = False
     self.job_timeout_seconds = 0
     self.progress_log_interval = 60
     self.smoke_test = False
@@ -372,6 +373,7 @@ class PathConfigManager:
     self.db_url = d.db_url
     self.ffmpeg_dir = d.ffmpeg_dir
     self.workers = d.workers
+    self.strict_routing = bool(d.strict_routing)
     self.job_timeout_seconds = d.job_timeout_seconds
     self.progress_log_interval = d.progress_log_interval
     self.smoke_test = d.smoke_test
@@ -487,12 +489,23 @@ class PathConfigManager:
 
     Walks ``daemon.routing`` longest-prefix; returns the matched rule's
     profile (which may itself be ``None`` for bare-base) or ``None`` when
-    no rule matches.
+    no rule matches. Emits a WARNING when no rule matches so silent
+    bare-base fallback surfaces in the daemon log.
     """
     if self._cfg is None:
       return None
     res = self._loader.resolve_routing(self._cfg, file_path)
+    if not res.matched:
+      self.log.warning(
+        "No routing rule matched %s — using bare base config. Add a daemon.routing entry or a path-rewrite, or set daemon.strict-routing=true to refuse such jobs [routing-miss]." % file_path,
+      )
     return res.profile
+
+  def has_routing_match(self, file_path) -> bool:
+    """Return True iff a ``daemon.routing`` rule matched *file_path*."""
+    if self._cfg is None:
+      return False
+    return self._loader.resolve_routing(self._cfg, file_path).matched
 
   def should_skip_same_extension(self, file_path: str) -> bool:
     """Return True if *file_path* would be a no-op conversion under the
