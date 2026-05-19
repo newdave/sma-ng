@@ -1271,6 +1271,85 @@ class TestMaxBitrateVBV:
     assert options["video"]["bufsize"] is None
 
 
+class TestSameFamilyVideoBitrateClamp:
+  """Same-family re-encode (e.g. h264 -> libx264) should soft-cap at 1.2x source kbps."""
+
+  def _make_mp(self, tmp_yaml, vbitrateratio=None):
+    with patch("resources.readsettings.ReadSettings._validate_binaries"):
+      from resources.mediaprocessor import MediaProcessor
+      from resources.readsettings import ReadSettings
+
+      settings = ReadSettings(tmp_yaml())
+      settings.vcodec = ["h264"]
+      settings.vmaxbitrate = 50000  # high enough to not be the binding cap
+      settings.vprofile = ["high"]  # forces re-encode (source profile defaults to "main")
+      if vbitrateratio is not None:
+        settings.vbitrateratio = vbitrateratio
+
+    mock_converter = MagicMock()
+    mock_converter.ffmpeg.codecs = {
+      "h264": {"encoders": ["libx264"]},
+      "hevc": {"encoders": ["libx265"]},
+      "aac": {"encoders": ["aac"]},
+    }
+    mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8}
+    mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {"h264": "libx264", "hevc": "libx265", "aac": "aac"}.get(c, c)
+
+    mp = MediaProcessor.__new__(MediaProcessor)
+    mp.settings = settings
+    mp.converter = mock_converter
+    mp.log = MagicMock()
+    mp.deletesubs = set()
+    from resources.subtitles import SubtitleProcessor
+
+    mp.subtitles = SubtitleProcessor(mp)
+    return mp
+
+  def test_same_family_high_target_clamped_to_1_2x_source(self, tmp_yaml, make_media_info):
+    # h264 source @ 10 Mbps, ratio 1.5 -> vbitrate 15000k. Soft cap = 12000k.
+    mp = self._make_mp(tmp_yaml, vbitrateratio={"h264": 1.5})
+    info = make_media_info(video_codec="h264", video_bitrate=10_000_000, total_bitrate=10_128_000, audio_bitrate=128_000)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    # vbitrate_estimate = 10000 * 0.95 (tolerance) = 9500; soft cap = 11400
+    assert options["video"]["bitrate"] == pytest.approx(11400.0, rel=0.01)
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list if c.args]
+    assert any("video-same-family-bitrate-clamp" in w for w in warnings)
+
+  def test_same_family_below_soft_cap_not_changed(self, tmp_yaml, make_media_info):
+    # Ratio 1.0 -> vbitrate equals source (10000k) which is < 12000k soft cap.
+    mp = self._make_mp(tmp_yaml)
+    info = make_media_info(video_codec="h264", video_bitrate=10_000_000, total_bitrate=10_128_000, audio_bitrate=128_000)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list if c.args]
+    assert not any("video-same-family-bitrate-clamp" in w for w in warnings)
+
+  def test_different_family_not_clamped(self, tmp_yaml, make_media_info):
+    # hevc source -> h264 output with ratio 1.5. Different family → no clamp.
+    mp = self._make_mp(tmp_yaml, vbitrateratio={"hevc": 1.5})
+    info = make_media_info(video_codec="hevc", video_bitrate=10_000_000, total_bitrate=10_128_000, audio_bitrate=128_000)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list if c.args]
+    assert not any("video-same-family-bitrate-clamp" in w for w in warnings)
+
+  def test_copy_codec_not_clamped(self, tmp_yaml, make_media_info):
+    # Source already h264 with matching profile, output codec list = ["h264"] -> copy. No clamp.
+    mp = self._make_mp(tmp_yaml)
+    info = make_media_info(video_codec="h264", video_bitrate=10_000_000, total_bitrate=10_128_000, audio_bitrate=128_000)
+    info.video.profile = "high"  # match settings.vprofile so copy is allowed
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    assert options["video"]["codec"] == "copy"
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list if c.args]
+    assert not any("video-same-family-bitrate-clamp" in w for w in warnings)
+
+
 class TestHDRMaxBitrateOverride:
   """hdr.max_bitrate overrides video.max-bitrate for HDR sources only."""
 
