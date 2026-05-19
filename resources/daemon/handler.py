@@ -1257,11 +1257,16 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """
     pcm = self.server.path_config_manager
     skip_same_ext = getattr(pcm, "should_skip_same_extension", None)
+    has_match = getattr(pcm, "has_routing_match", None)
+    strict = getattr(pcm, "strict_routing", False) and not config_override
     queued, duplicates, skipped = [], [], []
     for filepath in self._walk_media_files(path):
       job_path = pcm.rewrite_path(filepath)
       if callable(skip_same_ext) and skip_same_ext(job_path):
         skipped.append({"path": job_path, "reason": "same_as_output_extension"})
+        continue
+      if strict and callable(has_match) and not has_match(job_path):
+        skipped.append({"path": job_path, "reason": "no_routing_match"})
         continue
       resolved_config = self._resolve_config(job_path, config_override)
       profile = self._resolve_profile(job_path, config_override)
@@ -1314,6 +1319,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
         },
       )
       return
+    if getattr(pcm, "strict_routing", False) and not config_override:
+      has_match = getattr(pcm, "has_routing_match", None)
+      if callable(has_match) and not has_match(job_path):
+        self.server.logger.warning("Refused queue under strict-routing: %s did not match any daemon.routing rule [routing-miss]." % job_path)
+        self.send_json_response(
+          400,
+          {
+            "status": "refused",
+            "path": job_path,
+            "reason": "no_routing_match",
+            "message": "daemon.strict-routing=true and no daemon.routing rule matched this path. Add a rule or set strict-routing=false.",
+          },
+        )
+        return
     resolved_config = self._resolve_config(job_path, config_override)
     profile = self._resolve_profile(job_path, config_override)
     job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)

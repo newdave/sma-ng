@@ -230,11 +230,17 @@ class ScannerThread(_StoppableThread):
 
     self.log.info("Scanner: found %d new file(s) in %s" % (len(unscanned), scan_dir))
     queued = 0
+    strict = getattr(self.path_config_manager, "strict_routing", False)
+    has_match = getattr(self.path_config_manager, "has_routing_match", None)
     for filepath in unscanned:
       # Apply path rewrite before config resolution and job submission
       submit_path = filepath
       if rewrite_from and rewrite_to and filepath.startswith(rewrite_from):
         submit_path = rewrite_to + filepath[len(rewrite_from) :]
+
+      if strict and callable(has_match) and not has_match(submit_path):
+        self.log.warning("Scanner skipped %s under strict-routing — no daemon.routing rule matched [routing-miss]." % submit_path)
+        continue
 
       resolved_config = self.path_config_manager.get_config_for_path(submit_path)
       job_id = self.job_db.add_job(submit_path, resolved_config, [])

@@ -84,6 +84,8 @@ def _make_server(
   server.path_config_manager.routing_match_paths.return_value = []
   server.path_config_manager.get_profile_for_path.return_value = None
   server.path_config_manager.get_services_for_path.return_value = []
+  server.path_config_manager.strict_routing = False
+  server.path_config_manager.has_routing_match.return_value = True
   # Default to "do not skip" so directory-submission tests don't see every
   # file silently dropped by the same-extension gate (mp4 already matches the
   # default output extension). Individual tests override this when they need
@@ -1325,6 +1327,44 @@ class TestQueueFile:
     assert body["status"] == "skipped"
     assert body["reason"] == "same_as_output_extension"
     h.server.job_db.add_job.assert_not_called()
+
+  def test_strict_routing_refuses_unmatched_path(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.strict_routing = True
+    h.server.path_config_manager.has_routing_match.return_value = False
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert h._response_code == 400
+    assert body["status"] == "refused"
+    assert body["reason"] == "no_routing_match"
+    h.server.job_db.add_job.assert_not_called()
+
+  def test_strict_routing_allows_when_config_override(self, tmp_path):
+    # An explicit config-override bypasses the strict gate.
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.strict_routing = True
+    h.server.path_config_manager.has_routing_match.return_value = False
+    h.server.job_db.add_job.return_value = 9
+    h._queue_file(str(f), [], "/etc/override.yml")
+    body = _get_response_body(h)
+    assert body["status"] == "queued"
+    assert body["job_id"] == 9
+
+  def test_strict_routing_allows_matched_path(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.strict_routing = True
+    h.server.path_config_manager.has_routing_match.return_value = True
+    h.server.job_db.add_job.return_value = 11
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert body["status"] == "queued"
+    assert body["job_id"] == 11
 
 
 # ---------------------------------------------------------------------------

@@ -25,18 +25,19 @@ daemon:
   scan-paths: []
   path-rewrites: []
   routing:
-    - match: /mnt/media/TV
+    - match: /mnt/unionfs/Media/TV
       profile: rq
       services:
         - sonarr.main
-    - match: /mnt/media/TV/Kids
+    - match: /mnt/unionfs/Media/TV/Kids
       profile: lq
       services:
         - sonarr.kids
-    - match: /mnt/media/Movies
+    - match: /mnt/unionfs/Media/Movies
       profile: rq
       services:
         - radarr.main
+  strict-routing: false
   media-extensions:
     - .mkv
     - .m4v

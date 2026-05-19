@@ -588,6 +588,12 @@ class DaemonConfig(_Base):
   scan_paths: list[ScanPath] = Field(default_factory=list)
   path_rewrites: list[PathRewrite] = Field(default_factory=list)
   routing: list[RoutingRule] = Field(default_factory=list)
+  # Refuse jobs whose paths don't match any routing rule. Default False
+  # preserves the historical bare-base fallback; setting True forces every
+  # ingested path to fall under an explicit rule, surfacing misconfigured
+  # mounts at queue time instead of silently transcoding with default
+  # settings.
+  strict_routing: bool = False
   media_extensions: list[str] = Field(default_factory=lambda: [".mkv", ".m4v", ".avi", ".mov", ".wmv", ".ts", ".flv", ".webm"])
   config_watch: ConfigWatchSettings = Field(default_factory=ConfigWatchSettings)
   audit: AuditSettings = Field(default_factory=AuditSettings)

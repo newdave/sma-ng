@@ -65,11 +65,16 @@ class RoutingResolution:
           matched rule explicitly omitted ``services``.
       base: the resolved ``BaseConfig`` — base alone if profile is
           ``None``, otherwise base shallow-merged with the named profile.
+      matched: True iff a ``daemon.routing`` rule actually matched the
+          input path. False means every caller is silently running on
+          bare base — distinct from ``profile is None`` (a rule may
+          match but omit a profile).
   """
 
   profile: str | None
   services: list[tuple[str, str]]
   base: BaseConfig
+  matched: bool = True
 
 
 class ConfigLoader:
@@ -284,8 +289,9 @@ class ConfigLoader:
           profile=rule.profile,
           services=[self._parse_service_ref(s) for s in rule.services],
           base=self.apply_profile(cfg, rule.profile),
+          matched=True,
         )
-    return RoutingResolution(profile=None, services=[], base=cfg.base)
+    return RoutingResolution(profile=None, services=[], base=cfg.base, matched=False)
 
   def _normalise(self, file_path: str, cfg: SmaConfig) -> str:
     """Apply longest-prefix path_rewrite, then ``os.path.normpath``."""
