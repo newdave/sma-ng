@@ -1657,7 +1657,7 @@ class MediaProcessor:
 
     # Hard guarantee: SDR sources must never produce 10-bit / HDR output.
     if not hdrInput:
-      vpix_fmt, vprofile, vcodec, bit_depth, coerced = self._coerce_sdr_output(vpix_fmt, vprofile, vcodec, vcodecs, bit_depth, pix_fmts)
+      vpix_fmt, vprofile, vcodec, bit_depth, coerced = self._coerce_sdr_output(vpix_fmt, vprofile, vcodec, vcodecs, bit_depth, pix_fmts, source_pix_fmt=info.video.pix_fmt)
       if coerced:
         vdebug = vdebug + ".sdr-no-hdr"
 
@@ -2902,7 +2902,7 @@ class MediaProcessor:
   )
   _HDR_PROFILES = ("main10", "main12", "high10", "high12")
 
-  def _coerce_sdr_output(self, vpix_fmt, vprofile, vcodec, vcodecs, bit_depth, pix_fmts):
+  def _coerce_sdr_output(self, vpix_fmt, vprofile, vcodec, vcodecs, bit_depth, pix_fmts, source_pix_fmt=None):
     """Force SDR sources to produce 8-bit non-HDR output.
 
     A 10-bit SDR source (yuv420p10le bt709) would otherwise copy its
@@ -2913,6 +2913,12 @@ class MediaProcessor:
     Returns the coerced ``(vpix_fmt, vprofile, vcodec, bit_depth,
     coerced)`` tuple. ``coerced`` is True when any value changed and the
     caller should bump its debug tag to include ``.sdr-no-hdr``.
+
+    ``source_pix_fmt`` is consulted only when ``vpix_fmt`` is None: a
+    10-bit SDR source with no configured ``base.pix-fmt`` whitelist
+    leaves ``vpix_fmt`` unset, which would let ``_qsv_passthrough_filter``
+    fall back to the 10-bit source pix_fmt and hand the encoder P010
+    surfaces against an 8-bit profile (the ``Invalid FrameType:0`` bug).
     """
     coerced = False
     if vpix_fmt in self._HDR_PIX_FMTS:
@@ -2923,6 +2929,16 @@ class MediaProcessor:
       replacement = "main" if vprofile.startswith("main") else "high"
       self.log.info("SDR source had profile %s; forcing %s profile [sdr-no-hdr]." % (vprofile, replacement))
       vprofile = replacement
+      coerced = True
+      # Profile dropped to 8-bit -> the surface format MUST also be 8-bit
+      # or vpp_qsv will hand the encoder P010 against a Main profile.
+      if vpix_fmt is None or vpix_fmt in self._HDR_PIX_FMTS:
+        vpix_fmt = "yuv420p"
+    # 10-bit SDR source with no configured pix_fmt whitelist: pin 8-bit
+    # explicitly so downstream filters don't fall back to the source.
+    if vpix_fmt is None and source_pix_fmt in self._HDR_PIX_FMTS:
+      self.log.info("SDR source has 10/12-bit pix_fmt %s and no output pix_fmt set; forcing 8-bit yuv420p output [sdr-no-hdr]." % source_pix_fmt)
+      vpix_fmt = "yuv420p"
       coerced = True
     if coerced and vcodec == "copy" and vcodecs:
       vcodec = vcodecs[0]
