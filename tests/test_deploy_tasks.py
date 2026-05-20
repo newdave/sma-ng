@@ -86,16 +86,6 @@ class TestDeployDockerUpgradeTask:
     assert "compose_cmd=docker compose" in result.stdout
 
 
-class TestDeployPostgresTasks:
-  def test_pg_tasks_source_shared_library(self):
-    for rel_path in (
-      ".mise/tasks/pg/restart",
-      ".mise/tasks/pg/recreate",
-    ):
-      text = _read(rel_path)
-      assert 'source "$(dirname "$0")/../../shared/deploy/lib.sh"' in text
-
-
 class TestClusterTasks:
   def test_cluster_tasks_source_shared_library(self):
     for rel_path in (
@@ -178,13 +168,10 @@ class TestMiseTaskLayout:
     assert "cluster:resume" in tasks
     assert "cluster:upgrade" in tasks
 
-    assert "pg:restart" in tasks
-    assert "deploy:docker:pg:restart" not in tasks
-    assert "deploy:docker:pg:restart" in tasks["pg:restart"]
-
-    assert "pg:recreate" in tasks
-    assert "deploy:docker:pg:recreate" not in tasks
-    assert "deploy:docker:pg:recreate" in tasks["pg:recreate"]
+    # pg:restart / pg:recreate were removed when the *-pg compose profiles
+    # were switched to external PostgreSQL; nothing local to manage now.
+    assert "pg:restart" not in tasks
+    assert "pg:recreate" not in tasks
 
     assert "setup:deps" in tasks["setup:deps:base"]
 
@@ -714,8 +701,6 @@ class TestDeployMiseTask:
       ".mise/tasks/cluster/restart",
       ".mise/tasks/deploy/restart",
       ".mise/tasks/deploy/login",
-      ".mise/tasks/pg/restart",
-      ".mise/tasks/pg/recreate",
     ):
       text = _read(rel_path)
       assert '#MISE depends=["deploy:mise"]' in text, rel_path
