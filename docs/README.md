@@ -1190,22 +1190,17 @@ mise run deploy:setup
 # Build/push the current code image and redeploy production Docker hosts
 mise run deploy:redeploy
 
-# Include config/sample/service changes in the same run
-ROLL_CONFIG=true mise run deploy:redeploy
-
 # Redeploy an already-pushed image without rebuilding
 BUILD_IMAGE=false IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:redeploy
 
-# Optional: stop Docker services on one host
-HOST=sma-master mise run deploy:dockerstop
-
-# Optional: stop Docker services on multiple hosts
-HOSTS="sma-master sma-worker-1" mise run deploy:dockerstop
+# Stop Docker services on one host (or many)
+HOST=sma-master mise run cluster:stop
+HOSTS="sma-master sma-worker-1" mise run cluster:stop
 ```
 
-`deploy:redeploy` builds and pushes the current checkout, then runs `deploy:docker`
-for each selected host so Docker pulls the requested image tag and recreates only
-the SMA container.
+`deploy:redeploy` builds and pushes the current checkout, then runs
+`deploy:remote` per host — generating `sma-ng.yml` locally and recreating
+the Docker container with the new image.
 Use `HOST=<name>` or `HOSTS="<name1> <name2>"` to scope a redeploy.
 
 `deploy:sync` remains available for non-Docker/source-checkout maintenance.
@@ -1270,16 +1265,16 @@ Sends a graceful shutdown webhook to each host, waits for the daemon to drain, t
 | `deploy:check`    | Verify `setup/local.yml` exists and `deploy.hosts` is set                            |
 | `deploy:setup`    | First-time host prep: SSH key, apt deps, deploy dir, Docker install                  |
 | `deploy:mise`     | Sync the local `.mise/` deploy control plane to each remote `deploy_dir`             |
-| `deploy:redeploy` | Build/push current code, optionally roll config, then recreate SMA Docker containers |
+| `deploy:redeploy` | Build/push current code, then run `deploy:remote` per host                           |
+| `deploy:remote`   | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker)     |
+| `deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry     |
 | `deploy:sync`     | Sync code and install deps on all hosts                                              |
-| `deploy:config`     | Roll configs: create missing, merge new keys, stamp credentials and overlays         |
 | `deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container    |
-| `deploy:docker`   | Rsync the local code to Docker hosts, pull the latest image, recreate SMA            |
-| `pg:restart`      | Restart bundled PostgreSQL on hosts whose `docker_profile` ends in `-pg`             |
-| `pg:recreate`     | Stop bundled PostgreSQL, remove its Docker volume, and recreate                      |
+| `deploy:docker`   | Push docker-compose.yml, pull image, `docker compose down` + `up -d --force-recreate`|
 
-Additional Docker lifecycle helper: `deploy:dockerstop` (alias: `deploy:docker:stop`) stops
-services for selected hosts using each host's configured `DOCKER_PROFILE`.
+Cluster lifecycle: `cluster:start`, `cluster:stop`, `cluster:restart`, `cluster:status`,
+`cluster:drain`, `cluster:pause`, `cluster:resume`, `cluster:upgrade` — see
+[Cluster Operations](cluster-operations.md).
 
 ---
 

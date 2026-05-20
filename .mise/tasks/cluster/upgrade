@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Rolling cluster upgrade: drain each node in sequence, wait for queue to empty, then deploy:docker (HOST or HOSTS to scope)"
+#MISE description="Rolling cluster upgrade: drain each node in sequence, wait for queue to empty, then deploy:remote (HOST or HOSTS to scope)"
 #MISE depends=["deploy:mise"]
 set -euo pipefail
 
@@ -64,7 +64,7 @@ _running_jobs() {
 failed=""
 for host in $DEPLOY_HOSTS; do
   echo ""
-  echo "==> [$host] cluster upgrade: drain → wait → deploy:docker"
+  echo "==> [$host] cluster upgrade: drain → wait → deploy:remote"
 
   if ! _post_action "$host" drain; then
     echo "  ERROR: [$host] drain request failed; skipping host" >&2
@@ -96,9 +96,9 @@ for host in $DEPLOY_HOSTS; do
     continue
   fi
 
-  echo "==> [$host] running deploy:docker for this host only"
-  if ! HOST="$host" mise run deploy:docker; then
-    echo "  ERROR: [$host] deploy:docker failed; resuming and continuing" >&2
+  echo "==> [$host] running deploy:remote for this host only"
+  if ! HOST="$host" mise run deploy:remote; then
+    echo "  ERROR: [$host] deploy:remote failed; resuming and continuing" >&2
     _post_action "$host" resume || true
     failed="$failed $host"
     continue

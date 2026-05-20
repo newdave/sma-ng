@@ -291,21 +291,14 @@ Three log surfaces exist:
 
 ## Runbook: PostgreSQL lifecycle
 
-Routine restart (no data loss):
+`*-pg` Docker profiles point `daemon.db-url` at an **external** PostgreSQL
+instance (production reality on every host we run today). Restart and
+recovery are handled out-of-band against that database — there is no
+mise task that touches it. If you ever bring back a bundled `sma-pgsql`
+service you'll want to reintroduce dedicated lifecycle tasks for it.
 
-```bash
-mise run pg:restart
-```
-
-**Destructive recreate** — wipes the `sma-pgdata` Docker volume; only use this
-during recovery from corruption or schema reset:
-
-```bash
-mise run pg:recreate   # data is GONE
-```
-
-After a recreate, every node's heartbeat will register a fresh row; you'll
-need to re-approve them via `/admin`.
+After any database reset (planned or recovery), every node's heartbeat
+registers a fresh row; re-approve them via `/admin`.
 
 ---
 

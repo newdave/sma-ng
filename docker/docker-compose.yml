@@ -208,7 +208,7 @@ services:
       - /mnt/unionfs/downloads:/downloads
       - /transcodes:/transcodes
     devices:
-      - /dev/dri/card1:/dev/dri/card0
+      - /dev/dri/card0:/dev/dri/card0
       - /dev/dri/renderD128:/dev/dri/renderD128
     # Declarative GPU access (mirrors sma-intel). Set
     # SMA_ENTRYPOINT_FIX_GIDS=1 in the environment to fall back to the

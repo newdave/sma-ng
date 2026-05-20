@@ -80,11 +80,8 @@ curl https://mise.run | sh
 | `mise run deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container               |
 | `mise run config:audit`    | Audit local configs                                                                             |
 | `mise run deploy:docker`   | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate`         |
-| `mise run pg:restart`      | Restart bundled PostgreSQL on hosts using `*-pg` Docker profiles                                |
-| `mise run pg:recreate`     | Remove and recreate bundled PostgreSQL (destructive — removes `sma-pgdata` volume)              |
 | `mise run deploy:login`    | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token                                  |
 
-Also available: `mise run deploy:dockerstop` to stop Docker services on selected nodes.
 Use `HOST=<host>` for one node or `HOSTS="<host1> <host2>"` for multiple nodes.
 
 Run `mise tasks` to print a live list directly from the repo.
@@ -326,48 +323,33 @@ mise run deploy:config
 # 5. Restart daemon on all hosts
 mise run deploy:restart
 
-# Optional: sync code to Docker hosts, pull the latest image, and recreate
-# only the SMA service for each configured profile
-mise run deploy:docker
+# Build the next sma-ng.yml locally and recreate Docker on every host
+mise run deploy:remote
 
-# Optional: stop Docker services on one host
-HOST=user@server1.example.com mise run deploy:dockerstop
-
-# Optional: stop Docker services on multiple hosts
-HOSTS="user@server1.example.com user@server2.example.com" mise run deploy:dockerstop
-
-# Optional: restart or recreate bundled PostgreSQL on hosts using *-pg profiles
-mise run pg:restart
-mise run pg:recreate
+# Or do the two halves separately:
+mise run deploy:config   # generate + push sma-ng.yml only
+mise run deploy:docker   # push compose yml + docker compose down/up
 ```
 
 ### What `deploy:config` Does
 
-`deploy:config` depends on `deploy:mise`, so the remote host gets the current local
-`.mise/` helper and task code before any config mutation runs.
+For each host in `DEPLOY_HOSTS`, `deploy:config` runs entirely **locally** —
+the existing stamp helpers (`stamp_daemon.py`, `stamp_ffmpeg.py`) execute
+against a per-host staging dir under `.deploy-staging/<host>/config/`, then
+the finished `sma-ng.yml` is rsync'd to `<host>:<deploy_dir>/config/sma-ng.yml`.
 
-For managed deployments, `deploy:config` also stamps the host key from
-`setup/local.yml` into `daemon.node-id`, and the daemon uses that value as its
-cluster node ID.
+For each remote host the staging build:
 
-For each remote host:
-
-1. Detects the host's GPU type and writes it into a freshly-created `sma-ng.yml`
-2. Creates `config/sma-ng.yml` and `config/daemon.env` from the bundled samples if missing
-3. Backs up `config/` to `.backup/<timestamp>/` before any mutation
-4. Merges new keys from `setup/sma-ng.yml.sample` into the existing `config/sma-ng.yml`
-   via `yaml_merge.py` (non-destructive — existing values preserved)
-5. Stamps `ffmpeg` / `ffprobe` paths from the host's resolved `ffmpeg_dir` into
-   `base.converter.{ffmpeg,ffprobe}`
-6. Deep-merges `base:` and `profiles:` overlays from `setup/local.yml` into the
-   matching blocks of `sma-ng.yml` (see overlay semantics above)
-7. Stamps each `services.<type>.<instance>` from `setup/local.yml` into the
+1. Starts from `setup/sma-ng.yml.sample` (regenerated from the pydantic schema).
+2. Stamps `ffmpeg` / `ffprobe` paths from the host's resolved `ffmpeg_dir`.
+3. Deep-merges `base:` and `profiles:` overlays from `setup/local.yml`.
+4. Stamps each `services.<type>.<instance>` from `setup/local.yml` into the
    `services:` block, and rebuilds `daemon.routing` from every instance
-   carrying both `path` and `profile` (longest match first)
-8. Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir` /
-   `daemon.node-id` (kebab-case) into `daemon:`
-9. Deploys post-process scripts with the correct interpreter shebang and
-   Plex/Jellyfin/Emby credentials
+   carrying both `path` and `profile` (longest match first).
+5. Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir` /
+   `daemon.node-id` (kebab-case) into `daemon:`.
+6. Deep-merges arbitrary `daemon:` keys from `setup/local.yml` (e.g.
+   `path-rewrites`, `strict-routing`, `scan-paths`) into the daemon block.
 
 ### Deploy Tasks Reference
 
@@ -384,8 +366,6 @@ For each remote host:
 | `deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container         |
 | `config:audit`    | Audit local configs                                                                       |
 | `deploy:docker`   | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate`   |
-| `pg:restart`      | Restart bundled PostgreSQL on hosts whose `DOCKER_PROFILE` ends in `-pg`                  |
-| `pg:recreate`     | Stop bundled PostgreSQL, remove its Docker volume, and recreate it                        |
 | `cluster:start`   | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`)                            |
 | `cluster:stop`    | `docker compose stop` for selected hosts                                                  |
 | `cluster:restart` | `docker compose restart` for selected hosts                                               |
@@ -393,17 +373,17 @@ For each remote host:
 | `cluster:drain`   | `POST /admin/nodes/<host>/drain`; workers finish active jobs then go idle                 |
 | `cluster:pause`   | `POST /admin/nodes/<host>/pause`; workers stop picking up new jobs                        |
 | `cluster:resume`  | `POST /admin/nodes/<host>/resume`; clear drain or pause                                   |
-| `cluster:upgrade` | Drain each host, wait for `running_jobs=0`, then run `deploy:docker HOST=<host>`          |
+| `cluster:upgrade` | Drain each host, wait for `running_jobs=0`, then run `deploy:remote HOST=<host>`          |
 
 See [Cluster Operations](cluster-operations.md) for runbooks combining these.
 
-All remote-facing deploy/config tasks depend on `deploy:mise`, so the remote `.mise/`
-control plane is refreshed before those wrappers run. The Docker-specific deploy tasks
-require `DOCKER_PROFILE` to be set per host (or under `deploy:`) in `setup/local.yml`.
-Use `HOST=<host>` to target one node, or `HOSTS="<host1> <host2>"` to target multiple nodes.
-The PostgreSQL lifecycle tasks skip hosts that are not using one of the bundled `*-pg`
-profiles.
-Use `pg:recreate` only when you intentionally want a fresh bundled PostgreSQL data directory on the remote host; it removes the compose-managed `sma-pgdata` volume before bringing the service back.
+`deploy:config` and `deploy:docker` run locally — they only need an SSH path to
+each host. Tasks that invoke remote helpers or remote `mise` commands
+(`deploy:sync`, `deploy:restart`, `deploy:login`, `cluster:*`) depend on
+`deploy:mise` so the remote `.mise/` control plane is refreshed first. The
+Docker-specific tasks require `docker_profile` to be set per host (or under
+`deploy:`) in `setup/local.yml`. Use `HOST=<host>` to target one node, or
+`HOSTS="<host1> <host2>"` to target multiple nodes.
 
 ---
 
