@@ -1,6 +1,6 @@
 ---
 name: refactoring
-description: Use for behavior-preserving cleanup of SMA-NG Python, shell, config, or docs workflows.
+description: Behavior-preserving cleanup of SMA-NG Python, shell, config, or docs. Activate when the user says "refactor / clean up / simplify / rename / extract / dedupe / consolidate", or when changes to converter/, resources/, triggers/, .mise/tasks/, or docs/ are explicitly scoped as no-op restructuring. Skip when behavior is changing.
 ---
 
 # Refactoring

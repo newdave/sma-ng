@@ -1,6 +1,6 @@
 ---
 name: python-configuration
-description: Python configuration management via environment variables and typed settings. Use when externalizing config, setting up pydantic-settings, managing secrets, or implementing environment-specific behavior.
+description: Python configuration with pydantic and typed settings. Activate when editing resources/config_schema.py, resources/readsettings.py, resources/daemon/config.py, setup/sma-ng.yml.sample, or adding/renaming/removing any field under daemon:/base:/profiles:/services:. Also for aliases, validators, _defaults cascade, kebab-case YAML, and codec-parameter subblocks (qsv/vaapi/nvenc/amf/videotoolbox).
 ---
 
 # Python Configuration Management

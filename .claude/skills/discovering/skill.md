@@ -1,6 +1,6 @@
 ---
 name: discovering
-description: Use when the SMA-NG request has unclear goals, scope, users, or success criteria.
+description: Clarify outcome before coding. Activate when the request is vague ("improve X", "make Y better"), names no files, omits acceptance criteria, or proposes a feature without saying who benefits or how to verify. Skip when scope is already concrete.
 ---
 
 # Discovering

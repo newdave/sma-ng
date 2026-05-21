@@ -1,6 +1,6 @@
 ---
 name: blueprinting
-description: Use for multi-step SMA-NG changes after the approach is chosen and before implementation.
+description: Plan multi-step SMA-NG changes before writing code. Activate when the request touches more than one of (converter/, resources/, triggers/, .mise/tasks/, docs/), introduces a new config field, daemon option, codec, integration, or mise task, or requires same-commit doc/sample/projection updates. Skip for single-file edits and trivial fixes.
 ---
 
 # Blueprinting

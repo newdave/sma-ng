@@ -1,6 +1,6 @@
 ---
 name: implementing
-description: Use when an SMA-NG implementation plan exists and code changes should begin.
+description: Execute an agreed SMA-NG implementation plan with verification. Activate immediately after blueprinting finishes, or when the user asks to implement/build/wire-up a change with clear scope (file list, behavior, validation). Pair with python-testing before reporting done.
 ---
 
 # Implementing

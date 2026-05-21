@@ -1,6 +1,6 @@
 ---
 name: creating-skills
-description: Use when adding or updating a reusable Claude skill for this repository.
+description: Add or update a Claude skill in .claude/skills/. Activate when the user asks to "create/add/update a skill", or when a recurring SMA-NG workflow (triggers, validation steps, doc updates) is worth packaging. Includes writing concrete trigger-rich descriptions so the skill actually fires.
 ---
 
 # Creating Skills
