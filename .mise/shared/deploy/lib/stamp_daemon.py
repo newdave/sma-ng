@@ -149,12 +149,39 @@ if os.path.exists(yaml_path):
       print(f"  sma-ng.yml base.{path_}: {old!r} -> {new!r}")
       changed = True
 
-  # profiles overrides from local.yml (same merge semantics)
+  # profiles overrides from local.yml — local.yml is *authoritative*:
+  # any profile present in the stamped file but absent from local.yml
+  # is reaped, and any profile present in local.yml replaces the
+  # deployed profile wholesale. This prevents the upstream sample's
+  # placeholder profile fields (e.g. profiles.rq.video.max-bitrate: 8000)
+  # from sticking around when the operator's local.yml.profiles.rq
+  # doesn't override them and intends to inherit from base. Mirrors
+  # the authoritative-mode behaviour ConfigLoader/show-config already
+  # apply on the synthesize path (commit b291338).
+  #
+  # Per-field merge *within* a profile section is still a deep-merge so
+  # operator-only fields under a profile section that the sample doesn't
+  # carry are preserved.
   if profiles_overrides:
     profiles_block = root.setdefault("profiles", {})
-    for path_, old, new in _deep_merge(profiles_block, profiles_overrides):
-      print(f"  sma-ng.yml profiles.{path_}: {old!r} -> {new!r}")
+    existing_profiles = set(profiles_block.keys()) if isinstance(profiles_block, dict) else set()
+    incoming_profiles = set(profiles_overrides.keys())
+    for stale_profile in sorted(existing_profiles - incoming_profiles):
+      print(f"  sma-ng.yml profiles.{stale_profile}: removing (not in local.yml)")
+      del profiles_block[stale_profile]
       changed = True
+    # For profiles present in BOTH the stamped file and local.yml,
+    # replace the profile wholesale rather than deep-merging. The
+    # local.yml form is the operator's complete intent for that profile.
+    for prof_name, prof_data in profiles_overrides.items():
+      if prof_name in profiles_block and profiles_block.get(prof_name) != prof_data:
+        print(f"  sma-ng.yml profiles.{prof_name}: replacing (local.yml is authoritative)")
+        profiles_block[prof_name] = prof_data
+        changed = True
+      elif prof_name not in profiles_block:
+        print(f"  sma-ng.yml profiles.{prof_name}: adding from local.yml")
+        profiles_block[prof_name] = prof_data
+        changed = True
 
   # daemon overrides from local.yml (deep-merge before credential
   # stamping so the credentials/workers blocks below still win, and so
