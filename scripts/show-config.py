@@ -143,6 +143,12 @@ def _parse_args() -> argparse.Namespace:
     action="store_true",
     help="With --profile, show only the fields the profile overlay changes relative to the raw base block. Useful for confirming a profile carries only deltas.",
   )
+  p.add_argument(
+    "--input",
+    "-i",
+    default=None,
+    help="Path to a real media file. Probes the file, runs generateOptions, and prints the full FFmpeg command that would be executed under the chosen profile — without actually transcoding. Pairs naturally with --profile.",
+  )
   return p.parse_args()
 
 
@@ -167,10 +173,15 @@ def _load(config_path: str) -> SmaConfig:
 
 
 def _resolve(cfg: SmaConfig, profile: str | None) -> dict[str, Any]:
-  """Return the resolved base block as a kebab-cased dict."""
+  """Return the resolved base block as a kebab-cased dict.
+
+  Uses ``mode="json"`` so enum fields (``FallbackPolicy``) serialise to
+  their string values rather than the native Python enum object — PyYAML
+  can't represent the latter and would raise ``RepresenterError``.
+  """
   loader = ConfigLoader(logger=logging.getLogger("show-config"))
   base = loader.apply_profile(cfg, profile)
-  return base.model_dump(by_alias=True, exclude_none=False)
+  return base.model_dump(by_alias=True, exclude_none=False, mode="json")
 
 
 def _diff(base: dict[str, Any], resolved: dict[str, Any]) -> dict[str, Any]:
@@ -210,12 +221,52 @@ def _emit(data: Any, fmt: str) -> None:
     yaml.safe_dump(data, sys.stdout, sort_keys=False, default_flow_style=False)
 
 
+def _render_ffmpeg_preview(input_path: str, profile: str | None, config_path: str | None) -> int:
+  """Probe ``input_path`` and print the FFmpeg command that would run.
+
+  Delegates to ``manual.py -i <file> -oo`` which is the canonical
+  options-only preview — it loads the full settings stack, probes the
+  source, runs generateOptions, and emits the assembled ffmpeg command
+  to stdout. No new code path; no risk of drifting from production.
+  """
+  import subprocess
+
+  input_file = Path(input_path)
+  if not input_file.exists():
+    sys.stderr.write(f"error: input file not found: {input_path}\n")
+    return 1
+  cmd = [sys.executable, str(ROOT / "manual.py"), "-i", str(input_file), "-oo", "-a"]
+  if profile:
+    cmd.extend(["-p", profile])
+  if config_path and config_path not in (None, "synthesize"):
+    cmd.extend(["-c", config_path])
+  try:
+    completed = subprocess.run(cmd, cwd=str(ROOT), check=False)
+    return completed.returncode
+  except FileNotFoundError as exc:
+    sys.stderr.write(f"error invoking manual.py: {exc}\n")
+    return 1
+
+
 def main() -> int:
   args = _parse_args()
   if args.config is None:
     args.config, source_label = _default_source()
   else:
     source_label = args.config
+
+  if args.input:
+    if not Path(args.input).exists():
+      sys.stderr.write(f"error: input file not found: {args.input}\n")
+      return 1
+    sys.stdout.write(f"# source: {source_label}\n")
+    sys.stdout.write(f"# input:  {args.input}\n")
+    sys.stdout.write(f"# profile: {args.profile or '(none)'}\n")
+    sys.stdout.write("# generating FFmpeg command via manual.py -oo (no transcode performed)\n")
+    sys.stdout.write("# " + "-" * 70 + "\n")
+    sys.stdout.flush()
+    return _render_ffmpeg_preview(args.input, args.profile, args.config)
+
   cfg = _load(args.config)
 
   if args.diff and args.profile is None:

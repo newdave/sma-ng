@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Render the effective resolved config for a profile (--profile <name>; --diff to show only overlay deltas; --section to narrow output)"
+#MISE description="Render the effective resolved config for a profile (--profile, --diff, --section). With --input FILE: print the full FFmpeg command that would run, without transcoding."
 set -euo pipefail
 
 cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"

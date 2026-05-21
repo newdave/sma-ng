@@ -110,3 +110,33 @@ def test_subblock_alignment_warnings(tmp_path: Path, gpu, subblock_field, subblo
   findings: list = []
   validate_config._check_subblock_encoder_alignment(cfg, findings)
   assert any(f.level == expected_level and subblock_value in f.path for f in findings)
+
+
+def test_typed_vs_string_conflict_warns(tmp_path: Path) -> None:
+  """When a flag appears in both a typed field's home and the same
+  subblock's codec-parameters string, the validator should warn."""
+  yaml_path = _write_yaml(
+    tmp_path,
+    "daemon:\n  host: 127.0.0.1\nbase:\n  video:\n    gpu: qsv\n    codec: ['h265']\n    qsv:\n      codec-parameters: '-low_power 0 -adaptive_b 1'\n",
+  )
+  cfg, _ = validate_config._load_config(str(yaml_path))
+  assert cfg is not None
+  findings: list = []
+  validate_config._check_typed_vs_string_conflicts(cfg, findings)
+  msgs = [f.message for f in findings if f.level == "warn"]
+  assert any("low_power" in m for m in msgs)
+  assert any("adaptive_b" in m for m in msgs)
+
+
+def test_typed_vs_string_no_warning_when_typed_field_is_set(tmp_path: Path) -> None:
+  """If the typed field has a value, the codec-parameters string is
+  considered an intentional escape hatch — no warning."""
+  yaml_path = _write_yaml(
+    tmp_path,
+    "daemon:\n  host: 127.0.0.1\nbase:\n  video:\n    gpu: qsv\n    codec: ['h265']\n    qsv:\n      low-power: 0\n      codec-parameters: '-low_power 0'\n",
+  )
+  cfg, _ = validate_config._load_config(str(yaml_path))
+  assert cfg is not None
+  findings: list = []
+  validate_config._check_typed_vs_string_conflicts(cfg, findings)
+  assert not any("low_power" in f.message for f in findings)
