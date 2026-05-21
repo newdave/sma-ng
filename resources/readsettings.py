@@ -731,8 +731,23 @@ class ReadSettings:
     self.emby_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
     self.jellyfin_instances.sort(key=lambda x: len(x.get("path") or ""), reverse=True)
 
-    # Plex: pick the first instance (preferring one named "main"), or {}.
+    # Plex: build a list-of-dicts in the same shape as
+    # emby_instances / jellyfin_instances so refreshPlex can iterate
+    # every configured Plex server (not just the singleton). Each dict
+    # carries an extra `_name` key so error messages can disambiguate.
     plex_instances = cfg.services.plex
+    self.plex_instances: list[dict[str, Any]] = []
+    for name, inst in (plex_instances or {}).items():
+      if not inst.refresh and not inst.plexmatch:
+        # No actionable use for this instance — skip building a dict.
+        continue
+      d = self._plex_to_dict(inst)
+      d["_name"] = name
+      self.plex_instances.append(d)
+
+    # Backward-compat singleton: `self.Plex` is still consulted by the
+    # plexmatch path and any legacy callers. Pick the first instance
+    # preferring one named "main", same heuristic as before.
     plex_pick: PlexInstance | None = None
     if plex_instances:
       plex_pick = plex_instances.get("main") or next(iter(plex_instances.values()))

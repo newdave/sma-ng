@@ -167,3 +167,58 @@ class TestRefreshPlex:
 
     movies.update.assert_called_once()
     tv.update.assert_not_called()
+
+
+class TestRefreshPlexMultiInstance:
+  """Routing-aware refresh: iterate every configured plex instance with
+  refresh: true. Each is connected to and scanned independently."""
+
+  def test_multiple_instances_each_refreshed(self):
+    from autoprocess.plex import refreshPlex
+
+    settings = MagicMock()
+    settings.plex_instances = [
+      {"_name": "davetv", "host": "plex1", "port": 32400, "token": "t1", "ssl": False, "ignore-certs": False, "path-mapping": {}, "refresh": True},
+      {"_name": "davearchive", "host": "plex2", "port": 32400, "token": "t2", "ssl": False, "ignore-certs": False, "path-mapping": {}, "refresh": True},
+    ]
+    plex_a = MagicMock()
+    plex_a.library.sections.return_value = []
+    plex_b = MagicMock()
+    plex_b.library.sections.return_value = []
+
+    # _connect_plex is the multi-instance connection path; patch it to
+    # return different mocks per instance so we can assert both fired.
+    calls: list[str] = []
+
+    def _fake_connect(inst, log, label):
+      calls.append(label)
+      return plex_a if inst["_name"] == "davetv" else plex_b
+
+    with patch("autoprocess.plex._connect_plex", side_effect=_fake_connect):
+      refreshPlex(settings, path="/movies/file.mkv")
+
+    assert calls == ["davetv", "davearchive"]
+    plex_a.library.sections.assert_called_once()
+    plex_b.library.sections.assert_called_once()
+
+  def test_refresh_false_instances_skipped(self):
+    from autoprocess.plex import refreshPlex
+
+    settings = MagicMock()
+    settings.plex_instances = [
+      {"_name": "active", "host": "p1", "port": 32400, "token": "t", "ssl": False, "ignore-certs": False, "path-mapping": {}, "refresh": True},
+      {"_name": "plexmatch-only", "host": "p2", "port": 32400, "token": "t", "ssl": False, "ignore-certs": False, "path-mapping": {}, "refresh": False},
+    ]
+
+    calls: list[str] = []
+
+    def _fake_connect(inst, log, label):
+      calls.append(label)
+      m = MagicMock()
+      m.library.sections.return_value = []
+      return m
+
+    with patch("autoprocess.plex._connect_plex", side_effect=_fake_connect):
+      refreshPlex(settings, path="/movies/file.mkv")
+
+    assert calls == ["active"]
