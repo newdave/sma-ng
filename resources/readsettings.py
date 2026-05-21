@@ -300,6 +300,50 @@ class ReadSettings:
   # legacy comma-separated string values some users may keep using)
   # ---------------------------------------------------------------------
 
+  # Typed-field → ffmpeg flag mapping for QSVSettings. Each entry is
+  # (snake_field_name, ffmpeg_flag, sentinel_value). The runtime emits
+  # ``<flag> <value>`` whenever the field is NOT at its sentinel.
+  _QSV_TYPED_FLAG_MAP: tuple[tuple[str, str, int], ...] = (
+    ("low_power", "-low_power", -1),
+    ("async_depth", "-async_depth", 0),
+    ("extbrc", "-extbrc", -1),
+    ("b_strategy", "-b_strategy", -1),
+    ("adaptive_i", "-adaptive_i", -1),
+    ("adaptive_b", "-adaptive_b", -1),
+    ("p_strategy", "-p_strategy", -1),
+    ("rdo", "-rdo", -1),
+  )
+
+  @classmethod
+  def _project_qsv(cls, cfg) -> dict[str, Any]:
+    """Flatten a QSVSettings model into a snake_case dict.
+
+    Consumed by the runtime QSV codec path (mediaprocessor.py). All
+    sentinel defaults are preserved as-is so the reader applies
+    sentinel-fallback inheritance from the parent VideoSettings /
+    HDRSettings block — same pattern as the VAAPI overlay.
+
+    Additionally synthesizes ``codec_parameters`` from the typed
+    fields when they are set (overriding any operator-supplied string
+    in qsv.codec_parameters by APPENDING — the typed form is the
+    canonical shape; the string form is for raw flag escape-hatches).
+    """
+    if cfg is None:
+      return {}
+    out = cfg.model_dump(by_alias=False)
+    # Assemble typed fields into a flag string in a deterministic order.
+    typed_parts: list[str] = []
+    for field, flag, sentinel in cls._QSV_TYPED_FLAG_MAP:
+      val = out.get(field)
+      if val is None or val == sentinel:
+        continue
+      typed_parts.append(f"{flag} {val}")
+    typed_str = " ".join(typed_parts)
+    existing = (out.get("codec_parameters") or "").strip()
+    if typed_str:
+      out["codec_parameters"] = (existing + " " + typed_str).strip() if existing else typed_str
+    return out
+
   @staticmethod
   def _project_vaapi(cfg) -> dict[str, Any]:
     """Flatten a VAAPISettings model into a snake_case dict.
@@ -471,8 +515,11 @@ class ReadSettings:
     self.b_frames = cfg.b_frames
     self.ref_frames = cfg.ref_frames
     self.extra_hw_frames = int(cfg.extra_hw_frames or 0)
-    # Flat dict projection of base.video.vaapi for the runtime hw_alt
-    # overlay reader. snake_case keys match VAAPISettings.model_dump.
+    # Flat dict projections of the per-encoder subblocks. The runtime
+    # reads from the block matching the active encoder; the OTHER
+    # block is silently ignored (the safety guarantee — a QSV-only
+    # flag never leaks onto a hevc_vaapi command line).
+    self.qsv: dict[str, Any] = self._project_qsv(cfg.qsv)
     self.vaapi: dict[str, Any] = self._project_vaapi(cfg.vaapi)
 
     hdr_cfg = base.hdr
@@ -493,6 +540,7 @@ class ReadSettings:
       "ref_frames": hdr_cfg.ref_frames,
       "extra_hw_frames": int(hdr_cfg.extra_hw_frames or 0),
       "max_bitrate": int(hdr_cfg.max_bitrate),
+      "qsv": self._project_qsv(hdr_cfg.qsv),
       "vaapi": self._project_vaapi(hdr_cfg.vaapi),
     }
 
@@ -505,12 +553,28 @@ class ReadSettings:
     if self.gpu:
       self._apply_hwaccel_codec_map(self.gpu)
 
-    # codec-parameters may contain QSV-specific flags; clear them when not on QSV.
-    if self.codec_params and self.gpu != "qsv":
-      self.log.debug("Clearing codec-parameters (not QSV, gpu=%s)." % self.gpu)
-      self.codec_params = ""
-    if self.hdr.get("codec_params") and self.gpu != "qsv":
-      self.hdr["codec_params"] = ""
+    # Append the active-encoder subblock's codec-parameters string onto
+    # the encoder-agnostic parent string. The OTHER block's codec-
+    # parameters are NEVER concatenated, so QSV-only flags can never
+    # leak onto a hevc_vaapi command line (and vice versa). This is the
+    # core of the never-pass-wrong-options-to-ffmpeg guarantee.
+    def _subblock_extras(block: Any) -> str:
+      if not isinstance(block, dict):
+        return ""
+      return (block.get("codec_parameters") or "").strip()
+
+    if self.gpu == "qsv":
+      qsv_extras = _subblock_extras(self.qsv)
+      self.codec_params = ((self.codec_params or "").strip() + " " + qsv_extras).strip()
+      hdr_qsv_extras = _subblock_extras(self.hdr.get("qsv"))
+      self.hdr["codec_params"] = ((self.hdr.get("codec_params") or "").strip() + " " + hdr_qsv_extras).strip()
+    elif self.gpu == "vaapi":
+      vaapi_extras = _subblock_extras(self.vaapi)
+      self.codec_params = ((self.codec_params or "").strip() + " " + vaapi_extras).strip()
+      hdr_vaapi_extras = _subblock_extras(self.hdr.get("vaapi"))
+      self.hdr["codec_params"] = ((self.hdr.get("codec_params") or "").strip() + " " + hdr_vaapi_extras).strip()
+    # When gpu is something else (or empty), only the encoder-agnostic
+    # parent string is exposed — both qsv and vaapi blocks are inert.
 
   def _read_analyzer(self, base):
     cfg = base.analyzer

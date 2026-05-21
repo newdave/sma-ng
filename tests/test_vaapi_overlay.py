@@ -586,3 +586,51 @@ def test_migration_runs_on_hdr_block_too() -> None:
   assert "-color_primaries bt2020" in cfg.base.hdr.codec_parameters
   # QSV-only lifted.
   assert "-low_power 0" in cfg.base.hdr.qsv.codec_parameters
+
+
+# ---------------------------------------------------------------------------
+# Regression: ReadSettings concatenates active-encoder subblock onto
+# codec_params, so QSV flags lifted out of codec-parameters by the
+# migration shim still reach the runtime.
+# ---------------------------------------------------------------------------
+
+
+def test_readsettings_qsv_subblock_extras_reach_codec_params(tmp_path: Path) -> None:
+  from resources.readsettings import ReadSettings
+
+  yaml_path = _write_yaml(
+    tmp_path,
+    "daemon:\n  host: 127.0.0.1\nbase:\n  video:\n    gpu: qsv\n    codec: ['h265']\n    qsv:\n      codec-parameters: '-low_power 0 -async_depth 4'\n",
+  )
+  s = ReadSettings(str(yaml_path))
+  assert "-low_power 0" in s.codec_params
+  assert "-async_depth 4" in s.codec_params
+
+
+def test_readsettings_vaapi_subblock_extras_reach_codec_params_when_gpu_vaapi(tmp_path: Path) -> None:
+  from resources.readsettings import ReadSettings
+
+  yaml_path = _write_yaml(
+    tmp_path,
+    "daemon:\n  host: 127.0.0.1\nbase:\n  video:\n    gpu: vaapi\n    codec: ['h265']\n    vaapi:\n      codec-parameters: '-rc_mode VBR -compression_level 4'\n",
+  )
+  s = ReadSettings(str(yaml_path))
+  assert "-rc_mode VBR" in s.codec_params
+  assert "-compression_level 4" in s.codec_params
+
+
+def test_readsettings_does_not_leak_wrong_subblock_into_codec_params(tmp_path: Path) -> None:
+  """gpu=qsv must NEVER pull from vaapi.codec-parameters."""
+  from resources.readsettings import ReadSettings
+
+  yaml_path = _write_yaml(
+    tmp_path,
+    "daemon:\n  host: 127.0.0.1\n"
+    "base:\n  video:\n    gpu: qsv\n    codec: ['h265']\n"
+    "    qsv:\n      codec-parameters: '-low_power 0'\n"
+    "    vaapi:\n      codec-parameters: '-rc_mode VBR -compression_level 4'\n",
+  )
+  s = ReadSettings(str(yaml_path))
+  assert "-low_power 0" in s.codec_params
+  assert "-rc_mode" not in s.codec_params
+  assert "-compression_level" not in s.codec_params
