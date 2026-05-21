@@ -870,7 +870,7 @@ class TestFFMpegStderrSidecar:
     e = FFMpegConvertError(
       "Exited with code 1",
       "ffmpeg -i in.mkv out.mp4",
-      "ffmpeg version 8.1\n" + ("X" * 8000) + "\nError opening output files: Invalid argument\n",
+      "ffmpeg version 8.1.1\n" + ("X" * 8000) + "\nError opening output files: Invalid argument\n",
       pid=12345,
     )
     sidecar = mp._write_ffmpeg_stderr_sidecar(e)
@@ -4165,9 +4165,9 @@ class TestConvert:
     mp.setPermissions = MagicMock()
     result, _ = mp.convert(options, preopts, [], False, None)
     assert result is None
-    # Two attempts: hw + sw_decode. No third (full_sw) attempt.
-    assert call_count == 2
-    # Encoder must not be swapped under SW_DECODE_ONLY.
+    # Three attempts under SW_DECODE_ONLY: hw + hw_alt + sw_decode. No full_sw.
+    assert call_count == 3
+    # Encoder must not be swapped on the outer options under SW_DECODE_ONLY.
     assert options["video"]["codec"] == "h265qsv"
 
   def test_attempt_ladder_emits_structured_log_line(self, tmp_path):
@@ -6389,9 +6389,9 @@ class TestConvertDup:
     mp.setPermissions = MagicMock()
     result, _ = mp.convert(options, preopts, [], False, None)
     assert result is None
-    # Two attempts: hw + sw_decode. No third (full_sw) attempt.
-    assert call_count == 2
-    # Encoder must not be swapped under SW_DECODE_ONLY.
+    # Three attempts under SW_DECODE_ONLY: hw + hw_alt + sw_decode. No full_sw.
+    assert call_count == 3
+    # Encoder must not be swapped on the outer options under SW_DECODE_ONLY.
     assert options["video"]["codec"] == "h265qsv"
 
   def test_attempt_ladder_emits_structured_log_line(self, tmp_path):
@@ -7835,3 +7835,293 @@ class TestPostMethod:
     mock_refresh.side_effect = RuntimeError("plex offline")
     mp.post(["/out/file.mkv"], "movie")
     mp.log.exception.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# QSV → VAAPI swap-helper micro-tests (Task 3 of qsv-vaapi-fallback PRP).
+# ---------------------------------------------------------------------------
+
+
+class TestStripQsvOnlyFlags:
+  def test_strips_qsv_only_flag_and_value(self):
+    from resources.mediaprocessor import _strip_qsv_only_flags as f
+
+    assert f("-low_power 0 -global_quality 23 -preset slow") == "-preset slow"
+
+  def test_preserves_non_qsv_flags(self):
+    from resources.mediaprocessor import _strip_qsv_only_flags as f
+
+    assert f("-rc_mode VBR -qp 22 -b:v 4000k") == "-rc_mode VBR -qp 22 -b:v 4000k"
+
+  def test_empty_returns_empty(self):
+    from resources.mediaprocessor import _strip_qsv_only_flags as f
+
+    assert f("") == ""
+    assert f(None) == ""
+
+  def test_strips_all_known_qsv_only_flags(self):
+    from resources.mediaprocessor import _QSV_ONLY_CODEC_FLAGS, _strip_qsv_only_flags
+
+    parts = []
+    for flag in _QSV_ONLY_CODEC_FLAGS:
+      parts.extend([flag, "1"])
+    parts.extend(["-preset", "slow"])
+    assert _strip_qsv_only_flags(" ".join(parts)) == "-preset slow"
+
+
+class TestSwapQsvCodecToVaapi:
+  def test_basic_codec_swap(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv"}}
+    original = f(opts, {})
+    assert original == "hevc_qsv"
+    assert opts["video"]["codec"] == "hevc_vaapi"
+
+  def test_list_variant_head_replacement(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": ["hevc_qsv", "libx265"]}}
+    original = f(opts, {})
+    assert original == "hevc_qsv"
+    assert opts["video"]["codec"] == ["hevc_vaapi", "libx265"]
+
+  def test_unknown_codec_returns_none(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "libx264"}}
+    assert f(opts, {}) is None
+    assert opts["video"]["codec"] == "libx264"
+
+  def test_no_video_block_returns_none(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    assert f({}, {}) is None
+    assert f({"video": {}}, {}) is None
+    assert f({"video": "not a dict"}, {}) is None
+
+  def test_strips_qsv_only_flags_from_params(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv", "params": "-low_power 0 -preset slow"}}
+    f(opts, {})
+    assert "-low_power" not in opts["video"]["params"]
+    assert "-preset slow" in opts["video"]["params"]
+
+  def test_pops_qsv_pix_fmt(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv", "qsv_pix_fmt": "nv12"}}
+    f(opts, {})
+    assert "qsv_pix_fmt" not in opts["video"]
+
+  def test_global_quality_maps_to_rc_mode_cqp(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv", "global_quality": 23}}
+    f(opts, {})
+    assert "global_quality" not in opts["video"]
+    assert "-rc_mode CQP" in opts["video"]["params"]
+    assert "-qp 23" in opts["video"]["params"]
+
+  def test_global_quality_skipped_when_bitrate_set(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv", "global_quality": 23, "bitrate": 4000}}
+    f(opts, {})
+    params = opts["video"].get("params") or ""
+    assert "-rc_mode CQP" not in params
+
+  def test_overlay_codec_parameters_appended(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv", "params": "-preset slow"}}
+    f(opts, {"codec_parameters": "-rc_mode VBR -compression_level 4"})
+    assert "-preset slow" in opts["video"]["params"]
+    assert "-rc_mode VBR -compression_level 4" in opts["video"]["params"]
+
+  def test_overlay_scalar_fields_applied_when_set(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv"}}
+    f(opts, {"preset": "p4", "b_frames": 4, "ref_frames": 3, "look_ahead_depth": 20})
+    assert opts["video"]["preset"] == "p4"
+    assert opts["video"]["b_frames"] == 4
+    assert opts["video"]["ref_frames"] == 3
+    assert opts["video"]["look_ahead_depth"] == 20
+
+  def test_overlay_sentinel_fields_skipped(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv", "preset": "slow", "b_frames": 8}}
+    f(opts, {"preset": "", "b_frames": -1, "ref_frames": -1, "look_ahead_depth": 0})
+    # Sentinel overlay values must NOT overwrite parent values.
+    assert opts["video"]["preset"] == "slow"
+    assert opts["video"]["b_frames"] == 8
+
+
+class TestRewriteQsvPreoptsForVaapi:
+  def test_appends_vaapi_device_init(self):
+    from resources.mediaprocessor import _rewrite_qsv_preopts_for_vaapi_encode as f
+
+    preopts = ["-hwaccel", "qsv", "-qsv_device", "/dev/dri/renderD128", "-vcodec", "hevc_qsv", "-i", "in.mkv"]
+    out = f(preopts)
+    assert "-init_hw_device" in out
+    idx = out.index("-init_hw_device")
+    assert out[idx + 1] == "vaapi=vaapi0:/dev/dri/renderD128"
+    assert "-filter_hw_device" in out
+    # Preserves all original QSV decode flags.
+    assert "-hwaccel" in out and "qsv" in out
+    assert "-qsv_device" in out
+    assert "-vcodec" in out and "hevc_qsv" in out
+
+  def test_uses_qsv_device_value(self):
+    from resources.mediaprocessor import _rewrite_qsv_preopts_for_vaapi_encode as f
+
+    out = f(["-qsv_device", "/dev/dri/renderD129"])
+    idx = out.index("-init_hw_device")
+    assert out[idx + 1] == "vaapi=vaapi0:/dev/dri/renderD129"
+
+  def test_default_device_when_no_qsv_device(self):
+    from resources.mediaprocessor import _rewrite_qsv_preopts_for_vaapi_encode as f
+
+    out = f(["-hwaccel", "qsv"])
+    idx = out.index("-init_hw_device")
+    assert out[idx + 1] == "vaapi=vaapi0:/dev/dri/renderD128"
+
+  def test_idempotent(self):
+    from resources.mediaprocessor import _rewrite_qsv_preopts_for_vaapi_encode as f
+
+    once = f(["-qsv_device", "/dev/dri/renderD128"])
+    twice = f(once)
+    assert once == twice
+
+  def test_empty_preopts_returns_passthrough(self):
+    from resources.mediaprocessor import _rewrite_qsv_preopts_for_vaapi_encode as f
+
+    assert f(None) is None
+    assert f([]) == []
+
+
+class TestInjectHwmap:
+  def test_prepends_bridge_to_existing_filter(self):
+    from resources.mediaprocessor import _inject_hwmap_to_video_filter as f
+
+    opts = {"video": {"filter": "scale_qsv=w=1920:h=1080"}}
+    f(opts)
+    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_qsv=w=1920:h=1080"
+
+  def test_creates_filter_when_absent(self):
+    from resources.mediaprocessor import _inject_hwmap_to_video_filter as f
+
+    opts = {"video": {}}
+    f(opts)
+    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi"
+
+  def test_idempotent(self):
+    from resources.mediaprocessor import _inject_hwmap_to_video_filter as f
+
+    opts = {"video": {"filter": "scale_qsv"}}
+    f(opts)
+    f(opts)
+    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_qsv"
+
+  def test_no_video_block_noop(self):
+    from resources.mediaprocessor import _inject_hwmap_to_video_filter as f
+
+    f({})  # should not raise
+    f({"video": "not a dict"})
+
+
+class TestConvertHwAltPolicy:
+  """End-to-end smoke for HW_ALT policy: convert() recovers via hw_alt tier."""
+
+  def _make_mp(self, tmp_path):
+    mp = _make_mp()
+    mp.settings.output_extension = "mp4"
+    mp.settings.output_dir = None
+    mp.settings.temp_extension = None
+    mp.settings.delete = True
+    mp.settings.strip_metadata = False
+    mp.settings.burn_subtitles = False
+    mp.settings.detailedprogress = False
+    mp.settings.permissions = {"chmod": 0o664, "uid": -1, "gid": -1}
+    return mp
+
+  def test_hw_alt_policy_recovers_via_vaapi_tier(self, tmp_path):
+    """hw fails, hw_alt (hevc_vaapi swap) succeeds; convert() returns ok."""
+    from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.fallback_policy = FallbackPolicy.HW_ALT
+    mp.settings.vaapi = {}
+    mp.settings.hdr = {}
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"x")
+    out = tmp_path / "input.mp4"
+
+    options = {
+      "source": [str(src)],
+      "audio": [{"codec": "aac"}],
+      "video": {"codec": "h265qsv"},
+      "subtitle": [],
+    }
+    preopts = ["-hwaccel", "qsv", "-qsv_device", "/dev/dri/renderD128", "-vcodec", "hevc_qsv"]
+
+    calls = []
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      calls.append({"codec": opts["video"]["codec"], "preopts": list(preopts or [])})
+      if opts["video"]["codec"] == "h265qsv":
+        yield None, ["ffmpeg"]
+        raise FFMpegConvertError("cmd", "output", 1)
+      # hw_alt tier with hevc_vaapi succeeds.
+      out.write_bytes(b"output")
+      yield None, ["ffmpeg", "-i", str(src), str(out)]
+      yield 100, ""
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    result, _ = mp.convert(options, preopts, [], False, None)
+    assert result == str(out)
+    assert len(calls) == 2
+    assert calls[0]["codec"] == "h265qsv"
+    assert calls[1]["codec"] == "hevc_vaapi"
+    # Outer options must remain unchanged (hw_alt operates on deep copy).
+    assert options["video"]["codec"] == "h265qsv"
+
+  def test_hw_alt_policy_stops_when_both_tiers_fail(self, tmp_path):
+    """When fallback-policy=hw_alt and both tiers fail, no sw_decode runs."""
+    from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.fallback_policy = FallbackPolicy.HW_ALT
+    mp.settings.vaapi = {}
+    mp.settings.hdr = {}
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"x")
+
+    options = {
+      "source": [str(src)],
+      "audio": [{"codec": "aac"}],
+      "video": {"codec": "h265qsv"},
+      "subtitle": [],
+    }
+    preopts = ["-hwaccel", "qsv", "-qsv_device", "/dev/dri/renderD128", "-vcodec", "hevc_qsv"]
+
+    call_count = 0
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      nonlocal call_count
+      call_count += 1
+      yield None, ["ffmpeg"]
+      raise FFMpegConvertError("cmd", "output", 1)
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    result, _ = mp.convert(options, preopts, [], False, None)
+    assert result is None
+    # hw + hw_alt only; no sw_decode/full_sw under HW_ALT policy.
+    assert call_count == 2
