@@ -219,7 +219,10 @@ if os.path.exists(yaml_path):
   # to every routing rule's services list so it fires alongside the
   # per-path service. Currently used for autoscan, where one Autoscan
   # daemon typically fans library scans out across every managed path.
-  FANOUT_TYPES = {"autoscan"}
+  # Plex/Jellyfin/Emby refresh paths are also fan-out: one server
+  # serves every managed path, so their refs append to every routing
+  # rule rather than carrying their own path/profile.
+  FANOUT_TYPES = {"autoscan", "plex", "jellyfin", "emby"}
   routing_entries = []
   fanout_refs = []
   for stype, instances in services.items():
