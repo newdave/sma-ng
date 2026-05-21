@@ -53,6 +53,8 @@ curl https://mise.run | sh
 | `mise run config:gpu`      | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
 | `mise run config:generate` | Generate `config/sma-ng.yml` with GPU auto-detection                               |
 | `mise run config:audit`    | Audit local config files against the YAML sample                                   |
+| `mise run config:show`     | Render the effective resolved config for a profile (`-- --profile rq --section video --diff`) |
+| `mise run config:validate` | Validate the effective config — schema, unknown keys, encoder-flag leaks, routing refs |
 | `mise run daemon:smoke`    | Run daemon smoke-test config validation and exit                                   |
 
 ### Docker Tasks
@@ -365,6 +367,8 @@ For each remote host the staging build:
 | `deploy:reload`   | Hot-reload `config/sma-ng.yml` on every host with `POST /reload`                          |
 | `deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container         |
 | `config:audit`    | Audit local configs                                                                       |
+| `config:show`     | Render the effective resolved config for a profile                                        |
+| `config:validate` | Validate effective config — schema, unknowns, encoder-flag leaks, routing refs            |
 | `deploy:docker`   | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate`   |
 | `cluster:start`   | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`)                            |
 | `cluster:stop`    | `docker compose stop` for selected hosts                                                  |

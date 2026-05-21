@@ -116,37 +116,77 @@ shell-trigger-only and configured in `triggers/`. See
 
 ---
 
+## base.video.qsv
+
+Per-encoder typed overlay for Intel QSV encoders (`hevc_qsv`, `h264_qsv`,
+`av1_qsv`). The runtime reads from this block only when the active encoder
+is QSV; the parallel `base.video.vaapi` block is ignored on the QSV path,
+and vice versa. This is the "never pass wrong options to ffmpeg" guarantee:
+a QSV-only flag in this block can never leak onto a `hevc_vaapi` command
+line.
+
+Use this for QSV-specific knobs that have no VAAPI equivalent or that you
+want to tune independently of VAAPI. Operators can also write per-encoder
+overrides for the shared fields (`preset`, `b-frames`, etc.) here; unset
+values inherit from `base.video.*` at runtime.
+
+| Option             | Type   | Default | Description                                                                                                                                  |
+| ------------------ | ------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `preset`           | string | `''`    | Override `base.video.preset` for the QSV path. `''` inherits.                                                                                |
+| `codec-parameters` | string | `''`    | Free-form QSV-only flag string appended to the assembled command line. Use for flags not exposed as typed fields below.                      |
+| `low-power`        | int    | `-1`    | `-low_power` flag value (`0` = VDENC quality path, `1` = fixed-function low-power). `-1` = don't emit (encoder default fires).               |
+| `async-depth`      | int    | `0`     | `-async_depth` pipeline depth. `0` = don't emit. VDENC sweet spot is `4`; higher values can starve look-ahead.                               |
+| `extbrc`           | int    | `-1`    | `-extbrc` extended BRC toggle (`0`/`1`). `-1` = don't emit.                                                                                  |
+| `b-strategy`       | int    | `-1`    | `-b_strategy` adaptive B-frame strategy (`0`/`1`). `-1` = don't emit.                                                                        |
+| `adaptive-i`       | int    | `-1`    | `-adaptive_i` (`0`/`1`). `-1` = don't emit.                                                                                                  |
+| `adaptive-b`       | int    | `-1`    | `-adaptive_b` (`0`/`1`). `-1` = don't emit.                                                                                                  |
+| `p-strategy`       | int    | `-1`    | `-p_strategy` (`0`/`1`). `-1` = don't emit.                                                                                                  |
+| `rdo`              | int    | `-1`    | `-rdo` rate-distortion optimization (`0`/`1`). `-1` = don't emit. Quality win on slow presets; small perf cost.                              |
+| `look-ahead-depth` | int    | `0`     | Override `base.video.look-ahead-depth` for QSV. `0` = inherit.                                                                               |
+| `extra-hw-frames`  | int    | `0`     | Override `base.video.extra-hw-frames` (QSV surface-pool size) for the QSV path. `0` = inherit.                                               |
+| `global-quality`   | int    | `0`     | Override `base.video.global-quality` (QSV ICQ target). `0` = inherit.                                                                        |
+| `b-frames`         | int    | `-1`    | Override `base.video.b-frames` for QSV. `-1` = inherit.                                                                                       |
+| `ref-frames`       | int    | `-1`    | Override `base.video.ref-frames` for QSV. `-1` = inherit.                                                                                     |
+
+> **Migration:** if you have a legacy `base.video.codec-parameters` string
+> with QSV-only flags in it, the schema's migration validator automatically
+> lifts those tokens into `base.video.qsv.codec-parameters` on load. The
+> shape is value-preserving; operators are encouraged to write the typed
+> shape directly going forward.
+
+---
+
 ## base.video.vaapi
 
-Per-encoder overlay applied at the `hw_alt` fallback tier (see
+Per-encoder typed overlay for VAAPI encoders (`hevc_vaapi`, `h264_vaapi`,
+`av1_vaapi`) used by the `hw_alt` fallback tier (see
 `base.converter.fallback-policy`). When QSV encoding fails and the policy
 permits `hw_alt`, SMA-NG swaps `hevc_qsv`/`h264_qsv`/`av1_qsv` for the same-vendor
 VAAPI encoder while preserving the (working) QSV decoder via a zero-copy
-`hwmap=derive_device=vaapi` bridge. This block tunes the VAAPI half of that
-hybrid pipeline without duplicating the parent `base.video.*` settings.
+`hwmap=derive_device=vaapi` bridge.
 
-All fields are sentinel-defaulted; unset values inherit from the parent
-`base.video.*` block. QSV-only flags carried in `base.video.codec-parameters`
-(e.g. `-low_power`, `-extbrc`, `-look_ahead_depth`, `-global_quality`) are
-stripped automatically before the VAAPI command line is built, so you only
-need to specify the VAAPI-specific tuning here.
+Same operator promise as the QSV block: a VAAPI-only flag in this block
+can never leak onto a non-VAAPI command line. Unset fields inherit from
+`base.video.*` at runtime.
 
-| Option             | Type   | Default | Description                                                                                                                                            |
-| ------------------ | ------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `preset`           | string | `''`    | Encoder preset override for the VAAPI tier. `''` inherits `base.video.preset` (QSV preset names are mapped where they overlap with VAAPI).             |
-| `codec-parameters` | string | `''`    | Extra VAAPI codec parameters appended to the stripped parent params. Use `-rc_mode VBR` / `-rc_mode CQP -qp N` / `-compression_level N` etc.           |
-| `look-ahead-depth` | int    | `0`     | Look-ahead frames override. `0` = inherit from `base.video.look-ahead-depth`. Mapped to VAAPI's own look-ahead control where supported.                |
-| `global-quality`   | int    | `0`     | Quality target for VAAPI. `0` = inherit. Translated to `-rc_mode CQP -qp <N>` because VAAPI has no direct equivalent of QSV's ICQ `-global_quality`.   |
-| `b-frames`         | int    | `-1`    | B-frame override. `-1` = inherit from `base.video.b-frames`.                                                                                            |
-| `ref-frames`       | int    | `-1`    | Reference frame override. `-1` = inherit from `base.video.ref-frames`.                                                                                  |
-| `max-level`        | float  | `0.0`   | Profile level cap override. `0.0` = inherit from `base.video.max-level`.                                                                                |
-| `rc-mode`          | string | `''`    | VAAPI rate-control mode (`VBR`, `CBR`, `CQP`). `''` = inherit from `codec-parameters` if `-rc_mode` is set there, otherwise the encoder default fires. |
+| Option              | Type   | Default | Description                                                                                                                                            |
+| ------------------- | ------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `preset`            | string | `''`    | Encoder preset override for the VAAPI tier. `''` inherits `base.video.preset`.                                                                         |
+| `codec-parameters`  | string | `''`    | Free-form VAAPI-only flag string appended to the assembled command line.                                                                               |
+| `rc-mode`           | string | `''`    | VAAPI rate-control mode (`VBR`, `CBR`, `CQP`). `''` = inherit from `codec-parameters` if `-rc_mode` is set there, otherwise the encoder default fires. |
+| `compression-level` | int    | `0`     | `-compression_level` (VAAPI-specific quality/speed tuning). `0` = don't emit.                                                                          |
+| `low-power`         | int    | `-1`    | `-low_power` for VAAPI (semantics differ from QSV's flag of the same name). `-1` = don't emit.                                                         |
+| `look-ahead-depth`  | int    | `0`     | Override `base.video.look-ahead-depth` for VAAPI. `0` = inherit. Mapped to VAAPI's own look-ahead control where supported.                             |
+| `global-quality`    | int    | `0`     | Quality target for VAAPI. `0` = inherit. Translated to `-rc_mode CQP -qp <N>` because VAAPI has no direct equivalent of QSV's ICQ `-global_quality`.   |
+| `b-frames`          | int    | `-1`    | B-frame override. `-1` = inherit from `base.video.b-frames`.                                                                                            |
+| `ref-frames`        | int    | `-1`    | Reference frame override. `-1` = inherit from `base.video.ref-frames`.                                                                                  |
+| `max-level`         | float  | `0.0`   | Profile level cap override. `0.0` = inherit from `base.video.max-level`.                                                                                |
 
 > **VAAPI vs QSV flag names diverge.** `-global_quality` is QSV-only; on
 > VAAPI use `-rc_mode CQP -qp <N>` for quality-targeted, or `-rc_mode VBR
-> -b:v <rate> -maxrate <max>` for capped-VBR. The hw_alt runtime strips
-> known QSV-only flags before applying this overlay so `hevc_vaapi`
-> doesn't reject the command line.
+> -b:v <rate> -maxrate <max>` for capped-VBR. Either write the encoder
+> tunings as typed fields here and let the runtime translate, or stuff
+> them into `codec-parameters` verbatim.
 
 ---
 
@@ -185,22 +225,34 @@ For HLG sources, set `transfer: [arib-std-b67]`. The flags are emitted regardles
 
 ---
 
+## base.hdr.qsv
+
+HDR-specific QSV overlay. Same field shape and semantics as
+[`base.video.qsv`](#basevideoqsv) but unset values inherit from
+`base.hdr.*` (not `base.video.*`). Use this to tune the QSV encoder
+differently for HDR content (e.g. higher `look-ahead-depth`, different
+`rdo` setting) without affecting SDR encodes.
+
+---
+
 ## base.hdr.vaapi
 
 HDR-specific overlay for the `hw_alt` fallback tier. Same field shape and
 semantics as [`base.video.vaapi`](#basevideovaapi) but unset values inherit
 from `base.hdr.*` (not `base.video.*`).
 
-| Option             | Type   | Default | Description                                                                                          |
-| ------------------ | ------ | ------- | ---------------------------------------------------------------------------------------------------- |
-| `preset`           | string | `''`    | Encoder preset override for HDR VAAPI encodes. `''` inherits `base.hdr.preset`.                      |
-| `codec-parameters` | string | `''`    | Extra VAAPI codec parameters appended to the stripped parent params (HDR side).                      |
-| `look-ahead-depth` | int    | `0`     | HDR look-ahead override. `0` = inherit from `base.hdr.look-ahead-depth`.                             |
-| `global-quality`   | int    | `0`     | HDR quality target. `0` = inherit. Mapped to `-rc_mode CQP -qp <N>`.                                 |
-| `b-frames`         | int    | `-1`    | HDR B-frame override. `-1` = inherit.                                                                |
-| `ref-frames`       | int    | `-1`    | HDR reference frame override. `-1` = inherit.                                                        |
-| `max-level`        | float  | `0.0`   | HDR profile level cap override. `0.0` = inherit.                                                     |
-| `rc-mode`          | string | `''`    | VAAPI rate-control mode for HDR encodes (`VBR`, `CBR`, `CQP`). `''` defers to `codec-parameters`.    |
+| Option              | Type   | Default | Description                                                                                          |
+| ------------------- | ------ | ------- | ---------------------------------------------------------------------------------------------------- |
+| `preset`            | string | `''`    | Encoder preset override for HDR VAAPI encodes. `''` inherits `base.hdr.preset`.                      |
+| `codec-parameters`  | string | `''`    | Free-form VAAPI-only flag string appended to the assembled command line (HDR side).                  |
+| `rc-mode`           | string | `''`    | VAAPI rate-control mode for HDR encodes (`VBR`, `CBR`, `CQP`).                                       |
+| `compression-level` | int    | `0`     | `-compression_level` for HDR. `0` = don't emit.                                                      |
+| `low-power`         | int    | `-1`    | `-low_power` for HDR VAAPI. `-1` = don't emit.                                                       |
+| `look-ahead-depth`  | int    | `0`     | HDR look-ahead override. `0` = inherit from `base.hdr.look-ahead-depth`.                             |
+| `global-quality`    | int    | `0`     | HDR quality target. `0` = inherit. Mapped to `-rc_mode CQP -qp <N>`.                                 |
+| `b-frames`          | int    | `-1`    | HDR B-frame override. `-1` = inherit.                                                                |
+| `ref-frames`        | int    | `-1`    | HDR reference frame override. `-1` = inherit.                                                        |
+| `max-level`         | float  | `0.0`   | HDR profile level cap override. `0.0` = inherit.                                                     |
 
 ---
 
