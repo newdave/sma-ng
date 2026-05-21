@@ -3263,7 +3263,9 @@ class TestPost:
     mp.settings.Plex = {"refresh": True}
     with patch("resources.mediaprocessor.plex.refreshPlex", side_effect=Exception("plex down")):
       mp.post(["/fake/file.mp4"], "movie")  # should not raise
-    mp.log.exception.assert_called()
+    # Media-server failures log at WARNING (no traceback noise) so they
+    # don't look like job failures in operator dashboards.
+    mp.log.warning.assert_called()
 
 
 # ---------------------------------------------------------------------------
@@ -5874,7 +5876,9 @@ class TestPostDup:
     mp.settings.Plex = {"refresh": True}
     with patch("resources.mediaprocessor.plex.refreshPlex", side_effect=Exception("plex down")):
       mp.post(["/fake/file.mp4"], "movie")  # should not raise
-    mp.log.exception.assert_called()
+    # Media-server failures log at WARNING (no traceback noise) so they
+    # don't look like job failures in operator dashboards.
+    mp.log.warning.assert_called()
 
 
 # ---------------------------------------------------------------------------
@@ -7834,7 +7838,9 @@ class TestPostMethod:
     mp = self._make_mp(postprocess=False, plex_refresh=True)
     mock_refresh.side_effect = RuntimeError("plex offline")
     mp.post(["/out/file.mkv"], "movie")
-    mp.log.exception.assert_called()
+    # Media-server failures log at WARNING (no traceback) so they don't
+    # look like job failures in operator dashboards.
+    mp.log.warning.assert_called()
 
 
 # ---------------------------------------------------------------------------

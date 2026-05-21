@@ -475,14 +475,17 @@ class MediaProcessor:
       postprocessor.setEnv(mediatype, tmdbid, season, episode)
       postprocessor.run_scripts()
 
-    # Refresh Plex
+    # Refresh Plex. Failures are caught and logged but never fail the
+    # transcode job — a media-server outage is not a transcode error,
+    # and the verbose tracebacks log.exception() emits made transient
+    # outages look catastrophic in operator dashboards.
     if self.settings.Plex.get("refresh", False):
       try:
         plex.refreshPlex(self.settings, output_files[0], self.log)
       except KeyboardInterrupt:
         raise
-      except Exception:
-        self.log.exception("Error refreshing Plex.")
+      except Exception as err:
+        self.log.warning("Plex refresh skipped (server unreachable or auth failed): %s", err)
 
     # Trigger Autoscan
     if getattr(self.settings, "autoscan_instances", None):
@@ -490,8 +493,8 @@ class MediaProcessor:
         autoscan.triggerAutoscan(self.settings, output_files[0], self.log)
       except KeyboardInterrupt:
         raise
-      except Exception:
-        self.log.exception("Error triggering Autoscan.")
+      except Exception as err:
+        self.log.warning("Autoscan trigger skipped (server unreachable or auth failed): %s", err)
 
     # Refresh Emby
     if getattr(self.settings, "emby_instances", None):
@@ -499,8 +502,8 @@ class MediaProcessor:
         emby_refresh.refreshEmby(self.settings, output_files[0], self.log)
       except KeyboardInterrupt:
         raise
-      except Exception:
-        self.log.exception("Error refreshing Emby.")
+      except Exception as err:
+        self.log.warning("Emby refresh skipped (server unreachable or auth failed): %s", err)
 
     # Refresh Jellyfin
     if getattr(self.settings, "jellyfin_instances", None):
@@ -508,8 +511,8 @@ class MediaProcessor:
         jellyfin_refresh.refreshJellyfin(self.settings, output_files[0], self.log)
       except KeyboardInterrupt:
         raise
-      except Exception:
-        self.log.exception("Error refreshing Jellyfin.")
+      except Exception as err:
+        self.log.warning("Jellyfin refresh skipped (server unreachable or auth failed): %s", err)
 
   # Process a file from start to finish, with checking to make sure formats are compatible with selected settings
   def process(self, inputfile, reportProgress=False, original=None, info=None, progressOutput=None, tagdata=None):
