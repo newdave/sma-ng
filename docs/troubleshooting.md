@@ -128,6 +128,32 @@ If `Daemon.smoke_test: true` is set in `sma-ng.yml` or `--smoke-test` is passed:
 
 ---
 
+## Config inspection and validation
+
+If a job isn't behaving as expected and you want to know exactly what
+config the daemon would resolve for it:
+
+```bash
+mise run config:show -- --profile rq --section video --diff
+```
+
+renders the effective `video` section after the `rq` profile overlay,
+showing only the fields that differ from `base`. Useful for confirming a
+profile carries only the deltas you expect.
+
+```bash
+mise run config:validate
+```
+
+runs schema validation plus operator-facing checks: unknown config keys
+(typo detection), encoder-only flag tokens leaking into encoder-agnostic
+`codec-parameters` strings, routing references to undefined profiles or
+services, missing service credentials, and per-encoder subblock alignment
+warnings. Add `--strict` to fail on warnings (CI-friendly) or `--quiet`
+for a summary-only line.
+
+---
+
 ## Environment Variables
 
 The daemon no longer reads `SMA_*` environment variables for runtime configuration. Use CLI flags for process-level options and `sma-ng.yml` for persistent daemon settings.
