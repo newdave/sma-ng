@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Validate the effective config — schema, unknown keys, encoder-flag leaks, routing refs, service completeness. Exits 0 clean / 1 warnings (--strict) / 2 errors."
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+if [ -x "venv/bin/python" ]; then
+    py="venv/bin/python"
+else
+    py="python3"
+fi
+
+exec "$py" scripts/validate-config.py "$@"
