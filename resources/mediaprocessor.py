@@ -6,6 +6,7 @@ workflow: source validation, FFmpeg option generation, conversion, metadata
 tagging, file placement, and post-processing notifications.
 """
 
+import copy
 import json
 import logging
 import os
@@ -126,6 +127,174 @@ def _swap_qsv_codec_to_sw(options):
   video["codec"] = sw
   video.pop("qsv_pix_fmt", None)
   return codec
+
+
+_QSV_TO_VAAPI_CODEC_MAP = {
+  "h264qsv": "h264_vaapi",
+  "hevc_qsv": "hevc_vaapi",
+  "h265qsv": "hevc_vaapi",
+  "av1qsv": "av1_vaapi",
+  "hevcqsvpatched": "hevc_vaapi",
+}
+
+
+_QSV_ONLY_CODEC_FLAGS = {
+  "-low_power",
+  "-async_depth",
+  "-extbrc",
+  "-b_strategy",
+  "-look_ahead",
+  "-look_ahead_depth",
+  "-adaptive_i",
+  "-adaptive_b",
+  "-p_strategy",
+  "-global_quality",
+}
+
+
+def _strip_qsv_only_flags(params_str):
+  """Return *params_str* with QSV-only encoder flags (and their values) removed.
+
+  The hevc_vaapi / h264_vaapi encoders reject several flags that are only
+  valid for the QSV encoder family (e.g. ``-low_power``, ``-global_quality``,
+  ``-look_ahead_depth``). Strip them before passing the parent
+  ``codec-parameters`` string through to a VAAPI encoder in the hw_alt tier.
+
+  Returns the cleaned string (whitespace-collapsed). Empty input returns ``""``.
+  """
+  if not params_str:
+    return ""
+  tokens = params_str.split()
+  out: list[str] = []
+  i = 0
+  while i < len(tokens):
+    tok = tokens[i]
+    if tok in _QSV_ONLY_CODEC_FLAGS:
+      # Skip this flag and its following value (if any).
+      i += 2
+      continue
+    out.append(tok)
+    i += 1
+  return " ".join(out)
+
+
+def _swap_qsv_codec_to_vaapi(options, vaapi_overlay):
+  """Swap a QSV video encoder in *options* to its VAAPI equivalent.
+
+  Mirrors :func:`_swap_qsv_codec_to_sw`. Returns the original codec name on
+  success (so the caller can log the swap), or ``None`` if the options dict
+  didn't carry a known QSV encoder. Mutates *options* in place:
+
+  - ``options['video']['codec']`` is rewritten (list head only for fallback chains).
+  - ``qsv_pix_fmt`` is popped (only meaningful for ``scale_qsv``).
+  - ``params`` has QSV-only flags stripped and the operator's overlay
+    ``codec_parameters`` appended.
+  - Scalar overlay fields (``preset``, ``b_frames``, ``ref_frames``,
+    ``look_ahead_depth``) win when they're non-sentinel.
+  - ``global_quality`` from source or overlay maps to ``-rc_mode CQP -qp N``
+    on the VAAPI params line (QSV ICQ has no direct VAAPI equivalent).
+  """
+  if not options or not isinstance(options.get("video"), dict):
+    return None
+  video = options["video"]
+  codec = video.get("codec")
+  if not codec:
+    return None
+  if isinstance(codec, list):
+    head = codec[0] if codec else None
+    if head is None:
+      return None
+    vaapi_codec = _QSV_TO_VAAPI_CODEC_MAP.get(head)
+    if not vaapi_codec:
+      return None
+    video["codec"] = [vaapi_codec] + list(codec[1:])
+    original = head
+  else:
+    vaapi_codec = _QSV_TO_VAAPI_CODEC_MAP.get(codec)
+    if not vaapi_codec:
+      return None
+    video["codec"] = vaapi_codec
+    original = codec
+
+  video.pop("qsv_pix_fmt", None)
+
+  overlay = vaapi_overlay or {}
+
+  # Strip QSV-only flags from parent params, then append overlay params.
+  parent_params = video.get("params") or ""
+  cleaned = _strip_qsv_only_flags(parent_params)
+  overlay_params = overlay.get("codec_parameters", "") or ""
+  if overlay_params:
+    cleaned = ((cleaned.rstrip() + " " + overlay_params.lstrip()).strip()) if cleaned else overlay_params.strip()
+
+  # global_quality (QSV ICQ) → -rc_mode CQP -qp N on VAAPI (if not already overridden).
+  ov_gq = overlay.get("global_quality", 0) or 0
+  src_gq = video.pop("global_quality", 0) or 0
+  effective_q = ov_gq if ov_gq > 0 else src_gq
+  if effective_q > 0 and "bitrate" not in video and "-rc_mode" not in cleaned:
+    cleaned = ((cleaned.rstrip() + " ") if cleaned else "") + "-rc_mode CQP -qp %d" % effective_q
+
+  video["params"] = cleaned or None
+
+  # Scalar overlay (sentinel-fallback).
+  for field, sentinel in (("preset", ""), ("b_frames", -1), ("ref_frames", -1), ("look_ahead_depth", 0)):
+    ov_val = overlay.get(field, sentinel)
+    if ov_val != sentinel:
+      video[field] = ov_val
+
+  return original
+
+
+def _rewrite_qsv_preopts_for_vaapi_encode(preopts):
+  """Return *preopts* extended with VAAPI device init for the hw_alt tier.
+
+  Preserves every QSV decode preopt (``-hwaccel qsv``,
+  ``-hwaccel_output_format qsv``, ``-qsv_device``, ``-vcodec hevc_qsv``)
+  so the QSV decoder keeps working in the hybrid pipeline. Appends
+  ``-init_hw_device vaapi=vaapi0:<device>`` and ``-filter_hw_device vaapi0``
+  so the VAAPI encoder has its device context after the QSV decode is set up.
+
+  Idempotent: if ``-init_hw_device vaapi=...`` is already present, returns
+  the input unchanged. The render-node path is sourced from the existing
+  ``-qsv_device`` token, falling back to ``/dev/dri/renderD128``.
+  """
+  if not preopts:
+    return preopts
+  out = list(preopts)
+  device = "/dev/dri/renderD128"
+  for i, tok in enumerate(out):
+    if tok == "-qsv_device" and i + 1 < len(out):
+      device = out[i + 1]
+      break
+  # Idempotency check: any existing vaapi init_hw_device pair?
+  for i, tok in enumerate(out):
+    if tok == "-init_hw_device" and i + 1 < len(out) and "vaapi" in out[i + 1]:
+      return out
+  out.extend(
+    [
+      "-init_hw_device",
+      "vaapi=vaapi0:%s" % device,
+      "-filter_hw_device",
+      "vaapi0",
+    ]
+  )
+  return out
+
+
+def _inject_hwmap_to_video_filter(options):
+  """Prepend ``hwmap=derive_device=vaapi,`` to ``options['video']['filter']``.
+
+  Mutates *options* in place. Creates the filter chain if absent.
+  Idempotent: a second call with the same options is a no-op.
+  """
+  if not options or not isinstance(options.get("video"), dict):
+    return
+  video = options["video"]
+  existing = video.get("filter") or ""
+  bridge = "hwmap=derive_device=vaapi"
+  if bridge in existing:
+    return
+  video["filter"] = (bridge + "," + existing) if existing else bridge
 
 
 def _resolve_hdr_color_tags(hdr_input, hdr_output, hdr_settings):
@@ -1233,6 +1402,19 @@ class MediaProcessor:
 
     if self.settings.subencoding:
       options["sub-encoding"] = self.settings.subencoding
+
+    # Carry the resolved VAAPI overlay through to the runtime fallback ladder.
+    # The hw tier never reads this — tier 1 ffmpeg invocation stays byte-identical
+    # with or without `video.vaapi` set. Only the hw_alt retry copy applies it.
+    try:
+      _hdr_input = bool(self.isHDRInput(info.video)) if info and getattr(info, "video", None) else False
+    except Exception:
+      _hdr_input = False
+    hdr_settings = getattr(self.settings, "hdr", None) or {}
+    if _hdr_input and isinstance(hdr_settings, dict) and hdr_settings.get("vaapi"):
+      options["_vaapi_overlay"] = hdr_settings.get("vaapi") or {}
+    else:
+      options["_vaapi_overlay"] = getattr(self.settings, "vaapi", None) or {}
 
     preopts, postopts = self._build_preopts_postopts(vcodec, vcodecs, info, codecs, pix_fmts, options, metadata_map)
 
@@ -3184,18 +3366,19 @@ class MediaProcessor:
       blob = getattr(err, "output", "") or ""
       return parse_ffmpeg_failure(blob[-TAIL_BYTES:] if isinstance(blob, str) else blob)
 
-    first_err: FFMpegConvertError | None = None
-    second_err: FFMpegConvertError | None = None
+    hw_err: FFMpegConvertError | None = None
+    hw_alt_err: FFMpegConvertError | None = None
+    sw_decode_err: FFMpegConvertError | None = None
 
     # Tier 1: hardware
     t0 = time.monotonic()
     try:
-      run_fn(preopts)
+      run_fn(preopts, options)
       records.append(AttemptRecord(tier="hw", failure_class=None, duration_ms=_ms(t0)))
       self._emit_attempt_log(records, "ok")
       return
     except FFMpegConvertError as err:
-      first_err = err
+      hw_err = err
       cls = _classify(err)
       records.append(AttemptRecord(tier="hw", failure_class=cls, duration_ms=_ms(t0)))
       if policy == FallbackPolicy.HW_ONLY:
@@ -3205,28 +3388,68 @@ class MediaProcessor:
         self._emit_attempt_log(records, "failed")
         raise
 
-    # Tier 2: sw decode (hw encode retained)
+    # Tier 2 (NEW): hw_alt — VAAPI encoder, QSV decoder preserved (hybrid).
+    # Skipped silently when source isn't QSV-encoded, when the helper can't
+    # swap, or when the deep-copied options would otherwise be wasted work.
+    cls_hw = records[-1].failure_class
+    vaapi_overlay = self._resolve_vaapi_overlay(options)
+    retry_preopts_alt = _rewrite_qsv_preopts_for_vaapi_encode(preopts)
+    retry_options_alt = copy.deepcopy(options)
+    original_codec_alt = _swap_qsv_codec_to_vaapi(retry_options_alt, vaapi_overlay)
+    if original_codec_alt is not None:
+      _inject_hwmap_to_video_filter(retry_options_alt)
+      self.log.warning(
+        "Conversion failed with hw QSV (cause=%s); retrying with hw_alt (swap encoder %s -> %s, preserve QSV decoder via hwmap bridge). Original error: %s"
+        % (cls_hw.value if cls_hw else "unknown", original_codec_alt, retry_options_alt["video"]["codec"], str(hw_err)[:300]),
+      )
+      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("hw", "hw_alt", cls_hw.value if cls_hw else "other")
+      if outputfile is not None and os.path.isfile(outputfile):
+        self.removeFile(outputfile)
+      t_alt = time.monotonic()
+      try:
+        run_fn(retry_preopts_alt, retry_options_alt)
+        records.append(AttemptRecord(tier="hw_alt", failure_class=None, duration_ms=_ms(t_alt)))
+        self._emit_attempt_log(records, "ok")
+        return
+      except FFMpegConvertError as err:
+        hw_alt_err = err
+        cls = _classify(err)
+        records.append(AttemptRecord(tier="hw_alt", failure_class=cls, duration_ms=_ms(t_alt)))
+        if policy == FallbackPolicy.HW_ALT:
+          self.log.warning(
+            "hw_alt also failed and fallback-policy=hw_alt; surfacing error (cause=%s)." % cls.value,
+          )
+          self._emit_attempt_log(records, "failed")
+          raise
+    else:
+      if policy == FallbackPolicy.HW_ALT:
+        # No VAAPI tier possible (source wasn't QSV-encoded). Surface the hw error.
+        self._emit_attempt_log(records, "failed")
+        assert hw_err is not None
+        raise hw_err
+
+    # Tier 3: sw decode (hw encode retained)
     retry_preopts = _strip_hw_decoder_from_preopts(preopts)
     if retry_preopts is None:
       self._emit_attempt_log(records, "failed")
-      assert first_err is not None
-      raise first_err
-    cls0 = records[-1].failure_class
+      # Prefer the most recent error in the chain.
+      assert (hw_alt_err or hw_err) is not None
+      raise hw_alt_err or hw_err
+    cls_prev = records[-1].failure_class
     self.log.warning(
-      "Conversion failed with hardware decoder (cause=%s); retrying with software decode (stripping `-vcodec` from preopts). Original error: %s"
-      % (cls0.value if cls0 else "unknown", str(first_err)[:300]),
+      "Conversion failed (cause=%s); retrying with software decode (stripping `-vcodec` from preopts). Last error: %s" % (cls_prev.value if cls_prev else "unknown", str(hw_alt_err or hw_err)[:300]),
     )
-    getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("hw", "sw_decode", cls0.value if cls0 else "other")
+    getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("hw" if hw_alt_err is None else "hw_alt", "sw_decode", cls_prev.value if cls_prev else "other")
     if outputfile is not None and os.path.isfile(outputfile):
       self.removeFile(outputfile)
     t1 = time.monotonic()
     try:
-      run_fn(retry_preopts)
+      run_fn(retry_preopts, options)
       records.append(AttemptRecord(tier="sw_decode", failure_class=None, duration_ms=_ms(t1)))
       self._emit_attempt_log(records, "ok")
       return
     except FFMpegConvertError as err:
-      second_err = err
+      sw_decode_err = err
       cls = _classify(err)
       records.append(AttemptRecord(tier="sw_decode", failure_class=cls, duration_ms=_ms(t1)))
       if policy == FallbackPolicy.SW_DECODE_ONLY:
@@ -3236,24 +3459,24 @@ class MediaProcessor:
         self._emit_attempt_log(records, "failed")
         raise
 
-    # Tier 3: full software (encoder swap)
+    # Tier 4: full software (encoder swap)
     sw_preopts = _strip_qsv_input_pipeline_from_preopts(preopts) or []
     original_codec = _swap_qsv_codec_to_sw(options)
     if original_codec is None:
       self._emit_attempt_log(records, "failed")
-      assert second_err is not None
-      raise second_err
+      assert sw_decode_err is not None
+      raise sw_decode_err
     cls1 = records[-1].failure_class
     self.log.warning(
       "Software-decode retry also failed (cause=%s); falling back to full software pipeline (swapping encoder %s -> %s). Error: %s"
-      % (cls1.value if cls1 else "unknown", original_codec, options["video"]["codec"], str(second_err)[:300]),
+      % (cls1.value if cls1 else "unknown", original_codec, options["video"]["codec"], str(sw_decode_err)[:300]),
     )
     getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("sw_decode", "full_sw", cls1.value if cls1 else "other")
     if outputfile is not None and os.path.isfile(outputfile):
       self.removeFile(outputfile)
     t2 = time.monotonic()
     try:
-      run_fn(sw_preopts)
+      run_fn(sw_preopts, options)
       records.append(AttemptRecord(tier="full_sw", failure_class=None, duration_ms=_ms(t2)))
       self._emit_attempt_log(records, "ok")
       return
@@ -3263,6 +3486,30 @@ class MediaProcessor:
       getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("full_sw", "failed", cls.value)
       self._emit_attempt_log(records, "failed")
       raise
+
+  def _resolve_vaapi_overlay(self, options):
+    """Return the VAAPI overlay dict applicable to *options*.
+
+    Reads the carrier value set by :meth:`generateOptions` when available;
+    otherwise consults ``self.settings`` (HDR vs SDR) directly. Returns an
+    empty dict when no overlay is defined so callers can pass the result
+    through ``.get(...)`` safely.
+    """
+    if isinstance(options, dict) and "_vaapi_overlay" in options:
+      carrier = options.get("_vaapi_overlay")
+      return carrier if isinstance(carrier, dict) else {}
+    settings = getattr(self, "settings", None)
+    if settings is None:
+      return {}
+    sdr_overlay = getattr(settings, "vaapi", None)
+    if isinstance(sdr_overlay, dict):
+      return sdr_overlay
+    hdr_dict = getattr(settings, "hdr", None)
+    if isinstance(hdr_dict, dict):
+      hdr_overlay = hdr_dict.get("vaapi")
+      if isinstance(hdr_overlay, dict):
+        return hdr_overlay
+    return {}
 
   def _emit_attempt_log(self, records: list[AttemptRecord], result: str) -> None:
     """Emit one structured JSON line summarising the fallback ladder run.
@@ -3484,12 +3731,18 @@ class MediaProcessor:
       self.log.error("Unable to determine output file path, aborting conversion.")
       return None, inputfile
 
-    def _run_convert(_preopts):
+    def _run_convert(_preopts, _options=None):
       """Drive the convert generator end-to-end. Returns True on success,
-      raises FFMpegConvertError on failure (for retry consideration)."""
+      raises FFMpegConvertError on failure (for retry consideration).
+
+      ``_options`` is threaded through so the hw_alt tier can pass a
+      deep-copied options dict without mutating the outer ``options``.
+      Defaults to the closed-over ``options`` for backwards compatibility.
+      """
+      _opts = _options if _options is not None else options
       conv = self.converter.convert(
         outputfile,
-        options,
+        _opts,
         timeout=0,
         preopts=_preopts,
         postopts=postopts,
