@@ -1115,7 +1115,13 @@ class MediaProcessor:
 
     Maps title keywords like 'comment', 'hearing', 'sdh', and 'forced' to
     their corresponding FFmpeg disposition flags on each stream.
+
+    No-op when ``info`` is ``None`` — callers such as ``generateSourceDict``
+    invoke this before checking whether the probe succeeded, so we have
+    to tolerate an unreadable source rather than blowing up.
     """
+    if info is None:
+      return
     for stream in info.streams:
       title = stream.metadata.get("title", "").lower()
       for k, flag in self._TITLE_DISPO_MAP.items():

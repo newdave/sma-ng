@@ -295,6 +295,26 @@ def _render_ffmpeg_preview(input_path: str, profile: str | None, config_path: st
   try:
     if config_path == "synthesize" or config_path is None:
       synthesized = _synthesize_config()
+      # The synthesized config carries the deploy host's ffmpeg path
+      # (e.g. /usr/local/bin). If that path doesn't exist on the
+      # current host (running this preview locally on macOS while the
+      # daemon runs on Linux), MediaProcessor.isValidSource silently
+      # returns None and the dump crashes downstream. Detect and
+      # override with what's actually on PATH so the preview works
+      # regardless of where it's invoked.
+      import shutil
+
+      local_ffmpeg = shutil.which("ffmpeg")
+      local_ffprobe = shutil.which("ffprobe")
+      configured_ffmpeg = ((synthesized.get("base") or {}).get("converter") or {}).get("ffmpeg") or ""
+      configured_exists = bool(configured_ffmpeg) and Path(configured_ffmpeg).is_file()
+      if local_ffmpeg and not configured_exists:
+        synthesized.setdefault("base", {}).setdefault("converter", {})
+        synthesized["base"]["converter"]["ffmpeg"] = local_ffmpeg
+        if local_ffprobe:
+          synthesized["base"]["converter"]["ffprobe"] = local_ffprobe
+        synthesized.setdefault("daemon", {})["ffmpeg-dir"] = str(Path(local_ffmpeg).parent)
+        sys.stdout.write(f"# note: configured ffmpeg path missing on this host; using {local_ffmpeg} for the preview\n")
       with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", prefix="sma-ng.show.", delete=False) as tmp:
         yaml.safe_dump(synthesized, tmp, sort_keys=False, default_flow_style=False)
         temp_cfg = Path(tmp.name)
@@ -317,6 +337,33 @@ def _render_ffmpeg_preview(input_path: str, profile: str | None, config_path: st
       # may be non-JSON for an unsupported source. Pass through.
       sys.stdout.write(str(payload_json) + "\n")
       return 0
+
+    # If the source was rejected (no audio, blacklisted extension, etc.)
+    # the input dict only carries an "error" placeholder. ffprobe the
+    # file inline to tell the operator *why* the source was rejected.
+    if isinstance(payload.get("input"), dict) and payload["input"].get("error"):
+      sys.stderr.write("\n# input rejected by isValidSource — diagnosing with ffprobe:\n")
+      ffprobe = settings.ffmpeg.replace("ffmpeg", "ffprobe") if hasattr(settings, "ffmpeg") else "ffprobe"
+      try:
+        import subprocess
+
+        probe = subprocess.run(
+          [ffprobe, "-v", "error", "-show_entries", "stream=index,codec_type,codec_name", "-of", "default=noprint_wrappers=1", str(input_file)],
+          check=False,
+          capture_output=True,
+          text=True,
+        )
+        sys.stderr.write(probe.stdout)
+        if probe.stderr:
+          sys.stderr.write(probe.stderr)
+      except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"# (ffprobe call failed: {exc})\n")
+      sys.stderr.write(
+        "# Likely cause: SMA-NG requires at least 1 video AND 1 audio stream.\n"
+        "# Files missing audio (typical for camera/drone clips and animated GIFs)\n"
+        "# are rejected before option-generation can run. Add an audio track or\n"
+        "# point --input at a regular media file.\n"
+      )
 
     if fmt == "json":
       sys.stdout.write(json.dumps(payload, indent=2, sort_keys=False))
