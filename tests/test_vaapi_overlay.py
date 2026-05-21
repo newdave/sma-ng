@@ -49,6 +49,8 @@ def test_vaapi_settings_model_dump_is_stable() -> None:
     "ref_frames",
     "max_level",
     "rc_mode",
+    "compression_level",
+    "low_power",
   }
 
 
@@ -99,7 +101,10 @@ def test_partial_vaapi_overlay_preserves_parent_video_fields() -> None:
       "base": {
         "video": {
           "preset": "slower",
-          "codec-parameters": "-low_power 1 -global_quality 22",
+          # All encoder-agnostic flags; QSV/VAAPI tokens would be lifted
+          # by the migration shim. Use a generic flag here to assert the
+          # parent string survives.
+          "codec-parameters": "-mystery_flag 7",
           "b-frames": 3,
           "ref-frames": 2,
           "vaapi": {"codec-parameters": "-compression_level 4"},
@@ -110,7 +115,7 @@ def test_partial_vaapi_overlay_preserves_parent_video_fields() -> None:
   vid = cfg.base.video
   # Parent block survives untouched.
   assert vid.preset == "slower"
-  assert vid.codec_parameters == "-low_power 1 -global_quality 22"
+  assert vid.codec_parameters == "-mystery_flag 7"
   assert vid.b_frames == 3
   assert vid.ref_frames == 2
   # Overlay only mutates the nested block.
@@ -283,30 +288,35 @@ def test_codec_parameters_accepts_list_and_flattens() -> None:
       },
     }
   )
-  assert cfg.base.video.codec_parameters == "-low_power 0 -async_depth 4 -adaptive_i 1 -adaptive_b 1"
+  # All QSV-only tokens — migrated off the parent into video.qsv.
+  assert cfg.base.video.codec_parameters == ""
+  assert "-low_power 0" in cfg.base.video.qsv.codec_parameters
+  assert "-async_depth 4" in cfg.base.video.qsv.codec_parameters
 
 
 def test_codec_parameters_string_form_still_works() -> None:
-  cfg = SmaConfig.model_validate({"base": {"video": {"codec-parameters": "-low_power 0 -async_depth 4"}}})
-  assert cfg.base.video.codec_parameters == "-low_power 0 -async_depth 4"
+  cfg = SmaConfig.model_validate({"base": {"video": {"codec-parameters": "-encoder_agnostic 1"}}})
+  # Encoder-agnostic flag stays where it was written.
+  assert cfg.base.video.codec_parameters == "-encoder_agnostic 1"
 
 
 def test_codec_parameters_list_drops_empty_and_none_entries() -> None:
+  # Use encoder-agnostic flags so the migration shim doesn't lift them.
   cfg = SmaConfig.model_validate(
     {
       "base": {
         "video": {
-          "codec-parameters": ["-low_power 0", "", None, "  ", "-async_depth 4"],
+          "codec-parameters": ["-flag_a 0", "", None, "  ", "-flag_b 4"],
         },
       },
     }
   )
-  assert cfg.base.video.codec_parameters == "-low_power 0 -async_depth 4"
+  assert cfg.base.video.codec_parameters == "-flag_a 0 -flag_b 4"
 
 
 def test_codec_parameters_list_trims_whitespace_per_entry() -> None:
-  cfg = SmaConfig.model_validate({"base": {"video": {"codec-parameters": ["  -low_power 0  ", "\t-async_depth 4\n"]}}})
-  assert cfg.base.video.codec_parameters == "-low_power 0 -async_depth 4"
+  cfg = SmaConfig.model_validate({"base": {"video": {"codec-parameters": ["  -flag_a 0  ", "\t-flag_b 4\n"]}}})
+  assert cfg.base.video.codec_parameters == "-flag_a 0 -flag_b 4"
 
 
 def test_codec_parameters_list_form_on_hdr_block() -> None:
@@ -428,3 +438,151 @@ def test_service_defaults_independent_per_type() -> None:
   )
   assert cfg.services.sonarr["1080p"].rescan is True
   assert cfg.services.radarr["1080p"].rescan is True  # schema default = True too
+
+
+# ---------------------------------------------------------------------------
+# QSVSettings + per-encoder migration
+# ---------------------------------------------------------------------------
+
+
+def test_qsv_settings_defaults_are_sentinels() -> None:
+  from resources.config_schema import QSVSettings
+
+  q = QSVSettings()
+  assert q.preset == ""
+  assert q.b_frames == -1
+  assert q.ref_frames == -1
+  assert q.global_quality == 0
+  assert q.look_ahead_depth == 0
+  assert q.extra_hw_frames == 0
+  assert q.low_power == -1
+  assert q.async_depth == 0
+  assert q.extbrc == -1
+  assert q.b_strategy == -1
+  assert q.adaptive_i == -1
+  assert q.adaptive_b == -1
+  assert q.p_strategy == -1
+  assert q.rdo == -1
+  assert q.codec_parameters == ""
+
+
+def test_video_block_carries_both_qsv_and_vaapi_subblocks() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "base": {
+        "video": {
+          "qsv": {"low-power": 0, "async-depth": 4},
+          "vaapi": {"rc-mode": "VBR", "compression-level": 4},
+        },
+      },
+    }
+  )
+  assert cfg.base.video.qsv.low_power == 0
+  assert cfg.base.video.qsv.async_depth == 4
+  assert cfg.base.video.vaapi.rc_mode == "VBR"
+  assert cfg.base.video.vaapi.compression_level == 4
+
+
+def test_hdr_block_also_carries_qsv_and_vaapi_subblocks() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "base": {
+        "hdr": {
+          "qsv": {"low-power": 0, "adaptive-b": 1},
+          "vaapi": {"rc-mode": "CQP"},
+        },
+      },
+    }
+  )
+  assert cfg.base.hdr.qsv.low_power == 0
+  assert cfg.base.hdr.qsv.adaptive_b == 1
+  assert cfg.base.hdr.vaapi.rc_mode == "CQP"
+
+
+def test_migration_lifts_qsv_flags_out_of_codec_parameters() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "base": {
+        "video": {
+          "codec-parameters": "-low_power 0 -async_depth 4 -adaptive_i 1 -adaptive_b 1 -p_strategy 1",
+        },
+      },
+    }
+  )
+  # All QSV flags moved off the parent.
+  assert cfg.base.video.codec_parameters == ""
+  # And landed in qsv.codec-parameters as a single string.
+  qsv_params = cfg.base.video.qsv.codec_parameters
+  assert "-low_power 0" in qsv_params
+  assert "-async_depth 4" in qsv_params
+  assert "-adaptive_i 1" in qsv_params
+  assert "-p_strategy 1" in qsv_params
+
+
+def test_migration_lifts_vaapi_flags_out_of_codec_parameters() -> None:
+  cfg = SmaConfig.model_validate({"base": {"video": {"codec-parameters": "-rc_mode VBR -compression_level 4 -qp 23"}}})
+  assert cfg.base.video.codec_parameters == ""
+  vaapi_params = cfg.base.video.vaapi.codec_parameters
+  assert "-rc_mode VBR" in vaapi_params
+  assert "-compression_level 4" in vaapi_params
+  assert "-qp 23" in vaapi_params
+
+
+def test_migration_preserves_encoder_agnostic_flags() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "base": {
+        "video": {
+          "codec-parameters": "-low_power 0 -mystery-flag 42 -compression_level 4",
+        },
+      },
+    }
+  )
+  # Encoder-agnostic remainder stays on parent.
+  assert "-mystery-flag 42" in cfg.base.video.codec_parameters
+  assert "-low_power" not in cfg.base.video.codec_parameters
+  assert "-compression_level" not in cfg.base.video.codec_parameters
+  # QSV-only flags lifted.
+  assert "-low_power 0" in cfg.base.video.qsv.codec_parameters
+  # VAAPI-only flags lifted.
+  assert "-compression_level 4" in cfg.base.video.vaapi.codec_parameters
+
+
+def test_migration_appends_to_existing_subblock_codec_parameters() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "base": {
+        "video": {
+          "codec-parameters": "-low_power 0",
+          "qsv": {"codec-parameters": "-rdo 1"},
+        },
+      },
+    }
+  )
+  qsv_params = cfg.base.video.qsv.codec_parameters
+  assert "-rdo 1" in qsv_params
+  assert "-low_power 0" in qsv_params
+
+
+def test_migration_is_a_noop_when_codec_parameters_is_already_typed_only() -> None:
+  cfg = SmaConfig.model_validate({"base": {"video": {"codec-parameters": "", "qsv": {"low-power": 0}}}})
+  assert cfg.base.video.qsv.low_power == 0
+  assert cfg.base.video.codec_parameters == ""
+  # No spurious migration string in qsv.codec_parameters.
+  assert cfg.base.video.qsv.codec_parameters == ""
+
+
+def test_migration_runs_on_hdr_block_too() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "base": {
+        "hdr": {
+          "codec-parameters": "-low_power 0 -color_primaries bt2020",
+        },
+      },
+    }
+  )
+  # Color metadata is encoder-agnostic, stays on hdr.codec-parameters.
+  assert "-color_primaries bt2020" in cfg.base.hdr.codec_parameters
+  # QSV-only lifted.
+  assert "-low_power 0" in cfg.base.hdr.qsv.codec_parameters
