@@ -235,7 +235,7 @@ existing payload (consumers MUST ignore unknown keys per
     "render_nodes": ["/dev/dri/renderD128"],
     "vainfo_driver": "iHD",
     "vainfo_version": "23.4.0",
-    "ffmpeg_version": "8.1",
+    "ffmpeg_version": "8.1.1",
     "nvidia": false
   },
   "fallback": [
