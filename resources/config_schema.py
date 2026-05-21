@@ -216,8 +216,145 @@ class MetadataSettings(_Base):
   keep_titles: bool = False
 
 
+_QSV_ONLY_FLAG_TOKENS = frozenset(
+  {
+    "-low_power",
+    "-async_depth",
+    "-extbrc",
+    "-b_strategy",
+    "-look_ahead",
+    "-look_ahead_depth",
+    "-adaptive_i",
+    "-adaptive_b",
+    "-p_strategy",
+    "-rdo",
+  }
+)
+
+_VAAPI_ONLY_FLAG_TOKENS = frozenset({"-rc_mode", "-compression_level", "-qp"})
+
+
+def _migrate_encoder_flags(data: Any) -> Any:
+  """Lift QSV/VAAPI-specific tokens out of a legacy ``codec-parameters``
+  string into typed ``qsv:`` / ``vaapi:`` subblocks.
+
+  Shared between ``VideoSettings`` and ``HDRSettings`` model validators.
+  See VideoSettings._migrate_legacy_encoder_flags for the operator-facing
+  rationale.
+  """
+  if not isinstance(data, dict):
+    return data
+  raw = data.get("codec-parameters")
+  if raw is None:
+    raw = data.get("codec_parameters")
+  # Accept list-form input — operators frequently write codec-parameters
+  # as a YAML list (one flag-pair per line) for readability. Flatten to
+  # a single string before scanning.
+  if isinstance(raw, list):
+    raw = " ".join(str(item).strip() for item in raw if item is not None and str(item).strip())
+  if not isinstance(raw, str) or not raw.strip():
+    return data
+
+  tokens = raw.split()
+  qsv_lifted: list[str] = []
+  vaapi_lifted: list[str] = []
+  keep: list[str] = []
+  i = 0
+  while i < len(tokens):
+    tok = tokens[i]
+    consumes_value = i + 1 < len(tokens) and not tokens[i + 1].startswith("-")
+    if tok in _QSV_ONLY_FLAG_TOKENS:
+      qsv_lifted.append(tok)
+      if consumes_value:
+        qsv_lifted.append(tokens[i + 1])
+        i += 2
+        continue
+      i += 1
+      continue
+    if tok in _VAAPI_ONLY_FLAG_TOKENS:
+      vaapi_lifted.append(tok)
+      if consumes_value:
+        vaapi_lifted.append(tokens[i + 1])
+        i += 2
+        continue
+      i += 1
+      continue
+    keep.append(tok)
+    if consumes_value:
+      keep.append(tokens[i + 1])
+      i += 2
+      continue
+    i += 1
+
+  if qsv_lifted:
+    qsv_block = data.setdefault("qsv", {})
+    if isinstance(qsv_block, dict):
+      existing = qsv_block.get("codec-parameters") or qsv_block.get("codec_parameters") or ""
+      if isinstance(existing, list):
+        existing = " ".join(str(x) for x in existing)
+      combined = (str(existing).strip() + " " + " ".join(qsv_lifted)).strip()
+      qsv_block["codec-parameters"] = combined
+  if vaapi_lifted:
+    vaapi_block = data.setdefault("vaapi", {})
+    if isinstance(vaapi_block, dict):
+      existing = vaapi_block.get("codec-parameters") or vaapi_block.get("codec_parameters") or ""
+      if isinstance(existing, list):
+        existing = " ".join(str(x) for x in existing)
+      combined = (str(existing).strip() + " " + " ".join(vaapi_lifted)).strip()
+      vaapi_block["codec-parameters"] = combined
+  if qsv_lifted or vaapi_lifted:
+    remaining = " ".join(keep).strip()
+    if "codec-parameters" in data:
+      data["codec-parameters"] = remaining
+    else:
+      data["codec_parameters"] = remaining
+  return data
+
+
+class QSVSettings(_Base):
+  """Intel QSV encoder option overrides applied when the active encoder
+  is ``hevc_qsv`` / ``h264_qsv`` / ``av1_qsv``.
+
+  Every field is sentinel-defaulted; unset values inherit from the parent
+  ``VideoSettings`` (for shared keys like ``preset`` / ``b_frames``) or
+  are simply not emitted (for QSV-only flags like ``low_power`` /
+  ``async_depth``).
+
+  The runtime never reads from this block when the active encoder is
+  NOT a QSV encoder — so a misconfigured ``video.qsv.low-power`` under
+  ``gpu: vaapi`` is silently inert (no spurious ``-low_power`` on the
+  hevc_vaapi command line).
+  """
+
+  # Shared with parent VideoSettings — these fields exist at both
+  # levels; when set here, override the parent. Sentinel = inherit.
+  preset: str = ""
+  b_frames: int = -1
+  ref_frames: int = -1
+  global_quality: int = 0
+  look_ahead_depth: int = 0
+  extra_hw_frames: int = 0
+
+  # QSV-only flags (no VAAPI equivalent or different semantics on VAAPI).
+  # All optional; -1 / "" / negative sentinels mean "don't emit".
+  low_power: int = -1
+  async_depth: int = 0
+  extbrc: int = -1
+  b_strategy: int = -1
+  adaptive_i: int = -1
+  adaptive_b: int = -1
+  p_strategy: int = -1
+  rdo: int = -1
+
+  # Free-form QSV-only extras. Appended to the assembled flag list at
+  # runtime when the active encoder is QSV. Anything in here is NOT
+  # passed to non-QSV encoders (the safety guarantee).
+  codec_parameters: CodecParameters = ""
+
+
 class VAAPISettings(_Base):
-  """VAAPI encoder option overrides for the ``hw_alt`` fallback tier.
+  """VAAPI encoder option overrides applied when the active encoder is
+  ``hevc_vaapi`` / ``h264_vaapi`` / ``av1_vaapi`` (the ``hw_alt`` tier).
 
   All fields are optional sentinels; unset values inherit from the parent
   ``VideoSettings`` or ``HDRSettings`` block at runtime overlay time
@@ -226,19 +363,28 @@ class VAAPISettings(_Base):
   VAAPI's encoder accepts different flags from QSV. ``-global_quality``
   (QSV ICQ) has no direct VAAPI equivalent — use ``-rc_mode CQP -qp <N>``
   for quality-targeted, or ``-rc_mode VBR -b:v <rate> -maxrate <max>``
-  for capped-VBR. The ``hw_alt`` runtime strips known-QSV-only flags from
-  the parent ``codec-parameters`` before applying this overlay so
-  ``hevc_vaapi`` doesn't reject the command line.
+  for capped-VBR.
+
+  The runtime never reads from this block when the active encoder is
+  NOT a VAAPI encoder — so a misconfigured ``video.vaapi.rc-mode``
+  under ``gpu: qsv`` is silently inert.
   """
 
+  # Shared with parent VideoSettings — overrides when set.
   preset: str = ""
-  codec_parameters: CodecParameters = ""
-  look_ahead_depth: int = 0
-  global_quality: int = 0
   b_frames: int = -1
   ref_frames: int = -1
+  global_quality: int = 0
   max_level: float = 0.0
+  look_ahead_depth: int = 0
+
+  # VAAPI-only flags.
   rc_mode: str = ""
+  compression_level: int = 0
+  low_power: int = -1
+
+  # Free-form VAAPI-only extras.
+  codec_parameters: CodecParameters = ""
 
 
 class VideoSettings(_Base):
@@ -268,10 +414,31 @@ class VideoSettings(_Base):
   # used verbatim, clamped to ffmpeg's QSV ceiling of 100. Only applied
   # when `gpu: qsv`. Profiles can override per path (profiles.<name>.video.extra-hw-frames).
   extra_hw_frames: int = 0
-  # Nested VAAPI overlay applied at the hw_alt fallback tier. All fields
-  # are sentinel-defaulted; unset values inherit from this VideoSettings
-  # block (mirrors the HDR → video overlay pattern).
+  # Nested per-encoder overlays. The runtime reads from the block
+  # matching the active encoder (qsv: when codec resolves to a QSV
+  # encoder, vaapi: when the hw_alt tier fires). The OTHER block is
+  # silently ignored — operators can write QSV-only flags here without
+  # them leaking to a VAAPI command line.
+  qsv: QSVSettings = Field(default_factory=QSVSettings)
   vaapi: VAAPISettings = Field(default_factory=VAAPISettings)
+
+  @model_validator(mode="before")
+  @classmethod
+  def _migrate_legacy_encoder_flags(cls, data: Any) -> Any:
+    """Lift QSV/VAAPI-specific flags out of legacy ``codec-parameters``
+    strings into the new typed ``qsv:`` / ``vaapi:`` subblocks.
+
+    Older configs (and the upstream sma-ng.yml.sample) write the entire
+    encoder flag set as a free-form string under ``codec-parameters``.
+    The runtime can't safely pass that string to a non-matching encoder
+    without rejecting half its flags. This validator runs at parse time
+    and lifts known QSV-only tokens into ``qsv.codec-parameters`` and
+    VAAPI-only tokens into ``vaapi.codec-parameters``, leaving the
+    remainder under the parent ``codec-parameters`` as encoder-agnostic.
+
+    See module-level ``_migrate_encoder_flags`` for the implementation.
+    """
+    return _migrate_encoder_flags(data)
 
 
 class HDRSettings(_Base):
@@ -297,9 +464,16 @@ class HDRSettings(_Base):
   # copy through instead of being re-encoded just because the source bitrate
   # exceeds the SDR target). Negative leaves the SDR cap in effect.
   max_bitrate: int = -1
-  # HDR-specific VAAPI overlay for the hw_alt fallback tier. Sentinel
-  # defaults inherit from this HDRSettings block at runtime.
+  # HDR-specific per-encoder overlays. Same shape and semantics as
+  # VideoSettings.qsv / VideoSettings.vaapi (see those classes).
+  qsv: QSVSettings = Field(default_factory=QSVSettings)
   vaapi: VAAPISettings = Field(default_factory=VAAPISettings)
+
+  @model_validator(mode="before")
+  @classmethod
+  def _migrate_legacy_encoder_flags(cls, data: Any) -> Any:
+    """Mirror of VideoSettings._migrate_legacy_encoder_flags for HDR."""
+    return _migrate_encoder_flags(data)
 
 
 class AnalyzerSettings(_Base):
@@ -804,6 +978,7 @@ __all__ = [
   "SubtitleSettings",
   "SubtitleSorting",
   "UniversalAudio",
+  "QSVSettings",
   "VAAPISettings",
   "VideoSettings",
 ]

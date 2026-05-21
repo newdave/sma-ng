@@ -145,15 +145,33 @@ base:
     b-frames: -1
     ref-frames: -1
     extra-hw-frames: 0
-    vaapi:
+    qsv:
       preset: ''
-      codec-parameters: ''
-      look-ahead-depth: 0
-      global-quality: 0
       b-frames: -1
       ref-frames: -1
+      global-quality: 0
+      look-ahead-depth: 0
+      extra-hw-frames: 0
+      low-power: -1
+      async-depth: 0
+      extbrc: -1
+      b-strategy: -1
+      adaptive-i: -1
+      adaptive-b: -1
+      p-strategy: -1
+      rdo: -1
+      codec-parameters: ''
+    vaapi:
+      preset: ''
+      b-frames: -1
+      ref-frames: -1
+      global-quality: 0
       max-level: 0.0
+      look-ahead-depth: 0
       rc-mode: ''
+      compression-level: 0
+      low-power: -1
+      codec-parameters: ''
   hdr:
     codec: []
     pix-fmt: []
@@ -174,15 +192,33 @@ base:
     ref-frames: -1
     extra-hw-frames: 0
     max-bitrate: -1
-    vaapi:
+    qsv:
       preset: ''
-      codec-parameters: ''
-      look-ahead-depth: 0
-      global-quality: 0
       b-frames: -1
       ref-frames: -1
+      global-quality: 0
+      look-ahead-depth: 0
+      extra-hw-frames: 0
+      low-power: -1
+      async-depth: 0
+      extbrc: -1
+      b-strategy: -1
+      adaptive-i: -1
+      adaptive-b: -1
+      p-strategy: -1
+      rdo: -1
+      codec-parameters: ''
+    vaapi:
+      preset: ''
+      b-frames: -1
+      ref-frames: -1
+      global-quality: 0
       max-level: 0.0
+      look-ahead-depth: 0
       rc-mode: ''
+      compression-level: 0
+      low-power: -1
+      codec-parameters: ''
   analyzer:
     enabled: false
     backend: openvino
