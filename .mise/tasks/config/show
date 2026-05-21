@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Render the effective resolved config for a profile (--profile <name>; --diff to show only overlay deltas; --section to narrow output)"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+if [ -x "venv/bin/python" ]; then
+    py="venv/bin/python"
+else
+    py="python3"
+fi
+
+exec "$py" scripts/show-config.py "$@"
