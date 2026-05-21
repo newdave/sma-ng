@@ -301,6 +301,19 @@ class ReadSettings:
   # ---------------------------------------------------------------------
 
   @staticmethod
+  def _project_vaapi(cfg) -> dict[str, Any]:
+    """Flatten a VAAPISettings model into a snake_case dict.
+
+    Returned dict is consumed by the runtime hw_alt overlay reader
+    (mediaprocessor.py). All sentinel defaults are preserved as-is so
+    the reader can apply sentinel-fallback inheritance from the parent
+    VideoSettings / HDRSettings block.
+    """
+    if cfg is None:
+      return {}
+    return cfg.model_dump(by_alias=False)
+
+  @staticmethod
   def _as_list(value, separator=",", lower=True, replace=None):
     if value is None or value == "":
       return []
@@ -458,6 +471,9 @@ class ReadSettings:
     self.b_frames = cfg.b_frames
     self.ref_frames = cfg.ref_frames
     self.extra_hw_frames = int(cfg.extra_hw_frames or 0)
+    # Flat dict projection of base.video.vaapi for the runtime hw_alt
+    # overlay reader. snake_case keys match VAAPISettings.model_dump.
+    self.vaapi: dict[str, Any] = self._project_vaapi(cfg.vaapi)
 
     hdr_cfg = base.hdr
     self.hdr: dict[str, Any] = {
@@ -477,6 +493,7 @@ class ReadSettings:
       "ref_frames": hdr_cfg.ref_frames,
       "extra_hw_frames": int(hdr_cfg.extra_hw_frames or 0),
       "max_bitrate": int(hdr_cfg.max_bitrate),
+      "vaapi": self._project_vaapi(hdr_cfg.vaapi),
     }
 
     naming = base.naming

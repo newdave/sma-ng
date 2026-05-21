@@ -252,15 +252,29 @@ JSON, picked up by the worker stdout parser).
 ### `fallback-policy` (replaces the deprecated boolean `software-fallback`)
 
 `base.converter.fallback-policy` selects how far the hardware → software
-fallback ladder is allowed to descend on failure:
+fallback ladder is allowed to descend on failure. The full 4-tier
+`aggressive` ladder is `hw → hw_alt → sw_decode → full_sw`. The `hw_alt`
+tier swaps a failing QSV encoder for the same-vendor VAAPI encoder while
+preserving the (working) QSV decoder via a zero-copy `hwmap=derive_device=vaapi`
+bridge — operators get a same-iGPU recovery for transient `hevc_qsv`
+mid-encode failures (e.g. `Invalid FrameType:0` on Main10 with
+`bf=8 + adaptive_b`) instead of falling all the way to libx265 software.
 
 ```yaml
 base:
   converter:
-    fallback-policy: aggressive   # try hw → sw_decode → full_sw (default)
-    # fallback-policy: sw_decode_only   # try hw → sw_decode; never swap encoder
+    fallback-policy: aggressive   # try hw → hw_alt → sw_decode → full_sw (default)
+    # fallback-policy: sw_decode_only   # try hw → hw_alt → sw_decode; never swap encoder to software
+    # fallback-policy: hw_alt           # try hw → hw_alt; stop before any software encode
     # fallback-policy: hw_only          # surface hw failures immediately; no retries
 ```
+
+| Policy            | Ladder                                          | When to use                                                                                                                                                                                       |
+| ----------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hw_only`         | hw                                              | Production nodes that should fail loudly on hardware errors (lost `/dev/dri`, missing oneVPL runtime, kernel-driver mismatch). No silent CPU fallback masks the problem.                          |
+| `hw_alt`          | hw → hw_alt                                     | Stay on the iGPU: recover from transient QSV encoder bugs via VAAPI without ever paying the 10–20x wall-clock cost of libx265 software encode. Recommended starting point on iGPU-only nodes. |
+| `sw_decode_only`  | hw → hw_alt → sw_decode                         | Allow a software decoder swap if both hardware encoders fail, but never swap the encoder to software (preserves throughput on encoder bugs that ride on top of a hardware decode pipeline).        |
+| `aggressive`      | hw → hw_alt → sw_decode → full_sw               | Default. Maximises "actively try to not fail to transcode". Legacy `software-fallback: true` maps here.                                                                                            |
 
 The deprecated boolean form continues to work for one minor release:
 

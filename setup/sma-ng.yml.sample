@@ -145,6 +145,15 @@ base:
     b-frames: -1
     ref-frames: -1
     extra-hw-frames: 0
+    vaapi:
+      preset: ''
+      codec-parameters: ''
+      look-ahead-depth: 0
+      global-quality: 0
+      b-frames: -1
+      ref-frames: -1
+      max-level: 0.0
+      rc-mode: ''
   hdr:
     codec: []
     pix-fmt: []
@@ -165,6 +174,15 @@ base:
     ref-frames: -1
     extra-hw-frames: 0
     max-bitrate: -1
+    vaapi:
+      preset: ''
+      codec-parameters: ''
+      look-ahead-depth: 0
+      global-quality: 0
+      b-frames: -1
+      ref-frames: -1
+      max-level: 0.0
+      rc-mode: ''
   analyzer:
     enabled: false
     backend: openvino

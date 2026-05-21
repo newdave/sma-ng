@@ -116,6 +116,40 @@ shell-trigger-only and configured in `triggers/`. See
 
 ---
 
+## base.video.vaapi
+
+Per-encoder overlay applied at the `hw_alt` fallback tier (see
+`base.converter.fallback-policy`). When QSV encoding fails and the policy
+permits `hw_alt`, SMA-NG swaps `hevc_qsv`/`h264_qsv`/`av1_qsv` for the same-vendor
+VAAPI encoder while preserving the (working) QSV decoder via a zero-copy
+`hwmap=derive_device=vaapi` bridge. This block tunes the VAAPI half of that
+hybrid pipeline without duplicating the parent `base.video.*` settings.
+
+All fields are sentinel-defaulted; unset values inherit from the parent
+`base.video.*` block. QSV-only flags carried in `base.video.codec-parameters`
+(e.g. `-low_power`, `-extbrc`, `-look_ahead_depth`, `-global_quality`) are
+stripped automatically before the VAAPI command line is built, so you only
+need to specify the VAAPI-specific tuning here.
+
+| Option             | Type   | Default | Description                                                                                                                                            |
+| ------------------ | ------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `preset`           | string | `''`    | Encoder preset override for the VAAPI tier. `''` inherits `base.video.preset` (QSV preset names are mapped where they overlap with VAAPI).             |
+| `codec-parameters` | string | `''`    | Extra VAAPI codec parameters appended to the stripped parent params. Use `-rc_mode VBR` / `-rc_mode CQP -qp N` / `-compression_level N` etc.           |
+| `look-ahead-depth` | int    | `0`     | Look-ahead frames override. `0` = inherit from `base.video.look-ahead-depth`. Mapped to VAAPI's own look-ahead control where supported.                |
+| `global-quality`   | int    | `0`     | Quality target for VAAPI. `0` = inherit. Translated to `-rc_mode CQP -qp <N>` because VAAPI has no direct equivalent of QSV's ICQ `-global_quality`.   |
+| `b-frames`         | int    | `-1`    | B-frame override. `-1` = inherit from `base.video.b-frames`.                                                                                            |
+| `ref-frames`       | int    | `-1`    | Reference frame override. `-1` = inherit from `base.video.ref-frames`.                                                                                  |
+| `max-level`        | float  | `0.0`   | Profile level cap override. `0.0` = inherit from `base.video.max-level`.                                                                                |
+| `rc-mode`          | string | `''`    | VAAPI rate-control mode (`VBR`, `CBR`, `CQP`). `''` = inherit from `codec-parameters` if `-rc_mode` is set there, otherwise the encoder default fires. |
+
+> **VAAPI vs QSV flag names diverge.** `-global_quality` is QSV-only; on
+> VAAPI use `-rc_mode CQP -qp <N>` for quality-targeted, or `-rc_mode VBR
+> -b:v <rate> -maxrate <max>` for capped-VBR. The hw_alt runtime strips
+> known QSV-only flags before applying this overlay so `hevc_vaapi`
+> doesn't reject the command line.
+
+---
+
 ## base.hdr
 
 Override video settings for HDR content (detected automatically).
@@ -148,6 +182,25 @@ When the output is HDR (10-bit pix_fmt and `space`/`transfer`/`primaries` set), 
 ```
 
 For HLG sources, set `transfer: [arib-std-b67]`. The flags are emitted regardless of encoder (qsv / vaapi / nvenc / software) and only on HDR output — HDR→SDR transcodes do not carry the tags forward.
+
+---
+
+## base.hdr.vaapi
+
+HDR-specific overlay for the `hw_alt` fallback tier. Same field shape and
+semantics as [`base.video.vaapi`](#basevideovaapi) but unset values inherit
+from `base.hdr.*` (not `base.video.*`).
+
+| Option             | Type   | Default | Description                                                                                          |
+| ------------------ | ------ | ------- | ---------------------------------------------------------------------------------------------------- |
+| `preset`           | string | `''`    | Encoder preset override for HDR VAAPI encodes. `''` inherits `base.hdr.preset`.                      |
+| `codec-parameters` | string | `''`    | Extra VAAPI codec parameters appended to the stripped parent params (HDR side).                      |
+| `look-ahead-depth` | int    | `0`     | HDR look-ahead override. `0` = inherit from `base.hdr.look-ahead-depth`.                             |
+| `global-quality`   | int    | `0`     | HDR quality target. `0` = inherit. Mapped to `-rc_mode CQP -qp <N>`.                                 |
+| `b-frames`         | int    | `-1`    | HDR B-frame override. `-1` = inherit.                                                                |
+| `ref-frames`       | int    | `-1`    | HDR reference frame override. `-1` = inherit.                                                        |
+| `max-level`        | float  | `0.0`   | HDR profile level cap override. `0.0` = inherit.                                                     |
+| `rc-mode`          | string | `''`    | VAAPI rate-control mode for HDR encodes (`VBR`, `CBR`, `CQP`). `''` defers to `codec-parameters`.    |
 
 ---
 
