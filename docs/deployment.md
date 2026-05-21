@@ -53,7 +53,7 @@ curl https://mise.run | sh
 | `mise run config:gpu`      | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
 | `mise run config:generate` | Generate `config/sma-ng.yml` with GPU auto-detection                               |
 | `mise run config:audit`    | Audit local config files against the YAML sample                                   |
-| `mise run config:show`     | Render the effective resolved config for a profile (`-- --profile rq --section video --diff`) |
+| `mise run config:show`     | Render the effective resolved config for a profile (`-- --profile rq --section video --diff`). With `-- --input <file>`: print the full FFmpeg command for a real source without transcoding. |
 | `mise run config:validate` | Validate the effective config — schema, unknown keys, encoder-flag leaks, routing refs |
 | `mise run daemon:smoke`    | Run daemon smoke-test config validation and exit                                   |
 

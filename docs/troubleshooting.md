@@ -141,6 +141,18 @@ renders the effective `video` section after the `rq` profile overlay,
 showing only the fields that differ from `base`. Useful for confirming a
 profile carries only the deltas you expect.
 
+For an even more concrete preview — the actual ffmpeg command line that
+would run for a specific file — pass `--input`:
+
+```bash
+mise run config:show -- --profile rq --input /mnt/unionfs/Media/TV/.../episode.mkv
+```
+
+This probes the file, runs the same `generateOptions` path the daemon
+uses, and prints the assembled ffmpeg command without transcoding.
+Delegates to `manual.py -oo` so the output is byte-identical to what a
+real job would invoke.
+
 ```bash
 mise run config:validate
 ```

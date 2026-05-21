@@ -137,6 +137,70 @@ def _check_encoder_flag_leaks(cfg: SmaConfig, findings: list[Finding]) -> None:
         )
 
 
+# Map of QSV flag token -> typed field name on QSVSettings. Used by the
+# "typed field unset but flag appears in codec-parameters" leak check.
+_QSV_FLAG_TO_TYPED_FIELD = {
+  "-low_power": "low_power",
+  "-async_depth": "async_depth",
+  "-extbrc": "extbrc",
+  "-b_strategy": "b_strategy",
+  "-adaptive_i": "adaptive_i",
+  "-adaptive_b": "adaptive_b",
+  "-p_strategy": "p_strategy",
+  "-rdo": "rdo",
+}
+
+_VAAPI_FLAG_TO_TYPED_FIELD = {
+  "-rc_mode": "rc_mode",
+  "-compression_level": "compression_level",
+  "-low_power": "low_power",
+}
+
+
+def _check_typed_vs_string_conflicts(cfg: SmaConfig, findings: list[Finding]) -> None:
+  """Surface when an encoder subblock's codec-parameters string carries a
+  flag that the same subblock also exposes as a typed field. The typed
+  field is the canonical shape; the raw string bypasses validation and
+  any future schema-side semantic translation.
+  """
+
+  def _scan(label_prefix: str, block, flag_map: dict[str, str], sentinel_zero_fields: set[str]) -> None:
+    if block is None:
+      return
+    raw = (getattr(block, "codec_parameters", "") or "").strip()
+    if not raw:
+      return
+    tokens = raw.split()
+    for tok in tokens:
+      typed_name = flag_map.get(tok)
+      if not typed_name:
+        continue
+      current = getattr(block, typed_name, None)
+      # "unset" sentinel depends on field type: int fields with sentinel
+      # 0 mean "don't emit" (async_depth, compression_level); everything
+      # else uses -1.
+      is_unset = (typed_name in sentinel_zero_fields and current == 0) or (typed_name not in sentinel_zero_fields and current in (-1, "", None))
+      if is_unset:
+        findings.append(
+          Finding(
+            "warn",
+            f"{label_prefix}.codec-parameters",
+            f"contains `{tok}` but the typed field `{typed_name}` is unset — move the value into the typed field so config:validate and the schema can see it",
+          )
+        )
+
+  qsv_zero_fields = {"async_depth"}
+  vaapi_zero_fields = {"compression_level"}
+
+  for label_prefix, video_block in (("base.video", cfg.base.video), ("base.hdr", cfg.base.hdr)):
+    _scan(f"{label_prefix}.qsv", video_block.qsv, _QSV_FLAG_TO_TYPED_FIELD, qsv_zero_fields)
+    _scan(f"{label_prefix}.vaapi", video_block.vaapi, _VAAPI_FLAG_TO_TYPED_FIELD, vaapi_zero_fields)
+  for prof_name, prof in cfg.profiles.items():
+    if prof.video is not None:
+      _scan(f"profiles.{prof_name}.video.qsv", prof.video.qsv, _QSV_FLAG_TO_TYPED_FIELD, qsv_zero_fields)
+      _scan(f"profiles.{prof_name}.video.vaapi", prof.video.vaapi, _VAAPI_FLAG_TO_TYPED_FIELD, vaapi_zero_fields)
+
+
 def _check_routing_references(cfg: SmaConfig, findings: list[Finding]) -> None:
   """Routing rules must reference profiles and services that exist."""
   known_profiles = set(cfg.profiles)
@@ -329,6 +393,7 @@ def main() -> int:
 
   if cfg is not None:
     _check_encoder_flag_leaks(cfg, findings)
+    _check_typed_vs_string_conflicts(cfg, findings)
     _check_routing_references(cfg, findings)
     _check_service_completeness(cfg, findings)
     _check_codec_list_shapes(cfg, findings)
