@@ -78,9 +78,14 @@ Other rules:
 - If asked to "commit all changes", commit the whole worktree as multiple logical commits.
 - Use conventional commit prefixes such as `fix:`, `feat:`, `refactor:`, `docs:`.
 - After each requested commit, run `git pull --rebase` and `git push`.
-- Don't author new PRPs / task breakdowns into `docs/prps/` or `docs/tasks/`.
+- Don't author new PRPs / task breakdowns into `docs/prps/` or `docs/tasks/` for *shipped* features.
   Shipped-state planning docs go stale fast and the git history already preserves intent.
   Write the rationale into the commit message and the operator-facing doc instead.
+- Exception: *in-flight* PRPs and task breakdowns generated via `/bp:generate-prp`
+  may live in `docs/prps/` and `docs/tasks/` while implementation is active. They MUST
+  carry a `STATUS:` banner under the H1 (`IN-FLIGHT`, `COMPLETE`, `SUPERSEDED`).
+  Once `STATUS: COMPLETE` lands, prune the doc in a follow-up unless it documents
+  operator-visible behavior that doesn't fit elsewhere.
 
 ## Common Commands
 
