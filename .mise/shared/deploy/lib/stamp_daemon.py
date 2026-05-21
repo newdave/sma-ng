@@ -194,11 +194,28 @@ if os.path.exists(yaml_path):
     daemon_block["workers"] = workers
     changed = True
 
-  # service credentials (skip routing-only keys)
+  # service credentials (skip routing-only keys).
+  #
+  # `services.<type>` is *authoritative* against setup/local.yml: any
+  # instance present in the deployed config but absent from local.yml
+  # is reaped here before the merge. This prevents stale instances
+  # (sample-seeded or left over from earlier configs) from masking the
+  # selection logic in resources/readsettings.py (e.g. a ghost
+  # `services.plex.main` with an empty token would hijack the
+  # `get("main") or first` selector and silently break Plex refresh
+  # for the operator's real `plex.davetv` instance). Per-field merge
+  # within an instance remains additive — sample-defaulted fields like
+  # `plexmatch` survive when local.yml omits them.
   if services:
     services_block = root.setdefault("services", {})
     for stype, instances in services.items():
       type_block = services_block.setdefault(stype, {})
+      existing_insts = set(type_block.keys())
+      incoming_insts = set(instances.keys())
+      for stale_inst in sorted(existing_insts - incoming_insts):
+        print(f"  sma-ng.yml services.{stype}.{stale_inst}: removing (not in local.yml)")
+        del type_block[stale_inst]
+        changed = True
       for inst_name, fields in instances.items():
         inst_block = type_block.setdefault(inst_name, {})
         for raw_key, raw_val in fields.items():
