@@ -52,6 +52,31 @@ curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/sma-ng?level=ERROR"
 - Check that `ffprobe` path in `[Converter]` is correct
 - Run `ffprobe /path/to/file` manually to diagnose
 
+### `hevc_qsv` fails mid-encode with `Invalid FrameType:0` / exit 183
+
+A small fraction of Main10 SDR sources with deep look-ahead and adaptive B
+(`bf 8 + adaptive_b 1 + look_ahead_depth 40 + p010le`) trip a transient
+bug in the QSV encoder where it emits `Invalid FrameType:0` partway through
+the file and exits 183. The decoder side is healthy — only the encoder
+chokes.
+
+Set `base.converter.fallback-policy` so the `hw_alt` tier can recover by
+swapping `hevc_qsv` for `hevc_vaapi` on the same iGPU while preserving the
+working QSV decoder:
+
+```yaml
+base:
+  converter:
+    fallback-policy: hw_alt      # try hw → hw_alt; stop before software
+    # fallback-policy: aggressive  # full 4-tier ladder (hw → hw_alt → sw_decode → full_sw)
+```
+
+`hw_alt` keeps recovery on the iGPU and avoids the 10–20× wall-clock cost
+of falling all the way to libx265 software. See
+[`docs/hardware-acceleration.md`](hardware-acceleration.md#fallback-policy-replaces-the-deprecated-boolean-software-fallback)
+for the full policy table, and watch for the structured `ffmpeg.attempts`
+log line — successful recovery shows `[{tier: hw, failure_class: ...}, {tier: hw_alt, failure_class: null}]` with `result: ok`.
+
 ### Hardware acceleration not working
 
 - Verify `hwdevices` key matches encoder codec name (e.g., `qsv` for `h265qsv`)

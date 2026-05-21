@@ -35,6 +35,25 @@ def test_legacy_true_maps_to_aggressive() -> None:
   assert cfg.fallback_policy == FallbackPolicy.AGGRESSIVE
 
 
+def test_hw_alt_policy_round_trips() -> None:
+  """``fallback-policy: hw_alt`` parses, resolves to HW_ALT, and round-trips."""
+  cfg = ConverterSettings.model_validate({"fallback-policy": "hw_alt"})
+  assert cfg.fallback_policy == FallbackPolicy.HW_ALT
+  dumped = cfg.model_dump(by_alias=True)
+  assert dumped["fallback-policy"] == FallbackPolicy.HW_ALT
+  # Round-trip back through validation.
+  again = ConverterSettings.model_validate({"fallback-policy": dumped["fallback-policy"].value})
+  assert again.fallback_policy is FallbackPolicy.HW_ALT
+
+
+def test_legacy_software_fallback_true_still_aggressive_with_hw_alt_present() -> None:
+  """Regression: the new HW_ALT enum entry must not change the legacy
+  migration shim — ``software-fallback: true`` still maps to AGGRESSIVE
+  (the 4-tier policy now includes hw_alt transparently)."""
+  cfg = ConverterSettings.model_validate({"software-fallback": True})
+  assert cfg.fallback_policy is FallbackPolicy.AGGRESSIVE
+
+
 def test_new_key_wins_over_legacy_when_both_present() -> None:
   cfg = ConverterSettings.model_validate(
     {"software-fallback": True, "fallback-policy": "hw_only"},

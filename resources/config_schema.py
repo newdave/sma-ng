@@ -29,15 +29,23 @@ class FallbackPolicy(str, Enum):
   Values are stable strings consumed by /health metrics and ops dashboards;
   do not rename existing entries.
 
-  - AGGRESSIVE: try hw → sw_decode → full_sw (legacy default behaviour
-    selected by the deprecated ``software-fallback: true``).
-  - SW_DECODE_ONLY: try hw → sw_decode; never swap encoder to software.
+  The full 4-tier ``aggressive`` ladder is
+  ``hw → hw_alt → sw_decode → full_sw``. The ``hw_alt`` tier swaps a
+  failing QSV encoder for the same-vendor VAAPI encoder while preserving
+  the (working) QSV decoder via a zero-copy hwmap bridge.
+
+  - AGGRESSIVE: try hw → hw_alt → sw_decode → full_sw (legacy default
+    behaviour selected by the deprecated ``software-fallback: true``).
+  - SW_DECODE_ONLY: try hw → hw_alt → sw_decode; never swap encoder to
+    software.
+  - HW_ALT: try hw → hw_alt only; stop before any software encode.
   - HW_ONLY: surface hw failures immediately; no retries. Equivalent to
     the deprecated ``software-fallback: false``.
   """
 
   AGGRESSIVE = "aggressive"
   SW_DECODE_ONLY = "sw_decode_only"
+  HW_ALT = "hw_alt"
   HW_ONLY = "hw_only"
 
 
@@ -83,15 +91,24 @@ class ConverterSettings(_Base):
   post_process: bool = False
   wait_post_process: bool = False
   detailed_progress: bool = False
-  # Fallback ladder policy for hardware-accelerated conversions. Three
-  # tiers exist in MediaProcessor: hw → sw_decode → full_sw. The policy
-  # selects how far the ladder is allowed to descend on failure:
+  # Fallback ladder policy for hardware-accelerated conversions. Four
+  # tiers exist in MediaProcessor: hw → hw_alt → sw_decode → full_sw.
+  # The hw_alt tier swaps a failing QSV encoder for the same-vendor
+  # VAAPI encoder (preserving the QSV decoder via a zero-copy hwmap
+  # bridge) and only fires when the source pipeline is QSV-encoded.
+  # The policy selects how far the ladder is allowed to descend on failure:
   #   - hw_only        — surface hw failures immediately (recommended on
   #                      production nodes where a /dev/dri or QSV runtime
   #                      problem should fail loudly, not get masked by a
   #                      silent CPU encode);
-  #   - sw_decode_only — try hw, then sw decode; never swap the encoder;
-  #   - aggressive     — full legacy ladder (hw → sw_decode → full_sw).
+  #   - hw_alt         — try hw, then hw_alt; stop before any SW encode;
+  #   - sw_decode_only — try hw, hw_alt, then sw decode; never swap the
+  #                      encoder to software;
+  #   - aggressive     — full legacy ladder (hw → hw_alt → sw_decode →
+  #                      full_sw); legacy `software-fallback: true` maps
+  #                      here so operators upgrading from the boolean see
+  #                      the same recovery envelope plus the new hw_alt
+  #                      stop on the way down.
   # Default mirrors the prior `software-fallback: true` semantics so
   # operators upgrading from the boolean see no behaviour change.
   fallback_policy: FallbackPolicy = FallbackPolicy.AGGRESSIVE
@@ -171,6 +188,31 @@ class MetadataSettings(_Base):
   keep_titles: bool = False
 
 
+class VAAPISettings(_Base):
+  """VAAPI encoder option overrides for the ``hw_alt`` fallback tier.
+
+  All fields are optional sentinels; unset values inherit from the parent
+  ``VideoSettings`` or ``HDRSettings`` block at runtime overlay time
+  (same sentinel-fallback shape as the HDR → video overlay).
+
+  VAAPI's encoder accepts different flags from QSV. ``-global_quality``
+  (QSV ICQ) has no direct VAAPI equivalent — use ``-rc_mode CQP -qp <N>``
+  for quality-targeted, or ``-rc_mode VBR -b:v <rate> -maxrate <max>``
+  for capped-VBR. The ``hw_alt`` runtime strips known-QSV-only flags from
+  the parent ``codec-parameters`` before applying this overlay so
+  ``hevc_vaapi`` doesn't reject the command line.
+  """
+
+  preset: str = ""
+  codec_parameters: str = ""
+  look_ahead_depth: int = 0
+  global_quality: int = 0
+  b_frames: int = -1
+  ref_frames: int = -1
+  max_level: float = 0.0
+  rc_mode: str = ""
+
+
 class VideoSettings(_Base):
   gpu: str = ""
   codec: list[str] = Field(default_factory=lambda: ["h265"])
@@ -198,6 +240,10 @@ class VideoSettings(_Base):
   # used verbatim, clamped to ffmpeg's QSV ceiling of 100. Only applied
   # when `gpu: qsv`. Profiles can override per path (profiles.<name>.video.extra-hw-frames).
   extra_hw_frames: int = 0
+  # Nested VAAPI overlay applied at the hw_alt fallback tier. All fields
+  # are sentinel-defaulted; unset values inherit from this VideoSettings
+  # block (mirrors the HDR → video overlay pattern).
+  vaapi: VAAPISettings = Field(default_factory=VAAPISettings)
 
 
 class HDRSettings(_Base):
@@ -223,6 +269,9 @@ class HDRSettings(_Base):
   # copy through instead of being re-encoded just because the source bitrate
   # exceeds the SDR target). Negative leaves the SDR cap in effect.
   max_bitrate: int = -1
+  # HDR-specific VAAPI overlay for the hw_alt fallback tier. Sentinel
+  # defaults inherit from this HDRSettings block at runtime.
+  vaapi: VAAPISettings = Field(default_factory=VAAPISettings)
 
 
 class AnalyzerSettings(_Base):
@@ -679,5 +728,6 @@ __all__ = [
   "SubtitleSettings",
   "SubtitleSorting",
   "UniversalAudio",
+  "VAAPISettings",
   "VideoSettings",
 ]
