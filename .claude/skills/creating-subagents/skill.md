@@ -1,6 +1,6 @@
 ---
 name: creating-subagents
-description: Use when adding or updating a focused Claude subagent for recurring SMA-NG work.
+description: Add or update a Claude subagent under .claude/agents/. Activate when the user asks to "create/add a subagent" or when a recurring review/audit (FFmpeg args, schema drift, security, performance) deserves a focused context window separate from the main thread.
 ---
 
 # Creating Subagents

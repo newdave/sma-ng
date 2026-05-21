@@ -1,6 +1,6 @@
 ---
 name: researching
-description: Use when the technical approach for an SMA-NG change is uncertain or high-risk.
+description: Choose an SMA-NG implementation approach with codebase evidence. Activate when the change involves a new FFmpeg pipeline, hwaccel device, codec, container, integration API, schema split, or daemon persistence path — anywhere multiple approaches exist and the wrong one risks transcode regressions. Skip for well-trodden patterns.
 ---
 
 # Researching

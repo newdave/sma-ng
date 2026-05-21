@@ -155,3 +155,27 @@ See `docs/configuration.md` and `docs/daemon.md` for full reference.
 The `.claude/` directory is active configuration, not legacy metadata.
 Keep slash commands, agents, and skills short and specific to this Python FFmpeg transcoder.
 When workflow rules change, update this file first and sync `AGENTS.md` plus any matching `.codex/` mirrors.
+
+### Activation Routing
+
+Prefer the installed skills and subagents over ad-hoc reasoning. Route by trigger, not by habit.
+If a row matches the current request, invoke the listed tool before (or instead of) writing code directly.
+
+| Trigger / signal in the request                                          | Tool to invoke                          |
+| ------------------------------------------------------------------------ | --------------------------------------- |
+| Vague goal, no files named, no acceptance criteria                       | skill `discovering`                     |
+| New FFmpeg pipeline / hwaccel / codec / container / persistence approach | skill `researching`                     |
+| Change spans 2+ of converter/, resources/, triggers/, .mise/tasks/, docs/ | skill `blueprinting`                    |
+| Implementation plan is agreed; ready to write code                       | skill `implementing` + `python-testing` |
+| "refactor / clean up / simplify / rename / extract / dedupe"             | skill `refactoring`                     |
+| Edits to `resources/config_schema.py`, `readsettings.py`, `daemon/config.py`, `setup/sma-ng.yml.sample`, or any field under daemon:/base:/profiles:/services: | skill `python-configuration` + subagent `config-schema-reviewer` |
+| Edits to `converter/*.py`, `resources/mediaprocessor.py`, hwaccel filter graphs, encoder option blocks | skill `ffmpeg-cli` / `ffmpeg-hardware-acceleration` + subagent `ffmpeg-args-auditor` |
+| Writing or updating pytest coverage                                      | skill `python-testing` + subagent `test-writer` |
+| Operator docs, openapi, changelog, deploy/cluster docs                   | subagent `documentation-writer`         |
+| Read-only exploration ("where is X", "what references Y")                | subagent `explorer`                     |
+| Pre-merge / pre-commit review of staged changes                          | subagent `code-reviewer`                |
+| Adding a new skill                                                       | skill `creating-skills`                 |
+| Adding a new subagent                                                    | skill `creating-subagents`              |
+
+When two rows match (e.g. schema + FFmpeg args), invoke both reviewers; their scopes do not overlap.
+A skill miss is cheaper than a regression — bias toward invoking when uncertain.
