@@ -425,9 +425,22 @@ class TestDeployConfigTask:
 
 
 class TestDeployLibHelpers:
-  def _run_stamp_daemon(self, deploy_dir, services, *, api_key="", db_url="", ffmpeg_dir="", node_name="", workers="", daemon_overrides=None):
+  def _run_stamp_daemon(
+    self,
+    deploy_dir,
+    services,
+    *,
+    api_key="",
+    db_url="",
+    ffmpeg_dir="",
+    node_name="",
+    workers="",
+    daemon_overrides=None,
+    profiles_overrides=None,
+  ):
     services_b64 = b64encode(json.dumps(services).encode()).decode()
     daemon_overrides_b64 = b64encode(json.dumps(daemon_overrides).encode()).decode() if daemon_overrides else ""
+    profiles_b64 = b64encode(json.dumps(profiles_overrides).encode()).decode() if profiles_overrides else ""
     args = [
       PYTHON,
       ".mise/shared/deploy/lib/stamp_daemon.py",
@@ -441,7 +454,7 @@ class TestDeployLibHelpers:
       "",
       services_b64,
       "",  # base_overrides_b64
-      "",  # profiles_overrides_b64
+      profiles_b64,
       b64encode(str(workers).encode()).decode() if workers != "" else "",
       daemon_overrides_b64,
     ]
@@ -634,6 +647,45 @@ class TestDeployLibHelpers:
     # daemon.routing is rebuilt from services, so override entries must NOT
     # leak through.
     assert "/should-be-ignored" not in content
+
+  def test_stamp_daemon_profiles_are_authoritative(self, tmp_path):
+    """Profiles present in the stamped sample but absent from local.yml are
+    reaped; profiles present in both are replaced wholesale (rather than
+    deep-merged) so sample placeholder fields don't leak through when the
+    operator's local.yml profile relies on inheriting from base.
+    """
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    # Pre-existing stamped file carries a stale `lq` profile + a stale
+    # field on `rq.video.max-bitrate` that local.yml's rq doesn't override.
+    (config_dir / "sma-ng.yml").write_text(
+      "daemon: {}\n"
+      "profiles:\n"
+      "  rq:\n"
+      "    video:\n"
+      "      max-bitrate: 8000\n"  # stale, must be reaped
+      "      preset: medium\n"
+      "  lq:\n"  # entirely absent from local.yml, must be reaped
+      "    video:\n"
+      "      max-bitrate: 1200\n"
+    )
+    # local.yml.profiles.rq carries only audio + hdr overrides; no video.
+    profiles_overrides = {
+      "rq": {
+        "audio": {"codec": ["eac3"]},
+      },
+    }
+    result = self._run_stamp_daemon(deploy_dir, {}, profiles_overrides=profiles_overrides)
+    assert result.returncode == 0, result.stderr or result.stdout
+    content = (config_dir / "sma-ng.yml").read_text()
+    # Stale lq profile is gone.
+    assert " lq:" not in content
+    # Stale rq.video fields are gone (wholesale-replace dropped them).
+    assert "max-bitrate: 8000" not in content
+    assert "preset: medium" not in content
+    # Operator-specified rq.audio survives.
+    assert "eac3" in content
 
 
 class TestDeployMiseTask:
