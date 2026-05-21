@@ -1574,7 +1574,15 @@ class MediaProcessor:
         vmaxrate = "%dk" % analyzer_max_bitrate
         vbufsize = "%dk" % (analyzer_max_bitrate * 2)
 
-    vfilter = self.settings.hdr.get("filter") or None if hdrInput else self.settings.vfilter or None
+    # HDR settings overlay onto video settings: for each scalar field the
+    # `hdr.<field>` value wins only when the operator has explicitly set
+    # it (i.e. it differs from the schema's "unset" sentinel). Otherwise
+    # the corresponding `video.<field>` value carries through. This lets
+    # the YAML hdr block hold only HDR-specific deltas (e.g. colour-tag
+    # codec-parameters) instead of repeating every video tuning verbatim.
+    vfilter = self.settings.vfilter or None
+    if hdrInput and self.settings.hdr.get("filter"):
+      vfilter = self.settings.hdr.get("filter")
     if hdrInput and self.settings.hdr.get("filter") and self.settings.hdr.get("forcefilter"):
       self.log.debug("Video HDR force filter is enabled. Video stream can no longer be copied [hdr-force-filter].")
       vdebug = vdebug + ".hdr-force-filter"
@@ -1585,16 +1593,28 @@ class MediaProcessor:
       vcodec = vcodecs[0]
       vdebug = vdebug + ".force-filter"
 
-    vpreset = self.settings.hdr.get("preset") or None if hdrInput else self.settings.preset or None
+    vpreset = self.settings.preset or None
+    if hdrInput and self.settings.hdr.get("preset"):
+      vpreset = self.settings.hdr.get("preset")
 
-    vparams = self.settings.codec_params or None
+    # codec_params: HDR contribution is appended to (not replacing) the
+    # video codec_params so operators only need to write HDR-specific
+    # additions (e.g. colour metadata) in the hdr block.
+    vparams = self.settings.codec_params or ""
     if hdrInput and self.settings.hdr.get("codec_params"):
-      vparams = self.settings.hdr.get("codec_params")
+      hdr_params = self.settings.hdr.get("codec_params")
+      vparams = ((vparams.rstrip() + " " + hdr_params.lstrip()).strip()) if vparams else hdr_params
+    vparams = vparams or None
 
-    vlook_ahead_depth = self.settings.hdr.get("look_ahead_depth", 0) if hdrInput else self.settings.look_ahead_depth
-    vglobal_quality = self.settings.hdr.get("global_quality", 0) if hdrInput else self.settings.global_quality
-    vb_frames = self.settings.hdr.get("b_frames", -1) if hdrInput else self.settings.b_frames
-    vref_frames = self.settings.hdr.get("ref_frames", -1) if hdrInput else self.settings.ref_frames
+    # Scalar overlay: hdr value wins only when it's non-sentinel.
+    hdr_look_ahead = self.settings.hdr.get("look_ahead_depth", 0)
+    vlook_ahead_depth = hdr_look_ahead if (hdrInput and hdr_look_ahead > 0) else self.settings.look_ahead_depth
+    hdr_global_quality = self.settings.hdr.get("global_quality", 0)
+    vglobal_quality = hdr_global_quality if (hdrInput and hdr_global_quality > 0) else self.settings.global_quality
+    hdr_b_frames = self.settings.hdr.get("b_frames", -1)
+    vb_frames = hdr_b_frames if (hdrInput and hdr_b_frames >= 0) else self.settings.b_frames
+    hdr_ref_frames = self.settings.hdr.get("ref_frames", -1)
+    vref_frames = hdr_ref_frames if (hdrInput and hdr_ref_frames >= 0) else self.settings.ref_frames
 
     vpix_fmt = None
     if hdrInput and len(self.settings.hdr.get("pix_fmt")) > 0:
@@ -1655,12 +1675,13 @@ class MediaProcessor:
       # range_filter = "scale=in_range=full:out_range=limited"
       # vfilter = vfilter + "," + range_filter if vfilter else range_filter
 
-    # Hard guarantee: SDR sources must never produce 10-bit / HDR output.
-    if not hdrInput:
-      vpix_fmt, vprofile, vcodec, bit_depth, coerced = self._coerce_sdr_output(vpix_fmt, vprofile, vcodec, vcodecs, bit_depth, pix_fmts, source_pix_fmt=info.video.pix_fmt)
-      if coerced:
-        vdebug = vdebug + ".sdr-no-hdr"
-
+    # SDR-in -> SDR-out: hdrOutput resolution below already requires
+    # hdrInput, and _resolve_hdr_color_tags only emits HDR colour
+    # signalling when hdrOutput is True, so an SDR source can never be
+    # mislabelled as HDR regardless of bit-depth. Preserve the source
+    # bit-depth and Main10/High10 profile so 10-bit SDR releases
+    # (common for x265 SDR content) stay 10-bit through the encode
+    # and avoid the banding caused by an unnecessary 10->8 downsample.
     hdrOutput = self.isHDROutput(vpix_fmt, bit_depth) and hdrInput
 
     vcolor_primaries, vcolor_transfer, vcolor_space = _resolve_hdr_color_tags(hdrInput, hdrOutput, self.settings.hdr)
@@ -2890,62 +2911,6 @@ class MediaProcessor:
   _QSV_ENCODER_ALIGNMENT = 16
   _QSV_ENCODER_ALIGNMENT_10BIT = 32
   _QSV_10BIT_PIX_FMTS = frozenset({"yuv420p10le", "yuv422p10le", "yuv444p10le", "yuv420p12le", "yuv422p12le", "yuv444p12le", "p010le", "p012le"})
-
-  _HDR_PIX_FMTS = (
-    "yuv420p10le",
-    "yuv422p10le",
-    "yuv444p10le",
-    "yuv420p12le",
-    "yuv422p12le",
-    "yuv444p12le",
-    "p010le",
-  )
-  _HDR_PROFILES = ("main10", "main12", "high10", "high12")
-
-  def _coerce_sdr_output(self, vpix_fmt, vprofile, vcodec, vcodecs, bit_depth, pix_fmts, source_pix_fmt=None):
-    """Force SDR sources to produce 8-bit non-HDR output.
-
-    A 10-bit SDR source (yuv420p10le bt709) would otherwise copy its
-    pix_fmt and profile through to the output, producing a main10 MP4
-    labelled "FHD HDR" with no actual HDR colour metadata. Operators
-    asked for a hard guarantee that SDR-in always means SDR-out.
-
-    Returns the coerced ``(vpix_fmt, vprofile, vcodec, bit_depth,
-    coerced)`` tuple. ``coerced`` is True when any value changed and the
-    caller should bump its debug tag to include ``.sdr-no-hdr``.
-
-    ``source_pix_fmt`` is consulted only when ``vpix_fmt`` is None: a
-    10-bit SDR source with no configured ``base.pix-fmt`` whitelist
-    leaves ``vpix_fmt`` unset, which would let ``_qsv_passthrough_filter``
-    fall back to the 10-bit source pix_fmt and hand the encoder P010
-    surfaces against an 8-bit profile (the ``Invalid FrameType:0`` bug).
-    """
-    coerced = False
-    if vpix_fmt in self._HDR_PIX_FMTS:
-      self.log.info("SDR source has 10/12-bit pix_fmt %s; forcing 8-bit yuv420p output [sdr-no-hdr]." % vpix_fmt)
-      vpix_fmt = "yuv420p"
-      coerced = True
-    if vprofile in self._HDR_PROFILES:
-      replacement = "main" if vprofile.startswith("main") else "high"
-      self.log.info("SDR source had profile %s; forcing %s profile [sdr-no-hdr]." % (vprofile, replacement))
-      vprofile = replacement
-      coerced = True
-      # Profile dropped to 8-bit -> the surface format MUST also be 8-bit
-      # or vpp_qsv will hand the encoder P010 against a Main profile.
-      if vpix_fmt is None or vpix_fmt in self._HDR_PIX_FMTS:
-        vpix_fmt = "yuv420p"
-    # 10-bit SDR source with no configured pix_fmt whitelist: pin 8-bit
-    # explicitly so downstream filters don't fall back to the source.
-    if vpix_fmt is None and source_pix_fmt in self._HDR_PIX_FMTS:
-      self.log.info("SDR source has 10/12-bit pix_fmt %s and no output pix_fmt set; forcing 8-bit yuv420p output [sdr-no-hdr]." % source_pix_fmt)
-      vpix_fmt = "yuv420p"
-      coerced = True
-    if coerced and vcodec == "copy" and vcodecs:
-      vcodec = vcodecs[0]
-    bit_depth = pix_fmts.get(vpix_fmt, bit_depth) or 8
-    if bit_depth > 8:
-      bit_depth = 8
-    return vpix_fmt, vprofile, vcodec, bit_depth, coerced
 
   # Profile-specific limits on b-frames and reference frames. When the user
   # configured a higher count we cap to the spec maximum and INFO-log it so
