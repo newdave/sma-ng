@@ -57,6 +57,25 @@ def _normalise_instance(inst):
   return {k: _stringify(v) for k, v in inst.items() if v is not None and str(v) != ""}
 
 
+def _apply_defaults(instances):
+  """Pop ``_defaults`` from a service-type dict and merge it onto siblings.
+
+  Mirrors ``Services._apply_service_defaults`` in resources/config_schema.py
+  so deploy stamping (which reads local.yml directly without going through
+  the pydantic schema) sees the same cascaded shape.
+  """
+  if not isinstance(instances, dict):
+    return instances
+  defaults = instances.pop("_defaults", None)
+  if not isinstance(defaults, dict):
+    return instances
+  for inst_name, inst_data in list(instances.items()):
+    if not isinstance(inst_data, dict):
+      continue
+    instances[inst_name] = {**defaults, **inst_data}
+  return instances
+
+
 path = sys.argv[1] if len(sys.argv) > 1 else "setup/local.yml"
 
 out = {}
@@ -68,6 +87,7 @@ try:
       continue
     if not isinstance(instances, dict):
       continue
+    instances = _apply_defaults(instances)
     type_out = {}
     for inst_name, inst_data in instances.items():
       norm = _normalise_instance(inst_data)

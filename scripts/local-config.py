@@ -89,6 +89,25 @@ def _resolve_service(services, stype, instance, key):
   return ""
 
 
+def _apply_defaults_cascade(block):
+  """Pop ``_defaults`` from a sibling-keyed block and merge it onto siblings.
+
+  Same cascade pattern as ``Services._apply_service_defaults`` in the schema
+  and ``_apply_defaults`` in services-json.py. Lets operators DRY-up
+  ``hosts:`` (and ``services.<type>:``) blocks by writing common fields
+  once at the type level instead of repeating per-instance.
+  """
+  if not isinstance(block, dict):
+    return block
+  defaults = block.pop("_defaults", None) if "_defaults" in block else None
+  if not isinstance(defaults, dict):
+    return block
+  for name, child in list(block.items()):
+    if isinstance(child, dict):
+      block[name] = {**defaults, **child}
+  return block
+
+
 def resolve(data, section, key, default):
   if section == "daemon":
     return _str(_iget(data.get("daemon", {}), key)) or default
@@ -97,12 +116,18 @@ def resolve(data, section, key, default):
     stype = service_match.group(1).lower()
     instance = service_match.group(3)
     services = data.get("services") or {}
+    # Cascade _defaults onto the service-type block (idempotent — pops
+    # _defaults, returns same dict).
+    type_block = services.get(stype)
+    if isinstance(type_block, dict):
+      services[stype] = _apply_defaults_cascade(type_block)
     return _resolve_service(services, stype, instance, key) or default
   if section == "deploy":
     return _str(_iget(data.get("deploy") or {}, key)) or default
-  # Host-specific: host override > deploy default
+  # Host-specific: hosts.<section>.<key>  >  hosts._defaults.<key>  >  deploy.<key>
   deploy_val = _str(_iget(data.get("deploy") or {}, key))
-  host_val = _str(_iget((data.get("hosts") or {}).get(section, {}), key))
+  hosts = _apply_defaults_cascade(data.get("hosts") or {})
+  host_val = _str(_iget(hosts.get(section, {}), key))
   if host_val:
     return host_val
   if deploy_val:
