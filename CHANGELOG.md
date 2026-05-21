@@ -1,5 +1,83 @@
 # Changelog
 
+## [3.0.0](https://github.com/newdave/sma-ng/compare/sma-ng-v2.4.0...sma-ng-v3.0.0) (2026-05-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **config:** replace software-fallback bool with fallback-policy enum
+* daemon and Docker runtime configuration no longer reads SMA_* environment variables. Configure daemon settings in sma-ng.yml or explicit CLI flags, and use the renamed non-SMA helper variables for trigger scripts and compose interpolation.
+
+### Features
+
+* **config:** config:show --input &lt;file&gt;, typed-vs-string conflict check ([17649c4](https://github.com/newdave/sma-ng/commit/17649c4aca2b6be0121d5a0140f9f91bed300f27))
+* **config:** config:show/validate default to synthesize; pretty-printed FFmpeg preview ([b291338](https://github.com/newdave/sma-ng/commit/b2913386b50aeba6edde43a4fb7e18258e2dbb19))
+* **config:** nested VAAPISettings overlay + FallbackPolicy.HW_ALT ([ff98415](https://github.com/newdave/sma-ng/commit/ff98415fecf7cbf0dc081e5c14afdf13c845b6a7))
+* **config:** replace software-fallback bool with fallback-policy enum ([d24946a](https://github.com/newdave/sma-ng/commit/d24946aaa228b4abfab12c46d92068b2ec2aa036))
+* **daemon:** expose GET /jobs/&lt;id&gt;/ffmpeg-stderr endpoint ([40f47c3](https://github.com/newdave/sma-ng/commit/40f47c3ee5081d4e14471184b2474dd940f3c234))
+* **daemon:** ingest ffmpeg stderr sidecars into the job DB on failure ([53e0452](https://github.com/newdave/sma-ng/commit/53e04527ba2307f8bb386d57be3996f184bc5499))
+* **daemon:** store ffmpeg stderr blob in the jobs table ([c730af4](https://github.com/newdave/sma-ng/commit/c730af4012cff4ca63895c407b0975335875f1f4))
+* **daemon:** surface gpu_status, capabilities, and fallback counters on /health ([783207b](https://github.com/newdave/sma-ng/commit/783207b236a1cc1903e6678b9e89e1badab85b9b))
+* **deploy:** _defaults cascade for hosts + services; add config:show task ([9e91d06](https://github.com/newdave/sma-ng/commit/9e91d0600a4de8ffd359661118e503abe35afa83))
+* **deploy:** build sma-ng.yml locally and recreate Docker via deploy:remote ([a963a0b](https://github.com/newdave/sma-ng/commit/a963a0b5cc764913046604e7e8064e2fd89b5331))
+* **docker:** declarative /dev/dri permissions via group_add; gate entrypoint GID fix-up ([1b36698](https://github.com/newdave/sma-ng/commit/1b366987cc81ac069091b8b6356f8ea9ac406103))
+* make daemon worker count configurable via sma-ng.yml and SMA_WORKERS ([5fda9be](https://github.com/newdave/sma-ng/commit/5fda9be1a83a05eb82c7bafb70a57df877d7afbc))
+* **media:** hw_alt fallback tier — hevc_qsv -&gt; hevc_vaapi with QSV decode preserved ([457e9fa](https://github.com/newdave/sma-ng/commit/457e9fafcd39a0d35de221f4e60897c44c025181))
+* **media:** ReadSettings reads typed qsv/vaapi fields per active encoder ([71b82d4](https://github.com/newdave/sma-ng/commit/71b82d439127009fb15e52603999d1ddbfdff500))
+* **processor:** add ffmpeg failure taxonomy and parser ([73c3bcf](https://github.com/newdave/sma-ng/commit/73c3bcf70e9abc605ebf47944bdafdcc948469d0))
+* remove SMA env runtime configuration ([fde2b49](https://github.com/newdave/sma-ng/commit/fde2b4991a2d7c39f444ce3ed61c55c6c1094803))
+* **routing:** add daemon.strict-routing to refuse unmatched paths ([e427039](https://github.com/newdave/sma-ng/commit/e427039c90e35493abd1081a134e9188edbbf902))
+* **schema:** codec-parameters list-form + services._defaults cascade ([549cf5c](https://github.com/newdave/sma-ng/commit/549cf5c315c38917d2e19fd0488ef6f27fcec4c3))
+* **schema:** split codec-parameters into qsv/vaapi typed subblocks ([95cae0b](https://github.com/newdave/sma-ng/commit/95cae0b83931c797a6d41904b497b7c1ad5b7e5e))
+* **scripts:** add hardware capability probe ([3f7ea6e](https://github.com/newdave/sma-ng/commit/3f7ea6ec84f23f58e099823ed6ea23390b7a43b1))
+* **scripts:** config:validate — flag misconfigs, unknown keys, encoder leaks ([c61a4d1](https://github.com/newdave/sma-ng/commit/c61a4d133314e9a426577bd44a634efa9f5e5a3e))
+* **transcode:** extend ffmpeg failure classifier with 11 more causes ([b85eb8e](https://github.com/newdave/sma-ng/commit/b85eb8e0fa7522b9ef3c680717d8be63e4b5ac12))
+* **transcode:** structured ffmpeg failure diagnosis with hypotheses ([5290b2f](https://github.com/newdave/sma-ng/commit/5290b2fe11384f14efcc18f84868a3a4bc685924))
+
+
+### Bug Fixes
+
+* **cluster:** preserve approval_status across daemon restarts ([77e5215](https://github.com/newdave/sma-ng/commit/77e52154afb1ca606ffba991d0368996fb9fa27e))
+* **config:** config:show --input survives unreadable sources, reports why ([3578fea](https://github.com/newdave/sma-ng/commit/3578feae861fb6ba145cc0b2c74bf6e997671b8c))
+* **config:** treat bare-int chmod as octal digits, not decimal mode bits ([a465d06](https://github.com/newdave/sma-ng/commit/a465d0689c2238122b19777caa70f4cea952417f))
+* **daemon:** prevent hw probe from creating MagicMock/ directory in tests ([1105604](https://github.com/newdave/sma-ng/commit/1105604aebbdce8374f538a5344e105d3d3e920b))
+* **daemon:** write ffmpeg stderr sidecars to a deterministic path ([86dd8db](https://github.com/newdave/sma-ng/commit/86dd8db4054e56a65d5f09a026a72f226891b016))
+* **deploy:** make services.&lt;type&gt; authoritative against setup/local.yml ([97a682f](https://github.com/newdave/sma-ng/commit/97a682f8eaf288895857d9664bc74d902ee753a1))
+* **deploy:** restore source lib.sh pattern and re-add ffmpeg_dir to init_host_context ([17fef63](https://github.com/newdave/sma-ng/commit/17fef63719e8fc7ae632ddf05d53d3f60c894e47))
+* **diagnose:** classify QSV "Invalid FrameType" as pix_fmt mismatch ([f07ebe7](https://github.com/newdave/sma-ng/commit/f07ebe71a7d0ff86a853a3b6a8569b7ae8f0f4c0))
+* install docker build backend in venv ([9ad8f9f](https://github.com/newdave/sma-ng/commit/9ad8f9fda5121045837129d5105b48b4313ce250))
+* **media:** log media-server refresh failures at WARNING, not exception ([1cadd12](https://github.com/newdave/sma-ng/commit/1cadd12513e09bff7d6ac7af43830379dc1dcb69))
+* **qsv:** force vpix_fmt=yuv420p when SDR coerce drops main10-&gt;main ([aa498f4](https://github.com/newdave/sma-ng/commit/aa498f4fed8e0fb701b2f98b873278c685af649a))
+* **qsv:** translate yuv420p/10le to nv12/p010le for scale_qsv format= ([f2a1809](https://github.com/newdave/sma-ng/commit/f2a1809bc86bba297f761ba83df486d0f2f6cc47))
+* **routing:** fan plex/jellyfin/emby into every routing rule ([c693aa2](https://github.com/newdave/sma-ng/commit/c693aa22ddfab49cfd1e2e0d5118938ce46b17c1))
+* **scripts:** config:show auto-detects source so it works without a deploy ([543d72f](https://github.com/newdave/sma-ng/commit/543d72fac774a82b2b041b523c0b02eb73519c83))
+* switch pg profiles to external db URLs ([9a1b62d](https://github.com/newdave/sma-ng/commit/9a1b62d07252e1bb989fe47241d6e4e88d3e2895))
+* **transcode:** auto -strict experimental for opus/dts in mp4 ([be6c535](https://github.com/newdave/sma-ng/commit/be6c5359318d17d9f988d108d1a2fc6429712077))
+* **transcode:** auto-resample high-rate audio for aac/opus encoders ([4f17f77](https://github.com/newdave/sma-ng/commit/4f17f77bb2e51c679af48310d0d247962a6edfe5))
+* **transcode:** cap b-frames and ref-frames to profile limits ([7c4fc1c](https://github.com/newdave/sma-ng/commit/7c4fc1ca0dc613ef913f1f5cc0e639b0b3b667d6))
+* **transcode:** clamp audio bitrate to source on same-codec re-encode ([251cd05](https://github.com/newdave/sma-ng/commit/251cd0553dbc385acfa753d60547c90a502a10ef))
+* **transcode:** drop attachment streams when output is mp4 ([a8c404a](https://github.com/newdave/sma-ng/commit/a8c404a6875725792df950d6883786fdc9715738))
+* **transcode:** pad QSV surfaces to mod16 and never up-tag SDR as HDR ([c604df8](https://github.com/newdave/sma-ng/commit/c604df8f76cfe1ced5dd81784b19af9a330ae9d7))
+* **transcode:** pin vpp_qsv output format to prevent pink/magenta frames ([fca358c](https://github.com/newdave/sma-ng/commit/fca358c8f2b3fa3c59f269108a9a1cf719f43701))
+* **transcode:** preserve PTS/DTS on VFR Matroska to mp4 remux ([ba667a3](https://github.com/newdave/sma-ng/commit/ba667a32bef47814b75810b32611e9470d59e3b1))
+* **transcode:** preserve QSV GPU pipeline and stop tagging SDR as HDR10 ([a919245](https://github.com/newdave/sma-ng/commit/a91924592c57423bc72c55e9e77c00dd232dc473))
+* **transcode:** skip image subs targeting text-only output codecs ([95cf9cf](https://github.com/newdave/sma-ng/commit/95cf9cf02c7bc92b318f986ca0b029db72844f2f))
+* **transcode:** soft-cap video bitrate at 1.2x source on same-family re-encode ([25a2f7d](https://github.com/newdave/sma-ng/commit/25a2f7db3ec0b57de5f94c9a1bdb2312a8410f29))
+* **transcode:** stop applying HD crf-profiles to 2160p sources ([c749d1f](https://github.com/newdave/sma-ng/commit/c749d1f7cfae97aa6ca67dfa26399b51c663fe3b))
+* **transcode:** use mod-32 alignment for QSV 10-bit output ([19a6c08](https://github.com/newdave/sma-ng/commit/19a6c08768290cbfdbaa1955d1ecb5b6d97146f0))
+* Updates to deployment scripting ([44cf07d](https://github.com/newdave/sma-ng/commit/44cf07d85a3052864e44157b0b6a8dcfe9403fd5))
+
+
+### Documentation
+
+* add QSV pipeline Phase 1 brainstorm, PRP, and task breakdown ([d60415d](https://github.com/newdave/sma-ng/commit/d60415d394a24cb1a15e79a874e0559b2c6043e0))
+* **claude:** carve out exception for in-flight PRPs and task breakdowns ([31abee1](https://github.com/newdave/sma-ng/commit/31abee1aca3e97ce213e738f0b782789dcb0cea1))
+* cover qsv/vaapi typed subblocks + config:show/config:validate tasks ([7f2db8c](https://github.com/newdave/sma-ng/commit/7f2db8ce29cfc9744d9be277e9aa3a1602ba10fc))
+* document Phase 1 — fallback policy, capability probe, /health additions, declarative GPU perms ([19c6c3a](https://github.com/newdave/sma-ng/commit/19c6c3a8c9e84e3686cd6de58dc25d9e98d4cb06))
+* mark completed PRPs/task lists with status banners and tick checklists ([f4450f2](https://github.com/newdave/sma-ng/commit/f4450f27612958ebd2d132c57c9bd405eedba686))
+* **prp:** QSV -&gt; VAAPI fallback tier + nested per-encoder config overrides ([0a30a7a](https://github.com/newdave/sma-ng/commit/0a30a7a71faa663d447b2a8bd6aa9e97bc9aa6f7))
+* prune shipped PRPs, document strict-routing, enforce doc-with-code rule ([6bd34d1](https://github.com/newdave/sma-ng/commit/6bd34d17dbe9ccc3a198b17df34ce794ade9a3d2))
+
 ## [2.4.0](https://github.com/newdave/sma-ng/compare/sma-ng-v2.3.0...sma-ng-v2.4.0) (2026-05-13)
 
 
