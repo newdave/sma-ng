@@ -2129,3 +2129,63 @@ class TestH265VAAPIAdditional:
     opts = codec.parse_options({"codec": "h265vaapi", "device": "vaapi0", "decode_device": "vaapi1"})
     vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
     assert any("hwdownload" in v for v in vf_parts)
+
+
+# ---------------------------------------------------------------------------
+# Wrong-encoder flag filter (commit-pending): the QSV/VAAPI codec classes
+# now emit safe['params'] as individual tokens via _emit_filtered_params;
+# without these filters, a VAAPI-only flag misplaced into video.qsv.codec-
+# parameters (or vice-versa) would land on the wrong ffmpeg command line.
+# ---------------------------------------------------------------------------
+
+
+def test_qsv_codec_strips_vaapi_only_flags_from_params(caplog):
+  from converter.avcodecs import H265QSVCodec
+
+  codec = H265QSVCodec()
+  # Pretend the schema layer let -rc_mode VBR through (it shouldn't, but
+  # operators can hand-edit configs). The QSV codec must strip it.
+  safe = {"params": "-low_power 0 -rc_mode VBR -async_depth 4"}
+  with caplog.at_level("WARNING"):
+    out = codec._emit_filtered_params(safe)
+  assert "-rc_mode" not in out
+  assert "VBR" not in out
+  assert "-low_power" in out
+  assert "-async_depth" in out
+  assert any("rc_mode" in rec.message for rec in caplog.records)
+
+
+def test_vaapi_codec_strips_qsv_only_flags_from_params(caplog):
+  from converter.avcodecs import H265VAAPICodec
+
+  codec = H265VAAPICodec()
+  safe = {"params": "-low_power 0 -rc_mode VBR -extbrc 1"}
+  with caplog.at_level("WARNING"):
+    out = codec._emit_filtered_params(safe)
+  # Wrong-encoder tokens stripped.
+  assert "-low_power" not in out
+  assert "-extbrc" not in out
+  # Valid VAAPI token survives.
+  assert "-rc_mode" in out
+  assert "VBR" in out
+  # WARNING emitted for each stripped flag.
+  msgs = [rec.message for rec in caplog.records]
+  assert any("low_power" in m for m in msgs)
+  assert any("extbrc" in m for m in msgs)
+
+
+def test_qsv_codec_dedups_flags_emitted_by_dedicated_paths():
+  """hw_extbrc emits -extbrc directly; same flag in params must NOT
+  produce a duplicate on the command line."""
+  from converter.avcodecs import H265QSVCodec
+
+  codec = H265QSVCodec()
+  safe = {"params": "-extbrc 1 -low_power 0 -bf 8 -refs 4"}
+  out = codec._emit_filtered_params(safe)
+  # Dedicated emission paths already emit -extbrc, -bf, -refs — strip
+  # them from params to avoid double-emit.
+  assert "-extbrc" not in out
+  assert "-bf" not in out
+  assert "-refs" not in out
+  # But the unique typed flag survives.
+  assert "-low_power" in out
