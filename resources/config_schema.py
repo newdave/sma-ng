@@ -18,9 +18,37 @@ ConfigLoader after validation — see brainstorming/2026-04-26-config-restructur
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+
+
+def _flatten_codec_parameters(value: Any) -> Any:
+  """Accept a YAML list of flag fragments and collapse it to one string.
+
+  Operators frequently want to author ``codec-parameters`` as a list so each
+  flag (or flag pair) sits on its own line for readability, e.g.::
+
+      codec-parameters:
+        - -low_power 0
+        - -async_depth 4
+        - -adaptive_i 1
+        - -adaptive_b 1
+
+  is equivalent to ``"-low_power 0 -async_depth 4 -adaptive_i 1 -adaptive_b 1"``.
+  Strings still parse identically so existing configs are unchanged. ``None``
+  and empty entries are dropped; surrounding whitespace on each entry is
+  trimmed.
+
+  The internal representation stays as a single ``str`` because the runtime
+  reads ``settings.codec_params`` and splits on whitespace anyway.
+  """
+  if isinstance(value, list):
+    return " ".join(str(item).strip() for item in value if item is not None and str(item).strip())
+  return value
+
+
+CodecParameters = Annotated[str, BeforeValidator(_flatten_codec_parameters)]
 
 
 class FallbackPolicy(str, Enum):
@@ -204,7 +232,7 @@ class VAAPISettings(_Base):
   """
 
   preset: str = ""
-  codec_parameters: str = ""
+  codec_parameters: CodecParameters = ""
   look_ahead_depth: int = 0
   global_quality: int = 0
   b_frames: int = -1
@@ -222,7 +250,7 @@ class VideoSettings(_Base):
   crf_profiles_hd: str = ""
   crf_profiles_uhd: str = ""
   preset: str = ""
-  codec_parameters: str = ""
+  codec_parameters: CodecParameters = ""
   dynamic_parameters: bool = False
   max_width: int = 0
   profile: list[str] = Field(default_factory=list)
@@ -253,7 +281,7 @@ class HDRSettings(_Base):
   transfer: list[str] = Field(default_factory=lambda: ["smpte2084"])
   primaries: list[str] = Field(default_factory=lambda: ["bt2020"])
   preset: str = ""
-  codec_parameters: str = ""
+  codec_parameters: CodecParameters = ""
   filter: str = ""
   force_filter: bool = False
   profile: list[str] = Field(default_factory=list)
@@ -535,6 +563,54 @@ class Services(_Base):
   emby: dict[str, EmbyInstance] = Field(default_factory=dict)
   jellyfin: dict[str, JellyfinInstance] = Field(default_factory=dict)
   autoscan: dict[str, AutoscanInstance] = Field(default_factory=dict)
+
+  @model_validator(mode="before")
+  @classmethod
+  def _apply_service_defaults(cls, data: Any) -> Any:
+    """Cascade ``_defaults`` from each service type onto its sibling instances.
+
+    Lets operators DRY up the boilerplate they'd otherwise repeat across
+    every named instance::
+
+        services:
+          sonarr:
+            _defaults:
+              rescan: true
+              force-rename: true
+              in-progress-check: true
+              block-reprocess: false
+            1080p:
+              url: https://sonarr-1080p.example.com
+              apikey: abc
+              path: /mnt/unionfs/Media/TV/1080P
+              profile: rq
+            4k:
+              url: https://sonarr-4k.example.com
+              apikey: def
+              path: /mnt/unionfs/Media/TV/4K
+              profile: hq
+
+    Each named instance dict is merged ON TOP OF the type's ``_defaults``
+    so per-instance values win (URLs, paths, profiles override; common
+    flags like ``rescan: true`` inherit). The ``_defaults`` entry is
+    consumed here and never appears as a real instance — downstream code
+    (stamp_daemon, services-json, readsettings) sees the same fully-
+    expanded shape as today.
+    """
+    if not isinstance(data, dict):
+      return data
+    for _stype, instances in list(data.items()):
+      if not isinstance(instances, dict):
+        continue
+      defaults = instances.pop("_defaults", None)
+      if not isinstance(defaults, dict):
+        continue
+      for inst_name, inst_data in list(instances.items()):
+        if not isinstance(inst_data, dict):
+          continue
+        merged = {**defaults, **inst_data}
+        instances[inst_name] = merged
+    return data
 
 
 # ---------------------------------------------------------------------------

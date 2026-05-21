@@ -257,3 +257,174 @@ def test_tier1_path_unchanged_with_vaapi_overlay(tmp_path: Path, make_media_info
 def test_tier_one_path_byte_identical_with_and_without_vaapi_overlay(tmp_path: Path, make_media_info) -> None:
   """Schema-lane name kept for back-compat — delegates to the T5.3 test."""
   test_tier1_path_unchanged_with_vaapi_overlay(tmp_path, make_media_info)
+
+
+# ---------------------------------------------------------------------------
+# codec-parameters list-form flattening
+#
+# Operators can write codec-parameters as a YAML list (one flag/pair per line)
+# for readability; the schema flattens to a single space-joined str so the
+# runtime that reads settings.codec_params keeps working unchanged.
+# ---------------------------------------------------------------------------
+
+
+def test_codec_parameters_accepts_list_and_flattens() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "base": {
+        "video": {
+          "codec-parameters": [
+            "-low_power 0",
+            "-async_depth 4",
+            "-adaptive_i 1",
+            "-adaptive_b 1",
+          ],
+        },
+      },
+    }
+  )
+  assert cfg.base.video.codec_parameters == "-low_power 0 -async_depth 4 -adaptive_i 1 -adaptive_b 1"
+
+
+def test_codec_parameters_string_form_still_works() -> None:
+  cfg = SmaConfig.model_validate({"base": {"video": {"codec-parameters": "-low_power 0 -async_depth 4"}}})
+  assert cfg.base.video.codec_parameters == "-low_power 0 -async_depth 4"
+
+
+def test_codec_parameters_list_drops_empty_and_none_entries() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "base": {
+        "video": {
+          "codec-parameters": ["-low_power 0", "", None, "  ", "-async_depth 4"],
+        },
+      },
+    }
+  )
+  assert cfg.base.video.codec_parameters == "-low_power 0 -async_depth 4"
+
+
+def test_codec_parameters_list_trims_whitespace_per_entry() -> None:
+  cfg = SmaConfig.model_validate({"base": {"video": {"codec-parameters": ["  -low_power 0  ", "\t-async_depth 4\n"]}}})
+  assert cfg.base.video.codec_parameters == "-low_power 0 -async_depth 4"
+
+
+def test_codec_parameters_list_form_on_hdr_block() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "base": {
+        "hdr": {
+          "codec-parameters": [
+            "-color_primaries bt2020",
+            "-color_trc smpte2084",
+            "-colorspace bt2020nc",
+          ],
+        },
+      },
+    }
+  )
+  assert cfg.base.hdr.codec_parameters == "-color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc"
+
+
+def test_codec_parameters_list_form_on_vaapi_overlay() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "base": {
+        "video": {
+          "vaapi": {
+            "codec-parameters": ["-rc_mode VBR", "-compression_level 4"],
+          },
+        },
+      },
+    }
+  )
+  assert cfg.base.video.vaapi.codec_parameters == "-rc_mode VBR -compression_level 4"
+
+
+def test_codec_parameters_empty_list_is_empty_string() -> None:
+  cfg = SmaConfig.model_validate({"base": {"video": {"codec-parameters": []}}})
+  assert cfg.base.video.codec_parameters == ""
+
+
+# ---------------------------------------------------------------------------
+# Services._defaults cascading overlay
+# ---------------------------------------------------------------------------
+
+
+def test_service_defaults_cascade_onto_instances() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "services": {
+        "sonarr": {
+          "_defaults": {
+            "rescan": True,
+            "force-rename": True,
+            "in-progress-check": True,
+          },
+          "1080p": {
+            "url": "https://sonarr-1080p.example.com",
+            "apikey": "abc",
+          },
+          "4k": {
+            "url": "https://sonarr-4k.example.com",
+            "apikey": "def",
+          },
+        },
+      },
+    }
+  )
+  assert "_defaults" not in cfg.services.sonarr  # consumed by the validator
+  for inst in ("1080p", "4k"):
+    s = cfg.services.sonarr[inst]
+    assert s.rescan is True
+    assert s.force_rename is True
+    assert s.in_progress_check is True
+
+
+def test_instance_field_overrides_service_default() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "services": {
+        "sonarr": {
+          "_defaults": {"rescan": True},
+          "1080p": {
+            "url": "https://x",
+            "rescan": False,  # instance wins
+          },
+        },
+      },
+    }
+  )
+  assert cfg.services.sonarr["1080p"].rescan is False
+
+
+def test_service_without_defaults_still_works() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "services": {
+        "plex": {
+          "davetv": {"url": "http://plex.example.com:32400", "token": "abc"},
+        },
+      },
+    }
+  )
+  assert cfg.services.plex["davetv"].refresh is False  # schema default holds
+
+
+def test_service_defaults_independent_per_type() -> None:
+  cfg = SmaConfig.model_validate(
+    {
+      "services": {
+        "sonarr": {
+          "_defaults": {"rescan": True},
+          "1080p": {"url": "https://sonarr"},
+        },
+        "radarr": {
+          # No _defaults — radarr instances use schema defaults
+          "1080p": {"url": "https://radarr"},
+        },
+      },
+    }
+  )
+  assert cfg.services.sonarr["1080p"].rescan is True
+  assert cfg.services.radarr["1080p"].rescan is True  # schema default = True too
