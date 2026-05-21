@@ -1131,6 +1131,101 @@ class H264CodecAlt(H264Codec):
   codec_name = "x264"
 
 
+import logging as _logging
+
+# Module-level encoder-flag whitelists / blacklists.
+#
+# These are consumed by `HWAccelVideoCodec._emit_filtered_params` so the
+# QSV codec classes can safely emit `safe["params"]` as individual tokens
+# without leaking known VAAPI-only flags, and vice versa. Higher layers
+# (config_schema migration shim, config:validate) catch most leaks
+# earlier, but a defence-in-depth filter here closes the runtime hole
+# for unknown / custom flags that the schema layer doesn't recognise.
+_QSV_ONLY_HW_FLAGS = frozenset(
+  {
+    "-low_power",
+    "-async_depth",
+    "-extbrc",
+    "-b_strategy",
+    "-look_ahead",
+    "-look_ahead_depth",
+    "-adaptive_i",
+    "-adaptive_b",
+    "-p_strategy",
+    "-rdo",
+  }
+)
+
+_VAAPI_ONLY_HW_FLAGS = frozenset(
+  {
+    "-rc_mode",
+    "-compression_level",
+    "-qp",
+  }
+)
+
+_HW_FILTER_LOG = _logging.getLogger("converter.avcodecs.hw-filter")
+
+
+def _tokenise_params(params_str: str) -> list[str]:
+  """Split a free-form codec-parameters string into FFmpeg argv tokens."""
+  if not params_str:
+    return []
+  return params_str.split()
+
+
+def _drop_flag_pairs(tokens: list[str], flags: frozenset[str]) -> list[str]:
+  """Silently drop each ``flag value`` pair where ``flag`` is in ``flags``.
+
+  Used to dedupe flags emitted by dedicated codec-class code paths so
+  they don't appear twice on the ffmpeg command line.
+  """
+  out: list[str] = []
+  i = 0
+  while i < len(tokens):
+    tok = tokens[i]
+    if tok in flags:
+      if i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
+        i += 2
+      else:
+        i += 1
+      continue
+    out.append(tok)
+    i += 1
+  return out
+
+
+def _filter_wrong_encoder_tokens(tokens: list[str], forbidden: frozenset[str], encoder_label: str) -> list[str]:
+  """Drop flag/value pairs whose flag appears in ``forbidden``.
+
+  Logs one WARNING per dropped flag so operators can diagnose silent
+  fallout (e.g. a VAAPI-only ``-rc_mode VBR`` landing in a QSV
+  command line because it got pasted into the wrong subblock).
+  """
+  out: list[str] = []
+  i = 0
+  while i < len(tokens):
+    tok = tokens[i]
+    if tok in forbidden:
+      value = ""
+      if i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
+        value = " " + tokens[i + 1]
+        i += 1
+      _HW_FILTER_LOG.warning(
+        "Discarding `%s%s` from %s command line — this flag is not valid for the active encoder; "
+        "move it into the matching encoder subblock (video.qsv / video.vaapi) "
+        "in setup/local.yml. [hw-flag-filter]",
+        tok,
+        value,
+        encoder_label,
+      )
+      i += 1
+      continue
+    out.append(tok)
+    i += 1
+  return out
+
+
 class HWAccelVideoCodec:
   """Mixin providing shared parse/produce helpers for hardware-accelerated video codecs.
 
@@ -1139,6 +1234,10 @@ class HWAccelVideoCodec:
       hw_quality_key: str - safe dict key for quality value ('qp' or 'gq')
       hw_quality_flag: str - FFmpeg flag ('-qp' or '-global_quality')
       hw_quality_range: tuple(int, int) - valid (min, max) range for quality value
+      hw_forbidden_flags: frozenset[str] - flag tokens from the OTHER hw
+          encoder that must NOT reach this encoder's command line. The
+          base class sets this to the empty set; QSV/VAAPI subclasses
+          override.
   """
 
   hw_prefix = ""
@@ -1149,8 +1248,43 @@ class HWAccelVideoCodec:
   hw_presets = None
   hw_profiles = None
   hw_extbrc = False
+  hw_forbidden_flags: frozenset[str] = frozenset()
+  # Flags this codec class emits via dedicated code paths (hw_extbrc,
+  # the look-ahead block, b_frames, ref_frames, etc.). They MUST be
+  # stripped from safe['params'] before `_emit_filtered_params` emits
+  # the rest, otherwise the same flag appears twice on the ffmpeg
+  # command line.
+  hw_params_dedup_flags: frozenset[str] = frozenset()
   scale_filter: str = ""
   default_fmt: str = ""
+
+  def _emit_filtered_params(self, safe: dict) -> list[str]:
+    """Return ``safe['params']`` as a token list with wrong-encoder
+    flags stripped AND flags-already-emitted-by-dedicated-paths stripped.
+
+    Called by QSV/VAAPI subclasses whose ``codec_params`` is ``None``
+    (so the parent ``H264Codec`` / ``H265Codec`` / ``AV1Codec``
+    ``-x264-params``-style emission path is bypassed) but which still
+    want the typed-field flags from ``ReadSettings._project_qsv`` /
+    ``_project_vaapi`` to reach ffmpeg.
+
+    Two filter passes apply:
+
+    * ``hw_forbidden_flags`` — wrong-encoder tokens (logged as WARN).
+    * ``hw_params_dedup_flags`` — flags this class already emits via
+      dedicated code paths (e.g. ``-extbrc`` via ``hw_extbrc``,
+      ``-bf`` via the b_frames block). Silently skipped to avoid
+      double-emission.
+    """
+    params_str = safe.get("params") or ""
+    if not params_str:
+      return []
+    tokens = _tokenise_params(params_str)
+    if self.hw_forbidden_flags:
+      tokens = _filter_wrong_encoder_tokens(tokens, self.hw_forbidden_flags, self.__class__.__name__)
+    if self.hw_params_dedup_flags:
+      tokens = _drop_flag_pairs(tokens, self.hw_params_dedup_flags)
+    return tokens
 
   def _hw_parse_preset(self, safe):
     """Validate preset against hw_presets whitelist, remove if unsupported."""
@@ -1318,6 +1452,10 @@ class VAAPIVideoCodec(HWAccelVideoCodec):
   hw_prefix = "vaapi"
   hw_quality_default = 23
   default_fmt = "nv12"
+  # Drop QSV-only tokens before passing safe['params'] to hevc_vaapi /
+  # h264_vaapi / av1_vaapi — they are not valid VAAPI options and would
+  # produce "Error opening output files" at encoder init.
+  hw_forbidden_flags = _QSV_ONLY_HW_FLAGS
 
   def _hw_device_opts(self, safe, hwdownload_filter="hwdownload"):
     optlist = []
@@ -1377,6 +1515,7 @@ class H264VAAPICodec(VAAPIVideoCodec, H264Codec):
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
     optlist.extend(self._hw_vaapi_scale_opts(safe))
+    optlist.extend(self._emit_filtered_params(safe))
     return optlist
 
 
@@ -1389,6 +1528,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
   ffmpeg_codec_name = "h264_qsv"
   scale_filter = "scale_qsv"
   hw_prefix = "qsv"
+  hw_forbidden_flags = _VAAPI_ONLY_HW_FLAGS
   hw_quality_key = "gq"
   hw_quality_flag = "-global_quality"
   hw_quality_range = (1, 51)
@@ -1396,6 +1536,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
   hw_presets = ("veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow")
   hw_profiles = ("baseline", "main", "high", "high10")
   hw_extbrc = True
+  hw_params_dedup_flags = frozenset({"-extbrc", "-look_ahead", "-look_ahead_depth", "-bf", "-refs"})
   codec_params = None
   encoder_options = H264Codec.encoder_options.copy()
   encoder_options.update(
@@ -1440,6 +1581,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
     elif fmtstr:
       optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
     optlist.extend(super()._codec_specific_produce_ffmpeg_list(safe, stream))
+    optlist.extend(self._emit_filtered_params(safe))
     look_ahead_depth = safe.get("look_ahead_depth", 0)
     if look_ahead_depth and look_ahead_depth > 0:
       optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth)])
@@ -1599,6 +1741,11 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
   ffmpeg_codec_name = "hevc_qsv"
   scale_filter = "scale_qsv"
   hw_prefix = "qsv"
+  hw_forbidden_flags = _VAAPI_ONLY_HW_FLAGS
+  # Dedicated emission paths in this class' _codec_specific_produce_ffmpeg_list
+  # already emit these. Strip from params to avoid double-emit on the
+  # ffmpeg command line.
+  hw_params_dedup_flags = frozenset({"-extbrc", "-look_ahead", "-look_ahead_depth", "-bf", "-refs"})
   hw_quality_key = "gq"
   hw_quality_flag = "-global_quality"
   hw_quality_range = (1, 51)
@@ -1650,6 +1797,13 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
     elif fmtstr:
       optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
     optlist.extend(super()._codec_specific_produce_ffmpeg_list(safe, stream))
+    # Emit the assembled qsv typed-field flag string (low-power, async-depth,
+    # extbrc, adaptive-i/b, p-strategy, rdo, etc.) as individual tokens.
+    # codec_params=None gates out the parent class's `-x265-params` style
+    # emission, so without this hook those flags would be silently dropped.
+    # Wrong-encoder flags (anything in _VAAPI_ONLY_HW_FLAGS) are stripped
+    # with a one-time WARNING.
+    optlist.extend(self._emit_filtered_params(safe))
     look_ahead_depth = safe.get("look_ahead_depth", 0)
     if look_ahead_depth and look_ahead_depth > 0:
       # `-extra_hw_frames` is a device/hwframe-context option, not an encoder
@@ -1752,6 +1906,7 @@ class H265VAAPICodec(VAAPIVideoCodec, H265Codec):
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
     optlist.extend(self._hw_vaapi_scale_opts(safe))
+    optlist.extend(self._emit_filtered_params(safe))
     return optlist
 
 
@@ -2055,6 +2210,8 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
   ffmpeg_codec_name = "av1_qsv"
   scale_filter = "scale_qsv"
   hw_prefix = "qsv"
+  hw_forbidden_flags = _VAAPI_ONLY_HW_FLAGS
+  hw_params_dedup_flags = frozenset({"-extbrc", "-look_ahead", "-look_ahead_depth", "-bf", "-refs"})
   hw_quality_key = "gq"
   hw_quality_flag = "-global_quality"
   hw_quality_range = (1, 51)
@@ -2093,6 +2250,7 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
       optlist.extend(scale)
     elif fmtstr:
       optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
+    optlist.extend(self._emit_filtered_params(safe))
     look_ahead_depth = safe.get("look_ahead_depth", 0)
     if look_ahead_depth and look_ahead_depth > 0:
       optlist.extend(["-look_ahead", "1", "-look_ahead_depth", str(look_ahead_depth)])
@@ -2136,6 +2294,7 @@ class AV1VAAPICodec(VAAPIVideoCodec, AV1Codec):
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
     optlist.extend(self._hw_vaapi_scale_opts(safe))
+    optlist.extend(self._emit_filtered_params(safe))
     return optlist
 
 
@@ -2157,6 +2316,7 @@ class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
   ffmpeg_codec_name = "vp9_qsv"
   scale_filter = "scale_qsv"
   hw_prefix = "qsv"
+  hw_forbidden_flags = _VAAPI_ONLY_HW_FLAGS
   hw_quality_key = "gq"
   hw_quality_flag = "-global_quality"
   hw_quality_range = (1, 255)
