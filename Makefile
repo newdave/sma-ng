@@ -135,7 +135,7 @@ remote-make: ## Legacy alias: set REMOTE_TASK from REMOTE_MAKE and run remote-ta
 # ---------------------------------------------------------------------------
 
 TAG    ?= sma-ng:local
-FFMPEG_VERSION ?= 8.1
+FFMPEG_VERSION ?= 8.1.1
 
 docker-build: ## Build the Docker image locally (TAG=sma-ng:local FFMPEG_VERSION=8.0 to override)
 	$(call MISE_OR_DIRECT,build:docker, \
