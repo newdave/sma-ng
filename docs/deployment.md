@@ -389,6 +389,37 @@ Docker-specific tasks require `docker_profile` to be set per host (or under
 `deploy:`) in `setup/local.yml`. Use `HOST=<host>` to target one node, or
 `HOSTS="<host1> <host2>"` to target multiple nodes.
 
+### Fallback Policy Rollout
+
+`base.converter.fallback-policy` controls how aggressively the ladder in
+`_attempt_ladder` retries a failed transcode. The four tiers, in order, are
+`hw` → `hw_alt` → `sw_decode` → `full_sw`. See
+[`docs/hardware-acceleration.md`](hardware-acceleration.md#fallback-policy-replaces-the-deprecated-boolean-software-fallback)
+for the per-policy behaviour table.
+
+Recommended phased rollout when introducing `hw_alt` to a cluster:
+
+1. **Observation window — `hw_alt`** (one to two weeks): set
+   `base.converter.fallback-policy: hw_alt` in `setup/local.yml` and run
+   `mise run deploy:config && mise run deploy:reload`. The ladder will retry
+   tier-1 QSV failures on the same-vendor VAAPI encoder (10-bit preserved) and
+   stop there. No software fallback runs, so any unrecovered job still surfaces
+   as a failure — making the new tier easy to evaluate.
+2. **Promote — `aggressive`**: once `hw_alt` recovers cleanly across the
+   workload, promote to `fallback-policy: aggressive` to enable the full
+   `hw → hw_alt → sw_decode → full_sw` ladder.
+
+To confirm the new tier is exercising correctly, grep the daemon log for the
+single-line `ffmpeg.attempts` record emitted at job completion. A successful
+hw_alt recovery looks like:
+
+```text
+ffmpeg.attempts ... attempts=[hw failure_class=runtime_error, hw_alt failure_class=null] result=ok
+```
+
+A `result=ok` with no `hw_alt` entry means tier 1 succeeded — that is the
+expected steady state for most jobs and should not generate log noise.
+
 ---
 
 ## Docker

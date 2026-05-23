@@ -61,7 +61,8 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `GET`  | `/jobs`                          | Yes  | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
 | `GET`  | `/jobs/<id>`                     | Yes  | Get specific job (includes `progress` when running)                     |
 | `GET`  | `/configs`                       | Yes  | Config mappings and status                                              |
-| `GET`  | `/metrics`                       | No   | Cluster metrics web page (PostgreSQL required)                          |
+| `GET`  | `/metrics`                       | No   | Prometheus text exposition (industry-convention path)                   |
+| `GET`  | `/dashboard/metrics`             | No   | Cluster metrics web page (PostgreSQL required)                          |
 | `GET`  | `/api/metrics`                   | Yes  | Metrics JSON. Query: `?window=24h\|7d\|30d\|all` (PostgreSQL required)  |
 | `GET`  | `/stats`                         | Yes  | Job statistics by status                                                |
 | `GET`  | `/scan`                          | Yes  | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv`               |
@@ -97,6 +98,45 @@ finding kinds, configuration knobs, and auto-fix safety semantics.
 Node admin API route:
 
 - `POST /admin/nodes/<node_id>/<action>` where action is one of `approve`, `reject`, `restart`, `shutdown`, `delete`
+
+---
+
+## Prometheus Exposition
+
+`GET /metrics` returns Prometheus text exposition (industry-convention path; matches the default `metrics_path`
+in `prometheus.yml`'s `scrape_configs`). The HTML cluster-metrics dashboard previously served at `/metrics`
+moved to `/dashboard/metrics` — **this is a breaking change**; update any bookmarks or external links.
+
+Metrics exposed today (label cardinality is bounded; new labels require updating
+`tests/test_metrics_prom.py::test_label_sets_match_budget`):
+
+| Metric                              | Type      | Labels                                       | Notes                                                                                |
+| ----------------------------------- | --------- | -------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `sma_build_info`                    | gauge     | `version`, `node_id`                         | Always 1; labels carry build metadata for `join`-style PromQL queries.               |
+| `sma_jobs_total`                    | counter   | `status`                                     | Terminal job count by `completed` / `failed` / `cancelled`.                          |
+| `sma_job_duration_seconds`          | histogram | `status`                                     | Wall-clock from worker claim to terminal state. Buckets up to 7200s.                 |
+| `sma_fallback_transitions_total`    | counter   | `from_tier`, `to_tier`, `failure_class`      | Ladder transitions from `MediaProcessor._attempt_ladder`.                            |
+| `sma_failures_total`                | counter   | `failure_category`, `failure_cause`          | Failure count by operator category (`config`/`source_media`/`hardware`/`disk`/`system`/`unknown`) and raw cause. |
+| `sma_jobs_enqueued_total`           | counter   | `request_source`, `request_profile`          | Jobs accepted into the queue. Source is one of `sonarr`/`radarr`/`webhook`/`scan`/`audit`/`unknown`; profile is the resolved profile name or `none`. |
+| `sma_jobs_in_flight`                | gauge     | `node_id`                                    | Currently-running jobs (inc/dec at worker boundary).                                 |
+| `sma_queue_depth`                   | gauge     | `node_id`                                    | Pending + queued count — sampled at scrape via `Gauge.set_function(pending_count)`.  |
+| `sma_bytes_saved_bytes_total`       | counter   | `encoder_backend`                            | Cumulative bytes reclaimed by transcodes (per-job clamped to ≥ 0), keyed by encoder backend. |
+| `sma_bytes_grown_bytes_total`       | counter   | `encoder_backend`                            | Cumulative bytes added when transcode output exceeded the source, keyed by encoder backend. |
+| `sma_source_seconds_transcoded_total` | counter | `encoder_backend`                            | Cumulative source container seconds transcoded, keyed by encoder backend.            |
+
+Default `process_*` and `python_*` collectors are exposed automatically by `prometheus_client`.
+
+The metric inventory is intentionally narrow today; per-encoder / per-profile / per-failure-category labels
+land in follow-up PRs as the corresponding `jobs` columns ship. See `docs/prps/metrics-expansion.md`.
+
+Sample Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: sma-ng
+    static_configs:
+      - targets: ["sma-master:8585"]
+```
 
 ---
 
@@ -154,7 +194,8 @@ curl -H "X-API-Key: SECRET" ...
 curl -H "Authorization: Bearer SECRET" ...
 ```
 
-Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/metrics`, `/health`, `/status`, `/docs`, `/favicon.png`
+Public endpoints (no auth required): `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, `/metrics`, `/health`,
+`/status`, `/docs`, `/favicon.png`
 
 ---
 

@@ -983,6 +983,129 @@ def _make_db_with_mock_pool(mock_conn=None, mock_cursor=None):
   return db, pool_mock, mock_conn, mock_cursor
 
 
+class TestPostgreSQLMetricsExpansionAggregates:
+  """get_metrics emits the new savings / encoders / failures shape."""
+
+  def test_get_metrics_returns_new_kpi_keys_and_breakdowns(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    # The metrics query runs 4 sub-queries in order: snapshot, kpis, encoders, failures, timeseries, nodes.
+    # Provide fetchone for snap + kpi + timeseries-not-used; fetchall for encoders + failures + timeseries + nodes.
+    cur.fetchone.side_effect = [
+      # snapshot (pending/running/total)
+      {"pending": 3, "running": 1, "total": 100},
+      # KPI row including the three new sums
+      {
+        "completed": 90,
+        "failed": 8,
+        "cancelled": 2,
+        "failure_rate_pct": 8.16,
+        "avg_duration_seconds": 120.5,
+        "p95_duration_seconds": 300.0,
+        "avg_compression_pct": 35.0,
+        "bytes_saved_total": 123_456_789,
+        "bytes_grown_total": 45_000,
+        "minutes_transcoded_total": 1234.5,
+      },
+    ]
+    cur.fetchall.side_effect = [
+      # encoders breakdown
+      [
+        {"encoder_backend": "qsv", "count": 70, "bytes_saved": 100_000_000, "minutes": 900.0},
+        {"encoder_backend": "vaapi", "count": 15, "bytes_saved": 20_000_000, "minutes": 250.0},
+        {"encoder_backend": "unknown", "count": 5, "bytes_saved": 3_456_789, "minutes": 84.5},
+      ],
+      # failures breakdown
+      [
+        {"failure_category": "hardware", "count": 5},
+        {"failure_category": "config", "count": 2},
+        {"failure_category": "unknown", "count": 1},
+      ],
+      # timeseries (24h window)
+      [],
+      # nodes breakdown
+      [],
+    ]
+
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    result = db.get_metrics(window="24h")
+
+    assert result["kpis"]["bytes_saved_total"] == 123_456_789
+    assert result["kpis"]["bytes_grown_total"] == 45_000
+    assert result["kpis"]["minutes_transcoded_total"] == 1234.5
+    assert result["encoders"]["qsv"]["count"] == 70
+    assert result["encoders"]["qsv"]["bytes_saved"] == 100_000_000
+    assert result["encoders"]["vaapi"]["minutes"] == 250.0
+    assert result["failures"]["hardware"]["count"] == 5
+    assert result["failures"]["config"]["count"] == 2
+
+  def test_get_metrics_handles_null_aggregates(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchone.side_effect = [
+      {"pending": 0, "running": 0, "total": 0},
+      {
+        "completed": 0,
+        "failed": 0,
+        "cancelled": 0,
+        "failure_rate_pct": None,
+        "avg_duration_seconds": None,
+        "p95_duration_seconds": None,
+        "avg_compression_pct": None,
+        "bytes_saved_total": None,
+        "bytes_grown_total": None,
+        "minutes_transcoded_total": None,
+      },
+    ]
+    cur.fetchall.side_effect = [[], [], [], []]
+
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    result = db.get_metrics(window="24h")
+
+    assert result["kpis"]["bytes_saved_total"] == 0
+    assert result["kpis"]["bytes_grown_total"] == 0
+    assert result["kpis"]["minutes_transcoded_total"] == 0.0
+    assert result["encoders"] == {}
+    assert result["failures"] == {}
+
+
+class TestPostgreSQLMetricsExpansionMigration:
+  """The metrics-expansion columns are ALTERed into the jobs table idempotently."""
+
+  def test_init_db_alters_every_metrics_expansion_column(self):
+    from unittest.mock import MagicMock, patch
+
+    from resources.daemon.db import _METRICS_EXPANSION_COLUMNS
+
+    psycopg2_mock = MagicMock()
+    pool_mock = MagicMock()
+    psycopg2_mock.pool.ThreadedConnectionPool.return_value = pool_mock
+    psycopg2_mock.extras.RealDictCursor = object()
+
+    cur = MagicMock()
+    cur.fetchone.return_value = None
+    cur.fetchall.return_value = []
+    cur.rowcount = 0
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__ = lambda _s: cur
+    conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    pool_mock.getconn.return_value = conn
+
+    with patch.dict(
+      "sys.modules",
+      {"psycopg2": psycopg2_mock, "psycopg2.pool": psycopg2_mock.pool, "psycopg2.extras": psycopg2_mock.extras},
+    ):
+      with patch.object(PostgreSQLJobDatabase, "_reset_running_jobs"):
+        PostgreSQLJobDatabase("postgresql://mock/test")
+
+    statements = [call.args[0] for call in cur.execute.call_args_list if call.args]
+    for col_name, _sqlite_type, pg_type in _METRICS_EXPANSION_COLUMNS:
+      needle = "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS %s %s" % (col_name, pg_type)
+      assert any(needle in stmt for stmt in statements), "Expected migration not emitted for column %r (%s)" % (col_name, pg_type)
+
+
 class TestPostgreSQLJobDatabase:
   """Unit tests for PostgreSQLJobDatabase with mocked psycopg2."""
 
@@ -3653,8 +3776,17 @@ class TestPGGetMetricsMocked:
       "avg_duration_seconds": 120.5,
       "p95_duration_seconds": 600.0,
       "avg_compression_pct": 35.5,
+      "bytes_saved_total": 50_000_000,
+      "bytes_grown_total": 1_000_000,
+      "minutes_transcoded_total": 500.0,
     }
     cur.fetchone.side_effect = [snap, kpi]
+    encoders_rows = [
+      {"encoder_backend": "qsv", "count": 70, "bytes_saved": 45_000_000, "minutes": 480.0},
+    ]
+    failures_rows = [
+      {"failure_category": "hardware", "count": 3},
+    ]
     if wdef:
       ts_rows = [
         {
@@ -3672,19 +3804,18 @@ class TestPGGetMetricsMocked:
           "avg_duration_seconds": 100.0,
         },
       ]
-      cur.fetchall.side_effect = [ts_rows, node_rows]
+      cur.fetchall.side_effect = [encoders_rows, failures_rows, ts_rows, node_rows]
     else:
-      cur.fetchall.side_effect = [
-        [
-          {
-            "node_id": "n1",
-            "node_name": "master",
-            "completed": 60,
-            "failed": 3,
-            "avg_duration_seconds": None,
-          }
-        ]
+      node_rows = [
+        {
+          "node_id": "n1",
+          "node_name": "master",
+          "completed": 60,
+          "failed": 3,
+          "avg_duration_seconds": None,
+        }
       ]
+      cur.fetchall.side_effect = [encoders_rows, failures_rows, node_rows]
 
   def test_get_metrics_24h_window(self):
     db, _, _, cur = _make_db_with_mock_pool()
@@ -3724,9 +3855,12 @@ class TestPGGetMetricsMocked:
       "avg_duration_seconds": None,
       "p95_duration_seconds": None,
       "avg_compression_pct": None,
+      "bytes_saved_total": None,
+      "bytes_grown_total": None,
+      "minutes_transcoded_total": None,
     }
     cur.fetchone.side_effect = [snap, kpi]
-    cur.fetchall.side_effect = [[], []]
+    cur.fetchall.side_effect = [[], [], [], []]
     out = db.get_metrics(window="24h")
     # All null fields stay null in the output, not coerced to 0.0
     assert out["kpis"]["failure_rate_pct"] is None
@@ -3743,9 +3877,14 @@ class TestPGGetMetricsMocked:
       "avg_duration_seconds": None,
       "p95_duration_seconds": None,
       "avg_compression_pct": None,
+      "bytes_saved_total": None,
+      "bytes_grown_total": None,
+      "minutes_transcoded_total": None,
     }
     cur.fetchone.side_effect = [snap, kpi]
     cur.fetchall.side_effect = [
+      [],  # encoders breakdown
+      [],  # failures breakdown
       [],  # timeseries
       [
         {

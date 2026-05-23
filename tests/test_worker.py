@@ -134,7 +134,7 @@ class TestConversionWorkerProcessJob:
     worker = _make_worker(job_db=db)
     job = {"id": 1, "path": str(tmp_path / "missing.mkv"), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(1, "Path does not exist")
+    db.fail_job.assert_called_once_with(1, "Path does not exist", failure_category="source_media", failure_cause="path_missing")
 
   def test_skips_cancelled_job_before_start(self, tmp_path):
     media = tmp_path / "movie.mkv"
@@ -170,7 +170,7 @@ class TestConversionWorkerProcessJob:
     db = mock.MagicMock()
     db.get_job.return_value = {"status": "running"}
     worker = _make_worker(job_db=db)
-    worker._run_conversion = mock.MagicMock(return_value=True)
+    worker._run_conversion = mock.MagicMock(return_value=(True, None, None))
     job = {"id": 4, "path": str(media), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
     db.complete_job.assert_called_once()
@@ -183,10 +183,10 @@ class TestConversionWorkerProcessJob:
     db = mock.MagicMock()
     db.get_job.return_value = {"status": "running"}
     worker = _make_worker(job_db=db)
-    worker._run_conversion = mock.MagicMock(return_value=False)
+    worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
     job = {"id": 5, "path": str(media), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(5, "Conversion process failed")
+    db.fail_job.assert_called_once_with(5, "Conversion process failed", failure_category="system", failure_cause="process_failed")
     db.complete_job.assert_not_called()
 
   def test_does_not_overwrite_cancelled_status_after_failed_conversion(self, tmp_path):
@@ -200,7 +200,7 @@ class TestConversionWorkerProcessJob:
       {"status": "cancelled"},
     ]
     worker = _make_worker(job_db=db)
-    worker._run_conversion = mock.MagicMock(return_value=False)
+    worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
     job = {"id": 6, "path": str(media), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
     db.fail_job.assert_not_called()
@@ -229,7 +229,7 @@ class TestConversionWorkerProcessJob:
 
     def fake_run(job_id, path, config, args):
       captured["args"] = args
-      return True
+      return (True, None, None)
 
     worker._run_conversion = fake_run
     job = {"id": 8, "path": str(media), "config": "/cfg.ini", "args": '["-tmdb", "603"]'}
@@ -244,7 +244,7 @@ class TestConversionWorkerProcessJob:
     worker._run_conversion = mock.MagicMock()
     job = {"id": 8, "path": str(media), "config": "/cfg.ini", "args": '["-tmdb", '}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(8, "Invalid job args")
+    db.fail_job.assert_called_once_with(8, "Invalid job args", failure_category="config", failure_cause="invalid_args")
     worker._run_conversion.assert_not_called()
     assert worker.current_job_id is None
 
@@ -258,7 +258,7 @@ class TestConversionWorkerProcessJob:
 
     def fake_run(job_id, path, config, args):
       captured["args"] = args
-      return True
+      return (True, None, None)
 
     worker._run_conversion = fake_run
     job = {"id": 9, "path": str(media), "config": "/cfg.ini", "args": None}
@@ -271,7 +271,7 @@ class TestConversionWorkerProcessJob:
     db = mock.MagicMock()
     db.get_job.return_value = {"status": "running"}
     worker = _make_worker(job_db=db)
-    worker._run_conversion = mock.MagicMock(return_value=True)
+    worker._run_conversion = mock.MagicMock(return_value=(True, None, None))
     job = {"id": 10, "path": str(media), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
     assert worker.current_job_id is None
@@ -360,10 +360,10 @@ class TestIngestFfmpegStderrSidecars:
     db = mock.MagicMock()
     db.get_job.return_value = {"status": "running"}
     worker = _make_worker(job_db=db)
-    worker._run_conversion = mock.MagicMock(return_value=False)
+    worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
     worker.process_job({"id": 8, "path": str(media), "config": "/cfg.ini", "args": None})
 
-    db.fail_job.assert_called_once_with(8, "Conversion process failed")
+    db.fail_job.assert_called_once_with(8, "Conversion process failed", failure_category="system", failure_cause="process_failed")
     db.update_job_ffmpeg_stderr.assert_called_once()
     args, _ = db.update_job_ffmpeg_stderr.call_args
     assert args[0] == 8
@@ -411,7 +411,7 @@ class TestRunConversionInner:
     proc = _make_fake_process([], returncode=0)
     with mock.patch("subprocess.Popen", return_value=proc):
       result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
-    assert result is True
+    assert result[0] is True
 
   def test_returns_false_on_nonzero_exit(self, tmp_path):
     media = tmp_path / "movie.mkv"
@@ -420,7 +420,7 @@ class TestRunConversionInner:
     proc = _make_fake_process([], returncode=1)
     with mock.patch("subprocess.Popen", return_value=proc):
       result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
-    assert result is False
+    assert result[0] is False
 
   def test_returns_false_on_timeout(self, tmp_path):
     import subprocess as _subprocess
@@ -433,7 +433,7 @@ class TestRunConversionInner:
     proc.wait.side_effect = _subprocess.TimeoutExpired(cmd="manual.py", timeout=10)
     with mock.patch("subprocess.Popen", return_value=proc):
       result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
-    assert result is False
+    assert result[0] is False
     proc.kill.assert_called_once()
 
   def test_returns_false_on_popen_exception(self, tmp_path):
@@ -442,7 +442,7 @@ class TestRunConversionInner:
     worker = _make_worker()
     with mock.patch("subprocess.Popen", side_effect=OSError("no such file")):
       result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
-    assert result is False
+    assert result[0] is False
 
   def test_prepends_ffmpeg_dir_to_path(self, tmp_path):
     media = tmp_path / "movie.mkv"
@@ -471,7 +471,7 @@ class TestRunConversionInner:
     proc = _make_fake_process([duration_line, progress_line], returncode=0)
     with mock.patch("subprocess.Popen", return_value=proc):
       result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
-    assert result is True
+    assert result[0] is True
 
   def test_completion_log_uses_final_output_marker(self, tmp_path):
     """When manual.py emits SMA_FINAL_OUTPUT, the worker's completion
@@ -486,7 +486,7 @@ class TestRunConversionInner:
     proc = _make_fake_process([f"SMA_FINAL_OUTPUT: {final}"], returncode=0)
     with mock.patch("subprocess.Popen", return_value=proc):
       result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
-    assert result is True
+    assert result[0] is True
     completion_calls = [c for c in config_logger.info.call_args_list if "completed successfully" in str(c)]
     assert completion_calls, "expected a 'completed successfully' log line"
     assert final in str(completion_calls[-1])
@@ -522,7 +522,7 @@ class TestRunConversionInner:
       with mock.patch("resources.daemon.worker.time.monotonic", side_effect=[0.0, 10.0]):
         result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
 
-    assert result is True
+    assert result[0] is True
 
     progress_logs = [call.args[0] for call in config_logger.info.call_args_list if call.args and isinstance(call.args[0], str) and call.args[0].startswith("Progress: ")]
     assert progress_logs
@@ -542,7 +542,7 @@ class TestRunConversionInner:
     proc = _make_fake_process(["", "   ", ""], returncode=0)
     with mock.patch("subprocess.Popen", return_value=proc):
       result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
-    assert result is True
+    assert result[0] is True
 
   def test_cleans_up_job_processes_on_completion(self, tmp_path):
     media = tmp_path / "movie.mkv"
@@ -620,7 +620,7 @@ class TestConversionWorkerRun:
     db.claim_next_job.side_effect = claim_side_effect
     db.get_job.return_value = {"status": "running"}
     worker = _make_worker(job_db=db, lock_mgr=lock_mgr)
-    worker._run_conversion = mock.MagicMock(return_value=True)
+    worker._run_conversion = mock.MagicMock(return_value=(True, None, None))
     worker.job_event.set()
     worker.run()
     db.complete_job.assert_called_once()
@@ -781,7 +781,7 @@ class TestConversionWorkerChainWake:
       worker.running = False
 
     worker.process_job = mock.MagicMock(side_effect=stop_after_one_pass)
-    worker.job_event.wait = mock.MagicMock(return_value=True)
+    worker.job_event.wait = mock.MagicMock(return_value=(True, None, None))
     worker.run()
     worker.pool.notify_one.assert_called()
 

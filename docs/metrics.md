@@ -14,8 +14,12 @@ to enable. In standalone (in-memory) mode the metrics page shows an
 - **Dashboard widget**: The main dashboard (`/dashboard`) shows a 4-card KPI strip
   (throughput, avg duration, failure rate, compression) pulled from the last 24 hours
   when PostgreSQL is connected.
-- **Full metrics page**: Navigate to `/metrics` for interactive charts with a time-window
-  selector (24h / 7d / 30d / all-time).
+- **Full metrics page**: Navigate to `/dashboard/metrics` for interactive charts with a time-window
+  selector (24h / 7d / 30d / all-time). *(Previously served at `/metrics`; that path now serves
+  Prometheus text exposition — see "Prometheus" below.)*
+- **Prometheus**: `GET /metrics` returns Prometheus text exposition for scraping by Prometheus /
+  Grafana / Alertmanager. See the [Prometheus Exposition](daemon.md#prometheus-exposition) section in
+  `docs/daemon.md` for the metric catalogue and a sample scrape config.
 
 ## Metrics API
 
@@ -46,6 +50,9 @@ Returns aggregated job metrics as JSON.
     "avg_duration_seconds": 138.2,
     "p95_duration_seconds": 412.0,
     "avg_compression_pct": 34.1,
+    "bytes_saved_total": 123456789,
+    "bytes_grown_total": 45000,
+    "minutes_transcoded_total": 1234.5,
     "throughput_per_hour": 1.75
   },
   "timeseries": [
@@ -59,7 +66,16 @@ Returns aggregated job metrics as JSON.
       "failed": 2,
       "avg_duration_seconds": 138.2
     }
-  ]
+  ],
+  "encoders": {
+    "qsv":      { "count": 38, "bytes_saved": 120000000, "minutes": 1100.0 },
+    "vaapi":    { "count":  3, "bytes_saved":   3000000, "minutes":   90.0 },
+    "software": { "count":  1, "bytes_saved":    456789, "minutes":   44.5 }
+  },
+  "failures": {
+    "hardware":     { "count": 1 },
+    "source_media": { "count": 1 }
+  }
 }
 ```
 
@@ -83,7 +99,17 @@ Returns aggregated job metrics as JSON.
 | `avg_duration_seconds` | Mean wall-clock time (started\_at → completed\_at) for completed jobs |
 | `p95_duration_seconds` | 95th-percentile duration for completed jobs |
 | `avg_compression_pct` | Mean `(1 − output_bytes / input_bytes) × 100` — only populated when file sizes are recorded |
+| `bytes_saved_total` | Sum of `(input − output)` over completed jobs in the window, clamped to ≥ 0 per job. Operator-quotable "disk space reclaimed" number |
+| `bytes_grown_total` | Sum of `(output − input)` over completed jobs whose output exceeded the source. Surfaces HDR / quality-bumping configs that grow the file |
+| `minutes_transcoded_total` | Sum of source container duration in minutes (rounded to 0.01) across completed jobs in the window |
 | `throughput_per_hour` | `completed / window_hours`; `null` for the `all` window |
+
+**Breakdowns**
+
+| Key | Shape | Description |
+| --- | ----- | ----------- |
+| `encoders` | `{backend: {count, bytes_saved, minutes}}` | Per-encoder-backend rollup. Backend is one of `qsv` / `vaapi` / `nvenc` / `videotoolbox` / `amf` / `software` / `copy` / `unknown` |
+| `failures` | `{category: {count}}` | Per-failure-category rollup of failed jobs. Category is one of `config` / `source_media` / `hardware` / `disk` / `system` / `unknown` |
 
 **Timeseries**
 
@@ -108,7 +134,7 @@ created to support efficient windowed aggregation queries.
 
 ## Charts
 
-The `/metrics` page uses Chart.js 4.5.1 (loaded from jsDelivr CDN) to render:
+The `/dashboard/metrics` page uses Chart.js 4.5.1 (loaded from jsDelivr CDN) to render:
 
 - **Line chart** — jobs completed/failed per hour (24h) or per day (7d/30d)
 - **Doughnut chart** — job status distribution across all statuses

@@ -17,6 +17,7 @@ try:
 except Exception:
   _VERSION = "unknown"
 
+from resources.daemon import metrics_prom
 from resources.daemon.constants import resolve_node_id
 from resources.daemon.threads import (
   ConfigWatcherThread,
@@ -153,6 +154,12 @@ class DaemonServer(ThreadingHTTPServer):
     if pending > 0:
       logger.info("Found %d pending jobs from previous run" % pending)
       self.notify_workers()
+
+    # Prometheus best-practice: expose build/version info and lazily-
+    # evaluated saturation gauges. set_function() pulls fresh queue depth
+    # at scrape time so we never need a separate poller.
+    metrics_prom.set_build_info(_VERSION, self.node_id)
+    metrics_prom.register_queue_depth_source(self.node_id, job_db.pending_count)
 
     # Start heartbeat thread (only does real work with PostgreSQL backend)
     self.heartbeat_thread = HeartbeatThread(
@@ -321,10 +328,16 @@ class DaemonServer(ThreadingHTTPServer):
 
     Called by ``MediaProcessor._attempt_ladder`` (wired up by ``WorkerPool``
     when constructing the per-job processor). Thread-safe.
+
+    Dual-writes to the Prometheus ``sma_fallback_transitions_total`` counter
+    so ``/metrics`` reflects ladder activity. The in-memory dict still
+    backs the ``/health`` ``fallback`` block until the per-job schema
+    columns land and the dashboard moves entirely onto Prometheus.
     """
     key = (from_tier, to_tier, reason)
     with self._fallback_counters_lock:
       self.fallback_counters[key] = self.fallback_counters.get(key, 0) + 1
+    metrics_prom.record_fallback_transition(from_tier, to_tier, reason)
 
   def fallback_summary(self) -> list[dict]:
     """Snapshot of fallback counters for /health rendering."""

@@ -9,6 +9,7 @@ from urllib.parse import unquote
 
 import requests
 
+from resources.daemon import metrics_prom
 from resources.daemon.config import _strip_secrets
 from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
@@ -591,6 +592,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
     api_key = self.server.api_key or ""
     key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
     self.send_html_response(200, _load_metrics_html().replace("</head>", key_script + "</head>", 1))
+
+  def _get_metrics_prom(self, _path, _query):
+    """Prometheus text exposition. Industry-convention path; the HTML
+    dashboard previously served here moved to ``/dashboard/metrics``."""
+    body = metrics_prom.render_exposition()
+    self.send_response(200)
+    self.send_header("Content-Type", metrics_prom.PROM_CONTENT_TYPE)
+    self.end_headers()
+    self.wfile.write(body)
 
   def _get_favicon(self, _path, _query):
     favicon = os.path.join(SCRIPT_DIR, "logo.png")
@@ -1237,7 +1247,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         return profile
     return None
 
-  def _queue_directory(self, path, extra_args, config_override, max_retries=0):
+  def _queue_directory(self, path, extra_args, config_override, max_retries=0, *, request_source=None):
     """Expand directory to media files, queue each, respond.
 
     Files are discovered and queued lazily via _walk_media_files so the
@@ -1271,12 +1281,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
       resolved_config = self._resolve_config(job_path, config_override)
       profile = self._resolve_profile(job_path, config_override)
       job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
-      job_id = self.server.job_db.add_job(job_path, resolved_config, job_args, max_retries=max_retries)
+      job_id = self.server.job_db.add_job(
+        job_path,
+        resolved_config,
+        job_args,
+        max_retries=max_retries,
+        request_source=request_source,
+        request_profile=profile,
+      )
       if job_id is None:
         existing = self.server.job_db.find_active_job(job_path)
         duplicates.append({"path": job_path, "job_id": existing["id"] if existing else None})
       else:
         queued.append({"job_id": job_id, "path": job_path, "config": resolved_config, "profile": profile})
+        metrics_prom.record_job_enqueued(request_source, profile)
 
     if not queued and not duplicates and not skipped:
       self.send_json_response(200, {"status": "empty", "path": path, "message": "No media files found in directory"})
@@ -1302,7 +1320,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       },
     )
 
-  def _queue_file(self, path, extra_args, config_override, max_retries=0):
+  def _queue_file(self, path, extra_args, config_override, max_retries=0, *, request_source=None):
     """Queue a single file job and respond."""
     pcm = self.server.path_config_manager
     job_path = pcm.rewrite_path(path)
@@ -1336,7 +1354,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
     resolved_config = self._resolve_config(job_path, config_override)
     profile = self._resolve_profile(job_path, config_override)
     job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
-    job_id = self.server.job_db.add_job(job_path, resolved_config, job_args, max_retries=max_retries)
+    job_id = self.server.job_db.add_job(
+      job_path,
+      resolved_config,
+      job_args,
+      max_retries=max_retries,
+      request_source=request_source,
+      request_profile=profile,
+    )
 
     if job_id is None:
       existing = self.server.job_db.find_active_job(job_path)
@@ -1345,6 +1370,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       return
 
     self.server.notify_workers()
+    metrics_prom.record_job_enqueued(request_source, profile)
     log_file = self.server.config_log_manager.get_log_file(resolved_config)
     config_busy = self.server.config_lock_manager.is_locked(resolved_config)
     pending = self.server.job_db.pending_count_for_config(resolved_config)
@@ -1398,7 +1424,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     body = self.rfile.read(content_length).decode("utf-8").strip()
     return parse_radarr_body(body, self.send_json_response)
 
-  def _dispatch_path(self, path, extra_args, config_override=None, max_retries=0):
+  def _dispatch_path(self, path, extra_args, config_override=None, max_retries=0, *, request_source=None):
     """Shared tail: validate path, queue file or directory.
 
     Path rewrites are deferred to job-creation time so that a directory
@@ -1416,9 +1442,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
       self.send_json_response(400, {"error": "Path is inside a recycle-bin directory", "path": path})
       return
     if os.path.isdir(path):
-      self._queue_directory(path, extra_args, config_override, max_retries)
+      self._queue_directory(path, extra_args, config_override, max_retries, request_source=request_source)
     else:
-      self._queue_file(path, extra_args, config_override, max_retries)
+      self._queue_file(path, extra_args, config_override, max_retries, request_source=request_source)
 
   def _handle_sonarr_webhook(self):
     try:
@@ -1429,7 +1455,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         profile_override = self._resolve_arr_tag_profile("sonarr", path, tag_ids)
       if profile_override:
         extra_args = self._merge_profile_arg(extra_args, profile_override)
-      self._dispatch_path(path, extra_args)
+      self._dispatch_path(path, extra_args, request_source="sonarr")
     except Exception as e:
       self.server.logger.exception("Error handling Sonarr webhook: %s" % e)
       self.send_json_response(500, {"error": str(e)})
@@ -1443,7 +1469,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         profile_override = self._resolve_arr_tag_profile("radarr", path, tag_ids)
       if profile_override:
         extra_args = self._merge_profile_arg(extra_args, profile_override)
-      self._dispatch_path(path, extra_args)
+      self._dispatch_path(path, extra_args, request_source="radarr")
     except Exception as e:
       self.server.logger.exception("Error handling Radarr webhook: %s" % e)
       self.send_json_response(500, {"error": str(e)})
@@ -1453,7 +1479,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
       path, extra_args, config_override, max_retries = self._parse_webhook_body()
       if path is None:
         return
-      self._dispatch_path(path, extra_args, config_override, max_retries)
+      # X-SMA-Request-Source lets external automation (CI, custom scripts)
+      # label themselves; default to "webhook" for generic /webhook/* POSTs.
+      override = self.headers.get("X-SMA-Request-Source") or ""
+      override = override.strip().lower()
+      request_source = override if override in metrics_prom.REQUEST_SOURCES else "webhook"
+      self._dispatch_path(path, extra_args, config_override, max_retries, request_source=request_source)
     except Exception as e:
       self.server.logger.exception("Error handling request: %s" % e)
       self.send_json_response(500, {"error": str(e)})

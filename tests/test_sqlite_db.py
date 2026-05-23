@@ -1,5 +1,5 @@
 from resources.daemon.constants import STATUS_COMPLETED, STATUS_FAILED, STATUS_PENDING, STATUS_RUNNING, set_node_id_cache
-from resources.daemon.db import SQLiteJobDatabase
+from resources.daemon.db import _METRICS_EXPANSION_COLUMNS, SQLiteJobDatabase
 
 
 def _db(tmp_path):
@@ -124,6 +124,87 @@ class TestSQLiteJobDatabase:
     _row = db.get_job(job_id)
     assert _row is not None
     assert _row["ffmpeg_stderr"] == stored
+    db.close()
+
+  def test_metrics_expansion_columns_present_on_fresh_db(self, tmp_path):
+    """Every column declared in _METRICS_EXPANSION_COLUMNS exists on a freshly created jobs table."""
+    db = _db(tmp_path)
+    expected = {name for name, _, _ in _METRICS_EXPANSION_COLUMNS}
+    with db._conn() as conn:
+      actual = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    missing = expected - actual
+    assert not missing, "metrics-expansion columns missing on fresh DB: %r" % missing
+    db.close()
+
+  def test_metrics_expansion_columns_added_idempotently_on_upgrade(self, tmp_path):
+    """Old database lacking the new columns gets them via the upgrade migrator without data loss."""
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+    # Simulate an old-shape jobs table: pre-metrics-expansion columns only.
+    with sqlite3.connect(str(db_path)) as raw:
+      raw.execute("""
+        CREATE TABLE jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          path TEXT NOT NULL,
+          config TEXT NOT NULL,
+          args TEXT DEFAULT '[]',
+          status TEXT DEFAULT 'pending',
+          worker_id INTEGER,
+          node_id TEXT,
+          error TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          started_at TEXT,
+          completed_at TEXT,
+          retry_count INTEGER DEFAULT 0,
+          max_retries INTEGER DEFAULT 0,
+          next_attempt_at TEXT,
+          priority INTEGER DEFAULT 0,
+          input_size_bytes INTEGER,
+          output_size_bytes INTEGER
+        )
+      """)
+      raw.execute(
+        "INSERT INTO jobs (path, config, status) VALUES (?, ?, ?)",
+        ("/legacy.mkv", "/cfg.yml", STATUS_COMPLETED),
+      )
+      raw.commit()
+
+    db = SQLiteJobDatabase(f"sqlite:///{db_path}")
+    expected = {name for name, _, _ in _METRICS_EXPANSION_COLUMNS}
+    with db._conn() as conn:
+      actual = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+      assert expected.issubset(actual)
+      # Pre-existing row survives the migration.
+      row = conn.execute("SELECT path, status, encoder_backend FROM jobs WHERE id=1").fetchone()
+    assert row is not None
+    assert row["path"] == "/legacy.mkv"
+    assert row["status"] == STATUS_COMPLETED
+    assert row["encoder_backend"] is None
+    db.close()
+
+  def test_add_job_persists_request_source_and_profile(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job(
+      "/mnt/Media/show.mkv",
+      "/cfg.yml",
+      [],
+      request_source="sonarr",
+      request_profile="1080p",
+    )
+    row = db.get_job(job_id)
+    assert row is not None
+    assert row["request_source"] == "sonarr"
+    assert row["request_profile"] == "1080p"
+    db.close()
+
+  def test_add_job_request_attribution_defaults_to_none(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/mnt/Media/other.mkv", "/cfg.yml", [])
+    row = db.get_job(job_id)
+    assert row is not None
+    assert row["request_source"] is None
+    assert row["request_profile"] is None
     db.close()
 
   def test_running_jobs_reset_on_reopen_for_same_node(self, tmp_path, monkeypatch):
