@@ -141,9 +141,12 @@ class AuditEngine:
   def _queue_conversion(self, path: str) -> str:
     config = self.pcm.get_config_for_path(path)
     args = self.pcm.get_args_for_path(path)
-    job_id = self.job_db.add_job(path, config, args)
+    job_id = self.job_db.add_job(path, config, args, request_source="audit")
     if job_id is not None:
       self.log.info("Audit auto-queued conversion job %d for %s" % (job_id, path))
+      from resources.daemon import metrics_prom
+
+      metrics_prom.record_job_enqueued("audit", None)
       return "queued"
     return "skipped"
 

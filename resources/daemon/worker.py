@@ -7,9 +7,17 @@ import sys
 import threading
 import time
 
+from resources.daemon import metrics_prom
 from resources.daemon.constants import FFMPEG_STDERR_DIR, SCRIPT_DIR, resolve_node_id
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.log import getLogger
+from resources.processor.failures import (
+  WORKER_SENTINEL_EXCEPTION,
+  WORKER_SENTINEL_INVALID_ARGS,
+  WORKER_SENTINEL_PATH_MISSING,
+  WORKER_SENTINEL_PROCESS_FAILED,
+  categorize_failure,
+)
 
 log = getLogger("DAEMON")
 
@@ -134,20 +142,36 @@ class ConversionWorker(threading.Thread):
   def process_job(self, job):
     job_id = job["id"]
     self.current_job_id = job_id
+    # Reset per-job state captured from the ffmpeg.attempts JSON line so
+    # one job's classification doesn't leak into the next.
+    self._last_attempt_failure_class: str | None = None
+    self._last_encoder_name: str | None = None
+    self._last_encoder_backend: str | None = None
     path = job["path"]
     config_file = job["config"]
 
+    job_started_at = time.monotonic()
+    in_flight = metrics_prom.in_flight_counter(self.node_id)
+    in_flight.inc()
     try:
       args = json.loads(job["args"]) if job["args"] else []
     except (TypeError, ValueError) as e:
       self.log.error("Job %d has invalid args payload: %s" % (job_id, e))
-      self.job_db.fail_job(job_id, "Invalid job args")
+      cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
+      self.job_db.fail_job(job_id, "Invalid job args", failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS)
+      metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
+      metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
+      in_flight.dec()
       self.current_job_id = None
       return
 
     if not os.path.exists(path):
       self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
-      self.job_db.fail_job(job_id, "Path does not exist")
+      cat = categorize_failure(WORKER_SENTINEL_PATH_MISSING).value
+      self.job_db.fail_job(job_id, "Path does not exist", failure_category=cat, failure_cause=WORKER_SENTINEL_PATH_MISSING)
+      metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
+      metrics_prom.record_failure(cat, WORKER_SENTINEL_PATH_MISSING)
+      in_flight.dec()
       self.current_job_id = None
       return
 
@@ -157,6 +181,8 @@ class ConversionWorker(threading.Thread):
     current = self.job_db.get_job(job_id)
     if current and current.get("status") == "cancelled":
       self.log.info("Job %d was cancelled before processing started" % job_id)
+      metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
+      in_flight.dec()
       self.current_job_id = None
       return
 
@@ -169,6 +195,8 @@ class ConversionWorker(threading.Thread):
     if current and current.get("status") == "cancelled":
       self.log.info("Job %d was cancelled while waiting for lock" % job_id)
       self.config_lock_manager.release(config_file, job_id)
+      metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
+      in_flight.dec()
       self.current_job_id = None
       return
 
@@ -181,23 +209,64 @@ class ConversionWorker(threading.Thread):
         input_size = os.path.getsize(path)
       except OSError:
         self.log.warning("Could not stat input file for job %d: %s" % (job_id, path))
-      success = self._run_conversion(job_id, path, config_file, args)
+      success, final_output, source_duration_secs = self._run_conversion(job_id, path, config_file, args)
+      elapsed = time.monotonic() - job_started_at
+      output_size = None
       if success:
-        self.job_db.complete_job(job_id, input_size=input_size)
+        # Stat the produced output before any post-process moves it. The
+        # `final_output` is the SMA-tagged terminal path written into the
+        # log; fall back to the input path for in-place transcodes.
+        stat_target = final_output or path
+        try:
+          output_size = os.path.getsize(stat_target)
+        except OSError:
+          self.log.warning("Could not stat output file for job %d: %s" % (job_id, stat_target))
+        self.job_db.complete_job(
+          job_id,
+          input_size=input_size,
+          output_size=output_size,
+          source_duration_seconds=source_duration_secs,
+          encoder_backend=self._last_encoder_backend,
+          encoder_name=self._last_encoder_name,
+        )
+        metrics_prom.record_job_terminal("completed", elapsed)
+        metrics_prom.record_job_savings(
+          input_size,
+          output_size,
+          source_duration_secs,
+          encoder_backend=self._last_encoder_backend,
+        )
       else:
         # Don't overwrite a cancelled status set during conversion
         current = self.job_db.get_job(job_id)
-        if current and current.get("status") != "cancelled":
-          self.job_db.fail_job(job_id, "Conversion process failed")
+        if current and current.get("status") == "cancelled":
+          metrics_prom.record_job_terminal("cancelled", elapsed)
+        else:
+          # Prefer the precise classification from the last ffmpeg.attempts
+          # record (captured by _record_fallback_event). Falls back to the
+          # generic process_failed sentinel when the subprocess exited
+          # without emitting the structured line.
+          cause = self._last_attempt_failure_class or WORKER_SENTINEL_PROCESS_FAILED
+          cat = categorize_failure(cause).value
+          self.job_db.fail_job(job_id, "Conversion process failed", failure_category=cat, failure_cause=cause)
           self._ingest_ffmpeg_stderr_sidecars(job_id)
+          metrics_prom.record_job_terminal("failed", elapsed)
+          metrics_prom.record_failure(cat, cause)
     except Exception as e:
       self.log.exception("Job %d failed: %s" % (job_id, e))
+      elapsed = time.monotonic() - job_started_at
       current = self.job_db.get_job(job_id)
-      if current and current.get("status") != "cancelled":
-        self.job_db.fail_job(job_id, str(e))
+      if current and current.get("status") == "cancelled":
+        metrics_prom.record_job_terminal("cancelled", elapsed)
+      else:
+        cat = categorize_failure(WORKER_SENTINEL_EXCEPTION).value
+        self.job_db.fail_job(job_id, str(e), failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION)
         self._ingest_ffmpeg_stderr_sidecars(job_id)
+        metrics_prom.record_job_terminal("failed", elapsed)
+        metrics_prom.record_failure(cat, WORKER_SENTINEL_EXCEPTION)
     finally:
       self.config_lock_manager.release(config_file, job_id)
+      in_flight.dec()
       self.current_job_id = None
 
   def _ingest_ffmpeg_stderr_sidecars(self, job_id):
@@ -241,7 +310,12 @@ class ConversionWorker(threading.Thread):
       self.log.exception("Failed to ingest ffmpeg stderr sidecars for job %d" % job_id)
 
   def _run_conversion(self, job_id, path, config_file, extra_args):
-    """Run the actual conversion process. Returns True on success."""
+    """Run the conversion process.
+
+    Returns a ``(success: bool, final_output: str | None,
+    source_duration_seconds: float | None)`` tuple so the caller can
+    persist output size + source duration metrics without re-probing.
+    """
     token = set_job_id(job_id)
     try:
       return self._run_conversion_inner(job_id, path, config_file, extra_args)
@@ -331,19 +405,19 @@ class ConversionWorker(threading.Thread):
         process.kill()
         process.wait()
         config_logger.error("Job %d timed out after %ds: %s" % (job_id, self.job_timeout_seconds, path))
-        return False
+        return False, final_output, total_duration_secs
 
       report_path = final_output or path
       if process.returncode == 0:
         config_logger.info("Job %d completed successfully: %s" % (job_id, report_path))
-        return True
+        return True, final_output, total_duration_secs
       else:
         config_logger.error("Job %d exited with code %d: %s" % (job_id, process.returncode, report_path))
-        return False
+        return False, final_output, total_duration_secs
 
     except Exception as e:
       config_logger.exception("Job %d failed: %s" % (job_id, e))
-      return False
+      return False, final_output, total_duration_secs
     finally:
       self._job_processes.pop(job_id, None)
       self._job_progress.pop(job_id, None)
@@ -357,9 +431,6 @@ class ConversionWorker(threading.Thread):
     Tolerate both the bare-JSON case and the wrapped case by locating the
     first ``{`` and parsing from there.
     """
-    cb = self._fallback_counter_callback
-    if cb is None:
-      return
     start = line.find("{")
     if start < 0:
       return
@@ -372,10 +443,27 @@ class ConversionWorker(threading.Thread):
     attempts = payload.get("attempts") or []
     if not isinstance(attempts, list):
       return
+    result = payload.get("result")
+    # Stash the LAST attempt's failure_class so process_job can hand a
+    # specific cause to fail_job/categorize_failure. On success this is
+    # None; on failure it carries the precise ffmpeg classification.
+    if attempts and isinstance(attempts[-1], dict):
+      self._last_attempt_failure_class = attempts[-1].get("failure_class")
+    # Capture the final encoder used (after any hw_alt / full_sw swaps)
+    # so the worker can label Prometheus counters + persist the column.
+    encoder_name = payload.get("encoder_name")
+    encoder_backend = payload.get("encoder_backend")
+    if isinstance(encoder_name, str) and encoder_name:
+      self._last_encoder_name = encoder_name
+    if isinstance(encoder_backend, str) and encoder_backend:
+      self._last_encoder_backend = encoder_backend
+
+    cb = self._fallback_counter_callback
+    if cb is None:
+      return
     # Each tier that failed produces one counter increment. The to_tier is
     # the next attempted tier, or "failed" if this was the last attempt and
     # the overall result is "failed".
-    result = payload.get("result")
     for idx, rec in enumerate(attempts):
       if not isinstance(rec, dict):
         continue

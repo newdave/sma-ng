@@ -289,7 +289,7 @@ class TestScannerThreadScan:
     result = scanner._scan({"path": str(tmp_path)})
     assert result == 1
     db.filter_unscanned.assert_called_once()
-    db.add_job.assert_called_once_with(str(media), "/default.ini", [])
+    db.add_job.assert_called_once_with(str(media), "/default.ini", [], request_source="scan")
 
   def test_applies_path_rewrite(self, tmp_path):
     media = tmp_path / "show.mkv"

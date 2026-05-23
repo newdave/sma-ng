@@ -405,12 +405,117 @@ def diagnose_ffmpeg_failure(stderr: str | bytes | None) -> FailureDiagnosis:
   return FailureDiagnosis(failure_class, FfmpegFailureCause.UNKNOWN, "", "")
 
 
+class FailureCategory(str, Enum):
+  """Operator-facing failure bucket. Coarser than :class:`FfmpegFailureClass`
+  and :class:`FfmpegFailureCause`; designed to answer "is this a config /
+  source media / hardware / disk problem?" without operators learning the
+  raw enum vocabulary.
+
+  Bounded set: 6 values. Used as a Prometheus label — never add an
+  unbounded variant. The mapping from every existing FfmpegFailureClass +
+  FfmpegFailureCause + worker sentinel is enforced by a drift-guard test
+  (see ``tests/test_failure_categorization.py``); a new enum value that
+  isn't mapped lands as ``UNKNOWN`` AND fails CI.
+  """
+
+  CONFIG = "config"
+  SOURCE_MEDIA = "source_media"
+  HARDWARE = "hardware"
+  DISK = "disk"
+  SYSTEM = "system"
+  UNKNOWN = "unknown"
+
+
+# Worker-emitted sentinel strings for failures that never reach ffmpeg.
+# Documented as part of the public contract because the worker passes
+# them through to ``fail_job(failure_cause=...)``.
+WORKER_SENTINEL_PATH_MISSING = "path_missing"
+WORKER_SENTINEL_INVALID_ARGS = "invalid_args"
+WORKER_SENTINEL_PROCESS_FAILED = "process_failed"
+WORKER_SENTINEL_EXCEPTION = "exception"
+
+# Every value in :class:`FfmpegFailureClass`, :class:`FfmpegFailureCause`,
+# and the worker sentinels must appear here. The drift-guard test
+# enumerates the enums and fails if any value is missing or maps to
+# UNKNOWN — that is the only safeguard against silent
+# mis-categorisation when a new enum value lands later.
+_FAILURE_CATEGORY_MAP: dict[str, FailureCategory] = {
+  # ── FfmpegFailureClass ────────────────────────────────────────────
+  FfmpegFailureClass.DEVICE_OPEN_FAILED.value: FailureCategory.HARDWARE,
+  FfmpegFailureClass.DECODER_INIT_FAILED.value: FailureCategory.HARDWARE,
+  FfmpegFailureClass.ENCODER_INIT_FAILED.value: FailureCategory.HARDWARE,
+  FfmpegFailureClass.FILTER_INIT_FAILED.value: FailureCategory.HARDWARE,
+  FfmpegFailureClass.RUNTIME_ERROR.value: FailureCategory.SYSTEM,
+  FfmpegFailureClass.OTHER.value: FailureCategory.SYSTEM,
+  # ── FfmpegFailureCause: QSV hardware faults ───────────────────────
+  FfmpegFailureCause.QSV_ALIGNMENT.value: FailureCategory.HARDWARE,
+  FfmpegFailureCause.QSV_GPU_HANG.value: FailureCategory.HARDWARE,
+  FfmpegFailureCause.QSV_DEVICE_BUSY.value: FailureCategory.HARDWARE,
+  FfmpegFailureCause.QSV_SURFACE_POOL_EXHAUSTED.value: FailureCategory.HARDWARE,
+  # ── FfmpegFailureCause: profile / pix-fmt config mismatches ───────
+  FfmpegFailureCause.QSV_UNSUPPORTED_PROFILE.value: FailureCategory.CONFIG,
+  FfmpegFailureCause.QSV_UNSUPPORTED_PIX_FMT.value: FailureCategory.CONFIG,
+  FfmpegFailureCause.QSV_AUTOSCALE_FAILURE.value: FailureCategory.CONFIG,
+  # ── FfmpegFailureCause: other GPU vendor ──────────────────────────
+  FfmpegFailureCause.NVENC_SESSION_LIMIT.value: FailureCategory.HARDWARE,
+  FfmpegFailureCause.VAAPI_PROFILE_LOST.value: FailureCategory.HARDWARE,
+  FfmpegFailureCause.AV1_ENCODER_OOM.value: FailureCategory.HARDWARE,
+  # ── FfmpegFailureCause: codec / encoder config knobs ──────────────
+  FfmpegFailureCause.HEVC_REF_FRAME_LIMIT.value: FailureCategory.CONFIG,
+  FfmpegFailureCause.BITRATE_TOO_LOW_FOR_RESOLUTION.value: FailureCategory.CONFIG,
+  FfmpegFailureCause.STRICT_FLAG_REQUIRED.value: FailureCategory.CONFIG,
+  FfmpegFailureCause.BFRAME_COPY_INCOMPATIBLE.value: FailureCategory.CONFIG,
+  FfmpegFailureCause.HDR_TAGGING_MISMATCH.value: FailureCategory.CONFIG,
+  FfmpegFailureCause.DOLBY_VISION_REQUIRES_STRICT.value: FailureCategory.CONFIG,
+  # ── FfmpegFailureCause: source-media issues ───────────────────────
+  FfmpegFailureCause.VBV_UNDERRUN.value: FailureCategory.SOURCE_MEDIA,
+  FfmpegFailureCause.PTS_DTS_NONMONOTONIC.value: FailureCategory.SOURCE_MEDIA,
+  FfmpegFailureCause.INPUT_TRUNCATED.value: FailureCategory.SOURCE_MEDIA,
+  FfmpegFailureCause.AUDIO_CHANNEL_LAYOUT_MISMATCH.value: FailureCategory.SOURCE_MEDIA,
+  FfmpegFailureCause.AUDIO_SAMPLE_RATE_MISMATCH.value: FailureCategory.SOURCE_MEDIA,
+  FfmpegFailureCause.SUBTITLE_MUX_FAIL.value: FailureCategory.SOURCE_MEDIA,
+  FfmpegFailureCause.IMAGE_SUBTITLE_TO_TEXT.value: FailureCategory.SOURCE_MEDIA,
+  FfmpegFailureCause.ATTACHMENT_MUX_FAIL.value: FailureCategory.SOURCE_MEDIA,
+  FfmpegFailureCause.SOURCE_UNAVAILABLE.value: FailureCategory.SOURCE_MEDIA,
+  # ── FfmpegFailureCause: filesystem ────────────────────────────────
+  FfmpegFailureCause.DISK_FULL.value: FailureCategory.DISK,
+  FfmpegFailureCause.PERMISSION_DENIED.value: FailureCategory.DISK,
+  # ── FfmpegFailureCause: catch-all ─────────────────────────────────
+  FfmpegFailureCause.UNKNOWN.value: FailureCategory.SYSTEM,
+  # ── Worker sentinels ──────────────────────────────────────────────
+  WORKER_SENTINEL_PATH_MISSING: FailureCategory.SOURCE_MEDIA,
+  WORKER_SENTINEL_INVALID_ARGS: FailureCategory.CONFIG,
+  WORKER_SENTINEL_PROCESS_FAILED: FailureCategory.SYSTEM,
+  WORKER_SENTINEL_EXCEPTION: FailureCategory.SYSTEM,
+}
+
+
+def categorize_failure(cause_or_class: str | None) -> FailureCategory:
+  """Resolve a raw failure value (FfmpegFailureClass / FfmpegFailureCause
+  string, or worker sentinel) to an operator-facing :class:`FailureCategory`.
+
+  Returns ``UNKNOWN`` only for ``None`` or unmapped strings — the
+  drift-guard test ensures every documented enum value maps to a
+  non-UNKNOWN category. An unmapped string in production is treated as
+  drift to surface but not crash on.
+  """
+  if cause_or_class is None:
+    return FailureCategory.UNKNOWN
+  return _FAILURE_CATEGORY_MAP.get(str(cause_or_class), FailureCategory.UNKNOWN)
+
+
 __all__ = [
   "TAIL_BYTES",
+  "WORKER_SENTINEL_EXCEPTION",
+  "WORKER_SENTINEL_INVALID_ARGS",
+  "WORKER_SENTINEL_PATH_MISSING",
+  "WORKER_SENTINEL_PROCESS_FAILED",
   "AttemptRecord",
+  "FailureCategory",
   "FailureDiagnosis",
   "FfmpegFailureCause",
   "FfmpegFailureClass",
+  "categorize_failure",
   "diagnose_ffmpeg_failure",
   "parse_ffmpeg_failure",
 ]

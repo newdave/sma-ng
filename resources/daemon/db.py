@@ -43,6 +43,33 @@ _METRICS_WINDOW_MAP = {
   "30d": {"trunc": "day", "filter": "30 days", "series_offset": "29 days", "step": "1 day", "throughput_hours": 720.0},
 }
 
+# Additive `jobs` columns introduced by the metrics-expansion PRP. Both
+# backends migrate idempotently using their backend-specific helpers; the
+# Postgres type column accepts any text the backend understands.
+# See docs/prps/metrics-expansion.md for the full design rationale.
+_METRICS_EXPANSION_COLUMNS: tuple[tuple[str, str, str], ...] = (
+  # (name,                        sqlite_type, postgres_type)
+  ("encoder_backend", "TEXT", "TEXT"),
+  ("encoder_name", "TEXT", "TEXT"),
+  ("source_duration_seconds", "REAL", "DOUBLE PRECISION"),
+  ("failure_category", "TEXT", "TEXT"),
+  ("failure_cause", "TEXT", "TEXT"),
+  ("source_video_codec", "TEXT", "TEXT"),
+  ("source_video_width", "INTEGER", "INTEGER"),
+  ("source_video_height", "INTEGER", "INTEGER"),
+  ("source_audio_codec", "TEXT", "TEXT"),
+  ("source_audio_channels", "INTEGER", "INTEGER"),
+  ("source_hdr", "TEXT", "TEXT"),
+  ("dest_video_codec", "TEXT", "TEXT"),
+  ("dest_video_width", "INTEGER", "INTEGER"),
+  ("dest_video_height", "INTEGER", "INTEGER"),
+  ("dest_audio_codec", "TEXT", "TEXT"),
+  ("dest_audio_channels", "INTEGER", "INTEGER"),
+  ("dest_hdr", "TEXT", "TEXT"),
+  ("request_source", "TEXT", "TEXT"),
+  ("request_profile", "TEXT", "TEXT"),
+)
+
 
 def _utc_now():
   return datetime.now(UTC).replace(microsecond=0).isoformat()
@@ -119,7 +146,26 @@ class SQLiteJobDatabase:
           priority INTEGER DEFAULT 0,
           input_size_bytes INTEGER,
           output_size_bytes INTEGER,
-          ffmpeg_stderr TEXT
+          ffmpeg_stderr TEXT,
+          encoder_backend TEXT,
+          encoder_name TEXT,
+          source_duration_seconds REAL,
+          failure_category TEXT,
+          failure_cause TEXT,
+          source_video_codec TEXT,
+          source_video_width INTEGER,
+          source_video_height INTEGER,
+          source_audio_codec TEXT,
+          source_audio_channels INTEGER,
+          source_hdr TEXT,
+          dest_video_codec TEXT,
+          dest_video_width INTEGER,
+          dest_video_height INTEGER,
+          dest_audio_codec TEXT,
+          dest_audio_channels INTEGER,
+          dest_hdr TEXT,
+          request_source TEXT,
+          request_profile TEXT
         )
       """)
       # Idempotent migration: older deployments may already have a `jobs`
@@ -128,6 +174,9 @@ class SQLiteJobDatabase:
       existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
       if "ffmpeg_stderr" not in existing_cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN ffmpeg_stderr TEXT")
+      for col_name, sqlite_type, _pg_type in _METRICS_EXPANSION_COLUMNS:
+        if col_name not in existing_cols:
+          conn.execute("ALTER TABLE jobs ADD COLUMN %s %s" % (col_name, sqlite_type))
       conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
       conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_config ON jobs(config)")
       conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at)")
@@ -171,7 +220,7 @@ class SQLiteJobDatabase:
       )
       return cur.rowcount
 
-  def add_job(self, path, config, args=None, max_retries=0):
+  def add_job(self, path, config, args=None, max_retries=0, *, request_source=None, request_profile=None):
     args_json = json.dumps(args or [])
     with self._conn() as conn:
       row = conn.execute(
@@ -182,8 +231,8 @@ class SQLiteJobDatabase:
         self.log.debug("Duplicate job for path: %s (existing job %d)" % (path, row["id"]))
         return None
       cur = conn.execute(
-        "INSERT INTO jobs (path, config, args, status, max_retries) VALUES (?, ?, ?, ?, ?)",
-        (path, config, args_json, STATUS_PENDING, max_retries),
+        "INSERT INTO jobs (path, config, args, status, max_retries, request_source, request_profile) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (path, config, args_json, STATUS_PENDING, max_retries, request_source, request_profile),
       )
       job_id = cur.lastrowid
     self.log.debug("Added job %d: %s" % (job_id, path))
@@ -231,11 +280,36 @@ class SQLiteJobDatabase:
       conn.execute("UPDATE jobs SET status = ?, worker_id = ?, started_at = ? WHERE id = ?", (STATUS_RUNNING, worker_id, _utc_now(), job_id))
     self.log.debug("Job %d started by worker %d" % (job_id, worker_id))
 
-  def complete_job(self, job_id, input_size=None, output_size=None):
+  def complete_job(
+    self,
+    job_id,
+    input_size=None,
+    output_size=None,
+    source_duration_seconds=None,
+    encoder_backend=None,
+    encoder_name=None,
+  ):
     with self._conn() as conn:
       conn.execute(
-        "UPDATE jobs SET status = ?, completed_at = ?, input_size_bytes = ?, output_size_bytes = ? WHERE id = ?",
-        (STATUS_COMPLETED, _utc_now(), input_size, output_size, job_id),
+        """UPDATE jobs
+              SET status = ?,
+                  completed_at = ?,
+                  input_size_bytes = ?,
+                  output_size_bytes = ?,
+                  source_duration_seconds = ?,
+                  encoder_backend = ?,
+                  encoder_name = ?
+            WHERE id = ?""",
+        (
+          STATUS_COMPLETED,
+          _utc_now(),
+          input_size,
+          output_size,
+          source_duration_seconds,
+          encoder_backend,
+          encoder_name,
+          job_id,
+        ),
       )
     self.log.debug("Job %d completed" % job_id)
 
@@ -255,7 +329,7 @@ class SQLiteJobDatabase:
     with self._conn() as conn:
       conn.execute("UPDATE jobs SET ffmpeg_stderr = ? WHERE id = ?", (payload, job_id))
 
-  def fail_job(self, job_id, error=None):
+  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None):
     now = datetime.now(UTC).replace(microsecond=0)
     with self._conn() as conn:
       row = conn.execute("SELECT retry_count, max_retries FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -267,14 +341,20 @@ class SQLiteJobDatabase:
           """
           UPDATE jobs
           SET status = ?, retry_count = ?, error = ?, next_attempt_at = ?,
+              failure_category = ?, failure_cause = ?,
               started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
           WHERE id = ?
           """,
-          (STATUS_PENDING, retry_count, error, next_attempt, job_id),
+          (STATUS_PENDING, retry_count, error, next_attempt, failure_category, failure_cause, job_id),
         )
         self.log.debug("Job %d failed (attempt %d/%d), retrying in %ds" % (job_id, retry_count, row["max_retries"], delay))
       else:
-        conn.execute("UPDATE jobs SET status = ?, error = ?, completed_at = ? WHERE id = ?", (STATUS_FAILED, error, now.isoformat(), job_id))
+        conn.execute(
+          """UPDATE jobs SET status = ?, error = ?, completed_at = ?,
+                                failure_category = ?, failure_cause = ?
+                          WHERE id = ?""",
+          (STATUS_FAILED, error, now.isoformat(), failure_category, failure_cause, job_id),
+        )
         self.log.debug("Job %d failed: %s" % (job_id, error))
 
   def get_job(self, job_id):
@@ -752,6 +832,9 @@ class PostgreSQLJobDatabase:
                 """)
         cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_size_bytes BIGINT")
         cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS output_size_bytes BIGINT")
+        # Metrics-expansion columns (additive, all nullable, all backends).
+        for col_name, _sqlite_type, pg_type in _METRICS_EXPANSION_COLUMNS:
+          cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS %s %s" % (col_name, pg_type))
         cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status_completed ON jobs(status, completed_at)")
         # ---- library audit ---------------------------------------------------
         cur.execute("""
@@ -850,7 +933,7 @@ class PostgreSQLJobDatabase:
     """
     cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (path,))
 
-  def add_job(self, path, config, args=None, max_retries=0):
+  def add_job(self, path, config, args=None, max_retries=0, *, request_source=None, request_profile=None):
     """Add a job to the queue. Returns job ID, or None if a duplicate is already pending/running."""
     args_json = json.dumps(args or [])
     with self._conn() as conn:
@@ -861,7 +944,10 @@ class PostgreSQLJobDatabase:
         if existing:
           self.log.debug("Duplicate job for path: %s (existing job %d)" % (path, existing["id"]))
           return None
-        cur.execute("INSERT INTO jobs (path, config, args, status, max_retries) VALUES (%s, %s, %s, %s, %s) RETURNING id", (path, config, args_json, STATUS_PENDING, max_retries))
+        cur.execute(
+          "INSERT INTO jobs (path, config, args, status, max_retries, request_source, request_profile) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+          (path, config, args_json, STATUS_PENDING, max_retries, request_source, request_profile),
+        )
         job_id = cur.fetchone()["id"]
     self.log.debug("Added job %d: %s" % (job_id, path))
     return job_id
@@ -981,13 +1067,37 @@ class PostgreSQLJobDatabase:
         )
     self.log.debug("Job %d started by worker %d" % (job_id, worker_id))
 
-  def complete_job(self, job_id, input_size=None, output_size=None):
-    """Mark a job as completed, optionally recording input/output file sizes."""
+  def complete_job(
+    self,
+    job_id,
+    input_size=None,
+    output_size=None,
+    source_duration_seconds=None,
+    encoder_backend=None,
+    encoder_name=None,
+  ):
+    """Mark a job as completed, optionally recording size + duration + encoder."""
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
-          "UPDATE jobs SET status = %s, completed_at = NOW(), input_size_bytes = %s, output_size_bytes = %s WHERE id = %s",
-          (STATUS_COMPLETED, input_size, output_size, job_id),
+          """UPDATE jobs
+                SET status = %s,
+                    completed_at = NOW(),
+                    input_size_bytes = %s,
+                    output_size_bytes = %s,
+                    source_duration_seconds = %s,
+                    encoder_backend = %s,
+                    encoder_name = %s
+              WHERE id = %s""",
+          (
+            STATUS_COMPLETED,
+            input_size,
+            output_size,
+            source_duration_seconds,
+            encoder_backend,
+            encoder_name,
+            job_id,
+          ),
         )
     self.log.debug("Job %d completed" % job_id)
 
@@ -1008,7 +1118,7 @@ class PostgreSQLJobDatabase:
       with conn.cursor() as cur:
         cur.execute("UPDATE jobs SET ffmpeg_stderr = %s WHERE id = %s", (payload, job_id))
 
-  def fail_job(self, job_id, error=None):
+  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None):
     """Mark a job as failed, or requeue with exponential backoff if retries remain."""
     with self._conn() as conn:
       with conn.cursor() as cur:
@@ -1022,14 +1132,20 @@ class PostgreSQLJobDatabase:
                         UPDATE jobs
                         SET status = %s, retry_count = %s, error = %s,
                             next_attempt_at = NOW() + interval '%s seconds',
+                            failure_category = %s, failure_cause = %s,
                             started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
                         WHERE id = %s
                     """,
-            (STATUS_PENDING, retry_count, error, delay, job_id),
+            (STATUS_PENDING, retry_count, error, delay, failure_category, failure_cause, job_id),
           )
           self.log.debug("Job %d failed (attempt %d/%d), retrying in %ds" % (job_id, retry_count, row["max_retries"], delay))
         else:
-          cur.execute("UPDATE jobs SET status = %s, error = %s, completed_at = NOW() WHERE id = %s", (STATUS_FAILED, error, job_id))
+          cur.execute(
+            """UPDATE jobs SET status = %s, error = %s, completed_at = NOW(),
+                                  failure_category = %s, failure_cause = %s
+                            WHERE id = %s""",
+            (STATUS_FAILED, error, failure_category, failure_cause, job_id),
+          )
           self.log.debug("Job %d failed: %s" % (job_id, error))
 
   def get_job(self, job_id):
@@ -1119,11 +1235,75 @@ class PostgreSQLJobDatabase:
                                       AND input_size_bytes > 0
                                       AND output_size_bytes IS NOT NULL
                             THEN (1.0 - output_size_bytes::FLOAT / input_size_bytes) * 100 END
-                        )                                                                        AS avg_compression_pct
+                        )                                                                        AS avg_compression_pct,
+                        COALESCE(SUM(
+                          CASE WHEN status = 'completed'
+                                    AND input_size_bytes IS NOT NULL
+                                    AND output_size_bytes IS NOT NULL
+                                    AND input_size_bytes > output_size_bytes
+                          THEN input_size_bytes - output_size_bytes END
+                        ), 0)                                                                    AS bytes_saved_total,
+                        COALESCE(SUM(
+                          CASE WHEN status = 'completed'
+                                    AND input_size_bytes IS NOT NULL
+                                    AND output_size_bytes IS NOT NULL
+                                    AND output_size_bytes > input_size_bytes
+                          THEN output_size_bytes - input_size_bytes END
+                        ), 0)                                                                    AS bytes_grown_total,
+                        COALESCE(SUM(
+                          CASE WHEN status = 'completed'
+                                    AND source_duration_seconds IS NOT NULL
+                                    AND source_duration_seconds > 0
+                          THEN source_duration_seconds END
+                        ), 0) / 60.0                                                             AS minutes_transcoded_total
                     FROM jobs
                     WHERE 1=1 {filter_clause}
                 """)
         kpi_row = cur.fetchone()
+
+        # Per-encoder-backend breakdown over the same window.
+        cur.execute(f"""
+                    SELECT
+                        COALESCE(encoder_backend, 'unknown')                                    AS encoder_backend,
+                        COUNT(*) FILTER (WHERE status = 'completed')                            AS count,
+                        COALESCE(SUM(
+                          CASE WHEN status = 'completed'
+                                    AND input_size_bytes IS NOT NULL
+                                    AND output_size_bytes IS NOT NULL
+                                    AND input_size_bytes > output_size_bytes
+                          THEN input_size_bytes - output_size_bytes END
+                        ), 0)                                                                    AS bytes_saved,
+                        COALESCE(SUM(
+                          CASE WHEN status = 'completed'
+                                    AND source_duration_seconds IS NOT NULL
+                                    AND source_duration_seconds > 0
+                          THEN source_duration_seconds END
+                        ), 0) / 60.0                                                             AS minutes
+                    FROM jobs
+                    WHERE status = 'completed' {filter_clause}
+                    GROUP BY COALESCE(encoder_backend, 'unknown')
+                    ORDER BY count DESC
+                """)
+        encoders = {
+          row["encoder_backend"]: {
+            "count": int(row["count"] or 0),
+            "bytes_saved": int(row["bytes_saved"] or 0),
+            "minutes": round(float(row["minutes"] or 0), 2),
+          }
+          for row in cur.fetchall()
+        }
+
+        # Per-failure-category breakdown over the same window.
+        cur.execute(f"""
+                    SELECT
+                        COALESCE(failure_category, 'unknown')                                   AS failure_category,
+                        COUNT(*)                                                                AS count
+                    FROM jobs
+                    WHERE status = 'failed' {filter_clause}
+                    GROUP BY COALESCE(failure_category, 'unknown')
+                    ORDER BY count DESC
+                """)
+        failures = {row["failure_category"]: {"count": int(row["count"] or 0)} for row in cur.fetchall()}
 
         # Time-series: zero-filled buckets per hour (24h) or per day (7d/30d)
         if wdef:
@@ -1201,6 +1381,9 @@ class PostgreSQLJobDatabase:
       "avg_duration_seconds": float(kpi_row["avg_duration_seconds"]) if kpi_row["avg_duration_seconds"] is not None else None,
       "p95_duration_seconds": float(kpi_row["p95_duration_seconds"]) if kpi_row["p95_duration_seconds"] is not None else None,
       "avg_compression_pct": float(kpi_row["avg_compression_pct"]) if kpi_row["avg_compression_pct"] is not None else None,
+      "bytes_saved_total": int(kpi_row["bytes_saved_total"] or 0),
+      "bytes_grown_total": int(kpi_row["bytes_grown_total"] or 0),
+      "minutes_transcoded_total": round(float(kpi_row["minutes_transcoded_total"] or 0), 2),
       "throughput_per_hour": round(completed / th_hours, 2) if th_hours else None,
     }
     return {
@@ -1209,6 +1392,8 @@ class PostgreSQLJobDatabase:
       "kpis": kpis,
       "timeseries": timeseries,
       "nodes": nodes,
+      "encoders": encoders,
+      "failures": failures,
     }
 
   def get_running_jobs(self):

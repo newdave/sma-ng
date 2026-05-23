@@ -2,6 +2,7 @@ import os
 import threading
 import time
 
+from resources.daemon import metrics_prom
 from resources.daemon.log_archiver import LogArchiver
 from resources.library_audit.engine import AuditEngine
 from resources.library_audit.enumerator import enumerate_paths
@@ -243,10 +244,11 @@ class ScannerThread(_StoppableThread):
         continue
 
       resolved_config = self.path_config_manager.get_config_for_path(submit_path)
-      job_id = self.job_db.add_job(submit_path, resolved_config, [])
+      job_id = self.job_db.add_job(submit_path, resolved_config, [], request_source="scan")
       if job_id is not None:
         self.log.info("Scanner queued job %d: %s" % (job_id, submit_path))
         queued += 1
+        metrics_prom.record_job_enqueued("scan", None)
 
     # Record all candidates (including already-queued ones) as scanned so
     # we don't re-evaluate them on the next pass.

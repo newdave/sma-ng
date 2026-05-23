@@ -3384,7 +3384,7 @@ class MediaProcessor:
     try:
       run_fn(preopts, options)
       records.append(AttemptRecord(tier="hw", failure_class=None, duration_ms=_ms(t0)))
-      self._emit_attempt_log(records, "ok")
+      self._emit_attempt_log(records, "ok", options=options)
       return
     except FFMpegConvertError as err:
       hw_err = err
@@ -3394,7 +3394,7 @@ class MediaProcessor:
         self.log.warning(
           "Conversion failed with hardware decoder and fallback-policy=hw_only; surfacing original error (cause=%s)." % cls.value,
         )
-        self._emit_attempt_log(records, "failed")
+        self._emit_attempt_log(records, "failed", options=options)
         raise
 
     # Tier 2 (NEW): hw_alt — VAAPI encoder, QSV decoder preserved (hybrid).
@@ -3418,7 +3418,7 @@ class MediaProcessor:
       try:
         run_fn(retry_preopts_alt, retry_options_alt)
         records.append(AttemptRecord(tier="hw_alt", failure_class=None, duration_ms=_ms(t_alt)))
-        self._emit_attempt_log(records, "ok")
+        self._emit_attempt_log(records, "ok", options=retry_options_alt)
         return
       except FFMpegConvertError as err:
         hw_alt_err = err
@@ -3428,19 +3428,19 @@ class MediaProcessor:
           self.log.warning(
             "hw_alt also failed and fallback-policy=hw_alt; surfacing error (cause=%s)." % cls.value,
           )
-          self._emit_attempt_log(records, "failed")
+          self._emit_attempt_log(records, "failed", options=retry_options_alt)
           raise
     else:
       if policy == FallbackPolicy.HW_ALT:
         # No VAAPI tier possible (source wasn't QSV-encoded). Surface the hw error.
-        self._emit_attempt_log(records, "failed")
+        self._emit_attempt_log(records, "failed", options=options)
         assert hw_err is not None
         raise hw_err
 
     # Tier 3: sw decode (hw encode retained)
     retry_preopts = _strip_hw_decoder_from_preopts(preopts)
     if retry_preopts is None:
-      self._emit_attempt_log(records, "failed")
+      self._emit_attempt_log(records, "failed", options=options)
       # Prefer the most recent error in the chain.
       assert (hw_alt_err or hw_err) is not None
       raise hw_alt_err or hw_err
@@ -3455,7 +3455,7 @@ class MediaProcessor:
     try:
       run_fn(retry_preopts, options)
       records.append(AttemptRecord(tier="sw_decode", failure_class=None, duration_ms=_ms(t1)))
-      self._emit_attempt_log(records, "ok")
+      self._emit_attempt_log(records, "ok", options=options)
       return
     except FFMpegConvertError as err:
       sw_decode_err = err
@@ -3465,14 +3465,14 @@ class MediaProcessor:
         self.log.warning(
           "Conversion failed with sw decode and fallback-policy=sw_decode_only; surfacing error (cause=%s)." % cls.value,
         )
-        self._emit_attempt_log(records, "failed")
+        self._emit_attempt_log(records, "failed", options=options)
         raise
 
     # Tier 4: full software (encoder swap)
     sw_preopts = _strip_qsv_input_pipeline_from_preopts(preopts) or []
     original_codec = _swap_qsv_codec_to_sw(options)
     if original_codec is None:
-      self._emit_attempt_log(records, "failed")
+      self._emit_attempt_log(records, "failed", options=options)
       assert sw_decode_err is not None
       raise sw_decode_err
     cls1 = records[-1].failure_class
@@ -3487,13 +3487,13 @@ class MediaProcessor:
     try:
       run_fn(sw_preopts, options)
       records.append(AttemptRecord(tier="full_sw", failure_class=None, duration_ms=_ms(t2)))
-      self._emit_attempt_log(records, "ok")
+      self._emit_attempt_log(records, "ok", options=options)
       return
     except FFMpegConvertError as third_err:
       cls = _classify(third_err)
       records.append(AttemptRecord(tier="full_sw", failure_class=cls, duration_ms=_ms(t2)))
       getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("full_sw", "failed", cls.value)
-      self._emit_attempt_log(records, "failed")
+      self._emit_attempt_log(records, "failed", options=options)
       raise
 
   def _resolve_vaapi_overlay(self, options):
@@ -3520,15 +3520,62 @@ class MediaProcessor:
         return hdr_overlay
     return {}
 
-  def _emit_attempt_log(self, records: list[AttemptRecord], result: str) -> None:
+  @staticmethod
+  def _resolve_encoder_backend_from_options(options: dict | None) -> tuple[str | None, str | None]:
+    """Extract the operator-facing ``(encoder_name, encoder_backend)`` pair
+    from a live ``options`` dict.
+
+    *encoder_backend* is one of ``qsv`` / ``vaapi`` / ``nvenc`` /
+    ``videotoolbox`` / ``software`` / ``copy``. The string ``copy`` (raw
+    stream-copy) is bucketed separately from ``software`` because it
+    isn't an encode; downstream metrics exclude it from "encodes by GPU"
+    while still crediting it for bytes saved.
+
+    Returns ``(None, None)`` when *options* lacks a usable video codec —
+    e.g. unit tests calling ``_emit_attempt_log`` with no options dict.
+    """
+    if not options:
+      return None, None
+    video = options.get("video") if isinstance(options, dict) else None
+    if not isinstance(video, dict):
+      return None, None
+    vcodec = video.get("codec")
+    if not isinstance(vcodec, str) or not vcodec:
+      return None, None
+    if vcodec == "copy":
+      return "copy", "copy"
+    try:
+      vencoder = Converter.encoder(vcodec)
+    except Exception:
+      vencoder = None
+    backend = getattr(vencoder, "hw_prefix", "") or "software"
+    return vcodec, backend
+
+  def _emit_attempt_log(
+    self,
+    records: list[AttemptRecord],
+    result: str,
+    options: dict | None = None,
+  ) -> None:
     """Emit one structured JSON line summarising the fallback ladder run.
 
     Single-line per :doc:`brainstorming/2026-04-27-logging-refactor`; new
     structured fields go in the JSON payload, not multiple log records.
+
+    When *options* is provided the final encoder name (``options['video']
+    ['codec']`` after any hw_alt swap) plus its operator-facing backend
+    (``qsv`` / ``vaapi`` / ``nvenc`` / ``videotoolbox`` / ``software`` /
+    ``copy``) are included so the daemon worker can persist them and
+    Prometheus can break down savings by backend. ``options`` is optional
+    so legacy unit tests calling this helper without the dict continue to
+    pass; production paths always supply it.
     """
+    encoder_name, encoder_backend = self._resolve_encoder_backend_from_options(options)
     payload = {
       "event": "ffmpeg.attempts",
       "result": result,
+      "encoder_name": encoder_name,
+      "encoder_backend": encoder_backend,
       "attempts": [
         {
           "tier": r.tier,
