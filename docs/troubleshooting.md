@@ -117,6 +117,29 @@ log line — successful recovery shows `[{tier: hw, failure_class: ...}, {tier: 
 - Verify `config/sma-ng.yml` is valid YAML.
 - Verify `config/sma-ng.yml` exists
 
+### "Janitor swept N files" — what does it mean?
+
+If `logs/daemon.log` shows a recurring single-line JSON event like:
+
+```json
+{"event":"storage.janitor","swept_sma":3,"swept_smatmp":1,"swept_empty_mp4":0,"freed_bytes":4823040}
+```
+
+the storage janitor removed leftover transcode artefacts from
+`base.converter.output-directory`. A small non-zero count is normal —
+the janitor exists to reclaim space when ffmpeg or the daemon were
+killed mid-job. A sustained high `swept_sma` / `swept_smatmp` rate
+indicates the worker is crashing or being OOM-killed mid-transcode.
+
+Counter-mirror: `sma_output_orphan_files_swept_total{node_id,kind}` —
+plot `rate(sma_output_orphan_files_swept_total[1h])` per kind. The free-space
+gauge `sma_output_dir_free_bytes` and its companion alerts are documented in
+[`docs/metrics.md`](metrics.md#storage-instruments).
+
+To disable the janitor (not recommended on hosts with active output
+directories), set `daemon.storage-janitor-interval-seconds: 0` in
+`sma-ng.yml`.
+
 ### Smoke test fails at startup
 
 If `Daemon.smoke_test: true` is set in `sma-ng.yml` or `--smoke-test` is passed:

@@ -17,7 +17,7 @@ try:
 except Exception:
   _VERSION = "unknown"
 
-from resources.daemon import metrics_prom
+from resources.daemon import metrics_prom, storage
 from resources.daemon.constants import resolve_node_id
 from resources.daemon.threads import (
   ConfigWatcherThread,
@@ -26,6 +26,7 @@ from resources.daemon.threads import (
   LibraryAuditWorkerThread,
   RecycleBinCleanerThread,
   ScannerThread,
+  StorageJanitorThread,
 )
 from resources.daemon.worker import WorkerPool
 
@@ -161,6 +162,16 @@ class DaemonServer(ThreadingHTTPServer):
     metrics_prom.set_build_info(_VERSION, self.node_id)
     metrics_prom.register_queue_depth_source(self.node_id, job_db.pending_count)
 
+    # Register the output-directory capacity gauge source only when an
+    # output_directory is configured — registering a perpetually-zero
+    # callback would surface stale labels on the /metrics endpoint.
+    output_dir = path_config_manager.output_directory
+    if output_dir:
+      metrics_prom.register_output_dir_source(
+        self.node_id,
+        lambda: storage.output_dir_usage(path_config_manager.output_directory),
+      )
+
     # Start heartbeat thread (only does real work with PostgreSQL backend)
     self.heartbeat_thread = HeartbeatThread(
       job_db=job_db,
@@ -202,6 +213,18 @@ class DaemonServer(ThreadingHTTPServer):
       logger=logger,
     )
     self.recycle_cleaner_thread.start()
+
+    # Start the storage janitor (output_directory orphan sweeper).
+    self.storage_janitor_thread = StorageJanitorThread(
+      output_directory=path_config_manager.output_directory,
+      temp_extension=path_config_manager.temp_extension,
+      interval_seconds=path_config_manager.storage_janitor_interval_seconds,
+      max_age_seconds=path_config_manager.storage_janitor_max_age_seconds,
+      node_id=self.node_id,
+      logger=logger,
+      smoke_test=path_config_manager.smoke_test,
+    )
+    self.storage_janitor_thread.start()
 
     # Start library audit threads (enumerator + worker). Both no-op when
     # job_db is not distributed or when daemon.audit.enabled is false.
@@ -422,6 +445,20 @@ class DaemonServer(ThreadingHTTPServer):
     )
     self.recycle_cleaner_thread.start()
 
+    # Restart the storage janitor with updated settings.
+    self.storage_janitor_thread.stop()
+    self.storage_janitor_thread.join(timeout=5)
+    self.storage_janitor_thread = StorageJanitorThread(
+      output_directory=self.path_config_manager.output_directory,
+      temp_extension=self.path_config_manager.temp_extension,
+      interval_seconds=self.path_config_manager.storage_janitor_interval_seconds,
+      max_age_seconds=self.path_config_manager.storage_janitor_max_age_seconds,
+      node_id=self.node_id,
+      logger=self.logger,
+      smoke_test=self.path_config_manager.smoke_test,
+    )
+    self.storage_janitor_thread.start()
+
     # Restart library audit threads so a new audit_settings (paths, intervals,
     # skip_dirs) takes effect without a process restart.
     self.library_audit_thread.stop()
@@ -456,6 +493,7 @@ class DaemonServer(ThreadingHTTPServer):
     self.heartbeat_thread.stop()
     self.scanner_thread.stop()
     self.recycle_cleaner_thread.stop()
+    self.storage_janitor_thread.stop()
     self.library_audit_thread.stop()
     self.library_audit_worker_thread.stop()
     if self.config_watcher_thread:
@@ -497,6 +535,7 @@ class DaemonServer(ThreadingHTTPServer):
     self.heartbeat_thread.stop()
     self.scanner_thread.stop()
     self.recycle_cleaner_thread.stop()
+    self.storage_janitor_thread.stop()
     self.library_audit_thread.stop()
     self.library_audit_worker_thread.stop()
     if self.config_watcher_thread:

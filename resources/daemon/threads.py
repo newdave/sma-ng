@@ -1,8 +1,9 @@
+import json
 import os
 import threading
 import time
 
-from resources.daemon import metrics_prom
+from resources.daemon import metrics_prom, storage
 from resources.daemon.log_archiver import LogArchiver
 from resources.library_audit.engine import AuditEngine
 from resources.library_audit.enumerator import enumerate_paths
@@ -671,3 +672,70 @@ class LibraryAuditWorkerThread(_StoppableThread):
       self.log.exception("Library audit probe error for %s" % unit.get("path"))
     finally:
       sem.release()
+
+
+class StorageJanitorThread(_StoppableThread):
+  """Periodically sweeps orphaned transcode artefacts from the output directory.
+
+  Removes leftover ``*<temp_extension>`` (default ``.sma``), ``*.smatmp``
+  (atomic-copy partials), and zero-byte ``*.mp4`` files older than
+  ``max_age_seconds``. Runs once at startup so a crash-on-restart cleans
+  up immediately, then every ``interval_seconds``.
+
+  Disabled when ``output_directory`` is empty, ``interval_seconds <= 0``,
+  or ``max_age_seconds <= 0``. The ``smoke_test`` flag bypasses the actual
+  sweep so ``daemon.py --smoke-test`` never deletes files.
+  """
+
+  def __init__(self, output_directory, temp_extension, interval_seconds, max_age_seconds, node_id, logger, smoke_test=False):
+    super().__init__()
+    self.output_directory = output_directory or ""
+    self.temp_extension = temp_extension or ""
+    self.interval_seconds = int(interval_seconds or 0)
+    self.max_age_seconds = int(max_age_seconds or 0)
+    self.node_id = node_id or "local"
+    self.log = logger
+    self.smoke_test = bool(smoke_test)
+
+  def _disabled(self) -> bool:
+    return not self.output_directory or self.interval_seconds <= 0 or self.max_age_seconds <= 0
+
+  def _sweep_once(self) -> None:
+    if self.smoke_test:
+      self.log.info('{"event":"storage.janitor","mode":"smoke_test","action":"skip"}')
+      return
+    try:
+      summary = storage.sweep_output_directory(
+        self.output_directory,
+        self.temp_extension,
+        self.max_age_seconds,
+      )
+    except Exception:
+      self.log.exception("StorageJanitor: sweep failed")
+      return
+
+    metrics_prom.record_orphan_sweep(self.node_id, "sma", summary.sma_count)
+    metrics_prom.record_orphan_sweep(self.node_id, "smatmp", summary.smatmp_count)
+    metrics_prom.record_orphan_sweep(self.node_id, "empty_mp4", summary.empty_mp4_count)
+
+    payload = {
+      "event": "storage.janitor",
+      "swept_sma": summary.sma_count,
+      "swept_smatmp": summary.smatmp_count,
+      "swept_empty_mp4": summary.empty_mp4_count,
+      "freed_bytes": summary.freed_bytes,
+    }
+    self.log.info(json.dumps(payload, separators=(",", ":")))
+
+  def run(self):
+    if self._disabled():
+      self.log.info("StorageJanitor: disabled (output_directory=%r, interval=%ds, max_age=%ds)" % (self.output_directory, self.interval_seconds, self.max_age_seconds))
+      return
+    self.log.info("StorageJanitor started — output_dir=%s temp_ext=%s interval=%ds max_age=%ds" % (self.output_directory, self.temp_extension or ".sma", self.interval_seconds, self.max_age_seconds))
+    # Sweep at startup so a crash-on-restart cleans up immediately.
+    self._sweep_once()
+    while self.running:
+      self._stop_event.wait(timeout=self.interval_seconds)
+      if not self.running:
+        return
+      self._sweep_once()

@@ -141,3 +141,39 @@ The `/dashboard/metrics` page uses Chart.js 4.5.1 (loaded from jsDelivr CDN) to 
 - **Horizontal bar chart** — per-node completed/failed job counts
 
 All charts update in place when switching time windows (no page reload).
+
+## Storage instruments
+
+The daemon exposes four additional Prometheus instruments covering
+output-directory capacity and the orphan-sweep janitor (see
+[`docs/daemon.md`](daemon.md#storage-management--janitor) for the
+janitor itself).
+
+| Instrument                              | Type    | Labels             | Meaning                                                        |
+| --------------------------------------- | ------- | ------------------ | -------------------------------------------------------------- |
+| `sma_output_dir_total_bytes`            | Gauge   | `node_id`          | Total bytes on the filesystem hosting `output-directory`.      |
+| `sma_output_dir_used_bytes`             | Gauge   | `node_id`          | Used bytes on that filesystem (sampled at scrape).             |
+| `sma_output_dir_free_bytes`             | Gauge   | `node_id`          | Free bytes on that filesystem (sampled at scrape).             |
+| `sma_output_orphan_files_swept_total`   | Counter | `node_id`, `kind`  | Files removed by the janitor, by kind (`sma`/`smatmp`/`empty_mp4`). |
+
+Capacity gauges are populated via `Gauge.set_function()` — the scrape
+calls `shutil.disk_usage()` lazily, so there is no background poller.
+The gauges are only registered when `base.converter.output-directory` is
+non-empty; missing-directory and permission errors collapse to zero so
+the scrape loop never crashes.
+
+Sample PromQL for alerts:
+
+```promql
+# Alert when less than 50 GB free for 10 minutes on any node.
+sma_output_dir_free_bytes < 50e9 for 10m
+
+# Alert when the janitor is sweeping more than 5 files per hour
+# (sustained, across all kinds) — a sign that workers are crashing
+# or being killed mid-transcode.
+sum by (node_id) (rate(sma_output_orphan_files_swept_total[1h])) > 5
+```
+
+The full janitor cadence and the structured log line it emits per
+cycle are documented in
+[`docs/daemon.md`](daemon.md#storage-management--janitor).
