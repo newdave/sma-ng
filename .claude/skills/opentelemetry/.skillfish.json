@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "opentelemetry",
+  "owner": "bendrucker",
+  "repo": "claude",
+  "path": "plugins/opentelemetry/skills/opentelemetry",
+  "branch": "main",
+  "sha": "ff10a0ec08d3ef8e7f0247b84ce01ba9caf05acf",
+  "source": "manual"
+}
