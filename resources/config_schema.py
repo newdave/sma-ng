@@ -883,6 +883,13 @@ class DaemonConfig(_Base):
   log_archive_dir: str = ""
   log_archive_after_days: int = 7
   log_delete_after_days: int = 30
+  # Storage janitor — periodic sweep of leftover *.sma / *.smatmp /
+  # zero-byte *.mp4 files in the converter output_directory. Both keys
+  # nullable so operators can disable the janitor without removing the
+  # block; ``interval_seconds <= 0`` or ``max_age_seconds <= 0`` skips
+  # the sweep loop entirely (the gauges still register).
+  storage_janitor_interval_seconds: int | None = 900
+  storage_janitor_max_age_seconds: int | None = 21600
   default_args: list[str] | str = Field(default_factory=list)
   scan_paths: list[ScanPath] = Field(default_factory=list)
   path_rewrites: list[PathRewrite] = Field(default_factory=list)

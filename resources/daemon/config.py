@@ -291,6 +291,8 @@ class PathConfigManager:
     self._log_archive_dir: str | None = None
     self._log_archive_after_days: int = 0
     self._log_delete_after_days: int = 0
+    self._storage_janitor_interval_seconds: int = 900
+    self._storage_janitor_max_age_seconds: int = 21600
 
     self._loader = ConfigLoader(logger=self.log)
     self._cfg: SmaConfig | None = None  # validated config tree, populated by load_config
@@ -402,6 +404,10 @@ class PathConfigManager:
     self._log_archive_dir = d.log_archive_dir or None
     self._log_archive_after_days = d.log_archive_after_days
     self._log_delete_after_days = d.log_delete_after_days
+    # Treat null/None as "disabled" — surface as 0 to the consumers so the
+    # janitor thread can use a single `> 0` check.
+    self._storage_janitor_interval_seconds = int(d.storage_janitor_interval_seconds or 0)
+    self._storage_janitor_max_age_seconds = int(d.storage_janitor_max_age_seconds or 0)
     if self.path_rewrites:
       self.log.debug("Path rewrites (%d):" % len(self.path_rewrites))
       for rewrite in self.path_rewrites:
@@ -464,6 +470,30 @@ class PathConfigManager:
   def log_delete_after_days(self) -> int:
     """Return days after which archived log files are deleted (0 = disabled)."""
     return self._log_delete_after_days
+
+  @property
+  def storage_janitor_interval_seconds(self) -> int:
+    """Return the janitor sweep cadence in seconds (0 = disabled)."""
+    return self._storage_janitor_interval_seconds
+
+  @property
+  def storage_janitor_max_age_seconds(self) -> int:
+    """Return the minimum file-mtime age before the janitor reaps (0 = disabled)."""
+    return self._storage_janitor_max_age_seconds
+
+  @property
+  def output_directory(self) -> str:
+    """Return ``base.converter.output_directory`` (empty string when unset)."""
+    if self._cfg is None:
+      return ""
+    return self._cfg.base.converter.output_directory or ""
+
+  @property
+  def temp_extension(self) -> str:
+    """Return the configured temp-extension (without leading dot), or empty."""
+    if self._cfg is None:
+      return ""
+    return (self._cfg.base.converter.temp_extension or "").lstrip(".")
 
   @staticmethod
   def _parse_args_list(raw_args):

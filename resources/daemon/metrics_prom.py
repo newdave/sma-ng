@@ -281,6 +281,54 @@ def set_queue_depth(node_id: str, value: int) -> None:
   QUEUE_DEPTH.labels(node_id=node_id or "local").set(value)
 
 
+def register_output_dir_source(node_id: str, callback: Callable[[], object]) -> None:
+  """Wire *callback* so output-dir capacity gauges are sampled at scrape.
+
+  ``callback`` must return either a 3-tuple ``(total, used, free)`` or an
+  object exposing those three integer attributes (e.g.
+  :class:`resources.daemon.storage.DiskUsage`). Exceptions inside the
+  callback collapse to zero so a transient ENOENT never crashes the
+  Prometheus collector. Pass-through to three independent
+  :py:meth:`Gauge.set_function` registrations.
+  """
+  label = node_id or "local"
+
+  def _sample() -> tuple[float, float, float]:
+    try:
+      result = callback()
+    except Exception:
+      return 0.0, 0.0, 0.0
+    if result is None:
+      return 0.0, 0.0, 0.0
+    if isinstance(result, tuple) and len(result) >= 3:
+      total, used, free = result[0], result[1], result[2]
+    else:
+      total = getattr(result, "total", 0)
+      used = getattr(result, "used", 0)
+      free = getattr(result, "free", 0)
+    return float(total or 0), float(used or 0), float(free or 0)
+
+  OUTPUT_DIR_TOTAL_BYTES.labels(node_id=label).set_function(lambda: _sample()[0])
+  OUTPUT_DIR_USED_BYTES.labels(node_id=label).set_function(lambda: _sample()[1])
+  OUTPUT_DIR_FREE_BYTES.labels(node_id=label).set_function(lambda: _sample()[2])
+
+
+def record_orphan_sweep(node_id: str, kind: str, count: int) -> None:
+  """Increment ``sma_output_orphan_files_swept_total{node_id,kind}`` by *count*.
+
+  ``kind`` is collapsed to ``"unknown"`` if not in :data:`ORPHAN_KINDS` so
+  we never emit an unbounded label. ``count`` ≤ 0 is a no-op (Prometheus
+  counters MUST be monotonically non-decreasing).
+  """
+  if not count or count <= 0:
+    return
+  resolved_kind = kind if kind in ORPHAN_KINDS else "unknown"
+  OUTPUT_ORPHAN_FILES_SWEPT_TOTAL.labels(
+    node_id=node_id or "local",
+    kind=resolved_kind,
+  ).inc(int(count))
+
+
 def register_queue_depth_source(node_id: str, callback: Callable[[], int]) -> None:
   """Wire *callback* (e.g. ``job_db.pending_count``) so scrapes read fresh state.
 
@@ -311,6 +359,11 @@ __all__ = [
   "JOBS_IN_FLIGHT",
   "JOBS_TOTAL",
   "JOB_DURATION_SECONDS",
+  "ORPHAN_KINDS",
+  "OUTPUT_DIR_FREE_BYTES",
+  "OUTPUT_DIR_TOTAL_BYTES",
+  "OUTPUT_DIR_USED_BYTES",
+  "OUTPUT_ORPHAN_FILES_SWEPT_TOTAL",
   "PROM_CONTENT_TYPE",
   "QUEUE_DEPTH",
   "SOURCE_SECONDS_TRANSCODED_TOTAL",
@@ -321,6 +374,8 @@ __all__ = [
   "record_job_enqueued",
   "record_job_savings",
   "record_job_terminal",
+  "record_orphan_sweep",
+  "register_output_dir_source",
   "register_queue_depth_source",
   "render_exposition",
   "set_build_info",
