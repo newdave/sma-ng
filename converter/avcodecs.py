@@ -1435,6 +1435,7 @@ class VideotoolboxEncH264(H264Codec):
 
   codec_name = "h264_videotoolbox"
   ffmpeg_codec_name = "h264_videotoolbox"
+  hw_prefix = "videotoolbox"
 
 
 class OMXH264Codec(H264Codec):
@@ -2077,6 +2078,7 @@ class VideotoolboxEncH265(H265Codec):
 
   codec_name = "h265_videotoolbox"
   ffmpeg_codec_name = "hevc_videotoolbox"
+  hw_prefix = "videotoolbox"
 
 
 class DivxCodec(VideoCodec):
