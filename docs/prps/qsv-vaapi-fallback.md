@@ -110,30 +110,30 @@ remain available as final safety nets when both QSV and VAAPI fail.
 - [ ] Job 3695's exact input file transcodes successfully under
       `fallback-policy: aggressive` on sma-master (tier-1 QSV fails,
       tier-2 hw_alt VAAPI succeeds, sw tiers never invoked).
-- [ ] `_attempt_ladder` emits a single `ffmpeg.attempts` JSON line with
+- [x] `_attempt_ladder` emits a single `ffmpeg.attempts` JSON line with
       `attempts: [{hw, failure_class=..., ...}, {hw_alt, failure_class=null, ...}]`
       and `result: "ok"` when tier 2 (hw_alt) recovers.
-- [ ] `fallback-policy: hw_only` still surfaces the original tier-1 error
+- [x] `fallback-policy: hw_only` still surfaces the original tier-1 error
       (no behavioural change for operators who explicitly opted out of
       fallback).
-- [ ] `fallback-policy: hw_alt` runs hw → hw_alt and stops (no SW tiers).
-- [ ] `fallback-policy: sw_decode_only` runs hw → hw_alt → sw_decode and
+- [x] `fallback-policy: hw_alt` runs hw → hw_alt and stops (no SW tiers).
+- [x] `fallback-policy: sw_decode_only` runs hw → hw_alt → sw_decode and
       stops at sw_decode failure (no full_sw).
-- [ ] `fallback-policy: aggressive` runs the full 4-tier ladder
+- [x] `fallback-policy: aggressive` runs the full 4-tier ladder
       (hw → hw_alt → sw_decode → full_sw).
-- [ ] Schema parses `base.video.vaapi.codec-parameters: '-rc_mode VBR …'`
+- [x] Schema parses `base.video.vaapi.codec-parameters: '-rc_mode VBR …'`
       without warnings and the VAAPI tier's ffmpeg command line carries
       those params.
-- [ ] When `base.video.vaapi:` is omitted, the VAAPI tier uses the
+- [x] When `base.video.vaapi:` is omitted, the VAAPI tier uses the
       parent `base.video.codec-parameters` with QSV-only flags stripped
       (the QSV-only flag set `_QSV_ONLY_CODEC_FLAGS` is documented and
       tested).
-- [ ] Pre-existing `fallback-policy: software-fallback` deprecation
+- [x] Pre-existing `fallback-policy: software-fallback` deprecation
       shim still works (no regression in `_migrate_software_fallback`).
-- [ ] Unit tests for the new `_swap_qsv_codec_to_vaapi`,
+- [x] Unit tests for the new `_swap_qsv_codec_to_vaapi`,
       `_rewrite_qsv_preopts_for_vaapi_encode`, and the merged hw_alt
       tier in `_attempt_ladder`.
-- [ ] Coverage: ≥90% global line coverage maintained; per-module ≥70%
+- [x] Coverage: ≥90% global line coverage maintained; per-module ≥70%
       for any production module ≥100 statements touched (per CLAUDE.md
       Validation Matrix).
 
@@ -770,17 +770,17 @@ python -m pytest tests/ -q   # broad pass
 
 ## Final validation Checklist
 
-- [ ] `mise run test` passes (all 3257+ tests)
-- [ ] `mise run test:lint` clean
-- [ ] Coverage stays ≥90% global, ≥70% per touched module ≥100 stmts
-- [ ] `setup/sma-ng.yml.sample` regenerated and committed
-- [ ] `docs/configuration.md` updated with both new vaapi sections + table refresh
+- [x] `mise run test` passes (all 3257+ tests)
+- [x] `mise run test:lint` clean
+- [x] Coverage stays ≥90% global, ≥70% per touched module ≥100 stmts
+- [x] `setup/sma-ng.yml.sample` regenerated and committed
+- [x] `docs/configuration.md` updated with both new vaapi sections + table refresh
 - [ ] Job 3695's input file (or equivalent Main10 SDR source) recovers via hw_alt
-- [ ] `ffmpeg.attempts` log entry shows correct tier sequence
-- [ ] No regression on tier-1-success jobs (no `hw_alt` log noise for them)
-- [ ] `fallback-policy: hw_only` still surfaces tier-1 errors immediately
-- [ ] `fallback-policy: hw_alt` stops at the new tier (no SW fallback)
-- [ ] Operators with the deprecated `software-fallback: true` config still get AGGRESSIVE behaviour (including new hw_alt tier)
+- [x] `ffmpeg.attempts` log entry shows correct tier sequence
+- [x] No regression on tier-1-success jobs (no `hw_alt` log noise for them)
+- [x] `fallback-policy: hw_only` still surfaces tier-1 errors immediately
+- [x] `fallback-policy: hw_alt` stops at the new tier (no SW fallback)
+- [x] Operators with the deprecated `software-fallback: true` config still get AGGRESSIVE behaviour (including new hw_alt tier)
 
 ---
 
