@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "python-observability",
+  "owner": "ericgrill",
+  "repo": "agents-skills-plugins",
+  "path": "plugins/python-development/skills/python-observability",
+  "branch": "main",
+  "sha": "b3fa492cd6bc8d2215cb209b7fcae49f9704f3c5",
+  "source": "manual"
+}
