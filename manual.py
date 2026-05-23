@@ -24,11 +24,17 @@ from converter.avcodecs import attachment_codec_list, audio_codec_list, subtitle
 from resources.config_loader import ConfigError, ConfigLoader
 from resources.extensions import tmdb_api_key
 from resources.log import getLogger
-from resources.mediaprocessor import MediaProcessor
+from resources.mediaprocessor import InsufficientOutputSpace, MediaProcessor
 from resources.metadata import MediaType, Metadata
 from resources.readsettings import ReadSettings
 
 os.environ["REGEX_DISABLED"] = "1"  # Fixes Toilal/rebulk#20
+
+# Distinct exit code for ``InsufficientOutputSpace`` so operator scripts
+# (and the daemon worker, if a job ever slips past its own pre-flight)
+# can distinguish a transient capacity refusal from a generic conversion
+# failure (exit 1). Aligns with sysexits EX_TEMPFAIL (75).
+EXIT_INSUFFICIENT_OUTPUT_SPACE = 75
 
 log = getLogger("MANUAL")
 
@@ -757,6 +763,9 @@ def walkDir(
         )
         if result is False:
           failed = True
+      except InsufficientOutputSpace as err:
+        log.error("Refusing to convert %s: %s. Aborting batch — free space and retry." % (filepath, err))
+        sys.exit(EXIT_INSUFFICIENT_OUTPUT_SPACE)
       except SkipFileException:
         log.debug("Skipping file %s." % filepath)
       except KeyboardInterrupt:
@@ -1046,6 +1055,9 @@ def main():
         )
         if result is False:
           sys.exit(1)
+      except InsufficientOutputSpace as err:
+        log.error("Refusing to convert %s: %s. Free space on output_dir or lower output-directory-space-ratio." % (path, err))
+        sys.exit(EXIT_INSUFFICIENT_OUTPUT_SPACE)
       except SkipFileException:
         log.debug("Skipping file %s" % path)
 

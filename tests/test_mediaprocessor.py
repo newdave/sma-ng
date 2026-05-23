@@ -8131,3 +8131,50 @@ class TestConvertHwAltPolicy:
     assert result is None
     # hw + hw_alt only; no sw_decode/full_sw under HW_ALT policy.
     assert call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# InsufficientOutputSpace exception (replaces silent output_dir=None fallback)
+# ---------------------------------------------------------------------------
+
+
+class TestInsufficientOutputSpace:
+  """MediaProcessor.process() must now raise InsufficientOutputSpace instead
+  of silently routing the output next to the source. The daemon worker
+  pre-flights the same gate, so only CLI callers should ever observe this
+  raise."""
+
+  def test_process_raises_when_output_dir_full(self, tmp_path):
+    import shutil
+
+    from resources.mediaprocessor import InsufficientOutputSpace
+
+    mp = _make_mp()
+    mp.settings.output_dir = str(tmp_path)
+    mp.settings.output_dir_ratio = 2.0
+    mp.settings.delete = False
+    f = tmp_path / "big.mkv"
+    f.write_bytes(b"x" * 1024)
+    # isValidSource returns truthy info; outputDirHasFreeSpace returns False.
+    mp.isValidSource = MagicMock(return_value={"format": "matroska"})
+    mp.outputDirHasFreeSpace = MagicMock(return_value=False)
+    fake_usage = shutil.disk_usage(str(tmp_path))._replace(free=0)
+    with patch("resources.mediaprocessor.shutil.disk_usage", return_value=fake_usage):
+      with pytest.raises(InsufficientOutputSpace) as exc:
+        mp.process(str(f))
+    err = exc.value
+    assert err.output_dir == str(tmp_path)
+    assert err.needed_bytes == 2048  # 1024 * 2.0
+    assert err.free_bytes == 0
+
+  def test_process_does_not_raise_when_ratio_zero(self, tmp_path):
+    """Backward compatibility: ratio=0 keeps the original no-op semantics."""
+    mp = _make_mp()
+    mp.settings.output_dir = str(tmp_path)
+    mp.settings.output_dir_ratio = 0
+    f = tmp_path / "small.mkv"
+    f.write_bytes(b"x" * 100)
+    mp.isValidSource = MagicMock(return_value=None)  # short-circuit after the gate
+    # Should not raise — ratio falsy disables the gate in this path.
+    result = mp.process(str(f))
+    assert result is None

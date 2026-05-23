@@ -61,8 +61,7 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `GET`  | `/jobs`                          | Yes  | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
 | `GET`  | `/jobs/<id>`                     | Yes  | Get specific job (includes `progress` when running)                     |
 | `GET`  | `/configs`                       | Yes  | Config mappings and status                                              |
-| `GET`  | `/metrics`                       | No   | Prometheus text exposition (industry-convention path)                   |
-| `GET`  | `/dashboard/metrics`             | No   | Cluster metrics web page (PostgreSQL required)                          |
+| `GET`  | `/metrics`                       | No   | Cluster metrics web page (PostgreSQL required)                          |
 | `GET`  | `/api/metrics`                   | Yes  | Metrics JSON. Query: `?window=24h\|7d\|30d\|all` (PostgreSQL required)  |
 | `GET`  | `/stats`                         | Yes  | Job statistics by status                                                |
 | `GET`  | `/scan`                          | Yes  | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv`               |
@@ -98,45 +97,6 @@ finding kinds, configuration knobs, and auto-fix safety semantics.
 Node admin API route:
 
 - `POST /admin/nodes/<node_id>/<action>` where action is one of `approve`, `reject`, `restart`, `shutdown`, `delete`
-
----
-
-## Prometheus Exposition
-
-`GET /metrics` returns Prometheus text exposition (industry-convention path; matches the default `metrics_path`
-in `prometheus.yml`'s `scrape_configs`). The HTML cluster-metrics dashboard previously served at `/metrics`
-moved to `/dashboard/metrics` — **this is a breaking change**; update any bookmarks or external links.
-
-Metrics exposed today (label cardinality is bounded; new labels require updating
-`tests/test_metrics_prom.py::test_label_sets_match_budget`):
-
-| Metric                              | Type      | Labels                                       | Notes                                                                                |
-| ----------------------------------- | --------- | -------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `sma_build_info`                    | gauge     | `version`, `node_id`                         | Always 1; labels carry build metadata for `join`-style PromQL queries.               |
-| `sma_jobs_total`                    | counter   | `status`                                     | Terminal job count by `completed` / `failed` / `cancelled`.                          |
-| `sma_job_duration_seconds`          | histogram | `status`                                     | Wall-clock from worker claim to terminal state. Buckets up to 7200s.                 |
-| `sma_fallback_transitions_total`    | counter   | `from_tier`, `to_tier`, `failure_class`      | Ladder transitions from `MediaProcessor._attempt_ladder`.                            |
-| `sma_failures_total`                | counter   | `failure_category`, `failure_cause`          | Failure count by operator category (`config`/`source_media`/`hardware`/`disk`/`system`/`unknown`) and raw cause. |
-| `sma_jobs_enqueued_total`           | counter   | `request_source`, `request_profile`          | Jobs accepted into the queue. Source is one of `sonarr`/`radarr`/`webhook`/`scan`/`audit`/`unknown`; profile is the resolved profile name or `none`. |
-| `sma_jobs_in_flight`                | gauge     | `node_id`                                    | Currently-running jobs (inc/dec at worker boundary).                                 |
-| `sma_queue_depth`                   | gauge     | `node_id`                                    | Pending + queued count — sampled at scrape via `Gauge.set_function(pending_count)`.  |
-| `sma_bytes_saved_bytes_total`       | counter   | `encoder_backend`                            | Cumulative bytes reclaimed by transcodes (per-job clamped to ≥ 0), keyed by encoder backend. |
-| `sma_bytes_grown_bytes_total`       | counter   | `encoder_backend`                            | Cumulative bytes added when transcode output exceeded the source, keyed by encoder backend. |
-| `sma_source_seconds_transcoded_total` | counter | `encoder_backend`                            | Cumulative source container seconds transcoded, keyed by encoder backend.            |
-
-Default `process_*` and `python_*` collectors are exposed automatically by `prometheus_client`.
-
-The metric inventory is intentionally narrow today; per-encoder / per-profile / per-failure-category labels
-land in follow-up PRs as the corresponding `jobs` columns ship. See `docs/prps/metrics-expansion.md`.
-
-Sample Prometheus scrape config:
-
-```yaml
-scrape_configs:
-  - job_name: sma-ng
-    static_configs:
-      - targets: ["sma-master:8585"]
-```
 
 ---
 
@@ -194,8 +154,7 @@ curl -H "X-API-Key: SECRET" ...
 curl -H "Authorization: Bearer SECRET" ...
 ```
 
-Public endpoints (no auth required): `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, `/metrics`, `/health`,
-`/status`, `/docs`, `/favicon.png`
+Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/metrics`, `/health`, `/status`, `/docs`, `/favicon.png`
 
 ---
 
@@ -298,55 +257,10 @@ auto-profile selection happens for one-shot conversions. Pass
 | `log_archive_dir`           | Cluster-mode: directory for gzipped JSONL archive of cluster logs                                                            |
 | `log_archive_after_days`    | Cluster-mode: move logs older than this many days from DB to `log_archive_dir`                                               |
 | `log_delete_after_days`     | Cluster-mode: prune archived log files older than this many days                                                             |
-| `storage_janitor_interval_seconds` | Seconds between output-directory orphan sweeps (default: `900`; `0` or `null` = disabled)                              |
-| `storage_janitor_max_age_seconds`  | Minimum file mtime age before the janitor removes a leftover (default: `21600` / 6h; `0` or `null` = disabled)         |
 
 The `default_args` list is global only — there is no per-routing-rule
 override. Per-rule customisation is expressed by selecting a different
 `profile` for that rule.
-
----
-
-## Storage management — janitor
-
-The storage janitor runs alongside the worker pool to reap orphaned
-transcode artefacts from `base.converter.output-directory`. It targets
-three classes of files that accumulate when ffmpeg or the daemon are
-killed mid-job:
-
-- `*<temp-extension>` (default `.sma`) — abandoned in-progress outputs.
-- `*.smatmp` — partial atomic copies left when `shutil.copy` was
-  interrupted.
-- Zero-byte `*.mp4` — finals where QTFS moov relocation or atomic rename
-  was killed before any bytes were written.
-
-Cadence and aggressiveness are tuned via two daemon keys:
-
-| Key                                | Default | Behavior                                                                |
-| ---------------------------------- | ------- | ----------------------------------------------------------------------- |
-| `storage_janitor_interval_seconds` | `900`   | Seconds between sweeps. `0` or `null` disables the janitor entirely.   |
-| `storage_janitor_max_age_seconds`  | `21600` | Minimum mtime age before a file is removed (default 6 hours).          |
-
-The janitor runs one sweep at daemon startup so a crash-on-restart cleans
-up immediately, then every `storage_janitor_interval_seconds` thereafter.
-Daemon `--smoke-test` registers the janitor but skips the filesystem
-sweep so dry-runs never delete anything.
-
-Each cycle emits a single-line structured log record:
-
-```json
-{"event":"storage.janitor","swept_sma":3,"swept_smatmp":1,"swept_empty_mp4":0,"freed_bytes":4823040}
-```
-
-The per-node counter `sma_output_orphan_files_swept_total{node_id,kind}`
-and the three capacity gauges (`sma_output_dir_total_bytes`,
-`sma_output_dir_used_bytes`, `sma_output_dir_free_bytes`) are described
-in [`metrics.md`](metrics.md).
-
-If `base.converter.output-directory` is empty, the gauges are not
-registered and the janitor logs `disabled` and exits its thread. The
-janitor is independent of the recycle-bin cleaner — recycle bins still
-follow their own age/free-space rules.
 
 ---
 
@@ -550,6 +464,27 @@ Only recognised media file extensions are deleted (`.mp4`, `.mkv`, `.avi`, `.mov
 The free-space check uses `statvfs` and is mount-point-aware, so it works correctly with CephFS, NFS, and other network filesystems.
 
 ---
+
+## Storage management — preflight capacity gate
+
+Before invoking the conversion subprocess, every worker checks that the configured `output-directory` filesystem has
+enough free space to hold the converted file. The gate compares `os.path.getsize(input) * output-directory-space-ratio`
+against `shutil.disk_usage(output_dir).free`. On shortfall the job is **deferred** (returned to `pending` with a short
+`next_attempt_at` backoff) instead of failed — no retry slot is consumed, and the worker frees up to pick the next job.
+
+Behaviour notes:
+
+- The schema default for `output-directory-space-ratio` is `0.0`. Inside the daemon preflight only, a falsy ratio is
+  clamped to `1.0` so an operator who forgot to set the ratio still gets a sane "output must fit input" gate. The CLI
+  and direct `MediaProcessor` paths keep the original no-op semantics when the ratio is `0.0`.
+- An unreachable `output-directory` (ENOENT / permission error) **fails open** — the gate never wedges the queue on a
+  misconfigured path; the misconfiguration will surface later when ffmpeg actually tries to write.
+- A deferred job is logged as a single-line structured event:
+  `{"event":"worker.preflight","result":"deferred","cause":"disk_pressure", "input_path":..., "free_bytes":..., "needed_bytes":...}`.
+- The Prometheus counter `sma_failures_total{failure_category="disk", failure_cause="disk_pressure"}` increments on
+  every deferral so capacity pressure is alertable.
+- CLI users (`manual.py`) get a loud failure instead of a deferral: the new `InsufficientOutputSpace` exception exits
+  with status `75` (sysexits `EX_TEMPFAIL`).
 
 ## Job Lifecycle
 

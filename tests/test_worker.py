@@ -848,3 +848,165 @@ class TestFallbackEventParsing:
     worker = _make_worker()
     worker._fallback_counter_callback = None
     worker._record_fallback_event('{"event": "ffmpeg.attempts", "attempts": [], "result": "ok"}')  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# preflight_output_capacity helper + ConversionWorker._preflight_disk_pressure
+# ---------------------------------------------------------------------------
+
+
+class TestPreflightOutputCapacity:
+  """Unit tests for the pure helper preflight_output_capacity()."""
+
+  def test_no_output_dir_passes(self):
+    from resources.daemon.worker import preflight_output_capacity
+
+    ok, needed, free = preflight_output_capacity(None, 2.0, "/some/input")
+    assert ok is True
+    assert needed is None
+    assert free is None
+
+  def test_unstatable_input_fails_open(self, tmp_path):
+    from resources.daemon.worker import preflight_output_capacity
+
+    ok, _, _ = preflight_output_capacity(str(tmp_path), 1.0, "/no/such/input")
+    assert ok is True
+
+  def test_unreachable_output_dir_fails_open(self, tmp_path):
+    from resources.daemon.worker import preflight_output_capacity
+
+    f = tmp_path / "in.mkv"
+    f.write_bytes(b"x" * 100)
+    ok, _, _ = preflight_output_capacity("/does/not/exist", 1.0, str(f))
+    assert ok is True
+
+  def test_ratio_zero_clamped_to_one_in_daemon(self, tmp_path, monkeypatch):
+    """Falsy ratio defaults to 1.0 inside the daemon-side helper."""
+    from resources.daemon import worker as worker_mod
+
+    f = tmp_path / "in.mkv"
+    f.write_bytes(b"x" * 200)
+    monkeypatch.setattr(
+      worker_mod.shutil,
+      "disk_usage",
+      lambda _p: type("U", (), {"free": 100, "total": 1000, "used": 900})(),
+    )
+    ok, needed, free = worker_mod.preflight_output_capacity(str(tmp_path), 0, str(f))
+    assert ok is False
+    assert needed == 200
+    assert free == 100
+
+  def test_happy_when_free_exceeds_needed(self, tmp_path, monkeypatch):
+    from resources.daemon import worker as worker_mod
+
+    f = tmp_path / "in.mkv"
+    f.write_bytes(b"x" * 100)
+    monkeypatch.setattr(
+      worker_mod.shutil,
+      "disk_usage",
+      lambda _p: type("U", (), {"free": 10_000, "total": 100_000, "used": 90_000})(),
+    )
+    ok, needed, free = worker_mod.preflight_output_capacity(str(tmp_path), 2.0, str(f))
+    assert ok is True
+    assert needed == 200
+    assert free == 10_000
+
+
+class TestPreflightDiskPressureIntegration:
+  """ConversionWorker._preflight_disk_pressure end-to-end with mocked deps."""
+
+  def _patch_settings(self, monkeypatch, output_dir, output_dir_ratio):
+    from resources.daemon import worker as worker_mod
+
+    stub = type("S", (), {"output_dir": output_dir, "output_dir_ratio": output_dir_ratio})()
+    monkeypatch.setattr(worker_mod, "_load_settings_for_preflight", lambda *_a, **_kw: stub)
+
+  def test_happy_path_runs_conversion(self, tmp_path, monkeypatch):
+    from resources.daemon import worker as worker_mod
+
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"x" * 100)
+    out = tmp_path / "out"
+    out.mkdir()
+    self._patch_settings(monkeypatch, str(out), 2.0)
+    monkeypatch.setattr(
+      worker_mod.shutil,
+      "disk_usage",
+      lambda _p: type("U", (), {"free": 10_000, "total": 100_000, "used": 90_000})(),
+    )
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+    worker._run_conversion = mock.MagicMock(return_value=(True, None, None))
+    worker.process_job({"id": 100, "path": str(media), "config": "/cfg.ini", "args": None})
+    worker._run_conversion.assert_called_once()
+    db.complete_job.assert_called_once()
+    db.defer_job.assert_not_called()
+
+  def test_tight_disk_defers_job(self, tmp_path, monkeypatch, caplog):
+    from resources.daemon import worker as worker_mod
+
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"x" * 1000)
+    out = tmp_path / "out"
+    out.mkdir()
+    self._patch_settings(monkeypatch, str(out), 2.0)
+    monkeypatch.setattr(
+      worker_mod.shutil,
+      "disk_usage",
+      lambda _p: type("U", (), {"free": 100, "total": 100_000, "used": 99_900})(),
+    )
+    metric_calls = []
+    import resources.daemon.metrics_prom as _mp
+
+    monkeypatch.setattr(_mp, "record_failure", lambda c, x: metric_calls.append((c, x)))
+
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+    worker._run_conversion = mock.MagicMock(return_value=(True, None, None))
+    with caplog.at_level(logging.INFO, logger="test.worker"):
+      worker.process_job({"id": 101, "path": str(media), "config": "/cfg.ini", "args": None})
+    worker._run_conversion.assert_not_called()
+    db.complete_job.assert_not_called()
+    db.defer_job.assert_called_once()
+    assert db.defer_job.call_args[0][0] == 101
+    assert db.defer_job.call_args[1]["reason"] == "disk_pressure"
+    assert metric_calls and metric_calls[0][1] == "disk_pressure"
+    assert any('"event": "worker.preflight"' in r.getMessage() for r in caplog.records)
+
+  def test_unreachable_output_dir_fails_open(self, tmp_path, monkeypatch):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"x" * 100)
+    self._patch_settings(monkeypatch, "/this/path/does/not/exist", 2.0)
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+    worker._run_conversion = mock.MagicMock(return_value=(True, None, None))
+    worker.process_job({"id": 102, "path": str(media), "config": "/cfg.ini", "args": None})
+    worker._run_conversion.assert_called_once()
+    db.defer_job.assert_not_called()
+
+  def test_ratio_zero_defaults_to_one_and_can_defer(self, tmp_path, monkeypatch):
+    from resources.daemon import worker as worker_mod
+
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"x" * 1000)
+    out = tmp_path / "out"
+    out.mkdir()
+    self._patch_settings(monkeypatch, str(out), 0)
+    monkeypatch.setattr(
+      worker_mod.shutil,
+      "disk_usage",
+      lambda _p: type("U", (), {"free": 500, "total": 100_000, "used": 99_500})(),
+    )
+    import resources.daemon.metrics_prom as _mp
+
+    monkeypatch.setattr(_mp, "record_failure", lambda *a, **kw: None)
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+    worker._run_conversion = mock.MagicMock(return_value=(True, None, None))
+    worker.process_job({"id": 103, "path": str(media), "config": "/cfg.ini", "args": None})
+    db.defer_job.assert_called_once()
+    worker._run_conversion.assert_not_called()

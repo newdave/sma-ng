@@ -329,6 +329,26 @@ class SQLiteJobDatabase:
     with self._conn() as conn:
       conn.execute("UPDATE jobs SET ffmpeg_stderr = ? WHERE id = ?", (payload, job_id))
 
+  def defer_job(self, job_id, delay_seconds, reason=None):
+    """Push a running job back to pending with a delay, without bumping retry_count.
+
+    Used by the worker's pre-ffmpeg gates (e.g. output-filesystem pressure)
+    that want to defer the job instead of consuming a retry slot.
+    """
+    now = datetime.now(UTC).replace(microsecond=0)
+    next_attempt = (now + timedelta(seconds=max(int(delay_seconds), 0))).isoformat()
+    with self._conn() as conn:
+      conn.execute(
+        """
+        UPDATE jobs
+        SET status = ?, next_attempt_at = ?, error = ?,
+            started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
+        WHERE id = ?
+        """,
+        (STATUS_PENDING, next_attempt, reason, job_id),
+      )
+    self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay_seconds, reason or ""))
+
   def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None):
     now = datetime.now(UTC).replace(microsecond=0)
     with self._conn() as conn:
@@ -1117,6 +1137,27 @@ class PostgreSQLJobDatabase:
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute("UPDATE jobs SET ffmpeg_stderr = %s WHERE id = %s", (payload, job_id))
+
+  def defer_job(self, job_id, delay_seconds, reason=None):
+    """Push a running job back to pending with a delay, without bumping retry_count.
+
+    Used by the worker's pre-ffmpeg gates (e.g. output-filesystem pressure)
+    that want to defer the job instead of consuming a retry slot.
+    """
+    delay = max(int(delay_seconds), 0)
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+          UPDATE jobs
+          SET status = %s, error = %s,
+              next_attempt_at = NOW() + interval '%s seconds',
+              started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
+          WHERE id = %s
+          """,
+          (STATUS_PENDING, reason, delay, job_id),
+        )
+    self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay, reason or ""))
 
   def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None):
     """Mark a job as failed, or requeue with exponential backoff if retries remain."""
