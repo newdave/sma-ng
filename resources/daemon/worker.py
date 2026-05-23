@@ -2,6 +2,7 @@ import glob
 import json
 import os
 import re as _re
+import shutil
 import subprocess
 import sys
 import threading
@@ -12,10 +13,12 @@ from resources.daemon.constants import FFMPEG_STDERR_DIR, SCRIPT_DIR, resolve_no
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.log import getLogger
 from resources.processor.failures import (
+  WORKER_SENTINEL_DISK_PRESSURE,
   WORKER_SENTINEL_EXCEPTION,
   WORKER_SENTINEL_INVALID_ARGS,
   WORKER_SENTINEL_PATH_MISSING,
   WORKER_SENTINEL_PROCESS_FAILED,
+  FailureCategory,
   categorize_failure,
 )
 
@@ -32,6 +35,58 @@ _FFMPEG_BITRATE_RE = _re.compile(r"\bbitrate=\s*([\d.]+)\s*kbits/s")
 # output path after local rename, restoreFromOutput, and any arr rename.
 _SMA_FINAL_OUTPUT_RE = _re.compile(r"SMA_FINAL_OUTPUT:\s*(.+)$")
 _DEFAULT_PROGRESS_LOG_INTERVAL = 60  # seconds between progress log entries
+
+# Pre-flight defer window: short enough to recover quickly after a janitor
+# pass, long enough that we don't burn the worker chain-waking itself.
+PREFLIGHT_DEFER_SECONDS = 300
+
+
+def preflight_output_capacity(output_dir, output_dir_ratio, input_path, logger=None):
+  """Decide whether the configured ``output_dir`` can hold the converted file.
+
+  Returns a tuple ``(ok, needed_bytes, free_bytes)``. ``ok=True`` means the
+  gate passes (or is inapplicable). False means the worker should defer.
+
+  Fail-open paths: missing ``output_dir``, unstatable input, or unreachable
+  output_dir (ENOENT/permission/OSError). The ratio defaults to 1.0 when
+  unset/zero so a forgetful operator still gets an "output must fit input"
+  gate at the daemon layer (CLI / MediaProcessor preserve no-op semantics).
+  """
+  if not output_dir:
+    return True, None, None
+  ratio = output_dir_ratio if output_dir_ratio else 1.0
+  try:
+    input_size = os.path.getsize(input_path)
+  except OSError:
+    if logger is not None:
+      logger.warning("preflight_output_capacity: cannot stat input %s; failing open" % input_path)
+    return True, None, None
+  needed = int(input_size * ratio)
+  try:
+    free = shutil.disk_usage(output_dir).free
+  except (FileNotFoundError, PermissionError, OSError) as err:
+    if logger is not None:
+      logger.warning("preflight_output_capacity: cannot stat output_dir %s (%s); failing open" % (output_dir, err))
+    return True, None, None
+  return free > needed, needed, free
+
+
+def _load_settings_for_preflight(config_file, profile, logger):
+  """Best-effort ReadSettings load for the preflight check.
+
+  Returns None on any error so the caller can fail-open — preflight must
+  never wedge the queue on a settings parse hiccup.
+  """
+  try:
+    from resources.readsettings import ReadSettings
+  except Exception:
+    return None
+  try:
+    return ReadSettings(config_file, logger=logger, profile=profile)
+  except (Exception, SystemExit):
+    if logger is not None:
+      logger.warning("preflight: ReadSettings(%s, profile=%s) failed; skipping capacity gate" % (config_file, profile))
+    return None
 
 
 def _hms_to_seconds(h, m, s):
@@ -209,6 +264,12 @@ class ConversionWorker(threading.Thread):
         input_size = os.path.getsize(path)
       except OSError:
         self.log.warning("Could not stat input file for job %d: %s" % (job_id, path))
+      # Pre-flight output-filesystem capacity gate. Refuses to start ffmpeg
+      # when the configured output_dir cannot hold input_size * ratio,
+      # deferring instead so the slot isn't burnt on a guaranteed ENOSPC.
+      if self._preflight_disk_pressure(job_id, path, config_file, profile):
+        metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
+        return
       success, final_output, source_duration_secs = self._run_conversion(job_id, path, config_file, args)
       elapsed = time.monotonic() - job_started_at
       output_size = None
@@ -268,6 +329,50 @@ class ConversionWorker(threading.Thread):
       self.config_lock_manager.release(config_file, job_id)
       in_flight.dec()
       self.current_job_id = None
+
+  def _preflight_disk_pressure(self, job_id, path, config_file, profile):
+    """Run the output-filesystem capacity check before invoking the subprocess.
+
+    Returns True when the job was deferred (caller must abort the work loop),
+    False otherwise. Falls open on any unexpected error — a transient DB
+    hiccup or misconfigured output_dir must not wedge the queue.
+    """
+    try:
+      settings = _load_settings_for_preflight(config_file, profile, self.log)
+      if settings is None:
+        return False
+      output_dir = getattr(settings, "output_dir", None)
+      output_dir_ratio = getattr(settings, "output_dir_ratio", None)
+      ok, needed, free = preflight_output_capacity(output_dir, output_dir_ratio, path, logger=self.log)
+      if ok:
+        return False
+      try:
+        self.job_db.defer_job(job_id, PREFLIGHT_DEFER_SECONDS, reason=WORKER_SENTINEL_DISK_PRESSURE)
+      except Exception:
+        self.log.exception("Failed to defer job %d after disk-pressure preflight; failing open" % job_id)
+        return False
+      try:
+        metrics_prom.record_failure(FailureCategory.DISK.value, WORKER_SENTINEL_DISK_PRESSURE)
+      except Exception:
+        self.log.debug("metrics_prom.record_failure unavailable; skipping", exc_info=True)
+      self.log.info(
+        json.dumps(
+          {
+            "event": "worker.preflight",
+            "result": "deferred",
+            "cause": WORKER_SENTINEL_DISK_PRESSURE,
+            "input_path": path,
+            "output_dir": output_dir,
+            "free_bytes": free,
+            "needed_bytes": needed,
+          },
+          sort_keys=True,
+        )
+      )
+      return True
+    except (Exception, SystemExit):
+      self.log.exception("Unexpected error in disk-pressure preflight for job %d; failing open" % job_id)
+      return False
 
   def _ingest_ffmpeg_stderr_sidecars(self, job_id):
     """Read every ffmpeg.job<id>.*.stderr.log sidecar for *job_id*, write the

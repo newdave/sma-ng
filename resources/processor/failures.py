@@ -433,6 +433,11 @@ WORKER_SENTINEL_PATH_MISSING = "path_missing"
 WORKER_SENTINEL_INVALID_ARGS = "invalid_args"
 WORKER_SENTINEL_PROCESS_FAILED = "process_failed"
 WORKER_SENTINEL_EXCEPTION = "exception"
+# Pre-ffmpeg refusal: the worker checked the output filesystem and decided
+# there isn't enough headroom to risk the job. Sibling of
+# ``FfmpegFailureCause.DISK_FULL`` (which is an ffmpeg-stderr classification)
+# but raised before ffmpeg is even invoked.
+WORKER_SENTINEL_DISK_PRESSURE = "disk_pressure"
 
 # Every value in :class:`FfmpegFailureClass`, :class:`FfmpegFailureCause`,
 # and the worker sentinels must appear here. The drift-guard test
@@ -487,6 +492,7 @@ _FAILURE_CATEGORY_MAP: dict[str, FailureCategory] = {
   WORKER_SENTINEL_INVALID_ARGS: FailureCategory.CONFIG,
   WORKER_SENTINEL_PROCESS_FAILED: FailureCategory.SYSTEM,
   WORKER_SENTINEL_EXCEPTION: FailureCategory.SYSTEM,
+  WORKER_SENTINEL_DISK_PRESSURE: FailureCategory.DISK,
 }
 
 
@@ -506,6 +512,7 @@ def categorize_failure(cause_or_class: str | None) -> FailureCategory:
 
 __all__ = [
   "TAIL_BYTES",
+  "WORKER_SENTINEL_DISK_PRESSURE",
   "WORKER_SENTINEL_EXCEPTION",
   "WORKER_SENTINEL_INVALID_ARGS",
   "WORKER_SENTINEL_PATH_MISSING",
