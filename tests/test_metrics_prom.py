@@ -25,6 +25,10 @@ EXPECTED_LABELS: dict[str, tuple[str, ...]] = {
   "sma_source_seconds_transcoded_total": ("encoder_backend",),
   "sma_failures_total": ("failure_category", "failure_cause"),
   "sma_jobs_enqueued_total": ("request_source", "request_profile"),
+  "sma_output_dir_total_bytes": ("node_id",),
+  "sma_output_dir_used_bytes": ("node_id",),
+  "sma_output_dir_free_bytes": ("node_id",),
+  "sma_output_orphan_files_swept_total": ("node_id", "kind"),
 }
 
 # Labels we must NEVER use anywhere — these would explode Prometheus
@@ -44,6 +48,10 @@ _ATTR_TO_METRIC_NAME = {
   "SOURCE_SECONDS_TRANSCODED_TOTAL": "sma_source_seconds_transcoded_total",
   "FAILURES_TOTAL": "sma_failures_total",
   "JOBS_ENQUEUED_TOTAL": "sma_jobs_enqueued_total",
+  "OUTPUT_DIR_TOTAL_BYTES": "sma_output_dir_total_bytes",
+  "OUTPUT_DIR_USED_BYTES": "sma_output_dir_used_bytes",
+  "OUTPUT_DIR_FREE_BYTES": "sma_output_dir_free_bytes",
+  "OUTPUT_ORPHAN_FILES_SWEPT_TOTAL": "sma_output_orphan_files_swept_total",
 }
 
 
@@ -196,3 +204,69 @@ def test_in_flight_counter_inc_dec_round_trip():
   assert child._value.get() == baseline + 1
   child.dec()
   assert child._value.get() == baseline
+
+
+def test_record_orphan_sweep_increments_counter_by_kind():
+  """record_orphan_sweep increments the labelled counter monotonically."""
+  baseline = metrics_prom.OUTPUT_ORPHAN_FILES_SWEPT_TOTAL.labels(node_id="orphan-test", kind="sma")._value.get()
+  metrics_prom.record_orphan_sweep("orphan-test", "sma", 3)
+  metrics_prom.record_orphan_sweep("orphan-test", "sma", 2)
+  series = metrics_prom.OUTPUT_ORPHAN_FILES_SWEPT_TOTAL.labels(node_id="orphan-test", kind="sma")
+  assert series._value.get() == baseline + 5
+
+
+def test_record_orphan_sweep_zero_and_negative_is_noop():
+  before = metrics_prom.OUTPUT_ORPHAN_FILES_SWEPT_TOTAL.labels(node_id="orphan-zero", kind="smatmp")._value.get()
+  metrics_prom.record_orphan_sweep("orphan-zero", "smatmp", 0)
+  metrics_prom.record_orphan_sweep("orphan-zero", "smatmp", -5)
+  series = metrics_prom.OUTPUT_ORPHAN_FILES_SWEPT_TOTAL.labels(node_id="orphan-zero", kind="smatmp")
+  assert series._value.get() == before
+
+
+def test_record_orphan_sweep_unknown_kind_collapses_to_unknown_label():
+  metrics_prom.record_orphan_sweep("orphan-test", "not-a-kind", 1)
+  series = metrics_prom.OUTPUT_ORPHAN_FILES_SWEPT_TOTAL.labels(node_id="orphan-test", kind="unknown")
+  assert series._value.get() >= 1.0
+
+
+def test_orphan_kinds_is_bounded():
+  assert metrics_prom.ORPHAN_KINDS == ("sma", "smatmp", "empty_mp4")
+
+
+def test_register_output_dir_source_evaluates_at_scrape():
+  state = {"total": 1000, "used": 400, "free": 600}
+
+  def _cb():
+    return state["total"], state["used"], state["free"]
+
+  metrics_prom.register_output_dir_source("output-test", _cb)
+  rendered = metrics_prom.render_exposition().decode()
+  assert 'sma_output_dir_total_bytes{node_id="output-test"} 1000.0' in rendered
+  assert 'sma_output_dir_used_bytes{node_id="output-test"} 400.0' in rendered
+  assert 'sma_output_dir_free_bytes{node_id="output-test"} 600.0' in rendered
+
+  state["free"] = 9000
+  rendered_after = metrics_prom.render_exposition().decode()
+  assert 'sma_output_dir_free_bytes{node_id="output-test"} 9000.0' in rendered_after
+
+
+def test_register_output_dir_source_accepts_attr_object():
+  class _Usage:
+    total = 800
+    used = 100
+    free = 700
+
+  metrics_prom.register_output_dir_source("output-attr", lambda: _Usage())
+  rendered = metrics_prom.render_exposition().decode()
+  assert 'sma_output_dir_total_bytes{node_id="output-attr"} 800.0' in rendered
+  assert 'sma_output_dir_free_bytes{node_id="output-attr"} 700.0' in rendered
+
+
+def test_register_output_dir_source_callback_exception_yields_zeros():
+  def _boom():
+    raise RuntimeError("disk gone")
+
+  metrics_prom.register_output_dir_source("output-boom", _boom)
+  rendered = metrics_prom.render_exposition().decode()
+  assert 'sma_output_dir_total_bytes{node_id="output-boom"} 0.0' in rendered
+  assert 'sma_output_dir_free_bytes{node_id="output-boom"} 0.0' in rendered

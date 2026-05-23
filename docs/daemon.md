@@ -298,10 +298,55 @@ auto-profile selection happens for one-shot conversions. Pass
 | `log_archive_dir`           | Cluster-mode: directory for gzipped JSONL archive of cluster logs                                                            |
 | `log_archive_after_days`    | Cluster-mode: move logs older than this many days from DB to `log_archive_dir`                                               |
 | `log_delete_after_days`     | Cluster-mode: prune archived log files older than this many days                                                             |
+| `storage_janitor_interval_seconds` | Seconds between output-directory orphan sweeps (default: `900`; `0` or `null` = disabled)                              |
+| `storage_janitor_max_age_seconds`  | Minimum file mtime age before the janitor removes a leftover (default: `21600` / 6h; `0` or `null` = disabled)         |
 
 The `default_args` list is global only — there is no per-routing-rule
 override. Per-rule customisation is expressed by selecting a different
 `profile` for that rule.
+
+---
+
+## Storage management — janitor
+
+The storage janitor runs alongside the worker pool to reap orphaned
+transcode artefacts from `base.converter.output-directory`. It targets
+three classes of files that accumulate when ffmpeg or the daemon are
+killed mid-job:
+
+- `*<temp-extension>` (default `.sma`) — abandoned in-progress outputs.
+- `*.smatmp` — partial atomic copies left when `shutil.copy` was
+  interrupted.
+- Zero-byte `*.mp4` — finals where QTFS moov relocation or atomic rename
+  was killed before any bytes were written.
+
+Cadence and aggressiveness are tuned via two daemon keys:
+
+| Key                                | Default | Behavior                                                                |
+| ---------------------------------- | ------- | ----------------------------------------------------------------------- |
+| `storage_janitor_interval_seconds` | `900`   | Seconds between sweeps. `0` or `null` disables the janitor entirely.   |
+| `storage_janitor_max_age_seconds`  | `21600` | Minimum mtime age before a file is removed (default 6 hours).          |
+
+The janitor runs one sweep at daemon startup so a crash-on-restart cleans
+up immediately, then every `storage_janitor_interval_seconds` thereafter.
+Daemon `--smoke-test` registers the janitor but skips the filesystem
+sweep so dry-runs never delete anything.
+
+Each cycle emits a single-line structured log record:
+
+```json
+{"event":"storage.janitor","swept_sma":3,"swept_smatmp":1,"swept_empty_mp4":0,"freed_bytes":4823040}
+```
+
+The per-node counter `sma_output_orphan_files_swept_total{node_id,kind}`
+and the three capacity gauges (`sma_output_dir_total_bytes`,
+`sma_output_dir_used_bytes`, `sma_output_dir_free_bytes`) are described
+in [`metrics.md`](metrics.md).
+
+If `base.converter.output-directory` is empty, the gauges are not
+registered and the janitor logs `disabled` and exits its thread. The
+janitor is independent of the recycle-bin cleaner — recycle bins still
+follow their own age/free-space rules.
 
 ---
 

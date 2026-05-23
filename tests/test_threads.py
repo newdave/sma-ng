@@ -5,7 +5,7 @@ import os
 import time
 import unittest.mock as mock
 
-from resources.daemon.threads import HeartbeatThread, RecycleBinCleanerThread, ScannerThread
+from resources.daemon.threads import HeartbeatThread, RecycleBinCleanerThread, ScannerThread, StorageJanitorThread
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1030,3 +1030,80 @@ class TestHeartbeatDistributedExtras:
     ht._stop_event.wait = lambda timeout=None: setattr(ht, "running", False) or False
     ht.run()
     db.cleanup_old_logs.assert_called_with(14)
+
+
+# ---------------------------------------------------------------------------
+# StorageJanitorThread
+# ---------------------------------------------------------------------------
+
+
+def _make_janitor(**overrides):
+  log = logging.getLogger("test.janitor")
+  defaults = dict(
+    output_directory="/tmp/sma-out",
+    temp_extension="sma",
+    interval_seconds=900,
+    max_age_seconds=3600,
+    node_id="test-node",
+    logger=log,
+    smoke_test=False,
+  )
+  defaults.update(overrides)
+  return StorageJanitorThread(**defaults)
+
+
+class TestStorageJanitorThread:
+  def test_disabled_when_output_directory_missing(self):
+    j = _make_janitor(output_directory="")
+    assert j._disabled() is True
+
+  def test_disabled_when_interval_zero(self):
+    j = _make_janitor(interval_seconds=0)
+    assert j._disabled() is True
+
+  def test_disabled_when_max_age_zero(self):
+    j = _make_janitor(max_age_seconds=0)
+    assert j._disabled() is True
+
+  def test_run_no_op_when_disabled(self):
+    j = _make_janitor(output_directory="")
+    with mock.patch("resources.daemon.threads.storage.sweep_output_directory") as sweep:
+      j.run()
+      sweep.assert_not_called()
+
+  def test_smoke_test_bypasses_sweep(self):
+    j = _make_janitor(smoke_test=True)
+    with mock.patch("resources.daemon.threads.storage.sweep_output_directory") as sweep:
+      j._sweep_once()
+      sweep.assert_not_called()
+
+  def test_sweep_at_startup_then_respects_stop_event(self):
+    j = _make_janitor()
+    summary = mock.MagicMock(sma_count=2, smatmp_count=1, empty_mp4_count=0, freed_bytes=999)
+
+    # First wait() flips the stop flag so loop body never runs a second sweep.
+    def _wait_and_stop(timeout=None):
+      j.running = False
+      return False
+
+    with (
+      mock.patch("resources.daemon.threads.storage.sweep_output_directory", return_value=summary) as sweep,
+      mock.patch("resources.daemon.threads.metrics_prom.record_orphan_sweep") as record,
+    ):
+      j._stop_event.wait = _wait_and_stop  # type: ignore[assignment]
+      j.run()
+      sweep.assert_called_once_with("/tmp/sma-out", "sma", 3600)
+      # Three calls — one per kind — even if a count is zero.
+      assert record.call_count == 3
+      record.assert_any_call("test-node", "sma", 2)
+      record.assert_any_call("test-node", "smatmp", 1)
+      record.assert_any_call("test-node", "empty_mp4", 0)
+
+  def test_sweep_exception_is_caught(self):
+    j = _make_janitor()
+    with mock.patch(
+      "resources.daemon.threads.storage.sweep_output_directory",
+      side_effect=RuntimeError("boom"),
+    ):
+      # Should not raise.
+      j._sweep_once()

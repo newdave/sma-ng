@@ -1943,6 +1943,7 @@ class TestDaemonServerShutdownLifecycle:
     server.heartbeat_thread = MagicMock()
     server.scanner_thread = MagicMock()
     server.recycle_cleaner_thread = MagicMock()
+    server.storage_janitor_thread = MagicMock()
     server.config_watcher_thread = MagicMock()
     server.library_audit_thread = MagicMock()
     server.library_audit_worker_thread = MagicMock()
@@ -3181,6 +3182,37 @@ class TestPathConfigManagerExtendedYaml:
     assert pcm.log_archive_dir == "/var/log/archive"
     assert pcm.log_archive_after_days == 30
     assert pcm.log_delete_after_days == 90
+
+  def test_storage_janitor_defaults_when_unset(self, tmp_path):
+    cfg = self._yaml(tmp_path, {})
+    pcm = PathConfigManager(cfg)
+    # Schema defaults: 900s cadence, 21600s (6h) max-age.
+    assert pcm.storage_janitor_interval_seconds == 900
+    assert pcm.storage_janitor_max_age_seconds == 21600
+
+  def test_storage_janitor_null_disables(self, tmp_path):
+    cfg = self._yaml(
+      tmp_path,
+      {
+        "storage_janitor_interval_seconds": None,
+        "storage_janitor_max_age_seconds": None,
+      },
+    )
+    pcm = PathConfigManager(cfg)
+    assert pcm.storage_janitor_interval_seconds == 0
+    assert pcm.storage_janitor_max_age_seconds == 0
+
+  def test_storage_janitor_overrides_parse(self, tmp_path):
+    cfg = self._yaml(
+      tmp_path,
+      {
+        "storage_janitor_interval_seconds": 60,
+        "storage_janitor_max_age_seconds": 120,
+      },
+    )
+    pcm = PathConfigManager(cfg)
+    assert pcm.storage_janitor_interval_seconds == 60
+    assert pcm.storage_janitor_max_age_seconds == 120
 
 
 class TestRawLocalDaemonSection:
