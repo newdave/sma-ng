@@ -366,6 +366,8 @@ profiles:
         - h265
       max-bitrate: 18000
       preset: slow
+      look-ahead-depth: 60
+      extra-hw-frames: 80
     audio:
       codec:
         - eac3
