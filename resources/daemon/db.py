@@ -95,6 +95,49 @@ def _sqlite_path_from_url(db_url):
 _CAP_ADVISORY_LOCK_KEY = 0x53_4D_41_43_41_50_4C_4B  # "SMACAPLK"
 
 
+def _profile_from_args(args_payload):
+  """Extract ``--profile <name>`` (or ``-p <name>``) from a job's ``args``.
+
+  Accepts the DB-stored JSON string, a parsed list, or None. Returns the
+  profile name or None when no profile flag is present. This is the
+  bridge between legacy jobs queued before the ``request_profile`` column
+  existed (or by the scanner thread, which does not set it) and the
+  per-profile concurrency cap — without it the cap query never matches
+  any running row, because every row's ``request_profile`` is NULL.
+  """
+  if not args_payload:
+    return None
+  try:
+    args = json.loads(args_payload) if isinstance(args_payload, str) else args_payload
+  except (json.JSONDecodeError, TypeError, ValueError):
+    return None
+  if not isinstance(args, list):
+    return None
+  for idx, val in enumerate(args):
+    if val in ("--profile", "-p") and idx + 1 < len(args):
+      candidate = args[idx + 1]
+      if isinstance(candidate, str) and candidate:
+        return candidate
+  return None
+
+
+def _row_get(row, key):
+  """Tolerant accessor that works for sqlite3.Row, psycopg2 DictRow, and plain dicts."""
+  try:
+    return row[key]
+  except (KeyError, IndexError):
+    return None
+
+
+def _effective_profile(row):
+  """Resolve a job row's effective profile: ``request_profile`` column,
+  falling back to whatever ``--profile`` lives inside its ``args``."""
+  rp = _row_get(row, "request_profile")
+  if rp:
+    return rp
+  return _profile_from_args(_row_get(row, "args"))
+
+
 def _profiles_at_cap(conn, profile_caps, *, is_sqlite):
   """Return the set of profile names whose running-job count already meets
   or exceeds the configured ``max_concurrent`` cap.
@@ -103,21 +146,66 @@ def _profiles_at_cap(conn, profile_caps, *, is_sqlite):
   ``PathConfigManager.profile_concurrency_caps``. Empty/None → no caps,
   no work performed. The count is cluster-wide (we don't filter by
   ``node_id``) so the cap behaves the same on a single node and on a
-  Postgres-backed multi-worker pool.
+  Postgres-backed multi-worker pool. Each running row's profile is
+  resolved via :func:`_effective_profile` so jobs that pre-date the
+  ``request_profile`` column still count — every ``status=running`` job
+  on sma-master at the time this fix landed had ``request_profile=NULL``
+  and the cap was silently a no-op for them.
   """
   if not profile_caps:
     return set()
-  placeholders = ", ".join("?" if is_sqlite else "%s" for _ in profile_caps)
-  sql = "SELECT request_profile, COUNT(*) AS n FROM jobs WHERE status = " + ("?" if is_sqlite else "%s") + " AND request_profile IN (" + placeholders + ") GROUP BY request_profile"
-  params = [STATUS_RUNNING, *profile_caps.keys()]
+  param_q = "?" if is_sqlite else "%s"
+  sql = "SELECT request_profile, args FROM jobs WHERE status = " + param_q
+  params = [STATUS_RUNNING]
   if is_sqlite:
     rows = conn.execute(sql, params).fetchall()
-    running = {r["request_profile"]: int(r["n"]) for r in rows}
   else:
     with conn.cursor() as cur:
       cur.execute(sql, params)
-      running = {r["request_profile"]: int(r["n"]) for r in cur.fetchall()}
+      rows = cur.fetchall()
+  running: dict[str, int] = {}
+  for r in rows:
+    prof = _effective_profile(r)
+    if prof in profile_caps:
+      running[prof] = running.get(prof, 0) + 1
   return {name for name, cap in profile_caps.items() if running.get(name, 0) >= cap}
+
+
+def _backfill_request_profile(conn, *, is_sqlite, logger=None):
+  """Populate ``request_profile`` for rows where it is NULL but the
+  ``args`` column carries a ``--profile <name>`` flag.
+
+  Runs once at daemon startup as part of ``_init_db``. Idempotent — only
+  touches rows that are currently NULL and whose args parse to a profile
+  string. Without this backfill the per-profile concurrency cap silently
+  no-ops against every job queued before the metrics-expansion landed.
+  """
+  param_q = "?" if is_sqlite else "%s"
+  sql = "SELECT id, args FROM jobs WHERE request_profile IS NULL AND args IS NOT NULL AND args <> ''"
+  if is_sqlite:
+    rows = conn.execute(sql).fetchall()
+  else:
+    with conn.cursor() as cur:
+      cur.execute(sql)
+      rows = cur.fetchall()
+  updates: list[tuple[str, int]] = []
+  for r in rows:
+    prof = _profile_from_args(r["args"])
+    if prof:
+      updates.append((prof, int(r["id"])))
+  if not updates:
+    return 0
+  update_sql = "UPDATE jobs SET request_profile = " + param_q + " WHERE id = " + param_q + " AND request_profile IS NULL"
+  if is_sqlite:
+    for prof, job_id in updates:
+      conn.execute(update_sql, (prof, job_id))
+  else:
+    with conn.cursor() as cur:
+      for prof, job_id in updates:
+        cur.execute(update_sql, (prof, job_id))
+  if logger is not None:
+    logger.info("Backfilled request_profile for %d legacy jobs from --profile args" % len(updates))
+  return len(updates)
 
 
 class SQLiteJobDatabase:
@@ -232,6 +320,7 @@ class SQLiteJobDatabase:
           node_name TEXT
         )
       """)
+      _backfill_request_profile(conn, is_sqlite=True, logger=self.log)
     self._reset_running_jobs()
 
   def _reset_running_jobs(self):
@@ -957,6 +1046,8 @@ class PostgreSQLJobDatabase:
                 """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_media_ids_run_mid ON library_audit_media_ids (audit_id, media_id)")
     self.log.info("PostgreSQL database initialized: %s" % self.db_url)
+    with self._conn() as conn:
+      _backfill_request_profile(conn, is_sqlite=False, logger=self.log)
     self._reset_running_jobs()
 
   def _reset_running_jobs(self):

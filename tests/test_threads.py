@@ -285,11 +285,12 @@ class TestScannerThreadScan:
     path_config_manager = mock.MagicMock()
     path_config_manager.media_extensions = frozenset([".mp4", ".mkv"])
     path_config_manager.get_config_for_path.return_value = "/default.ini"
+    path_config_manager.get_profile_for_path.return_value = None
     scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db, path_config_manager=path_config_manager)
     result = scanner._scan({"path": str(tmp_path)})
     assert result == 1
     db.filter_unscanned.assert_called_once()
-    db.add_job.assert_called_once_with(str(media), "/default.ini", [], request_source="scan")
+    db.add_job.assert_called_once_with(str(media), "/default.ini", [], request_source="scan", request_profile=None)
 
   def test_applies_path_rewrite(self, tmp_path):
     media = tmp_path / "show.mkv"
