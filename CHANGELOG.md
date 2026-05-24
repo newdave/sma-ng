@@ -1,5 +1,30 @@
 # Changelog
 
+## [3.1.0](https://github.com/newdave/sma-ng/compare/sma-ng-v3.0.0...sma-ng-v3.1.0) (2026-05-24)
+
+
+### Features
+
+* **daemon:** per-profile cluster-wide concurrency cap ([ab2ad73](https://github.com/newdave/sma-ng/commit/ab2ad7370cabfc53071af7d4e585e25b6dbbc958))
+* **metrics:** expand failure categorization + Prometheus exposition ([8920136](https://github.com/newdave/sma-ng/commit/8920136e3c6b63d2042693beda07fd2da51bf5a8))
+* **plex:** refreshPlex iterates every configured Plex instance ([c72ca99](https://github.com/newdave/sma-ng/commit/c72ca9914114d81a21e6c2dafdc0082c291b7f72))
+* **storage:** janitor thread + output-dir capacity metrics ([7472a94](https://github.com/newdave/sma-ng/commit/7472a94b511b41d984a8598bd7b46d99ca065273))
+* **storage:** schema + metrics scaffolding for output-dir janitor ([0da3029](https://github.com/newdave/sma-ng/commit/0da3029d1a8d313d92e5faf597c2bdec4791e8a3))
+* **worker:** preflight output-filesystem capacity gate ([027bea9](https://github.com/newdave/sma-ng/commit/027bea995c8f342259b845303af6267aae670f24))
+
+
+### Bug Fixes
+
+* **avcodecs:** QSV/VAAPI codecs emit safe[params] tokens with safety filter ([bfc92e5](https://github.com/newdave/sma-ng/commit/bfc92e5d60175e7b827981353228d44a4c852320))
+* **deploy:** stamp_daemon profiles authoritative-mode + doc refresh ([7421aea](https://github.com/newdave/sma-ng/commit/7421aeac0c0a9ccf61b10fc76ef62b5df58b209c))
+* **docker:** add prometheus-client to setup/requirements.txt ([146d088](https://github.com/newdave/sma-ng/commit/146d088ac49f85cf715a6d91b8693e0c313e6245))
+
+
+### Documentation
+
+* **claude:** activation routing table + trigger-rich skill descriptions ([94651a5](https://github.com/newdave/sma-ng/commit/94651a532eaab31db6d19048088a388d48828d9e))
+* **prp:** blueprint output storage management (preflight gate + janitor) ([f7f4bcb](https://github.com/newdave/sma-ng/commit/f7f4bcb0ec9b8917c6eb4b9c627028ff736d2a62))
+
 ## [3.0.0](https://github.com/newdave/sma-ng/compare/sma-ng-v2.4.0...sma-ng-v3.0.0) (2026-05-21)
 
 
