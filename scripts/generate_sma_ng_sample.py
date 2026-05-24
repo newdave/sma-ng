@@ -62,7 +62,16 @@ def _illustrative_profiles() -> dict:
       # so the GPU encoder and output filesystem aren't saturated.
       # Set to null / omit to disable.
       "max-concurrent": 1,
-      "video": {"codec": ["h265"], "max-bitrate": 18000, "preset": "slow"},
+      "video": {
+        "codec": ["h265"],
+        "max-bitrate": 18000,
+        "preset": "slow",
+        # extra-hw-frames must size the QSV surface pool to hold
+        # lookahead + b-frames + ref-frames + async-depth + safety.
+        # Base default (16) is rq-sized; 4K with lookahead=60 needs ~80.
+        "look-ahead-depth": 60,
+        "extra-hw-frames": 80,
+      },
       "audio": {"codec": ["eac3", "ac3"], "max-channels": 8},
     },
   }
