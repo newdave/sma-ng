@@ -304,3 +304,50 @@ class TestSQLiteJobDatabase:
       over = _profiles_at_cap(conn, {"hq": 1}, is_sqlite=True)
     assert over == {"hq"}
     db.close()
+
+  def test_requeue_failed_job_backfills_request_profile(self, tmp_path):
+    """A failed legacy job (request_profile=NULL) must get its column
+    populated when requeued, so the next claim's cap query sees it."""
+    db = _db(tmp_path)
+    with db._conn() as conn:
+      conn.execute(
+        "INSERT INTO jobs (path, config, args, status) VALUES (?, ?, ?, ?)",
+        ("/m/old.mkv", "/cfg.yml", '["--profile", "hq"]', "failed"),
+      )
+      job_id = conn.execute("SELECT id FROM jobs WHERE path = ?", ("/m/old.mkv",)).fetchone()["id"]
+    # Wipe the column so we can prove requeue heals it.
+    with db._conn() as conn:
+      conn.execute("UPDATE jobs SET request_profile = NULL WHERE id = ?", (job_id,))
+    assert db.requeue_job(job_id) is True
+    row = db.get_job(job_id)
+    assert row["request_profile"] == "hq"
+    assert row["status"] == "pending"
+    db.close()
+
+  def test_fail_job_retry_branch_backfills_request_profile(self, tmp_path):
+    """The retry path inside fail_job also leaves the row pending; the
+    cap depends on request_profile being populated before the next claim."""
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/retry.mkv", "/cfg.yml", ["--profile", "hq"], max_retries=2)
+    # Clear request_profile to simulate the legacy state.
+    with db._conn() as conn:
+      conn.execute("UPDATE jobs SET request_profile = NULL WHERE id = ?", (job_id,))
+      conn.execute("UPDATE jobs SET status = 'running' WHERE id = ?", (job_id,))
+    db.fail_job(job_id, "transient")
+    row = db.get_job(job_id)
+    assert row["status"] == "pending"
+    assert row["request_profile"] == "hq"
+    db.close()
+
+  def test_requeue_failed_jobs_bulk_backfills(self, tmp_path):
+    db = _db(tmp_path)
+    with db._conn() as conn:
+      for path in ("/m/a.mkv", "/m/b.mkv"):
+        conn.execute(
+          "INSERT INTO jobs (path, config, args, status, request_profile) VALUES (?, ?, ?, ?, ?)",
+          (path, "/cfg.yml", '["--profile", "hq"]', "failed", None),
+        )
+    assert db.requeue_failed_jobs() == 2
+    rows = db.get_pending_jobs()
+    assert all(r["request_profile"] == "hq" for r in rows)
+    db.close()

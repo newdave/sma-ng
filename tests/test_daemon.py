@@ -1453,9 +1453,10 @@ class TestPostgreSQLJobDatabase:
     cur.fetchone.return_value = {"retry_count": 0, "max_retries": 3}
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
     db.fail_job(job_id=12, error="transient")
-    last_call = cur.execute.call_args_list[-1]
-    _sql, params = last_call[0]
-    # Should use STATUS_PENDING and include retry_count=1
+    # The requeue path may issue follow-up backfill SQL; find the UPDATE
+    # that actually pushed the row back to pending and assert on it.
+    requeue_call = next(c for c in cur.execute.call_args_list if isinstance(c.args[0], str) and "UPDATE jobs" in c.args[0] and "retry_count" in c.args[0])
+    _sql, params = requeue_call.args
     assert STATUS_PENDING in params
     assert 1 in params  # retry_count
 
@@ -1778,8 +1779,11 @@ class TestPostgreSQLJobDatabase:
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
     result = db.requeue_failed_jobs(config="/cfg/tv.ini")
     assert result == 1
-    sql = cur.execute.call_args[0][0]
-    assert "config" in sql
+    # The requeue path may issue follow-up SQL (the request_profile
+    # backfill); assert the config-filtered UPDATE appears somewhere
+    # rather than asserting it was the final call.
+    executed = " | ".join(str(c.args[0]) for c in cur.execute.call_args_list)
+    assert "config" in executed
 
   # ------------------------------------------------------------------
   # cancel_job
@@ -3496,8 +3500,10 @@ class TestPGExtendedMocked:
     cur.rowcount = 3
     out = db.requeue_failed_jobs(config="/c.yml")
     assert out == 3
-    sql = cur.execute.call_args[0][0]
-    assert "config = %s" in sql
+    # The requeue path issues follow-up backfill SQL; the config-filtered
+    # UPDATE just needs to appear somewhere in the cursor's history.
+    executed = " | ".join(str(c.args[0]) for c in cur.execute.call_args_list)
+    assert "config = %s" in executed
 
   def test_cancel_job_returns_true_when_cancelled(self):
     db, _, _, cur = _make_db_with_mock_pool()

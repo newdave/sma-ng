@@ -171,6 +171,40 @@ def _profiles_at_cap(conn, profile_caps, *, is_sqlite):
   return {name for name, cap in profile_caps.items() if running.get(name, 0) >= cap}
 
 
+def _backfill_one_request_profile(conn, job_id, *, is_sqlite):
+  """Backfill ``request_profile`` for a single job from its ``args``.
+
+  Idempotent: only updates rows whose ``request_profile`` is currently
+  NULL and whose args parse to a profile string. Called from every
+  requeue / retry path so a row that came in legacy-style (no
+  request_profile, profile only in args) gets healed the moment it
+  re-enters the pending queue — without this the per-profile cap will
+  silently no-op against requeued failures forever.
+  """
+  param_q = "?" if is_sqlite else "%s"
+  select_sql = "SELECT args FROM jobs WHERE id = " + param_q + " AND request_profile IS NULL"
+  update_sql = "UPDATE jobs SET request_profile = " + param_q + " WHERE id = " + param_q + " AND request_profile IS NULL"
+  if is_sqlite:
+    row = conn.execute(select_sql, (job_id,)).fetchone()
+    if not row:
+      return False
+    prof = _profile_from_args(_row_get(row, "args"))
+    if not prof:
+      return False
+    conn.execute(update_sql, (prof, job_id))
+    return True
+  with conn.cursor() as cur:
+    cur.execute(select_sql, (job_id,))
+    row = cur.fetchone()
+    if not row:
+      return False
+    prof = _profile_from_args(_row_get(row, "args"))
+    if not prof:
+      return False
+    cur.execute(update_sql, (prof, job_id))
+    return True
+
+
 def _backfill_request_profile(conn, *, is_sqlite, logger=None):
   """Populate ``request_profile`` for rows where it is NULL but the
   ``args`` column carries a ``--profile <name>`` flag.
@@ -338,6 +372,8 @@ class SQLiteJobDatabase:
         """,
         (STATUS_PENDING, STATUS_RUNNING, node_id),
       )
+      # Heal NULL request_profile so the cap sees newly-pending rows.
+      _backfill_request_profile(conn, is_sqlite=True)
       return cur.rowcount
 
   def add_job(self, path, config, args=None, max_retries=0, *, request_source=None, request_profile=None):
@@ -492,6 +528,7 @@ class SQLiteJobDatabase:
           """,
           (STATUS_PENDING, retry_count, error, next_attempt, failure_category, failure_cause, job_id),
         )
+        _backfill_one_request_profile(conn, job_id, is_sqlite=True)
         self.log.debug("Job %d failed (attempt %d/%d), retrying in %ds" % (job_id, retry_count, row["max_retries"], delay))
       else:
         conn.execute(
@@ -670,6 +707,8 @@ class SQLiteJobDatabase:
         (STATUS_PENDING, job_id, STATUS_FAILED),
       )
       requeued = cur.rowcount > 0
+      if requeued:
+        _backfill_one_request_profile(conn, job_id, is_sqlite=True)
     if requeued:
       self.log.info("Requeued failed job %d" % job_id)
     return requeued
@@ -687,6 +726,8 @@ class SQLiteJobDatabase:
     with self._conn() as conn:
       cur = conn.execute(sql, params)
       count = cur.rowcount
+      if count > 0:
+        _backfill_request_profile(conn, is_sqlite=True)
     if count > 0:
       self.log.info("Requeued %d failed jobs" % count)
     return count
@@ -1068,7 +1109,9 @@ class PostgreSQLJobDatabase:
                     """,
           (STATUS_PENDING, STATUS_RUNNING, node_id),
         )
-        return cur.rowcount
+        rowcount = cur.rowcount
+      _backfill_request_profile(conn, is_sqlite=False)
+      return rowcount
 
   def _lock_job_path(self, cur, path):
     """Serialize add_job decisions for the same media path within a transaction.
@@ -1286,6 +1329,7 @@ class PostgreSQLJobDatabase:
   def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None):
     """Mark a job as failed, or requeue with exponential backoff if retries remain."""
     with self._conn() as conn:
+      requeued = False
       with conn.cursor() as cur:
         cur.execute("SELECT retry_count, max_retries FROM jobs WHERE id = %s", (job_id,))
         row = cur.fetchone()
@@ -1303,6 +1347,7 @@ class PostgreSQLJobDatabase:
                     """,
             (STATUS_PENDING, retry_count, error, delay, failure_category, failure_cause, job_id),
           )
+          requeued = True
           self.log.debug("Job %d failed (attempt %d/%d), retrying in %ds" % (job_id, retry_count, row["max_retries"], delay))
         else:
           cur.execute(
@@ -1312,6 +1357,8 @@ class PostgreSQLJobDatabase:
             (STATUS_FAILED, error, failure_category, failure_cause, job_id),
           )
           self.log.debug("Job %d failed: %s" % (job_id, error))
+      if requeued:
+        _backfill_one_request_profile(conn, job_id, is_sqlite=False)
 
   def get_job(self, job_id):
     """Get a specific job by ID."""
@@ -1988,6 +2035,8 @@ class PostgreSQLJobDatabase:
           (STATUS_PENDING, job_id, STATUS_FAILED),
         )
         requeued = cur.rowcount > 0
+      if requeued:
+        _backfill_one_request_profile(conn, job_id, is_sqlite=False)
     if requeued:
       self.log.info("Requeued failed job %d" % job_id)
     return requeued
@@ -2008,6 +2057,8 @@ class PostgreSQLJobDatabase:
       with conn.cursor() as cur:
         cur.execute(sql, params)
         count = cur.rowcount
+      if count > 0:
+        _backfill_request_profile(conn, is_sqlite=False)
     if count > 0:
       self.log.info("Requeued %d failed jobs" % count)
     return count
