@@ -171,6 +171,20 @@ class DaemonServer(ThreadingHTTPServer):
         self.node_id,
         lambda: storage.output_dir_usage(path_config_manager.output_directory),
       )
+      # Optional fresh-start wipe of the output-directory so leftover
+      # partials from a prior daemon don't waste disk (SMA-NG can't
+      # resume transcodes across restarts). Skipped under --smoke-test.
+      if path_config_manager.storage_clear_on_start and not path_config_manager.smoke_test:
+        try:
+          freed = storage.clear_output_directory(output_dir)
+          logger.info(
+            json.dumps(
+              {"event": "storage.clear_on_start", "output_dir": output_dir, "freed_bytes": freed},
+              sort_keys=True,
+            )
+          )
+        except Exception:
+          logger.exception("storage.clear_on_start failed for %s" % output_dir)
 
     # Start heartbeat thread (only does real work with PostgreSQL backend)
     self.heartbeat_thread = HeartbeatThread(
