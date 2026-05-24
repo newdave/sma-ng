@@ -130,6 +130,19 @@ for host in $DEPLOY_HOSTS; do
 
   print_remote_container_summary "$host" "sma-ng"
 
+  # Verify the container ended up on the same image that the registry
+  # currently advertises as our deploy tag. Catches three deploy bugs in
+  # one shot: (1) the pull silently fell back to a cached older layer,
+  # (2) the compose recreate kept the previous container, (3) a newer
+  # CI build landed between our pull and our verification. Non-fatal so
+  # an opaque registry hiccup doesn't fail an otherwise-good deploy.
+  if image_ref=$(resolve_image_ref 2>/dev/null) && [ -n "$image_ref" ]; then
+    echo "==> [$host] verifying image freshness against $image_ref"
+    verify_remote_image_current "$host" "sma-ng" "$image_ref" || true
+  else
+    echo "  WARNING: [$host] no image ref resolvable — skipping freshness check" >&2
+  fi
+
   echo "==> [$host] done"
 done
 

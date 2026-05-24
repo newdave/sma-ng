@@ -19,32 +19,16 @@ selected_hosts() {
 }
 
 image_from_config() {
-  local configured_image configured_tag gh_user tag
-  configured_image=$(lc deploy image "")
-  configured_tag=$(lc deploy image_tag "")
-  if [ -n "$configured_image" ]; then
-    if [ -z "${IMAGE_TAG:-}" ] &&
-      [[ "$configured_image" == *:* ]] &&
-      [[ "${configured_image##*:}" != */* ]]; then
-      printf '%s\n' "$configured_image"
-      return
-    fi
-    tag="${IMAGE_TAG:-${configured_tag:-latest}}"
-    printf '%s:%s\n' "$configured_image" "$tag"
-    return
+  # Thin wrapper around the shared resolve_image_ref so IMAGE_TAG can
+  # still override the registry-side tag in addition to lib.sh's
+  # baseline resolution (IMAGE > deploy.image[+image_tag] > ghcr/user/...).
+  local resolved
+  resolved=$(resolve_image_ref) || return 1
+  if [ -n "${IMAGE_TAG:-}" ]; then
+    printf '%s:%s\n' "${resolved%:*}" "$IMAGE_TAG"
+  else
+    printf '%s\n' "$resolved"
   fi
-
-  gh_user=$(lc deploy gh_user "")
-  if [ -z "$gh_user" ] && command -v gh >/dev/null 2>&1; then
-    gh_user=$(gh api user --jq '.login' 2>/dev/null || true)
-  fi
-  if [ -z "$gh_user" ]; then
-    echo "ERROR: set IMAGE=ghcr.io/<owner>/sma-ng:<tag> or deploy.gh_user in $LOCAL" >&2
-    return 1
-  fi
-
-  tag="${IMAGE_TAG:-${configured_tag:-latest}}"
-  printf 'ghcr.io/%s/sma-ng:%s\n' "$gh_user" "$tag"
 }
 
 split_image_ref() {
