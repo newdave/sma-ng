@@ -358,6 +358,18 @@ profiles:
       codec:
         - aac
       max-channels: 2
+  hq:
+    max-concurrent: 1
+    video:
+      codec:
+        - h265
+      max-bitrate: 18000
+      preset: slow
+    audio:
+      codec:
+        - eac3
+        - ac3
+      max-channels: 8
 # ── Services ─────────────────────────────────────────────────────────
 # Sonarr / Radarr / Plex instances. Reference each one from
 # daemon.routing[].services as `<type>.<instance>` (e.g. `sonarr.kids`).

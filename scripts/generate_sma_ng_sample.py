@@ -57,6 +57,14 @@ def _illustrative_profiles() -> dict:
       "video": {"codec": ["h264"], "max-bitrate": 3000, "preset": "fast"},
       "audio": {"codec": ["aac"], "max-channels": 2},
     },
+    "hq": {
+      # Cluster-wide cap: at most one 4K (hq) transcode runs at a time
+      # so the GPU encoder and output filesystem aren't saturated.
+      # Set to null / omit to disable.
+      "max-concurrent": 1,
+      "video": {"codec": ["h265"], "max-bitrate": 18000, "preset": "slow"},
+      "audio": {"codec": ["eac3", "ac3"], "max-channels": 8},
+    },
   }
 
 

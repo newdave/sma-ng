@@ -220,3 +220,36 @@ class TestSQLiteJobDatabase:
     assert _row["status"] == STATUS_PENDING
     reopened.close()
     set_node_id_cache("")
+
+  def test_profile_cap_skips_pending_when_running_count_reached(self, tmp_path):
+    db = _db(tmp_path)
+    # Two hq jobs queued; cap=1.
+    a = db.add_job("/m/4k/a.mkv", "/cfg.yml", [], request_profile="hq")
+    b = db.add_job("/m/4k/b.mkv", "/cfg.yml", [], request_profile="hq")
+    # First claim runs hq, leaving the second pending.
+    first = db.claim_next_job(worker_id=1, node_id="node-a", profile_caps={"hq": 1})
+    assert first is not None
+    assert first["id"] == a
+    # Second claim from a different worker must be blocked by the cap.
+    second = db.claim_next_job(worker_id=2, node_id="node-a", profile_caps={"hq": 1})
+    assert second is None
+    # An rq job sneaks through even while hq is at cap.
+    rq_id = db.add_job("/m/rq.mkv", "/cfg.yml", [], request_profile="rq")
+    third = db.claim_next_job(worker_id=2, node_id="node-a", profile_caps={"hq": 1})
+    assert third is not None
+    assert third["id"] == rq_id
+    # When the running hq finishes, the second hq is claimable.
+    db.complete_job(a)
+    fourth = db.claim_next_job(worker_id=3, node_id="node-a", profile_caps={"hq": 1})
+    assert fourth is not None
+    assert fourth["id"] == b
+    db.close()
+
+  def test_no_profile_caps_disables_gating(self, tmp_path):
+    db = _db(tmp_path)
+    a = db.add_job("/m/a.mkv", "/cfg.yml", [], request_profile="hq")
+    b = db.add_job("/m/b.mkv", "/cfg.yml", [], request_profile="hq")
+    assert db.claim_next_job(worker_id=1, node_id="node-a")["id"] == a
+    # No caps passed → second claim succeeds (default unlimited).
+    assert db.claim_next_job(worker_id=2, node_id="node-a")["id"] == b
+    db.close()

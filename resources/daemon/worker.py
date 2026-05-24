@@ -183,7 +183,17 @@ class ConversionWorker(threading.Thread):
           break
 
         locked = self.config_lock_manager.get_locked_configs()
-        job = self.job_db.claim_next_job(self.worker_id, self.node_id, exclude_configs=locked or None)
+        profile_caps = None
+        try:
+          profile_caps = self.path_config_manager.profile_concurrency_caps()
+        except Exception:
+          self.log.debug("profile_concurrency_caps unavailable; ignoring caps", exc_info=True)
+        job = self.job_db.claim_next_job(
+          self.worker_id,
+          self.node_id,
+          exclude_configs=locked or None,
+          profile_caps=profile_caps or None,
+        )
         if job:
           # Chain-wake: notify the next idle worker before starting heavy
           # work, so a burst of N arrivals fans across N workers instead

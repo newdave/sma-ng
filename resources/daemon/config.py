@@ -592,6 +592,23 @@ class PathConfigManager:
       cache[profile_name] = self._cfg.base.converter
     return cache[profile_name]
 
+  def profile_concurrency_caps(self) -> dict[str, int]:
+    """Return ``{profile_name: max_concurrent}`` for every profile with a
+    positive cap. Profiles with ``max_concurrent`` None / <=0 are omitted
+    so the caller can treat absence as "unlimited".
+
+    Read by ``claim_next_job`` to skip pending jobs whose profile already
+    has its cap-many running peers across the cluster.
+    """
+    if self._cfg is None or self._cfg.profiles is None:
+      return {}
+    caps: dict[str, int] = {}
+    for name, overlay in self._cfg.profiles.items():
+      cap = getattr(overlay, "max_concurrent", None)
+      if cap and cap > 0:
+        caps[name] = int(cap)
+    return caps
+
   def get_args_for_path(self, file_path):
     """Return the global default args list.
 
