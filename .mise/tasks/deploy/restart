@@ -55,9 +55,10 @@ for host in $DEPLOY_HOSTS; do
     echo "==> [$host] daemon stopped (${elapsed}s)"
   fi
 
-  echo "==> [$host] restarting sma-daemon container (profile: $profile)"
-  if ! run_remote_compose "$host" "--profile $profile restart sma"; then
-    echo "ERROR: [$host] docker compose restart sma failed" >&2
+  service="sma-${profile}"
+  echo "==> [$host] restarting $service (profile: $profile)"
+  if ! run_remote_compose "$host" "--profile $profile restart $service"; then
+    echo "ERROR: [$host] docker compose restart $service failed" >&2
     failed="$failed $host"
     continue
   fi
