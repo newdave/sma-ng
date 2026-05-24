@@ -24,6 +24,7 @@ daemon:
   storage-janitor-interval-seconds: 900
   storage-janitor-max-age-seconds: 21600
   storage-clear-on-start: true
+  concurrency-budget: 6
   default-args: []
   scan-paths: []
   path-rewrites: []
@@ -361,6 +362,7 @@ profiles:
       max-channels: 2
   hq:
     max-concurrent: 1
+    concurrency-cost: 6
     video:
       codec:
         - h265

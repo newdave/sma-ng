@@ -660,6 +660,15 @@ class ProfileOverlay(_Base):
   # 4K HDR `hq`) where running multiple in parallel would saturate the
   # GPU encoder or the output filesystem.
   max_concurrent: int | None = None
+  # Weight this profile carries against ``daemon.concurrency-budget``.
+  # Every running job's cost is summed; a new claim is refused when the
+  # sum + this_job.cost would exceed the per-node budget. Default 1 means
+  # every profile counts equally — with the matching default budget
+  # (``daemon.workers``) this preserves byte-identical behaviour to a
+  # pre-budget install. Tune to reflect real encoder cost: e.g.
+  # ``hq.concurrency-cost: 6 / rq: 2 / lq: 1`` with budget 6 means
+  # "1 hq saturates the node, or 3 rq, or 6 lq, or any sum ≤ 6".
+  concurrency_cost: int = 1
 
 
 # ---------------------------------------------------------------------------
@@ -903,6 +912,14 @@ class DaemonConfig(_Base):
   # removes stale rows from the janitor's view. Default True; set False
   # if output_directory is your final destination rather than a temp dir.
   storage_clear_on_start: bool = True
+  # Per-node encoder-capacity budget. Each running job consumes its
+  # ``profiles.<name>.concurrency-cost`` units; a new claim is refused
+  # when the sum + this_job.cost would exceed the budget. None / <=0
+  # resolves at runtime to ``workers``, which together with the
+  # default ``concurrency-cost: 1`` reproduces today's behaviour
+  # (every job costs 1 against a budget of ``workers``). Misconfigured
+  # cost > budget refuses to start at config-validation time.
+  concurrency_budget: int | None = None
   default_args: list[str] | str = Field(default_factory=list)
   scan_paths: list[ScanPath] = Field(default_factory=list)
   path_rewrites: list[PathRewrite] = Field(default_factory=list)
@@ -961,6 +978,32 @@ class SmaConfig(_Base):
           raise ValueError(f"daemon.routing[{i}].services: '{ref}' has no matching services.{stype}.{sname}")
       if rule.profile is not None and rule.profile not in self.profiles:
         raise ValueError(f"daemon.routing[{i}].profile: '{rule.profile}' not defined under profiles")
+    return self
+
+  @model_validator(mode="after")
+  def _validate_concurrency_budget(self) -> SmaConfig:
+    """Refuse to start when any profile's ``concurrency-cost`` exceeds
+    the effective budget. Such a profile would be unclaimable forever —
+    failing here surfaces the misconfiguration loudly at boot rather
+    than silently stalling a queue.
+
+    Effective budget = ``daemon.concurrency-budget`` if positive, else
+    ``daemon.workers``. Profiles with ``concurrency-cost <= 0`` are
+    treated as cost=1 (the schema default) so a stray zero in YAML
+    doesn't silently disable accounting.
+    """
+    raw_budget = self.daemon.concurrency_budget
+    effective_budget = raw_budget if (raw_budget and raw_budget > 0) else self.daemon.workers
+    if effective_budget <= 0:
+      return self
+    for name, overlay in self.profiles.items():
+      cost = overlay.concurrency_cost if overlay.concurrency_cost and overlay.concurrency_cost > 0 else 1
+      if cost > effective_budget:
+        raise ValueError(
+          f"profiles.{name}.concurrency-cost={cost} exceeds the effective "
+          f"daemon concurrency budget ({effective_budget}); the profile would "
+          f"be unclaimable. Lower the cost or raise daemon.concurrency-budget."
+        )
     return self
 
 

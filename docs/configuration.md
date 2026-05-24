@@ -482,6 +482,55 @@ profiles:
       max-bitrate: 18000
 ```
 
+### profiles.\<name\>.concurrency-cost + daemon.concurrency-budget
+
+`max-concurrent` enforces a hard per-profile slot count. Pair it (or
+replace it) with the **weighted-budget scheduler** when you want
+profiles to share a single per-node encoder-capacity ceiling:
+
+| Key                          | Where        | Type | Default          | Notes                                                                                                                          |
+| ---------------------------- | ------------ | ---- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `concurrency-cost`           | per profile  | int  | `1`              | Weight this profile carries against the budget. `<=0` is treated as `1`.                                                       |
+| `daemon.concurrency-budget`  | per node     | int  | `daemon.workers` | Per-node ceiling. `null` / `<=0` resolves to `workers` so a zero-config install behaves identically to a no-budget deployment. |
+
+Semantics: every running job's `concurrency-cost` is summed. A new
+claim is refused when `sum + this_job.cost > budget`. The advisory
+lock that serialises per-profile cap counting (see
+`docs/daemon.md` → "Profile concurrency caps") also serialises the
+cost-sum, so two concurrent claims can't both pass the budget check
+on the same available slot.
+
+Both gates compose — the tighter wins. Use `max-concurrent` for caps
+that are *not* encoder-driven (e.g. "never two hq because the
+output-disk janitor can't keep up"); use `concurrency-cost` +
+`concurrency-budget` for the encoder-bandwidth share. They live side by
+side on the same profile.
+
+Example for a 3-worker Meteor Lake node where one 4K transcode equals
+the encoder load of three 1080p HEVC slower-preset transcodes or six
+1080p VDENC speed-first transcodes:
+
+```yaml
+daemon:
+  workers: 3
+  concurrency-budget: 6        # per-node encoder-capacity ceiling
+
+profiles:
+  hq:
+    max-concurrent: 1          # hard secondary ceiling
+    concurrency-cost: 6        # 1 hq saturates the budget
+  rq:
+    concurrency-cost: 2        # 3 rq fills the budget
+  lq:
+    concurrency-cost: 1        # 6 lq fills the budget (capped at workers=3)
+```
+
+Misconfiguration is caught at startup: if any profile's
+`concurrency-cost` exceeds the effective budget, the daemon refuses
+to start with a structured error naming the offending profile and
+both values (`profiles.<name>.concurrency-cost=<N> exceeds the
+effective daemon concurrency budget (<M>)`).
+
 ---
 
 ## services.sonarr / services.radarr

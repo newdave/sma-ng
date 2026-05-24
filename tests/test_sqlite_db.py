@@ -351,3 +351,91 @@ class TestSQLiteJobDatabase:
     rows = db.get_pending_jobs()
     assert all(r["request_profile"] == "hq" for r in rows)
     db.close()
+
+  def test_budget_blocks_second_claim_when_cost_exhausts(self, tmp_path):
+    """One hq costs 6; budget 6 → second hq blocked (budget over), and
+    so is any other profile because its cost would also push over."""
+    db = _db(tmp_path)
+    a = db.add_job("/m/hq-a.mkv", "/cfg.yml", ["--profile", "hq"], request_profile="hq")
+    db.add_job("/m/hq-b.mkv", "/cfg.yml", ["--profile", "hq"], request_profile="hq")
+    db.add_job("/m/rq.mkv", "/cfg.yml", ["--profile", "rq"], request_profile="rq")
+    costs = {"hq": 6, "rq": 2, "lq": 1}
+    budget = 6
+    first = db.claim_next_job(worker_id=1, node_id="n", profile_costs=costs, concurrency_budget=budget)
+    assert first["id"] == a
+    second = db.claim_next_job(worker_id=2, node_id="n", profile_costs=costs, concurrency_budget=budget)
+    assert second is None
+    db.close()
+
+  def test_budget_allows_mixed_within_ceiling(self, tmp_path):
+    """1 rq (cost 2) leaves 4 of a 6-budget — 4 lq (cost 1 each) all fit."""
+    db = _db(tmp_path)
+    rq = db.add_job("/m/rq.mkv", "/cfg.yml", ["--profile", "rq"], request_profile="rq")
+    lqs = [db.add_job(f"/m/lq-{i}.mkv", "/cfg.yml", ["--profile", "lq"], request_profile="lq") for i in range(5)]
+    costs = {"hq": 6, "rq": 2, "lq": 1}
+    budget = 6
+    claimed = []
+    for w in range(1, 6):
+      job = db.claim_next_job(worker_id=w, node_id="n", profile_costs=costs, concurrency_budget=budget)
+      if job is None:
+        break
+      claimed.append(job["id"])
+    assert claimed[0] == rq  # rq is queued first
+    # 5 claims fit: rq(2) + 4*lq(1) = 6. 6th lq blocked.
+    assert len(claimed) == 5
+    assert lqs[4] not in claimed
+    db.close()
+
+  def test_budget_default_unset_is_byte_identical(self, tmp_path):
+    """With no profile_costs / budget passed, two hq jobs both claim
+    (matches today's pre-budget behaviour)."""
+    db = _db(tmp_path)
+    a = db.add_job("/m/a.mkv", "/cfg.yml", ["--profile", "hq"], request_profile="hq")
+    b = db.add_job("/m/b.mkv", "/cfg.yml", ["--profile", "hq"], request_profile="hq")
+    assert db.claim_next_job(worker_id=1, node_id="n")["id"] == a
+    assert db.claim_next_job(worker_id=2, node_id="n")["id"] == b
+    db.close()
+
+  def test_budget_counts_legacy_null_request_profile_via_args(self, tmp_path):
+    """A running job with request_profile NULL but args=['--profile','hq']
+    still counts toward the cost sum — same heuristic as the cap path."""
+    from resources.daemon.db import _budget_exhausted_profiles
+
+    db = _db(tmp_path)
+    with db._conn() as conn:
+      conn.execute(
+        "INSERT INTO jobs (path, config, args, status, worker_id) VALUES (?, ?, ?, ?, ?)",
+        ("/m/legacy-hq.mkv", "/cfg.yml", '["--profile", "hq"]', "running", 1),
+      )
+    costs = {"hq": 6, "rq": 2, "lq": 1}
+    with db._conn() as conn:
+      over = _budget_exhausted_profiles(conn, costs, 6, is_sqlite=True)
+    # 6 already running → every profile (cost ≥ 1) exceeds remaining 0.
+    assert over == {"hq", "rq", "lq"}
+    db.close()
+
+  def test_budget_zero_disables_gating(self, tmp_path):
+    """budget=None / 0 must be a no-op (returns empty set)."""
+    from resources.daemon.db import _budget_exhausted_profiles
+
+    db = _db(tmp_path)
+    with db._conn() as conn:
+      assert _budget_exhausted_profiles(conn, {"hq": 6}, 0, is_sqlite=True) == set()
+      assert _budget_exhausted_profiles(conn, {"hq": 6}, None, is_sqlite=True) == set()
+      assert _budget_exhausted_profiles(conn, {}, 6, is_sqlite=True) == set()
+    db.close()
+
+  def test_cap_and_budget_compose_tightest_wins(self, tmp_path):
+    """hq.max-concurrent=1 fires even when the budget would still allow
+    another hq — both gates apply, the tightest wins."""
+    db = _db(tmp_path)
+    a = db.add_job("/m/a.mkv", "/cfg.yml", ["--profile", "hq"], request_profile="hq")
+    db.add_job("/m/b.mkv", "/cfg.yml", ["--profile", "hq"], request_profile="hq")
+    # Budget allows 2 hq (cost 6 each, budget 12). But cap is 1.
+    caps = {"hq": 1}
+    costs = {"hq": 6}
+    first = db.claim_next_job(worker_id=1, node_id="n", profile_caps=caps, profile_costs=costs, concurrency_budget=12)
+    assert first["id"] == a
+    second = db.claim_next_job(worker_id=2, node_id="n", profile_caps=caps, profile_costs=costs, concurrency_budget=12)
+    assert second is None  # max-concurrent fires before budget would
+    db.close()

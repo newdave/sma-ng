@@ -1,6 +1,6 @@
 # PRP: Weighted Concurrency Budget
 
-STATUS: IN-FLIGHT
+STATUS: COMPLETE
 
 ## Discovery Summary
 

@@ -115,3 +115,64 @@ def test_settings_emits_deprecation_warning(caplog: pytest.LogCaptureFixture) ->
   finally:
     if yaml_path.exists():
       yaml_path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Concurrency budget validator
+# ---------------------------------------------------------------------------
+
+
+def test_concurrency_budget_refuses_cost_exceeding_budget() -> None:
+  """If any profile's concurrency-cost exceeds the effective budget the
+  daemon must refuse to start — otherwise that profile would be
+  unclaimable forever."""
+  from pydantic import ValidationError as _PydanticValidationError
+
+  from resources.config_schema import SmaConfig
+
+  with pytest.raises(_PydanticValidationError) as exc:
+    SmaConfig.model_validate(
+      {
+        "daemon": {"workers": 3, "concurrency-budget": 4},
+        "profiles": {"hq": {"concurrency-cost": 6}},
+      }
+    )
+  msg = str(exc.value)
+  assert "hq" in msg
+  assert "concurrency-cost=6" in msg
+  assert "4" in msg
+
+
+def test_concurrency_budget_defaults_to_workers() -> None:
+  """When daemon.concurrency-budget is null the validator uses
+  daemon.workers as the effective budget."""
+  from pydantic import ValidationError as _PydanticValidationError
+
+  from resources.config_schema import SmaConfig
+
+  # workers=3, no budget → effective budget is 3 → cost 5 must fail.
+  with pytest.raises(_PydanticValidationError):
+    SmaConfig.model_validate(
+      {
+        "daemon": {"workers": 3},
+        "profiles": {"hq": {"concurrency-cost": 5}},
+      }
+    )
+  # cost equal to workers is allowed.
+  cfg = SmaConfig.model_validate(
+    {
+      "daemon": {"workers": 3},
+      "profiles": {"hq": {"concurrency-cost": 3}},
+    }
+  )
+  assert cfg.profiles["hq"].concurrency_cost == 3
+
+
+def test_concurrency_cost_default_one_is_always_valid() -> None:
+  """A zero-config install (no costs/budget set) must validate cleanly."""
+  from resources.config_schema import SmaConfig
+
+  cfg = SmaConfig.model_validate({"daemon": {"workers": 2}, "profiles": {"hq": {}, "rq": {}, "lq": {}}})
+  for p in cfg.profiles.values():
+    assert p.concurrency_cost == 1
+  assert cfg.daemon.concurrency_budget is None
