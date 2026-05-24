@@ -89,6 +89,31 @@ def _sqlite_path_from_url(db_url):
   return path
 
 
+def _profiles_at_cap(conn, profile_caps, *, is_sqlite):
+  """Return the set of profile names whose running-job count already meets
+  or exceeds the configured ``max_concurrent`` cap.
+
+  ``profile_caps`` is the ``{profile: cap}`` dict produced by
+  ``PathConfigManager.profile_concurrency_caps``. Empty/None → no caps,
+  no work performed. The count is cluster-wide (we don't filter by
+  ``node_id``) so the cap behaves the same on a single node and on a
+  Postgres-backed multi-worker pool.
+  """
+  if not profile_caps:
+    return set()
+  placeholders = ", ".join("?" if is_sqlite else "%s" for _ in profile_caps)
+  sql = "SELECT request_profile, COUNT(*) AS n FROM jobs WHERE status = " + ("?" if is_sqlite else "%s") + " AND request_profile IN (" + placeholders + ") GROUP BY request_profile"
+  params = [STATUS_RUNNING, *profile_caps.keys()]
+  if is_sqlite:
+    rows = conn.execute(sql, params).fetchall()
+    running = {r["request_profile"]: int(r["n"]) for r in rows}
+  else:
+    with conn.cursor() as cur:
+      cur.execute(sql, params)
+      running = {r["request_profile"]: int(r["n"]) for r in cur.fetchall()}
+  return {name for name, cap in profile_caps.items() if running.get(name, 0) >= cap}
+
+
 class SQLiteJobDatabase:
   """SQLite-backed job queue for single-node deployments.
 
@@ -243,9 +268,10 @@ class SQLiteJobDatabase:
       row = conn.execute("SELECT * FROM jobs WHERE path = ? AND status IN (?, ?) LIMIT 1", (path, STATUS_PENDING, STATUS_RUNNING)).fetchone()
       return dict(row) if row else None
 
-  def claim_next_job(self, worker_id, node_id, exclude_configs=None):
+  def claim_next_job(self, worker_id, node_id, exclude_configs=None, profile_caps=None):
     now = _utc_now()
     with self._conn() as conn:
+      over_capped = _profiles_at_cap(conn, profile_caps, is_sqlite=True)
       params = [STATUS_PENDING, now]
       sql = """
         SELECT id FROM jobs
@@ -255,6 +281,10 @@ class SQLiteJobDatabase:
         placeholders = ", ".join("?" for _ in exclude_configs)
         sql += " AND config NOT IN (%s)" % placeholders
         params.extend(list(exclude_configs))
+      if over_capped:
+        placeholders = ", ".join("?" for _ in over_capped)
+        sql += " AND (request_profile IS NULL OR request_profile NOT IN (%s))" % placeholders
+        params.extend(list(over_capped))
       sql += " ORDER BY priority DESC, created_at ASC LIMIT 1"
       row = conn.execute(sql, params).fetchone()
       if row is None:
@@ -980,12 +1010,16 @@ class PostgreSQLJobDatabase:
         row = cur.fetchone()
         return dict(row) if row else None
 
-  def claim_next_job(self, worker_id, node_id, exclude_configs=None):
+  def claim_next_job(self, worker_id, node_id, exclude_configs=None, profile_caps=None):
     """Atomically claim the next pending job using SELECT FOR UPDATE SKIP LOCKED.
 
     exclude_configs: set of config paths already held by a running job —
     jobs for those configs are skipped so a free worker can pick up work
     for a different config rather than blocking on a locked one.
+
+    profile_caps: optional ``{profile_name: max_concurrent}`` map. Pending
+    jobs whose ``request_profile`` already has cap-many running peers
+    (cluster-wide) are skipped.
 
     Load balancing: if this node already has a running job AND another
     online+approved peer node has zero running jobs (with at least one
@@ -1019,32 +1053,17 @@ class PostgreSQLJobDatabase:
         if balance and balance.get("my_running", 0) > 0 and balance.get("idle_peer"):
           return None
 
+        over_capped = _profiles_at_cap(conn, profile_caps, is_sqlite=False)
+        clauses = ["status = %s", "(next_attempt_at IS NULL OR next_attempt_at <= NOW())"]
+        params: list = [STATUS_PENDING]
         if exclude_configs:
-          cur.execute(
-            """
-                        SELECT id, path, config, args
-                        FROM jobs
-                        WHERE status = %s AND config != ALL(%s)
-                          AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
-                        ORDER BY priority DESC, created_at ASC
-                        LIMIT 1
-                        FOR UPDATE SKIP LOCKED
-                    """,
-            (STATUS_PENDING, list(exclude_configs)),
-          )
-        else:
-          cur.execute(
-            """
-                        SELECT id, path, config, args
-                        FROM jobs
-                        WHERE status = %s
-                          AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
-                        ORDER BY priority DESC, created_at ASC
-                        LIMIT 1
-                        FOR UPDATE SKIP LOCKED
-                    """,
-            (STATUS_PENDING,),
-          )
+          clauses.append("config != ALL(%s)")
+          params.append(list(exclude_configs))
+        if over_capped:
+          clauses.append("(request_profile IS NULL OR request_profile != ALL(%s))")
+          params.append(list(over_capped))
+        sql = "SELECT id, path, config, args FROM jobs WHERE " + " AND ".join(clauses) + " ORDER BY priority DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
+        cur.execute(sql, tuple(params))
         row = cur.fetchone()
         if row is None:
           return None

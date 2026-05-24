@@ -459,6 +459,29 @@ Overlay semantics are shallow per top-level section: the overlay's
 `base.video`); the overlay's `audio:` block similarly replaces only its
 own keys. Sections the profile omits inherit from `base` untouched.
 
+### profiles.\<name\>.max-concurrent
+
+Optional cluster-wide cap on the number of jobs with this profile that
+may run simultaneously. Enforced at claim time by the daemon's
+`claim_next_job` against the live `jobs` table — when the cap is reached
+a pending job with this profile is skipped until a running peer finishes.
+
+| Key              | Type | Default     | Notes                                                                  |
+| ---------------- | ---- | ----------- | ---------------------------------------------------------------------- |
+| `max-concurrent` | int  | unlimited   | `null` or `<=0` disables the cap. Counted across every daemon node.    |
+
+Typical use is the 4K HDR profile (`hq`), where running multiple
+transcodes in parallel saturates the GPU encoder and chews through the
+output filesystem faster than the storage janitor can sweep it:
+
+```yaml
+profiles:
+  hq:
+    max-concurrent: 1
+    video:
+      max-bitrate: 18000
+```
+
 ---
 
 ## services.sonarr / services.radarr

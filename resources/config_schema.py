@@ -653,6 +653,13 @@ class ProfileOverlay(_Base):
   naming: NamingSettings | None = None
   audio: AudioSettings | None = None
   subtitle: SubtitleSettings | None = None
+  # Cluster-wide concurrency cap for this profile. None / <=0 means
+  # unlimited (default). Enforced at claim time by the daemon's
+  # claim_next_job — a pending job whose profile is at-cap is skipped
+  # until a running peer finishes. Intended for heavy profiles (e.g.
+  # 4K HDR `hq`) where running multiple in parallel would saturate the
+  # GPU encoder or the output filesystem.
+  max_concurrent: int | None = None
 
 
 # ---------------------------------------------------------------------------
