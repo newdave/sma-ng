@@ -294,6 +294,108 @@ print_remote_container_summary() {
     "${sudo_prefix}docker ps --filter name=${name_filter} --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'"
 }
 
+# resolve_image_ref [explicit-image-ref]
+# Echoes the canonical "repo:tag" reference for the configured deploy
+# image. Resolution order:
+#   1. $1 (explicit override, e.g. when deploy:redeploy already split it)
+#   2. $IMAGE env var
+#   3. deploy.image[+image_tag] from local.yml
+#   4. ghcr.io/<deploy.gh_user>/sma-ng:<deploy.image_tag|latest>
+#   5. ghcr.io/<gh api user>/sma-ng:<deploy.image_tag|latest>
+# Returns non-zero with a stderr error when nothing resolvable.
+resolve_image_ref() {
+  local explicit="${1:-}" configured_image configured_tag gh_user tag
+  if [ -n "$explicit" ]; then
+    printf '%s\n' "$explicit"
+    return
+  fi
+  if [ -n "${IMAGE:-}" ]; then
+    printf '%s\n' "$IMAGE"
+    return
+  fi
+  configured_image=$(lc deploy image "")
+  configured_tag=$(lc deploy image_tag "")
+  if [ -n "$configured_image" ]; then
+    if [[ "$configured_image" == *:* ]] && [[ "${configured_image##*:}" != */* ]]; then
+      printf '%s\n' "$configured_image"
+      return
+    fi
+    tag="${configured_tag:-latest}"
+    printf '%s:%s\n' "$configured_image" "$tag"
+    return
+  fi
+  gh_user=$(lc deploy gh_user "")
+  if [ -z "$gh_user" ] && command -v gh >/dev/null 2>&1; then
+    gh_user=$(gh api user --jq '.login' 2>/dev/null || true)
+  fi
+  if [ -z "$gh_user" ]; then
+    echo "ERROR: resolve_image_ref: set IMAGE=ghcr.io/<owner>/sma-ng:<tag> or deploy.gh_user in $LOCAL" >&2
+    return 1
+  fi
+  tag="${configured_tag:-latest}"
+  printf 'ghcr.io/%s/sma-ng:%s\n' "$gh_user" "$tag"
+}
+
+# registry_manifest_digest <image-ref>
+# Echoes the OCI manifest digest (sha256:...) of <image-ref> as currently
+# published in the registry. Uses `docker buildx imagetools inspect` which
+# does not download layers — works against any reachable registry,
+# including public GHCR (no auth) and authenticated GHCR (uses the
+# operator's `docker login ghcr.io` credentials when private).
+# Returns empty string + non-zero if the lookup fails.
+registry_manifest_digest() {
+  local image_ref="$1"
+  if ! command -v docker >/dev/null 2>&1; then
+    return 1
+  fi
+  docker buildx imagetools inspect "$image_ref" --format '{{.Manifest.Digest}}' 2>/dev/null
+}
+
+# running_container_image_digest <host> <container-name> <image-repo>
+# SSH-queries <host> for <container-name>'s underlying image and returns
+# the matching RepoDigest restricted to <image-repo>. Echoes just the
+# sha256:... portion (matches registry_manifest_digest output). Empty
+# string + non-zero on lookup failure.
+running_container_image_digest() {
+  local host="$1" container_name="$2" image_repo="$3"
+  local cmd="${sudo_prefix}docker inspect --format='{{.Image}}' ${container_name} 2>/dev/null"
+  local image_id
+  image_id=$(run_remote_command "$host" "$cmd" 2>/dev/null | tr -d '\r' | head -n1) || return 1
+  if [ -z "$image_id" ]; then
+    return 1
+  fi
+  # Get every RepoDigest for the image, then filter to the requested repo.
+  local digest_cmd="${sudo_prefix}docker image inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' ${image_id} 2>/dev/null"
+  run_remote_command "$host" "$digest_cmd" 2>/dev/null \
+    | tr -d '\r' \
+    | awk -v repo="${image_repo}@" -F@ '$0 ~ "^"repo"sha256:" {print $2; exit}'
+}
+
+# verify_remote_image_current <host> <container-name> <image-ref>
+# Compares the registry's current manifest digest for <image-ref> with the
+# digest of the image actually backing <container-name> on <host>. Logs a
+# pass / fail line and returns 0 if they match (or if a lookup failed and
+# we can't tell — never block the deploy on a verification hiccup).
+verify_remote_image_current() {
+  local host="$1" container_name="$2" image_ref="$3"
+  local image_repo="${image_ref%:*}"
+  local registry_digest running_digest
+  registry_digest=$(registry_manifest_digest "$image_ref" || true)
+  running_digest=$(running_container_image_digest "$host" "$container_name" "$image_repo" || true)
+  if [ -z "$registry_digest" ] || [ -z "$running_digest" ]; then
+    echo "  WARNING: [$host] could not verify image freshness (registry='${registry_digest:-unknown}' running='${running_digest:-unknown}')" >&2
+    return 0
+  fi
+  if [ "$registry_digest" = "$running_digest" ]; then
+    echo "==> [$host] image up to date: ${image_ref} @ ${registry_digest}"
+    return 0
+  fi
+  echo "  WARNING: [$host] running image differs from registry :latest" >&2
+  echo "           registry: $registry_digest" >&2
+  echo "           running:  $running_digest" >&2
+  return 1
+}
+
 remove_remote_pg_volume() {
   local host="$1" requested_volumes="${2:-}"
   local remote_script

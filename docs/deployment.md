@@ -81,7 +81,7 @@ curl https://mise.run | sh
 | `mise run deploy:reload`   | Hot-reload `config/sma-ng.yml` on every host with `POST /reload`                                |
 | `mise run deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container               |
 | `mise run config:audit`    | Audit local configs                                                                             |
-| `mise run deploy:docker`   | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate`         |
+| `mise run deploy:docker`   | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate`, then verify the recreated container's image digest matches the registry's current `:latest` (warning-only on mismatch). |
 | `mise run deploy:login`    | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token                                  |
 
 Use `HOST=<host>` for one node or `HOSTS="<host1> <host2>"` for multiple nodes.
