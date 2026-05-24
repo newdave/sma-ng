@@ -253,3 +253,16 @@ class TestSQLiteJobDatabase:
     # No caps passed → second claim succeeds (default unlimited).
     assert db.claim_next_job(worker_id=2, node_id="node-a")["id"] == b
     db.close()
+
+  def test_profile_cap_is_serialised_within_single_writer(self, tmp_path):
+    """SQLite serialises writers via the connection lock; even with the
+    same caps dict passed twice, the second call sees the first claim."""
+    db = _db(tmp_path)
+    a = db.add_job("/m/a.mkv", "/cfg.yml", [], request_profile="hq")
+    b = db.add_job("/m/b.mkv", "/cfg.yml", [], request_profile="hq")
+    caps = {"hq": 1}
+    first = db.claim_next_job(worker_id=1, node_id="n", profile_caps=caps)
+    second = db.claim_next_job(worker_id=2, node_id="n", profile_caps=caps)
+    assert first["id"] == a
+    assert second is None
+    db.close()

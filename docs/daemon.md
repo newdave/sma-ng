@@ -486,6 +486,25 @@ Behaviour notes:
 - CLI users (`manual.py`) get a loud failure instead of a deferral: the new `InsufficientOutputSpace` exception exits
   with status `75` (sysexits `EX_TEMPFAIL`).
 
+## Storage management — output-directory clear on start
+
+When `daemon.storage-clear-on-start: true` (the default), the daemon wipes every entry under
+`base.converter.output-directory` once at startup, after registering the output-dir capacity gauges and before any
+worker thread starts. SMA-NG has no transcode-resume across restarts, so any leftover `.sma` / `.smatmp` / partial
+`.mp4` from the previous process is dead weight that only wastes disk and confuses the storage janitor's age-based
+sweep.
+
+Set `daemon.storage-clear-on-start: false` if `output-directory` is your final destination rather than a temp staging
+path. The cleared event is logged as a single-line `{"event":"storage.clear_on_start","output_dir":...,"freed_bytes":N}`.
+
+## Profile concurrency caps and the claim-time advisory lock
+
+When any profile carries `max-concurrent: N`, `claim_next_job` takes a Postgres transaction-scoped
+`pg_advisory_xact_lock` before counting running jobs per profile. Without the lock two workers calling claim
+concurrently both see "0 running" and both claim a capped job — exactly the race that broke the `hq` cap on
+sma-master before this guard landed. SQLite does not need the lock because its connection serialises writers via a
+process-wide threading lock.
+
 ## Job Lifecycle
 
 ```mermaid

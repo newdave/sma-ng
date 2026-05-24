@@ -158,4 +158,40 @@ def output_dir_usage(output_dir: str) -> DiskUsage:
   return DiskUsage(total=int(usage.total), used=int(usage.used), free=int(usage.free))
 
 
-__all__ = ["DiskUsage", "SweptSummary", "output_dir_usage", "sweep_output_directory"]
+def clear_output_directory(output_dir: str) -> int:
+  """Remove every entry under *output_dir* (files, dirs, symlinks) and
+  recreate the directory itself empty. Returns the number of bytes freed.
+
+  Intended for daemon startup when the operator wants a clean slate —
+  any leftover partial transcode is unrecoverable across a daemon
+  restart anyway (no resume support), so wiping them frees space and
+  removes confusion. Missing / unreadable dir is a no-op (returns 0).
+  """
+  if not output_dir:
+    return 0
+  freed = 0
+  try:
+    entries = list(os.scandir(output_dir))
+  except FileNotFoundError:
+    return 0
+  except (PermissionError, OSError) as exc:
+    log.warning("clear_output_directory: cannot scan %s: %s" % (output_dir, exc))
+    return 0
+  for entry in entries:
+    try:
+      st = entry.stat(follow_symlinks=False)
+      size = int(st.st_size)
+    except OSError:
+      size = 0
+    try:
+      if entry.is_dir(follow_symlinks=False):
+        shutil.rmtree(entry.path, ignore_errors=True)
+      else:
+        os.remove(entry.path)
+      freed += size
+    except OSError as exc:
+      log.warning("clear_output_directory: failed to remove %s: %s" % (entry.path, exc))
+  return freed
+
+
+__all__ = ["DiskUsage", "SweptSummary", "clear_output_directory", "output_dir_usage", "sweep_output_directory"]

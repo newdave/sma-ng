@@ -23,6 +23,7 @@ daemon:
   log-delete-after-days: 30
   storage-janitor-interval-seconds: 900
   storage-janitor-max-age-seconds: 21600
+  storage-clear-on-start: true
   default-args: []
   scan-paths: []
   path-rewrites: []

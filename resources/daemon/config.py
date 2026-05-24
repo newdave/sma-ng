@@ -293,6 +293,7 @@ class PathConfigManager:
     self._log_delete_after_days: int = 0
     self._storage_janitor_interval_seconds: int = 900
     self._storage_janitor_max_age_seconds: int = 21600
+    self._storage_clear_on_start: bool = True
 
     self._loader = ConfigLoader(logger=self.log)
     self._cfg: SmaConfig | None = None  # validated config tree, populated by load_config
@@ -408,6 +409,7 @@ class PathConfigManager:
     # janitor thread can use a single `> 0` check.
     self._storage_janitor_interval_seconds = int(d.storage_janitor_interval_seconds or 0)
     self._storage_janitor_max_age_seconds = int(d.storage_janitor_max_age_seconds or 0)
+    self._storage_clear_on_start = bool(d.storage_clear_on_start)
     if self.path_rewrites:
       self.log.debug("Path rewrites (%d):" % len(self.path_rewrites))
       for rewrite in self.path_rewrites:
@@ -480,6 +482,11 @@ class PathConfigManager:
   def storage_janitor_max_age_seconds(self) -> int:
     """Return the minimum file-mtime age before the janitor reaps (0 = disabled)."""
     return self._storage_janitor_max_age_seconds
+
+  @property
+  def storage_clear_on_start(self) -> bool:
+    """Return whether the daemon should wipe ``output_directory`` at startup."""
+    return self._storage_clear_on_start
 
   @property
   def output_directory(self) -> str:

@@ -89,6 +89,12 @@ def _sqlite_path_from_url(db_url):
   return path
 
 
+# Stable 64-bit key for the per-claim advisory lock in Postgres. Chosen
+# at random; any constant works as long as no other claim path picks the
+# same value. Value: low 63 bits of sha1("sma-ng/profile-cap").
+_CAP_ADVISORY_LOCK_KEY = 0x53_4D_41_43_41_50_4C_4B  # "SMACAPLK"
+
+
 def _profiles_at_cap(conn, profile_caps, *, is_sqlite):
   """Return the set of profile names whose running-job count already meets
   or exceeds the configured ``max_concurrent`` cap.
@@ -1053,6 +1059,14 @@ class PostgreSQLJobDatabase:
         if balance and balance.get("my_running", 0) > 0 and balance.get("idle_peer"):
           return None
 
+        # When any profile cap is in play, serialise the per-profile
+        # count + claim across all workers via a Postgres transaction-
+        # scoped advisory lock. Without this, two workers concurrently
+        # executing claim_next_job both read "0 running hq" and both
+        # claim an hq job — exactly the race we hit on sma-master.
+        # The lock is released on COMMIT (advisory_xact_lock).
+        if profile_caps:
+          cur.execute("SELECT pg_advisory_xact_lock(%s)", (_CAP_ADVISORY_LOCK_KEY,))
         over_capped = _profiles_at_cap(conn, profile_caps, is_sqlite=False)
         clauses = ["status = %s", "(next_attempt_at IS NULL OR next_attempt_at <= NOW())"]
         params: list = [STATUS_PENDING]

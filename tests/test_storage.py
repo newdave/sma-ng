@@ -122,3 +122,27 @@ def test_sweep_summary_fields_are_addressable(kind):
   assert s.empty_mp4_count == 3
   assert s.freed_bytes == 42
   assert getattr(s, f"{kind}_count") in (1, 2, 3)
+
+
+class TestClearOutputDirectory:
+  def test_wipes_files_and_subdirs(self, tmp_path):
+    from resources.daemon.storage import clear_output_directory
+
+    (tmp_path / "leftover.sma").write_bytes(b"abc")
+    (tmp_path / "partial.smatmp").write_bytes(b"xyz")
+    sub = tmp_path / "stage"
+    sub.mkdir()
+    (sub / "in.tmp").write_bytes(b"q" * 100)
+    freed = clear_output_directory(str(tmp_path))
+    assert freed >= 6  # at least the two top-level files
+    assert list(tmp_path.iterdir()) == []
+
+  def test_missing_dir_is_noop(self, tmp_path):
+    from resources.daemon.storage import clear_output_directory
+
+    assert clear_output_directory(str(tmp_path / "nope")) == 0
+
+  def test_empty_string_is_noop(self):
+    from resources.daemon.storage import clear_output_directory
+
+    assert clear_output_directory("") == 0

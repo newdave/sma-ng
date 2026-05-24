@@ -897,6 +897,12 @@ class DaemonConfig(_Base):
   # the sweep loop entirely (the gauges still register).
   storage_janitor_interval_seconds: int | None = 900
   storage_janitor_max_age_seconds: int | None = 21600
+  # Wipe every entry under `base.converter.output-directory` at daemon
+  # startup. SMA-NG has no transcode resume across restarts, so any
+  # leftover partial is dead weight — clearing them frees disk and
+  # removes stale rows from the janitor's view. Default True; set False
+  # if output_directory is your final destination rather than a temp dir.
+  storage_clear_on_start: bool = True
   default_args: list[str] | str = Field(default_factory=list)
   scan_paths: list[ScanPath] = Field(default_factory=list)
   path_rewrites: list[PathRewrite] = Field(default_factory=list)
