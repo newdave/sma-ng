@@ -66,42 +66,84 @@ for host in $DEPLOY_HOSTS; do
   fi
   chown_remote_path_to_ssh_user "$host" "$dir/docker/docker-compose.yml"
 
-  echo "==> [$host] pulling latest image"
-  if ! run_remote_compose "$host" "--profile $profile pull"; then
-    echo "ERROR: [$host] docker compose pull failed" >&2
-    failed="$failed $host"
-    continue
+  # ── Fast-path detection ────────────────────────────────────────────
+  # Compare the registry's current manifest digest against the digest of
+  # the image actually backing the running sma-ng container. When they
+  # match, the heavy `pull → down → up --force-recreate` cycle is
+  # unnecessary — the only thing that needs to take effect is whatever
+  # config / compose changes just landed. `compose restart` re-launches
+  # the entrypoint inside the existing container, which is enough for
+  # bind-mounted sma-ng.yml refreshes (deploy:remote ran deploy:config
+  # immediately before this task).
+  #
+  # FORCE_RECREATE=1 disables the fast-path so an operator can always
+  # opt back into a full recreate (e.g. to clear in-container state).
+  fast_path="no"
+  if [ "${FORCE_RECREATE:-0}" != "1" ]; then
+    if image_ref=$(resolve_image_ref 2>/dev/null) && [ -n "$image_ref" ]; then
+      image_repo="${image_ref%:*}"
+      registry_digest=$(registry_manifest_digest "$image_ref" || true)
+      running_digest=$(running_container_image_digest "$host" "sma-ng" "$image_repo" || true)
+      if [ -n "$registry_digest" ] && [ -n "$running_digest" ] && [ "$registry_digest" = "$running_digest" ]; then
+        fast_path="yes"
+        echo "==> [$host] image already current ($registry_digest); skipping pull + recreate, restarting only"
+      elif [ -n "$registry_digest" ] && [ -n "$running_digest" ]; then
+        echo "==> [$host] registry image differs from running ($registry_digest vs $running_digest); will pull + recreate"
+      else
+        echo "  NOTE: [$host] could not compare image digests (registry='${registry_digest:-?}' running='${running_digest:-?}'); will pull + recreate"
+      fi
+    fi
   fi
 
   if docker_profile_is_pg "$profile"; then
     echo "==> [$host] profile $profile expects external PostgreSQL in daemon.db-url"
   fi
 
-  # One-time migration: drop legacy per-profile container names.
-  if ! remove_stale_sma_containers "$host"; then
-    echo "  WARNING: [$host] stale-container cleanup reported errors — continuing" >&2
-  fi
+  if [ "$fast_path" = "yes" ]; then
+    # Config-only path. Compose restart re-execs the entrypoint inside
+    # the existing container so the bind-mounted sma-ng.yml is re-read
+    # without losing the cached image layers. ~3-5s vs ~30s for a full
+    # down/up/recreate cycle.
+    echo "==> [$host] restarting $service (config-only path)"
+    if ! run_remote_compose "$host" "--profile $profile restart $service"; then
+      echo "ERROR: [$host] docker compose restart $service failed" >&2
+      failed="$failed $host"
+      continue
+    fi
+  else
+    echo "==> [$host] pulling latest image"
+    if ! run_remote_compose "$host" "--profile $profile pull"; then
+      echo "ERROR: [$host] docker compose pull failed" >&2
+      failed="$failed $host"
+      continue
+    fi
 
-  echo "==> [$host] stopping $service"
-  if ! run_remote_compose "$host" "--profile $profile down --remove-orphans"; then
-    echo "  WARNING: [$host] docker compose down reported errors — continuing" >&2
-  fi
+    # One-time migration: drop legacy per-profile container names.
+    if ! remove_stale_sma_containers "$host"; then
+      echo "  WARNING: [$host] stale-container cleanup reported errors — continuing" >&2
+    fi
 
-  # `compose down` only stops containers belonging to the active profile.
-  # If the canonical `sma-ng` container was last brought up under a
-  # different profile (e.g. switching from intel-pg to intel), it survives
-  # `down` and then collides with `up`'s container_name. Force-remove by
-  # name as a belt-and-suspenders sweep before recreating.
-  # shellcheck disable=SC2154  # sudo_prefix populated by init_docker_host_context
-  if ! run_remote_command "$host" "${sudo_prefix}docker rm -f sma-ng >/dev/null 2>&1 || true"; then
-    echo "  WARNING: [$host] could not force-remove pre-existing sma-ng container" >&2
-  fi
+    echo "==> [$host] stopping $service"
+    if ! run_remote_compose "$host" "--profile $profile down --remove-orphans"; then
+      echo "  WARNING: [$host] docker compose down reported errors — continuing" >&2
+    fi
 
-  echo "==> [$host] starting $service (--force-recreate)"
-  if ! run_remote_compose "$host" "--profile $profile up -d --force-recreate --no-deps $service"; then
-    echo "ERROR: [$host] docker compose up failed" >&2
-    failed="$failed $host"
-    continue
+    # `compose down` only stops containers belonging to the active profile.
+    # If the canonical `sma-ng` container was last brought up under a
+    # different profile (e.g. switching from intel-pg to intel), it survives
+    # `down` and then collides with `up`'s container_name. Force-remove by
+    # name as a belt-and-suspenders sweep before recreating.
+    # shellcheck disable=SC2154  # sudo_prefix populated by init_docker_host_context
+    if ! run_remote_command "$host" "${sudo_prefix}docker rm -f sma-ng >/dev/null 2>&1 || true"; then
+      echo "  WARNING: [$host] could not force-remove pre-existing sma-ng container" >&2
+    fi
+
+    echo "==> [$host] starting $service (--force-recreate)"
+    if ! run_remote_compose "$host" "--profile $profile up -d --force-recreate --no-deps $service"; then
+      echo "ERROR: [$host] docker compose up failed" >&2
+      failed="$failed $host"
+      continue
+    fi
   fi
 
   echo "==> [$host] waiting for $service to become healthy (timeout: ${HEALTH_TIMEOUT}s)"
