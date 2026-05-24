@@ -616,6 +616,38 @@ class PathConfigManager:
         caps[name] = int(cap)
     return caps
 
+  def profile_concurrency_costs(self) -> dict[str, int]:
+    """Return ``{profile_name: concurrency_cost}`` for every profile.
+
+    Always includes every named profile (default cost = 1) so the caller
+    can sum costs of every running job without needing to fall back to
+    1 for missing keys. Pairs with :attr:`concurrency_budget` to express
+    a weighted-capacity scheduler: ``Σ running.cost ≤ budget``.
+    """
+    if self._cfg is None or self._cfg.profiles is None:
+      return {}
+    costs: dict[str, int] = {}
+    for name, overlay in self._cfg.profiles.items():
+      raw = getattr(overlay, "concurrency_cost", 1)
+      costs[name] = int(raw) if raw and raw > 0 else 1
+    return costs
+
+  @property
+  def concurrency_budget(self) -> int:
+    """Return the per-node encoder-capacity budget.
+
+    Resolves ``daemon.concurrency_budget`` when set positive, else
+    falls back to ``daemon.workers`` so a zero-config install behaves
+    identically to the pre-budget code (every job costs 1 against a
+    budget of ``workers``).
+    """
+    if self._cfg is None:
+      return 0
+    raw = self._cfg.daemon.concurrency_budget
+    if raw and raw > 0:
+      return int(raw)
+    return int(self._cfg.daemon.workers or 0)
+
   def get_args_for_path(self, file_path):
     """Return the global default args list.
 

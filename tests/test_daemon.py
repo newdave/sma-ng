@@ -1310,6 +1310,27 @@ class TestPostgreSQLJobDatabase:
     sql_called = cur.execute.call_args[0][0]
     assert "ALL" in sql_called or "!=" in sql_called
 
+  def test_claim_next_job_takes_advisory_lock_when_costs_set(self):
+    """profile_costs (the weighted-budget gate) must also acquire the
+    pg_advisory_xact_lock so the cost-sum can't race two concurrent
+    claims on the same available slot."""
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    # balance probe → fetchall (running count) → fetchall (cost-sum count)
+    # → fetchone for the SELECT → not needed (returns None below).
+    cur.fetchone.side_effect = [{"my_running": 0, "idle_peer": False}, None]
+    cur.fetchall.return_value = []
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    db.claim_next_job(
+      worker_id=1,
+      node_id="node1",
+      profile_costs={"hq": 6, "rq": 2},
+      concurrency_budget=6,
+    )
+    executed = " | ".join(str(c.args[0]) for c in cur.execute.call_args_list)
+    assert "pg_advisory_xact_lock" in executed
+
   # ------------------------------------------------------------------
   # get_job
   # ------------------------------------------------------------------

@@ -62,6 +62,11 @@ def _illustrative_profiles() -> dict:
       # so the GPU encoder and output filesystem aren't saturated.
       # Set to null / omit to disable.
       "max-concurrent": 1,
+      # Weight against `daemon.concurrency-budget`. With cost=6 and a
+      # budget of 6, one running hq saturates the node; the other
+      # profiles' costs (rq=2, lq=1) then fail the budget check until
+      # the hq completes. Set to 1 to opt out of weighting.
+      "concurrency-cost": 6,
       "video": {
         "codec": ["h265"],
         "max-bitrate": 18000,
@@ -181,6 +186,10 @@ def build_sample_yaml() -> bytes:
   # ScanPath / PathRewrite / RoutingRule lists default to [] — drop them
   # from the daemon block so the sample only carries illustrative entries.
   data["daemon"]["routing"] = _illustrative_routing()
+  # Match the illustrative hq.concurrency-cost=6 below so the sample
+  # validates self-consistently. None/0 would resolve to workers (4) and
+  # the schema validator would reject hq cost=6 > budget=4 at load time.
+  data["daemon"]["concurrency-budget"] = 6
   data["profiles"] = _illustrative_profiles()
   data["services"] = _illustrative_services()
 

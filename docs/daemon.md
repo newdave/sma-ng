@@ -499,11 +499,24 @@ path. The cleared event is logged as a single-line `{"event":"storage.clear_on_s
 
 ## Profile concurrency caps and the claim-time advisory lock
 
-When any profile carries `max-concurrent: N`, `claim_next_job` takes a Postgres transaction-scoped
-`pg_advisory_xact_lock` before counting running jobs per profile. Without the lock two workers calling claim
-concurrently both see "0 running" and both claim a capped job — exactly the race that broke the `hq` cap on
-sma-master before this guard landed. SQLite does not need the lock because its connection serialises writers via a
-process-wide threading lock.
+When any profile carries `max-concurrent: N` **or** any profile carries `concurrency-cost > 1` (i.e. the
+weighted-budget scheduler is active), `claim_next_job` takes a Postgres transaction-scoped
+`pg_advisory_xact_lock` before counting running jobs per profile and summing their costs. Without the lock two
+workers calling claim concurrently both see "0 running" and both claim a capped job — exactly the race that broke
+the `hq` cap on sma-master before this guard landed. SQLite does not need the lock because its connection
+serialises writers via a process-wide threading lock.
+
+### Weighted-budget scheduler
+
+`profiles.<name>.concurrency-cost` (default `1`) and `daemon.concurrency-budget` (default `daemon.workers`) layer
+a *shared* per-node encoder-capacity ceiling on top of the per-profile `max-concurrent` cap. Every running job
+contributes its `concurrency-cost`; a candidate claim is refused when the sum + the candidate's cost would exceed
+the budget. Both gates compose — the tighter wins — so an operator can keep `hq.max-concurrent: 1` (output-disk
+saturation reason) alongside `hq.concurrency-cost: 6` (encoder-bandwidth reason) without redundancy.
+
+`docs/configuration.md` carries the full key reference and a worked sma-master example. Misconfiguration where any
+profile's `concurrency-cost` exceeds the effective budget is rejected at config-validation time so a queue can't
+silently stall.
 
 ## Job Lifecycle
 

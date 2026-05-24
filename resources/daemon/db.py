@@ -171,6 +171,42 @@ def _profiles_at_cap(conn, profile_caps, *, is_sqlite):
   return {name for name, cap in profile_caps.items() if running.get(name, 0) >= cap}
 
 
+def _budget_exhausted_profiles(conn, profile_costs, budget, *, is_sqlite):
+  """Return the set of profile names whose ``concurrency-cost`` would
+  push the cluster-wide running cost-sum over ``budget`` if claimed now.
+
+  ``profile_costs`` is the ``{profile: cost}`` dict produced by
+  :meth:`resources.daemon.config.PathConfigManager.profile_concurrency_costs`.
+  ``budget`` is the per-node integer ceiling. Empty/None costs or
+  non-positive budget → no work performed; returns an empty set so the
+  caller can union with ``_profiles_at_cap`` and skip the filter when
+  neither cap mechanism applies.
+
+  Counts every ``status=running`` row's cost using
+  :func:`_effective_profile` so legacy NULL-``request_profile`` rows
+  contribute. Rows whose effective profile isn't in ``profile_costs``
+  count as cost=1 — same as the schema default; matches the operator
+  mental model that "an unweighted job still occupies a slot".
+  """
+  if not profile_costs or not budget or budget <= 0:
+    return set()
+  param_q = "?" if is_sqlite else "%s"
+  sql = "SELECT request_profile, args FROM jobs WHERE status = " + param_q
+  params = [STATUS_RUNNING]
+  if is_sqlite:
+    rows = conn.execute(sql, params).fetchall()
+  else:
+    with conn.cursor() as cur:
+      cur.execute(sql, params)
+      rows = cur.fetchall()
+  running_total = 0
+  for r in rows:
+    prof = _effective_profile(r)
+    running_total += int(profile_costs.get(prof, 1))
+  remaining = int(budget) - running_total
+  return {name for name, cost in profile_costs.items() if int(cost) > remaining}
+
+
 def _backfill_one_request_profile(conn, job_id, *, is_sqlite):
   """Backfill ``request_profile`` for a single job from its ``args``.
 
@@ -399,10 +435,20 @@ class SQLiteJobDatabase:
       row = conn.execute("SELECT * FROM jobs WHERE path = ? AND status IN (?, ?) LIMIT 1", (path, STATUS_PENDING, STATUS_RUNNING)).fetchone()
       return dict(row) if row else None
 
-  def claim_next_job(self, worker_id, node_id, exclude_configs=None, profile_caps=None):
+  def claim_next_job(
+    self,
+    worker_id,
+    node_id,
+    exclude_configs=None,
+    profile_caps=None,
+    profile_costs=None,
+    concurrency_budget=None,
+  ):
     now = _utc_now()
     with self._conn() as conn:
       over_capped = _profiles_at_cap(conn, profile_caps, is_sqlite=True)
+      over_budget = _budget_exhausted_profiles(conn, profile_costs, concurrency_budget, is_sqlite=True)
+      skip_profiles = over_capped | over_budget
       params = [STATUS_PENDING, now]
       sql = """
         SELECT id FROM jobs
@@ -412,10 +458,10 @@ class SQLiteJobDatabase:
         placeholders = ", ".join("?" for _ in exclude_configs)
         sql += " AND config NOT IN (%s)" % placeholders
         params.extend(list(exclude_configs))
-      if over_capped:
-        placeholders = ", ".join("?" for _ in over_capped)
+      if skip_profiles:
+        placeholders = ", ".join("?" for _ in skip_profiles)
         sql += " AND (request_profile IS NULL OR request_profile NOT IN (%s))" % placeholders
-        params.extend(list(over_capped))
+        params.extend(list(skip_profiles))
       sql += " ORDER BY priority DESC, created_at ASC LIMIT 1"
       row = conn.execute(sql, params).fetchone()
       if row is None:
@@ -1150,7 +1196,15 @@ class PostgreSQLJobDatabase:
         row = cur.fetchone()
         return dict(row) if row else None
 
-  def claim_next_job(self, worker_id, node_id, exclude_configs=None, profile_caps=None):
+  def claim_next_job(
+    self,
+    worker_id,
+    node_id,
+    exclude_configs=None,
+    profile_caps=None,
+    profile_costs=None,
+    concurrency_budget=None,
+  ):
     """Atomically claim the next pending job using SELECT FOR UPDATE SKIP LOCKED.
 
     exclude_configs: set of config paths already held by a running job —
@@ -1160,6 +1214,11 @@ class PostgreSQLJobDatabase:
     profile_caps: optional ``{profile_name: max_concurrent}`` map. Pending
     jobs whose ``request_profile`` already has cap-many running peers
     (cluster-wide) are skipped.
+
+    profile_costs + concurrency_budget: optional weighted-capacity gate.
+    Each running job's ``concurrency-cost`` is summed; a candidate is
+    skipped when sum + this_job.cost would exceed ``concurrency_budget``.
+    Independent from profile_caps — both filters compose (tightest wins).
 
     Load balancing: if this node already has a running job AND another
     online+approved peer node has zero running jobs (with at least one
@@ -1199,17 +1258,19 @@ class PostgreSQLJobDatabase:
         # executing claim_next_job both read "0 running hq" and both
         # claim an hq job — exactly the race we hit on sma-master.
         # The lock is released on COMMIT (advisory_xact_lock).
-        if profile_caps:
+        if profile_caps or profile_costs:
           cur.execute("SELECT pg_advisory_xact_lock(%s)", (_CAP_ADVISORY_LOCK_KEY,))
         over_capped = _profiles_at_cap(conn, profile_caps, is_sqlite=False)
+        over_budget = _budget_exhausted_profiles(conn, profile_costs, concurrency_budget, is_sqlite=False)
+        skip_profiles = over_capped | over_budget
         clauses = ["status = %s", "(next_attempt_at IS NULL OR next_attempt_at <= NOW())"]
         params: list = [STATUS_PENDING]
         if exclude_configs:
           clauses.append("config != ALL(%s)")
           params.append(list(exclude_configs))
-        if over_capped:
+        if skip_profiles:
           clauses.append("(request_profile IS NULL OR request_profile != ALL(%s))")
-          params.append(list(over_capped))
+          params.append(list(skip_profiles))
         sql = "SELECT id, path, config, args FROM jobs WHERE " + " AND ".join(clauses) + " ORDER BY priority DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
         cur.execute(sql, tuple(params))
         row = cur.fetchone()
