@@ -245,11 +245,22 @@ class ScannerThread(_StoppableThread):
         continue
 
       resolved_config = self.path_config_manager.get_config_for_path(submit_path)
-      job_id = self.job_db.add_job(submit_path, resolved_config, [], request_source="scan")
+      try:
+        scan_profile = self.path_config_manager.get_profile_for_path(submit_path)
+      except Exception:
+        scan_profile = None
+      scan_args = ["--profile", scan_profile] if scan_profile else []
+      job_id = self.job_db.add_job(
+        submit_path,
+        resolved_config,
+        scan_args,
+        request_source="scan",
+        request_profile=scan_profile,
+      )
       if job_id is not None:
         self.log.info("Scanner queued job %d: %s" % (job_id, submit_path))
         queued += 1
-        metrics_prom.record_job_enqueued("scan", None)
+        metrics_prom.record_job_enqueued("scan", scan_profile)
 
     # Record all candidates (including already-queued ones) as scanned so
     # we don't re-evaluate them on the next pass.

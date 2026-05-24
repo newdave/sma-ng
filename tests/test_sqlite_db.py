@@ -266,3 +266,41 @@ class TestSQLiteJobDatabase:
     assert first["id"] == a
     assert second is None
     db.close()
+
+  def test_legacy_request_profile_null_is_backfilled_from_args(self, tmp_path):
+    """Jobs queued before request_profile existed must still respect the cap.
+    The backfill in _init_db parses --profile from args and updates the column."""
+    db = _db(tmp_path)
+    # Simulate a legacy row: insert directly with NULL request_profile.
+    with db._conn() as conn:
+      conn.execute(
+        "INSERT INTO jobs (path, config, args, status, max_retries) VALUES (?, ?, ?, ?, ?)",
+        ("/m/legacy.mkv", "/cfg.yml", '["--profile", "hq"]', "pending", 0),
+      )
+    db.close()
+    # Reopen — _init_db backfills.
+    db = _db(tmp_path)
+    row = db.get_next_pending_job()
+    assert row["request_profile"] == "hq"
+    db.close()
+
+  def test_cap_counts_running_jobs_via_args_when_column_null(self, tmp_path):
+    """Even before backfill runs (within a single session), the cap must
+    correctly count running jobs whose request_profile is NULL but whose
+    args carry --profile."""
+    from resources.daemon.db import _profile_from_args, _profiles_at_cap
+
+    db = _db(tmp_path)
+    # Manually create a running row with NULL request_profile.
+    with db._conn() as conn:
+      conn.execute(
+        "INSERT INTO jobs (path, config, args, status, worker_id) VALUES (?, ?, ?, ?, ?)",
+        ("/m/running.mkv", "/cfg.yml", '["--profile", "hq"]', "running", 1),
+      )
+    # Helper sanity.
+    assert _profile_from_args('["--profile", "hq"]') == "hq"
+    # _profiles_at_cap must see the running hq via args parsing.
+    with db._conn() as conn:
+      over = _profiles_at_cap(conn, {"hq": 1}, is_sqlite=True)
+    assert over == {"hq"}
+    db.close()
