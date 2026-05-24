@@ -16,3 +16,4 @@ python-json-logger>=3.2,<4
 mistune>=3.0,<4
 ruamel.yaml>=0.18
 pydantic>=2,<3
+prometheus-client>=0.20,<1
