@@ -185,19 +185,22 @@ class ConversionWorker(threading.Thread):
         locked = self.config_lock_manager.get_locked_configs()
         profile_caps = None
         profile_costs = None
+        profile_weights = None
         budget = None
         try:
           profile_caps = self.path_config_manager.profile_concurrency_caps()
           profile_costs = self.path_config_manager.profile_concurrency_costs()
+          profile_weights = self.path_config_manager.profile_priority_weights()
           budget = self.path_config_manager.concurrency_budget
         except Exception:
-          self.log.debug("profile cap/cost/budget unavailable; ignoring", exc_info=True)
+          self.log.debug("profile cap/cost/weight/budget unavailable; ignoring", exc_info=True)
         job = self.job_db.claim_next_job(
           self.worker_id,
           self.node_id,
           exclude_configs=locked or None,
           profile_caps=profile_caps or None,
           profile_costs=profile_costs or None,
+          profile_weights=profile_weights or None,
           concurrency_budget=budget or None,
         )
         if job:

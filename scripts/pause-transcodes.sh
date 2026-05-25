@@ -8,12 +8,12 @@
 #
 # Exit codes:
 #   0  pause requested; if WAIT=1 all running jobs completed; if
-#      SHUTDOWN=1 the shutdown command was successfully POSTed
-#   1  configuration error (missing host, api key, etc.)
-#   2  HTTP error talking to the daemon
-#   3  timed out waiting for running jobs to finish (WAIT=1 / SHUTDOWN=1
-#      only); when SHUTDOWN=1 the shutdown is NOT sent on timeout — that
-#      would kill in-flight ffmpeg and undo the whole point.
+#      POWERCYCLE=1 the Proxmox VM reboot was successfully POSTed
+#   1  configuration error (missing host, api key, proxmox token, etc.)
+#   2  HTTP error talking to the daemon or to Proxmox
+#   3  timed out waiting for running jobs to finish (WAIT=1 / POWERCYCLE=1
+#      only); when POWERCYCLE=1 the Proxmox reboot is NOT sent on timeout
+#      — that would kill in-flight ffmpeg and undo the whole point.
 #
 # Usage from cron (no waiting — fire-and-forget):
 #   0 23 * * *  /opt/sma/scripts/pause-transcodes.sh sma-master >>/var/log/sma-pause.log 2>&1
@@ -22,12 +22,14 @@
 #   30 22 * * *  WAIT=1 WAIT_TIMEOUT=3600 \
 #                  /opt/sma/scripts/pause-transcodes.sh sma-master >>/var/log/sma-pause.log 2>&1
 #
-# Usage from cron + drain + shut the daemon down for the night
-# (pair with a morning cron that re-starts the daemon container):
-#   30 22 * * *  WAIT=1 SHUTDOWN=1 WAIT_TIMEOUT=3600 \
+# Usage from cron + drain + powercycle the Proxmox VM hosting the daemon
+# (pair with autostart so the VM comes back up on its own):
+#   30 22 * * *  WAIT=1 POWERCYCLE=1 WAIT_TIMEOUT=3600 \
+#                  PROXMOX_HOST=proxmox.lan PROXMOX_NODE=pve PROXMOX_VMID=109 \
+#                  PROXMOX_TOKEN='sma@pve!cron=00000000-0000-0000-0000-000000000000' \
 #                  /opt/sma/scripts/pause-transcodes.sh sma-master >>/var/log/sma-pause.log 2>&1
 #
-# Environment:
+# Environment — daemon side:
 #   SMA_HOST           daemon hostname / IP   (overrides positional $1)
 #   SMA_PORT           daemon HTTP port       (default 8585)
 #   SMA_API_KEY        X-API-Key header       (required; daemon.api-key in sma-ng.yml)
@@ -35,11 +37,27 @@
 #   WAIT               1 = poll until running=0; 0 = fire-and-forget (default 0)
 #   WAIT_TIMEOUT       seconds to wait when WAIT=1   (default 1800 = 30 min)
 #   WAIT_INTERVAL      poll cadence in seconds       (default 30)
-#   SHUTDOWN           1 = after drain, POST /shutdown so the daemon
-#                      exits cleanly. Implies WAIT=1 because shutting
-#                      down with jobs still running would orphan ffmpeg
-#                      children. Default 0.
 #   ACTOR              X-Actor header (audit log)    (default "cron")
+#
+# Environment — Proxmox side (only required when POWERCYCLE=1):
+#   POWERCYCLE         1 = after drain, ask Proxmox to reboot the VM
+#                      hosting the daemon. Implies WAIT=1 (forced so
+#                      in-flight ffmpeg children aren't orphaned).
+#                      Default 0.
+#   POWERCYCLE_MODE    Proxmox status action: 'reboot' (ACPI shutdown
+#                      then start — guest OS gets a clean syncs+unmount)
+#                      or 'reset' (hard reset, like a power button).
+#                      Default 'reboot'. Use 'reset' only when the guest
+#                      OS is known wedged.
+#   PROXMOX_HOST       Proxmox API endpoint hostname or IP (no scheme).
+#                      Port defaults to 8006 unless embedded (host:port).
+#   PROXMOX_NODE       Proxmox node name hosting the VM (e.g. 'pve').
+#   PROXMOX_VMID       QEMU VM ID to act on. Default 109.
+#   PROXMOX_TOKEN      API token in the form 'USER@REALM!TOKENID=SECRET'.
+#                      Create under Datacenter → Permissions → API Tokens
+#                      with VM.PowerMgmt on /vms/<vmid> at minimum.
+#   PROXMOX_INSECURE   1 = skip TLS verification (self-signed certs).
+#                      Default 0.
 #
 # Required tools: curl, awk. Optional: jq (used when present for cleaner
 # parsing; falls back to grep/awk so vanilla minimal images work).
@@ -67,15 +85,28 @@ SMA_NODE_ID="${SMA_NODE_ID:-${POSITIONAL_HOST:-${SMA_HOST}}}"
 WAIT="${WAIT:-0}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-1800}"
 WAIT_INTERVAL="${WAIT_INTERVAL:-30}"
-SHUTDOWN="${SHUTDOWN:-0}"
+POWERCYCLE="${POWERCYCLE:-0}"
+PROXMOX_VMID="${PROXMOX_VMID:-109}"
 ACTOR="${ACTOR:-cron}"
 
-# SHUTDOWN=1 forces WAIT=1 — issuing /shutdown while ffmpeg children are
-# still running would kill those subprocesses and leave the storage
-# janitor a mess to clean up next start.
-if [ "$SHUTDOWN" = "1" ] && [ "$WAIT" != "1" ]; then
-  log "SHUTDOWN=1 implies WAIT=1; enabling wait so in-flight jobs aren't orphaned."
+# POWERCYCLE=1 forces WAIT=1 — rebooting the VM with ffmpeg children
+# still running would kill those subprocesses mid-transcode.
+if [ "$POWERCYCLE" = "1" ] && [ "$WAIT" != "1" ]; then
+  log "POWERCYCLE=1 implies WAIT=1; enabling wait so in-flight jobs aren't orphaned."
   WAIT=1
+fi
+
+# POWERCYCLE_MODE must be a Proxmox-recognised VM status verb. We allow
+# the two that make sense here; 'shutdown'/'stop'/'start' aren't useful
+# because we need the VM to come back up.
+if [ "$POWERCYCLE" = "1" ]; then
+  case "$POWERCYCLE_MODE" in
+    reboot|reset) ;;
+    *) die 1 "POWERCYCLE_MODE must be 'reboot' (graceful) or 'reset' (hard); got '${POWERCYCLE_MODE}'." ;;
+  esac
+  [ -z "$PROXMOX_HOST" ]  && die 1 "POWERCYCLE=1 requires PROXMOX_HOST (e.g. proxmox.lan or 10.30.0.10)."
+  [ -z "$PROXMOX_NODE" ]  && die 1 "POWERCYCLE=1 requires PROXMOX_NODE (Proxmox cluster node name, e.g. 'pve')."
+  [ -z "$PROXMOX_TOKEN" ] && die 1 "POWERCYCLE=1 requires PROXMOX_TOKEN ('USER@REALM!TOKENID=SECRET')."
 fi
 
 [ -z "$SMA_HOST" ] && die 1 "Usage: $0 <host> (or set SMA_HOST). See script header for env vars."
@@ -165,16 +196,16 @@ while :; do
   sleep "$WAIT_INTERVAL"
 done
 
-# ---- step 3 (optional): issue the shutdown --------------------------------
+# ---- step 3 (optional): powercycle the Proxmox VM hosting the daemon ----
 
-if [ "$SHUTDOWN" != "1" ]; then
+if [ "$POWERCYCLE" != "1" ]; then
   exit 0
+else
+  log "POWERCYCLE=1: sending ${POWERCYCLE_MODE} command to Proxmox VM ${PROXMOX_VMID} on node '${PROXMOX_NODE}' (${PROXMOX_HOST})..."
+  pvesh create /nodes/localhost/qemu/"${PROXMOX_VMID}"/stop
+  pvesh create /nodes/localhost/qemu/"${PROXMOX_VMID}"/start
+  log "VM ${PROXMOX_VMID} is powercycling. Daemon HTTP will be unreachable until the guest finishes booting and the sma-ng container starts."
 fi
 
-log "Drained successfully; POSTing shutdown to node '${SMA_NODE_ID}'."
-if ! response=$(api_post "/admin/nodes/${encoded_node}/shutdown" 2>&1); then
-  die 2 "Shutdown request failed: ${response}"
-fi
-log "Shutdown requested: ${response}"
-log "Daemon will exit cleanly. Restart externally (systemd / docker / cron) when ready."
+log "Exiting..."
 exit 0

@@ -473,3 +473,72 @@ class TestSQLiteJobDatabase:
     # Default behaviour = ORDER BY created_at DESC; b was inserted second.
     assert typo[0]["path"] == "/m/b.mkv"
     db.close()
+
+  def test_priority_weight_zero_identity(self, tmp_path):
+    """No non-zero weights → ORDER BY is the historical
+    (priority DESC, created_at ASC); claim order is insertion order
+    for default-priority rows."""
+    db = _db(tmp_path)
+    a = db.add_job("/m/a.mkv", "/cfg.yml", [], request_profile="hq")
+    b = db.add_job("/m/b.mkv", "/cfg.yml", [], request_profile="rq")
+    weights = {"hq": 0, "rq": 0, "lq": 0}
+    first = db.claim_next_job(worker_id=1, node_id="n", profile_weights=weights)
+    second = db.claim_next_job(worker_id=2, node_id="n", profile_weights=weights)
+    assert [first["id"], second["id"]] == [a, b]
+    db.close()
+
+  def test_priority_weight_positive_pulls_profile_forward(self, tmp_path):
+    """lq.weight=+5 with all rows at priority=0 → lq claims first."""
+    db = _db(tmp_path)
+    hq = db.add_job("/m/h.mkv", "/cfg.yml", [], request_profile="hq")
+    rq = db.add_job("/m/r.mkv", "/cfg.yml", [], request_profile="rq")
+    lq = db.add_job("/m/l.mkv", "/cfg.yml", [], request_profile="lq")
+    weights = {"hq": -10, "rq": 0, "lq": 5}
+    order = []
+    for w in range(1, 4):
+      job = db.claim_next_job(worker_id=w, node_id="n", profile_weights=weights)
+      order.append(job["id"])
+    assert order == [lq, rq, hq]
+    db.close()
+
+  def test_priority_weight_negative_pushes_profile_back(self, tmp_path):
+    """hq.weight=-10 with other profiles unweighted → hq claims last."""
+    db = _db(tmp_path)
+    h = db.add_job("/m/h.mkv", "/cfg.yml", [], request_profile="hq")
+    r = db.add_job("/m/r.mkv", "/cfg.yml", [], request_profile="rq")
+    weights = {"hq": -10}
+    first = db.claim_next_job(worker_id=1, node_id="n", profile_weights=weights)
+    second = db.claim_next_job(worker_id=2, node_id="n", profile_weights=weights)
+    assert first["id"] == r
+    assert second["id"] == h
+    db.close()
+
+  def test_row_priority_overrides_profile_weight(self, tmp_path):
+    """A row-priority bump beats a negative profile weight when the
+    delta exceeds the weight magnitude."""
+    db = _db(tmp_path)
+    h = db.add_job("/m/h.mkv", "/cfg.yml", [], request_profile="hq")
+    db.add_job("/m/l.mkv", "/cfg.yml", [], request_profile="lq")
+    # Bump the hq row priority to +20 — effective hq = 20 + (-10) = 10
+    # vs effective lq = 0 + 5 = 5. hq should claim first.
+    with db._conn() as conn:
+      conn.execute("UPDATE jobs SET priority = ? WHERE id = ?", (20, h))
+    weights = {"hq": -10, "lq": 5}
+    first = db.claim_next_job(worker_id=1, node_id="n", profile_weights=weights)
+    assert first["id"] == h
+    db.close()
+
+  def test_priority_weight_legacy_null_profile_treated_as_zero(self, tmp_path):
+    """Rows with request_profile=NULL get the CASE ... ELSE 0 path —
+    they sort by their bare row priority, unaffected by other
+    profiles' weights."""
+    db = _db(tmp_path)
+    legacy = db.add_job("/m/legacy.mkv", "/cfg.yml", [])  # NULL request_profile
+    weighted = db.add_job("/m/h.mkv", "/cfg.yml", [], request_profile="hq")
+    weights = {"hq": -10}
+    # legacy (effective 0) > hq (effective -10), so legacy claims first.
+    first = db.claim_next_job(worker_id=1, node_id="n", profile_weights=weights)
+    second = db.claim_next_job(worker_id=2, node_id="n", profile_weights=weights)
+    assert first["id"] == legacy
+    assert second["id"] == weighted
+    db.close()

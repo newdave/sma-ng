@@ -531,6 +531,51 @@ to start with a structured error naming the offending profile and
 both values (`profiles.<name>.concurrency-cost=<N> exceeds the
 effective daemon concurrency budget (<M>)`).
 
+### profiles.\<name\>.priority-weight
+
+`max-concurrent` and `concurrency-cost` decide *which* jobs are
+claimable. `priority-weight` decides *what order* the claimable ones
+get picked up in. Defaults to `0` (no bias); positive values pull a
+profile forward in the queue, negative values push it back.
+
+| Key               | Type | Default | Notes                                                                       |
+| ----------------- | ---- | ------- | --------------------------------------------------------------------------- |
+| `priority-weight` | int  | `0`     | Added to the per-row `jobs.priority` column at claim ORDER BY time.         |
+
+The composition rule is:
+
+```text
+effective claim ordering =
+  (jobs.priority + profiles.<name>.priority-weight) DESC, created_at ASC
+```
+
+Worked example for sma-master where the operator wants kids content
+to drain ahead of regular-quality content, and 4K rips to wait until
+last:
+
+```yaml
+profiles:
+  hq:
+    priority-weight: -10        # push 4K to the back of the queue
+  lq:
+    priority-weight: 5          # claim kids content first
+```
+
+With these settings AND three pending jobs (one per profile, all
+default `jobs.priority=0`), the claim order is `lq` (effective 5) →
+`rq` (effective 0) → `hq` (effective -10).
+
+The per-row `jobs.priority` column (adjustable via the dashboard's
+▲/▼ buttons or `POST /jobs/<id>/priority`) is a *finer* override.
+With `hq.priority-weight: -10`, a single hq job whose row-priority
+was bumped to `+20` lands an effective priority of `+10` — beating
+every default-weight peer regardless of profile.
+
+Weight composes only with ordering, never with eligibility. A
+high-weighted profile that is at-cap (`max-concurrent`) or
+over-budget (`concurrency-cost > budget - Σ running`) is still
+skipped until a running peer finishes.
+
 ---
 
 ## services.sonarr / services.radarr

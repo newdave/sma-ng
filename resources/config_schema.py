@@ -669,6 +669,16 @@ class ProfileOverlay(_Base):
   # ``hq.concurrency-cost: 6 / rq: 2 / lq: 1`` with budget 6 means
   # "1 hq saturates the node, or 3 rq, or 6 lq, or any sum ≤ 6".
   concurrency_cost: int = 1
+  # Additive bias applied to every job in this profile at claim
+  # ORDER BY time. Effective claim ordering is
+  #   (jobs.priority + profile_weight) DESC, created_at ASC
+  # so a positive weight pulls the profile forward and a negative
+  # weight pushes it back. Default 0 reproduces the historical claim
+  # order. Composes with the per-row ``jobs.priority`` column (the
+  # ▲/▼ controls in the dashboard); whichever sum wins. No effect on
+  # caps/budget — a profile that is at-cap or over-budget is skipped
+  # regardless of weight.
+  priority_weight: int = 0
 
 
 # ---------------------------------------------------------------------------

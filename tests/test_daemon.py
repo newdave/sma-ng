@@ -1331,6 +1331,61 @@ class TestPostgreSQLJobDatabase:
     executed = " | ".join(str(c.args[0]) for c in cur.execute.call_args_list)
     assert "pg_advisory_xact_lock" in executed
 
+  def test_claim_next_job_takes_advisory_lock_when_weights_set(self):
+    """profile_weights (the priority-ordering bias) must also acquire
+    the pg_advisory_xact_lock so the ORDER BY's view of running state
+    can't race a concurrent claim."""
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchone.side_effect = [{"my_running": 0, "idle_peer": False}, None]
+    cur.fetchall.return_value = []
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    db.claim_next_job(
+      worker_id=1,
+      node_id="node1",
+      profile_weights={"hq": -10, "lq": 5},
+    )
+    executed = " | ".join(str(c.args[0]) for c in cur.execute.call_args_list)
+    assert "pg_advisory_xact_lock" in executed
+
+  def test_claim_next_job_order_by_contains_case_when_weights_nonzero(self):
+    """The CASE expression must appear in the SELECT's ORDER BY when at
+    least one weight is non-zero. Zero-weight identity preserves the
+    bare `priority DESC` clause."""
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchone.side_effect = [{"my_running": 0, "idle_peer": False}, None]
+    cur.fetchall.return_value = []
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    db.claim_next_job(
+      worker_id=1,
+      node_id="node1",
+      profile_weights={"hq": -10},
+    )
+    select_sql = next(c.args[0] for c in cur.execute.call_args_list if isinstance(c.args[0], str) and "FOR UPDATE SKIP LOCKED" in c.args[0])
+    assert "CASE request_profile" in select_sql
+    assert "priority +" in select_sql
+
+  def test_claim_next_job_zero_weights_emit_bare_priority_order_by(self):
+    """All-zero weight dict short-circuits to the historical
+    ORDER BY priority DESC clause — no CASE expression emitted."""
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchone.side_effect = [{"my_running": 0, "idle_peer": False}, None]
+    cur.fetchall.return_value = []
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    db.claim_next_job(
+      worker_id=1,
+      node_id="node1",
+      profile_weights={"hq": 0, "rq": 0, "lq": 0},
+    )
+    select_sql = next(c.args[0] for c in cur.execute.call_args_list if isinstance(c.args[0], str) and "FOR UPDATE SKIP LOCKED" in c.args[0])
+    assert "CASE" not in select_sql
+    assert "ORDER BY priority DESC" in select_sql
+
   # ------------------------------------------------------------------
   # get_job
   # ------------------------------------------------------------------

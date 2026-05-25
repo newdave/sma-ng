@@ -32,12 +32,13 @@ services:
     ports:
       - "${PORT:-8585}:8585"
     volumes:
-      - /opt/sma/config:/config
-      - /opt/sma/logs:/logs
-      - /opt/sma/data:/data
-      - /mnt:/mnt
-      - /mnt/unionfs/downloads:/downloads
-      - /transcodes:/transcodes
+      - "/opt/sma/config:/config:rslave"
+      - "/opt/sma/logs:/logs:rslave"
+      - "/opt/sma/data:/data:rslave"
+      - "/mnt:/mnt:rslave"
+      - "/mnt/unionfs/downloads:/downloads:rslave"
+      - "/transcodes:/transcodes:rslave"
+      - "/recycle:/recycle:rslave"
     env_file:
       - path: ../config/daemon.env
         required: true
@@ -59,12 +60,13 @@ services:
     ports:
       - "${PORT:-8585}:8585"
     volumes:
-      - /opt/sma/config:/config
-      - /opt/sma/logs:/logs
-      - /opt/sma/data:/data
-      - /mnt:/mnt
-      - /mnt/unionfs/downloads:/downloads
-      - /transcodes:/transcodes
+      - "/opt/sma/config:/config:rslave"
+      - "/opt/sma/logs:/logs:rslave"
+      - "/opt/sma/data:/data:rslave"
+      - "/mnt:/mnt:rslave"
+      - "/mnt/unionfs/downloads:/downloads:rslave"
+      - "/transcodes:/transcodes:rslave"
+      - "/recycle:/recycle:rslave"
     env_file:
       - path: ../config/daemon.env
         required: true
@@ -86,12 +88,13 @@ services:
     ports:
       - "${PORT:-8585}:8585"
     volumes:
-      - /opt/sma/config:/config
-      - /opt/sma/logs:/logs
-      - /opt/sma/data:/data
-      - /mnt:/mnt
-      - /mnt/unionfs/downloads:/downloads
-      - /transcodes:/transcodes
+      - "/opt/sma/config:/config:rslave"
+      - "/opt/sma/logs:/logs:rslave"
+      - "/opt/sma/data:/data:rslave"
+      - "/mnt:/mnt:rslave"
+      - "/mnt/unionfs/downloads:/downloads:rslave"
+      - "/transcodes:/transcodes:rslave"
+      - "/recycle:/recycle:rslave"
     deploy:
       resources:
         reservations:
@@ -123,12 +126,13 @@ services:
     ports:
       - "${PORT:-8585}:8585"
     volumes:
-      - /opt/sma/config:/config
-      - /opt/sma/logs:/logs
-      - /opt/sma/data:/data
-      - /mnt:/mnt
-      - /mnt/unionfs/downloads:/downloads
-      - /transcodes:/transcodes
+      - "/opt/sma/config:/config:rslave"
+      - "/opt/sma/logs:/logs:rslave"
+      - "/opt/sma/data:/data:rslave"
+      - "/mnt:/mnt:rslave"
+      - "/mnt/unionfs/downloads:/downloads:rslave"
+      - "/transcodes:/transcodes:rslave"
+      - "/recycle:/recycle:rslave"
     deploy:
       resources:
         reservations:
@@ -160,12 +164,13 @@ services:
     ports:
       - "${PORT:-8585}:8585"
     volumes:
-      - /opt/sma/config:/config
-      - /opt/sma/logs:/logs
-      - /opt/sma/data:/data
-      - /mnt:/mnt
-      - /mnt/unionfs/downloads:/downloads
-      - /transcodes:/transcodes
+      - "/opt/sma/config:/config:rslave"
+      - "/opt/sma/logs:/logs:rslave"
+      - "/opt/sma/data:/data:rslave"
+      - "/mnt:/mnt:rslave"
+      - "/mnt/unionfs/downloads:/downloads:rslave"
+      - "/transcodes:/transcodes:rslave"
+      - "/recycle:/recycle:rslave"
     devices:
       - /dev/dri:/dev/dri
     # Declarative GPU access: the container's `ubuntu` runtime user joins
@@ -201,12 +206,13 @@ services:
     ports:
       - "${PORT:-8585}:8585"
     volumes:
-      - /opt/sma/config:/config
-      - /opt/sma/logs:/logs
-      - /opt/sma/data:/data
-      - /mnt:/mnt
-      - /mnt/unionfs/downloads:/downloads
-      - /transcodes:/transcodes
+      - "/opt/sma/config:/config:rslave"
+      - "/opt/sma/logs:/logs:rslave"
+      - "/opt/sma/data:/data:rslave"
+      - "/mnt:/mnt:rslave"
+      - "/mnt/unionfs/downloads:/downloads:rslave"
+      - "/transcodes:/transcodes:rslave"
+      - "/recycle:/recycle:rslave"
     devices:
       - /dev/dri/card0:/dev/dri/card0
       - /dev/dri/renderD128:/dev/dri/renderD128

@@ -54,6 +54,11 @@ def _illustrative_profiles() -> dict:
       "audio": {"codec": ["ac3", "aac"]},
     },
     "lq": {
+      # Priority bias: claim lq ahead of rq/hq when all three have
+      # claimable jobs queued. Composes additively with the per-row
+      # `jobs.priority` column — a single rq job with the dashboard's
+      # ▲ button still beats lq's profile bias.
+      "priority-weight": 5,
       "video": {"codec": ["h264"], "max-bitrate": 3000, "preset": "fast"},
       "audio": {"codec": ["aac"], "max-channels": 2},
     },
@@ -67,6 +72,12 @@ def _illustrative_profiles() -> dict:
       # profiles' costs (rq=2, lq=1) then fail the budget check until
       # the hq completes. Set to 1 to opt out of weighting.
       "concurrency-cost": 6,
+      # Push hq behind every other profile in the claim ORDER BY so
+      # smaller jobs drain first. Negative weights are additive against
+      # the per-row `jobs.priority` column; a single hq job whose
+      # row-priority is bumped to +20 still beats every default-weight
+      # peer.
+      "priority-weight": -10,
       "video": {
         "codec": ["h265"],
         "max-bitrate": 18000,

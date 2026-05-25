@@ -632,6 +632,19 @@ class PathConfigManager:
       costs[name] = int(raw) if raw and raw > 0 else 1
     return costs
 
+  def profile_priority_weights(self) -> dict[str, int]:
+    """Return ``{profile_name: priority_weight}`` for every profile.
+
+    Always includes every named profile (default weight = 0) so the
+    caller can apply the additive bias uniformly. Consumed by
+    ``claim_next_job`` to bias ORDER BY without touching the cap/budget
+    skip filters — a profile at-cap or over-budget is still skipped
+    regardless of its weight.
+    """
+    if self._cfg is None or self._cfg.profiles is None:
+      return {}
+    return {name: int(getattr(o, "priority_weight", 0) or 0) for name, o in self._cfg.profiles.items()}
+
   @property
   def concurrency_budget(self) -> int:
     """Return the per-node encoder-capacity budget.

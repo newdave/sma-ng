@@ -499,12 +499,12 @@ path. The cleared event is logged as a single-line `{"event":"storage.clear_on_s
 
 ## Profile concurrency caps and the claim-time advisory lock
 
-When any profile carries `max-concurrent: N` **or** any profile carries `concurrency-cost > 1` (i.e. the
-weighted-budget scheduler is active), `claim_next_job` takes a Postgres transaction-scoped
-`pg_advisory_xact_lock` before counting running jobs per profile and summing their costs. Without the lock two
-workers calling claim concurrently both see "0 running" and both claim a capped job — exactly the race that broke
-the `hq` cap on sma-master before this guard landed. SQLite does not need the lock because its connection
-serialises writers via a process-wide threading lock.
+When any profile carries `max-concurrent: N` **or** `concurrency-cost > 1` (weighted-budget scheduler active)
+**or** `priority-weight ≠ 0` (priority-bias ordering active), `claim_next_job` takes a Postgres transaction-scoped
+`pg_advisory_xact_lock` before counting running jobs per profile, summing their costs, and computing the
+priority-weighted ORDER BY. Without the lock two workers calling claim concurrently both see "0 running" and both
+claim a capped job — exactly the race that broke the `hq` cap on sma-master before this guard landed. SQLite does
+not need the lock because its connection serialises writers via a process-wide threading lock.
 
 ### Weighted-budget scheduler
 
@@ -517,6 +517,16 @@ saturation reason) alongside `hq.concurrency-cost: 6` (encoder-bandwidth reason)
 `docs/configuration.md` carries the full key reference and a worked sma-master example. Misconfiguration where any
 profile's `concurrency-cost` exceeds the effective budget is rejected at config-validation time so a queue can't
 silently stall.
+
+### Priority-weighted claim ordering
+
+`profiles.<name>.priority-weight` (default `0`) is added to each row's `jobs.priority` column at the claim
+`ORDER BY` step. Effective ordering is `(jobs.priority + profile_weight) DESC, created_at ASC`. The expression is
+built from a parameterised `CASE WHEN ? THEN ?` clause whenever at least one weight is non-zero; when every weight
+is `0` the emitted SQL is byte-identical to the pre-weighting `ORDER BY priority DESC, created_at ASC` so a
+zero-config install sees no behavior change.
+
+Weight composes with ordering only. A high-weighted profile that is at-cap or over-budget is still skipped.
 
 ## Job Lifecycle
 
