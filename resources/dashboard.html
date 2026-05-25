@@ -543,9 +543,26 @@
                         x-text="requeueingAll ? 'Requeueing…' : 'Requeue All Failed'">
                     </button>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                     <input type="text" x-model="searchQuery" @input="onSearchInput()" placeholder="Search path…"
                         class="text-xs px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-gray-400 w-44">
+                    <select x-model="profileFilter" @change="page=0; fetchJobs()"
+                        title="Filter by profile / library"
+                        class="text-xs px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 focus:outline-none focus:border-gray-400">
+                        <option value="">All profiles</option>
+                        <template x-for="p in profileOptions" :key="p">
+                            <option :value="p" x-text="p"></option>
+                        </template>
+                    </select>
+                    <select x-model="sortMode" @change="page=0; fetchJobs()"
+                        title="Sort the queue"
+                        class="text-xs px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 focus:outline-none focus:border-gray-400">
+                        <option value="created">Newest first</option>
+                        <option value="created_asc">Oldest first</option>
+                        <option value="priority">Priority (queue order)</option>
+                        <option value="profile">Profile / library</option>
+                        <option value="status">Status</option>
+                    </select>
                     <template x-for="f in ['all','pending','running','completed','failed']" :key="f">
                         <button @click="filter=f; page=0; fetchJobs()"
                             class="text-xs px-2.5 py-1 rounded-full border transition-colors"
@@ -592,6 +609,7 @@
                             </th>
                             <th class="pb-2 pr-3 w-12 font-medium">ID</th>
                             <th class="pb-2 pr-3 font-medium">File</th>
+                            <th class="pb-2 pr-3 font-medium">Profile</th>
                             <th class="pb-2 pr-3 font-medium">Config</th>
                             <th class="pb-2 pr-3 font-medium">Status</th>
                             <th class="pb-2 pr-3 font-medium">Created</th>
@@ -619,6 +637,13 @@
                                     <div x-show="j.error" class="text-red-400 mt-0.5 truncate max-w-xs" :title="j.error"
                                         x-text="j.error">
                                     </div>
+                                </td>
+                                <td class="py-2 pr-3 text-xs">
+                                    <span x-show="j.request_profile"
+                                        class="px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 font-mono"
+                                        :title="'Profile: ' + j.request_profile + (j.request_source ? '  •  Source: ' + j.request_source : '')"
+                                        x-text="j.request_profile"></span>
+                                    <span x-show="!j.request_profile" class="text-gray-400 dark:text-gray-600">—</span>
                                 </td>
                                 <td class="py-2 pr-3 text-gray-500 dark:text-gray-500 font-mono text-xs"
                                     x-text="j.config ? j.config.split('/').pop() : ''"></td>
@@ -662,7 +687,7 @@
                         </template>
                         <template x-if="jobs.length === 0">
                             <tr>
-                                <td colspan="8" class="py-8 text-center text-gray-500 dark:text-gray-500 text-sm"
+                                <td colspan="9" class="py-8 text-center text-gray-500 dark:text-gray-500 text-sm"
                                     x-text="searchQuery.trim() ? 'No jobs match \u201c' + searchQuery.trim() + '\u201d' : 'No jobs found'">
                                 </td>
                             </tr>
@@ -775,6 +800,7 @@
                 health: {}, stats: {}, configs: {}, jobs: [], cluster: null, nodePendingMap: {},
                 metrics: null, metricsAvailable: false,
                 filter: 'all', page: 0, pageSize: 50, threadsTab: 'local', searchQuery: '', searchTimer: null,
+                profileFilter: '', sortMode: 'created',
                 lastUpdate: '', interval: null,
                 submitPath: '', submitArgs: '', submitFlags: [], submitting: false, submitResult: '', submitError: false, submitWarning: false,
                 selectedJobIds: [], lastSelectedJobId: null, bulkBusy: false, bulkResult: '', bulkError: false,
@@ -846,10 +872,23 @@
                     const params = new URLSearchParams({ limit: this.pageSize, offset: this.page * this.pageSize });
                     if (this.filter !== 'all') params.set('status', this.filter);
                     if (this.searchQuery.trim()) params.set('search', this.searchQuery.trim());
+                    if (this.profileFilter) params.set('profile', this.profileFilter);
+                    if (this.sortMode && this.sortMode !== 'created') params.set('sort', this.sortMode);
                     try {
                         const r = await fetch('/jobs?' + params, { headers: this.authHeaders() }).then(r => r.json());
                         this.jobs = r.jobs || [];
                     } catch (e) { this.jobs = []; }
+                },
+                // Profile dropdown options derive from whatever profiles
+                // the routing block declares + any extra seen in current
+                // jobs (handles a profile that was renamed but still has
+                // legacy jobs in flight).
+                get profileOptions() {
+                    const known = new Set();
+                    const routes = (this.configs && this.configs.routing) || [];
+                    for (const r of routes) if (r.profile) known.add(r.profile);
+                    for (const j of this.jobs) if (j.request_profile) known.add(j.request_profile);
+                    return Array.from(known).sort();
                 },
                 onSearchInput() {
                     clearTimeout(this.searchTimer);

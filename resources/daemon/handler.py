@@ -206,12 +206,26 @@ class WebhookHandler(BaseHTTPRequestHandler):
     status = query.get("status", [None])[0]
     config = query.get("config", [None])[0]
     search = query.get("search", [None])[0]
+    # `library` is a UX alias for `profile` — every entry under
+    # `daemon.routing[]` carries exactly one `profile`, so an operator
+    # who thinks of their content shelves as "the 4K library" can pass
+    # ?library=hq with the same effect as ?profile=hq.
+    profile = query.get("profile", [None])[0] or query.get("library", [None])[0]
+    sort = query.get("sort", [None])[0]
     limit = int(query.get("limit", [100])[0])
     offset = int(query.get("offset", [0])[0])
     if search:
       offset = 0
       limit = max(limit, 200)
-    jobs = self.server.job_db.get_jobs(status=status, config=config, path=search, limit=limit, offset=offset)
+    jobs = self.server.job_db.get_jobs(
+      status=status,
+      config=config,
+      path=search,
+      profile=profile,
+      sort=sort,
+      limit=limit,
+      offset=offset,
+    )
     for job in jobs:
       if job.get("config"):
         job["log_name"] = os.path.splitext(os.path.basename(job["config"]))[0]

@@ -95,6 +95,33 @@ def _sqlite_path_from_url(db_url):
 _CAP_ADVISORY_LOCK_KEY = 0x53_4D_41_43_41_50_4C_4B  # "SMACAPLK"
 
 
+# Whitelisted ORDER BY clauses for the GET /jobs endpoint's ?sort= param.
+# Mapping done via lookup table rather than string interpolation so the
+# value can never reach the SQL planner unsanitised. Both backends share
+# the same clauses since both schemas have the same columns.
+_JOBS_SORT_CLAUSES: dict[str, str] = {
+  "created": "ORDER BY created_at DESC",
+  "created_asc": "ORDER BY created_at ASC",
+  "priority": "ORDER BY priority DESC, created_at ASC",
+  "profile": "ORDER BY request_profile IS NULL, request_profile ASC, created_at ASC",
+  "library": "ORDER BY request_profile IS NULL, request_profile ASC, created_at ASC",
+  "status": "ORDER BY status ASC, created_at DESC",
+}
+
+
+def _resolve_sort_clause(sort_key):
+  """Return a safe ORDER BY clause for the GET /jobs endpoint.
+
+  Unknown / None keys fall back to the historical default
+  ``ORDER BY created_at DESC`` so an operator typoing ``sort=newest``
+  doesn't see an error — they just get the same view as before. The
+  set of accepted keys is :data:`_JOBS_SORT_CLAUSES`.
+  """
+  if not sort_key:
+    return _JOBS_SORT_CLAUSES["created"]
+  return _JOBS_SORT_CLAUSES.get(str(sort_key).lower(), _JOBS_SORT_CLAUSES["created"])
+
+
 def _profile_from_args(args_payload):
   """Extract ``--profile <name>`` (or ``-p <name>``) from a job's ``args``.
 
@@ -590,7 +617,7 @@ class SQLiteJobDatabase:
       row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
       return dict(row) if row else None
 
-  def get_jobs(self, status=None, config=None, path=None, limit=100, offset=0):
+  def get_jobs(self, status=None, config=None, path=None, profile=None, sort=None, limit=100, offset=0):
     query = "SELECT * FROM jobs WHERE 1=1"
     params = []
     if status:
@@ -602,7 +629,10 @@ class SQLiteJobDatabase:
     if path:
       query += " AND LOWER(path) LIKE LOWER(?)"
       params.append("%" + path + "%")
-    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    if profile:
+      query += " AND request_profile = ?"
+      params.append(profile)
+    query += " " + _resolve_sort_clause(sort) + " LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     with self._conn() as conn:
       return [dict(r) for r in conn.execute(query, params).fetchall()]
@@ -1429,8 +1459,8 @@ class PostgreSQLJobDatabase:
         row = cur.fetchone()
         return dict(row) if row else None
 
-  def get_jobs(self, status=None, config=None, path=None, limit=100, offset=0):
-    """Get jobs with optional filtering."""
+  def get_jobs(self, status=None, config=None, path=None, profile=None, sort=None, limit=100, offset=0):
+    """Get jobs with optional filtering and sort order."""
     query = "SELECT * FROM jobs WHERE 1=1"
     params = []
     if status:
@@ -1442,7 +1472,10 @@ class PostgreSQLJobDatabase:
     if path:
       query += " AND path ILIKE %s"
       params.append("%" + path + "%")
-    query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+    if profile:
+      query += " AND request_profile = %s"
+      params.append(profile)
+    query += " " + _resolve_sort_clause(sort) + " LIMIT %s OFFSET %s"
     params.extend([limit, offset])
     with self._conn() as conn:
       with conn.cursor() as cur:

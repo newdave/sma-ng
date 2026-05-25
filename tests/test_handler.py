@@ -441,12 +441,24 @@ class TestGetJobs:
   def test_passes_status_filter(self):
     h = _make_handler()
     h._get_jobs({"status": ["pending"]})
-    h.server.job_db.get_jobs.assert_called_once_with(status="pending", config=None, path=None, limit=100, offset=0)
+    h.server.job_db.get_jobs.assert_called_once_with(status="pending", config=None, path=None, profile=None, sort=None, limit=100, offset=0)
 
   def test_passes_limit_and_offset(self):
     h = _make_handler()
     h._get_jobs({"limit": ["10"], "offset": ["20"]})
-    h.server.job_db.get_jobs.assert_called_once_with(status=None, config=None, path=None, limit=10, offset=20)
+    h.server.job_db.get_jobs.assert_called_once_with(status=None, config=None, path=None, profile=None, sort=None, limit=10, offset=20)
+
+  def test_passes_profile_and_sort(self):
+    """profile / sort params flow through to the db; library is a UX
+    alias for profile and resolves to the same kwarg."""
+    h = _make_handler()
+    h._get_jobs({"profile": ["hq"], "sort": ["profile"]})
+    h.server.job_db.get_jobs.assert_called_once_with(status=None, config=None, path=None, profile="hq", sort="profile", limit=100, offset=0)
+
+  def test_library_alias_maps_to_profile(self):
+    h = _make_handler()
+    h._get_jobs({"library": ["rq"]})
+    h.server.job_db.get_jobs.assert_called_once_with(status=None, config=None, path=None, profile="rq", sort=None, limit=100, offset=0)
 
   def test_adds_log_name_to_jobs_with_config(self):
     h = _make_handler()
