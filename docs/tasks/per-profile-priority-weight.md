@@ -1,6 +1,6 @@
 # Task Breakdown: Per-Profile Priority Weight
 
-STATUS: IN-FLIGHT
+STATUS: COMPLETE
 PRP: [docs/prps/per-profile-priority-weight.md](../prps/per-profile-priority-weight.md)
 
 ## Overview

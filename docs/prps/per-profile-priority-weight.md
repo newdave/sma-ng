@@ -1,6 +1,6 @@
 # PRP: Per-Profile Priority Weight
 
-STATUS: IN-FLIGHT
+STATUS: COMPLETE
 
 ## Discovery Summary
 

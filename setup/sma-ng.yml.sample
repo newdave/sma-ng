@@ -351,6 +351,7 @@ profiles:
         - ac3
         - aac
   lq:
+    priority-weight: 5
     video:
       codec:
         - h264
@@ -363,6 +364,7 @@ profiles:
   hq:
     max-concurrent: 1
     concurrency-cost: 6
+    priority-weight: -10
     video:
       codec:
         - h265

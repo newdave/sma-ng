@@ -234,6 +234,34 @@ def _budget_exhausted_profiles(conn, profile_costs, budget, *, is_sqlite):
   return {name for name, cost in profile_costs.items() if int(cost) > remaining}
 
 
+def _priority_weight_sql_clause(profile_weights, *, is_sqlite):
+  """Return ``(sql_expression, [bound_params])`` for the additive
+  priority-weight expression used in the ``claim_next_job`` ORDER BY.
+
+  When no non-zero weights are configured, returns ``("priority", [])``
+  so the emitted SQL is byte-identical to today's pre-weighted claim
+  ordering (just ``ORDER BY priority DESC, created_at ASC``).
+
+  Otherwise emits ``(priority + CASE request_profile WHEN ? THEN ?
+  ... ELSE 0 END)``. Profile names + weights are passed as bound
+  parameters — never string-interpolated — so operator-controlled
+  config can't leak into the SQL planner.
+  """
+  if not profile_weights:
+    return "priority", []
+  non_zero = {k: int(v) for k, v in profile_weights.items() if v}
+  if not non_zero:
+    return "priority", []
+  qmark = "?" if is_sqlite else "%s"
+  whens = " ".join("WHEN " + qmark + " THEN " + qmark for _ in non_zero)
+  expr = "(priority + CASE request_profile " + whens + " ELSE 0 END)"
+  params: list = []
+  for name, weight in non_zero.items():
+    params.append(name)
+    params.append(int(weight))
+  return expr, params
+
+
 def _backfill_one_request_profile(conn, job_id, *, is_sqlite):
   """Backfill ``request_profile`` for a single job from its ``args``.
 
@@ -469,6 +497,7 @@ class SQLiteJobDatabase:
     exclude_configs=None,
     profile_caps=None,
     profile_costs=None,
+    profile_weights=None,
     concurrency_budget=None,
   ):
     now = _utc_now()
@@ -476,6 +505,7 @@ class SQLiteJobDatabase:
       over_capped = _profiles_at_cap(conn, profile_caps, is_sqlite=True)
       over_budget = _budget_exhausted_profiles(conn, profile_costs, concurrency_budget, is_sqlite=True)
       skip_profiles = over_capped | over_budget
+      priority_expr, priority_params = _priority_weight_sql_clause(profile_weights, is_sqlite=True)
       params = [STATUS_PENDING, now]
       sql = """
         SELECT id FROM jobs
@@ -489,7 +519,8 @@ class SQLiteJobDatabase:
         placeholders = ", ".join("?" for _ in skip_profiles)
         sql += " AND (request_profile IS NULL OR request_profile NOT IN (%s))" % placeholders
         params.extend(list(skip_profiles))
-      sql += " ORDER BY priority DESC, created_at ASC LIMIT 1"
+      sql += " ORDER BY " + priority_expr + " DESC, created_at ASC LIMIT 1"
+      params.extend(priority_params)
       row = conn.execute(sql, params).fetchone()
       if row is None:
         return None
@@ -1233,6 +1264,7 @@ class PostgreSQLJobDatabase:
     exclude_configs=None,
     profile_caps=None,
     profile_costs=None,
+    profile_weights=None,
     concurrency_budget=None,
   ):
     """Atomically claim the next pending job using SELECT FOR UPDATE SKIP LOCKED.
@@ -1249,6 +1281,11 @@ class PostgreSQLJobDatabase:
     Each running job's ``concurrency-cost`` is summed; a candidate is
     skipped when sum + this_job.cost would exceed ``concurrency_budget``.
     Independent from profile_caps — both filters compose (tightest wins).
+
+    profile_weights: optional ``{profile_name: priority_weight}`` map.
+    Adds the weight to each row's ``priority`` column at ORDER BY time,
+    biasing claim order without affecting eligibility. Independent from
+    caps/costs — a profile at-cap is still skipped regardless of weight.
 
     Load balancing: if this node already has a running job AND another
     online+approved peer node has zero running jobs (with at least one
@@ -1288,11 +1325,12 @@ class PostgreSQLJobDatabase:
         # executing claim_next_job both read "0 running hq" and both
         # claim an hq job — exactly the race we hit on sma-master.
         # The lock is released on COMMIT (advisory_xact_lock).
-        if profile_caps or profile_costs:
+        if profile_caps or profile_costs or profile_weights:
           cur.execute("SELECT pg_advisory_xact_lock(%s)", (_CAP_ADVISORY_LOCK_KEY,))
         over_capped = _profiles_at_cap(conn, profile_caps, is_sqlite=False)
         over_budget = _budget_exhausted_profiles(conn, profile_costs, concurrency_budget, is_sqlite=False)
         skip_profiles = over_capped | over_budget
+        priority_expr, priority_params = _priority_weight_sql_clause(profile_weights, is_sqlite=False)
         clauses = ["status = %s", "(next_attempt_at IS NULL OR next_attempt_at <= NOW())"]
         params: list = [STATUS_PENDING]
         if exclude_configs:
@@ -1301,7 +1339,8 @@ class PostgreSQLJobDatabase:
         if skip_profiles:
           clauses.append("(request_profile IS NULL OR request_profile != ALL(%s))")
           params.append(list(skip_profiles))
-        sql = "SELECT id, path, config, args FROM jobs WHERE " + " AND ".join(clauses) + " ORDER BY priority DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
+        sql = "SELECT id, path, config, args FROM jobs WHERE " + " AND ".join(clauses) + " ORDER BY " + priority_expr + " DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
+        params.extend(priority_params)
         cur.execute(sql, tuple(params))
         row = cur.fetchone()
         if row is None:
