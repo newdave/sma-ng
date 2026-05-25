@@ -439,3 +439,37 @@ class TestSQLiteJobDatabase:
     second = db.claim_next_job(worker_id=2, node_id="n", profile_caps=caps, profile_costs=costs, concurrency_budget=12)
     assert second is None  # max-concurrent fires before budget would
     db.close()
+
+  def test_get_jobs_filter_by_profile(self, tmp_path):
+    db = _db(tmp_path)
+    db.add_job("/m/a.mkv", "/cfg.yml", ["--profile", "hq"], request_profile="hq")
+    db.add_job("/m/b.mkv", "/cfg.yml", ["--profile", "rq"], request_profile="rq")
+    db.add_job("/m/c.mkv", "/cfg.yml", ["--profile", "lq"], request_profile="lq")
+    hq = db.get_jobs(profile="hq")
+    rq_via_alias = db.get_jobs(profile="rq")
+    assert [j["path"] for j in hq] == ["/m/a.mkv"]
+    assert [j["path"] for j in rq_via_alias] == ["/m/b.mkv"]
+    db.close()
+
+  def test_get_jobs_sort_by_profile_groups_alphabetically(self, tmp_path):
+    db = _db(tmp_path)
+    # Insert in mixed order; expect ascending profile then created_at asc.
+    db.add_job("/m/r2.mkv", "/cfg.yml", [], request_profile="rq")
+    db.add_job("/m/h1.mkv", "/cfg.yml", [], request_profile="hq")
+    db.add_job("/m/l1.mkv", "/cfg.yml", [], request_profile="lq")
+    db.add_job("/m/r1.mkv", "/cfg.yml", [], request_profile="rq")
+    db.add_job("/m/null.mkv", "/cfg.yml", [], request_profile=None)
+    sorted_jobs = db.get_jobs(sort="profile")
+    profiles = [j["request_profile"] for j in sorted_jobs]
+    # Non-null first (hq, lq, rq), NULL last.
+    assert profiles == ["hq", "lq", "rq", "rq", None]
+    db.close()
+
+  def test_get_jobs_sort_unknown_falls_back_to_default(self, tmp_path):
+    db = _db(tmp_path)
+    db.add_job("/m/a.mkv", "/cfg.yml", [])
+    db.add_job("/m/b.mkv", "/cfg.yml", [])
+    typo = db.get_jobs(sort="newest")  # not in whitelist
+    # Default behaviour = ORDER BY created_at DESC; b was inserted second.
+    assert typo[0]["path"] == "/m/b.mkv"
+    db.close()

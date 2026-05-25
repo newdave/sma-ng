@@ -317,7 +317,9 @@ class TestComposeBaseService:
 
   def test_data_volume_mounted_for_sqlite(self, compose):
     volumes = compose["services"]["sma-software"]["volumes"]
-    assert "/opt/sma/data:/data" in volumes
+    # Tolerate an optional propagation flag (e.g. `:rslave`) appended
+    # to the mount spec; the host:container pair is what matters.
+    assert any(str(v).split(":")[:2] == ["/opt/sma/data", "/data"] for v in volumes)
 
   def test_media_volume_mounted(self, compose):
     volumes = compose["services"]["sma-software"]["volumes"]
@@ -449,7 +451,7 @@ class TestComposePostgres:
       assert any(
         (isinstance(ef, dict) and ef.get("path") in ("/opt/sma/config/daemon.env", "../config/daemon.env")) or ef in ("/opt/sma/config/daemon.env", "../config/daemon.env") for ef in env_files
       )
-      assert "/opt/sma/data:/data" in svc_def["volumes"]
+      assert any(str(v).split(":")[:2] == ["/opt/sma/data", "/data"] for v in svc_def["volumes"])
 
   def test_pg_profiles_do_not_set_db_url_env(self, compose):
     for svc in ("sma-software-pg", "sma-intel-pg", "sma-nvidia-pg"):
