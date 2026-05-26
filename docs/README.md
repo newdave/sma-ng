@@ -1332,7 +1332,7 @@ The daemon also writes per-config rotating log files in `logs/`:
 
 - Verify every path FFmpeg writes to (output dir, temp dir, media mounts) is bind-mounted
   read-write into the `sma` service in `docker/docker-compose.yml`
-- The bundled compose file mounts `/opt/sma/config`, `/opt/sma/logs`, and `/transcodes` by
+- The bundled compose file mounts `/opt/sma/config`, `/opt/sma/logs`, and `/transcode` by
   default — extend `volumes:` for any additional paths your setup needs
 
 ### Environment Variables

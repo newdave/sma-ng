@@ -2,7 +2,7 @@
 
 STATUS: IN-FLIGHT
 
-Goal: prevent `/transcodes/sma` full-disk outages from burning worker slots
+Goal: prevent `/transcode/sma` full-disk outages from burning worker slots
 and leaking partial files, and give operators visibility before the next one.
 
 Non-goals:

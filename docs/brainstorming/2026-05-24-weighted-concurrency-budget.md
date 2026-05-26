@@ -37,7 +37,7 @@ Operationally:
 
 - **Primary Users:** Daemon operators tuning a single node (sma-master)
   whose hardware mix (Meteor Lake Xe-LPG, 3 worker threads, shared
-  `/transcodes/sma`) doesn't fit a one-cap-per-profile model.
+  `/transcode/sma`) doesn't fit a one-cap-per-profile model.
 - **Secondary Users:** Future multi-node cluster operators where each
   node has different encoder capacity (Arc dGPU vs iGPU vs CPU-only) —
   per-node budgets, global profile costs.
