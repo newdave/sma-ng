@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "${script_dir}/.." && pwd)
 install_dir="${INSTALL_DIR:-/opt/sma}"
-transcode_dir="${TRANSCODE_DIR:-/transcodes}"
+transcode_dir="${TRANSCODE_DIR:-/transcode}"
 owner="${OWNER:-${SUDO_USER:-${USER:-}}}"
 snippet_path="${BASH_SNIPPET:-${install_dir}/sma-ng-docker-aliases.sh}"
 config_source="${CONFIG_SOURCE:-${repo_root}/setup/sma-ng.yml.sample}"
@@ -19,7 +19,7 @@ Creates host-side directories and seed files for the SMA-NG Docker Compose
 container. Override paths with environment variables:
 
   INSTALL_DIR=/opt/sma
-  TRANSCODE_DIR=/transcodes
+  TRANSCODE_DIR=/transcode
   OWNER="$USER"
   BASH_SNIPPET=/opt/sma/sma-ng-docker-aliases.sh
   CONFIG_SOURCE=setup/sma-ng.yml.sample

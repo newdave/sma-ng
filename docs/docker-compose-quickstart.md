@@ -48,7 +48,7 @@ By default this creates the persistent directories and seed files the compose fi
 /opt/sma/logs/
 /opt/sma/cache/
 /opt/sma/data/
-/transcodes/sma/
+/transcode/sma/
 ```
 
 The default compose mounts are:
@@ -58,14 +58,14 @@ The default compose mounts are:
 - `/opt/sma/data` → container `/data`
 - `/mnt` → container `/mnt`
 - `/mnt/unionfs/downloads` → container `/downloads`
-- `/transcodes` → container `/transcodes`
+- `/transcode` → container `/transcode`
 
 Adjust the compose file if your host uses different media paths.
 
 The installer accepts environment overrides:
 
 ```bash
-INSTALL_DIR=/srv/sma TRANSCODE_DIR=/srv/transcodes mise run setup:docker:target
+INSTALL_DIR=/srv/sma TRANSCODE_DIR=/srv/transcode mise run setup:docker:target
 ```
 
 ## 2. Create Config Files
@@ -156,7 +156,7 @@ Useful aliases:
 | `sma-shell`                               | Open an interactive shell in the `sma-ng` container  |
 
 Paths passed to these aliases must be container-visible paths, such as `/mnt/...`, `/downloads/...`,
-`/transcodes/...`, or another path mounted into the compose service.
+`/transcode/...`, or another path mounted into the compose service.
 
 ## 7. Edit `daemon.env`
 

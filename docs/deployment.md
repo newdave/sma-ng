@@ -132,7 +132,7 @@ No containers are left running afterwards.
 mise run setup:docker:target
 ```
 
-This creates `/opt/sma/config`, `/opt/sma/logs`, `/opt/sma/cache`, `/opt/sma/data`, and `/transcodes/sma`, then seeds
+This creates `/opt/sma/config`, `/opt/sma/logs`, `/opt/sma/cache`, `/opt/sma/data`, and `/transcode/sma`, then seeds
 `/opt/sma/config/sma-ng.yml` and `/opt/sma/config/daemon.env` if they are missing. It also installs
 `/opt/sma/sma-ng-docker-aliases.sh`; source that file in Bash to get aliases such as `sma-manual`,
 `sma-convert`, `sma-preview`, `sma-codecs`, and `sma-logs`.
@@ -140,7 +140,7 @@ This creates `/opt/sma/config`, `/opt/sma/logs`, `/opt/sma/cache`, `/opt/sma/dat
 Override the default host paths when your compose mounts differ:
 
 ```bash
-INSTALL_DIR=/srv/sma TRANSCODE_DIR=/srv/transcodes mise run setup:docker:target
+INSTALL_DIR=/srv/sma TRANSCODE_DIR=/srv/transcode mise run setup:docker:target
 ```
 
 ### Push a multi-architecture image to a registry
