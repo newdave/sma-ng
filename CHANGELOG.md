@@ -1,5 +1,31 @@
 # Changelog
 
+## [3.2.0](https://github.com/newdave/sma-ng/compare/sma-ng-v3.1.0...sma-ng-v3.2.0) (2026-05-26)
+
+
+### Features
+
+* **claim:** per-profile priority weight (closes PRP) ([37b4c29](https://github.com/newdave/sma-ng/commit/37b4c29ff61ec18d32cbf663cc6b8c28797383f5))
+* **daemon:** weighted concurrency budget (closes PRP) ([69a4772](https://github.com/newdave/sma-ng/commit/69a4772be7d77b6e501abba16d60a37cecd768df))
+* **deploy:** fast-path deploy:docker when image is already current ([cda7ee9](https://github.com/newdave/sma-ng/commit/cda7ee938b9aef6052a869143733a0ae093851d5))
+* **deploy:** verify recreated container matches registry :latest ([db9c0c9](https://github.com/newdave/sma-ng/commit/db9c0c977f2dabfb998f18c13e3efa7df88aeed3))
+* **queue:** sort + filter the queue by profile/library, add Profile column ([8606e79](https://github.com/newdave/sma-ng/commit/8606e79ea620fee679a8d94a7e96375549b72ed6))
+* **scripts:** cron-friendly pause-transcodes.sh with optional shutdown ([d9831e5](https://github.com/newdave/sma-ng/commit/d9831e5874a0b86de5991ba1184db2c5beb96304))
+
+
+### Bug Fixes
+
+* **cap:** backfill request_profile on every requeue path ([ba16bfc](https://github.com/newdave/sma-ng/commit/ba16bfc4f2e67b3c2136d02eb3e9889ac4f34212))
+* **cap:** derive profile from args so cap actually enforces ([461fbb2](https://github.com/newdave/sma-ng/commit/461fbb25a7ac514c1e017c23c78ca7faae6de8f0))
+* **daemon:** serialise profile-cap claims + clear output-dir at startup ([d419084](https://github.com/newdave/sma-ng/commit/d41908449c271cf93ecbb3faac70d6b906de6b8b))
+
+
+### Documentation
+
+* **prp:** per-profile priority weight — PRP + task breakdown ([817dec3](https://github.com/newdave/sma-ng/commit/817dec3a2dfb5901ff25c6d619ed245eac08f015))
+* **prp:** weighted concurrency budget — brainstorm + PRP ([e2f7bb7](https://github.com/newdave/sma-ng/commit/e2f7bb79ecff5ded10d14814041b4014e7c1c987))
+* **sample:** hq profile illustrative extra-hw-frames=80 + lookahead=60 ([4becc68](https://github.com/newdave/sma-ng/commit/4becc6808441e856dfbe42420f1b6975471d8231))
+
 ## [3.1.0](https://github.com/newdave/sma-ng/compare/sma-ng-v3.0.0...sma-ng-v3.1.0) (2026-05-24)
 
 
