@@ -240,16 +240,20 @@ class TestColorFormatterHelpers:
     assert not isinstance(non_tty_handler.formatter, ColorFormatter)
 
   def test_apply_job_context_filter_is_idempotent(self):
+    # JobContextFilter is now attached at the handler level so %(job_id)s
+    # resolves on every handler (console, manual CLI, daemon file) — not
+    # just on records originated at the DAEMON logger.
+    handler = logging.StreamHandler(_NonTTYStream())
     daemon_logger = logging.getLogger("DAEMON")
-    original_filters = list(daemon_logger.filters)
-    daemon_logger.filters = []
+    original_handlers = list(daemon_logger.handlers)
+    daemon_logger.handlers = [handler]
     try:
       _apply_job_context_filter()
       _apply_job_context_filter()
-      assert len(daemon_logger.filters) == 1
-      assert isinstance(daemon_logger.filters[0], JobContextFilter)
+      job_filters = [f for f in handler.filters if isinstance(f, JobContextFilter)]
+      assert len(job_filters) == 1
     finally:
-      daemon_logger.filters = original_filters
+      daemon_logger.handlers = original_handlers
 
   @pytest.mark.skipif(JSONFormatter is None, reason="python-json-logger not installed")
   def test_apply_json_formatter_updates_rotating_file_handler(self, tmp_path):
