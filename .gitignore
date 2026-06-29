@@ -31,6 +31,9 @@ env/
 .idea/
 .vscode/
 .claude/settings.local.json
+# Ephemeral Claude Code tooling artifacts (hook tool-output log, agent worktrees)
+.claude/codediff.txt
+.claude/worktrees/
 *.swp
 *.swo
 *~
