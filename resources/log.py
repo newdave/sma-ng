@@ -77,11 +77,11 @@ defaults = {
     "args": None,  # filled in by checkLoggingConfig with the absolute logs path
   },
   "formatter_simpleFormatter": {
-    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "format": "%(asctime)s - %(name)s - %(levelname)s [%(threadName)s job:%(job_id)s] %(message)s",
     "datefmt": "%Y-%m-%d %H:%M:%S",
   },
-  "formatter_minimalFormatter": {"format": "%(message)s", "datefmt": ""},
-  "formatter_daemonFormatter": {"format": "%(asctime)s [%(levelname)s] [job:%(job_id)s] %(message)s", "datefmt": "%Y-%m-%d %H:%M:%S"},
+  "formatter_minimalFormatter": {"format": "[%(threadName)s job:%(job_id)s] %(message)s", "datefmt": ""},
+  "formatter_daemonFormatter": {"format": "%(asctime)s [%(levelname)s] [%(threadName)s job:%(job_id)s] %(message)s", "datefmt": "%Y-%m-%d %H:%M:%S"},
 }
 
 CONFIG_DEFAULT = "logging.ini"
@@ -423,17 +423,19 @@ def _apply_redacting_filter():
 
 
 def _apply_job_context_filter():
-  """Attach JobContextFilter to the DAEMON logger if not already present.
+  """Attach JobContextFilter to every handler so ``%(job_id)s`` resolves
+  on console, manual CLI, and daemon file output alike.
 
-  The filter injects ``job_id`` into every LogRecord so that
-  ``%(job_id)s`` works in daemonFormatter format strings.  Called after
-  ``fileConfig()`` so the DAEMON logger is guaranteed to exist.
+  Filters attached to a logger only run for records originated at that
+  logger — propagated records reach ancestor *handlers* without re-running
+  ancestor-logger filters. Attaching to handlers guarantees the field is
+  populated regardless of which named logger emitted the record.
   """
   from resources.daemon.context import JobContextFilter
 
-  daemon_logger = logging.getLogger("DAEMON")
-  if not any(isinstance(f, JobContextFilter) for f in daemon_logger.filters):
-    daemon_logger.addFilter(JobContextFilter())
+  for handler in _iter_all_handlers():
+    if not any(isinstance(f, JobContextFilter) for f in handler.filters):
+      handler.addFilter(JobContextFilter())
 
 
 def _apply_json_formatter():
@@ -513,11 +515,20 @@ def checkLoggingConfig(configfile, logs_dir=None):
     config.set("handler_daemonHandler", "args", daemon_handler_args)
     write = True
 
-  # Migrate daemonFormatter to include job_id field if not already present
+  # Migrate daemonFormatter to include job_id and threadName fields.
   _new_daemon_fmt = defaults["formatter_daemonFormatter"]["format"]
-  if "%(job_id)s" not in config.get("formatter_daemonFormatter", "format", fallback=""):
+  _daemon_fmt = config.get("formatter_daemonFormatter", "format", fallback="")
+  if "%(job_id)s" not in _daemon_fmt or "%(threadName)s" not in _daemon_fmt:
     config.set("formatter_daemonFormatter", "format", _new_daemon_fmt)
     write = True
+
+  # Migrate simpleFormatter / minimalFormatter to include thread + job context.
+  for fmt_section in ("formatter_simpleFormatter", "formatter_minimalFormatter"):
+    desired = defaults[fmt_section]["format"]
+    current = config.get(fmt_section, "format", fallback="")
+    if "%(threadName)s" not in current or "%(job_id)s" not in current:
+      config.set(fmt_section, "format", desired)
+      write = True
 
   # Remove legacy fileHandler from handlers list and delete its section
   if config.has_option("handlers", "keys") and "fileHandler" in config.get("handlers", "keys"):
