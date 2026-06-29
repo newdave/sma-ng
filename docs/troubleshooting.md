@@ -77,6 +77,28 @@ of falling all the way to libx265 software. See
 for the full policy table, and watch for the structured `ffmpeg.attempts`
 log line — successful recovery shows `[{tier: hw, failure_class: ...}, {tier: hw_alt, failure_class: null}]` with `result: ok`.
 
+### XviD / MPEG-4 ASP source fails immediately with `decoder_init_failed`
+
+Legacy `.avi` content (XviD / DivX, ffprobe codec `mpeg4`, advanced-simple
+profile) and some VC-1 sources cannot be decoded by Intel QSV at all. Both
+the `hw` and `hw_alt` tiers reuse the QSV decoder, so they fail back to back
+— the `ffmpeg.attempts` line shows two failed attempts ending in
+`failure_class: decoder_init_failed`, and the job is surfaced as failed under
+`fallback-policy: hw_alt` or `hw_only`.
+
+SMA-NG now auto-recovers this case: a `decoder_init_failed` under `hw_alt` or
+`hw_only` triggers one extra **software-decode + hardware-encode** retry
+(`tier: sw_decode_hw_encode`). The source is decoded on the CPU while the QSV
+encoder is kept, so the expensive encode stays on the GPU. The recovery log
+line reads `Decode-side hardware failure (cause=decoder_init_failed); retrying
+with software decode + hardware encode … [decode-side-rescue]`, followed by an
+`ffmpeg.attempts` entry with `{tier: sw_decode_hw_encode, failure_class: null}`
+and `result: ok`.
+
+No configuration change is required. If even the software decode fails (a
+genuinely corrupt source), switch to `fallback-policy: aggressive` to add the
+full software encode tier (`full_sw`) as a last resort.
+
 ### Hardware acceleration not working
 
 - Verify `hwdevices` key matches encoder codec name (e.g., `qsv` for `h265qsv`)
