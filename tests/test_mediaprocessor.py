@@ -3944,6 +3944,104 @@ class TestSwapQsvCodecToSw:
 
 
 # ---------------------------------------------------------------------------
+# _strip_qsv_decode_keep_encoder() / _rewrite_qsv_filter_for_sw_decode()
+# ---------------------------------------------------------------------------
+
+
+class TestStripQsvDecodeKeepEncoder:
+  """`_strip_qsv_decode_keep_encoder` drops the QSV decode pipeline but keeps
+  the encoder's `-qsv_device`, enabling software-decode + hardware-encode."""
+
+  def test_strips_hwaccel_keeps_qsv_device(self):
+    from resources.mediaprocessor import _strip_qsv_decode_keep_encoder as f
+
+    pre = ["-qsv_device", "/dev/dri/renderD128", "-extra_hw_frames", "48", "-hwaccel", "qsv", "-hwaccel_output_format", "qsv"]
+    assert f(pre) == ["-qsv_device", "/dev/dri/renderD128"]
+
+  def test_strips_input_decoder_vcodec(self):
+    from resources.mediaprocessor import _strip_qsv_decode_keep_encoder as f
+
+    pre = ["-qsv_device", "/dev/dri/renderD128", "-hwaccel", "qsv", "-vcodec", "hevc_qsv"]
+    assert f(pre) == ["-qsv_device", "/dev/dri/renderD128"]
+
+  def test_returns_none_when_nothing_to_strip(self):
+    from resources.mediaprocessor import _strip_qsv_decode_keep_encoder as f
+
+    assert f(["-qsv_device", "/dev/dri/renderD128"]) is None
+    assert f([]) is None
+    assert f(None) is None
+
+
+class TestRewriteQsvFilterForSwDecode:
+  """`_rewrite_qsv_filter_for_sw_decode` turns the GPU `vpp_qsv` filter into a
+  system-memory `scale`/`format` chain the QSV encoder can auto-upload."""
+
+  def test_vpp_qsv_with_alignment_becomes_scale_format(self):
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_sw_decode as f
+
+    o = {"video": {"codec": "hevc_qsv", "filter": "vpp_qsv=w=608:h=464:format=nv12"}}
+    f(o)
+    assert o["video"]["filter"] == "scale=608:464,format=nv12"
+
+  def test_vpp_qsv_format_only_becomes_format(self):
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_sw_decode as f
+
+    o = {"video": {"codec": "hevc_qsv", "filter": "vpp_qsv=format=nv12"}}
+    f(o)
+    assert o["video"]["filter"] == "format=nv12"
+
+  def test_hwmap_bridge_is_dropped(self):
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_sw_decode as f
+
+    o = {"video": {"codec": "hevc_qsv", "filter": "hwmap=derive_device=vaapi,vpp_qsv=format=nv12"}}
+    f(o)
+    assert o["video"]["filter"] == "format=nv12"
+
+  def test_absent_filter_gets_format_nv12(self):
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_sw_decode as f
+
+    o = {"video": {"codec": "hevc_qsv"}}
+    f(o)
+    assert o["video"]["filter"] == "format=nv12"
+
+  def test_unrelated_filter_segments_preserved(self):
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_sw_decode as f
+
+    o = {"video": {"codec": "hevc_qsv", "filter": "vpp_qsv=format=nv12,subtitles=subs.srt"}}
+    f(o)
+    assert o["video"]["filter"] == "format=nv12,subtitles=subs.srt"
+
+  def test_pix_fmt_and_dims_popped_to_block_scale_qsv(self):
+    """`pix_fmt`/`width`/`height` must be stripped — the QSV codec turns them
+    back into a hardware `scale_qsv` filter that has no device in the
+    software-decode pipeline."""
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_sw_decode as f
+
+    o = {"video": {"codec": "hevc_qsv", "pix_fmt": "yuv420p", "width": 1920, "height": 1080, "filter": "vpp_qsv=format=nv12"}}
+    f(o)
+    v = o["video"]
+    assert "pix_fmt" not in v and "width" not in v and "height" not in v
+
+  def test_10bit_pix_fmt_default_format_preserved(self):
+    """With no filter format token, the surface format is derived from the
+    encoder pix_fmt so a 10-bit source isn't silently downconverted to nv12."""
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_sw_decode as f
+
+    o = {"video": {"codec": "hevc_qsv", "pix_fmt": "yuv420p10le"}}
+    f(o)
+    assert o["video"]["filter"] == "format=p010le"
+
+  def test_explicit_width_becomes_software_scale(self):
+    """Encoder-side width/height scaling (no vpp_qsv) is translated to a
+    software `scale` so the configured resize is preserved on the CPU."""
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_sw_decode as f
+
+    o = {"video": {"codec": "hevc_qsv", "width": 1280, "height": 720, "pix_fmt": "yuv420p"}}
+    f(o)
+    assert o["video"]["filter"] == "scale=1280:720,format=nv12"
+
+
+# ---------------------------------------------------------------------------
 # _cleanup_input()
 # ---------------------------------------------------------------------------
 
@@ -8130,6 +8228,135 @@ class TestConvertHwAltPolicy:
     result, _ = mp.convert(options, preopts, [], False, None)
     assert result is None
     # hw + hw_alt only; no sw_decode/full_sw under HW_ALT policy.
+    assert call_count == 2
+
+  def test_hw_alt_decode_side_failure_rescued_by_sw_decode_hw_encode(self, tmp_path):
+    """job-6486 regression: when hw and hw_alt both die on a decode-side
+    failure (QSV can't decode the source codec, e.g. XviD), HW_ALT policy must
+    fall to a software-decode + hardware-encode rescue instead of surfacing
+    the error. The QSV encoder is kept; only the decoder moves to the CPU."""
+    from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.fallback_policy = FallbackPolicy.HW_ALT
+    mp.settings.vaapi = {}
+    mp.settings.hdr = {}
+    src = tmp_path / "input.avi"
+    src.write_bytes(b"x")
+    out = tmp_path / "input.mp4"
+
+    options = {
+      "source": [str(src)],
+      "audio": [{"codec": "aac"}],
+      "video": {"codec": "h265qsv", "filter": "vpp_qsv=format=nv12"},
+      "subtitle": [],
+    }
+    preopts = ["-hwaccel", "qsv", "-qsv_device", "/dev/dri/renderD128", "-vcodec", "hevc_qsv"]
+
+    seen = []
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      seen.append({"codec": opts["video"]["codec"], "filter": opts["video"].get("filter"), "preopts": list(preopts or [])})
+      yield None, ["ffmpeg"]
+      # hw (QSV decode+encode) and hw_alt (QSV decode + VAAPI encode) both keep
+      # the broken QSV decoder (-hwaccel qsv) and fail decode-side. The rescue
+      # strips -hwaccel and succeeds on software decode.
+      if "-hwaccel" in (preopts or []):
+        raise FFMpegConvertError("cmd", "output", "Decoder hevc_qsv does not support this stream")
+      out.write_bytes(b"output")
+      yield 100, ""
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    result, _ = mp.convert(options, preopts, [], False, None)
+    assert result == str(out)
+    # hw + hw_alt + rescue = 3 attempts.
+    assert len(seen) == 3
+    rescue = seen[-1]
+    assert "-hwaccel" not in rescue["preopts"]
+    assert "-qsv_device" in rescue["preopts"]
+    # Rescue keeps the QSV encoder and rewrites the vpp_qsv filter to software.
+    assert rescue["codec"] == "h265qsv"
+    assert rescue["filter"] == "format=nv12"
+    # Outer options untouched (rescue runs on a deep copy).
+    assert options["video"]["codec"] == "h265qsv"
+    assert options["video"]["filter"] == "vpp_qsv=format=nv12"
+
+  def test_hw_only_decode_side_failure_rescued(self, tmp_path):
+    """HW_ONLY skips hw_alt, but a decode-side failure on the first attempt
+    still earns the software-decode + hardware-encode carve-out."""
+    from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.fallback_policy = FallbackPolicy.HW_ONLY
+    src = tmp_path / "input.avi"
+    src.write_bytes(b"x")
+    out = tmp_path / "input.mp4"
+
+    options = {
+      "source": [str(src)],
+      "audio": [{"codec": "aac"}],
+      "video": {"codec": "h265qsv", "filter": "vpp_qsv=format=nv12"},
+      "subtitle": [],
+    }
+    preopts = ["-hwaccel", "qsv", "-qsv_device", "/dev/dri/renderD128", "-vcodec", "hevc_qsv"]
+
+    seen = []
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      seen.append(list(preopts or []))
+      yield None, ["ffmpeg"]
+      if "-hwaccel" in (preopts or []):
+        raise FFMpegConvertError("cmd", "output", "Failed setup for format qsv")
+      out.write_bytes(b"output")
+      yield 100, ""
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    result, _ = mp.convert(options, preopts, [], False, None)
+    assert result == str(out)
+    # hw + rescue = 2 attempts (no hw_alt under HW_ONLY).
+    assert len(seen) == 2
+    assert "-hwaccel" not in seen[-1]
+
+  def test_hw_alt_non_decode_side_failure_not_rescued(self, tmp_path):
+    """A non-decode-side failure (encoder init) under HW_ALT must surface
+    after hw + hw_alt — the rescue rung is decode-side only."""
+    from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.fallback_policy = FallbackPolicy.HW_ALT
+    mp.settings.vaapi = {}
+    mp.settings.hdr = {}
+    src = tmp_path / "input.avi"
+    src.write_bytes(b"x")
+    out = tmp_path / "input.mp4"
+    out.write_bytes(b"partial")
+
+    options = {
+      "source": [str(src)],
+      "audio": [{"codec": "aac"}],
+      "video": {"codec": "h265qsv", "filter": "vpp_qsv=format=nv12"},
+      "subtitle": [],
+    }
+    preopts = ["-hwaccel", "qsv", "-qsv_device", "/dev/dri/renderD128", "-vcodec", "hevc_qsv"]
+
+    call_count = 0
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      nonlocal call_count
+      call_count += 1
+      yield None, ["ffmpeg"]
+      raise FFMpegConvertError("cmd", "output", "Could not open encoder before EOF")
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    result, _ = mp.convert(options, preopts, [], False, None)
+    assert result is None
+    # hw + hw_alt only; encoder-init failure does not trigger the decode rescue.
     assert call_count == 2
 
 

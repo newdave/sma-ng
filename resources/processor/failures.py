@@ -43,7 +43,7 @@ class FfmpegFailureClass(str, Enum):
 class AttemptRecord:
   """One tier of the fallback ladder. Emitted as structured log + /health metric."""
 
-  tier: str  # "hw" | "hw_alt" | "sw_decode" | "full_sw"
+  tier: str  # "hw" | "hw_alt" | "sw_decode_hw_encode" | "sw_decode" | "full_sw"
   failure_class: FfmpegFailureClass | None  # None on success
   duration_ms: int
 

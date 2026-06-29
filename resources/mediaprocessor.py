@@ -314,6 +314,133 @@ def _inject_hwmap_to_video_filter(options):
   video["filter"] = (bridge + "," + existing) if existing else bridge
 
 
+# Decode-side QSV flags that must be dropped to fall back to software
+# decoding while keeping a hardware *encoder*. Deliberately excludes
+# ``-qsv_device`` / ``-init_hw_device`` / ``-filter_hw_device``: the QSV
+# encoder still needs its device context after the decode moves to the CPU.
+_QSV_DECODE_FLAGS = (
+  "-hwaccel",
+  "-hwaccel_output_format",
+  "-extra_hw_frames",
+)
+
+
+def _strip_qsv_decode_keep_encoder(preopts):
+  """Return *preopts* with the QSV *decode* pipeline removed but the QSV
+  *encoder* device preserved, or ``None`` if nothing was stripped.
+
+  Removes ``-hwaccel``, ``-hwaccel_output_format``, ``-extra_hw_frames``
+  flag/value pairs and a leading ``-vcodec``/``-c:v`` decoder pair, so the
+  source is decoded in software (system-memory frames). Crucially it keeps
+  ``-qsv_device`` (and any ``-init_hw_device`` / ``-filter_hw_device``)
+  intact so the ``hevc_qsv`` encoder still has a device to upload to — the
+  "software decode + hardware encode" recovery pipeline used when the QSV
+  decoder can't handle the source codec (e.g. MPEG-4 ASP / XviD) but the
+  encoder is healthy.
+
+  Pair with :func:`_rewrite_qsv_filter_for_sw_decode`, which rewrites the
+  ``vpp_qsv`` output filter (it needs QSV surfaces that no longer exist
+  once decode is on the CPU) into a system-memory ``scale``/``format``
+  chain the encoder can auto-upload.
+  """
+  if not preopts:
+    return None
+  out = list(preopts)
+  changed = False
+  i = 0
+  while i < len(out):
+    if out[i] in _QSV_DECODE_FLAGS and i + 1 < len(out):
+      del out[i : i + 2]
+      changed = True
+      continue
+    if out[i] in ("-vcodec", "-c:v") and i + 1 < len(out):
+      del out[i : i + 2]
+      changed = True
+      continue
+    i += 1
+  return out if changed else None
+
+
+# CPU planar pixel formats → QSV surface name. Mirrors
+# ``H265QSVCodec._QSV_SURFACE_FMT_MAP``; used to pick the software ``format``
+# token that matches the encoder's expected surface bit depth.
+_QSV_SURFACE_FMT_MAP = {
+  "yuv420p": "nv12",
+  "yuv420p10le": "p010le",
+  "yuv420p12le": "p012le",
+}
+
+
+def _rewrite_qsv_filter_for_sw_decode(options):
+  """Rewrite the QSV hardware video pipeline into a software-memory equivalent.
+
+  Mutates ``options['video']`` in place. ``vpp_qsv`` requires QSV hardware
+  surfaces on its input; once decoding moves to the CPU those surfaces no
+  longer exist. This replaces the GPU filter with a software ``scale``/
+  ``format`` chain the ``hevc_qsv`` encoder can auto-upload via its
+  ``-qsv_device`` context, and — crucially — strips every option that would
+  otherwise make the codec re-emit a hardware ``scale_qsv`` filter
+  (``pix_fmt``/``qsv_pix_fmt`` are turned into ``-vf scale_qsv=format=…`` by
+  the encoder, and ``width``/``height`` into ``-vf scale_qsv=w:h``). Without
+  this the final filtergraph would be ``format=nv12,scale_qsv=…``, which has
+  no bound QSV device and aborts at init.
+
+  Scaling the GPU filter performed (vpp_qsv ``w``/``h`` alignment, or an
+  explicit encoder ``width``/``height``) is preserved as a software
+  ``scale=W:H``. Any ``hwmap=derive_device=vaapi`` bridge segment is dropped.
+  The surface format is taken from the filter's ``format=`` token, then the
+  encoder ``pix_fmt`` mapping, defaulting to ``nv12``.
+  """
+  if not options or not isinstance(options.get("video"), dict):
+    return
+  video = options["video"]
+
+  scale_dims: tuple[str, str] | None = None
+  surface_fmt: str | None = None
+  passthrough: list[str] = []
+
+  for seg in (video.get("filter") or "").split(","):
+    seg = seg.strip()
+    if not seg or seg.startswith("hwmap"):
+      # Empty, or a GPU-to-GPU bridge that is meaningless in system memory.
+      continue
+    if seg.startswith("vpp_qsv"):
+      kv = {}
+      for part in seg[len("vpp_qsv=") :].split(":") if "=" in seg else []:
+        if "=" in part:
+          key, val = part.split("=", 1)
+          kv[key] = val
+      if "w" in kv and "h" in kv:
+        scale_dims = (kv["w"], kv["h"])
+      if "format" in kv:
+        surface_fmt = kv["format"]
+      continue
+    passthrough.append(seg)
+
+  # Explicit encoder-side scaling (width/wscale) becomes a software scale.
+  if scale_dims is None:
+    for wkey, hkey in (("width", "height"), ("wscale", "hscale")):
+      if video.get(wkey):
+        scale_dims = (str(video[wkey]), str(video[hkey]) if video.get(hkey) else "-2")
+        break
+
+  if surface_fmt is None:
+    pix = video.get("qsv_pix_fmt") or video.get("pix_fmt")
+    surface_fmt = _QSV_SURFACE_FMT_MAP.get(pix, pix) if pix else None
+  surface_fmt = surface_fmt or "nv12"
+
+  # Drop every key the QSV encoder would turn back into a hardware filter.
+  for key in ("pix_fmt", "qsv_pix_fmt", "width", "height", "wscale", "hscale"):
+    video.pop(key, None)
+
+  segments: list[str] = []
+  if scale_dims is not None:
+    segments.append("scale=%s:%s" % scale_dims)
+  segments.append("format=%s" % surface_fmt)
+  segments.extend(passthrough)
+  video["filter"] = ",".join(segments)
+
+
 def _resolve_hdr_color_tags(hdr_input, hdr_output, hdr_settings):
   """Return (primaries, transfer, space) tags to stamp on the output stream.
 
@@ -3447,6 +3574,42 @@ class MediaProcessor:
     hw_alt_err: FFMpegConvertError | None = None
     sw_decode_err: FFMpegConvertError | None = None
 
+    def _try_decode_side_rescue(from_tier: str, cls: FfmpegFailureClass) -> bool:
+      """Attempt a software-decode + hardware-encode retry on a decode-side
+      failure, even under the strict ``hw_only`` / ``hw_alt`` policies.
+
+      The QSV decoder can't handle some source codecs (MPEG-4 ASP / XviD,
+      some VC-1) that the QSV *encoder* is perfectly happy to produce. The
+      regular ``hw_alt`` tier only swaps the encoder, so it re-runs the
+      broken decoder and dies again. This rung keeps the expensive part
+      (encode) on the GPU while moving decode to the CPU. Returns ``True``
+      and emits the success log when the retry converts; ``False`` (with the
+      failed attempt recorded) when it can't be built or also fails.
+      """
+      if cls != FfmpegFailureClass.DECODER_INIT_FAILED:
+        return False
+      rescue_preopts = _strip_qsv_decode_keep_encoder(preopts)
+      if rescue_preopts is None:
+        return False
+      rescue_options = copy.deepcopy(options)
+      _rewrite_qsv_filter_for_sw_decode(rescue_options)
+      self.log.warning(
+        "Decode-side hardware failure (cause=%s); retrying with software decode + hardware encode (drop -hwaccel, keep %s encoder + QSV device) [decode-side-rescue]."
+        % (cls.value, (rescue_options.get("video") or {}).get("codec")),
+      )
+      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)(from_tier, "sw_decode_hw_encode", cls.value)
+      if outputfile is not None and os.path.isfile(outputfile):
+        self.removeFile(outputfile)
+      t_rescue = time.monotonic()
+      try:
+        run_fn(rescue_preopts, rescue_options)
+        records.append(AttemptRecord(tier="sw_decode_hw_encode", failure_class=None, duration_ms=_ms(t_rescue)))
+        self._emit_attempt_log(records, "ok")
+        return True
+      except FFMpegConvertError as err:
+        records.append(AttemptRecord(tier="sw_decode_hw_encode", failure_class=_classify(err), duration_ms=_ms(t_rescue)))
+        return False
+
     # Tier 1: hardware
     t0 = time.monotonic()
     try:
@@ -3459,6 +3622,10 @@ class MediaProcessor:
       cls = _classify(err)
       records.append(AttemptRecord(tier="hw", failure_class=cls, duration_ms=_ms(t0)))
       if policy == FallbackPolicy.HW_ONLY:
+        # Carve-out: a decode-side failure can still be rescued with software
+        # decode + hardware encode without violating "no software encode".
+        if _try_decode_side_rescue("hw", cls):
+          return
         self.log.warning(
           "Conversion failed with hardware decoder and fallback-policy=hw_only; surfacing original error (cause=%s)." % cls.value,
         )
@@ -3493,6 +3660,11 @@ class MediaProcessor:
         cls = _classify(err)
         records.append(AttemptRecord(tier="hw_alt", failure_class=cls, duration_ms=_ms(t_alt)))
         if policy == FallbackPolicy.HW_ALT:
+          # The VAAPI encoder swap re-used the broken QSV decoder; a decode-side
+          # failure here means software decode (keeping the QSV encoder) is the
+          # only HW-encode path left before surfacing.
+          if _try_decode_side_rescue("hw_alt", cls):
+            return
           self.log.warning(
             "hw_alt also failed and fallback-policy=hw_alt; surfacing error (cause=%s)." % cls.value,
           )
@@ -3500,7 +3672,10 @@ class MediaProcessor:
           raise
     else:
       if policy == FallbackPolicy.HW_ALT:
-        # No VAAPI tier possible (source wasn't QSV-encoded). Surface the hw error.
+        # No VAAPI tier possible (source wasn't QSV-encoded). Try a decode-side
+        # rescue off the original hw failure before surfacing.
+        if cls_hw is not None and _try_decode_side_rescue("hw", cls_hw):
+          return
         self._emit_attempt_log(records, "failed")
         assert hw_err is not None
         raise hw_err
