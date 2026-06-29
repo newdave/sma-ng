@@ -399,6 +399,7 @@ class MediaProcessor:
       info = self.isValidSource(inputfile, tagdata=tagdata)
       if info:
         self.log.info("Processing %s." % inputfile)
+        self._logSourceSummary(info)
 
         try:
           tagdata = tagdata or Metadata(mediatype, tvdbid=tvdbid, tmdbid=tmdbid, imdbid=imdbid, season=season, episode=episode, original=original, language=language)
@@ -959,6 +960,43 @@ class MediaProcessor:
       return {"y": info.video.video_height, "x": info.video.video_width}
 
     return {"y": 0, "x": 0}
+
+  def _logSourceSummary(self, info):
+    """Emit a one-line INFO summary of the source media.
+
+    Surfaces the source video bitrate (kbps), resolution, codec, pixel
+    format, container bitrate, and duration so the operator does not have
+    to enable DEBUG to see what the encoder is being asked to ingest.
+    """
+    try:
+      v = getattr(info, "video", None)
+      fmt = getattr(info, "format", None)
+      v_kbps = int(v.bitrate / 1000) if v and v.bitrate else None
+      total_kbps = int(fmt.bitrate / 1000) if fmt and getattr(fmt, "bitrate", None) else None
+      duration = int(fmt.duration) if fmt and getattr(fmt, "duration", None) else None
+      audio_count = len(getattr(info, "audio", []) or [])
+      sub_count = len(getattr(info, "subtitle", []) or [])
+      parts = []
+      if v:
+        parts.append("video=%s" % (v.codec or "?"))
+        if v.video_width and v.video_height:
+          parts.append("%dx%d" % (v.video_width, v.video_height))
+        if v.pix_fmt:
+          parts.append("pix=%s" % v.pix_fmt)
+        if v.fps:
+          parts.append("%.3gfps" % v.fps)
+        parts.append("vbitrate=%s" % (("%dkbps" % v_kbps) if v_kbps else "unknown"))
+      parts.append("container-bitrate=%s" % (("%dkbps" % total_kbps) if total_kbps else "unknown"))
+      if duration is not None:
+        parts.append("duration=%ds" % duration)
+      parts.append("audio-streams=%d" % audio_count)
+      parts.append("subtitle-streams=%d" % sub_count)
+      policy = getattr(self.settings, "fallback_policy", None)
+      if policy is not None:
+        parts.append("fallback-policy=%s" % getattr(policy, "value", policy))
+      self.log.info("Source media: %s." % ", ".join(parts))
+    except Exception:
+      self.log.debug("Source media summary unavailable.", exc_info=True)
 
   # Estimate the video bitrate
   def estimateVideoBitrate(self, info, baserate=64000, tolerance=0.95):
