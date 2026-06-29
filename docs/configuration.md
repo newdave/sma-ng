@@ -113,6 +113,24 @@ shell-trigger-only and configured in `triggers/`. See
 > **Encoder-flag safety:** When the active encoder is QSV, only `base.video.qsv.*` (plus the encoder-agnostic `codec-parameters`) is emitted to ffmpeg. When the active encoder is VAAPI (typically the `hw_alt` fallback tier), only `base.video.vaapi.*` is emitted. The other subblock is silently ignored. This means a QSV-only flag misplaced under `vaapi:` can never leak onto a `hevc_vaapi` command line — run `mise run config:validate` to catch the leak before it ships.
 >
 > **QSV preset:** `h264_qsv`, `hevc_qsv`, `vp9_qsv`, and `av1_qsv` accept the standard FFmpeg QSV preset names (`veryfast`, `faster`, `fast`, `medium`, `slow`, `slower`, `veryslow`). Earlier releases silently dropped any preset on these encoders; SMA-NG now passes them through. `slower` is the recommended QSV default — it costs little speed on Intel iGPUs and meaningfully improves quality.
+>
+> **GOP tuning for seeking / trick-play:** the keyframe interval (`-g`) is the
+> dominant control over how precisely players can seek and how smoothly
+> `4×`/`8×` fast-forward scans, because both jump keyframe-to-keyframe. `-g` is
+> measured in *frames*, so the seek grid in seconds ≈ `g ÷ source-fps`. Anchor
+> the value to your dominant source frame rate: for a film/TV library
+> (≈24 fps), `-g 72` gives a ~3 s grid and `-g 144` a ~6 s grid; pick the
+> frame count one tier *finer* than your target so higher-fps content stays at
+> or below the target. A short closed GOP costs a few percent in size — a fair
+> trade for responsive scrubbing on a media-server library. Do **not** add
+> `-idr_interval begin_only`: it makes only the first I-frame a true IDR (the
+> rest open-GOP CRA), which trims ~2–4 % size but leaves most GOP boundaries
+> non-seekable on players that random-access only to IDR frames. Leaving it
+> unset keeps QSV's default — every I-frame is a closed IDR random-access
+> point. A short GOP does not hurt the B-pyramid: a 72-frame GOP still holds
+> many `b-frames`-deep mini-GoPs. Because `codec-parameters` is a flat key,
+> a profile that overrides it **replaces** the base string wholesale — restate
+> every flag (e.g. `-strict -1`) you still want, not just `-g`.
 
 ---
 
