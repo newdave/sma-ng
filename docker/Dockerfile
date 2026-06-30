@@ -13,6 +13,12 @@
 FROM ubuntu:24.04 AS ffmpeg-builder
 
 ARG FFMPEG_VERSION=8.1.1
+# nv-codec-headers must match the NVENC API that FFMPEG_VERSION compiles
+# against. Pin it — cloning the moving default branch breaks the build when
+# upstream changes the NVENC struct layout ahead of an FFmpeg release
+# (e.g. post-n13.0.19.0 split NV_ENC_CLOCK_TIMESTAMP_SET.countingType into
+# countingTypeLSB/countingTypeMSB). Bump in lockstep with FFMPEG_VERSION.
+ARG NV_CODEC_HEADERS_VERSION=n13.0.19.0
 # Injected automatically by Docker Buildx for multi-arch builds
 ARG TARGETARCH
 
@@ -65,7 +71,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # ── nv-codec-headers (NVENC/NVDEC — headers only, no CUDA needed at build time)
-RUN git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers /tmp/nv-codec-headers \
+RUN git clone --depth 1 --branch "${NV_CODEC_HEADERS_VERSION}" \
+    https://github.com/FFmpeg/nv-codec-headers /tmp/nv-codec-headers \
     && cd /tmp/nv-codec-headers \
     && make install PREFIX=/usr \
     && rm -rf /tmp/nv-codec-headers
