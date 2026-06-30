@@ -12,7 +12,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 FROM ubuntu:24.04 AS ffmpeg-builder
 
-ARG FFMPEG_VERSION=8.1.1
+ARG FFMPEG_VERSION=8.1.2
 # nv-codec-headers must match the NVENC API that FFMPEG_VERSION compiles
 # against. Pin it — cloning the moving default branch breaks the build when
 # upstream changes the NVENC struct layout ahead of an FFmpeg release
