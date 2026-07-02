@@ -232,6 +232,16 @@ paths:
                     example: ok
                   node:
                     type: string
+                  version:
+                    type: string
+                    description: SMA-NG release version of this node (from package metadata)
+                    example: 3.1.0
+                  commit:
+                    type: string
+                    description: >-
+                      Git commit the running image was built from (baked in via the
+                      SMA_GIT_SHA build-arg). "unknown" on bare-metal/source runs.
+                    example: 2e26970
                   started_at:
                     type: string
                     format: date-time
@@ -263,6 +273,24 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  version:
+                    type: string
+                    description: SMA-NG release version of the local node answering the request
+                    example: 3.1.0
+                  commit:
+                    type: string
+                    description: >-
+                      Git commit of the local node answering the request. Per-node build
+                      info for other cluster members is carried in each cluster[] entry.
+                    example: 2e26970
+                  cluster:
+                    type: array
+                    description: One entry per known node, including its version and last-seen time
+                    items:
+                      type: object
+                  jobs:
+                    $ref: "#/components/schemas/JobStats"
 
   /stats:
     get:

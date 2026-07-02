@@ -17,6 +17,13 @@ try:
 except Exception:
   _VERSION = "unknown"
 
+# Git commit the running code was built from. Baked into the image at build
+# time via the ``SMA_GIT_SHA`` build-arg (see docker/Dockerfile and the
+# docker.yml workflow). Empty/absent on bare-metal or source checkouts, where
+# the semver alone can't distinguish commits within a release, so we report
+# "unknown" rather than an empty string.
+_COMMIT = (os.environ.get("SMA_GIT_SHA") or "unknown").strip() or "unknown"
+
 from resources.daemon import metrics_prom, storage
 from resources.daemon.constants import resolve_node_id
 from resources.daemon.threads import (
@@ -117,6 +124,8 @@ class DaemonServer(ThreadingHTTPServer):
     self.node_id = resolve_node_id()
     self.detected_hwaccel: str = ""
     self.started_at = datetime.now().astimezone()
+    self.version = _VERSION
+    self.commit = _COMMIT
     self._cli_api_key = cli_api_key
     self._cli_basic_auth = cli_basic_auth
     self._cli_ffmpeg_dir = cli_ffmpeg_dir

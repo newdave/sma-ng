@@ -166,6 +166,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
     payload = {
       "status": "ok",
       "node": self.server.node_id,
+      "version": self.server.version,
+      "commit": self.server.commit,
       "started_at": self.server.started_at,
       "uptime_seconds": uptime,
       "workers": self.server.worker_count,
@@ -200,7 +202,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
       nodes = normalized_nodes
 
     stats = self.server.job_db.get_stats()
-    self.send_json_response(200, {"cluster": nodes, "jobs": stats})
+    # Top-level version/commit describe the local node answering this request;
+    # per-node build info for other cluster members is carried in each
+    # `cluster[]` entry via the heartbeat.
+    self.send_json_response(
+      200,
+      {"version": self.server.version, "commit": self.server.commit, "cluster": nodes, "jobs": stats},
+    )
 
   def _get_jobs(self, query):
     status = query.get("status", [None])[0]

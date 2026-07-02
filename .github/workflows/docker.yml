@@ -114,6 +114,7 @@ jobs:
             ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}:buildcache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}
           build-args: |
             FFMPEG_VERSION=${{ env.FFMPEG_VERSION }}
+            SMA_GIT_SHA=${{ github.sha }}
 
       - uses: jdx/mise-action@v2
         with:

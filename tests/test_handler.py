@@ -30,6 +30,8 @@ def _make_server(
   server.api_key = api_key
   server.basic_auth = basic_auth
   server.node_id = "test-node-1"
+  server.version = "3.1.0"
+  server.commit = "abc1234"
   server.worker_count = 2
   server.stale_seconds = 120
   server.started_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
@@ -291,6 +293,13 @@ class TestGetHealth:
     h._get_health()
     body = _get_response_body(h)
     assert body["node"] == "test-node-1"
+
+  def test_returns_version_and_commit(self):
+    h = _make_handler(path="/health")
+    h._get_health()
+    body = _get_response_body(h)
+    assert body["version"] == "3.1.0"
+    assert body["commit"] == "abc1234"
 
   def test_returns_workers(self):
     h = _make_handler(path="/health")
@@ -762,6 +771,13 @@ class TestGetStatus:
     body = _get_response_body(h)
     assert "cluster" in body
     assert "jobs" in body
+
+  def test_returns_local_version_and_commit(self):
+    h = _make_handler()
+    h._get_status()
+    body = _get_response_body(h)
+    assert body["version"] == "3.1.0"
+    assert body["commit"] == "abc1234"
 
   def test_status_is_read_only(self):
     h = _make_handler()
