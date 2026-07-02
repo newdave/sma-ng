@@ -1877,6 +1877,15 @@ class MediaProcessor:
     except Exception:
       self.log.exception("Custom video stream copy check error.")
 
+    # force-reencode: operator explicitly wants the video stream rebuilt (e.g.
+    # to fix a broken GOP/keyframe grid) even though its codec is already in the
+    # accepted pool and would otherwise be copied. Copying can't apply
+    # codec-parameters like -g, so honour the request by re-encoding.
+    if self.settings.force_reencode and vcodec == "copy":
+      self.log.info("Force-reencode is enabled; video stream will be re-encoded rather than copied [force-reencode].")
+      vdebug = vdebug + ".force-reencode"
+      vcodec = vcodecs[0]
+
     vbitrate_estimate = self.estimateVideoBitrate(info)
     vbitrate_ratio = self.settings.vbitrateratio.get(info.video.codec, self.settings.vbitrateratio.get("*", 1.0))
     vbitrate = vbitrate_estimate * vbitrate_ratio

@@ -116,6 +116,7 @@ class ConverterSettings(_Base):
   process_same_extensions: bool = False
   bypass_if_copying_all: bool = False
   force_convert: bool = False
+  force_reencode: bool = False
   post_process: bool = False
   wait_post_process: bool = False
   detailed_progress: bool = False

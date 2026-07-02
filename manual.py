@@ -837,6 +837,10 @@ def apply_cli_overrides(args, settings):
     settings.process_same_extensions = True
     settings.force_convert = True
     log.info("Force conversion of files enabled. As a result conversion of mp4 files is also enabled")
+  if args.get("forcereencode"):
+    settings.force_reencode = True
+    settings.process_same_extensions = True
+    log.info("Force re-encode enabled. The video stream will be re-encoded rather than copied, even when its codec is already accepted")
   if args["tagonly"]:
     log.info("Tag only enabled")
   elif args["notag"]:
@@ -924,6 +928,12 @@ def main():
   parser.add_argument("-pse", "--processsameextensions", action="store_true", help="Overrides process-same-extensions setting in sma-ng.yml enabling the reprocessing of files")
   parser.add_argument(
     "-fc", "--forceconvert", action="store_true", help="Overrides force-convert setting in sma-ng.yml and also enables process-same-extenions if true forcing the conversion of files"
+  )
+  parser.add_argument(
+    "-fr",
+    "--forcereencode",
+    action="store_true",
+    help="Force the video stream to be re-encoded rather than copied, even when its codec is already accepted. Also enables process-same-extensions. Use to rebuild GOP/keyframes on files SMA would otherwise copy",
   )
   parser.add_argument("-oo", "--optionsonly", action="store_true", help="Display generated conversion options only, do not perform conversion")
   parser.add_argument("-cl", "--codeclist", action="store_true", help="Print a list of supported codecs and their paired FFMPEG encoders")

@@ -105,6 +105,7 @@ base:
     process-same-extensions: false
     bypass-if-copying-all: false
     force-convert: false
+    force-reencode: false
     post-process: false
     wait-post-process: false
     detailed-progress: false

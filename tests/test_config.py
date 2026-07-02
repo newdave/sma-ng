@@ -276,6 +276,20 @@ class TestForceConvertOverride:
     assert settings.process_same_extensions is True
 
 
+class TestForceReencodeOverride:
+  @patch("resources.readsettings.ReadSettings._validate_binaries")
+  def test_force_reencode_sets_process_same(self, mock_validate, tmp_yaml):
+    yml = tmp_yaml(overrides={"base": {"converter": {"force-reencode": True}}})
+    settings = ReadSettings(yml)
+    assert settings.force_reencode is True
+    assert settings.process_same_extensions is True
+
+  @patch("resources.readsettings.ReadSettings._validate_binaries")
+  def test_force_reencode_defaults_false(self, mock_validate, tmp_yaml):
+    settings = ReadSettings(tmp_yaml())
+    assert settings.force_reencode is False
+
+
 class TestArtworkParsing:
   @patch("resources.readsettings.ReadSettings._validate_binaries")
   def test_poster_artwork(self, mock_validate, tmp_yaml):

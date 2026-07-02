@@ -806,6 +806,7 @@
                 selectedJobIds: [], lastSelectedJobId: null, bulkBusy: false, bulkResult: '', bulkError: false,
                 flagDefs: [
                     { flag: '-fc', label: 'Force Convert', title: 'Force conversion even if file already has the target extension or matches force-convert=false' },
+                    { flag: '-fr', label: 'Force Re-encode', title: 'Re-encode the video stream instead of copying it, even when its codec is already accepted (rebuilds GOP/keyframes). Also enables Same Ext.' },
                     { flag: '-pse', label: 'Same Ext', title: 'Allow reprocessing files that already have the target extension' },
                     { flag: '--tv', label: 'TV', title: 'Force guessit to treat input as a TV episode (mutually exclusive with Movie)' },
                     { flag: '--movie', label: 'Movie', title: 'Force guessit to treat input as a movie (mutually exclusive with TV)' },

@@ -386,8 +386,13 @@ python manual.py -cl
 # Use a named profile from the config file
 python manual.py -i /path/to/file.mkv -a -c config/sma-ng.yml --profile rq
 
-# Force re-encode even if format matches
+# Force the file to be processed even if it already matches the target format
+# (note: the video stream may still be COPIED if its codec is already accepted)
 python manual.py -i /path/to/file.mp4 -a -fc
+
+# Force the video stream to be re-encoded rather than copied — rebuilds the
+# GOP/keyframe grid. Works on a whole directory tree; recurses automatically.
+python manual.py -i "/path/to/Show Name" -a --tv -fr
 
 # Convert without tagging
 python manual.py -i /path/to/file.mkv -a -nt
@@ -440,6 +445,7 @@ python manual.py -i /path/to/file.mkv -a -c config/sma-ng.yml
 | `-pr`   | `--preserverelative`      | Preserve relative directory structure      |
 | `-pse`  | `--processsameextensions` | Reprocess files already in target format   |
 | `-fc`   | `--forceconvert`          | Force conversion + process-same-extensions |
+| `-fr`   | `--forcereencode`         | Re-encode video (blocks copy)              |
 | `-m`    | `--moveto`                | Override move-to path                      |
 | `-oo`   | `--optionsonly`           | Show conversion options, don't convert     |
 | `-cl`   | `--codeclist`             | List all supported codecs                  |
