@@ -1350,6 +1350,58 @@ class TestSameFamilyVideoBitrateClamp:
     assert not any("video-same-family-bitrate-clamp" in w for w in warnings)
 
 
+class TestForceReencode:
+  """force-reencode blocks the video-copy path even when the codec is accepted."""
+
+  def _make_mp(self, tmp_yaml, force_reencode):
+    with patch("resources.readsettings.ReadSettings._validate_binaries"):
+      from resources.mediaprocessor import MediaProcessor
+      from resources.readsettings import ReadSettings
+
+      settings = ReadSettings(tmp_yaml())
+      settings.vcodec = ["hevc"]
+      settings.vmaxbitrate = 50000  # high enough to not force a re-encode itself
+      settings.vprofile = []  # don't let profile mismatch force the re-encode
+      settings.force_reencode = force_reencode
+
+    mock_converter = MagicMock()
+    mock_converter.ffmpeg.codecs = {"hevc": {"encoders": ["libx265"]}, "aac": {"encoders": ["aac"]}}
+    mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8}
+    mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {"hevc": "libx265", "aac": "aac"}.get(c, c)
+
+    mp = MediaProcessor.__new__(MediaProcessor)
+    mp.settings = settings
+    mp.converter = mock_converter
+    mp.log = MagicMock()
+    mp.deletesubs = set()
+    from resources.subtitles import SubtitleProcessor
+
+    mp.subtitles = SubtitleProcessor(mp)
+    return mp
+
+  def _hevc_info(self, make_media_info):
+    # Low-bitrate HEVC that SMA would normally copy (codec accepted, fits gates).
+    return make_media_info(video_codec="hevc", video_bitrate=1_000_000, total_bitrate=1_128_000, audio_bitrate=128_000)
+
+  def test_copy_when_force_reencode_off(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, force_reencode=False)
+    info = self._hevc_info(make_media_info)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    assert options["video"]["codec"] == "copy"
+
+  def test_reencode_when_force_reencode_on(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, force_reencode=True)
+    info = self._hevc_info(make_media_info)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    assert options["video"]["codec"] != "copy"
+    assert options["video"]["codec"] == "hevc"
+    assert ".force-reencode" in options["video"]["debug"]
+
+
 class TestHDRMaxBitrateOverride:
   """hdr.max_bitrate overrides video.max-bitrate for HDR sources only."""
 

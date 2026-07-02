@@ -433,6 +433,7 @@ class ReadSettings:
     self.process_same_extensions = cfg.process_same_extensions
     self.bypass_copy_all = cfg.bypass_if_copying_all
     self.force_convert = cfg.force_convert
+    self.force_reencode = cfg.force_reencode
     self.postprocess = cfg.post_process
     self.waitpostprocess = cfg.wait_post_process
     self.detailedprogress = cfg.detailed_progress
@@ -455,6 +456,14 @@ class ReadSettings:
     if self.force_convert:
       self.process_same_extensions = True
       self.log.warning("Force-convert is true, so process-same-extensions is being overridden to true as well")
+
+    if self.force_reencode:
+      # Forcing a real re-encode is pointless if the file is skipped as a
+      # no-op first, so imply process-same-extensions the same way
+      # force-convert does. Video-stream copy is blocked in
+      # MediaProcessor._select_video_codec [force-reencode].
+      self.process_same_extensions = True
+      self.log.warning("Force-reencode is true, so process-same-extensions is being overridden to true as well")
 
   def _read_permissions(self, base):
     cfg = base.permissions
