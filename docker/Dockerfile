@@ -290,6 +290,15 @@ RUN find /app -maxdepth 1 -type f \( \
 # --no-build-isolation reuses the already-installed setuptools.
 RUN /venv/bin/pip install --no-deps --no-build-isolation /app
 
+# Bake the source commit into the image so the running daemon can report it
+# via /health and /status. The semver alone (importlib.metadata) can't
+# distinguish commits within a release, so operators need the SHA to tell
+# whether a given fix is actually deployed. Passed by the docker.yml workflow
+# as build-arg SMA_GIT_SHA=${{ github.sha }}; defaults to "unknown" for local
+# builds that don't set it.
+ARG SMA_GIT_SHA=unknown
+ENV SMA_GIT_SHA=${SMA_GIT_SHA}
+
 # Install entrypoint script (root-owned, world-executable)
 COPY docker/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

@@ -281,6 +281,17 @@ Job 3: /TV/show2.mkv     -> sma-ng.yml profile rq [waits for an available worker
 
 Check active/waiting jobs: `curl http://localhost:8585/health`
 
+Both `/health` and `/status` report the running build in two top-level fields:
+
+- `version` — the SMA-NG release version (from package metadata, e.g. `3.1.0`).
+- `commit` — the git commit the running image was built from, baked in at
+  image build time via the `SMA_GIT_SHA` build-arg. It reads `unknown` on
+  bare-metal/source runs that don't set it. Because the semver alone cannot
+  distinguish commits within a release, use `commit` to confirm whether a
+  specific fix is actually deployed on a node. On `/status`, these fields
+  describe the local node answering the request; per-node build info for other
+  cluster members is carried in each `cluster[]` entry.
+
 `/health` also returns three additive top-level fields covering hardware
 acceleration and fallback metrics — see
 [`docs/hardware-acceleration.md`](hardware-acceleration.md#phase-1-observability-health-fallback-policy-capability-probe)
