@@ -4,9 +4,20 @@
 #
 # Usage:
 #   sma-webhook.sh submit /path/to/file.mkv          Submit a file for conversion
+#   sma-webhook.sh submit /path/to/dir               Submit a directory (recurses the whole tree)
 #   sma-webhook.sh submit /path/to/file.mkv -tmdb 603  Submit with extra args
 #   sma-webhook.sh submit /path/to/file.mkv --config /path/to/sma-ng.yml
 #   sma-webhook.sh submit /path/to/file.mkv --retries 3  Submit with retry-on-failure
+#
+#   Any flag other than --config / --retries is forwarded verbatim to
+#   manual.py on the daemon, so profiles and conversion overrides work:
+#     -p <profile> / --profile <profile>   Apply a named profile (e.g. -p lq)
+#     -fc                                  Force-convert (process even if same extension)
+#     -fr                                  Force re-encode the video (rebuild GOP; blocks copy)
+#     --tv / --movie                       Bias guessit toward TV or movie
+#   e.g. rebuild every episode of a show with a profile:
+#     sma-webhook.sh submit "/media/TV/The Colbert Report" -p lq -fr --tv
+#
 #   sma-webhook.sh health                             Check daemon health
 #   sma-webhook.sh jobs                               List all jobs
 #   sma-webhook.sh jobs pending                       List jobs by status
@@ -67,7 +78,10 @@ if [[ -n "$SMA_API_KEY" ]]; then
 fi
 
 usage() {
-    sed -n '3,22s/^# \?//p' "$0"
+    # Print the leading comment block (from the first line after the shebang
+    # until the first non-comment line), stripping the leading "# ". Avoids a
+    # hardcoded line range that drifts as the header grows.
+    awk 'NR>=3 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
     exit 1
 }
 
