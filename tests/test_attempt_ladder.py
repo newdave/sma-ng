@@ -289,7 +289,9 @@ class TestAttemptLadderTier2HwAlt:
 
     def run_fn(preopts, options=None):
       attempts.append((options or {}).get("video", {}).get("codec"))
-      raise _err("everything fails")
+      # Non-decode-side failure so the decode-side rescue carve-out does
+      # not apply — this isolates the hw_alt policy gate.
+      raise _err("everything fails", output="generic runtime failure")
 
     with pytest.raises(FFMpegConvertError):
       mp._attempt_ladder(self._preopts(), {"video": {"codec": "h265qsv"}}, None, run_fn)
@@ -320,8 +322,46 @@ class TestAttemptLadderTier2HwAlt:
 
     def run_fn(preopts, options=None):
       attempts.append((options or {}).get("video", {}).get("codec"))
-      raise _err("hw fail")
+      # Non-decode-side failure so the decode-side rescue carve-out does
+      # not apply — this isolates the hw_only policy gate.
+      raise _err("hw fail", output="generic runtime failure")
 
     with pytest.raises(FFMpegConvertError):
       mp._attempt_ladder(self._preopts(), {"video": {"codec": "h265qsv"}}, None, run_fn)
     assert attempts == ["h265qsv"]
+
+  def test_hw_only_decode_side_failure_rescued_with_sw_decode_hw_encode(self):
+    """A decode-side (DECODER_INIT_FAILED) failure is rescued with software
+    decode + hardware encode even under hw_only — the carve-out added in the
+    decode-side-rescue feature. Verifies the rescue runs and succeeds."""
+    mp = _make_mp(FallbackPolicy.HW_ONLY)
+    attempts = []
+
+    def run_fn(preopts, options=None):
+      codec = (options or {}).get("video", {}).get("codec")
+      attempts.append({"codec": codec, "hwaccel": "-hwaccel" in preopts, "qsv_device": "-qsv_device" in preopts})
+      if len(attempts) == 1:
+        raise _err("decode fail", output="Unknown decoder")  # DECODER_INIT_FAILED
+      return None  # rescue succeeds
+
+    mp._attempt_ladder(self._preopts(), {"video": {"codec": "h265qsv"}}, None, run_fn)
+    # hw (full QSV) then the sw-decode+hw-encode rescue: same encoder codec,
+    # hw decode dropped from preopts, encoder device preserved.
+    assert len(attempts) == 2
+    assert attempts[0] == {"codec": "h265qsv", "hwaccel": True, "qsv_device": True}
+    assert attempts[1] == {"codec": "h265qsv", "hwaccel": False, "qsv_device": True}
+
+  def test_hw_only_decode_side_rescue_failure_surfaces(self):
+    """When the decode-side rescue itself fails under hw_only, the original
+    hardware error is surfaced (no descent to hw_alt / software encode)."""
+    mp = _make_mp(FallbackPolicy.HW_ONLY)
+    attempts = []
+
+    def run_fn(preopts, options=None):
+      attempts.append((options or {}).get("video", {}).get("codec"))
+      raise _err("decode fail", output="Unknown decoder")  # DECODER_INIT_FAILED throughout
+
+    with pytest.raises(FFMpegConvertError):
+      mp._attempt_ladder(self._preopts(), {"video": {"codec": "h265qsv"}}, None, run_fn)
+    # hw attempt + one rescue attempt, then surface — never reaches hw_alt.
+    assert attempts == ["h265qsv", "h265qsv"]
