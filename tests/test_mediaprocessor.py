@@ -8115,6 +8115,33 @@ class TestSwapQsvCodecToVaapi:
     assert opts["video"]["preset"] == "slow"
     assert opts["video"]["b_frames"] == 8
 
+  def test_points_encoder_at_preinited_vaapi_device(self):
+    # Regression: the hw_alt preopts already init the VAAPI device (name
+    # vaapi0). The swapped encoder must reference that device via
+    # `-filter_hw_device vaapi0`, NOT re-init it — a second
+    # `-init_hw_device vaapi=vaapi0:...` makes ffmpeg abort with
+    # "named device already exists".
+    from resources.mediaprocessor import _VAAPI_HWMAP_DEVICE_NAME
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv"}}
+    f(opts, {})
+    assert opts["video"]["device"] == _VAAPI_HWMAP_DEVICE_NAME
+
+  def test_swapped_encoder_does_not_duplicate_init_hw_device(self):
+    # End-to-end guard at the codec layer: rendering the swapped VAAPI codec
+    # options must emit `-filter_hw_device vaapi0` and no `-init_hw_device`,
+    # so the combined command carries exactly one device init (from preopts).
+    from converter.avcodecs import H265VAAPICodec
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv"}}
+    f(opts, {})
+    rendered = H265VAAPICodec().parse_options({"codec": "h265vaapi", "device": opts["video"]["device"]})
+    assert "-init_hw_device" not in rendered
+    assert "-filter_hw_device" in rendered
+    assert rendered[rendered.index("-filter_hw_device") + 1] == "vaapi0"
+
 
 class TestRewriteQsvPreoptsForVaapi:
   def test_appends_vaapi_device_init(self):

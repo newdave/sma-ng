@@ -169,6 +169,14 @@ _QSV_ONLY_CODEC_FLAGS = {
 }
 
 
+# Name of the VAAPI hardware device context shared between the hw_alt tier's
+# preopts (``-init_hw_device vaapi=<name>:<node>``) and the swapped VAAPI
+# encoder (``-filter_hw_device <name>``). Both sides MUST agree: the encoder
+# references this already-initialised device instead of re-initialising it,
+# otherwise ffmpeg aborts with "named device already exists".
+_VAAPI_HWMAP_DEVICE_NAME = "vaapi0"
+
+
 def _strip_qsv_only_flags(params_str):
   """Return *params_str* with QSV-only encoder flags (and their values) removed.
 
@@ -235,6 +243,13 @@ def _swap_qsv_codec_to_vaapi(options, vaapi_overlay):
 
   video.pop("qsv_pix_fmt", None)
 
+  # The hw_alt preopts init the VAAPI device via
+  # ``_rewrite_qsv_preopts_for_vaapi_encode`` (name ``vaapi0``). Point the
+  # encoder at that existing device so it emits ``-filter_hw_device vaapi0``
+  # rather than a second ``-init_hw_device vaapi=vaapi0:...`` (which ffmpeg
+  # rejects as "named device already exists").
+  video["device"] = _VAAPI_HWMAP_DEVICE_NAME
+
   overlay = vaapi_overlay or {}
 
   # Strip QSV-only flags from parent params, then append overlay params.
@@ -290,9 +305,9 @@ def _rewrite_qsv_preopts_for_vaapi_encode(preopts):
   out.extend(
     [
       "-init_hw_device",
-      "vaapi=vaapi0:%s" % device,
+      "vaapi=%s:%s" % (_VAAPI_HWMAP_DEVICE_NAME, device),
       "-filter_hw_device",
-      "vaapi0",
+      _VAAPI_HWMAP_DEVICE_NAME,
     ]
   )
   return out
