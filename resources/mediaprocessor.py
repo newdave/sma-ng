@@ -2402,6 +2402,10 @@ class MediaProcessor:
       self.log.debug("Not creating any additional universal audio streams [universal-audio-first-stream-only].")
       allowua = False
 
+    # Downmix 7.1 → 5.1 when the target encoder can't handle >6 channels
+    # (native ac3/eac3/dca). A no-op for copy and higher-capacity encoders.
+    audio_channels = self._cap_audio_channels(acodec, audio_channels)
+
     absf = "aac_adtstoasc" if acodec == "copy" and a.codec == "aac" and self.settings.aac_adtstoasc else None
 
     # Auto-resample for encoders with a native max sample rate. libfdk_aac
@@ -3338,6 +3342,36 @@ class MediaProcessor:
     "opus": 48000,
     "libopus": 48000,
   }
+
+  # Native ffmpeg AC-3/E-AC-3/DTS encoders top out at 5.1 (6 channels) and
+  # refuse to initialise on a 7.1 (8-channel) layout ("Specified channel
+  # layout '7.1' is not supported by the eac3 encoder"). Keyed by both the
+  # SMA codec name (eac3/ac3/dts) and the ffmpeg encoder name (dca) so the
+  # cap applies regardless of which representation reaches us.
+  _AUDIO_ENCODER_MAX_CHANNELS = {
+    "ac3": 6,
+    "eac3": 6,
+    "dts": 6,
+    "dca": 6,
+  }
+
+  def _cap_audio_channels(self, acodec, channels):
+    """Cap the output channel count to the encoder's native maximum.
+
+    ffmpeg's native ac3/eac3/dca encoders reject layouts above 5.1, so a
+    7.1 source re-encoded to one of them dies at encoder init. Profiles with
+    ``max-channels: 0`` (unlimited) otherwise pass the 8 source channels
+    straight through. Downmix to the encoder's ceiling so the transcode
+    succeeds instead of failing. Copy/None and higher-capacity encoders
+    (aac, libfdk_aac, flac) pass through unchanged.
+    """
+    if acodec in (None, "copy"):
+      return channels
+    cap = self._AUDIO_ENCODER_MAX_CHANNELS.get(acodec)
+    if not cap or not isinstance(channels, int) or channels <= cap:
+      return channels
+    self.log.info("Encoder %s caps channels at %d; downmixing from %d [adaptive-audio-channel-cap]." % (acodec, cap, channels))
+    return cap
 
   def _cap_audio_samplerate(self, acodec, source_samplerate, current_samplerate):
     """Cap the output audio samplerate to the encoder's native maximum.
