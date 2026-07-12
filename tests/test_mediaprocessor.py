@@ -3841,6 +3841,51 @@ class TestCapAudioSamplerate:
     assert mp._cap_audio_samplerate("aac", 96000, 96000) == 48000
 
 
+class TestCapAudioChannels:
+  """`_cap_audio_channels` clamps the output channel count when the chosen
+  encoder can't handle it (native ac3/eac3/dca top out at 5.1). Prevents the
+  "Specified channel layout '7.1' is not supported by the eac3 encoder"
+  encoder-init failure on 7.1 sources re-encoded under a max-channels: 0
+  profile."""
+
+  def test_eac3_caps_71_source_to_6(self):
+    mp = _make_mp()
+    assert mp._cap_audio_channels("eac3", 8) == 6
+
+  def test_ac3_caps_71_source_to_6(self):
+    mp = _make_mp()
+    assert mp._cap_audio_channels("ac3", 8) == 6
+
+  def test_dts_caps_71_source_to_6(self):
+    mp = _make_mp()
+    assert mp._cap_audio_channels("dts", 8) == 6
+
+  def test_dca_encoder_name_caps_to_6(self):
+    mp = _make_mp()
+    assert mp._cap_audio_channels("dca", 8) == 6
+
+  def test_eac3_passes_through_51(self):
+    mp = _make_mp()
+    assert mp._cap_audio_channels("eac3", 6) == 6
+
+  def test_eac3_passes_through_stereo(self):
+    mp = _make_mp()
+    assert mp._cap_audio_channels("eac3", 2) == 2
+
+  def test_copy_codec_not_capped(self):
+    mp = _make_mp()
+    assert mp._cap_audio_channels("copy", 8) == 8
+
+  def test_none_codec_not_capped(self):
+    mp = _make_mp()
+    assert mp._cap_audio_channels(None, 8) == 8
+
+  def test_aac_not_capped(self):
+    # native aac handles 7.1 natively; only the AC-3/DTS family is limited
+    mp = _make_mp()
+    assert mp._cap_audio_channels("aac", 8) == 8
+
+
 class TestCapFramesToProfile:
   """`_cap_frames_to_profile` lowers operator-configured b/ref-frame counts
   to the limits of the chosen encoder profile so the encoder doesn't fail

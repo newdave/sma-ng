@@ -99,6 +99,25 @@ No configuration change is required. If even the software decode fails (a
 genuinely corrupt source), switch to `fallback-policy: aggressive` to add the
 full software encode tier (`full_sw`) as a last resort.
 
+### 7.1 source fails immediately with `encoder_init_failed` / `audio_channel_layout_mismatch`
+
+A source with a 7.1 (8-channel) audio track re-encoded to `eac3`, `ac3`, or
+`dts` used to die at encoder init in tens of milliseconds. The
+`ffmpeg.failure_diagnosis` line reports
+`cause: audio_channel_layout_mismatch` with the ffmpeg signal
+`Specified channel layout '7.1' is not supported by the eac3 encoder`.
+The native ffmpeg AC-3/E-AC-3/DTS encoders top out at 5.1 (6 channels), and a
+profile with `max-channels: 0` (unlimited — as `rq`/`hq` use) otherwise passes
+all 8 source channels straight through.
+
+SMA-NG now auto-recovers this case: before the encode it downmixes the output
+to the encoder's ceiling (6 channels) and logs
+`Encoder eac3 caps channels at 6; downmixing from 8 [adaptive-audio-channel-cap]`.
+No configuration change is required. Copy passthrough and higher-capacity
+encoders (`aac`, `libfdk_aac`, `flac`) are unaffected. To keep the full 7.1
+layout instead of downmixing, set the profile's `audio.codec` to a 7.1-capable
+encoder or let the source stream copy through.
+
 ### Hardware acceleration not working
 
 - Verify `hwdevices` key matches encoder codec name (e.g., `qsv` for `h265qsv`)
