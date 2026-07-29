@@ -118,27 +118,34 @@ encoders (`aac`, `libfdk_aac`, `flac`) are unaffected. To keep the full 7.1
 layout instead of downmixing, set the profile's `audio.codec` to a 7.1-capable
 encoder or let the source stream copy through.
 
-### 8-bit source fails immediately with `encoder_init_failed` (10-bit profile)
+### Source fails immediately with `encoder_init_failed` (profile bit-depth mismatch)
 
-An 8-bit source (e.g. a DVD or x264 release) re-encoded to HEVC/H.264 used to
-die at encoder init in ~100 ms when the target profile resolved to a 10-bit
-profile such as `main10` (or `high10`). The `ffmpeg.failure_diagnosis` line
-reports `failure_class: encoder_init_failed` with `profile: main10` but an
-8-bit output filter (`format=nv12`). This happens because the profile fallback
+A re-encode used to die at encoder init in ~100 ms when the target profile's
+bit-depth class disagreed with the output surface. The `ffmpeg.failure_diagnosis`
+line reports `failure_class: encoder_init_failed` with a `profile` and an output
+filter that don't agree on bit depth. This happens because the profile fallback
 picks the first entry of `video.profile` whenever the source's own profile name
 isn't in the list — and for any cross-codec transcode (H.264 source → HEVC) it
-never is. If that first entry is a 10-bit profile but no 10-bit `pix-fmt` is
-selected, `hevc_qsv`/`hevc_vaapi` (and the H.264 encoders) reject the 8-bit
-surface at init. A `profile: [main10, main]` ordering (main10 first) is the
-common trigger.
+never is. Two mismatches result:
 
-SMA-NG now auto-recovers this case: before the encode it downgrades the profile
-to its 8-bit sibling (`main10` → `main`, `high10` → `high`) and logs
-`Profile main10 requires 10-bit input but output is 8-bit; downgrading to main
-to avoid encoder_init_failed [adaptive-profile-bit-depth]`. It reuses your own
-spelling from `video.profile` when present. No configuration change is required.
-To keep 10-bit output instead of downgrading, add a 10-bit entry to the
-profile's `video.pix-fmt` (e.g. `p010le`) so the pipeline stays 10-bit.
+- **10-bit profile on 8-bit output** — `profile: main10` with `format=nv12`
+  (an 8-bit DVD/x264 source, no 10-bit `pix-fmt` selected). Common trigger:
+  `profile: [main10, main]` ordering (main10 first).
+- **8-bit profile on 10-bit output** — `profile: main` with a `p010le` surface
+  (a 10-bit SDR x265 source, `profile: [main, main10]` ordering).
+
+Either way `hevc_qsv`/`hevc_vaapi` (and the H.264 encoders) reject the surface
+at init.
+
+SMA-NG now auto-recovers both cases: before the encode it aligns the profile to
+the output depth — downgrading (`main10` → `main`, `high10` → `high`) for 8-bit
+output, or upgrading (`main` → `main10`, `high` → `high10`) for 10-bit output —
+and logs e.g. `Profile main10 requires 10-bit input but output is 8-bit;
+downgrading to main to avoid encoder_init_failed [adaptive-profile-bit-depth]`.
+The upgrade direction is only taken when the chosen encoder actually supports
+10-bit. It reuses your own spelling from `video.profile` when present. No
+configuration change is required. To pin the output bit depth explicitly, set
+the profile's `video.pix-fmt` (e.g. `p010le` for 10-bit, `nv12` for 8-bit).
 
 ### Hardware acceleration not working
 
