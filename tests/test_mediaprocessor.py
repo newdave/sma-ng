@@ -8197,7 +8197,9 @@ class TestRewriteQsvPreoptsForVaapi:
     assert "-init_hw_device" in out
     idx = out.index("-init_hw_device")
     assert out[idx + 1] == "vaapi=vaapi0:/dev/dri/renderD128"
-    assert "-filter_hw_device" in out
+    # Must NOT emit -filter_hw_device: the swapped encoder owns that single
+    # global slot (see test_combined_command_has_single_filter_hw_device).
+    assert "-filter_hw_device" not in out
     # Preserves all original QSV decode flags.
     assert "-hwaccel" in out and "qsv" in out
     assert "-qsv_device" in out
@@ -8229,6 +8231,23 @@ class TestRewriteQsvPreoptsForVaapi:
 
     assert f(None) is None
     assert f([]) == []
+
+  def test_combined_command_has_single_filter_hw_device(self):
+    # Regression: `-filter_hw_device` is a single global slot; ffmpeg aborts
+    # with "Only one filter device can be used" if it appears twice. The
+    # preopts must NOT emit it (the swapped encoder owns it via device=vaapi0),
+    # so the combined preopts + encoder command carries exactly one.
+    from converter.avcodecs import H265VAAPICodec
+    from resources.mediaprocessor import _rewrite_qsv_preopts_for_vaapi_encode as rewrite
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as swap
+
+    preopts = rewrite(["-hwaccel", "qsv", "-qsv_device", "/dev/dri/renderD128", "-vcodec", "hevc_qsv"])
+    opts = {"video": {"codec": "hevc_qsv"}}
+    swap(opts, {})
+    encoder = H265VAAPICodec().parse_options({"codec": "h265vaapi", "device": opts["video"]["device"]})
+    combined = list(preopts) + list(encoder)
+    assert combined.count("-filter_hw_device") == 1
+    assert combined.count("-init_hw_device") == 1
 
 
 class TestInjectHwmap:

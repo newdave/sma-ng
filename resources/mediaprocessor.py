@@ -282,9 +282,15 @@ def _rewrite_qsv_preopts_for_vaapi_encode(preopts):
 
   Preserves every QSV decode preopt (``-hwaccel qsv``,
   ``-hwaccel_output_format qsv``, ``-qsv_device``, ``-vcodec hevc_qsv``)
-  so the QSV decoder keeps working in the hybrid pipeline. Appends
-  ``-init_hw_device vaapi=vaapi0:<device>`` and ``-filter_hw_device vaapi0``
-  so the VAAPI encoder has its device context after the QSV decode is set up.
+  so the QSV decoder keeps working in the hybrid pipeline. Appends only
+  ``-init_hw_device vaapi=vaapi0:<device>`` so the VAAPI encoder has its
+  device context after the QSV decode is set up.
+
+  Deliberately does NOT emit ``-filter_hw_device``: that is a single global
+  slot and the swapped VAAPI encoder already emits ``-filter_hw_device
+  vaapi0`` (its ``device`` is pinned to ``vaapi0`` by
+  :func:`_swap_qsv_codec_to_vaapi`). Emitting it here too makes ffmpeg abort
+  with "Only one filter device can be used".
 
   Idempotent: if ``-init_hw_device vaapi=...`` is already present, returns
   the input unchanged. The render-node path is sourced from the existing
@@ -306,8 +312,6 @@ def _rewrite_qsv_preopts_for_vaapi_encode(preopts):
     [
       "-init_hw_device",
       "vaapi=%s:%s" % (_VAAPI_HWMAP_DEVICE_NAME, device),
-      "-filter_hw_device",
-      _VAAPI_HWMAP_DEVICE_NAME,
     ]
   )
   return out
