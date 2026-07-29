@@ -3360,6 +3360,17 @@ class MediaProcessor:
     "high 10": "high",
   }
 
+  # The mirror case: an 8-bit profile (main / high) stranded on a 10-bit
+  # output pipeline (e.g. a 10-bit SDR x265 source whose profile fallback
+  # resolved to "main" while the surface stays p010le). The encoder rejects
+  # an 8-bit profile fed 10-bit surfaces the same way. Safe to upgrade here
+  # because the pix_fmt bit-depth safety check above only leaves a 10-bit
+  # output when the chosen encoder actually supports 10-bit.
+  _EIGHT_BIT_PROFILE_TO_TEN_BIT = {
+    "main": "main10",
+    "high": "high10",
+  }
+
   # Encoders with a native max sample rate. Sources above the cap need to be
   # downsampled on the encode pass or the encoder refuses to initialise.
   _AUDIO_ENCODER_MAX_SAMPLERATE = {
@@ -3471,36 +3482,51 @@ class MediaProcessor:
     return vb_frames, vref_frames
 
   def _reconcile_profile_to_bit_depth(self, vcodec, vprofile, output_bit_depth):
-    """Downgrade a 10-bit encoder profile to its 8-bit sibling for 8-bit output.
+    """Align the encoder profile's bit-depth class with the output pipeline.
 
     The profile fallback in :meth:`_select_video_codec` picks ``vprofile[0]``
     whenever the source's profile name isn't in the target codec's approved
     list. For a cross-codec transcode that is *always* the case: an H.264
     source reports an H.264 profile ("High"/"Main") which never matches an
     HEVC ``[main10, main]`` list, so the fallback fires on every DVD/x264 ->
-    HEVC job. When that fallback lands on a 10-bit profile (e.g. ``main10``)
-    but the output pipeline is 8-bit (no 10-bit pix_fmt selected, surface
-    defaults to nv12), hevc_qsv and hevc_vaapi both abort at init with
-    encoder_init_failed. Repair the mismatch in place per the golden rule:
-    degrade rather than fail.
+    HEVC job. When the chosen profile's bit-depth class disagrees with the
+    output surface, hevc_qsv / hevc_vaapi (and the H.264 encoders) abort at
+    init with encoder_init_failed. Two mismatches occur:
 
-    Prefers the operator's own spelling of the 8-bit profile when it appears
-    in ``video.profile`` (so ``profile: [main10, main]`` reuses their
-    ``main``), falling back to the derived sibling otherwise. Returns
-    *vprofile* unchanged for copy streams, absent profiles, unknown profile
-    names, or any output that is already 10-bit or deeper.
+    - 10-bit profile (``main10``) on an 8-bit output (no 10-bit pix_fmt, so
+      the surface defaults to nv12) -> downgrade to the 8-bit sibling.
+    - 8-bit profile (``main``) on a 10-bit output (e.g. a 10-bit SDR x265
+      source whose surface stays p010le) -> upgrade to the 10-bit sibling.
+
+    Repair either in place per the golden rule: adapt rather than fail. The
+    upgrade direction is safe because the pix_fmt bit-depth safety check that
+    runs before this only leaves a 10-bit output when the encoder supports it.
+
+    Prefers the operator's own spelling of the target profile when it appears
+    in ``video.profile`` (so ``profile: [main10, main]`` reuses their exact
+    ``main`` / ``main10``), falling back to the derived sibling otherwise.
+    Returns *vprofile* unchanged for copy streams, absent profiles, unknown
+    profile names, an unknown (0) output depth, or an already-matching depth.
     """
-    if vcodec == "copy" or not vprofile or not output_bit_depth or output_bit_depth > 8:
+    if vcodec == "copy" or not vprofile or not output_bit_depth:
       return vprofile
-    sibling = self._TEN_BIT_PROFILE_TO_EIGHT_BIT.get(vprofile.strip().lower())
-    if not sibling:
+    key = vprofile.strip().lower()
+    if output_bit_depth <= 8:
+      target = self._TEN_BIT_PROFILE_TO_EIGHT_BIT.get(key)
+      reason = "requires 10-bit input but output is %d-bit" % output_bit_depth
+      verb = "downgrading"
+    else:
+      target = self._EIGHT_BIT_PROFILE_TO_TEN_BIT.get(key)
+      reason = "caps at 8-bit but output is %d-bit" % output_bit_depth
+      verb = "upgrading"
+    if not target:
       return vprofile
-    replacement = sibling
+    replacement = target
     for candidate in self.settings.vprofile or []:
-      if isinstance(candidate, str) and candidate.strip().lower() == sibling:
+      if isinstance(candidate, str) and candidate.strip().lower() == target:
         replacement = candidate
         break
-    self.log.info("Profile %s requires 10-bit input but output is %d-bit; downgrading to %s to avoid encoder_init_failed [adaptive-profile-bit-depth]." % (vprofile, output_bit_depth, replacement))
+    self.log.info("Profile %s %s; %s to %s to avoid encoder_init_failed [adaptive-profile-bit-depth]." % (vprofile, reason, verb, replacement))
     return replacement
 
   def _qsv_passthrough_filter(self, info, output_pix_fmt=None):

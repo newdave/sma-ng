@@ -3958,6 +3958,34 @@ class TestReconcileProfileToBitDepth:
     mp.settings.vprofile = ["main10", "main"]
     assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main10", 10) == "main10"
 
+  def test_main_on_10bit_upgrades_to_main10(self):
+    # Mirror case: an 8-bit profile stranded on a 10-bit output (e.g. 10-bit
+    # SDR x265 source whose surface stays p010le) must upgrade or the encoder
+    # aborts at init just the same.
+    mp = _make_mp()
+    mp.settings.vprofile = ["main", "main10"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 10) == "main10"
+
+  def test_upgrade_prefers_operator_spelling(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main", "Main10"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 10) == "Main10"
+
+  def test_upgrade_derives_sibling_when_not_in_profile_list(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 10) == "main10"
+
+  def test_h264_high_on_10bit_upgrades_to_high10(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["high", "high10"]
+    assert mp._reconcile_profile_to_bit_depth("h264_qsv", "high", 10) == "high10"
+
+  def test_main_on_8bit_unchanged(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main", "main10"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 8) == "main"
+
   def test_spaced_spelling_downgrades(self):
     mp = _make_mp()
     mp.settings.vprofile = ["main"]
