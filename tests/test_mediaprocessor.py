@@ -3932,6 +3932,64 @@ class TestCapFramesToProfile:
     assert r == -1
 
 
+class TestReconcileProfileToBitDepth:
+  """`_reconcile_profile_to_bit_depth` downgrades a 10-bit encoder profile to
+  its 8-bit sibling when the output pipeline is 8-bit, so hevc_qsv/hevc_vaapi
+  don't abort at init with encoder_init_failed (the main10-on-8-bit bug)."""
+
+  def test_main10_on_8bit_downgrades_to_main(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main10", "main"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main10", 8) == "main"
+
+  def test_prefers_operator_spelling_from_profile_list(self):
+    # Operator wrote "Main" — reuse their exact spelling rather than "main".
+    mp = _make_mp()
+    mp.settings.vprofile = ["main10", "Main"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main10", 8) == "Main"
+
+  def test_derives_sibling_when_not_in_profile_list(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main10"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main10", 8) == "main"
+
+  def test_main10_on_10bit_unchanged(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main10", "main"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main10", 10) == "main10"
+
+  def test_spaced_spelling_downgrades(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_vaapi", "Main 10", 8) == "main"
+
+  def test_h264_high10_downgrades_to_high(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["high10", "high"]
+    assert mp._reconcile_profile_to_bit_depth("h264_qsv", "high10", 8) == "high"
+
+  def test_8bit_profile_unchanged(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 8) == "main"
+
+  def test_copy_codec_passthrough(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main10", "main"]
+    assert mp._reconcile_profile_to_bit_depth("copy", "main10", 8) == "main10"
+
+  def test_none_profile_passthrough(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main10", "main"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", None, 8) is None
+
+  def test_unknown_bit_depth_passthrough(self):
+    # bit_depth 0 means "unknown"; don't gamble on a downgrade.
+    mp = _make_mp()
+    mp.settings.vprofile = ["main10", "main"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main10", 0) == "main10"
+
+
 class TestAdaptiveStrictExperimentalAudio:
   """`_build_preopts_postopts` adds `-strict experimental` once for mp4
   outputs that mux audio codecs ffmpeg considers experimental in MP4."""
