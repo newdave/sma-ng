@@ -1187,21 +1187,22 @@ mise run deploy:setup
 #### Deploying code
 
 ```bash
-# Build/push the current code image and redeploy production Docker hosts
-mise run deploy:redeploy
+# Push to main; CI builds and pushes the image. Then deploy it:
+mise run deploy:remote
 
-# Redeploy an already-pushed image without rebuilding
-BUILD_IMAGE=false IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:redeploy
+# Deploy a specific image tag
+IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:remote
 
 # Stop Docker services on one host (or many)
 HOST=sma-master mise run cluster:stop
 HOSTS="sma-master sma-worker-1" mise run cluster:stop
 ```
 
-`deploy:redeploy` builds and pushes the current checkout, then runs
-`deploy:remote` per host — generating `sma-ng.yml` locally and recreating
-the Docker container with the new image.
-Use `HOST=<name>` or `HOSTS="<name1> <name2>"` to scope a redeploy.
+Production images are built in CI on push to `main`. Once the GitHub Actions
+Docker workflow finishes, `deploy:remote` runs `deploy:config` then
+`deploy:docker` per host — regenerating `sma-ng.yml` locally, pulling the
+latest image, and recreating the Docker container. It never builds an image
+locally. Use `HOST=<name>` or `HOSTS="<name1> <name2>"` to scope a deploy.
 
 `deploy:sync` remains available for non-Docker/source-checkout maintenance.
 It does the following on each host in `deploy.hosts`:
@@ -1265,7 +1266,6 @@ Sends a graceful shutdown webhook to each host, waits for the daemon to drain, t
 | `deploy:check`    | Verify `setup/local.yml` exists and `deploy.hosts` is set                            |
 | `deploy:setup`    | First-time host prep: SSH key, apt deps, deploy dir, Docker install                  |
 | `deploy:mise`     | Sync the local `.mise/` deploy control plane to each remote `deploy_dir`             |
-| `deploy:redeploy` | Build/push current code, then run `deploy:remote` per host                           |
 | `deploy:remote`   | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker)     |
 | `deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry     |
 | `deploy:sync`     | Sync code and install deps on all hosts                                              |

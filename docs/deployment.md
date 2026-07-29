@@ -74,7 +74,6 @@ curl https://mise.run | sh
 | `mise run deploy:check`    | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                       |
 | `mise run deploy:setup`    | First-time host prep: SSH key, apt deps, deploy dir, Docker install                             |
 | `mise run deploy:mise`     | Sync the local `.mise/` deploy control plane to all hosts                                       |
-| `mise run deploy:redeploy` | Build/push the current code image, then run `deploy:remote` against production hosts            |
 | `mise run deploy:remote`   | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker)                |
 | `mise run deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry                |
 | `mise run deploy:sync`     | Sync code and install dependencies on all hosts                                                 |
@@ -82,7 +81,6 @@ curl https://mise.run | sh
 | `mise run deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container               |
 | `mise run config:audit`    | Audit local configs                                                                             |
 | `mise run deploy:docker`   | Push `docker-compose.yml`. Compare the registry's current image digest against the running container; if they match, only `docker compose restart $service` to pick up bind-mounted config changes (~3–5s). Otherwise pull, `compose down`, `up -d --force-recreate` (~30s+). Either path ends with a freshness verification against the registry. Override with `FORCE_RECREATE=1` to always take the full path. |
-| `mise run deploy:login`    | Log in to `ghcr.io` on all `DEPLOY_HOSTS` using a GitHub token                                  |
 
 Use `HOST=<host>` for one node or `HOSTS="<host1> <host2>"` for multiple nodes.
 
@@ -277,34 +275,38 @@ unless you also set it under `profiles:`.
 
 ### Deployment Workflow
 
-For normal production code changes, use the single redeploy command:
+Production images are built in CI: push to `main`, and the GitHub Actions Docker
+workflow builds and pushes `ghcr.io/<deploy.gh_user>/sma-ng:latest`. Once that run
+finishes, deploy the freshly published image with:
 
 ```bash
-mise run deploy:redeploy
+mise run deploy:remote
 ```
 
-`deploy:redeploy` builds and pushes the current checkout as a Docker image, then calls
-`deploy:docker` one host at a time so each node pulls the exact image tag and recreates
-only the SMA container.
-By default it builds `linux/amd64` and deploys `ghcr.io/<deploy.gh_user>/sma-ng:latest`.
+`deploy:remote` runs `deploy:config` then `deploy:docker` one host at a time, so each
+node regenerates its `sma-ng.yml`, pulls the latest image tag, and recreates only the
+SMA container. It never builds an image locally — the registry copy is the source of
+truth.
 
 Useful overrides:
 
 ```bash
-# Redeploy one host
-HOST=sma-master mise run deploy:redeploy
+# Deploy one host
+HOST=sma-master mise run deploy:remote
 
-# Redeploy selected hosts
-HOSTS="sma-master sma-worker-1" mise run deploy:redeploy
+# Deploy selected hosts
+HOSTS="sma-master sma-worker-1" mise run deploy:remote
 
 # Use an explicit image tag
-IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:redeploy
+IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:remote
+```
 
-# Include config/sample/service changes in the same run
-ROLL_CONFIG=true mise run deploy:redeploy
+If you need to build and push an image by hand (e.g. a one-off tag outside CI), use
+`build:push` first, then `deploy:remote`:
 
-# Pull and recreate an already-pushed image without rebuilding
-BUILD_IMAGE=false IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:redeploy
+```bash
+IMAGE=ghcr.io/newdave/sma-ng:2.0.0 mise run build:push
+IMAGE=ghcr.io/newdave/sma-ng:2.0.0 mise run deploy:remote
 ```
 
 Lower-level tasks are still available when you need one specific phase:
@@ -333,6 +335,17 @@ mise run deploy:config   # generate + push sma-ng.yml only
 mise run deploy:docker   # push compose yml + docker compose down/up
 ```
 
+If the GHCR image is private, `deploy:docker` pulls with the host's own registry
+credentials. Authenticate each host once with a GitHub token that has `read:packages`:
+
+```bash
+# Run on the host (or over SSH), once:
+echo "$GH_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
+```
+
+The published `ghcr.io/newdave/sma-ng` image is public, so no host login is needed for
+the default deployment.
+
 ### What `deploy:config` Does
 
 For each host in `DEPLOY_HOSTS`, `deploy:config` runs entirely **locally** —
@@ -360,7 +373,6 @@ For each remote host the staging build:
 | `deploy:check`    | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                 |
 | `deploy:setup`    | First-time host prep: SSH key, apt deps, deploy dir, Docker install                       |
 | `deploy:mise`     | Sync the local `.mise/` deploy control plane to each remote `DEPLOY_DIR`                  |
-| `deploy:redeploy` | Build/push the current code image, then run `deploy:remote` per host                      |
 | `deploy:remote`   | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker)          |
 | `deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry          |
 | `deploy:sync`     | Sync code and install deps on all hosts                                                   |
@@ -383,7 +395,7 @@ See [Cluster Operations](cluster-operations.md) for runbooks combining these.
 
 `deploy:config` and `deploy:docker` run locally — they only need an SSH path to
 each host. Tasks that invoke remote helpers or remote `mise` commands
-(`deploy:sync`, `deploy:restart`, `deploy:login`, `cluster:*`) depend on
+(`deploy:sync`, `deploy:restart`, `cluster:*`) depend on
 `deploy:mise` so the remote `.mise/` control plane is refreshed first. The
 Docker-specific tasks require `docker_profile` to be set per host (or under
 `deploy:`) in `setup/local.yml`. Use `HOST=<host>` to target one node, or

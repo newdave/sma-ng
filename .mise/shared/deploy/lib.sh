@@ -297,7 +297,7 @@ print_remote_container_summary() {
 # resolve_image_ref [explicit-image-ref]
 # Echoes the canonical "repo:tag" reference for the configured deploy
 # image. Resolution order:
-#   1. $1 (explicit override, e.g. when deploy:redeploy already split it)
+#   1. $1 (explicit override passed by a caller that already resolved a ref)
 #   2. $IMAGE env var
 #   3. deploy.image[+image_tag] from local.yml
 #   4. ghcr.io/<deploy.gh_user>/sma-ng:<deploy.image_tag|latest>
