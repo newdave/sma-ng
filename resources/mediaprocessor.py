@@ -2124,6 +2124,15 @@ class MediaProcessor:
     self.log.debug("Video bsf: %s." % vbsf)
     self.log.debug("Video codec parameters %s." % vparams)
 
+    # Reconcile the encoder profile with the final output bit-depth before
+    # capping frames (so the cap sees the corrected profile). The output
+    # depth follows the chosen pix_fmt, falling back to the source depth when
+    # pix_fmt is unset (the surface format then tracks the source). This
+    # repairs the main10-on-8-bit mismatch that otherwise aborts hevc_qsv /
+    # hevc_vaapi at init with encoder_init_failed.
+    final_output_bit_depth = pix_fmts.get(vpix_fmt, 0) or source_bit_depth
+    vprofile = self._reconcile_profile_to_bit_depth(vcodec, vprofile, final_output_bit_depth)
+
     # Cap b-frames / ref-frames to profile limits so HEVC main / H.264 baseline
     # don't crash the encoder with "too many reference frames" or "B-frames not
     # allowed". Adaptive pre-flight per the golden rule: degrade settings
@@ -3338,6 +3347,19 @@ class MediaProcessor:
   _HEVC_MAIN_MAX_REF_FRAMES = 4
   _H264_BASELINE_MAX_B_FRAMES = 0
 
+  # HEVC / H.264 encoder profiles that mandate >8-bit input. Selecting one of
+  # these for an 8-bit output pipeline (e.g. an 8-bit H.264 DVD -> HEVC with
+  # an nv12 surface) makes hevc_qsv / hevc_vaapi and the H.264 encoders abort
+  # at init with encoder_init_failed. Each maps to its 8-bit sibling so the
+  # pre-flight can repair the mismatch in place. Keys are compared lowercased
+  # with internal whitespace preserved ("main 10" is a valid ffprobe spelling).
+  _TEN_BIT_PROFILE_TO_EIGHT_BIT = {
+    "main10": "main",
+    "main 10": "main",
+    "high10": "high",
+    "high 10": "high",
+  }
+
   # Encoders with a native max sample rate. Sources above the cap need to be
   # downsampled on the encode pass or the encoder refuses to initialise.
   _AUDIO_ENCODER_MAX_SAMPLERATE = {
@@ -3447,6 +3469,39 @@ class MediaProcessor:
         vb_frames = self._H264_BASELINE_MAX_B_FRAMES
 
     return vb_frames, vref_frames
+
+  def _reconcile_profile_to_bit_depth(self, vcodec, vprofile, output_bit_depth):
+    """Downgrade a 10-bit encoder profile to its 8-bit sibling for 8-bit output.
+
+    The profile fallback in :meth:`_select_video_codec` picks ``vprofile[0]``
+    whenever the source's profile name isn't in the target codec's approved
+    list. For a cross-codec transcode that is *always* the case: an H.264
+    source reports an H.264 profile ("High"/"Main") which never matches an
+    HEVC ``[main10, main]`` list, so the fallback fires on every DVD/x264 ->
+    HEVC job. When that fallback lands on a 10-bit profile (e.g. ``main10``)
+    but the output pipeline is 8-bit (no 10-bit pix_fmt selected, surface
+    defaults to nv12), hevc_qsv and hevc_vaapi both abort at init with
+    encoder_init_failed. Repair the mismatch in place per the golden rule:
+    degrade rather than fail.
+
+    Prefers the operator's own spelling of the 8-bit profile when it appears
+    in ``video.profile`` (so ``profile: [main10, main]`` reuses their
+    ``main``), falling back to the derived sibling otherwise. Returns
+    *vprofile* unchanged for copy streams, absent profiles, unknown profile
+    names, or any output that is already 10-bit or deeper.
+    """
+    if vcodec == "copy" or not vprofile or not output_bit_depth or output_bit_depth > 8:
+      return vprofile
+    sibling = self._TEN_BIT_PROFILE_TO_EIGHT_BIT.get(vprofile.strip().lower())
+    if not sibling:
+      return vprofile
+    replacement = sibling
+    for candidate in self.settings.vprofile or []:
+      if isinstance(candidate, str) and candidate.strip().lower() == sibling:
+        replacement = candidate
+        break
+    self.log.info("Profile %s requires 10-bit input but output is %d-bit; downgrading to %s to avoid encoder_init_failed [adaptive-profile-bit-depth]." % (vprofile, output_bit_depth, replacement))
+    return replacement
 
   def _qsv_passthrough_filter(self, info, output_pix_fmt=None):
     """Build the implicit ``vpp_qsv`` filter, padding to encoder alignment.
