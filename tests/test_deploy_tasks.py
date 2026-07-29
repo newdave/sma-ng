@@ -156,8 +156,13 @@ class TestMiseTaskLayout:
     assert "deploy:docker" in tasks
     assert "deploy:docker:upgrade" not in tasks
     assert "deploy:docker:upgrade" in tasks["deploy:docker"]
-    assert "deploy:redeploy" in tasks
-    assert "deploy:prod" in tasks["deploy:redeploy"]
+
+    # deploy:redeploy (local image build competing with CI) and deploy:login
+    # (unused; deploy:docker uses the host's existing ghcr creds) were removed
+    # in favour of the CI-build + deploy:remote flow.
+    assert "deploy:redeploy" not in tasks
+    assert "deploy:prod" not in tasks
+    assert "deploy:login" not in tasks
 
     assert "cluster:stop" in tasks
     assert "cluster:start" in tasks
@@ -703,15 +708,6 @@ class TestDeployMiseTask:
     text = _read(".mise/tasks/deploy/restart")
     assert 'source "$(dirname "$0")/../../shared/deploy/lib.sh"' in text
 
-  def test_deploy_redeploy_orchestrates_build_and_remote_steps(self):
-    text = _read(".mise/tasks/deploy/redeploy")
-    assert '#MISE depends=["deploy:check"]' in text
-    assert "mise run build:push" in text
-    # deploy:remote = deploy:config + deploy:docker, which replaced the
-    # legacy config:roll + deploy:docker pair.
-    assert "mise run deploy:remote" in text
-    assert 'IMAGE="$DEPLOY_IMAGE" IMAGE_TAG="$DEPLOY_IMAGE_TAG"' in text
-
   def test_deploy_docker_can_override_compose_image_and_tag(self):
     lib = _read(".mise/shared/deploy/lib.sh")
     compose = _read("docker/docker-compose.yml")
@@ -752,7 +748,6 @@ class TestDeployMiseTask:
       ".mise/tasks/cluster/start",
       ".mise/tasks/cluster/restart",
       ".mise/tasks/deploy/restart",
-      ".mise/tasks/deploy/login",
     ):
       text = _read(rel_path)
       assert '#MISE depends=["deploy:mise"]' in text, rel_path
