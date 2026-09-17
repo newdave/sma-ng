@@ -2654,6 +2654,30 @@ class TestIsValidSubtitleSource:
     assert mp.isValidSubtitleSource("/path/to/file.srt") is None
 
 
+class TestProbeExcludesCoverArt:
+  """MediaProcessor probes with posters_as_video=False so attached_pic
+  cover-art streams can never be selected as the main video stream."""
+
+  def test_isValidSource_probes_without_posters(self, tmp_path):
+    mp = _make_mp()
+    mp.settings.ignored_extensions = []
+    mp.settings.minimum_size = 0
+    mp.converter = MagicMock()
+    mp.converter.probe.return_value = None  # type: ignore[attr-defined]
+    src = tmp_path / "movie.mkv"
+    src.write_bytes(b"\x00" * 1024)
+    mp.isValidSource(str(src))
+    assert mp.converter.probe.call_args.kwargs.get("posters_as_video") is False  # type: ignore[attr-defined]
+
+  def test_isValidSubtitleSource_probes_without_posters(self):
+    mp = _make_mp()
+    mp.settings.ignored_extensions = []
+    mp.converter = MagicMock()
+    mp.converter.probe.return_value = None  # type: ignore[attr-defined]
+    mp.isValidSubtitleSource("/path/to/file.srt")
+    assert mp.converter.probe.call_args.kwargs.get("posters_as_video") is False  # type: ignore[attr-defined]
+
+
 # ---------------------------------------------------------------------------
 # isHDRInput
 # ---------------------------------------------------------------------------
@@ -3717,7 +3741,9 @@ class TestQsvVppPassthroughInjection:
 
 
 class TestAdaptiveStripAttachments:
-  """`_build_preopts_postopts` drops attachment streams for mp4 outputs."""
+  """`_build_preopts_postopts` always drops data streams, and drops attachment
+  streams unless the operator explicitly selected some via attachment-codec on
+  a container that supports them (mp4 never can)."""
 
   def _mp(self):
     mp = _make_mp()
@@ -3744,12 +3770,34 @@ class TestAdaptiveStripAttachments:
     pairs = list(zip(postopts, postopts[1:]))
     assert ("-map", "-0:t") in pairs
 
-  def test_mkv_keeps_attachments(self):
+  def test_mp4_strips_attachments_even_when_selected(self):
+    mp = self._mp()
+    options = {"format": "mp4", "audio": [], "video": {"filter": None}, "attachment": [{"map": 4, "codec": "copy"}]}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
+    pairs = list(zip(postopts, postopts[1:]))
+    assert ("-map", "-0:t") in pairs
+
+  def test_mkv_strips_attachments_when_none_selected(self):
     mp = self._mp()
     options = {"format": "mkv", "audio": [], "video": {"filter": None}}
     _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
     pairs = list(zip(postopts, postopts[1:]))
+    assert ("-map", "-0:t") in pairs
+
+  def test_mkv_keeps_attachments_when_selected(self):
+    mp = self._mp()
+    options = {"format": "mkv", "audio": [], "video": {"filter": None}, "attachment": [{"map": 4, "codec": "copy"}]}
+    _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
+    pairs = list(zip(postopts, postopts[1:]))
     assert ("-map", "-0:t") not in pairs
+
+  def test_data_streams_always_stripped(self):
+    mp = self._mp()
+    for fmt in ("mp4", "mkv"):
+      options = {"format": fmt, "audio": [], "video": {"filter": None}}
+      _, postopts = mp._build_preopts_postopts("copy", ["copy"], self._info(), {}, {}, options, [])
+      pairs = list(zip(postopts, postopts[1:]))
+      assert ("-map", "-0:d") in pairs
 
 
 class TestAdaptiveVfrPassthrough:

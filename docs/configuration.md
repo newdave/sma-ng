@@ -398,6 +398,18 @@ Generates an additional stereo AAC stream for device compatibility.
 | `ignored-dispositions`      | list   |            | Skip subs with these dispositions                                                                                                                                                                                                                                   |
 | `remove-bitstream-subs`     | list   | `true`     | Remove bitstream subtitle formats                                                                                                                                                                                                                                   |
 | `include-original-language` | bool   | `false`    | Include original language subs                                                                                                                                                                                                                                      |
+| `attachment-codec`          | list   |            | Attachment codecs (e.g. `ttf` fonts) to copy into the output. Only honored on containers that support attachments (never MP4); empty (the default) drops all attachment streams.                                                                                   |
+
+Only whitelisted stream types reach the output: the selected video stream, the
+selected audio streams, and embedded subtitle streams. Everything else is
+removed during conversion — data streams (timecode, `bin_data`), cover-art /
+poster image streams (`attached_pic`), and attachment streams not selected by
+`attachment-codec`. Image-based subtitle streams are only embedded when
+`embed-image-subs` is enabled and their codec is listed in `codec-image-based`;
+otherwise they are dropped from the output (they may still be ripped to
+external files or burned in, per the rip/burn settings). Cover art does not
+count as a video stream: an audio-only file whose only "video" is an
+`attached_pic` poster is rejected as an invalid source rather than transcoded.
 
 ### base.subtitle.cleanit
 
