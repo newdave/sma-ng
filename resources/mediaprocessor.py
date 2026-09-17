@@ -585,7 +585,7 @@ class MediaProcessor:
 
               # Re-probe the converted output so codec/quality tokens reflect
               # the encoded file, not the source (e.g. x265 instead of x264).
-              output_info = self.converter.probe(output["output"]) or info
+              output_info = self.converter.probe(output["output"], posters_as_video=False) or info
               new_name = generate_name(output["output"], output_info, tagdata, self.settings, log=self.log, lookup_path=inputfile)
               if new_name:
                 output["output"] = rename_file(output["output"], new_name, log=self.log)
@@ -1009,7 +1009,7 @@ class MediaProcessor:
       if self.settings.minimum_size > 0 and os.path.getsize(inputfile) < (self.settings.minimum_size * 1000000):
         self.log.debug("Invalid source, below minimum size threshold [minimum-size].")
         return None
-      info = self.converter.probe(inputfile)
+      info = self.converter.probe(inputfile, posters_as_video=False)
       if not info:
         self.log.debug("Invalid source, no data returned.")
         return None
@@ -1053,7 +1053,7 @@ class MediaProcessor:
     if extension in bad_sub_extensions or extension in self.settings.ignored_extensions:
       return None
     try:
-      info = self.converter.probe(inputfile)
+      info = self.converter.probe(inputfile, posters_as_video=False)
       if info:
         if len(info.subtitle) < 1 or info.video or len(info.audio) > 0:
           return None
@@ -1097,7 +1097,7 @@ class MediaProcessor:
     Returns a dict with keys 'x' (width) and 'y' (height), defaulting to 0
     if the file cannot be probed.
     """
-    info = self.converter.probe(inputfile)
+    info = self.converter.probe(inputfile, posters_as_video=False)
 
     if info and info.video:
       self.log.debug("Height: %s" % info.video.video_height)
@@ -1551,7 +1551,7 @@ class MediaProcessor:
     codecs = self.converter.ffmpeg.codecs
     pix_fmts = self.converter.ffmpeg.pix_fmts
 
-    info = info or self.converter.probe(inputfile)
+    info = info or self.converter.probe(inputfile, posters_as_video=False)
 
     if not info:
       self.log.error("FFPROBE returned no value for inputfile %s (exists: %s), either the file does not exist or is not a format FFPROBE can read." % (inputfile, os.path.exists(inputfile)))
@@ -1835,12 +1835,20 @@ class MediaProcessor:
       except Exception:
         self.log.exception("Error when trying to determine hardware acceleration support.")
 
-    # MP4 cannot carry attachment streams (embedded fonts, cover art) — they
-    # cause "Attachment stream not supported" mux errors. Drop them with
-    # `-map -0:t` for mp4 outputs; keep them for mkv where they are valid.
+    # Streams are mapped by explicit whitelist, but make the exclusions
+    # explicit so only video/audio/subtitle streams can reach the mux.
+    # Data streams (timecode, bin_data, dvb data) are never wanted in the
+    # output. Attachment streams (embedded fonts, cover art) are dropped
+    # unless the operator opted in via attachment-codec on a container that
+    # supports them — MP4 cannot carry them at all and fails the mux with
+    # "Attachment stream not supported".
+    postopts.extend(["-map", "-0:d"])
     if options.get("format") == "mp4":
       postopts.extend(["-map", "-0:t"])
       self.log.info("Dropping attachment streams for mp4 output [adaptive-strip-attachments].")
+    elif not options.get("attachment"):
+      postopts.extend(["-map", "-0:t"])
+      self.log.info("Dropping attachment streams, none selected by attachment-codec [adaptive-strip-attachments].")
 
     # VFR-source preservation: when remuxing a Matroska variable-frame-rate
     # source into mp4, ffmpeg's default vsync can produce non-monotonic DTS

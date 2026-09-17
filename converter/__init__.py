@@ -350,7 +350,10 @@ class Converter:
 
     infile = options["source"][0]
 
-    info = self.ffmpeg.probe(infile)
+    # Probe without posters so src_width/src_height below come from the real
+    # video stream, never from an attached_pic cover-art stream that happens
+    # to precede it.
+    info = self.ffmpeg.probe(infile, posters_as_video=False)
     if info is None:
       raise ConverterError("Can't get information about source file")
 
