@@ -324,6 +324,18 @@ Each failed conversion also logs the absolute path of the sidecar at `ERROR`
 level so it is easy to find. The directory is created on demand and exists
 regardless of whether the daemon log goes to a file or stdout (Docker).
 
+The `<id>` comes from the `--job-id` flag the worker passes to the
+`manual.py` subprocess. After the job is marked failed, the worker ingests
+every matching sidecar into the job's `ffmpeg_stderr` database column and
+deletes the files — so query the API rather than scraping the directory:
+
+```bash
+curl -H "X-API-Key: SECRET" http://localhost:8585/jobs/123/ffmpeg-stderr
+```
+
+Returns the stored stderr as `text/plain`, or 404 if the job doesn't exist
+or has no stored stderr (e.g. it failed before ffmpeg ran).
+
 ---
 
 ## Log Viewer API

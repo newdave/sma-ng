@@ -585,6 +585,27 @@ class TestRunConversionInner:
     assert "-tmdb" in captured_cmd
     assert "603" in captured_cmd
 
+  def test_job_id_passed_to_subprocess(self, tmp_path):
+    # The MediaProcessor subprocess names its ffmpeg-stderr sidecar after
+    # this id; without the flag the sidecar is "ffmpeg.job-.*" and
+    # _ingest_ffmpeg_stderr_sidecars never finds it.
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    captured_cmd = []
+
+    proc = _make_fake_process([], returncode=0)
+
+    def fake_popen(cmd, **kwargs):
+      captured_cmd.extend(cmd)
+      return proc
+
+    with mock.patch("subprocess.Popen", side_effect=fake_popen):
+      worker._run_conversion_inner(42, str(media), "/cfg.ini", [])
+
+    idx = captured_cmd.index("--job-id")
+    assert captured_cmd[idx + 1] == "42"
+
 
 # ---------------------------------------------------------------------------
 # ConversionWorker.run (loop)

@@ -569,6 +569,20 @@ class TestMain:
         main()
     mock_sc.assert_called_once()
 
+  def test_job_id_flag_adopted_into_log_context(self):
+    # The daemon worker passes --job-id so subprocess log lines and the
+    # ffmpeg-stderr sidecar name carry the job id instead of "-".
+    from resources.daemon.context import _job_id
+
+    token = _job_id.set("-")
+    try:
+      with patch("sys.argv", ["manual.py", "-cl", "--job-id", "42"]):
+        with patch("manual.showCodecs"):
+          main()
+      assert _job_id.get() == "42"
+    finally:
+      _job_id.reset(token)
+
   def test_file_input_processes_file(self, tmp_path):
     fake_file = tmp_path / "movie.mkv"
     fake_file.write_bytes(b"fake")
