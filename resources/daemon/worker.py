@@ -462,7 +462,12 @@ class ConversionWorker(threading.Thread):
       extra={"job_id": job_id, "path": path, "config": config_file, "worker_id": self.worker_id},
     )
 
-    cmd = [sys.executable, self.script_path, "-a", "-i", path, "-c", config_file] + extra_args
+    # --job-id crosses the process boundary that the _job_id contextvar
+    # cannot: without it the MediaProcessor subprocess logs "job:-" and
+    # names its ffmpeg-stderr sidecar "ffmpeg.job-.*", which the
+    # _ingest_ffmpeg_stderr_sidecars glob ("ffmpeg.job<id>.*") never
+    # matches — so jobs.ffmpeg_stderr stayed empty for every failure.
+    cmd = [sys.executable, self.script_path, "-a", "-i", path, "-c", config_file, "--job-id", str(job_id)] + extra_args
 
     env = os.environ.copy()
     if self.ffmpeg_dir:

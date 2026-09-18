@@ -22,6 +22,7 @@ import tmdbsimple as tmdb
 
 from converter.avcodecs import attachment_codec_list, audio_codec_list, subtitle_codec_list, video_codec_list
 from resources.config_loader import ConfigError, ConfigLoader
+from resources.daemon.context import set_job_id
 from resources.extensions import tmdb_api_key
 from resources.log import getLogger
 from resources.mediaprocessor import InsufficientOutputSpace, MediaProcessor
@@ -954,12 +955,23 @@ def main():
   mediatype_group.add_argument("--movie", action="store_true", help="Force guessit to treat input as a movie")
 
   parser.add_argument(
+    "--job-id",
+    dest="job_id",
+    help="Daemon job id for log correlation and ffmpeg-stderr sidecar naming. Set automatically by the daemon worker; rarely useful by hand.",
+  )
+  parser.add_argument(
     "--audit",
     action="store_true",
     help="Run a library audit on the input path: locate ffprobe failures, orphan sidecars, leftover .tmp files, leftover pre-conversion originals, and TMDB/TVDB-id duplicates. Prints findings and exits non-zero when any are found.",
   )
 
   args = vars(parser.parse_args())
+
+  # Adopt the daemon-assigned job id so every log line carries "job:<id>"
+  # and the ffmpeg-stderr sidecar is named ffmpeg.job<id>.* — the daemon
+  # worker finds and ingests it by that name after this process exits.
+  if args.get("job_id"):
+    set_job_id(args["job_id"])
 
   # Setup the silent mode
   silent = args["auto"]
