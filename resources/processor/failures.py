@@ -304,12 +304,30 @@ _CAUSE_PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureCause, str], ...] = (
     "Audio sample rate not supported by encoder (e.g. libfdk_aac wants 48 kHz). Auto-resample via -ar 48000 on the audio stream.",
   ),
   (
-    re.compile(r"image.*subtitle.*(?:cannot|not).*text|mov_text.*image|hdmv_pgs|dvd_subtitle.*mov_text", re.IGNORECASE),
+    # Requires bitmap-codec + text-codec context on the matched text. A bare
+    # codec name (e.g. "hdmv_pgs") must NOT match: ffprobe/ffmpeg emit benign
+    # input-probe warnings that merely mention the codec ("Could not find
+    # codec parameters for stream N (Subtitle: hdmv_pgs_subtitle ...)"), and
+    # a loose pattern misattributed unrelated encoder failures to subtitles
+    # whenever the source simply contained a PGS stream.
+    re.compile(
+      r"image.*subtitle.*(?:cannot|not).*text"
+      r"|only possible from text to text or bitmap to bitmap"
+      r"|(?:hdmv_pgs|pgssub|dvd_subtitle|dvdsub|dvb_subtitle|dvbsub).*mov_text"
+      r"|mov_text.*(?:hdmv_pgs|pgssub|dvd_subtitle|dvdsub|dvb_subtitle|dvbsub)",
+      re.IGNORECASE,
+    ),
     FfmpegFailureCause.IMAGE_SUBTITLE_TO_TEXT,
     "Tried to mux a bitmap subtitle (PGS / VOBSUB / DVB) into a text-subtitle codec (mov_text). Promote to external sidecar via OCR or drop the stream — direct conversion is impossible.",
   ),
   (
-    re.compile(r"Subtitle encoding (?:not|currently) supported|subtitle\(s\) too large|Could not write header.*subtitle", re.IGNORECASE),
+    re.compile(
+      r"Subtitle encoding (?:not|currently) supported"
+      r"|subtitle\(s\) too large"
+      r"|Could not write header.*subtitle"
+      r"|Could not find tag for codec \S*(?:pgs|dvd_sub|dvb_sub)\S* in stream",
+      re.IGNORECASE,
+    ),
     FfmpegFailureCause.SUBTITLE_MUX_FAIL,
     "Subtitle stream couldn't be muxed (size/codec). Drop the offending sub or convert to a different format.",
   ),
