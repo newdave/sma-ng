@@ -236,6 +236,33 @@ class TestDiagnoseFfmpegFailure:
     d = diagnose_ffmpeg_failure(stderr)
     assert d.cause == FfmpegFailureCause.IMAGE_SUBTITLE_TO_TEXT
 
+  def test_image_sub_to_text_detected_from_canonical_ffmpeg_message(self):
+    stderr = "[vost#0:2/mov_text @ 0x55] Subtitle encoding currently only possible from text to text or bitmap to bitmap\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.IMAGE_SUBTITLE_TO_TEXT
+
+  def test_benign_pgs_probe_warning_does_not_misdiagnose_encoder_failure(self):
+    # Regression: a source that merely CONTAINS a PGS stream emits this
+    # harmless input-probe warning; the old pattern's bare "hdmv_pgs"
+    # alternative hijacked the diagnosis of an unrelated encoder-init
+    # failure (job 20823).
+    stderr = (
+      "[in#0/matroska,webm @ 0x5884b8734b80] Could not find codec parameters for stream 6 "
+      "(Subtitle: hdmv_pgs_subtitle (pgssub)): unspecified size\n"
+      "[vost#0:0/hevc_qsv @ 0xff] Error initializing output stream: "
+      "Error while opening encoder for output stream #0:0\n"
+      "Conversion failed!\n"
+    )
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.failure_class == FfmpegFailureClass.ENCODER_INIT_FAILED
+    assert d.cause != FfmpegFailureCause.IMAGE_SUBTITLE_TO_TEXT
+
+  def test_bitmap_sub_container_tag_rejection_detected_as_mux_fail(self):
+    # Stream-copying a bitmap subtitle into a container with no tag for it.
+    stderr = "[mp4 @ 0x55] Could not find tag for codec hdmv_pgs_subtitle in stream #2, codec not currently supported in container\n"
+    d = diagnose_ffmpeg_failure(stderr)
+    assert d.cause == FfmpegFailureCause.SUBTITLE_MUX_FAIL
+
   def test_attachment_mux_fail_detected(self):
     stderr = "[mp4 @ 0x55] Could not find tag for codec none in stream #5, codec attachment not supported by mp4\n"
     d = diagnose_ffmpeg_failure(stderr)
