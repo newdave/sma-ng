@@ -7,6 +7,7 @@ import mistune
 from resources.daemon.constants import SCRIPT_DIR
 
 DOCS_DIR = os.path.join(SCRIPT_DIR, "docs")
+CHANGELOG_PATH = os.path.join(SCRIPT_DIR, "CHANGELOG.md")
 DOCS_TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "resources", "docs.html")
 DASHBOARD_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "dashboard.html")
 ADMIN_HTML_PATH = os.path.join(SCRIPT_DIR, "resources", "admin.html")
@@ -25,7 +26,18 @@ DOC_PAGES = [
   ("cluster-operations", "Cluster Operations"),
   ("troubleshooting", "Troubleshooting"),
   ("migration", "Migration Guide"),
+  ("changelog", "Changelog"),
 ]
+
+
+def doc_file_for_slug(slug):
+  """Map a /docs/<slug> URL slug to the markdown file it renders."""
+  if slug == "index":
+    return os.path.join(DOCS_DIR, "README.md")
+  if slug == "changelog":
+    return CHANGELOG_PATH
+  return os.path.join(DOCS_DIR, slug + ".md")
+
 
 _TAG_STRIP_RE = _re.compile(r"<[^>]+>")
 _SLUG_STRIP_RE = _re.compile(r"[^\w-]")
@@ -117,7 +129,7 @@ def _load_metrics_html():
     return f.read()
 
 
-def _load_docs_template(active_slug="index"):
+def _load_docs_template(active_slug="index", version="unknown"):
   with open(DOCS_TEMPLATE_PATH, "r", encoding="utf-8") as f:
     template = f.read()
   nav_items = []
@@ -125,4 +137,4 @@ def _load_docs_template(active_slug="index"):
     href = "/docs" if slug == "index" else "/docs/" + slug
     active = ' class="bg-gray-700 text-white"' if slug == active_slug else ' class="text-gray-300 hover:text-white"'
     nav_items.append('<a href="%s"%s>%s</a>' % (href, active, title))
-  return template.replace("%NAV%", "\n".join(nav_items))
+  return template.replace("%NAV%", "\n".join(nav_items)).replace("%VERSION%", _html.escape(version))

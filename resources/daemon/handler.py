@@ -14,7 +14,7 @@ from resources.daemon.config import _strip_secrets
 from resources.daemon.constants import SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase
-from resources.daemon.docs_ui import DOCS_DIR, _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html
+from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html, doc_file_for_slug
 
 __all__ = ["WebhookHandler", "_inline"]
 from resources.daemon.routes import dispatch_get, dispatch_post, dispatch_post_job_action
@@ -580,14 +580,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
     # Sanitise to word chars and hyphens only to prevent path traversal
     raw_slug = path[len("/docs") :].lstrip("/") or "index"
     slug = _re.sub(r"[^\w\-]", "", raw_slug) or "index"
-    md_file = os.path.join(DOCS_DIR, "README.md" if slug == "index" else slug + ".md")
-    if not os.path.abspath(md_file).startswith(os.path.abspath(DOCS_DIR) + os.sep) and slug != "index":
+    md_file = doc_file_for_slug(slug)
+    if not os.path.abspath(md_file).startswith(os.path.abspath(SCRIPT_DIR) + os.sep):
       self.send_json_response(404, {"error": "Not found"})
       return
     try:
       with open(md_file, "r", encoding="utf-8") as f:
         md_content = f.read()
-      self.send_html_response(200, _load_docs_template(slug) % _render_markdown_to_html(md_content))
+      self.send_html_response(200, _load_docs_template(slug, version=self.server.version) % _render_markdown_to_html(md_content))
     except FileNotFoundError:
       self.send_html_response(404, "<h1>Page not found</h1><p>%s</p>" % md_file)
 

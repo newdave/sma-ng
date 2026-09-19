@@ -426,6 +426,32 @@ class TestDocsAndAssets:
     assert ".." not in opened_path
     assert opened_path.endswith("docs/daemon.md")
 
+  def test_get_docs_changelog_reads_repo_changelog(self):
+    h = _make_handler(path="/docs/changelog")
+    with (
+      patch("resources.daemon.handler._load_docs_template", return_value="<html>%s</html>"),
+      patch("resources.daemon.handler._render_markdown_to_html", return_value="<h1>Changelog</h1>"),
+      patch("builtins.open", new_callable=MagicMock) as mock_open,
+    ):
+      mock_open.return_value.__enter__.return_value.read.return_value = "# Changelog"
+      h._get_docs("/docs/changelog", {})
+    assert h._response_code == 200
+    opened_path = mock_open.call_args[0][0]
+    assert opened_path.endswith("CHANGELOG.md")
+    assert "docs/" not in opened_path
+
+  def test_get_docs_passes_server_version_to_template(self):
+    h = _make_handler(path="/docs")
+    h.server.version = "9.9.9"
+    with (
+      patch("resources.daemon.handler._load_docs_template", return_value="<html>%s</html>") as mock_tpl,
+      patch("resources.daemon.handler._render_markdown_to_html", return_value="<p>ok</p>"),
+      patch("builtins.open", new_callable=MagicMock) as mock_open,
+    ):
+      mock_open.return_value.__enter__.return_value.read.return_value = "ok"
+      h._get_docs("/docs", {})
+    assert mock_tpl.call_args.kwargs.get("version") == "9.9.9"
+
   def test_get_favicon_returns_404_when_missing(self):
     h = _make_handler(path="/favicon.png")
     with patch("builtins.open", side_effect=FileNotFoundError):

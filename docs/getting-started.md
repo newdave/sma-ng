@@ -453,6 +453,7 @@ python manual.py -i /path/to/file.mkv -a -c config/sma-ng.yml
 | `-ms`   | `--minsize`               | Minimum file size in MB                    |
 | `-pa`   | `--processedarchive`      | Path to processed files archive JSON       |
 |         | `--job-id`                | Daemon job id (set by the daemon worker)   |
+|         | `--version`               | Print version and exit                     |
 
 ---
 

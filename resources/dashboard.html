@@ -160,6 +160,9 @@
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                     </svg>
                 </button>
+                <span class="tooltip text-xs text-gray-500 dark:text-gray-500" x-show="health.version" x-text="'v' + health.version">
+                    <span class="tip" x-text="'SMA-NG version — build ' + (health.commit || 'unknown')"></span>
+                </span>
                 <span class="tooltip text-xs text-gray-500 dark:text-gray-500" x-show="health.node" x-text="health.node">
                     <span class="tip">Hostname of this daemon node</span>
                 </span>
