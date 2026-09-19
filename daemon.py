@@ -45,6 +45,7 @@ from resources.daemon import (
 from resources.daemon.constants import LOGS_DIR, SCRIPT_DIR, resolve_node_id
 from resources.daemon.server import _validate_hwaccel
 from resources.log import getLogger
+from resources.version import version_string
 
 # Main daemon logger
 log = getLogger("DAEMON")
@@ -123,6 +124,7 @@ def main():
   and then serves requests until interrupted.
   """
   parser = argparse.ArgumentParser(description="SMA-NG Daemon - HTTP webhook server for media conversion")
+  parser.add_argument("--version", action="version", version=version_string())
   parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
   parser.add_argument("--port", type=int, default=8585, help="Port to listen on (default: 8585)")
   parser.add_argument("--workers", type=int, default=None, help="Number of worker threads (default: daemon.workers in sma-ng.yml, or 4 if unset)")

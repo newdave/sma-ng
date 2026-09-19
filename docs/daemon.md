@@ -29,6 +29,7 @@ All options can also be set via environment variables — see [Environment Varia
 | `--job-timeout SECONDS`  | `0`     | Kill a conversion job after this many seconds (0 = no timeout). Also settable via `Daemon.job_timeout_seconds` in `sma-ng.yml`. |
 | `--heartbeat-interval N` | `30`    | Seconds between PostgreSQL cluster heartbeat updates                                                                            |
 | `--stale-seconds N`      | `120`   | Seconds without a heartbeat before a node's running jobs are requeued                                                           |
+| `--version`              |         | Print `sma-ng <version> (commit <sha>)` and exit                                                                                |
 
 ---
 
@@ -45,6 +46,11 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 - Job priority controls
 - Log viewer: browse, filter, and live-tail per-config log files
 - Admin node controls for approve/reject/restart/shutdown/delete
+- Header shows the running SMA-NG version (hover for the build commit)
+
+The docs pages at `/docs` are rendered from the operator docs shipped in the
+image, including the release changelog at `/docs/changelog`; the footer of
+every docs page shows the running version.
 
 ---
 
@@ -57,7 +63,7 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 | `GET`  | `/admin`                         | No   | Admin panel (destructive actions)                                       |
 | `GET`  | `/health`                        | No   | Health check with job stats + GPU capabilities + fallback counters      |
 | `GET`  | `/status`                        | No   | Cluster-wide status across all nodes                                    |
-| `GET`  | `/docs`                          | No   | Rendered documentation                                                  |
+| `GET`  | `/docs`                          | No   | Rendered documentation (`/docs/<page>`; includes `/docs/changelog`)     |
 | `GET`  | `/jobs`                          | Yes  | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
 | `GET`  | `/jobs/<id>`                     | Yes  | Get specific job (includes `progress` when running)                     |
 | `GET`  | `/configs`                       | Yes  | Config mappings and status                                              |

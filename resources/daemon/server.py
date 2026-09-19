@@ -10,19 +10,10 @@ from datetime import datetime
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-try:
-  import importlib.metadata as _importlib_metadata
+from resources.version import get_commit, get_version
 
-  _VERSION = _importlib_metadata.version("sma-ng")
-except Exception:
-  _VERSION = "unknown"
-
-# Git commit the running code was built from. Baked into the image at build
-# time via the ``SMA_GIT_SHA`` build-arg (see docker/Dockerfile and the
-# docker.yml workflow). Empty/absent on bare-metal or source checkouts, where
-# the semver alone can't distinguish commits within a release, so we report
-# "unknown" rather than an empty string.
-_COMMIT = (os.environ.get("SMA_GIT_SHA") or "unknown").strip() or "unknown"
+_VERSION = get_version()
+_COMMIT = get_commit()
 
 from resources.daemon import metrics_prom, storage
 from resources.daemon.constants import resolve_node_id

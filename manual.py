@@ -28,6 +28,7 @@ from resources.log import getLogger
 from resources.mediaprocessor import InsufficientOutputSpace, MediaProcessor
 from resources.metadata import MediaType, Metadata
 from resources.readsettings import ReadSettings
+from resources.version import version_string
 
 os.environ["REGEX_DISABLED"] = "1"  # Fixes Toilal/rebulk#20
 
@@ -907,6 +908,7 @@ def main():
   Exits with code 1 if processing fails.
   """
   parser = argparse.ArgumentParser(description="SMA-NG manual conversion and tagging script")
+  parser.add_argument("--version", action="version", version=version_string())
   parser.add_argument("-i", "--input", help="The source that will be converted. May be a file or a directory")
   parser.add_argument("-c", "--config", help="Specify an alternate configuration file location")
   parser.add_argument(
