@@ -34,10 +34,14 @@ htmlcov/
 config/
 logs/
 
-# Docs / plans
-docs/
+# Docs / plans. Operator docs (docs/*.md) and CHANGELOG.md ship in the
+# image: the daemon renders them at /docs — see resources/daemon/docs_ui.py.
+# Planning docs stay out.
+docs/prps/
+docs/tasks/
 *.md
 !README.md
+!CHANGELOG.md
 
 # Editor
 .vscode/

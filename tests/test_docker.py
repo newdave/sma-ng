@@ -499,6 +499,18 @@ class TestDockerignore:
   def test_excludes_pre_commit(self, dockerignore):
     assert ".pre-commit-config.yaml" in dockerignore
 
+  def test_ships_operator_docs_and_changelog(self, dockerignore):
+    # The daemon renders docs/*.md and CHANGELOG.md at /docs — excluding
+    # them from the image breaks the docs webui in production.
+    lines = [line.strip() for line in dockerignore.splitlines()]
+    assert "docs/" not in lines
+    assert "!CHANGELOG.md" in lines
+
+  def test_excludes_planning_docs(self, dockerignore):
+    lines = [line.strip() for line in dockerignore.splitlines()]
+    assert "docs/prps/" in lines
+    assert "docs/tasks/" in lines
+
   def test_excludes_github_dir(self, dockerignore):
     assert ".github" in dockerignore
 
