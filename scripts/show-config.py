@@ -138,12 +138,19 @@ def _synthesize_config() -> dict[str, Any]:
       block = local_data.get(bucket)
       if isinstance(block, dict):
         merged[bucket] = copy.deepcopy(block)
-  # Strip routing-only metadata from services. `path` and `profile` are
-  # consumed by stamp_daemon to build `daemon.routing` and are not part
-  # of any service-instance schema. Leaving them would surface as
-  # "Unknown config key" warnings on load. Mirrors stamp_daemon's
-  # ROUTING_ONLY_KEYS filter.
-  routing_only = {"path", "profile"}
+  _strip_routing_only_service_keys(merged)
+  return merged
+
+
+# Routing-only metadata on service instances: `path`, `profile`, and the
+# multi-path `routes` list are consumed by stamp_daemon to build
+# `daemon.routing` and are not part of any service-instance schema.
+# Leaving them would surface as "Unknown config key" warnings on load.
+# Mirrors stamp_daemon's ROUTING_ONLY_KEYS filter.
+ROUTING_ONLY_KEYS = {"path", "profile", "routes"}
+
+
+def _strip_routing_only_service_keys(merged: dict[str, Any]) -> None:
   for instances in (merged.get("services") or {}).values():
     if not isinstance(instances, dict):
       continue
@@ -151,9 +158,8 @@ def _synthesize_config() -> dict[str, Any]:
       if not isinstance(fields, dict):
         continue
       for k in list(fields):
-        if k in routing_only:
+        if k in ROUTING_ONLY_KEYS:
           del fields[k]
-  return merged
 
 
 def _parse_args() -> argparse.Namespace:

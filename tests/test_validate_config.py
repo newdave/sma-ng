@@ -140,3 +140,32 @@ def test_typed_vs_string_no_warning_when_typed_field_is_set(tmp_path: Path) -> N
   findings: list = []
   validate_config._check_typed_vs_string_conflicts(cfg, findings)
   assert not any("low_power" in f.message for f in findings)
+
+
+def test_synthesize_strips_routing_only_keys_including_routes() -> None:
+  """config:show / config:validate synthesize from setup/local.yml, where
+  service instances carry routing-only metadata (`path`/`profile` and the
+  multi-path `routes` list). The synthesis filter must mirror
+  stamp_daemon's ROUTING_ONLY_KEYS so those keys never reach schema
+  validation as unknown-key warnings."""
+  spec_sc = importlib.util.spec_from_file_location("show_config", ROOT / "scripts" / "show-config.py")
+  assert spec_sc is not None and spec_sc.loader is not None
+  show_config = importlib.util.module_from_spec(spec_sc)
+  sys.modules["show_config"] = show_config
+  spec_sc.loader.exec_module(show_config)
+
+  merged = {
+    "services": {
+      "sonarr": {
+        "main": {
+          "url": "http://sonarr",
+          "apikey": "abc",
+          "path": "/media/tv",
+          "profile": "rq",
+          "routes": [{"path": "/media/tv/4K", "profile": "hq"}],
+        },
+      },
+    },
+  }
+  show_config._strip_routing_only_service_keys(merged)
+  assert merged["services"]["sonarr"]["main"] == {"url": "http://sonarr", "apikey": "abc"}

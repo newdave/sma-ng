@@ -615,7 +615,13 @@ Each service type is a map keyed by instance name. The instance name is
 referenced from `daemon.routing[].services` as `<type>.<instance>` —
 e.g. `sonarr.kids`, `radarr.4k`. The path-prefix derivation that drove
 multi-instance matching in the old INI shape is now expressed
-explicitly in routing rules.
+explicitly in routing rules. One instance can serve any number of
+routing rules — multiple library paths (each with its own profile) can
+point at the same Sonarr/Radarr server without duplicating instances.
+When deploying via `mise run deploy:config`, declare those paths as a
+`routes:` list on the instance in `setup/local.yml` and the rules are
+generated for you (see the
+[deployment configuration reference](deployment.md#configuration)).
 
 | Option              | Type   | Default  | Description                                                                                                                                                                                                  |
 | ------------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

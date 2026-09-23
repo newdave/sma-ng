@@ -31,12 +31,13 @@ mapping that mirrors ``services:`` in sma-ng.yml exactly. We:
 
 * write daemon credentials into ``daemon.api-key`` / ``daemon.db-url`` /
   ``daemon.ffmpeg-dir``;
-* rebuild ``daemon.routing`` from every instance that carries both a
-  ``path`` and a ``profile`` (longest-match-first so the daemon's
-  prefix matcher picks the most specific rule);
+* rebuild ``daemon.routing`` from every instance that carries a
+  ``path`` + ``profile`` pair and/or a ``routes`` list of such pairs —
+  one rule per pair (longest-match-first so the daemon's prefix
+  matcher picks the most specific rule);
 * stamp service credentials into ``services.<type>.<instance>``,
-  filtering out routing-only metadata (``path``, ``profile``) which
-  belongs in routing rules, not the service block.
+  filtering out routing-only metadata (``path``, ``profile``,
+  ``routes``) which belongs in routing rules, not the service block.
 """
 
 import base64
@@ -57,8 +58,9 @@ def _b64arg(n, default=""):
 
 
 # Keys that describe routing, not service identity — never stamped into
-# services.<type>.<instance>.
-ROUTING_ONLY_KEYS = {"path", "profile"}
+# services.<type>.<instance>. ``routes`` is the multi-path form: a list
+# of {path, profile} dicts on one instance, each becoming its own rule.
+ROUTING_ONLY_KEYS = {"path", "profile", "routes"}
 
 # Boolean fields per service type (used to coerce JSON string values back
 # to YAML bools so the schema validator doesn't complain).
@@ -255,8 +257,9 @@ if os.path.exists(yaml_path):
             inst_block[yaml_key] = new_val
             changed = True
 
-  # routing rules built from every instance carrying path + profile,
-  # sorted longest-match-first.
+  # routing rules built from every instance carrying path + profile
+  # pairs — the singular `path`/`profile` fields, a `routes` list of
+  # {path, profile} entries, or both — sorted longest-match-first.
   #
   # Fan-out services: any instance whose type is in FANOUT_TYPES that
   # carries no path/profile is considered "global" — its ref is appended
@@ -271,17 +274,29 @@ if os.path.exists(yaml_path):
   fanout_refs = []
   for stype, instances in services.items():
     for inst_name, fields in instances.items():
-      path = fields.get("path", "").strip()
-      profile = fields.get("profile", "").strip()
+      pairs = []
+      path = str(fields.get("path", "") or "").strip()
+      profile = str(fields.get("profile", "") or "").strip()
       if path and profile:
+        pairs.append((path, profile))
+      routes = fields.get("routes") or []
+      if isinstance(routes, list):
+        for entry in routes:
+          if not isinstance(entry, dict):
+            continue
+          r_path = str(entry.get("path", "") or "").strip()
+          r_profile = str(entry.get("profile", "") or "").strip()
+          if r_path and r_profile:
+            pairs.append((r_path, r_profile))
+      for r_path, r_profile in pairs:
         routing_entries.append(
           {
-            "match": path,
-            "profile": profile,
+            "match": r_path,
+            "profile": r_profile,
             "services": [f"{stype}.{inst_name}"],
           }
         )
-      elif stype in FANOUT_TYPES and not path and not profile:
+      if not pairs and stype in FANOUT_TYPES and not path and not profile:
         fanout_refs.append(f"{stype}.{inst_name}")
   if fanout_refs:
     for entry in routing_entries:
