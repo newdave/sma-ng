@@ -252,13 +252,16 @@ services:                      # nested <type>.<instance>; matches sma-ng.yml sc
     main:
       url: https://sonarr.example.com
       apikey: <key>
-      path: /mnt/unionfs/Media/TV/1080P
-      profile: rq              # routing.match=path, routing.profile=this
+      routes:                  # one routing rule per entry, all -> sonarr.main
+        - path: /mnt/unionfs/Media/TV/1080P
+          profile: rq
+        - path: /mnt/unionfs/Media/TV/4K
+          profile: hq
     kids:
       url: https://sonarr-kids.example.com
       apikey: <key>
       path: /mnt/unionfs/Media/TV/Kids
-      profile: lq
+      profile: lq              # singular form: routing.match=path, routing.profile=this
 ```
 
 Deep-merge semantics for `base:` and `profiles:`:
@@ -360,7 +363,8 @@ For each remote host the staging build:
 3. Deep-merges `base:` and `profiles:` overlays from `setup/local.yml`.
 4. Stamps each `services.<type>.<instance>` from `setup/local.yml` into the
    `services:` block, and rebuilds `daemon.routing` from every instance
-   carrying both `path` and `profile` (longest match first).
+   carrying path+profile pairs — the singular `path`/`profile` keys and/or
+   a `routes` list of such pairs, one rule per pair (longest match first).
 5. Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir` /
    `daemon.node-id` (kebab-case) into `daemon:`.
 6. Deep-merges arbitrary `daemon:` keys from `setup/local.yml` (e.g.

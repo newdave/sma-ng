@@ -621,6 +621,120 @@ class TestDeployLibHelpers:
     assert parsed["services"]["autoscan"]["main"]["url"] == "http://autoscan"
     assert parsed["services"]["autoscan"]["main"]["username"] == "u"
 
+  def test_stamp_daemon_expands_routes_list_into_routing_rules(self, tmp_path):
+    """One instance carrying a `routes` list of {path, profile} pairs
+    generates one routing rule per pair, all referencing that instance —
+    no duplicate instances needed to route multiple library paths."""
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "sma-ng.yml").write_text("daemon: {}\nservices: {}\n")
+    (config_dir / "daemon.env").write_text("# existing\n")
+
+    services = {
+      "sonarr": {
+        "main": {
+          "url": "http://sonarr",
+          "apikey": "tv-key",
+          "routes": [
+            {"path": "/media/tv/1080P", "profile": "rq"},
+            {"path": "/media/tv/4K", "profile": "hq"},
+            {"path": "/media/tv/Kids", "profile": "lq"},
+          ],
+        },
+      },
+      "autoscan": {
+        "main": {"url": "http://autoscan"},
+      },
+    }
+    result = self._run_stamp_daemon(deploy_dir, services)
+    assert result.returncode == 0, result.stderr or result.stdout
+    content = (config_dir / "sma-ng.yml").read_text()
+
+    import yaml as _y
+
+    parsed = _y.safe_load(content)
+    routing = parsed["daemon"]["routing"]
+    by_match = {r["match"]: r for r in routing}
+    assert set(by_match) == {"/media/tv/1080P", "/media/tv/4K", "/media/tv/Kids"}
+    assert by_match["/media/tv/1080P"]["profile"] == "rq"
+    assert by_match["/media/tv/4K"]["profile"] == "hq"
+    assert by_match["/media/tv/Kids"]["profile"] == "lq"
+    for rule in routing:
+      assert "sonarr.main" in rule["services"]
+      assert "autoscan.main" in rule["services"], f"fan-out missing from {rule}"
+    # `routes` is routing-only metadata — it must not be stamped into
+    # the service block.
+    assert "routes" not in parsed["services"]["sonarr"]["main"]
+
+  def test_stamp_daemon_merges_legacy_path_and_routes(self, tmp_path):
+    """The singular path/profile pair and a `routes` list compose:
+    every pair becomes a rule."""
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "sma-ng.yml").write_text("daemon: {}\nservices: {}\n")
+    (config_dir / "daemon.env").write_text("# existing\n")
+
+    services = {
+      "radarr": {
+        "main": {
+          "url": "http://radarr",
+          "path": "/media/movies/1080P",
+          "profile": "rq",
+          "routes": [{"path": "/media/movies/4K", "profile": "hq"}],
+        },
+      },
+    }
+    result = self._run_stamp_daemon(deploy_dir, services)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+    import yaml as _y
+
+    parsed = _y.safe_load((config_dir / "sma-ng.yml").read_text())
+    by_match = {r["match"]: r for r in parsed["daemon"]["routing"]}
+    assert set(by_match) == {"/media/movies/1080P", "/media/movies/4K"}
+    assert by_match["/media/movies/4K"]["profile"] == "hq"
+
+  def test_services_json_preserves_routes_structure(self, tmp_path):
+    """scripts/services-json.py must keep `routes` as structured JSON
+    (list of path/profile dicts), not stringify it, and drop malformed
+    entries."""
+    local_yml = tmp_path / "local.yml"
+    local_yml.write_text(
+      "services:\n"
+      "  sonarr:\n"
+      "    main:\n"
+      "      url: http://sonarr\n"
+      "      apikey: abc\n"
+      "      routes:\n"
+      "        - path: /media/tv/1080P\n"
+      "          profile: rq\n"
+      "        - path: /media/tv/4K\n"
+      "          profile: hq\n"
+      "        - path: /media/tv/broken\n"  # no profile -> dropped
+      "        - just-a-string\n"  # not a dict -> dropped
+      "  plex:\n"
+      "    main:\n"
+      "      url: http://plex\n"
+      "      token: t\n"
+    )
+    result = subprocess.run(
+      [PYTHON, "scripts/services-json.py", str(local_yml)],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    out = json.loads(result.stdout)
+    assert out["sonarr"]["main"]["routes"] == [
+      {"path": "/media/tv/1080P", "profile": "rq"},
+      {"path": "/media/tv/4K", "profile": "hq"},
+    ]
+    # Scalar fields still stringified as before.
+    assert out["plex"]["main"]["url"] == "http://plex"
+
   def test_stamp_daemon_does_not_write_sma_node_name_to_daemon_env(self, tmp_path):
     deploy_dir = tmp_path / "deploy"
     config_dir = deploy_dir / "config"

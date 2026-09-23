@@ -141,17 +141,22 @@ daemon:
 #
 # `mise run deploy:config` stamps each instance into sma-ng.yml under
 # `services.<type>.<instance>` and rebuilds `daemon.routing` from every
-# instance that defines both `path:` and `profile:`. The `path` and
-# `profile` keys live here only so routing can be derived; they are not
-# copied into the service block.
+# instance that defines path+profile pairs — either the singular `path:`
+# and `profile:` keys, or a `routes:` list when one server manages
+# several library paths (one routing rule per entry; both forms may be
+# combined). These keys live here only so routing can be derived; they
+# are not copied into the service block.
 
 # services:
 #   sonarr:
 #     main:
 #       url: http://sonarr.example.com:8989
 #       apikey: ""
-#       path: /media/tv
-#       profile: rq
+#       routes:
+#         - path: /media/tv
+#           profile: rq
+#         - path: /media/tv/4K
+#           profile: hq
 #     kids:
 #       url: http://sonarr.example.com:8990
 #       apikey: ""

@@ -17,6 +17,22 @@ becomes::
     {"sonarr": {"main": {"url": "...", "apikey": "...",
                           "path": "...", "profile": "rq"}}, ...}
 
+An instance may route multiple library paths through a ``routes`` list
+instead of (or alongside) the singular ``path``/``profile`` pair::
+
+    services:
+      sonarr:
+        main:
+          url: ...
+          routes:
+            - path: /media/tv/1080P
+              profile: rq
+            - path: /media/tv/4K
+              profile: hq
+
+``routes`` is preserved structurally as a list of ``{"path": ...,
+"profile": ...}`` string dicts; entries missing either key are dropped.
+
 Only known service types are emitted (sonarr, radarr, plex, jellyfin, emby).
 Empty instances are dropped so downstream stampers can rely on truthiness
 checks. Booleans are stringified ("true"/"false") to keep JSON consumers
@@ -51,10 +67,36 @@ def _stringify(v):
   return str(v)
 
 
+def _normalise_routes(routes):
+  """Keep ``routes`` as structured data: a list of path+profile string
+  dicts. Entries that aren't dicts or lack either key are dropped."""
+  if not isinstance(routes, list):
+    return []
+  out = []
+  for entry in routes:
+    if not isinstance(entry, dict):
+      continue
+    path = _stringify(entry.get("path") or "").strip()
+    profile = _stringify(entry.get("profile") or "").strip()
+    if path and profile:
+      out.append({"path": path, "profile": profile})
+  return out
+
+
 def _normalise_instance(inst):
   if not isinstance(inst, dict):
     return {}
-  return {k: _stringify(v) for k, v in inst.items() if v is not None and str(v) != ""}
+  out = {}
+  for k, v in inst.items():
+    if v is None or v == "" or v == []:
+      continue
+    if k == "routes":
+      routes = _normalise_routes(v)
+      if routes:
+        out[k] = routes
+      continue
+    out[k] = _stringify(v)
+  return out
 
 
 def _apply_defaults(instances):
