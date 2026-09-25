@@ -396,6 +396,7 @@ Generates an additional stereo AAC stream for device compatibility.
 | `embed-image-subs`          | bool   | `false`    | Embed image-based subs                                                                                                                                                                                                                                              |
 | `embed-only-internal-subs`  | bool   | `false`    | Only embed subs from source (no external files)                                                                                                                                                                                                                     |
 | `ignored-dispositions`      | list   |            | Skip subs with these dispositions                                                                                                                                                                                                                                   |
+| `encoding`                  | string |            | Manual character-set override passed to FFmpeg as `-sub_charenc` for every subtitle source. Rarely needed: external sidecar files have their encoding auto-detected per file (see below), and the detected value wins over this global setting for that file.       |
 | `remove-bitstream-subs`     | list   | `true`     | Remove bitstream subtitle formats                                                                                                                                                                                                                                   |
 | `include-original-language` | bool   | `false`    | Include original language subs                                                                                                                                                                                                                                      |
 | `attachment-codec`          | list   |            | Attachment codecs (e.g. `ttf` fonts) to copy into the output. Only honored on containers that support attachments (never MP4); empty (the default) drops all attachment streams.                                                                                   |
@@ -410,6 +411,14 @@ otherwise they are dropped from the output (they may still be ripped to
 external files or burned in, per the rip/burn settings). Cover art does not
 count as a video stream: an audio-only file whose only "video" is an
 `attached_pic` poster is rejected as an invalid source rather than transcoded.
+
+External text sidecars (`.srt` and friends) are not always UTF-8 — release
+groups commonly ship CP1252 or UTF-16 files. FFmpeg's subtitle decoder rejects
+those ("Invalid UTF-8 in decoded subtitles text"), which previously made the
+image/text probe misclassify the file as image-based and silently drop it.
+SMA-NG now detects the encoding of each external subtitle file (UTF-8, UTF-16
+BOM, CP1252/latin-1 fallback) and passes `-sub_charenc` for that source
+automatically, logging `[sub-encoding-detect]` when a non-UTF-8 file is found.
 
 ### base.subtitle.cleanit
 

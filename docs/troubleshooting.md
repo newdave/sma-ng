@@ -168,6 +168,16 @@ the profile's `video.pix-fmt` (e.g. `p010le` for 10-bit, `nv12` for 8-bit).
 
 - This is Plex reading the raw codec name. SMA-NG sets a title on subtitle streams — this is cosmetic.
 
+### External .srt skipped with "no appropriate codecs found or embed disabled"
+
+- For a text sidecar this usually meant the file is not UTF-8 (CP1252/UTF-16 are
+  common); FFmpeg's decode failure made the image/text probe classify it as
+  image-based, and with `codec-image-based` empty the file was dropped.
+- SMA-NG now auto-detects sidecar encodings and passes `-sub_charenc`
+  (log line `[sub-encoding-detect]`), so this skip should only appear for
+  genuinely image-based or corrupt files. Re-queue the affected items to pick
+  the subtitles up.
+
 ### Sonarr/Radarr not rescanning after manual.py
 
 - Verify `path` is set in the `[Sonarr]`/`[Radarr]` section

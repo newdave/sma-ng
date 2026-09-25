@@ -5431,6 +5431,54 @@ class TestProcessExternalSubStream:
       mp._process_external_sub(ext_sub, "/fake/movie.mkv", ["eng"], [], [], sub_settings, sources, None)
     assert len(sub_settings) == 0
 
+  def test_detected_encoding_passed_to_image_check_and_setting(self):
+    mp = self._make_mp()
+    ext_sub = self._make_external_sub()
+    sub_settings = []
+    sources = ["/fake/movie.mkv"]
+    with (
+      patch.object(mp.subtitles, "detectSubEncoding", return_value="cp1252"),
+      patch.object(mp, "isImageBasedSubtitle", return_value=False) as mock_image,
+      patch.object(mp, "cleanDispositions"),
+    ):
+      mp._process_external_sub(ext_sub, "/fake/movie.mkv", ["eng"], [], [], sub_settings, sources, None)
+    mock_image.assert_called_once_with("/fake/movie.eng.srt", 0, sub_encoding="cp1252")
+    assert len(sub_settings) == 1
+    assert sub_settings[0]["encoding"] == "cp1252"
+
+  def test_utf8_sub_has_no_encoding_key(self):
+    mp = self._make_mp()
+    ext_sub = self._make_external_sub()
+    sub_settings = []
+    sources = ["/fake/movie.mkv"]
+    with (
+      patch.object(mp.subtitles, "detectSubEncoding", return_value=None),
+      patch.object(mp, "isImageBasedSubtitle", return_value=False) as mock_image,
+      patch.object(mp, "cleanDispositions"),
+    ):
+      mp._process_external_sub(ext_sub, "/fake/movie.mkv", ["eng"], [], [], sub_settings, sources, None)
+    mock_image.assert_called_once_with("/fake/movie.eng.srt", 0, sub_encoding=None)
+    assert len(sub_settings) == 1
+    assert "encoding" not in sub_settings[0]
+
+  def test_image_sidecar_never_stamped_with_encoding(self):
+    # Binary image sidecars (.sup/.idx) always "detect" as cp1252/latin1;
+    # -sub_charenc is illegal for bitmap decoders so it must not be stamped.
+    mp = self._make_mp()
+    mp.settings.embedimgsubs = True
+    mp.settings.scodec_image = ["hdmv_pgs_subtitle"]
+    ext_sub = self._make_external_sub("/fake/movie.eng.sup", codec="hdmv_pgs_subtitle")
+    sub_settings = []
+    sources = ["/fake/movie.mkv"]
+    with (
+      patch.object(mp.subtitles, "detectSubEncoding", return_value="cp1252"),
+      patch.object(mp, "isImageBasedSubtitle", return_value=True),
+      patch.object(mp, "cleanDispositions"),
+    ):
+      mp._process_external_sub(ext_sub, "/fake/movie.mkv", ["eng"], [], [], sub_settings, sources, None)
+    assert len(sub_settings) == 1
+    assert "encoding" not in sub_settings[0]
+
 
 # ---------------------------------------------------------------------------
 # cleanExternalSub()
