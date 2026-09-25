@@ -133,6 +133,51 @@ class TestProcessExternalSub:
     assert result.subtitle[0].metadata["language"] == BaseCodec.UNDEFINED
 
 
+class TestDetectSubEncoding:
+  def _write(self, tmp_path, data: bytes):
+    p = tmp_path / "movie.eng.srt"
+    p.write_bytes(data)
+    return str(p)
+
+  def test_plain_utf8_returns_none(self, tmp_path):
+    path = self._write(tmp_path, b"1\n00:00:00,000 --> 00:00:02,000\nHello\n\n")
+    assert SubtitleProcessor.detectSubEncoding(path) is None
+
+  def test_utf8_bom_returns_none(self, tmp_path):
+    path = self._write(tmp_path, b"\xef\xbb\xbf" + b"1\n00:00:00,000 --> 00:00:02,000\nHello\n\n")
+    assert SubtitleProcessor.detectSubEncoding(path) is None
+
+  def test_utf16le_bom_detected(self, tmp_path):
+    path = self._write(tmp_path, "1\n00:00:00,000 --> 00:00:02,000\nHello\n\n".encode("utf-16"))
+    assert SubtitleProcessor.detectSubEncoding(path) == "utf-16le"
+
+  def test_utf16be_bom_detected(self, tmp_path):
+    path = self._write(tmp_path, b"\xfe\xff" + "Hello".encode("utf-16-be"))
+    assert SubtitleProcessor.detectSubEncoding(path) == "utf-16be"
+
+  def test_cp1252_detected(self, tmp_path):
+    path = self._write(tmp_path, b"1\n00:00:00,000 --> 00:00:02,000\nCa\xe7a \x93quoted\x94 caf\xe9\n\n")
+    assert SubtitleProcessor.detectSubEncoding(path) == "cp1252"
+
+  def test_undecodable_cp1252_falls_back_to_latin1(self, tmp_path):
+    # 0x81 is undefined in cp1252 but valid in latin-1.
+    path = self._write(tmp_path, b"1\n00:00:00,000 --> 00:00:02,000\nbad \x81 byte\n\n")
+    assert SubtitleProcessor.detectSubEncoding(path) == "latin1"
+
+  def test_bomless_utf16le_detected(self, tmp_path):
+    data = "1\n00:00:00,000 --> 00:00:02,000\nHello\n\n".encode("utf-16-le")
+    path = self._write(tmp_path, data)
+    assert SubtitleProcessor.detectSubEncoding(path) == "utf-16le"
+
+  def test_bomless_utf16be_detected(self, tmp_path):
+    data = "1\n00:00:00,000 --> 00:00:02,000\nHello\n\n".encode("utf-16-be")
+    path = self._write(tmp_path, data)
+    assert SubtitleProcessor.detectSubEncoding(path) == "utf-16be"
+
+  def test_missing_file_returns_none(self, tmp_path):
+    assert SubtitleProcessor.detectSubEncoding(str(tmp_path / "nope.srt")) is None
+
+
 class TestScanForExternalSubs:
   def _sub_info_mock(self, path, lang, default=False):
     m = MagicMock()

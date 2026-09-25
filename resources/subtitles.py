@@ -1,5 +1,6 @@
 """Subtitle scanning, downloading, burning, and syncing."""
 
+import codecs
 import os
 
 from converter import ConverterError, FFMpegConvertError
@@ -33,6 +34,48 @@ class SubtitleProcessor:
     self.settings = media_processor.settings
     self.converter = media_processor.converter
     self.log = media_processor.log
+
+  # Text-subtitle files must be UTF-8 for FFmpeg's subtitle decoders; sidecars
+  # from release groups are frequently CP1252/UTF-16. FFprobe demuxes them fine
+  # but decode fails ("Invalid UTF-8 in decoded subtitles text"), so detect the
+  # encoding up front and pass it to FFmpeg via -sub_charenc instead of losing
+  # the stream.
+  _SUB_ENCODING_READ_CAP = 10 * 1024 * 1024
+
+  @classmethod
+  def detectSubEncoding(cls, path):
+    """Return an FFmpeg -sub_charenc value for a text subtitle file, or None.
+
+    None means the file is already valid UTF-8 (with or without BOM) and no
+    -sub_charenc is needed. Unreadable files also return None so the caller
+    falls through to existing error handling.
+    """
+    try:
+      with open(path, "rb") as f:
+        raw = f.read(cls._SUB_ENCODING_READ_CAP)
+    except OSError:
+      return None
+    for bom, enc in ((codecs.BOM_UTF8, None), (codecs.BOM_UTF16_LE, "utf-16le"), (codecs.BOM_UTF16_BE, "utf-16be")):
+      if raw.startswith(bom):
+        return enc
+    if b"\x00" in raw:
+      # BOM-less UTF-16 ASCII decodes as "valid" UTF-8 (NUL is a legal code
+      # point), so sniff NUL bytes before the UTF-8 check. A leading NUL means
+      # big-endian high bytes come first.
+      return "utf-16be" if raw[:1] == b"\x00" else "utf-16le"
+    try:
+      raw.decode("utf-8")
+      return None
+    except UnicodeDecodeError:
+      pass
+    # No BOM and not UTF-8: cp1252 is a superset of latin-1 for the printable
+    # range and covers the common curly-quote/accent sidecars; latin-1 is the
+    # never-fails fallback for the few code points cp1252 leaves undefined.
+    try:
+      raw.decode("cp1252")
+      return "cp1252"
+    except UnicodeDecodeError:
+      return "latin1"
 
   def processExternalSub(self, valid_external_sub, inputfile):
     """

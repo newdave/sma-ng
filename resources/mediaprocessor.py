@@ -2625,13 +2625,21 @@ class MediaProcessor:
     Handles image vs text detection, language/disposition filtering, source list management,
     and scheduling the external subtitle file for deletion after embedding.
     """
+    sub_encoding = self.subtitles.detectSubEncoding(external_sub.path)
     try:
-      image_based = self.isImageBasedSubtitle(external_sub.path, 0)
+      image_based = self.isImageBasedSubtitle(external_sub.path, 0, sub_encoding=sub_encoding)
     except KeyboardInterrupt:
       raise
     except Exception:
       self.log.error("Unknown error occurred while trying to determine if subtitle is text or image based. Probably corrupt, skipping.")
       return
+    if image_based:
+      # -sub_charenc is only legal for text subtitle decoders; binary image
+      # sidecars (.sup/.idx) always "detect" as cp1252/latin1 so the value is
+      # meaningless there and would abort any decode of that stream.
+      sub_encoding = None
+    elif sub_encoding:
+      self.log.info("External subtitle file %s is not UTF-8, using -sub_charenc %s [sub-encoding-detect]." % (os.path.basename(external_sub.path), sub_encoding))
     self.cleanDispositions(external_sub)
     stream = external_sub.subtitle[0]
     scodec = self._select_subtitle_codec(stream.codec if hasattr(stream, "codec") else "", image_based, embed=True)
@@ -2657,6 +2665,8 @@ class MediaProcessor:
       "is_forced": getattr(stream, "forced", False),
       "debug": "subtitle.embed-subs",
     }
+    if sub_encoding:
+      subtitle_setting["encoding"] = sub_encoding
     subtitle_setting["title"] = self.subtitleStreamTitle(stream, subtitle_setting, image_based, path=external_sub.path, tagdata=tagdata)
     subtitle_settings.append(subtitle_setting)
     self.log.debug("Path: %s." % external_sub.path)
@@ -3626,16 +3636,20 @@ class MediaProcessor:
       return bit_depth >= 10
 
   # Run test conversion of subtitle to see if its image based, does not appear to be any other way to tell dynamically
-  def isImageBasedSubtitle(self, inputfile, map):
+  def isImageBasedSubtitle(self, inputfile, map, sub_encoding=None):
     """
     Test whether a subtitle track is image-based by attempting a short SRT conversion.
 
     Runs FFmpeg for up to 1 second attempting to convert the track to SRT.
     Returns True (image-based) if FFmpeg raises an FFMpegConvertError, or
-    False if the conversion succeeds (text-based).
+    False if the conversion succeeds (text-based). sub_encoding is passed
+    through as -sub_charenc so non-UTF-8 text sidecars are not misread as
+    image-based when their decode fails.
     """
     ripsub = [{"map": map, "codec": "srt"}]
     options = {"source": [inputfile], "format": "srt", "subtitle": ripsub}
+    if sub_encoding:
+      options["sub-encoding"] = sub_encoding
     postopts = ["-t", "00:00:01"]
     try:
       conv = self.converter.convert(None, options, timeout=30, postopts=postopts)

@@ -384,3 +384,48 @@ class TestConverterConvertFull:
         }
       )
     assert "-fix_sub_duration" in opts
+
+  def test_per_source_subtitle_encoding_emits_sub_charenc(self, tmp_path):
+    """A subtitle entry's detected encoding renders as -sub_charenc before its own -i only."""
+    c = _make_converter()
+    src = tmp_path / "movie.mkv"
+    src.write_bytes(b"x")
+    sub = tmp_path / "movie.eng.srt"
+    sub.write_bytes(b"subtitle")
+    fake_info = _make_info()
+
+    with patch.object(c.ffmpeg, "probe", return_value=fake_info):
+      opts = c.parse_options(
+        {
+          "format": "mp4",
+          "source": [str(src), str(sub)],
+          "audio": [{"codec": "aac"}],
+          "subtitle": [{"codec": "mov_text", "map": "0:2", "source": 1, "encoding": "cp1252"}],
+        }
+      )
+    charenc_at = opts.index("-sub_charenc")
+    assert opts[charenc_at + 1] == "cp1252"
+    # -sub_charenc must precede the subtitle source's -i and follow the main source's.
+    assert opts.index(str(src)) < charenc_at < opts.index(str(sub))
+
+  def test_global_sub_encoding_still_applies(self, tmp_path):
+    """Legacy global sub-encoding option still renders when no per-stream encoding is set."""
+    c = _make_converter()
+    src = tmp_path / "movie.mkv"
+    src.write_bytes(b"x")
+    sub = tmp_path / "movie.eng.srt"
+    sub.write_bytes(b"subtitle")
+    fake_info = _make_info()
+
+    with patch.object(c.ffmpeg, "probe", return_value=fake_info):
+      opts = c.parse_options(
+        {
+          "format": "mp4",
+          "source": [str(src), str(sub)],
+          "sub-encoding": "utf-16le",
+          "audio": [{"codec": "aac"}],
+          "subtitle": [{"codec": "mov_text", "map": "0:2", "source": 1}],
+        }
+      )
+    charenc_at = opts.index("-sub_charenc")
+    assert opts[charenc_at + 1] == "utf-16le"

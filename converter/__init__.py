@@ -130,10 +130,14 @@ class Converter:
           opt["subtitle"] = [opt["subtitle"]]
 
         sindex = opt["source"].index(x)
-        if any(s.get("source", 0) == sindex for s in opt["subtitle"]):
+        subs_for_source = [s for s in opt.get("subtitle", []) if isinstance(s, dict) and s.get("source", 0) == sindex]
+        if subs_for_source:
           source_options.append("-fix_sub_duration")
-          if "sub-encoding" in opt:
-            source_options.extend(["-sub_charenc", opt["sub-encoding"]])
+          # Per-stream detected encoding wins over the global sub-encoding
+          # setting; both render as -sub_charenc ahead of this source's -i.
+          charenc = next((s["encoding"] for s in subs_for_source if s.get("encoding")), None) or opt.get("sub-encoding")
+          if charenc:
+            source_options.extend(["-sub_charenc", charenc])
         source_options.extend(["-i", x])
 
     # Audio
