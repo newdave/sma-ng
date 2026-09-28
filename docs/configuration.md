@@ -482,7 +482,11 @@ an episode is genuinely titled "Episode N". Daily shows (late-night, news) use p
 numbers that differ between Sonarr and TMDB, so SxxExx names would not be
 matchable on re-import; the air date is the only identifier both sides agree
 on. Air dates are recognized in filenames with `-`, `.`, `_`, or space
-separators (for example `2026-09-16` or `Show.2026.09.16`).
+separators (for example `2026-09-16` or `Show.2026.09.16`). Air-date
+recovery searches the arr-supplied season first and then the TMDB season
+whose date range contains the air date, so tags and titles resolve even
+when Sonarr and TMDB disagree on the season number (common late in a
+daily show's broadcast year).
 
 ---
 
