@@ -69,6 +69,7 @@ class _TypeStub:
     self.tvdbid = None
     self.imdbid = None
     self.date = None
+    self.episode_substituted = False
 
 
 class RenameProcessor:
@@ -278,8 +279,10 @@ class RenameProcessor:
     # not in the filename, so we look it up from the season episode list
     # rather than passing episode=0 to Metadata() and triggering a 404.
     resolved_episode = episode
+    episode_from_air_date = False
     if resolved_episode is None and air_date:
       resolved_episode = self._find_episode_for_date(_tmdb, resolved_tmdbid, resolved_season, air_date)
+      episode_from_air_date = resolved_episode is not None
     if resolved_episode is None:
       self.log.debug("Could not resolve episode number for %s, using stub" % basename)
       return _TypeStub(MediaType.TV)
@@ -295,6 +298,12 @@ class RenameProcessor:
         language=language,
         logger=self.log,
       )
+      if episode_from_air_date:
+        # The episode number only exists because we matched the filename's
+        # air date against TMDB — the source filename has no SxxEyy.  Flag
+        # the substitution so generate_name keeps the air-date template and
+        # the name stays matchable by Sonarr on re-import.
+        tagdata.episode_substituted = True
       self.log.info("Resolved %s -> S%02dE%02d - %s" % (basename, resolved_season, resolved_episode, tagdata.title or ""))
       return tagdata
     except Exception:
