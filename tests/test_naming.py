@@ -1085,3 +1085,192 @@ class TestMultiEpisodePlexmatch:
     # All entries point to same file
     paths = [l.split(":", 2)[2].strip() for l in lines]
     assert len(set(paths)) == 1
+
+
+class TestExtractAirDate:
+  """extract_air_date accepts common release-name date separators."""
+
+  def _fn(self):
+    from resources.naming import extract_air_date
+
+    return extract_air_date
+
+  def test_hyphenated(self):
+    assert self._fn()("Show - 2026-09-16 - Title.mkv") == "2026-09-16"
+
+  def test_dotted(self):
+    assert self._fn()("Jimmy.Kimmel.2026.09.22.Sarah.Paulson.720p.HDTV.x264-MeGusta.mkv") == "2026-09-22"
+
+  def test_underscored(self):
+    assert self._fn()("Show_2026_09_16_Title.mkv") == "2026-09-16"
+
+  def test_spaced(self):
+    assert self._fn()("Show 2026 09 16 Title.mkv") == "2026-09-16"
+
+  def test_mixed_separators_rejected(self):
+    # Separator must be consistent — avoids matching '2049.10 80'-style noise.
+    assert self._fn()("Blade Runner 2049.10-80.mkv") is None
+
+  def test_invalid_month_rejected(self):
+    assert self._fn()("Show.2026.13.01.mkv") is None
+
+  def test_resolution_not_matched(self):
+    assert self._fn()("Blade.Runner.2049.1080p.x265.mkv") is None
+
+  def test_no_date(self):
+    assert self._fn()("Some.Show.S01E02.mkv") is None
+
+
+class TestDailySeriesNaming:
+  """Daily (air-date) series must be named with the airdate template even when
+  the episode number is non-zero — Sonarr numbers daily episodes with large
+  per-season values (e.g. Jimmy Kimmel S24E2510) that TMDB does not share, so
+  SxxExx names are unmatchable on re-import."""
+
+  def _settings(self):
+    settings = MagicMock()
+    settings.naming_enabled = True
+    settings.naming_tv_template = "{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle}"
+    settings.naming_tv_airdate_template = "{Series TitleYear} - {Air-Date} - {Episode CleanTitle}"
+    settings.sonarr_instances = []
+    return settings
+
+  def _kimmel_tagdata(self, title="Episode 2510"):
+    td = MagicMock()
+    td.mediatype = MediaType.TV
+    td.showname = "Jimmy Kimmel Live!"
+    td.showdata = {"first_air_date": "2003-01-26"}
+    td.season = 24
+    td.episode = 2510
+    td.episodes = [2510]
+    td.title = title
+    td.date = None
+    td.episode_substituted = False
+    return td
+
+  @patch("resources.naming._requests")
+  def test_sonarr_daily_series_uses_airdate_template(self, mock_requests, make_media_info):
+    """Sonarr parse reporting seriesType 'daily' forces the airdate template."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+      "series": {"title": "Jimmy Kimmel Live!", "year": 2003, "seriesType": "daily"},
+      "episodes": [{"seasonNumber": 24, "episodeNumber": 2505, "title": "Bill Burr, H.E.R.", "airDate": "2026-09-16"}],
+      "quality": {"quality": {"resolution": "720p", "source": "HDTV"}},
+      "releaseGroup": "MeGusta",
+    }
+    mock_requests.get.return_value = mock_resp
+
+    settings = self._settings()
+    settings.sonarr_instances = [{"path": "/tv/", "host": "sonarr", "port": 8989, "apikey": "key", "ssl": False, "webroot": ""}]
+
+    td = self._kimmel_tagdata(title="Bill Burr, H.E.R.")
+    path = "/tv/Jimmy Kimmel Live!/Season 24/Jimmy.Kimmel.2026.09.16.Bill.Burr.720p.HDTV.x264-MeGusta.mkv"
+    result = generate_name(path, make_media_info(), td, settings)
+    assert result is not None
+    assert "2026-09-16" in result
+    assert "Bill Burr" in result
+    assert "E2505" not in result
+
+  def test_placeholder_title_with_dotted_date_uses_airdate_template(self, make_media_info):
+    """No Sonarr data: a TMDB placeholder title ('Episode 2510') plus a date in
+    the source filename means the S/E numbering is untrustworthy — use the
+    airdate template and drop the placeholder title."""
+    td = self._kimmel_tagdata()
+    path = "/tv/Jimmy Kimmel Live!/Season 24/Jimmy.Kimmel.2026.09.22.Sarah.Paulson.720p.HDTV.x264-MeGusta.mkv"
+    result = generate_name(path, make_media_info(), td, self._settings())
+    assert result is not None
+    assert "2026-09-22" in result
+    assert "E2510" not in result
+    assert "Episode 2510" not in result
+
+  def test_placeholder_title_without_date_keeps_standard_template(self, make_media_info):
+    """Placeholder title but no date anywhere: nothing better to offer, keep SxxExx."""
+    td = self._kimmel_tagdata()
+    path = "/tv/Jimmy Kimmel Live!/Season 24/Jimmy.Kimmel.S24E2510.720p.HDTV.x264-MeGusta.mkv"
+    result = generate_name(path, make_media_info(), td, self._settings())
+    assert result is not None
+    assert "S24E2510" in result
+
+  def test_episode_substituted_uses_airdate_template(self, make_media_info):
+    """Metadata that recovered the real episode via air-date matching proved the
+    arr/TMDB numbering disagree — name by date, keeping the real title."""
+    td = self._kimmel_tagdata(title="Sarah Paulson, Dua Lipa")
+    td.episode = 108
+    td.episodes = [108]
+    td.date = "2026-09-22"
+    td.episode_substituted = True
+    path = "/tv/Jimmy Kimmel Live!/Season 24/Jimmy.Kimmel.2026.09.22.Sarah.Paulson.720p.HDTV.x264-MeGusta.mkv"
+    result = generate_name(path, make_media_info(), td, self._settings())
+    assert result is not None
+    assert "2026-09-22" in result
+    assert "Sarah Paulson" in result
+    assert "E108" not in result
+
+  def test_real_title_and_date_keeps_standard_template(self, make_media_info):
+    """A weekly show whose filename happens to contain a date still uses SxxExx
+    when the numbering was confirmed (real title, no daily signals)."""
+    td = self._kimmel_tagdata(title="Good Episode")
+    td.season = 3
+    td.episode = 5
+    td.episodes = [5]
+    path = "/tv/Some Show/Season 03/Some Show - 2020-03-10 - Good Episode.mkv"
+    result = generate_name(path, make_media_info(), td, self._settings())
+    assert result is not None
+    assert "S03E05" in result
+
+  @patch("resources.naming._requests")
+  def test_standard_series_with_literal_episode_title_keeps_sxxexx(self, mock_requests, make_media_info):
+    """A standard weekly series whose episode is genuinely titled 'Episode 1'
+    (common on international shows) must keep the SxxExx template even though
+    Sonarr supplies an airDate — Sonarr affirmed the numbering."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+      "series": {"title": "Happy Valley", "year": 2014, "seriesType": "standard"},
+      "episodes": [{"seasonNumber": 1, "episodeNumber": 1, "title": "Episode 1", "airDate": "2014-04-29"}],
+      "quality": {"quality": {"resolution": "1080p", "source": "WEB-DL"}},
+    }
+    mock_requests.get.return_value = mock_resp
+
+    settings = self._settings()
+    settings.sonarr_instances = [{"path": "/tv/", "host": "sonarr", "port": 8989, "apikey": "key", "ssl": False, "webroot": ""}]
+
+    td = self._kimmel_tagdata(title="Episode 1")
+    td.showname = "Happy Valley"
+    td.season = 1
+    td.episode = 1
+    td.episodes = [1]
+    path = "/tv/Happy Valley/Season 01/Happy.Valley.S01E01.1080p.WEB-DL.mkv"
+    result = generate_name(path, make_media_info(), td, settings)
+    assert result is not None
+    assert "S01E01" in result
+    assert "Episode 1" in result
+    assert "2014-04-29" not in result
+
+  @patch("resources.naming._requests")
+  def test_anime_series_keeps_sxxexx(self, mock_requests, make_media_info):
+    """Sonarr seriesType 'anime' is not air-date based — keep SxxExx even with
+    a placeholder-looking title and a date in the filename."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+      "series": {"title": "Some Anime", "year": 2020, "seriesType": "anime"},
+      "episodes": [{"seasonNumber": 2, "episodeNumber": 7, "title": "Episode 7", "airDate": "2020-05-17"}],
+    }
+    mock_requests.get.return_value = mock_resp
+
+    settings = self._settings()
+    settings.sonarr_instances = [{"path": "/tv/", "host": "sonarr", "port": 8989, "apikey": "key", "ssl": False, "webroot": ""}]
+
+    td = self._kimmel_tagdata(title="Episode 7")
+    td.season = 2
+    td.episode = 7
+    td.episodes = [7]
+    path = "/tv/Some Anime/Season 02/Some.Anime.2020.05.17.720p.mkv"
+    result = generate_name(path, make_media_info(), td, settings)
+    assert result is not None
+    assert "S02E07" in result
+
+  def test_impossible_date_rejected(self):
+    """extract_air_date validates against the real calendar."""
+    from resources.naming import extract_air_date
+
+    assert extract_air_date("Show.2026.02.31.mkv") is None

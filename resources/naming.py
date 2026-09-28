@@ -11,6 +11,7 @@ Default templates follow Sonarr/Radarr naming conventions.
 import logging
 import os
 import re
+from datetime import datetime
 
 try:
   import requests as _requests
@@ -119,6 +120,26 @@ DEFAULT_MOVIE_TEMPLATE = "{Movie CleanTitle} ({Release Year}) [{Quality Full}][{
 # Characters unsafe for filenames
 UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 
+# Air date in a release name: YYYY-MM-DD with a consistent separator drawn
+# from the set commonly used by release names (hyphen, dot, underscore, space).
+_AIR_DATE_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})([-._ ])(\d{2})\2(\d{2})(?!\d)")
+
+
+def extract_air_date(text):
+  """Extract an air date from a filename and normalize to YYYY-MM-DD.
+
+  Accepts hyphen/dot/underscore/space separators (consistent within one
+  date). Returns None when no plausible date is present.
+  """
+  for m in _AIR_DATE_RE.finditer(text or ""):
+    candidate = "%s-%s-%s" % (m.group(1), m.group(3), m.group(4))
+    try:
+      datetime.strptime(candidate, "%Y-%m-%d")
+    except ValueError:
+      continue
+    return candidate
+  return None
+
 
 def sanitize_filename(name):
   """Remove characters unsafe for filenames."""
@@ -196,12 +217,14 @@ class NamingData:
     self.series_title = ""
     self.series_year = ""
     self.series_titleyear = ""
+    self.series_type = ""  # Sonarr seriesType: 'standard', 'daily', 'anime'
     self.season = 0
     self.episode = 0
     self.episodes = []
     self.episode_title = ""
     self.episode_cleantitle = ""
     self.air_date = ""  # YYYY-MM-DD for airdate-based episodes
+    self.episode_substituted = False  # TMDB air-date remap replaced the arr episode number
 
     # Movie
     self.movie_title = ""
@@ -261,6 +284,12 @@ class NamingData:
       self.episodes = sorted(tagdata.episodes) if getattr(tagdata, "episodes", None) else [self.episode]
       self.episode_title = tagdata.title or ""
       self.episode_cleantitle = sanitize_filename(self.episode_title)
+      # Metadata sets .date to the episode air date; keep it as a fallback
+      # for the airdate template. Strict checks keep Mock/None values out.
+      date = getattr(tagdata, "date", None)
+      if isinstance(date, str):
+        self.air_date = extract_air_date(date) or self.air_date
+      self.episode_substituted = getattr(tagdata, "episode_substituted", False) is True
     elif tagdata.mediatype == MediaType.Movie:
       self.movie_title = tagdata.title or ""
       self.movie_cleantitle = sanitize_filename(self.movie_title)
@@ -319,6 +348,7 @@ class NamingData:
     if data.get("series"):
       series = data["series"]
       self.series_title = series.get("title", self.series_title)
+      self.series_type = series.get("seriesType", "") or ""
       year = series.get("year")
       if year:  # don't overwrite a known year with 0 or None
         self.series_year = str(year)
@@ -555,26 +585,38 @@ def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, 
   if not api_success:
     log.debug("Using local data for naming (no API match)")
 
-  # Guard: episode 0 must never use the standard SxxExx template.
-  # These are air-date-based episodes (e.g. late-night shows) where TMDB
-  # returns 404 / no real title.  Use the airdate template instead, sourcing
-  # the date from Sonarr data or from the filename.  If no date is available
-  # at all, skip the rename entirely rather than produce "S11E00 - Episode 0".
-  if is_tv and data.episode == 0:
-    # Air date may already be set from Sonarr; fall back to filename.
-    if not data.air_date:
-      m = re.search(r"(\d{4}-\d{2}-\d{2})", os.path.basename(lookup_path or filepath))
-      if m:
-        data.air_date = m.group(1)
+  # Guard: air-date-based episodes must never use the standard SxxExx
+  # template — the resulting names are unmatchable on re-import.  Signals:
+  #   - episode 0: TMDB placeholder for an air-date episode it can't number.
+  #   - Sonarr reports the series as 'daily' (late-night/news shows whose
+  #     Sonarr episode numbers, e.g. S24E2510, don't exist on TMDB).
+  #   - Metadata remapped the episode number via air-date matching, proving
+  #     the arr and TMDB numbering schemes disagree.
+  #   - The title is a TMDB placeholder ("Episode NNNN"), the source
+  #     filename carries an air date, and the series type is unknown — the
+  #     numbering is untrustworthy.  When Sonarr affirmed the series as
+  #     'standard' or 'anime', "Episode N" may be the real title (common on
+  #     international shows) and SxxExx stays authoritative.
+  # Use the airdate template, sourcing the date from Sonarr data, TMDB tag
+  # data, or the filename.  If no date is available at all, skip the rename
+  # entirely rather than produce "S11E00 - Episode 0".
+  _placeholder = re.compile(r"^[Ee]pisode\s+\d+$")
+  filename_date = extract_air_date(os.path.basename(lookup_path or filepath))
+  is_airdate_episode = is_tv and (
+    data.episode == 0 or data.series_type == "daily" or data.episode_substituted or (not data.series_type and bool(_placeholder.match(data.episode_title or "")) and bool(filename_date))
+  )
+  if is_airdate_episode:
+    # Air date may already be set from Sonarr or TMDB; fall back to filename.
+    if not data.air_date and filename_date:
+      data.air_date = filename_date
     if not data.air_date:
       log.warning(
-        "E00 episode with no air date — skipping rename for (%s)",
+        "Air-date episode with no air date — skipping rename for (%s)",
         os.path.basename(lookup_path or filepath),
       )
       return None
     # Clear placeholder titles so they don't appear in the output filename.
-    # TMDB and Sonarr both return "Episode 0" when they have no real title.
-    _placeholder = re.compile(r"^[Ee]pisode\s+0+$")
+    # TMDB falls back to "Episode <n>" when it has no real title.
     if not data.episode_title or _placeholder.match(data.episode_title):
       data.episode_title = ""
       data.episode_cleantitle = ""
@@ -583,7 +625,7 @@ def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, 
     if new_name:
       return new_name
     log.warning(
-      "E00 episode airdate template produced empty result for (%s), skipping rename",
+      "Airdate template produced empty result for (%s), skipping rename",
       os.path.basename(lookup_path or filepath),
     )
     return None

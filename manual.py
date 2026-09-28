@@ -611,7 +611,7 @@ def processFile(
         from resources.naming import generate_name, rename_file
 
         guess_data = _guessit.guessit(original or os.path.basename(inputfile))
-        new_name = generate_name(output["output"], info, tagdata, mp.settings, guess_data=guess_data, log=log)
+        new_name = generate_name(output["output"], info, tagdata, mp.settings, guess_data=guess_data, log=log, lookup_path=inputfile)
         if new_name:
           output["output"] = rename_file(output["output"], new_name, log=log)
       except Exception:

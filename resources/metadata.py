@@ -9,7 +9,6 @@ using mutagen. Also handles .plexmatch sidecar file generation.
 import enum
 import logging
 import os
-import re
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
@@ -21,6 +20,7 @@ from mutagen.mp4 import MP4, MP4Cover, MP4StreamInfoError
 from converter.ffmpeg import FFMpegConvertError
 from resources.extensions import tmdb_api_key, valid_poster_extensions
 from resources.lang import getAlpha2BCode, getAlpha3TCode
+from resources.naming import extract_air_date
 
 
 class TMDBIDError(Exception):
@@ -85,6 +85,7 @@ class Metadata:
     self.season = None
     self.episode = None
     self.episodes = None
+    self.episode_substituted = False
     self.original_language = None
 
     tmdb.API_KEY = tmdb_api_key
@@ -174,11 +175,11 @@ class Metadata:
       _by_air_date = {ep["air_date"]: ep for ep in _season_episodes if ep.get("air_date")}
 
       # Extract a candidate air date from the original source path once.
+      # Release names use dots as often as hyphens (Show.2026.09.22.720p),
+      # so extract_air_date normalizes any common separator to YYYY-MM-DD.
       _filename_date = None
       if self.original:
-        _m = re.search(r"(\d{4}-\d{2}-\d{2})", os.path.basename(self.original))
-        if _m:
-          _filename_date = _m.group(1)
+        _filename_date = extract_air_date(os.path.basename(self.original))
 
       # Collect episode results in order
       self.episodedata_list = []
@@ -211,11 +212,15 @@ class Metadata:
               matched_credits = {"cast": [], "crew": []}
             self.episodedata_list.append(matched_info)
             credit_list.append(matched_credits)
-            # Remap episode number so callers see the real episode.
+            # Remap episode number so callers see the real episode.  The
+            # substitution flag tells the naming engine the requested (arr)
+            # numbering doesn't exist on TMDB — an air-date show.
             idx = self.episodes.index(ep)
             self.episodes[idx] = real_ep
             if ep == self.episode:
               self.episode = real_ep
+            if real_ep != ep:
+              self.episode_substituted = True
           else:
             self.episodedata_list.append({"name": None, "overview": None, "air_date": _filename_date})
             credit_list.append({"cast": [], "crew": []})
