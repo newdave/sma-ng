@@ -34,6 +34,18 @@ _FALLBACK_MEDIA_EXTENSIONS = {
 }
 
 
+def _first_number(value):
+  """Normalize a guessit season/episode value to a single number.
+
+  guessit returns a list for multi-episode filenames (S01E01E02, or a
+  title whose trailing digit reads as a second episode number); take the
+  first entry in that case.
+  """
+  if isinstance(value, list):
+    return value[0] if value else None
+  return value
+
+
 class _TypeStub:
   """Minimal duck-type standing in for a Metadata object.
 
@@ -130,8 +142,8 @@ class RenameProcessor:
       return MediaType.TV
 
     if guess.get("type") == "episode":
-      season = guess.get("season")
-      episode = guess.get("episode")
+      season = _first_number(guess.get("season"))
+      episode = _first_number(guess.get("episode"))
       # Only trust the episode classification when both season and episode
       # are present and within sane ranges.  A title like "57 Seconds"
       # produces episode=57, season=None — that's a false positive.
@@ -255,7 +267,7 @@ class RenameProcessor:
     # Determine season number.
     resolved_season = season
     if resolved_season is None:
-      resolved_season = guess.get("season")
+      resolved_season = _first_number(guess.get("season"))
     if resolved_season is None and air_date:
       resolved_season = self._find_season_for_date(_tmdb, resolved_tmdbid, air_date)
     if resolved_season is None:
