@@ -630,3 +630,37 @@ class TestFindEpisodeForDate:
     mock_tmdb.TV_Seasons.return_value.info.side_effect = Exception("timeout")
     result = RenameProcessor._find_episode_for_date(mock_tmdb, 123, 1, "2021-01-12")
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# RenameProcessor._lookup_tmdb_tv — air-date episode substitution flag
+# ---------------------------------------------------------------------------
+
+
+class TestLookupTmdbTvAirDateFlag:
+  def _run_lookup(self, filepath, episode=None):
+    import sys
+
+    proc = _make_processor()
+    mock_tmdb = MagicMock()
+    mock_tmdb.Search.return_value.tv.return_value = {"results": [{"id": 123, "name": "Jimmy Kimmel Live!"}]}
+    mock_metadata = MagicMock()
+    mock_metadata.return_value.episode_substituted = False
+    with (
+      patch.dict(sys.modules, {"tmdbsimple": mock_tmdb}),
+      patch("resources.rename_util.Metadata", mock_metadata),
+      patch("resources.rename_util.guessit.guessit", return_value={"title": "Jimmy Kimmel Live!", "season": 23}),
+      patch.object(RenameProcessor, "_find_episode_for_date", return_value=125),
+    ):
+      return proc._lookup_tmdb_tv(filepath, season=23, episode=episode)
+
+  def test_episode_from_air_date_sets_substituted_flag(self):
+    # Filename carries an air date, no SxxEyy: the episode number only
+    # exists via TMDB air-date lookup, so naming must keep the air-date
+    # template (regression: Jimmy Kimmel files renamed to S23E125).
+    tagdata = self._run_lookup("/media/TV/Jimmy Kimmel Live! (2003) - 2025-06-05 - Guests.mp4")
+    assert tagdata.episode_substituted is True
+
+  def test_explicit_episode_does_not_set_flag(self):
+    tagdata = self._run_lookup("/media/TV/Jimmy Kimmel Live! (2003) - 2025-06-05 - Guests.mp4", episode=125)
+    assert tagdata.episode_substituted is False
