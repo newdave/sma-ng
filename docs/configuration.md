@@ -459,6 +459,33 @@ automatically, logging `[sub-encoding-detect]` when a non-UTF-8 file is found.
 
 ---
 
+## base.naming
+
+| Option                | Type   | Default             | Description                                                    |
+| --------------------- | ------ | ------------------- | -------------------------------------------------------------- |
+| `enabled`             | bool   | `false`             | Rename output files using the templates below after conversion |
+| `tv-template`         | string | Sonarr-style SxxExx | Template for standard (weekly) TV episodes                     |
+| `tv-airdate-template` | string | Sonarr daily style  | Template for air-date (daily) TV episodes                      |
+| `movie-template`      | string | Radarr-style        | Template for movies                                            |
+
+Naming data comes from the matching Sonarr/Radarr instance's parse API when
+the file path falls under a configured `services.*` path, with FFprobe,
+guessit, and TMDB as fallbacks.
+
+`tv-airdate-template` is used instead of `tv-template` when the episode is
+air-date based: the episode number is 0, Sonarr reports the series type as
+`daily`, the episode number had to be recovered by air-date matching, or —
+only when the series type is unknown — TMDB has no episode at the
+arr-supplied number and the source filename carries an air date. Series that
+Sonarr affirms as `standard` or `anime` always keep `tv-template`, even when
+an episode is genuinely titled "Episode N". Daily shows (late-night, news) use per-season episode
+numbers that differ between Sonarr and TMDB, so SxxExx names would not be
+matchable on re-import; the air date is the only identifier both sides agree
+on. Air dates are recognized in filenames with `-`, `.`, `_`, or space
+separators (for example `2026-09-16` or `Show.2026.09.16`).
+
+---
+
 ## base.permissions
 
 | Option  | Type  | Default | Description                 |

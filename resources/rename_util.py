@@ -17,7 +17,7 @@ os.environ["REGEX_DISABLED"] = "1"  # Fixes Toilal/rebulk#20
 from autoprocess.plex import refreshPlex
 from resources.mediaprocessor import MediaProcessor
 from resources.metadata import MediaType, Metadata, update_plexmatch
-from resources.naming import generate_name
+from resources.naming import extract_air_date, generate_name
 from resources.naming import rename_file as _rename_file
 
 _FALLBACK_MEDIA_EXTENSIONS = {
@@ -231,10 +231,7 @@ class RenameProcessor:
     _, clean_basename = self._extract_ids_from_path(filepath)
     guess = guessit.guessit(clean_basename)
     series_title = guess.get("title", "")
-    air_date = None
-    m = re.search(r"(\d{4}-\d{2}-\d{2})", basename)
-    if m:
-      air_date = m.group(1)
+    air_date = extract_air_date(basename)
 
     if not series_title:
       self.log.debug("No series title from guessit for %s, using stub" % basename)

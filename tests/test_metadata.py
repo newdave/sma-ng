@@ -250,6 +250,48 @@ class TestAirDateEpisodeFallback:
   @patch("resources.metadata.tmdb.TV_Seasons")
   @patch("resources.metadata.tmdb.TV")
   @patch("resources.metadata.Metadata.resolveTmdbID", return_value=63770)
+  def test_bogus_episode_with_dotted_date_resolves_via_air_date(self, mock_resolve, mock_tv, mock_seasons, mock_episodes_cls):
+    """Sonarr daily numbering (e.g. E2510) 404s on TMDB; the dotted air date in
+    the release name (2025.11.11) must still be matched against the season
+    list, remapping to the real episode and flagging the substitution."""
+    mock_tv.return_value.info.return_value = self._SHOW_DATA
+    mock_tv.return_value.external_ids.return_value = {"tvdb_id": 289574}
+    mock_tv.return_value.content_ratings.return_value = {"results": []}
+    mock_seasons.return_value.info.return_value = self._SEASON_DATA
+
+    def ep_factory(tmdbid, season, ep_num):
+      inst = MagicMock()
+      if ep_num == 2510:
+        inst.info.side_effect = Exception("404 Client Error: Not Found")
+        inst.credits.side_effect = Exception("404 Client Error: Not Found")
+      else:
+        inst.info.return_value = {
+          "name": "Claire Danes Rep. James Clyburn",
+          "overview": "A great show.",
+          "air_date": "2025-11-11",
+          "episode_number": 47,
+        }
+        inst.credits.return_value = {"cast": [], "crew": []}
+      return inst
+
+    mock_episodes_cls.side_effect = ep_factory
+
+    m = Metadata(
+      MediaType.TV,
+      tmdbid=63770,
+      season=11,
+      episode=2510,
+      original="The.Late.Show.2025.11.11.Claire.Danes.720p.HDTV.x264-MeGusta.mkv",
+    )
+
+    assert m.episode == 47, "episode should be remapped from 2510 to 47"
+    assert m.title == "Claire Danes Rep. James Clyburn"
+    assert m.episode_substituted is True
+
+  @patch("resources.metadata.tmdb.TV_Episodes")
+  @patch("resources.metadata.tmdb.TV_Seasons")
+  @patch("resources.metadata.tmdb.TV")
+  @patch("resources.metadata.Metadata.resolveTmdbID", return_value=63770)
   def test_episode0_no_air_date_match_leaves_empty_title(self, mock_resolve, mock_tv, mock_seasons, mock_episodes_cls):
     """When S11E0 returns 404 and no season episode matches the air date,
     the title is left empty (not 'Episode 0') and air_date comes from the filename."""
