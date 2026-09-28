@@ -149,6 +149,29 @@ class TestInferMediatype:
     assert result == MediaType.Movie
 
   @patch("resources.rename_util.guessit.guessit")
+  def test_guessit_episode_list_returns_tv(self, mock_guessit):
+    # Multi-episode parse: guessit returns a list for episode (e.g.
+    # "S00E27 - The Resistance 5" reads as episodes [27, 5]).
+    mock_guessit.return_value = {"type": "episode", "season": 0, "episode": [27, 5]}
+    proc = self._proc()
+    result = proc._infer_mediatype("/media/downloads/Show - S00E27 - The Resistance 5.mp4")
+    assert result == MediaType.TV
+
+  @patch("resources.rename_util.guessit.guessit")
+  def test_guessit_season_list_returns_tv(self, mock_guessit):
+    mock_guessit.return_value = {"type": "episode", "season": [1, 2], "episode": 3}
+    proc = self._proc()
+    result = proc._infer_mediatype("/media/downloads/Show.S01S02E03.mp4")
+    assert result == MediaType.TV
+
+  @patch("resources.rename_util.guessit.guessit")
+  def test_guessit_empty_episode_list_returns_movie(self, mock_guessit):
+    mock_guessit.return_value = {"type": "episode", "season": 1, "episode": []}
+    proc = self._proc()
+    result = proc._infer_mediatype("/media/downloads/odd.mp4")
+    assert result == MediaType.Movie
+
+  @patch("resources.rename_util.guessit.guessit")
   def test_season_above_100_not_tv(self, mock_guessit):
     mock_guessit.return_value = {"type": "episode", "season": 150, "episode": 5}
     proc = self._proc()
