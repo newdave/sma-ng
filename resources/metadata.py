@@ -192,6 +192,16 @@ class Metadata:
           self.log.warning("Unable to retrieve episode S%sE%s data from TMDB (tmdbid %s): %s", season, ep, self.tmdbid, e)
           # Try to resolve via air date → season episode list.
           matched = _by_air_date.get(_filename_date) if _filename_date else None
+          matched_season = self.season
+          if not matched and _filename_date:
+            # The arr's season numbering may not match TMDB's (Sonarr daily
+            # shows carry TVDB numbering, e.g. S24E2510 while the air date
+            # falls in TMDB season 25).  Locate the TMDB season whose date
+            # range contains the air date and search its episode list.
+            cross = self._find_episode_by_air_date(tmdb, _filename_date)
+            if cross:
+              matched_season, matched, cross_seasondata = cross
+              self.seasondata = cross_seasondata
           if matched:
             real_ep = matched.get("episode_number", ep)
             self.log.info(
@@ -199,28 +209,29 @@ class Metadata:
               season,
               ep,
               _filename_date,
-              season,
+              matched_season,
               real_ep,
               matched.get("name", ""),
             )
             # Fetch full episode detail for the matched episode number.
             try:
-              matched_info = tmdb.TV_Episodes(self.tmdbid, season, real_ep).info(language=self.language)
-              matched_credits = tmdb.TV_Episodes(self.tmdbid, season, real_ep).credits()
+              matched_info = tmdb.TV_Episodes(self.tmdbid, matched_season, real_ep).info(language=self.language)
+              matched_credits = tmdb.TV_Episodes(self.tmdbid, matched_season, real_ep).credits()
             except Exception:
               matched_info = matched
               matched_credits = {"cast": [], "crew": []}
             self.episodedata_list.append(matched_info)
             credit_list.append(matched_credits)
-            # Remap episode number so callers see the real episode.  The
-            # substitution flag tells the naming engine the requested (arr)
-            # numbering doesn't exist on TMDB — an air-date show.
+            # Remap season/episode numbers so callers see the real episode.
+            # The substitution flag tells the naming engine the requested
+            # (arr) numbering doesn't exist on TMDB — an air-date show.
             idx = self.episodes.index(ep)
             self.episodes[idx] = real_ep
             if ep == self.episode:
               self.episode = real_ep
-            if real_ep != ep:
+            if real_ep != ep or matched_season != self.season:
               self.episode_substituted = True
+            self.season = matched_season
           else:
             self.episodedata_list.append({"name": None, "overview": None, "air_date": _filename_date})
             credit_list.append({"cast": [], "crew": []})
@@ -268,6 +279,36 @@ class Metadata:
       self.date = self.episodedata["air_date"]
       self.imdbid = self.externalids.get("imdb_id") or imdbid
       self.tvdbid = self.externalids.get("tvdb_id") or tvdbid
+
+  def _find_episode_by_air_date(self, tmdb, air_date):
+    """Locate an episode across TMDB seasons by its air date.
+
+    Walks the show's season list (already fetched in self.showdata) in
+    chronological order, picks the last regular season premiering on or
+    before *air_date*, fetches that season's episode list, and returns
+    (season_number, episode_dict, season_data) when an episode airs on
+    exactly that date.  Returns None when no season or episode matches.
+    """
+    seasons = (self.showdata or {}).get("seasons") or []
+    candidate = None
+    for s in sorted(seasons, key=lambda x: x.get("air_date") or "9999"):
+      s_num = s.get("season_number")
+      s_air = s.get("air_date") or ""
+      if not s_num or not s_air:  # skip specials (season 0) and undated seasons
+        continue
+      if s_air <= air_date:
+        candidate = s_num
+    if candidate is None or candidate == self.season:
+      return None
+    try:
+      season_data = tmdb.TV_Seasons(self.tmdbid, candidate).info(language=self.language)
+    except Exception as e:
+      self.log.debug("Unable to fetch season %s for air-date lookup (tmdbid %s): %s", candidate, self.tmdbid, e)
+      return None
+    for ep in season_data.get("episodes") or []:
+      if ep.get("air_date") == air_date:
+        return candidate, ep, season_data
+    return None
 
   @staticmethod
   def resolveTmdbID(mediatype, log, tmdbid=None, tvdbid=None, imdbid=None):

@@ -291,6 +291,78 @@ class TestAirDateEpisodeFallback:
   @patch("resources.metadata.tmdb.TV_Episodes")
   @patch("resources.metadata.tmdb.TV_Seasons")
   @patch("resources.metadata.tmdb.TV")
+  @patch("resources.metadata.Metadata.resolveTmdbID", return_value=1489)
+  def test_wrong_season_resolves_across_seasons_by_air_date(self, mock_resolve, mock_tv, mock_seasons, mock_episodes_cls):
+    """Sonarr daily numbering can disagree with TMDB on the *season* too:
+    Jimmy Kimmel S24E2510 404s on TMDB and its air date (2026-09-24) falls in
+    TMDB season 25.  The remap must search the season containing the air
+    date, fixing season, episode, and title (regression: files renamed to
+    'S24E2510 - Episode 2510')."""
+    mock_tv.return_value.info.return_value = {
+      "name": "Jimmy Kimmel Live!",
+      "genres": [],
+      "networks": [],
+      "original_language": "en",
+      "seasons": [
+        {"season_number": 0, "air_date": "2004-01-01"},
+        {"season_number": 24, "air_date": "2025-09-08"},
+        {"season_number": 25, "air_date": "2026-09-07"},
+      ],
+    }
+    mock_tv.return_value.external_ids.return_value = {"tvdb_id": 71998}
+    mock_tv.return_value.content_ratings.return_value = {"results": []}
+
+    season_lists = {
+      24: {"episodes": [{"episode_number": 1, "name": "Old Ep", "overview": "", "air_date": "2025-09-08"}]},
+      25: {
+        "episodes": [
+          {"episode_number": 11, "name": "Other Guests", "overview": "", "air_date": "2026-09-23"},
+          {"episode_number": 12, "name": "Ben Affleck, Mo Amer", "overview": "Guests.", "air_date": "2026-09-24"},
+        ]
+      },
+    }
+
+    def seasons_factory(tmdbid, season):
+      inst = MagicMock()
+      inst.info.return_value = season_lists[season]
+      return inst
+
+    mock_seasons.side_effect = seasons_factory
+
+    def ep_factory(tmdbid, season, ep_num):
+      inst = MagicMock()
+      if season == 25 and ep_num == 12:
+        inst.info.return_value = {
+          "name": "Ben Affleck, Mo Amer",
+          "overview": "Guests.",
+          "air_date": "2026-09-24",
+          "episode_number": 12,
+        }
+        inst.credits.return_value = {"cast": [], "crew": []}
+      else:
+        inst.info.side_effect = Exception("404 Client Error: Not Found")
+        inst.credits.side_effect = Exception("404 Client Error: Not Found")
+      return inst
+
+    mock_episodes_cls.side_effect = ep_factory
+
+    m = Metadata(
+      MediaType.TV,
+      tmdbid=1489,
+      season=24,
+      episode=2510,
+      original="Jimmy Kimmel Live! (2003) - 2026-09-24 - Ben Affleck Mo Amer [HDTV-720p][EAC3 5.1][x265]-MeGusta.mkv",
+    )
+
+    assert m.season == 25, "season should be remapped to the one containing the air date"
+    assert m.episode == 12, "episode should be remapped from 2510 to 12"
+    assert m.title == "Ben Affleck, Mo Amer"
+    assert m.episode_substituted is True
+    assert m.date == "2026-09-24"
+
+  @patch("resources.metadata.tmdb.TV_Episodes")
+  @patch("resources.metadata.tmdb.TV_Seasons")
+  @patch("resources.metadata.tmdb.TV")
   @patch("resources.metadata.Metadata.resolveTmdbID", return_value=63770)
   def test_episode0_no_air_date_match_leaves_empty_title(self, mock_resolve, mock_tv, mock_seasons, mock_episodes_cls):
     """When S11E0 returns 404 and no season episode matches the air date,
