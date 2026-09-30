@@ -505,6 +505,7 @@ class ReadSettings:
     cfg = base.video
     self.vcodec = self._as_list(cfg.codec)
     self.vmaxbitrate = cfg.max_bitrate
+    self.vminbitrate = cfg.min_bitrate
     self.vbitrateratio = self._as_dict(cfg.bitrate_ratio, value_modifier=float)
     self.vbitrate_profiles = self._parse_bitrate_profiles(cfg.crf_profiles)
     self.vbitrate_profiles_hd = self._parse_bitrate_profiles(cfg.crf_profiles_hd)

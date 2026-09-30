@@ -2170,6 +2170,39 @@ class MediaProcessor:
             except ValueError:
               pass
 
+    # Rate-control selection for forced re-encodes. When the re-encode was
+    # not requested for bitrate reasons (profile/pix-fmt/filter/custom/
+    # force-reencode), a ratio-derived VBR target just re-inflicts the
+    # source's starvation on a second generation (e.g. a 450k HEVC source
+    # re-encoded at 450k x ratio). Prefer quality-governed rate control:
+    # drop the bitrate target so the operator's global-quality (ICQ)
+    # takes over below. maxrate/bufsize must also be cleared: QSV picks
+    # QVBR (not ICQ) when global_quality and maxrate are both set, and
+    # QVBR with a zero bitrate target fails encoder init. Bitrate-driven
+    # re-encodes (max-bitrate exceeded, crf-profile ladder match, analyzer
+    # bitrate ceiling — the ceiling implies a VBV cap the analyzer asked
+    # for, so ICQ without VBV would discard it) keep explicit VBR targets.
+    bitrate_driven = ".max-bitrate" in vdebug or profile_match is not None or bool(analyzer_max_bitrate)
+    if vcodec != "copy" and vbitrate and not bitrate_driven and vglobal_quality and vglobal_quality > 0:
+      self.log.info("Re-encode is not bitrate-driven (%s); dropping %dk bitrate target in favor of global-quality %d [icq-rate-control]." % (vdebug, vbitrate, vglobal_quality))
+      vbitrate = None
+      vmaxrate = None
+      vbufsize = None
+      vdebug = vdebug + ".icq"
+    elif vcodec != "copy" and vbitrate and self.settings.vminbitrate and vbitrate < self.settings.vminbitrate:
+      self.log.info("Video bitrate target %dk is below the configured floor; raising to %dk [video-min-bitrate]." % (vbitrate, self.settings.vminbitrate))
+      vbitrate = self.settings.vminbitrate
+      vdebug = vdebug + ".min-bitrate"
+      # Keep the VBV ceiling above the raised target; QSV/VAAPI refuse
+      # bitrate > maxrate at encoder init.
+      if vmaxrate and isinstance(vmaxrate, str) and vmaxrate.endswith("k"):
+        try:
+          if int(vmaxrate[:-1]) < vbitrate:
+            vmaxrate = "%dk" % int(vbitrate)
+            vbufsize = "%dk" % int(vbitrate * 2)
+        except ValueError:
+          pass
+
     self.log.info("Creating %s video stream from source stream %d." % (vcodec, info.video.index))
 
     video_settings = {
