@@ -33,9 +33,9 @@ jobs:
       tag_name: ${{ steps.rp.outputs.tag_name }}
       pr: ${{ steps.rp.outputs.pr }}
       version: ${{ steps.rp.outputs.version }}
-      patch: ${{ steps.detect-patch.outputs.match }}
-      minor: ${{ steps.detect-minor.outputs.match }}
-      major: ${{ steps.detect-major.outputs.match }}
+      patch: ${{ steps.detect.outputs.patch }}
+      minor: ${{ steps.detect.outputs.minor }}
+      major: ${{ steps.detect.outputs.major }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: rp
@@ -43,47 +43,36 @@ jobs:
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Detect release type by parsing version string and PR title
-      # Patch: only Z changes (fix: commits only)
-      # Minor: Y changes (feat: commits)
-      # Major: X changes (BREAKING CHANGE commits)
-      - name: Detect patch release (only Z changes)
-        id: detect-patch
-        if: steps.rp.outputs.version
+      # Detect release type from the version in the Release PR title.
+      # steps.rp.outputs.version is only populated on release-creation runs
+      # (after the Release PR merges), never on PR create/update runs, so
+      # gating on it meant the detect steps — and therefore auto-merge —
+      # never fired while the PR was open. The PR title
+      # ("chore(main): release sma-ng X.Y.Z") is available on every run.
+      # Patch: x.y.Z with Z > 0 (the default under always-bump-patch)
+      # Minor: x.Y.0 with Y > 0 (explicit release-as override)
+      # Major: X.0.0 (explicit release-as override)
+      - name: Detect release type from PR title
+        id: detect
+        if: steps.rp.outputs.pr
         run: |
-          version="${{ steps.rp.outputs.version }}"
-          if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-            patch="${BASH_REMATCH[3]}"
-            if (( patch > 0 )); then
-              echo "match=true" >> "$GITHUB_OUTPUT"
+          pr_title="${{ fromJSON(steps.rp.outputs.pr).title }}"
+          patch=false; minor=false; major=false
+          if [[ "$pr_title" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            y="${BASH_REMATCH[2]}"; z="${BASH_REMATCH[3]}"
+            if (( z > 0 )); then
+              patch=true
+            elif (( y > 0 )); then
+              minor=true
             else
-              echo "match=false" >> "$GITHUB_OUTPUT"
+              major=true
             fi
-          else
-            echo "match=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Detect minor release (Y changes)
-        id: detect-minor
-        if: steps.rp.outputs.version && steps.rp.outputs.pr
-        run: |
-          pr_title="${{ fromJSON(steps.rp.outputs.pr).title }}"
-          if [[ "$pr_title" == *"feat"* ]] && [[ "$pr_title" != *"BREAKING"* ]]; then
-            echo "match=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "match=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Detect major release (X changes)
-        id: detect-major
-        if: steps.rp.outputs.version && steps.rp.outputs.pr
-        run: |
-          pr_title="${{ fromJSON(steps.rp.outputs.pr).title }}"
-          if [[ "$pr_title" == *"BREAKING"* ]]; then
-            echo "match=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "match=false" >> "$GITHUB_OUTPUT"
-          fi
+          {
+            echo "patch=$patch"
+            echo "minor=$minor"
+            echo "major=$major"
+          } >> "$GITHUB_OUTPUT"
 
   # ── Step 1b: Auto-merge patch releases (x.y.Z) ──────────────────────────────
   # Patch releases auto-merge immediately after checks pass.
@@ -97,7 +86,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ fromJSON(needs.release-please.outputs.pr).number }}
-        run: gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --auto
+        # --auto requires branch protection with required checks; fall back
+        # to a direct squash merge when auto-merge cannot be enabled.
+        run: |
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --auto \
+            || gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash
 
   # ── Step 1c: Label and notify minor releases (x.Y.z) ──────────────────────────
   # Minor releases require manual approval—label PR and post notification.
