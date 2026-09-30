@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.1](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.0...sma-ng-v3.2.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **ci:** detect release type from PR title so patch auto-merge fires ([f6d600a](https://github.com/newdave/sma-ng/commit/f6d600ab544ceb9dcbc27e6d17ddd0acb932dcfe))
+* **release:** pin always-bump-patch versioning as documented ([d6b31d1](https://github.com/newdave/sma-ng/commit/d6b31d13e921b9be12cab66f6c2388a6c6431dfd))
+
 ## [3.2.0](https://github.com/newdave/sma-ng/compare/sma-ng-v3.1.0...sma-ng-v3.2.0) (2026-09-30)
 
 
