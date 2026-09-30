@@ -491,3 +491,25 @@ Conventional commit types still control changelog grouping and breaking-change s
 - `fix:` → patch bump
 - `feat:` → patch bump
 - `feat!:` or `BREAKING CHANGE:` → patch bump unless a one-off override is used
+
+### Release PR lifecycle
+
+Every push to `main` containing a releasable commit (`fix:` / `feat:`) creates or updates a Release PR.
+The workflow classifies the PR by the version in its title and acts accordingly:
+
+| Version shape | Class | Action                                                                 |
+| ------------- | ----- | ---------------------------------------------------------------------- |
+| `x.y.Z` (Z>0) | patch | Auto-merged immediately (the default under `always-bump-patch`)        |
+| `x.Y.0` (Y>0) | minor | Labelled `type: minor-release`; requires manual approval before merge  |
+| `X.0.0`       | major | No automatic action; merge manually                                    |
+
+Minor and major versions only occur via an explicit `release-as` override
+(e.g. a commit footer `Release-As: 4.0.0`); day-to-day pushes always produce auto-merged point releases.
+Auto-merge uses `gh pr merge --auto` when branch protection with required checks is enabled and falls
+back to a direct squash merge otherwise.
+
+Merging the Release PR creates the GitHub Release and `sma-ng-vX.Y.Z` tag, which triggers the Docker
+semver + `latest` image builds. The version reported by the daemon's `/health` endpoint is baked into
+the image from the latest tag at build time, so a running daemon shows the new version only after the
+tagged image is built **and** `mise run deploy:remote` re-pulls it; the `commit` field in `/health`
+always identifies the exact code running regardless of the version label.
