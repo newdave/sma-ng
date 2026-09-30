@@ -392,6 +392,13 @@ class VideoSettings(_Base):
   gpu: str = ""
   codec: list[str] = Field(default_factory=lambda: ["h265"])
   max_bitrate: int = 0
+  # Floor (kbps) applied to any computed video bitrate target when a stream
+  # is being re-encoded. Prevents bitrate-ratio maths from compounding
+  # quality loss on already-starved sources (e.g. a 450 kbps HEVC source
+  # being re-encoded at 450k x 0.8 = 360k). 0 disables the floor. Has no
+  # effect on streams that are copied, and no effect when the re-encode
+  # uses quality-governed rate control (global-quality with no bitrate target).
+  min_bitrate: int = 0
   bitrate_ratio: dict[str, float] = Field(default_factory=dict)
   crf_profiles: str = ""
   crf_profiles_hd: str = ""

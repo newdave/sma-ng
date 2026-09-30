@@ -131,6 +131,7 @@ base:
     codec:
       - h265
     max-bitrate: 0
+    min-bitrate: 0
     bitrate-ratio: {}
     crf-profiles: ''
     crf-profiles-hd: ''

@@ -1350,6 +1350,132 @@ class TestSameFamilyVideoBitrateClamp:
     assert not any("video-same-family-bitrate-clamp" in w for w in warnings)
 
 
+class TestReencodeRateControlSelection:
+  """Non-bitrate-driven re-encodes prefer ICQ (global-quality); the min-bitrate floor guards the VBR path."""
+
+  def _make_mp(self, tmp_yaml, global_quality=0, vminbitrate=0, vmaxbitrate=50000):
+    with patch("resources.readsettings.ReadSettings._validate_binaries"):
+      from resources.mediaprocessor import MediaProcessor
+      from resources.readsettings import ReadSettings
+
+      settings = ReadSettings(tmp_yaml())
+      settings.vcodec = ["h264"]
+      settings.vmaxbitrate = vmaxbitrate
+      settings.vminbitrate = vminbitrate
+      settings.global_quality = global_quality
+      settings.vprofile = ["high"]  # forces re-encode (source profile defaults to "main")
+
+    mock_converter = MagicMock()
+    mock_converter.ffmpeg.codecs = {
+      "h264": {"encoders": ["libx264"]},
+      "hevc": {"encoders": ["libx265"]},
+      "aac": {"encoders": ["aac"]},
+    }
+    mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8}
+    mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {"h264": "libx264", "hevc": "libx265", "aac": "aac"}.get(c, c)
+
+    mp = MediaProcessor.__new__(MediaProcessor)
+    mp.settings = settings
+    mp.converter = mock_converter
+    mp.log = MagicMock()
+    mp.deletesubs = set()
+    from resources.subtitles import SubtitleProcessor
+
+    mp.subtitles = SubtitleProcessor(mp)
+    return mp
+
+  def _generate(self, mp, info):
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    return options
+
+  def test_profile_forced_reencode_uses_icq_over_vbr(self, tmp_yaml, make_media_info):
+    # Profile mismatch forces the re-encode; with global-quality configured the
+    # ratio-derived bitrate target is dropped so ICQ takes over.
+    mp = self._make_mp(tmp_yaml, global_quality=22)
+    info = make_media_info(video_codec="h264", video_bitrate=450_000, total_bitrate=578_000, audio_bitrate=128_000)
+    options = self._generate(mp, info)
+    assert options is not None
+    assert options["video"]["codec"] != "copy"
+    assert options["video"]["bitrate"] is None
+    # maxrate/bufsize must be cleared too: QSV selects QVBR (not ICQ) when
+    # global_quality and maxrate are both set, and QVBR with no bitrate
+    # target fails encoder init.
+    assert options["video"]["maxrate"] is None
+    assert options["video"]["bufsize"] is None
+    assert options["video"]["global_quality"] == 22
+    assert ".icq" in options["video"]["debug"]
+    infos = [c.args[0] for c in mp.log.info.call_args_list if c.args]
+    assert any("icq-rate-control" in m for m in infos)
+
+  def test_bitrate_driven_reencode_keeps_vbr_target(self, tmp_yaml, make_media_info):
+    # Source over max-bitrate: the re-encode is bitrate-driven so the explicit
+    # VBR target wins and global-quality stays out of the command.
+    mp = self._make_mp(tmp_yaml, global_quality=22, vmaxbitrate=2000)
+    info = make_media_info(video_codec="h264", video_bitrate=10_000_000, total_bitrate=10_128_000, audio_bitrate=128_000)
+    options = self._generate(mp, info)
+    assert options is not None
+    assert options["video"]["codec"] != "copy"
+    assert options["video"]["bitrate"] == 2000
+    assert "global_quality" not in options["video"]
+    assert ".icq" not in options["video"]["debug"]
+
+  def test_min_bitrate_floor_raises_starved_vbr_target(self, tmp_yaml, make_media_info):
+    # No global-quality: the VBR path stays, but the floor lifts the
+    # ratio-derived target so a starved source isn't re-starved.
+    mp = self._make_mp(tmp_yaml, global_quality=0, vminbitrate=1500)
+    info = make_media_info(video_codec="h264", video_bitrate=450_000, total_bitrate=578_000, audio_bitrate=128_000)
+    options = self._generate(mp, info)
+    assert options is not None
+    assert options["video"]["codec"] != "copy"
+    assert options["video"]["bitrate"] == 1500
+    assert ".min-bitrate" in options["video"]["debug"]
+    infos = [c.args[0] for c in mp.log.info.call_args_list if c.args]
+    assert any("video-min-bitrate" in m for m in infos)
+
+  def test_no_floor_keeps_ratio_derived_target(self, tmp_yaml, make_media_info):
+    # Default min-bitrate 0 and no global-quality: legacy behavior unchanged.
+    mp = self._make_mp(tmp_yaml)
+    info = make_media_info(video_codec="h264", video_bitrate=450_000, total_bitrate=578_000, audio_bitrate=128_000)
+    options = self._generate(mp, info)
+    assert options is not None
+    assert options["video"]["codec"] != "copy"
+    assert options["video"]["bitrate"] == pytest.approx(427.5, rel=0.01)
+    assert ".min-bitrate" not in options["video"]["debug"]
+    assert ".icq" not in options["video"]["debug"]
+
+  def test_min_bitrate_floor_lifts_vbv_ceiling(self, tmp_yaml, make_media_info):
+    # Misconfigured floor above max-bitrate: the floor wins, and maxrate/
+    # bufsize are lifted with it so the encoder never sees bitrate > maxrate
+    # (a hard init failure on QSV/VAAPI).
+    mp = self._make_mp(tmp_yaml, global_quality=0, vminbitrate=1500, vmaxbitrate=1000)
+    info = make_media_info(video_codec="h264", video_bitrate=10_000_000, total_bitrate=10_128_000, audio_bitrate=128_000)
+    options = self._generate(mp, info)
+    assert options is not None
+    assert options["video"]["codec"] != "copy"
+    assert options["video"]["bitrate"] == 1500
+    assert options["video"]["maxrate"] == "1500k"
+    assert options["video"]["bufsize"] == "3000k"
+
+  def test_min_bitrate_projected_from_yaml(self, tmp_yaml):
+    # YAML -> schema alias -> readsettings projection round-trip.
+    with patch("resources.readsettings.ReadSettings._validate_binaries"):
+      from resources.readsettings import ReadSettings
+
+      settings = ReadSettings(tmp_yaml(overrides={"base": {"video": {"min-bitrate": 1500}}}))
+    assert settings.vminbitrate == 1500
+
+  def test_copy_path_unaffected_by_global_quality(self, tmp_yaml, make_media_info):
+    # Matching profile -> copy; global-quality must not force a re-encode.
+    mp = self._make_mp(tmp_yaml, global_quality=22, vminbitrate=1500)
+    info = make_media_info(video_codec="h264", video_bitrate=450_000, total_bitrate=578_000, audio_bitrate=128_000)
+    info.video.profile = "high"
+    options = self._generate(mp, info)
+    assert options is not None
+    assert options["video"]["codec"] == "copy"
+    assert "global_quality" not in options["video"]
+
+
 class TestForceReencode:
   """force-reencode blocks the video-copy path even when the codec is accepted."""
 
