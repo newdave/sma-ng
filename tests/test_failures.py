@@ -76,6 +76,54 @@ def test_device_open_pattern_beats_generic_decoder_pattern() -> None:
   assert parse_ffmpeg_failure(hybrid) == FfmpegFailureClass.DEVICE_OPEN_FAILED
 
 
+def test_vf_task_death_beats_could_not_open_encoder() -> None:
+  """Regression (job 22893): when the video-filter task aborts at graph
+  init, ffmpeg follows with "Could not open encoder before EOF" — no frame
+  ever reached the encoder. The vf-task pattern must win so the failure
+  classifies FILTER_INIT_FAILED (eligible for the decode-side software
+  rescue) instead of ENCODER_INIT_FAILED (which dead-ends the ladder).
+  """
+  tail = (
+    "[vf#0:0 @ 0x5fe18a5cfe40] Task finished with error code: -17 (File exists)\n"
+    "[vf#0:0 @ 0x5fe18a5cfe40] Terminating thread with return code -17 (File exists)\n"
+    "[vost#0:0/hevc_vaapi @ 0x5fe18a690b00] [enc:hevc_vaapi @ 0x5fe18a380bc0] Could not open encoder before EOF\n"
+    "[vost#0:0/hevc_vaapi @ 0x5fe18a690b00] Task finished with error code: -22 (Invalid argument)\n"
+    "Conversion failed!\n"
+  )
+  assert parse_ffmpeg_failure(tail) == FfmpegFailureClass.FILTER_INIT_FAILED
+
+
+def test_true_encoder_init_failure_still_classifies_encoder() -> None:
+  """An encoder that fails at open with frames flowing (no vf-task death)
+  must keep classifying ENCODER_INIT_FAILED."""
+  tail = "[vost#0:0/hevc_qsv @ 0xff] Error initializing output stream: Error while opening encoder for output stream #0:0\nConversion failed!\n"
+  assert parse_ffmpeg_failure(tail) == FfmpegFailureClass.ENCODER_INIT_FAILED
+
+
+def test_ffmpeg8_encoder_failure_with_vf_cascade_classifies_encoder() -> None:
+  """ffmpeg >=6.1's threaded scheduler drags the vf task down on a GENUINE
+  encoder-open failure too ("Error while opening encoder" followed by the
+  vf cascade and "Could not open encoder before EOF"). The explicit
+  encoder pattern must outrank the vf rule so this stays
+  ENCODER_INIT_FAILED and doesn't earn a pointless sw-decode retry."""
+  tail = (
+    "[vost#0:0/hevc_qsv @ 0xff] Error while opening encoder - maybe incorrect parameters such as bit_rate, rate, width or height.\n"
+    "[vf#0:0 @ 0xee] Error sending frames to consumers: Invalid argument\n"
+    "[vf#0:0 @ 0xee] Task finished with error code: -22 (Invalid argument)\n"
+    "[vost#0:0/hevc_qsv @ 0xff] Could not open encoder before EOF\n"
+    "Conversion failed!\n"
+  )
+  assert parse_ffmpeg_failure(tail) == FfmpegFailureClass.ENCODER_INIT_FAILED
+
+
+def test_runtime_failure_with_vf_cascade_stays_runtime() -> None:
+  """A mid-stream fatal (e.g. disk full during mux) also emits the vf-task
+  cascade but no "Could not open encoder before EOF" — it must keep
+  falling through to RUNTIME_ERROR, not become filter_init_failed."""
+  tail = "av_interleaved_write_frame(): No space left on device\n[vf#0:0 @ 0xee] Task finished with error code: -28 (No space left on device)\nError muxing a packet\nConversion failed!\n"
+  assert parse_ffmpeg_failure(tail) == FfmpegFailureClass.RUNTIME_ERROR
+
+
 def test_attempt_record_is_frozen() -> None:
   record = AttemptRecord(tier="hw", failure_class=FfmpegFailureClass.RUNTIME_ERROR, duration_ms=123)
   with pytest.raises((AttributeError, TypeError)):

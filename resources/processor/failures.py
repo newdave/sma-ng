@@ -78,6 +78,30 @@ _PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureClass], ...] = (
     ),
     FfmpegFailureClass.DECODER_INIT_FAILED,
   ),
+  # An explicit encoder-open failure must outrank the vf-task rule below:
+  # on ffmpeg >=6.1's threaded scheduler a genuine encoder failure ALSO
+  # drags the filter task down ("[vf#0:0] Task finished with error code"
+  # cascade), so without this entry it would mis-bucket as filter-init.
+  (
+    re.compile(r"Error while opening encoder", re.IGNORECASE),
+    FfmpegFailureClass.ENCODER_INIT_FAILED,
+  ),
+  # A video-filter task dying at graph init, before the encoder ever
+  # opened. Requires the "Could not open encoder before EOF" conjunction
+  # (no frame reached the encoder): the bare vf-task cascade line is
+  # emitted for virtually every fatal error on ffmpeg >=6.1 (mux errors,
+  # disk full, mid-stream decode faults) and must keep falling through to
+  # the encoder/runtime buckets. Checked BEFORE the generic encoder
+  # patterns, which would otherwise swallow this as ENCODER_INIT_FAILED
+  # and block the decode-side software rescue (job 22893: hwmap/vpp_qsv
+  # graph abort).
+  (
+    re.compile(
+      r"\[vf#[^\]]*\] (?:Task finished with error code|Terminating thread with return code)[\s\S]*?Could not open encoder before EOF",
+      re.IGNORECASE,
+    ),
+    FfmpegFailureClass.FILTER_INIT_FAILED,
+  ),
   (
     re.compile(
       r"Error initializing output stream"

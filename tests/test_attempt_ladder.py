@@ -365,3 +365,33 @@ class TestAttemptLadderTier2HwAlt:
       mp._attempt_ladder(self._preopts(), {"video": {"codec": "h265qsv"}}, None, run_fn)
     # hw attempt + one rescue attempt, then surface — never reaches hw_alt.
     assert attempts == ["h265qsv", "h265qsv"]
+
+  def test_hw_alt_filter_init_failure_rescued_with_sw_decode_hw_encode(self):
+    """Regression (job 22893): a hardware filter graph that dies at init
+    ("[vf#0:0] Task finished with error code" then "Could not open encoder
+    before EOF") classifies FILTER_INIT_FAILED and must earn the software
+    decode + hardware encode rescue under the hw_alt policy instead of
+    surfacing after two sub-second graph aborts."""
+    mp = _make_mp(FallbackPolicy.HW_ALT)
+    vf_death = (
+      "[vf#0:0 @ 0x5fe18a5cfe40] Task finished with error code: -17 (File exists)\n"
+      "[vost#0:0/hevc_vaapi @ 0x5fe18a690b00] [enc:hevc_vaapi @ 0x5fe18a380bc0] Could not open encoder before EOF\n"
+      "Conversion failed!\n"
+    )
+    attempts = []
+
+    def run_fn(preopts, options=None):
+      codec = (options or {}).get("video", {}).get("codec")
+      attempts.append({"codec": codec, "hwaccel": "-hwaccel" in preopts, "filter": (options or {}).get("video", {}).get("filter")})
+      if len(attempts) <= 2:
+        raise _err("graph abort", output=vf_death)
+      return None  # sw-decode rescue succeeds
+
+    options = {"video": {"codec": "h265qsv", "filter": "vpp_qsv=w=3840:h=2080:format=p010le", "pix_fmt": "yuv420p10le"}}
+    mp._attempt_ladder(self._preopts(), options, None, run_fn)
+    assert [a["codec"] for a in attempts] == ["h265qsv", "hevc_vaapi", "h265qsv"]
+    # hw_alt tier rewrote the chain: bridge first, QSV scaler translated.
+    assert attempts[1]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=w=3840:h=2080:format=p010le"
+    # Rescue tier: hw decode dropped, GPU filter rewritten to system memory.
+    assert attempts[2]["hwaccel"] is False
+    assert attempts[2]["filter"] == "scale=3840:2080,format=p010le"
