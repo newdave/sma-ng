@@ -86,14 +86,21 @@ the `hw` and `hw_alt` tiers reuse the QSV decoder, so they fail back to back
 `failure_class: decoder_init_failed`, and the job is surfaced as failed under
 `fallback-policy: hw_alt` or `hw_only`.
 
-SMA-NG now auto-recovers this case: a `decoder_init_failed` under `hw_alt` or
-`hw_only` triggers one extra **software-decode + hardware-encode** retry
-(`tier: sw_decode_hw_encode`). The source is decoded on the CPU while the QSV
-encoder is kept, so the expensive encode stays on the GPU. The recovery log
-line reads `Decode-side hardware failure (cause=decoder_init_failed); retrying
-with software decode + hardware encode … [decode-side-rescue]`, followed by an
-`ffmpeg.attempts` entry with `{tier: sw_decode_hw_encode, failure_class: null}`
-and `result: ok`.
+SMA-NG now auto-recovers this case: a `decoder_init_failed` **or**
+`filter_init_failed` under `hw_alt` or `hw_only` triggers one extra
+**software-decode + hardware-encode** retry (`tier: sw_decode_hw_encode`). The
+source is decoded on the CPU while the QSV encoder is kept, so the expensive
+encode stays on the GPU. The recovery log line reads `Decode-side hardware
+failure (cause=…); retrying with software decode + hardware encode …
+[decode-side-rescue]`, followed by an `ffmpeg.attempts` entry with
+`{tier: sw_decode_hw_encode, failure_class: null}` and `result: ok`.
+
+The `filter_init_failed` class covers a hardware filter graph that aborts
+before the encoder ever opens — ffmpeg logs `[vf#0:0 …] Task finished with
+error code: …` followed by `Could not open encoder before EOF`. Moving decode
+to system memory rewrites every GPU filter (`vpp_qsv`, `scale_qsv`,
+`scale_vaapi`, the `hwmap` bridge) into a plain `scale`/`format` chain, which
+cures graph-level faults the same way it cures decoder faults.
 
 No configuration change is required. If even the software decode fails (a
 genuinely corrupt source), switch to `fallback-policy: aggressive` to add the

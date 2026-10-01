@@ -478,9 +478,10 @@ def _rewrite_qsv_filter_for_sw_decode(options):
     if not seg or seg.startswith("hwmap"):
       # Empty, or a GPU-to-GPU bridge that is meaningless in system memory.
       continue
-    if seg.startswith("vpp_qsv"):
+    if seg.startswith(("vpp_qsv", "scale_qsv", "scale_vaapi")):
       kv = {}
-      for part in seg[len("vpp_qsv=") :].split(":") if "=" in seg else []:
+      _, _, args = seg.partition("=")
+      for part in args.split(":") if args else []:
         if "=" in part:
           key, val = part.split("=", 1)
           kv[key] = val
@@ -3865,8 +3866,14 @@ class MediaProcessor:
       (encode) on the GPU while moving decode to the CPU. Returns ``True``
       and emits the success log when the retry converts; ``False`` (with the
       failed attempt recorded) when it can't be built or also fails.
+
+      Also fires on ``FILTER_INIT_FAILED``: a hardware filter graph that
+      dies at init (e.g. a vf task aborting before the encoder opens) is
+      equally cured by moving to system-memory frames — the software
+      rewrite replaces every GPU filter with plain ``scale``/``format``
+      the hardware encoder auto-uploads.
       """
-      if cls != FfmpegFailureClass.DECODER_INIT_FAILED:
+      if cls not in (FfmpegFailureClass.DECODER_INIT_FAILED, FfmpegFailureClass.FILTER_INIT_FAILED):
         return False
       rescue_preopts = _strip_qsv_decode_keep_encoder(preopts)
       if rescue_preopts is None:
