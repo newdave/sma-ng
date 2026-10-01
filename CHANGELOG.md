@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.2.3](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.2...sma-ng-v3.2.3) (2026-10-01)
+
+
+### Bug Fixes
+
+* **ffmpeg:** floor-align operator downscale and keep stream keys when unfoldable ([689686b](https://github.com/newdave/sma-ng/commit/689686b59ed2d1927f935ceec04a591a8773aeba))
+
+
+### Documentation
+
+* max-width row and a troubleshooting entry document the alignment ([689686b](https://github.com/newdave/sma-ng/commit/689686b59ed2d1927f935ceec04a591a8773aeba))
+
 ## [3.2.2](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.1...sma-ng-v3.2.2) (2026-10-01)
 
 
