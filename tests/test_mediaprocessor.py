@@ -3828,9 +3828,42 @@ class TestQsvVppPassthroughInjection:
     info.video.video_height = 2160
     options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p", "width": 1920, "height": None}}
     mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
-    # 1920 -> derived height 1080, aligned up to mod-16 = 1088.
-    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1088:format=nv12"
+    # 1920 -> derived height 1080, floor-aligned to mod-16 = 1072. Floor,
+    # never ceil: max-width is a cap and vpp_qsv scales (doesn't pad), so
+    # rounding up would stretch past the requested size.
+    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1072:format=nv12"
     assert "width" not in options["video"] and "height" not in options["video"]
+
+  def test_operator_height_only_target_folds(self):
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    info = self._info()
+    info.video.pix_fmt = "yuv420p"
+    info.video.video_width = 3840
+    info.video.video_height = 2160
+    options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p", "width": None, "height": 1080}}
+    mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
+    # Width derived from aspect (1920), explicit height floor-aligned to 1072.
+    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1072:format=nv12"
+    assert "width" not in options["video"] and "height" not in options["video"]
+
+  def test_unresolvable_single_target_keeps_stream_keys(self):
+    # Source dims unprobeable + single-dimension target: the fold can't
+    # derive the missing dimension, so width must STAY on the stream for
+    # the codec's expression-based scale path instead of being silently
+    # dropped (output would ship at source resolution).
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    info = self._info()
+    info.video.pix_fmt = "yuv420p"
+    info.video.video_width = None
+    info.video.video_height = None
+    options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p", "width": 1280, "height": None}}
+    mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
+    assert options["video"]["filter"] == "vpp_qsv=format=nv12"
+    assert options["video"]["width"] == 1280
 
   def test_aligned_dims_uses_plain_vpp_qsv(self):
     mp = self._mp()
@@ -4372,6 +4405,24 @@ class TestRewriteQsvFilterForSwDecode:
     o = {"video": {"codec": "hevc_qsv", "filter": "hwmap=derive_device=vaapi,vpp_qsv=format=nv12"}}
     f(o)
     assert o["video"]["filter"] == "format=nv12"
+
+  def test_scale_qsv_segment_is_absorbed(self):
+    # scale_qsv has the same system-memory problem as vpp_qsv and must be
+    # harvested, not passed through into the software chain.
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_sw_decode as f
+
+    o = {"video": {"codec": "hevc_qsv", "filter": "scale_qsv=w=1280:h=720:format=p010le"}}
+    f(o)
+    assert o["video"]["filter"] == "scale=1280:720,format=p010le"
+
+  def test_scale_vaapi_segment_is_absorbed(self):
+    # The hw_alt tier's rewritten chain (hwmap + scale_vaapi) must collapse
+    # to a pure software chain when the rescue runs off hw_alt options.
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_sw_decode as f
+
+    o = {"video": {"codec": "hevc_vaapi", "filter": "hwmap=derive_device=vaapi,scale_vaapi=w=3840:h=2080:format=p010le"}}
+    f(o)
+    assert o["video"]["filter"] == "scale=3840:2080,format=p010le"
 
   def test_absent_filter_gets_format_nv12(self):
     from resources.mediaprocessor import _rewrite_qsv_filter_for_sw_decode as f
@@ -8642,6 +8693,13 @@ class TestRewriteQsvFilterForVaapiEncode:
     opts = {"video": {"width": 1920, "pix_fmt": "yuv420p"}}
     f(opts)
     assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=w=1920:h=trunc(ow/a/2)*2:format=nv12"
+
+  def test_operator_height_only_downscale_preserves_aspect(self):
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
+
+    opts = {"video": {"height": 1080, "pix_fmt": "yuv420p"}}
+    f(opts)
+    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=w=trunc((oh*a)/2)*2:h=1080:format=nv12"
 
   def test_idempotent(self):
     from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
