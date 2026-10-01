@@ -1386,15 +1386,27 @@ class HWAccelVideoCodec:
     return []
 
   @staticmethod
-  def _explicit_filter_pins_qsv_format(safe):
-    """True when safe['filter'] already carries a QSV filter with a format pin.
+  def _explicit_filter_pins_qsv_format(safe, wanted=None):
+    """True when safe['filter'] already carries a QSV filter whose
+    ``format=`` pin matches *wanted* (any pin when *wanted* is None).
 
     MediaProcessor's implicit ``vpp_qsv`` passthrough always pins
     ``format=`` (the ffmpeg 7.x+ bit-depth workaround), so a second
     format-only ``scale_qsv`` from the encoder would chain two QSV VPP
-    sessions for no effect.
+    sessions for no effect. The value comparison guards the rare case
+    where the explicit pin and the profile pix-fmt diverge — suppressing
+    then would silently encode at the pinned (wrong) bit depth.
     """
-    return any(seg.strip().startswith(("vpp_qsv", "scale_qsv")) and "format=" in seg for seg in str(safe.get("filter") or "").split(","))
+    for seg in str(safe.get("filter") or "").split(","):
+      seg = seg.strip()
+      if not seg.startswith(("vpp_qsv", "scale_qsv")):
+        continue
+      for part in seg.partition("=")[2].split(":"):
+        if part.startswith("format="):
+          pinned = part[len("format=") :]
+          if wanted is None or pinned == wanted:
+            return True
+    return False
 
   def _qsv_scale_opts(self, safe):
     """Produce the QSV scale/format ``-vf`` fragment from width/height and
@@ -1402,7 +1414,7 @@ class HWAccelVideoCodec:
 
     An explicit scale (width/height set on the stream) always wins. A
     format-only ``scale_qsv=format=F`` is emitted ONLY when the explicit
-    filter chain doesn't already pin the surface format via
+    filter chain doesn't already pin the same surface format via
     ``vpp_qsv``/``scale_qsv`` — otherwise the command carries a redundant
     second QSV VPP pass (regression seen on 4K HDR hq jobs where the
     profile pix-fmt list added ``scale_qsv=format=p010le`` after the
@@ -1412,7 +1424,7 @@ class HWAccelVideoCodec:
     scale = self._hw_scale_opts(safe, fmtstr)
     if scale:
       return scale
-    if fmtstr and not self._explicit_filter_pins_qsv_format(safe):
+    if fmtstr and not self._explicit_filter_pins_qsv_format(safe, wanted=safe.get("qsv_pix_fmt")):
       return ["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])]
     return []
 
