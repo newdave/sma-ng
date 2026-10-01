@@ -3813,6 +3813,25 @@ class TestQsvVppPassthroughInjection:
     # 1088 is mod-16 — only the format pin is needed.
     assert options["video"]["filter"] == "vpp_qsv=format=nv12"
 
+  def test_operator_downscale_folds_into_single_vpp_qsv(self):
+    # Regression (auditor finding on job 22893): width/height on the
+    # stream used to leave the codec free to append its own scale_qsv
+    # after the injected vpp_qsv — two chained QSV VPP sessions abort
+    # graph init on ffmpeg 8.x/iHD. The downscale must ride the single
+    # vpp_qsv and the stream keys must be consumed.
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    info = self._info()
+    info.video.pix_fmt = "yuv420p"
+    info.video.video_width = 3840
+    info.video.video_height = 2160
+    options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p", "width": 1920, "height": None}}
+    mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
+    # 1920 -> derived height 1080, aligned up to mod-16 = 1088.
+    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1088:format=nv12"
+    assert "width" not in options["video"] and "height" not in options["video"]
+
   def test_aligned_dims_uses_plain_vpp_qsv(self):
     mp = self._mp()
     mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
@@ -8596,11 +8615,33 @@ class TestRewriteQsvFilterForVaapiEncode:
     assert opts["video"]["filter"] == "hwmap=derive_device=vaapi"
 
   def test_non_qsv_segments_pass_through(self):
+    # Non-QSV segments are preserved verbatim (software filters downstream
+    # of the bridge will still fail on hardware frames — this documents
+    # placement, not graph validity; the ladder falls through as before).
     from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
 
     opts = {"video": {"filter": "vpp_qsv=format=nv12,hflip"}}
     f(opts)
     assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=format=nv12,hflip"
+
+  def test_operator_downscale_folds_into_scale_vaapi(self):
+    # width/height on the stream (video.max-width projection) must land in
+    # the scale_vaapi target: the VAAPI codec's own scale path is
+    # suppressed by the hwmap bridge, so leaving them on the stream would
+    # silently ship the output at source resolution.
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
+
+    opts = {"video": {"filter": "vpp_qsv=w=3840:h=2080:format=p010le", "width": 1920, "height": 1040}}
+    f(opts)
+    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=w=1920:h=1040:format=p010le"
+    assert "width" not in opts["video"] and "height" not in opts["video"]
+
+  def test_operator_width_only_downscale_preserves_aspect(self):
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
+
+    opts = {"video": {"width": 1920, "pix_fmt": "yuv420p"}}
+    f(opts)
+    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=w=1920:h=trunc(ow/a/2)*2:format=nv12"
 
   def test_idempotent(self):
     from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
@@ -8609,6 +8650,16 @@ class TestRewriteQsvFilterForVaapiEncode:
     f(opts)
     f(opts)
     assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=w=1920:h=1080"
+
+  def test_preexisting_hwmap_bridge_leaves_stream_keys_alone(self):
+    # When the chain already carries the bridge, nothing may be consumed:
+    # popping pix_fmt without folding it anywhere would lose the pin.
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
+
+    opts = {"video": {"filter": "hwmap=derive_device=vaapi", "pix_fmt": "yuv420p10le", "width": 1920}}
+    f(opts)
+    assert opts["video"]["pix_fmt"] == "yuv420p10le"
+    assert opts["video"]["width"] == 1920
 
   def test_no_video_block_noop(self):
     from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f

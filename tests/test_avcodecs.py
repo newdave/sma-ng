@@ -166,6 +166,17 @@ class TestQsvScaleFormatSuppression:
     vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
     assert any("scale_qsv=format=p010le" in v for v in vf_parts)
 
+  def test_mismatched_format_pin_does_not_suppress(self):
+    # Suppression requires the pinned value to MATCH the profile pix-fmt:
+    # an operator filter pinning nv12 with a 10-bit profile must not
+    # silently encode at the pinned (wrong) bit depth.
+    from converter.avcodecs import H265QSVCodec
+
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv", "pix_fmt": "yuv420p10le", "filter": "vpp_qsv=format=nv12"})
+    vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
+    assert any("scale_qsv=format=p010le" in v for v in vf_parts)
+
   def test_explicit_scale_wins_over_suppression(self):
     # width/height on the stream is a real scale request; it must still be
     # emitted even when an explicit filter exists.

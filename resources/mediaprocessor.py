@@ -335,6 +335,10 @@ def _rewrite_qsv_filter_for_vaapi_encode(options):
   already hardware surfaces; when the QSV filter carried no format pin
   the popped pix_fmt is folded into ``scale_vaapi=format=...`` instead
   (CPU planar names map to surface names, e.g. yuv420p10le -> p010le).
+  Operator-configured downscale (``width``/``height`` on the stream) is
+  likewise popped and folded into the ``scale_vaapi`` target — the VAAPI
+  codec's own scale path is suppressed by the hwmap bridge, so leaving it
+  on the stream would silently ship the output at source resolution.
 
   Mutates *options* in place. Creates the filter chain if absent.
   Idempotent: a second call with the same options is a no-op.
@@ -343,10 +347,15 @@ def _rewrite_qsv_filter_for_vaapi_encode(options):
     return
   video = options["video"]
   existing = video.get("filter") or ""
-  pix = video.pop("pix_fmt", None)
   bridge = "hwmap=derive_device=vaapi"
   if bridge in existing:
+    # Already rewritten (or an operator-supplied bridge): leave pix_fmt
+    # and width/height untouched so nothing is consumed without being
+    # folded into the chain.
     return
+  pix = video.pop("pix_fmt", None)
+  target_w = video.pop("width", None)
+  target_h = video.pop("height", None)
   scale_kv: dict[str, str] = {}
   passthrough: list[str] = []
   for seg in existing.split(","):
@@ -362,6 +371,14 @@ def _rewrite_qsv_filter_for_vaapi_encode(options):
             scale_kv[key] = val
       continue
     passthrough.append(seg)
+  # Operator downscale wins over harvested vpp_qsv alignment dims (those
+  # are just source dims rounded up to the encoder boundary).
+  if target_w and target_h:
+    scale_kv["w"], scale_kv["h"] = str(target_w), str(target_h)
+  elif target_w:
+    scale_kv["w"], scale_kv["h"] = str(target_w), "trunc(ow/a/2)*2"
+  elif target_h:
+    scale_kv["w"], scale_kv["h"] = "trunc((oh*a)/2)*2", str(target_h)
   if "format" not in scale_kv and isinstance(pix, str) and pix:
     scale_kv["format"] = _QSV_SURFACE_FMT_MAP.get(pix, pix)
   segments = [bridge]
@@ -1846,8 +1863,15 @@ class MediaProcessor:
         # negotiation fails ("Impossible to convert between ... 'auto_scale_0'").
         # Inject a vpp_qsv passthrough so the GPU pipeline stays intact.
         if "qsv" in vcodec and "-hwaccel_output_format" in opts and opts[opts.index("-hwaccel_output_format") + 1] == "qsv" and not (options.get("video") or {}).get("filter"):
-          options["video"]["filter"] = self._qsv_passthrough_filter(info, (options.get("video") or {}).get("pix_fmt"))
-          self.log.debug("Injected %s to preserve QSV GPU pipeline [hwaccel-output-format]." % options["video"]["filter"])
+          # Fold any operator-configured downscale into the single vpp_qsv:
+          # letting the codec append its own scale_qsv afterwards chains two
+          # QSV VPP sessions, which aborts graph init on ffmpeg 8.x/iHD
+          # (same failure shape as job 22893's redundant format-only pass).
+          video_opts = options["video"]
+          target_w = video_opts.pop("width", None)
+          target_h = video_opts.pop("height", None)
+          video_opts["filter"] = self._qsv_passthrough_filter(info, video_opts.get("pix_fmt"), target_width=target_w, target_height=target_h)
+          self.log.debug("Injected %s to preserve QSV GPU pipeline [hwaccel-output-format]." % video_opts["filter"])
         for k in self.settings.hwdevices:
           if k in vcodec:
             match = self.settings.hwdevices[k]
@@ -3618,7 +3642,7 @@ class MediaProcessor:
     self.log.info("Profile %s %s; %s to %s to avoid encoder_init_failed [adaptive-profile-bit-depth]." % (vprofile, reason, verb, replacement))
     return replacement
 
-  def _qsv_passthrough_filter(self, info, output_pix_fmt=None):
+  def _qsv_passthrough_filter(self, info, output_pix_fmt=None, target_width=None, target_height=None):
     """Build the implicit ``vpp_qsv`` filter, padding to encoder alignment.
 
     Three responsibilities baked into one filter to keep the QSV pipeline
@@ -3635,6 +3659,13 @@ class MediaProcessor:
     3. **Surface dim preservation**: when nothing else changes we still
        want vpp_qsv in the chain to defeat ffmpeg 8.x's auto_scale
        interposition between decoder and encoder.
+    4. **Operator downscale folding**: when ``target_width`` /
+       ``target_height`` are given (video.max-width projection), the
+       downscale happens inside this same vpp_qsv instead of the codec
+       appending its own ``scale_qsv`` — chaining two QSV VPP sessions
+       aborts graph init on ffmpeg 8.x/iHD. The missing dimension is
+       derived from the source aspect ratio, and the result is aligned
+       to the encoder boundary like the alignment path.
     """
     width = getattr(info.video, "video_width", None)
     height = getattr(info.video, "video_height", None)
@@ -3644,7 +3675,20 @@ class MediaProcessor:
     align = self._QSV_ENCODER_ALIGNMENT_10BIT if is_10bit else self._QSV_ENCODER_ALIGNMENT
 
     parts: list[str] = []
+    tw = int(target_width) if target_width else 0
+    th = int(target_height) if target_height else 0
     if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+      if tw and not th:
+        th = 2 * round(tw * height / width / 2)
+      elif th and not tw:
+        tw = 2 * round(th * width / height / 2)
+    if tw and th:
+      aw = ((tw + align - 1) // align) * align
+      ah = ((th + align - 1) // align) * align
+      parts.append("w=%d" % aw)
+      parts.append("h=%d" % ah)
+      self.log.info("Folding operator downscale into vpp_qsv w=%d:h=%d (target %sx%s, aligned to %d) [adaptive-qsv-downscale]." % (aw, ah, target_width or "auto", target_height or "auto", align))
+    elif isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
       if width % align or height % align:
         aw = ((width + align - 1) // align) * align
         ah = ((height + align - 1) // align) * align
