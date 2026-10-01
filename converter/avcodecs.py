@@ -1385,6 +1385,37 @@ class HWAccelVideoCodec:
       return ["-vf", "%s=w=trunc((oh*a)/2)*2:h=%s%s" % (self.scale_filter, safe[hkey], fmtstr)]
     return []
 
+  @staticmethod
+  def _explicit_filter_pins_qsv_format(safe):
+    """True when safe['filter'] already carries a QSV filter with a format pin.
+
+    MediaProcessor's implicit ``vpp_qsv`` passthrough always pins
+    ``format=`` (the ffmpeg 7.x+ bit-depth workaround), so a second
+    format-only ``scale_qsv`` from the encoder would chain two QSV VPP
+    sessions for no effect.
+    """
+    return any(seg.strip().startswith(("vpp_qsv", "scale_qsv")) and "format=" in seg for seg in str(safe.get("filter") or "").split(","))
+
+  def _qsv_scale_opts(self, safe):
+    """Produce the QSV scale/format ``-vf`` fragment from width/height and
+    ``qsv_pix_fmt``.
+
+    An explicit scale (width/height set on the stream) always wins. A
+    format-only ``scale_qsv=format=F`` is emitted ONLY when the explicit
+    filter chain doesn't already pin the surface format via
+    ``vpp_qsv``/``scale_qsv`` — otherwise the command carries a redundant
+    second QSV VPP pass (regression seen on 4K HDR hq jobs where the
+    profile pix-fmt list added ``scale_qsv=format=p010le`` after the
+    alignment ``vpp_qsv=...:format=p010le``; job 22893).
+    """
+    fmtstr = ":format=%s" % safe["qsv_pix_fmt"] if "qsv_pix_fmt" in safe else ""
+    scale = self._hw_scale_opts(safe, fmtstr)
+    if scale:
+      return scale
+    if fmtstr and not self._explicit_filter_pins_qsv_format(safe):
+      return ["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])]
+    return []
+
 
 class NVEncH264Codec(HWAccelVideoCodec, H264Codec):
   """
@@ -1471,7 +1502,18 @@ class VAAPIVideoCodec(HWAccelVideoCodec):
     return optlist
 
   def _hw_vaapi_scale_opts(self, safe):
-    """VAAPI-specific scale filter with format conversion and hwupload."""
+    """VAAPI-specific scale filter with format conversion and hwupload.
+
+    Suppressed entirely when the explicit filter chain carries an
+    ``hwmap`` bridge (the hw_alt hybrid tier: QSV decoder output mapped
+    onto the VAAPI device). Frames then reach the encoder as VAAPI
+    hardware surfaces, so the software upload chain
+    (``format=...,hwupload``) must not be appended — scaling and the
+    surface-format pin already live in the bridge rewrite
+    (``scale_vaapi`` after ``hwmap=derive_device=vaapi``).
+    """
+    if "hwmap=" in str(safe.get("filter") or ""):
+      return []
     p = self.hw_prefix
     wkey, hkey = p + "_wscale", p + "_hscale"
     fmt = safe.get(p + "_pix_fmt", self.default_fmt)
@@ -1575,12 +1617,7 @@ class H264QSVCodec(HWAccelVideoCodec, H264Codec):
 
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
-    fmtstr = ":format=%s" % safe["qsv_pix_fmt"] if "qsv_pix_fmt" in safe else ""
-    scale = self._hw_scale_opts(safe, fmtstr)
-    if scale:
-      optlist.extend(scale)
-    elif fmtstr:
-      optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
+    optlist.extend(self._qsv_scale_opts(safe))
     optlist.extend(super()._codec_specific_produce_ffmpeg_list(safe, stream))
     optlist.extend(self._emit_filtered_params(safe))
     look_ahead_depth = safe.get("look_ahead_depth", 0)
@@ -1791,12 +1828,7 @@ class H265QSVCodec(HWAccelVideoCodec, H265Codec):
 
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
-    fmtstr = ":format=%s" % safe["qsv_pix_fmt"] if "qsv_pix_fmt" in safe else ""
-    scale = self._hw_scale_opts(safe, fmtstr)
-    if scale:
-      optlist.extend(scale)
-    elif fmtstr:
-      optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
+    optlist.extend(self._qsv_scale_opts(safe))
     optlist.extend(super()._codec_specific_produce_ffmpeg_list(safe, stream))
     # Emit the assembled qsv typed-field flag string (low-power, async-depth,
     # extbrc, adaptive-i/b, p-strategy, rdo, etc.) as individual tokens.
@@ -2246,12 +2278,7 @@ class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
       optlist.extend(["-preset", str(safe["preset"])])
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
-    fmtstr = ":format=%s" % safe["qsv_pix_fmt"] if "qsv_pix_fmt" in safe else ""
-    scale = self._hw_scale_opts(safe, fmtstr)
-    if scale:
-      optlist.extend(scale)
-    elif fmtstr:
-      optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
+    optlist.extend(self._qsv_scale_opts(safe))
     optlist.extend(self._emit_filtered_params(safe))
     look_ahead_depth = safe.get("look_ahead_depth", 0)
     if look_ahead_depth and look_ahead_depth > 0:
@@ -2350,12 +2377,7 @@ class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
     optlist = []
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
-    fmtstr = ":format=%s" % safe["qsv_pix_fmt"] if "qsv_pix_fmt" in safe else ""
-    scale = self._hw_scale_opts(safe, fmtstr)
-    if scale:
-      optlist.extend(scale)
-    elif fmtstr:
-      optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
+    optlist.extend(self._qsv_scale_opts(safe))
     look_ahead_depth = safe.get("look_ahead_depth", 0)
     if look_ahead_depth and look_ahead_depth > 0:
       # See H265QSVCodec for why -extra_hw_frames is no longer emitted at

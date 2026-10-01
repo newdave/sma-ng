@@ -8558,31 +8558,60 @@ class TestRewriteQsvPreoptsForVaapi:
     assert combined.count("-init_hw_device") == 1
 
 
-class TestInjectHwmap:
-  def test_prepends_bridge_to_existing_filter(self):
-    from resources.mediaprocessor import _inject_hwmap_to_video_filter as f
+class TestRewriteQsvFilterForVaapiEncode:
+  """hw_alt hybrid tier filter rewrite: QSV segments are translated to
+  scale_vaapi AFTER the hwmap bridge — a QSV filter downstream of the
+  bridge receives VAAPI frames and aborts graph init (job 22893)."""
+
+  def test_translates_qsv_scale_to_scale_vaapi_after_bridge(self):
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
 
     opts = {"video": {"filter": "scale_qsv=w=1920:h=1080"}}
     f(opts)
-    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_qsv=w=1920:h=1080"
+    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=w=1920:h=1080"
+
+  def test_translates_vpp_qsv_alignment_and_format_pin(self):
+    # The exact job-22893 shape: 4K HDR alignment pad + p010le pin.
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
+
+    opts = {"video": {"filter": "vpp_qsv=w=3840:h=2080:format=p010le", "pix_fmt": "yuv420p10le"}}
+    f(opts)
+    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=w=3840:h=2080:format=p010le"
+    assert "vpp_qsv" not in opts["video"]["filter"]
+    # pix_fmt is consumed so the VAAPI codec can't re-emit an upload chain.
+    assert "pix_fmt" not in opts["video"]
+
+  def test_pix_fmt_folds_into_format_when_no_pin(self):
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
+
+    opts = {"video": {"pix_fmt": "yuv420p10le"}}
+    f(opts)
+    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=format=p010le"
 
   def test_creates_filter_when_absent(self):
-    from resources.mediaprocessor import _inject_hwmap_to_video_filter as f
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
 
     opts = {"video": {}}
     f(opts)
     assert opts["video"]["filter"] == "hwmap=derive_device=vaapi"
 
-  def test_idempotent(self):
-    from resources.mediaprocessor import _inject_hwmap_to_video_filter as f
+  def test_non_qsv_segments_pass_through(self):
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
 
-    opts = {"video": {"filter": "scale_qsv"}}
+    opts = {"video": {"filter": "vpp_qsv=format=nv12,hflip"}}
+    f(opts)
+    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=format=nv12,hflip"
+
+  def test_idempotent(self):
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
+
+    opts = {"video": {"filter": "scale_qsv=w=1920:h=1080"}}
     f(opts)
     f(opts)
-    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_qsv"
+    assert opts["video"]["filter"] == "hwmap=derive_device=vaapi,scale_vaapi=w=1920:h=1080"
 
   def test_no_video_block_noop(self):
-    from resources.mediaprocessor import _inject_hwmap_to_video_filter as f
+    from resources.mediaprocessor import _rewrite_qsv_filter_for_vaapi_encode as f
 
     f({})  # should not raise
     f({"video": "not a dict"})

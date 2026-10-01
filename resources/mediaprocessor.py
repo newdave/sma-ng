@@ -317,8 +317,24 @@ def _rewrite_qsv_preopts_for_vaapi_encode(preopts):
   return out
 
 
-def _inject_hwmap_to_video_filter(options):
-  """Prepend ``hwmap=derive_device=vaapi,`` to ``options['video']['filter']``.
+def _rewrite_qsv_filter_for_vaapi_encode(options):
+  """Rewrite the video filter chain for the hw_alt hybrid tier (QSV decode,
+  VAAPI encode).
+
+  The QSV decoder's output frames are mapped onto the VAAPI device with
+  ``hwmap=derive_device=vaapi``. A QSV-only filter (``vpp_qsv`` /
+  ``scale_qsv``) CANNOT run downstream of that bridge — it would receive
+  VAAPI frames and abort graph init (ffmpeg 8.x: ``Task finished with
+  error code: -17 (File exists)`` followed by "Could not open encoder
+  before EOF"; job 22893). Each QSV segment is therefore translated into
+  an equivalent ``scale_vaapi`` placed after the bridge, preserving the
+  alignment scale (``w``/``h``) and the surface-format pin (``format=``).
+
+  Also pops ``pix_fmt`` so the swapped VAAPI codec doesn't emit its
+  software upload chain (``format=...,hwupload``) for frames that are
+  already hardware surfaces; when the QSV filter carried no format pin
+  the popped pix_fmt is folded into ``scale_vaapi=format=...`` instead
+  (CPU planar names map to surface names, e.g. yuv420p10le -> p010le).
 
   Mutates *options* in place. Creates the filter chain if absent.
   Idempotent: a second call with the same options is a no-op.
@@ -327,10 +343,32 @@ def _inject_hwmap_to_video_filter(options):
     return
   video = options["video"]
   existing = video.get("filter") or ""
+  pix = video.pop("pix_fmt", None)
   bridge = "hwmap=derive_device=vaapi"
   if bridge in existing:
     return
-  video["filter"] = (bridge + "," + existing) if existing else bridge
+  scale_kv: dict[str, str] = {}
+  passthrough: list[str] = []
+  for seg in existing.split(","):
+    seg = seg.strip()
+    if not seg:
+      continue
+    if seg.startswith(("vpp_qsv", "scale_qsv")):
+      _, _, args = seg.partition("=")
+      for part in args.split(":") if args else []:
+        if "=" in part:
+          key, val = part.split("=", 1)
+          if key in ("w", "h", "format"):
+            scale_kv[key] = val
+      continue
+    passthrough.append(seg)
+  if "format" not in scale_kv and isinstance(pix, str) and pix:
+    scale_kv["format"] = _QSV_SURFACE_FMT_MAP.get(pix, pix)
+  segments = [bridge]
+  if scale_kv:
+    segments.append("scale_vaapi=" + ":".join("%s=%s" % (key, scale_kv[key]) for key in ("w", "h", "format") if key in scale_kv))
+  segments.extend(passthrough)
+  video["filter"] = ",".join(segments)
 
 
 # Decode-side QSV flags that must be dropped to fall back to software
@@ -3839,7 +3877,7 @@ class MediaProcessor:
     retry_options_alt = copy.deepcopy(options)
     original_codec_alt = _swap_qsv_codec_to_vaapi(retry_options_alt, vaapi_overlay)
     if original_codec_alt is not None:
-      _inject_hwmap_to_video_filter(retry_options_alt)
+      _rewrite_qsv_filter_for_vaapi_encode(retry_options_alt)
       self.log.warning(
         "Conversion failed with hw QSV (cause=%s); retrying with hw_alt (swap encoder %s -> %s, preserve QSV decoder via hwmap bridge). Original error: %s"
         % (cls_hw.value if cls_hw else "unknown", original_codec_alt, retry_options_alt["video"]["codec"], str(hw_err)[:300]),
