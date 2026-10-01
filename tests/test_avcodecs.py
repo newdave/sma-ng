@@ -143,6 +143,71 @@ class TestH264QSVCodec:
     assert any("scale_qsv" in v for v in vf_parts)
 
 
+class TestQsvScaleFormatSuppression:
+  """Regression (job 22893): when the explicit filter already pins the QSV
+  surface format via vpp_qsv/scale_qsv, the codec must not append a second
+  format-only scale_qsv — the command would chain two QSV VPP passes."""
+
+  def test_explicit_vpp_qsv_format_pin_suppresses_scale_qsv(self):
+    from converter.avcodecs import H265QSVCodec
+
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv", "pix_fmt": "yuv420p10le", "filter": "vpp_qsv=w=3840:h=2080:format=p010le"})
+    vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
+    joined = ",".join(vf_parts)
+    assert "vpp_qsv=w=3840:h=2080:format=p010le" in joined
+    assert "scale_qsv" not in joined
+
+  def test_no_explicit_filter_still_emits_format_scale(self):
+    from converter.avcodecs import H265QSVCodec
+
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv", "pix_fmt": "yuv420p10le"})
+    vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
+    assert any("scale_qsv=format=p010le" in v for v in vf_parts)
+
+  def test_explicit_scale_wins_over_suppression(self):
+    # width/height on the stream is a real scale request; it must still be
+    # emitted even when an explicit filter exists.
+    from converter.avcodecs import H265QSVCodec
+
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv", "pix_fmt": "yuv420p", "width": 1280, "height": 720, "filter": "vpp_qsv=format=nv12"})
+    vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
+    assert any("scale_qsv=1280:720" in v for v in vf_parts)
+
+
+class TestVaapiHybridUploadSuppression:
+  """Regression (job 22893): in the hw_alt hybrid tier the filter carries
+  the hwmap bridge and frames reach hevc_vaapi as hardware surfaces — the
+  software upload chain (format=...,hwupload) must not be appended."""
+
+  def test_hwmap_filter_suppresses_upload_chain(self):
+    from converter.avcodecs import H265VAAPICodec
+
+    codec = H265VAAPICodec()
+    opts = codec.parse_options(
+      {
+        "codec": "h265vaapi",
+        "device": "vaapi0",
+        "pix_fmt": "yuv420p10le",
+        "filter": "hwmap=derive_device=vaapi,scale_vaapi=w=3840:h=2080:format=p010le",
+      }
+    )
+    vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
+    joined = ",".join(vf_parts)
+    assert "hwupload" not in joined
+    assert joined == "hwmap=derive_device=vaapi,scale_vaapi=w=3840:h=2080:format=p010le"
+
+  def test_without_hwmap_upload_chain_still_emitted(self):
+    from converter.avcodecs import H265VAAPICodec
+
+    codec = H265VAAPICodec()
+    opts = codec.parse_options({"codec": "h265vaapi", "device": "vaapi0"})
+    vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
+    assert any("hwupload" in v for v in vf_parts)
+
+
 class TestH264VAAPICodec:
   """Test H.264 VAAPI hardware codec."""
 
