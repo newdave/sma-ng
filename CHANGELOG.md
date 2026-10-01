@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.2.2](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.1...sma-ng-v3.2.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* **fallback:** classify vf-task graph aborts and widen decode-side rescue ([56855b5](https://github.com/newdave/sma-ng/commit/56855b544be0bcfc2a7519ab44f96aae112277b3))
+* **ffmpeg:** harden QSV/VAAPI filter rewrites per args audit ([85713ac](https://github.com/newdave/sma-ng/commit/85713ac011aecfcfd1e4763f2e592de322f5b666))
+* **ffmpeg:** repair QSV/VAAPI filter chains for 4K HDR hardware jobs ([eb048cb](https://github.com/newdave/sma-ng/commit/eb048cbf7dd00fc9851f5b0f44a51078911422dc))
+
+
+### Documentation
+
+* **deployment:** document release PR lifecycle and version propagation ([381a1de](https://github.com/newdave/sma-ng/commit/381a1def617e7609073c0b6ffd3864cfc0a3f408))
+* fallback-policy carve-out and troubleshooting ladder updated. ([56855b5](https://github.com/newdave/sma-ng/commit/56855b544be0bcfc2a7519ab44f96aae112277b3))
+
 ## [3.2.1](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.0...sma-ng-v3.2.1) (2026-09-30)
 
 
