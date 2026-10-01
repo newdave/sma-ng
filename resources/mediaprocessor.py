@@ -358,19 +358,11 @@ def _rewrite_qsv_filter_for_vaapi_encode(options):
   target_h = video.pop("height", None)
   scale_kv: dict[str, str] = {}
   passthrough: list[str] = []
-  for seg in existing.split(","):
-    seg = seg.strip()
-    if not seg:
+  for name, args, raw in parse_filter_segments(existing):
+    if name in ("vpp_qsv", "scale_qsv"):
+      scale_kv.update({key: val for key, val in args.items() if key in ("w", "h", "format")})
       continue
-    if seg.startswith(("vpp_qsv", "scale_qsv")):
-      _, _, args = seg.partition("=")
-      for part in args.split(":") if args else []:
-        if "=" in part:
-          key, val = part.split("=", 1)
-          if key in ("w", "h", "format"):
-            scale_kv[key] = val
-      continue
-    passthrough.append(seg)
+    passthrough.append(raw)
   # Operator downscale wins over harvested vpp_qsv alignment dims (those
   # are just source dims rounded up to the encoder boundary).
   if target_w and target_h:
@@ -435,14 +427,11 @@ def _strip_qsv_decode_keep_encoder(preopts):
   return out if changed else None
 
 
-# CPU planar pixel formats → QSV surface name. Mirrors
-# ``H265QSVCodec._QSV_SURFACE_FMT_MAP``; used to pick the software ``format``
-# token that matches the encoder's expected surface bit depth.
-_QSV_SURFACE_FMT_MAP = {
-  "yuv420p": "nv12",
-  "yuv420p10le": "p010le",
-  "yuv420p12le": "p012le",
-}
+# CPU planar pixel formats → QSV surface name: single source of truth lives
+# in ``converter.avcodecs.QSV_SURFACE_FMT_MAP``. The local alias
+# ``_QSV_SURFACE_FMT_MAP`` is assigned below the converter import (this
+# module's import block sits mid-file); the helpers above resolve it at
+# call time.
 
 
 def _rewrite_qsv_filter_for_sw_decode(options):
@@ -473,24 +462,17 @@ def _rewrite_qsv_filter_for_sw_decode(options):
   surface_fmt: str | None = None
   passthrough: list[str] = []
 
-  for seg in (video.get("filter") or "").split(","):
-    seg = seg.strip()
-    if not seg or seg.startswith("hwmap"):
-      # Empty, or a GPU-to-GPU bridge that is meaningless in system memory.
+  for name, args, raw in parse_filter_segments(video.get("filter")):
+    if name == "hwmap":
+      # A GPU-to-GPU bridge is meaningless in system memory.
       continue
-    if seg.startswith(("vpp_qsv", "scale_qsv", "scale_vaapi")):
-      kv = {}
-      _, _, args = seg.partition("=")
-      for part in args.split(":") if args else []:
-        if "=" in part:
-          key, val = part.split("=", 1)
-          kv[key] = val
-      if "w" in kv and "h" in kv:
-        scale_dims = (kv["w"], kv["h"])
-      if "format" in kv:
-        surface_fmt = kv["format"]
+    if name in ("vpp_qsv", "scale_qsv", "scale_vaapi"):
+      if "w" in args and "h" in args:
+        scale_dims = (args["w"], args["h"])
+      if "format" in args:
+        surface_fmt = args["format"]
       continue
-    passthrough.append(seg)
+    passthrough.append(raw)
 
   # Explicit encoder-side scaling (width/wscale) becomes a software scale.
   if scale_dims is None:
@@ -535,7 +517,9 @@ def _resolve_hdr_color_tags(hdr_input, hdr_output, hdr_settings):
 from collections.abc import Callable
 
 from converter import Converter, FFMpegConvertError
-from converter.avcodecs import BaseCodec
+from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, parse_filter_segments
+
+_QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
 from resources.config_schema import FallbackPolicy
 from resources.extensions import bad_sub_extensions, subtitle_codec_extensions
