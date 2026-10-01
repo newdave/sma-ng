@@ -1868,10 +1868,18 @@ class MediaProcessor:
           # letting the codec append its own scale_qsv afterwards chains two
           # QSV VPP sessions, which aborts graph init on ffmpeg 8.x/iHD
           # (same failure shape as job 22893's redundant format-only pass).
+          # Pop width/height ONLY when the fold actually consumed them —
+          # an unresolvable single-dimension target (source dims
+          # unprobeable) stays on the stream so the codec's expression-
+          # based scale path still fires instead of silently shipping at
+          # source resolution.
           video_opts = options["video"]
-          target_w = video_opts.pop("width", None)
-          target_h = video_opts.pop("height", None)
+          target_w = video_opts.get("width")
+          target_h = video_opts.get("height")
           video_opts["filter"] = self._qsv_passthrough_filter(info, video_opts.get("pix_fmt"), target_width=target_w, target_height=target_h)
+          if (target_w or target_h) and "w=" in video_opts["filter"]:
+            video_opts.pop("width", None)
+            video_opts.pop("height", None)
           self.log.debug("Injected %s to preserve QSV GPU pipeline [hwaccel-output-format]." % video_opts["filter"])
         for k in self.settings.hwdevices:
           if k in vcodec:
@@ -3665,8 +3673,14 @@ class MediaProcessor:
        downscale happens inside this same vpp_qsv instead of the codec
        appending its own ``scale_qsv`` — chaining two QSV VPP sessions
        aborts graph init on ffmpeg 8.x/iHD. The missing dimension is
-       derived from the source aspect ratio, and the result is aligned
-       to the encoder boundary like the alignment path.
+       derived from the source aspect ratio. Operator targets are
+       floor-aligned (never rounded up): max-width is a cap, and
+       ``vpp_qsv`` w/h SCALES rather than pads, so ceiling would stretch
+       the picture past the requested size. A single-dimension target
+       that can't be resolved (source dims unprobeable) is NOT folded —
+       the returned filter carries no ``w=``/``h=`` and the caller keeps
+       width/height on the stream for the codec's own expression-based
+       scale path.
     """
     width = getattr(info.video, "video_width", None)
     height = getattr(info.video, "video_height", None)
@@ -3684,11 +3698,20 @@ class MediaProcessor:
       elif th and not tw:
         tw = 2 * round(th * width / height / 2)
     if tw and th:
-      aw = ((tw + align - 1) // align) * align
-      ah = ((th + align - 1) // align) * align
+      # Floor-align, never ceil: max-width is a CAP and vpp_qsv scales
+      # (doesn't pad), so rounding up would both exceed the requested
+      # size and stretch the picture. After flooring the width, re-derive
+      # the height from the source aspect so the floor on one axis
+      # doesn't compound distortion on the other.
+      aw = max(align, (tw // align) * align)
+      if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0 and not target_height:
+        th = 2 * round(aw * height / width / 2)
+      ah = max(align, (th // align) * align)
       parts.append("w=%d" % aw)
       parts.append("h=%d" % ah)
-      self.log.info("Folding operator downscale into vpp_qsv w=%d:h=%d (target %sx%s, aligned to %d) [adaptive-qsv-downscale]." % (aw, ah, target_width or "auto", target_height or "auto", align))
+      self.log.info(
+        "Folding operator downscale into vpp_qsv w=%d:h=%d (target %sx%s, floor-aligned to %d) [adaptive-qsv-downscale]." % (aw, ah, target_width or "auto", target_height or "auto", align)
+      )
     elif isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
       if width % align or height % align:
         aw = ((width + align - 1) // align) * align

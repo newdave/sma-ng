@@ -154,6 +154,17 @@ The upgrade direction is only taken when the chosen encoder actually supports
 configuration change is required. To pin the output bit depth explicitly, set
 the profile's `video.pix-fmt` (e.g. `p010le` for 10-bit, `nv12` for 8-bit).
 
+### Output dims differ slightly from `max-width` on QSV jobs
+
+On the QSV full-GPU pipeline an operator downscale (`video.max-width`) is
+folded into the single implicit `vpp_qsv` filter — chaining a second QSV
+scaler aborts graph init on ffmpeg 8.x/iHD. The folded dimensions are
+floor-aligned to the encoder boundary (16, or 32 for 10-bit), so a derived
+1920x1080 10-bit target ships as 1920x1056. The fold is logged as
+`Folding operator downscale into vpp_qsv w=W:h=H … [adaptive-qsv-downscale]`.
+No configuration change is required; the sub-percent aspect change is the
+cost of the encoder's alignment requirement.
+
 ### Hardware acceleration not working
 
 - Verify `hwdevices` key matches encoder codec name (e.g., `qsv` for `h265qsv`)
