@@ -1166,6 +1166,45 @@ _VAAPI_ONLY_HW_FLAGS = frozenset(
 
 _HW_FILTER_LOG = _logging.getLogger("converter.avcodecs.hw-filter")
 
+# CPU planar pixel formats -> QSV/VAAPI hardware surface names. GPU scalers
+# (scale_qsv / vpp_qsv / scale_vaapi) only accept surface names (nv12,
+# p010le, ...) and reject the CPU planar equivalents (yuv420p, yuv420p10le)
+# with "Unsupported pixel format". Single source of truth — consumed by the
+# codec classes below and by resources.mediaprocessor's filter rewrites.
+QSV_SURFACE_FMT_MAP = {
+  "yuv420p": "nv12",
+  "yuv420p10le": "p010le",
+  "yuv420p12le": "p012le",
+}
+
+
+def parse_filter_segments(chain):
+  """Split a ``-vf`` chain into ``(name, args, raw)`` tuples.
+
+  ``name`` is the filter name, ``args`` the ``key=value`` pairs parsed from
+  its colon-separated argument string (valueless args are skipped), ``raw``
+  the original segment text for verbatim passthrough. Shared by the codec
+  format-pin check and mediaprocessor's hw_alt / sw-decode filter rewrites
+  so the chain grammar lives in exactly one place.
+
+  Limitation: the comma split is naive — quoted filter arguments that
+  contain commas (e.g. ``subtitles='a,b.srt'``) are split incorrectly. No
+  current producer of these chains emits quoted args.
+  """
+  segments: list[tuple[str, dict[str, str], str]] = []
+  for seg in str(chain or "").split(","):
+    seg = seg.strip()
+    if not seg:
+      continue
+    name, _, argstr = seg.partition("=")
+    args: dict[str, str] = {}
+    for part in argstr.split(":") if argstr else []:
+      if "=" in part:
+        key, val = part.split("=", 1)
+        args[key] = val
+    segments.append((name, args, seg))
+  return segments
+
 
 def _tokenise_params(params_str: str) -> list[str]:
   """Split a free-form codec-parameters string into FFmpeg argv tokens."""
@@ -1325,14 +1364,9 @@ class HWAccelVideoCodec:
     if self.hw_quality_key not in safe and "bitrate" not in safe and self.hw_quality_default is not None:
       safe[self.hw_quality_key] = self.hw_quality_default
 
-  # CPU planar pix_fmts -> QSV surface formats. scale_qsv / vpp_qsv only
-  # accept hardware surface names (nv12, p010le, …) and reject the CPU
-  # equivalents (yuv420p, yuv420p10le) with "Unsupported pixel format".
-  _QSV_SURFACE_FMT_MAP = {
-    "yuv420p": "nv12",
-    "yuv420p10le": "p010le",
-    "yuv420p12le": "p012le",
-  }
+  # Module-level single source of truth; kept as a class attribute for
+  # existing subclass/test references.
+  _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
 
   def _hw_parse_pix_fmt(self, safe):
     """Move pix_fmt to hw-prefixed key.
@@ -1385,6 +1419,12 @@ class HWAccelVideoCodec:
       return ["-vf", "%s=w=trunc((oh*a)/2)*2:h=%s%s" % (self.scale_filter, safe[hkey], fmtstr)]
     return []
 
+
+class QSVVideoCodec(HWAccelVideoCodec):
+  """Intel QSV intermediate: scale/format emission against the explicit
+  filter chain. Keeps QSV-only VPP semantics off the shared
+  ``HWAccelVideoCodec`` base so NVEnc/VAAPI codecs don't inherit them."""
+
   @staticmethod
   def _explicit_filter_pins_qsv_format(safe, wanted=None):
     """True when safe['filter'] already carries a QSV filter whose
@@ -1397,15 +1437,10 @@ class HWAccelVideoCodec:
     where the explicit pin and the profile pix-fmt diverge — suppressing
     then would silently encode at the pinned (wrong) bit depth.
     """
-    for seg in str(safe.get("filter") or "").split(","):
-      seg = seg.strip()
-      if not seg.startswith(("vpp_qsv", "scale_qsv")):
-        continue
-      for part in seg.partition("=")[2].split(":"):
-        if part.startswith("format="):
-          pinned = part[len("format=") :]
-          if wanted is None or pinned == wanted:
-            return True
+    for name, args, _raw in parse_filter_segments(safe.get("filter")):
+      if name in ("vpp_qsv", "scale_qsv") and "format" in args:
+        if wanted is None or args["format"] == wanted:
+          return True
     return False
 
   def _qsv_scale_opts(self, safe):
@@ -1574,7 +1609,7 @@ class H264VAAPICodec(VAAPIVideoCodec, H264Codec):
     return optlist
 
 
-class H264QSVCodec(HWAccelVideoCodec, H264Codec):
+class H264QSVCodec(QSVVideoCodec, H264Codec):
   """
   H.264/AVC QSV video codec.
   """
@@ -1782,7 +1817,7 @@ class H265CodecAlt(H265Codec):
   codec_name = "hevc"
 
 
-class H265QSVCodec(HWAccelVideoCodec, H265Codec):
+class H265QSVCodec(QSVVideoCodec, H265Codec):
   """
   HEVC QSV video codec.
   """
@@ -2247,7 +2282,7 @@ class RAV1ECodec(AV1Codec):
   ffmpeg_codec_name = "librav1e"
 
 
-class AV1QSVCodec(HWAccelVideoCodec, AV1Codec):
+class AV1QSVCodec(QSVVideoCodec, AV1Codec):
   """
   QSV AV1 Codec
   """
@@ -2348,7 +2383,7 @@ class NVEncAV1Codec(AV1Codec):
   ffmpeg_codec_name = "av1_nvenc"
 
 
-class Vp9QSVCodec(HWAccelVideoCodec, Vp9Codec):
+class Vp9QSVCodec(QSVVideoCodec, Vp9Codec):
   """
   Google VP9 QSV video codec.
   """

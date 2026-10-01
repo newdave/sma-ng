@@ -95,9 +95,12 @@ _PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureClass], ...] = (
   # patterns, which would otherwise swallow this as ENCODER_INIT_FAILED
   # and block the decode-side software rescue (job 22893: hwmap/vpp_qsv
   # graph abort).
+  # The conjunction is bounded to ~25 lines so a benign vf warning early
+  # in the tail can't pair with an encoder-EOF line from an unrelated
+  # later failure.
   (
     re.compile(
-      r"\[vf#[^\]]*\] (?:Task finished with error code|Terminating thread with return code)[\s\S]*?Could not open encoder before EOF",
+      r"\[vf#[^\]]*\] (?:Task finished with error code|Terminating thread with return code)(?:[^\n]*\n){0,25}?[^\n]*Could not open encoder before EOF",
       re.IGNORECASE,
     ),
     FfmpegFailureClass.FILTER_INIT_FAILED,

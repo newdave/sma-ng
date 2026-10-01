@@ -177,6 +177,21 @@ class TestQsvScaleFormatSuppression:
     vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
     assert any("scale_qsv=format=p010le" in v for v in vf_parts)
 
+  def test_scale_qsv_pin_also_suppresses(self):
+    from converter.avcodecs import H265QSVCodec
+
+    codec = H265QSVCodec()
+    opts = codec.parse_options({"codec": "h265qsv", "pix_fmt": "yuv420p", "filter": "scale_qsv=format=nv12"})
+    vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
+    assert ",".join(vf_parts).count("scale_qsv") == 1
+
+  def test_pin_check_wanted_none_matches_any_pin(self):
+    from converter.avcodecs import QSVVideoCodec
+
+    assert QSVVideoCodec._explicit_filter_pins_qsv_format({"filter": "vpp_qsv=format=nv12"})
+    assert not QSVVideoCodec._explicit_filter_pins_qsv_format({"filter": "vpp_qsv=w=1920:h=1080"})
+    assert not QSVVideoCodec._explicit_filter_pins_qsv_format({})
+
   def test_explicit_scale_wins_over_suppression(self):
     # width/height on the stream is a real scale request; it must still be
     # emitted even when an explicit filter exists.
