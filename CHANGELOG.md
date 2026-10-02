@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.7](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.6...sma-ng-v3.2.7) (2026-10-02)
+
+
+### Bug Fixes
+
+* **audit:** skip Plex Versions directories by default ([eac5804](https://github.com/newdave/sma-ng/commit/eac580486d9038527145a4a9c8555a1add9bae11))
+
 ## [3.2.6](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.5...sma-ng-v3.2.6) (2026-10-02)
 
 
