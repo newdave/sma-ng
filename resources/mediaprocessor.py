@@ -327,8 +327,8 @@ def _rewrite_qsv_filter_for_vaapi_encode(options):
   VAAPI frames and abort graph init (ffmpeg 8.x: ``Task finished with
   error code: -17 (File exists)`` followed by "Could not open encoder
   before EOF"; job 22893). Each QSV segment is therefore translated into
-  an equivalent ``scale_vaapi`` placed after the bridge, preserving the
-  alignment scale (``w``/``h``) and the surface-format pin (``format=``).
+  an equivalent ``scale_vaapi`` placed after the bridge, preserving any
+  folded downscale (``w``/``h``) and the surface-format pin (``format=``).
 
   Also pops ``pix_fmt`` so the swapped VAAPI codec doesn't emit its
   software upload chain (``format=...,hwupload``) for frames that are
@@ -363,8 +363,8 @@ def _rewrite_qsv_filter_for_vaapi_encode(options):
       scale_kv.update({key: val for key, val in args.items() if key in ("w", "h", "format")})
       continue
     passthrough.append(raw)
-  # Operator downscale wins over harvested vpp_qsv alignment dims (those
-  # are just source dims rounded up to the encoder boundary).
+  # Operator downscale wins over any harvested vpp_qsv dims (those carry
+  # the same folded downscale target).
   if target_w and target_h:
     scale_kv["w"], scale_kv["h"] = str(target_w), str(target_h)
   elif target_w:
@@ -448,8 +448,8 @@ def _rewrite_qsv_filter_for_sw_decode(options):
   this the final filtergraph would be ``format=nv12,scale_qsv=…``, which has
   no bound QSV device and aborts at init.
 
-  Scaling the GPU filter performed (vpp_qsv ``w``/``h`` alignment, or an
-  explicit encoder ``width``/``height``) is preserved as a software
+  Scaling the GPU filter performed (a folded vpp_qsv ``w``/``h`` downscale,
+  or an explicit encoder ``width``/``height``) is preserved as a software
   ``scale=W:H``. Any ``hwmap=derive_device=vaapi`` bridge segment is dropped.
   The surface format is taken from the filter's ``format=`` token, then the
   encoder ``pix_fmt`` mapping, defaulting to ``nv12``.
@@ -3441,8 +3441,6 @@ class MediaProcessor:
       return False
     return False
 
-  _QSV_ENCODER_ALIGNMENT = 16
-  _QSV_ENCODER_ALIGNMENT_10BIT = 32
   _QSV_10BIT_PIX_FMTS = frozenset({"yuv420p10le", "yuv422p10le", "yuv444p10le", "yuv420p12le", "yuv422p12le", "yuv444p12le", "p010le", "p012le"})
 
   # Profile-specific limits on b-frames and reference frames. When the user
@@ -3636,42 +3634,47 @@ class MediaProcessor:
     return replacement
 
   def _qsv_passthrough_filter(self, info, output_pix_fmt=None, target_width=None, target_height=None):
-    """Build the implicit ``vpp_qsv`` filter, padding to encoder alignment.
+    """Build the implicit ``vpp_qsv`` filter for the full-GPU QSV pipeline.
 
     Three responsibilities baked into one filter to keep the QSV pipeline
     on-GPU and visually correct:
 
-    1. **Encoder alignment**: hevc_qsv refuses to initialize on dims that
-       aren't a multiple of 16 (or 32 for 10-bit on Gen11+ Intel). Pad
-       up to the next multiple via ``vpp_qsv=w=W:h=H``.
-    2. **Explicit output surface format**: vpp_qsv without an explicit
+    1. **Explicit output surface format**: vpp_qsv without an explicit
        ``format=`` token can hand the encoder a P010 (10-bit) surface
        when the encoder expects NV12 (8-bit) — the classic cause of
        *pink/magenta chroma frames* in ffmpeg 7.x/8.x QSV transcodes.
        Always pin the output format to match the chosen pix_fmt.
-    3. **Surface dim preservation**: when nothing else changes we still
+    2. **Surface dim preservation**: when nothing else changes we still
        want vpp_qsv in the chain to defeat ffmpeg 8.x's auto_scale
        interposition between decoder and encoder.
-    4. **Operator downscale folding**: when ``target_width`` /
+    3. **Operator downscale folding**: when ``target_width`` /
        ``target_height`` are given (video.max-width projection), the
        downscale happens inside this same vpp_qsv instead of the codec
        appending its own ``scale_qsv`` — chaining two QSV VPP sessions
        aborts graph init on ffmpeg 8.x/iHD. The missing dimension is
        derived from the source aspect ratio. Operator targets are
-       floor-aligned (never rounded up): max-width is a cap, and
+       floored to even (never rounded up): max-width is a cap, and
        ``vpp_qsv`` w/h SCALES rather than pads, so ceiling would stretch
        the picture past the requested size. A single-dimension target
        that can't be resolved (source dims unprobeable) is NOT folded —
        the returned filter carries no ``w=``/``h=`` and the caller keeps
        width/height on the stream for the codec's own expression-based
        scale path.
+
+    Dimensions are never coerced beyond even values. Earlier revisions
+    forced mod-16 (mod-32 for 10-bit) output dims through vpp_qsv, which
+    SCALES — every 1920x1080 source shipped vertically stretched to
+    1920x1088 and every derived downscale drifted off the source aspect
+    ratio. QSV encoders accept any even dimensions; surface alignment is
+    handled inside the driver via conformance cropping, so no pre-scale
+    is needed. If a driver ever rejects the graph anyway, the fallback
+    tiers rescue the job rather than this filter distorting the picture.
     """
     width = getattr(info.video, "video_width", None)
     height = getattr(info.video, "video_height", None)
     src_pix_fmt = getattr(info.video, "pix_fmt", None)
     is_10bit = output_pix_fmt in self._QSV_10BIT_PIX_FMTS if output_pix_fmt else src_pix_fmt in self._QSV_10BIT_PIX_FMTS
     surface_format = "p010le" if is_10bit else "nv12"
-    align = self._QSV_ENCODER_ALIGNMENT_10BIT if is_10bit else self._QSV_ENCODER_ALIGNMENT
 
     parts: list[str] = []
     tw = int(target_width) if target_width else 0
@@ -3682,27 +3685,18 @@ class MediaProcessor:
       elif th and not tw:
         tw = 2 * round(th * width / height / 2)
     if tw and th:
-      # Floor-align, never ceil: max-width is a CAP and vpp_qsv scales
+      # Floor to even, never ceil: max-width is a CAP and vpp_qsv scales
       # (doesn't pad), so rounding up would both exceed the requested
       # size and stretch the picture. After flooring the width, re-derive
-      # the height from the source aspect so the floor on one axis
-      # doesn't compound distortion on the other.
-      aw = max(align, (tw // align) * align)
+      # the height from the source aspect so the output never drifts off
+      # the source aspect ratio.
+      aw = max(2, (tw // 2) * 2)
       if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0 and not target_height:
         th = 2 * round(aw * height / width / 2)
-      ah = max(align, (th // align) * align)
+      ah = max(2, (th // 2) * 2)
       parts.append("w=%d" % aw)
       parts.append("h=%d" % ah)
-      self.log.info(
-        "Folding operator downscale into vpp_qsv w=%d:h=%d (target %sx%s, floor-aligned to %d) [adaptive-qsv-downscale]." % (aw, ah, target_width or "auto", target_height or "auto", align)
-      )
-    elif isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
-      if width % align or height % align:
-        aw = ((width + align - 1) // align) * align
-        ah = ((height + align - 1) // align) * align
-        parts.append("w=%d" % aw)
-        parts.append("h=%d" % ah)
-        self.log.info("Source %dx%d is not aligned to %d; QSV encoder requires alignment, padding via vpp_qsv to %dx%d [adaptive-qsv-alignment]." % (width, height, align, aw, ah))
+      self.log.info("Folding operator downscale into vpp_qsv w=%d:h=%d (target %sx%s, aspect preserved) [adaptive-qsv-downscale]." % (aw, ah, target_width or "auto", target_height or "auto"))
 
     # Always pin format. Without this, vpp_qsv may emit P010 surfaces to
     # an NV12-expecting encoder (or vice-versa) and the output frames

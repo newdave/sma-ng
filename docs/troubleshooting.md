@@ -158,12 +158,16 @@ the profile's `video.pix-fmt` (e.g. `p010le` for 10-bit, `nv12` for 8-bit).
 
 On the QSV full-GPU pipeline an operator downscale (`video.max-width`) is
 folded into the single implicit `vpp_qsv` filter — chaining a second QSV
-scaler aborts graph init on ffmpeg 8.x/iHD. The folded dimensions are
-floor-aligned to the encoder boundary (16, or 32 for 10-bit), so a derived
-1920x1080 10-bit target ships as 1920x1056. The fold is logged as
+scaler aborts graph init on ffmpeg 8.x/iHD. The configured width is floored
+to the nearest even value (it is a cap, never rounded up) and the height is
+derived from the source aspect ratio, so the picture is never stretched. The
+fold is logged as
 `Folding operator downscale into vpp_qsv w=W:h=H … [adaptive-qsv-downscale]`.
-No configuration change is required; the sub-percent aspect change is the
-cost of the encoder's alignment requirement.
+Earlier releases floor-aligned both dimensions to a mod-16/mod-32 encoder
+boundary, which shipped slightly stretched output (e.g. a derived 1920x1080
+target as 1920x1072, or an untouched 1920x1080 source scaled to 1920x1088);
+that coercion has been removed — QSV drivers handle surface alignment
+internally without rescaling the picture.
 
 ### Hardware acceleration not working
 
