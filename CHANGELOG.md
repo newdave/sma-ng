@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.8](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.7...sma-ng-v3.2.8) (2026-10-02)
+
+
+### Features
+
+* **scripts:** plex-optimize-4k.py queues Plex optimized versions for 4K media ([650b1ec](https://github.com/newdave/sma-ng/commit/650b1ec71e45ffce8491f7b98c5cb1df9d58dda0))
+
 ## [3.2.7](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.6...sma-ng-v3.2.7) (2026-10-02)
 
 
