@@ -964,7 +964,15 @@ def main():
   parser.add_argument(
     "--audit",
     action="store_true",
-    help="Run a library audit on the input path: locate ffprobe failures, orphan sidecars, leftover .tmp files, leftover pre-conversion originals, and TMDB/TVDB-id duplicates. Prints findings and exits non-zero when any are found.",
+    help="Run a library audit on the input path: locate ffprobe failures, orphan sidecars, leftover .tmp files, leftover pre-conversion originals, TMDB/TVDB-id duplicates, and hybrid-aspect (stretched) MP4s. Prints findings and exits non-zero when any are found.",
+  )
+  parser.add_argument(
+    "--repair-hybrid",
+    dest="repairhybrid",
+    nargs="?",
+    const="remux",
+    choices=["remux", "reencode"],
+    help="Repair hybrid-aspect MP4s (outputs stretched by the former QSV alignment bug, e.g. 1920x1088 from a 1080p source). 'remux' (default) losslessly stamps the correct display aspect ratio via stream-copy; 'reencode' rebuilds the video stream scaled back to its true dimensions. With a directory input, remux mode sweeps and repairs every detected file; reencode mode requires a single file.",
   )
 
   args = vars(parser.parse_args())
@@ -1035,6 +1043,46 @@ def main():
     ffmpeg_dir = getattr(settings, "ffmpeg_dir", None) or None
     rc = _run_audit_inline([path], audit_settings, log, ffmpeg_dir=ffmpeg_dir)
     sys.exit(rc)
+
+  if args.get("repairhybrid"):
+    from resources.library_audit.probes import hybrid_aspect_check
+    from resources.library_audit.repair import repair_hybrid_aspect
+
+    repair_mode = args["repairhybrid"]
+    ffmpeg_dir = getattr(settings, "ffmpeg_dir", None) or None
+    if repair_mode == "remux":
+      targets = []
+      if os.path.isdir(path):
+        for root, _dirs, files in os.walk(path):
+          targets.extend(os.path.join(root, f) for f in files if f.lower().endswith(".mp4"))
+      else:
+        targets.append(path)
+      detected = repaired = 0
+      for target in sorted(targets):
+        details = hybrid_aspect_check(target, ffmpeg_dir=ffmpeg_dir)
+        if details is None:
+          continue
+        detected += 1
+        log.info("Hybrid-aspect file detected: %s (%dx%d, true height %d)" % (target, details["width"], details["height"], details["true_height"]))
+        if repair_hybrid_aspect(target, details["dar"], ffmpeg_dir=ffmpeg_dir, logger=log):
+          repaired += 1
+      if detected == 0:
+        log.info("No hybrid-aspect files detected under %s" % path)
+        sys.exit(0)
+      log.info("Hybrid-aspect repair finished: %d repaired of %d detected" % (repaired, detected))
+      sys.exit(0 if repaired == detected else 1)
+    # reencode mode: detect, then fall through to the normal single-file
+    # conversion with a corrective-scale dims override.
+    if os.path.isdir(path):
+      log.error("--repair-hybrid reencode requires a single file input, not a directory")
+      sys.exit(2)
+    details = hybrid_aspect_check(path, ffmpeg_dir=ffmpeg_dir)
+    if details is None:
+      log.error("%s is not a detected hybrid-aspect file; nothing to repair" % path)
+      sys.exit(2)
+    settings.video_dims_override = (details["width"], details["true_height"])
+    settings.process_same_extensions = True
+    log.info("Hybrid-aspect re-encode: %s will be rebuilt at %dx%d" % (path, details["width"], details["true_height"]))
 
   if os.path.isdir(path):
     success = walkDir(

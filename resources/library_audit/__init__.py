@@ -1,7 +1,8 @@
 """Library audit subsystem.
 
 Locates corrupt media (FFprobe failures), orphan sidecars, leftover tmp/partial
-artifacts, leftover pre-conversion originals, and TMDB/TVDB-ID duplicates across
+artifacts, leftover pre-conversion originals, TMDB/TVDB-ID duplicates, and
+hybrid-aspect MP4s (stretched by the former QSV alignment bug) across
 configured paths. Distributed across the SMA-NG cluster via PostgreSQL queue +
 ``FOR UPDATE SKIP LOCKED`` claim semantics — every live node contributes probes.
 

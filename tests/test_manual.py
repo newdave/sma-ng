@@ -685,3 +685,129 @@ class TestMain:
         with patch("manual.MediaProcessor", return_value=mock_mp):
           with patch("manual.processFile", side_effect=SkipFileException):
             main()  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# main() — --repair-hybrid (hybrid-aspect repair)
+# ---------------------------------------------------------------------------
+
+_HYBRID_DETAILS = {
+  "reason": "stretched_dims",
+  "width": 1920,
+  "height": 1088,
+  "true_height": 1080,
+  "dar": "1920:1080",
+}
+
+
+class TestRepairHybrid:
+  def _mock_settings(self):
+    s = MagicMock()
+    s.tagfile = True
+    s.postprocess = True
+    s.output_dir = None
+    s.moveto = None
+    s.copyto = None
+    s.delete = True
+    s.process_same_extensions = False
+    s.force_convert = False
+    s.minimum_size = 0
+    s.naming_enabled = False
+    s.sonarr_instances = []
+    s.radarr_instances = []
+    return s
+
+  def test_remux_no_hybrid_exits_0(self, tmp_path):
+    fake_file = tmp_path / "movie.mp4"
+    fake_file.write_bytes(b"fake")
+    with patch("sys.argv", ["manual.py", "-i", str(fake_file), "--repair-hybrid", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._mock_settings()):
+        with patch("resources.library_audit.probes.hybrid_aspect_check", return_value=None) as mock_check:
+          with pytest.raises(SystemExit) as exc:
+            main()
+    assert exc.value.code == 0
+    mock_check.assert_called_once()
+    assert mock_check.call_args.args[0] == str(fake_file)
+
+  def test_bare_flag_defaults_to_remux_and_sweeps_directory(self, tmp_path):
+    # const="remux": the flag with no value takes the remux path, which
+    # sweeps every .mp4 under a directory input (non-mp4 files skipped).
+    (tmp_path / "a.mp4").write_bytes(b"fake")
+    (tmp_path / "b.mkv").write_bytes(b"fake")
+    with patch("sys.argv", ["manual.py", "-i", str(tmp_path), "--repair-hybrid", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._mock_settings()):
+        with patch("resources.library_audit.probes.hybrid_aspect_check", return_value=None) as mock_check:
+          with pytest.raises(SystemExit) as exc:
+            main()
+    assert exc.value.code == 0
+    checked = [c.args[0] for c in mock_check.call_args_list]
+    assert checked == [str(tmp_path / "a.mp4")]
+
+  def test_remux_repairs_detected_file(self, tmp_path):
+    fake_file = tmp_path / "movie.mp4"
+    fake_file.write_bytes(b"fake")
+    with patch("sys.argv", ["manual.py", "-i", str(fake_file), "--repair-hybrid", "remux", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._mock_settings()):
+        with patch("resources.library_audit.probes.hybrid_aspect_check", return_value=dict(_HYBRID_DETAILS)):
+          with patch("resources.library_audit.repair.repair_hybrid_aspect", return_value=True) as mock_repair:
+            with pytest.raises(SystemExit) as exc:
+              main()
+    assert exc.value.code == 0
+    mock_repair.assert_called_once()
+    assert mock_repair.call_args.args[0] == str(fake_file)
+    assert mock_repair.call_args.args[1] == "1920:1080"
+
+  def test_remux_repair_failure_exits_1(self, tmp_path):
+    fake_file = tmp_path / "movie.mp4"
+    fake_file.write_bytes(b"fake")
+    with patch("sys.argv", ["manual.py", "-i", str(fake_file), "--repair-hybrid", "remux", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._mock_settings()):
+        with patch("resources.library_audit.probes.hybrid_aspect_check", return_value=dict(_HYBRID_DETAILS)):
+          with patch("resources.library_audit.repair.repair_hybrid_aspect", return_value=False):
+            with pytest.raises(SystemExit) as exc:
+              main()
+    assert exc.value.code == 1
+
+  def test_reencode_on_directory_exits_2(self, tmp_path):
+    with patch("sys.argv", ["manual.py", "-i", str(tmp_path), "--repair-hybrid", "reencode", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._mock_settings()):
+        with pytest.raises(SystemExit) as exc:
+          main()
+    assert exc.value.code == 2
+
+  def test_reencode_on_non_hybrid_file_exits_2(self, tmp_path):
+    fake_file = tmp_path / "movie.mp4"
+    fake_file.write_bytes(b"fake")
+    with patch("sys.argv", ["manual.py", "-i", str(fake_file), "--repair-hybrid", "reencode", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._mock_settings()):
+        with patch("resources.library_audit.probes.hybrid_aspect_check", return_value=None):
+          with pytest.raises(SystemExit) as exc:
+            main()
+    assert exc.value.code == 2
+
+  def test_reencode_sets_dims_override_and_converts(self, tmp_path):
+    fake_file = tmp_path / "movie.mp4"
+    fake_file.write_bytes(b"fake")
+    settings = self._mock_settings()
+
+    mock_mp = MagicMock()
+    mock_mp.isValidSource.return_value = MagicMock()
+    mock_mp.settings = settings
+
+    with patch("sys.argv", ["manual.py", "-i", str(fake_file), "--repair-hybrid", "reencode", "-a"]):
+      with patch("manual.ReadSettings", return_value=settings):
+        with patch("resources.library_audit.probes.hybrid_aspect_check", return_value=dict(_HYBRID_DETAILS)):
+          with patch("manual.MediaProcessor", return_value=mock_mp):
+            with patch("manual.processFile", return_value=True) as mock_pf:
+              main()  # falls through to normal single-file conversion
+    assert settings.video_dims_override == (1920, 1080)
+    assert settings.process_same_extensions is True
+    mock_pf.assert_called_once()
+
+  def test_invalid_mode_rejected_by_argparse(self, tmp_path):
+    fake_file = tmp_path / "movie.mp4"
+    fake_file.write_bytes(b"fake")
+    with patch("sys.argv", ["manual.py", "-i", str(fake_file), "--repair-hybrid", "transmux", "-a"]):
+      with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2

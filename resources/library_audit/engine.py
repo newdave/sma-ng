@@ -25,11 +25,13 @@ from resources.library_audit.kinds import (
 )
 from resources.library_audit.probes import (
   ffprobe_check,
+  hybrid_aspect_check,
   preconv_original_check,
   sidecar_orphan_check,
   tmp_artifact_check,
 )
 from resources.library_audit.recycler import move_to_recycle_bin
+from resources.library_audit.repair import repair_hybrid_aspect
 from resources.library_audit.tag_reader import derive_media_id, read_media_ids
 
 
@@ -102,6 +104,9 @@ class AuditEngine:
           self.job_db.record_media_id(audit_id, path, media_id)
       except Exception:
         self.log.exception("Audit id-record failed for %s" % path)
+    hybrid = hybrid_aspect_check(path, ffmpeg_dir=self.ffmpeg_dir)
+    if hybrid is not None:
+      return Finding(FindingKind.HYBRID_ASPECT, path, hybrid)
     return None
 
   def _probe_preconv(self, path: str, audit_id: int | None) -> Finding | None:
@@ -124,7 +129,7 @@ class AuditEngine:
     return self.job_db.upsert_finding(finding.kind.value, finding.path, finding.details, audit_id)
 
   def maybe_auto_fix(self, finding: Finding) -> str:
-    """Return ``"queued"|"recycled"|"skipped"|"dry_run"`` describing the action taken."""
+    """Return ``"queued"|"recycled"|"repaired"|"skipped"|"dry_run"`` describing the action taken."""
     if self.dry_run or self.auto_fix is None:
       return "dry_run"
     kind = finding.kind
@@ -136,6 +141,8 @@ class AuditEngine:
       return self._recycle(finding.path)
     if kind == FindingKind.PRECONV_ORIGINAL and getattr(self.auto_fix, "preconv_original", False):
       return self._recycle(finding.path)
+    if kind == FindingKind.HYBRID_ASPECT and getattr(self.auto_fix, "hybrid_aspect", False):
+      return self._repair_hybrid(finding)
     return "skipped"
 
   def _queue_conversion(self, path: str) -> str:
@@ -149,6 +156,13 @@ class AuditEngine:
       metrics_prom.record_job_enqueued("audit", None)
       return "queued"
     return "skipped"
+
+  def _repair_hybrid(self, finding: Finding) -> str:
+    dar = finding.details.get("dar")
+    if not dar:
+      return "skipped"
+    ok = repair_hybrid_aspect(finding.path, dar, ffmpeg_dir=self.ffmpeg_dir, logger=self.log)
+    return "repaired" if ok else "skipped"
 
   def _recycle(self, path: str) -> str:
     bin_dir = self.pcm.get_recycle_bin(self.pcm.default_config)
@@ -220,6 +234,9 @@ def _inline_probe(path: str, hint: str, ffmpeg_dir: str | None, observed_ids: di
       mid = derive_media_id(ids)
       if mid:
         observed_ids.setdefault(mid, []).append(path)
+    hybrid = hybrid_aspect_check(path, ffmpeg_dir=ffmpeg_dir)
+    if hybrid is not None:
+      return Finding(FindingKind.HYBRID_ASPECT, path, hybrid)
     return None
   if hint == KIND_HINT_PRECONV:
     cand = preconv_original_check(path)

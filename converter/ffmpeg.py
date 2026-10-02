@@ -119,6 +119,8 @@ class MediaStreamInfo:
   Video-specific attributes are:
     * video_width - width of video in pixels
     * video_height - height of video in pixels
+    * sample_aspect_ratio - pixel aspect ratio as reported by ffprobe
+      (e.g. "1:1", "135:136"), or None when not reported
   Audio-specific attributes are:
     * audio_channels - the number of channels in the stream
     * audio_samplerate - sample rate (Hz)
@@ -133,6 +135,7 @@ class MediaStreamInfo:
     self.bitrate = None
     self.video_width = None
     self.video_height = None
+    self.sample_aspect_ratio = None
     self.fps = None
     self.video_level = None
     self.pix_fmt = None
@@ -259,6 +262,9 @@ class MediaStreamInfo:
       self.video_width = self.parse_int(val)
     elif key == "height":
       self.video_height = self.parse_int(val)
+    elif key == "sample_aspect_ratio":
+      # ffprobe reports "N/A" or "0:1" when the stream carries no PAR.
+      self.sample_aspect_ratio = val if val and ":" in val and not val.startswith("0:") else None
     elif key == "channels":
       self.audio_channels = self.parse_int(val)
     elif key == "sample_rate":

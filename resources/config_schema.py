@@ -883,6 +883,9 @@ class AuditAutoFix(_Base):
   orphan_sidecar: bool = False
   leftover_tmp: bool = False
   preconv_original: bool = False
+  # Losslessly remux hybrid-aspect findings (outputs stretched by the former
+  # QSV alignment bug) with a corrective display aspect ratio.
+  hybrid_aspect: bool = False
 
 
 class AuditSettings(_Base):

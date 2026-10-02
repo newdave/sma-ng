@@ -11,6 +11,7 @@ class FindingKind(str, Enum):
   LEFTOVER_TMP = "leftover_tmp"
   PRECONV_ORIGINAL = "preconv_original"
   DUPLICATE_ID = "duplicate_id"
+  HYBRID_ASPECT = "hybrid_aspect"
 
 
 # Per-kind hint stored on each library_audit_queue row so the worker knows

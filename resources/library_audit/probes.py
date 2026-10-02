@@ -44,6 +44,66 @@ def ffprobe_check(path: str, ffmpeg_dir: str | None = None) -> dict[str, Any] | 
   return None
 
 
+# Stretched-output signatures left behind by the (now fixed) QSV alignment
+# bug: standard-resolution sources whose height was force-scaled to a
+# mod-16/mod-32 boundary (ceil for "encoder alignment", floor for the
+# max-width downscale fold). Maps (stored_width, stored_height) -> the true
+# height the picture was stretched from. These heights essentially never
+# occur naturally at these widths, so matching the table (plus a 1:1/absent
+# SAR — a corrective DAR remux leaves a non-square PAR behind) identifies a
+# hybrid-aspect file with no realistic false positives.
+_HYBRID_STANDARD_DIMS = ((1920, 1080), (3840, 2160), (1280, 720))
+HYBRID_DIMS_TABLE: dict[tuple[int, int], int] = {}
+for _w, _h in _HYBRID_STANDARD_DIMS:
+  for _align in (16, 32):
+    for _stored in (((_h + _align - 1) // _align) * _align, (_h // _align) * _align):
+      if _stored != _h:
+        HYBRID_DIMS_TABLE[(_w, _stored)] = _h
+del _w, _h, _align, _stored
+
+
+def hybrid_aspect_check(path: str, ffmpeg_dir: str | None = None) -> dict[str, Any] | None:
+  """Detect an SMA-produced MP4 whose picture was stretched by the former
+  QSV alignment bug. Returns finding-details, or ``None`` when the file is
+  not a hybrid (wrong extension, unprobeable, dims not in the signature
+  table, or already carrying a corrective non-square PAR).
+  """
+  if not path.lower().endswith(".mp4") or not os.path.isfile(path):
+    return None
+  try:
+    if ffmpeg_dir:
+      ffmpeg = FFMpeg(
+        ffmpeg_path=os.path.join(ffmpeg_dir, "ffmpeg"),
+        ffprobe_path=os.path.join(ffmpeg_dir, "ffprobe"),
+      )
+    else:
+      ffmpeg = FFMpeg()
+    info = ffmpeg.probe(path)
+  except Exception:
+    return None
+  if info is None or info.video is None:
+    return None
+  width = getattr(info.video, "video_width", None)
+  height = getattr(info.video, "video_height", None)
+  if not isinstance(width, int) or not isinstance(height, int):
+    return None
+  true_height = HYBRID_DIMS_TABLE.get((width, height))
+  if not true_height:
+    return None
+  sar = getattr(info.video, "sample_aspect_ratio", None)
+  if sar and sar != "1:1":
+    # A non-square PAR means the display aspect is already corrected
+    # (either a prior remux repair or a genuinely anamorphic encode).
+    return None
+  return {
+    "reason": "stretched_dims",
+    "width": width,
+    "height": height,
+    "true_height": true_height,
+    "dar": "%d:%d" % (width, true_height),
+  }
+
+
 def is_sidecar(path: str) -> bool:
   return os.path.splitext(path)[1].lower() in SIDECAR_EXTS
 
@@ -118,7 +178,9 @@ def preconv_original_check(path: str) -> dict[str, Any] | None:
 
 
 __all__ = [
+  "HYBRID_DIMS_TABLE",
   "ffprobe_check",
+  "hybrid_aspect_check",
   "is_sidecar",
   "is_tmp_artifact",
   "preconv_original_check",

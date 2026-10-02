@@ -86,6 +86,31 @@ class TestStreamParseFfprobe:
     # parse_ffprobe collapses sub-1000 bps reads to None (likely garbage).
     assert s.bitrate is None
 
+  def test_sample_aspect_ratio_defaults_to_none(self):
+    assert MediaStreamInfo().sample_aspect_ratio is None
+
+  def test_sample_aspect_ratio_square_par_stored(self):
+    s = MediaStreamInfo()
+    s.parse_ffprobe("sample_aspect_ratio", "1:1")
+    assert s.sample_aspect_ratio == "1:1"
+
+  def test_sample_aspect_ratio_anamorphic_par_stored(self):
+    # The corrective-DAR remux repair leaves a non-square PAR behind.
+    s = MediaStreamInfo()
+    s.parse_ffprobe("sample_aspect_ratio", "135:136")
+    assert s.sample_aspect_ratio == "135:136"
+
+  def test_sample_aspect_ratio_na_is_none(self):
+    s = MediaStreamInfo()
+    s.parse_ffprobe("sample_aspect_ratio", "N/A")
+    assert s.sample_aspect_ratio is None
+
+  def test_sample_aspect_ratio_zero_ratio_is_none(self):
+    # ffprobe reports "0:1" when the stream carries no PAR.
+    s = MediaStreamInfo()
+    s.parse_ffprobe("sample_aspect_ratio", "0:1")
+    assert s.sample_aspect_ratio is None
+
 
 class TestFormatParseFfprobe:
   def test_format_keys_and_tag_metadata(self):
