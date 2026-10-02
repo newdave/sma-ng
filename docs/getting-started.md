@@ -454,7 +454,8 @@ python manual.py -i /path/to/file.mkv -a -c config/sma-ng.yml
 | `-pa`   | `--processedarchive`      | Path to processed files archive JSON       |
 |         | `--job-id`                | Daemon job id (set by the daemon worker)   |
 |         | `--audit`                 | Audit the input path, print findings       |
-|         | `--repair-hybrid`         | Repair stretched (hybrid-aspect) MP4s: `remux` (default, lossless aspect fix) or `reencode` (rebuild at true dims) |
+|         | `--recycle-failed`        | With `--audit`: move media that fails ffprobe to the configured recycle-bin |
+|         | `--repair-hybrid`         | Repair stretched (hybrid-aspect) MP4s: `remux` (default, lossless aspect fix) or `reencode` (rebuild at true dims); with `--audit`, remuxes hybrid findings during the audit |
 |         | `--version`               | Print version and exit                     |
 
 ---

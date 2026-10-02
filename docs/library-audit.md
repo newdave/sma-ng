@@ -88,10 +88,28 @@ python manual.py --audit -i /path/to/library
 ```
 
 Walks the path in-process, prints one line per finding, and exits non-zero
-when any finding is produced. The CLI does not touch the cluster tables —
-useful for ad-hoc one-shot inspections.
+when any finding is produced that was not fixed in place. The CLI does not
+touch the cluster tables — useful for ad-hoc one-shot inspections.
 
-Hybrid-aspect findings can be repaired directly from the CLI without
+Two fix flags apply findings as the audit walks:
+
+```bash
+# Remux hybrid-aspect findings losslessly as they are found, and move any
+# media that fails ffprobe into the configured recycle-bin.
+python manual.py --audit --repair-hybrid --recycle-failed -i /path/to/library
+```
+
+- `--repair-hybrid` (remux mode only; `reencode` is rejected with `--audit`)
+  stamps the corrective display aspect ratio into each hybrid finding.
+- `--recycle-failed` moves ffprobe-failed media to the `recycle-bin`
+  configured in `sma-ng.yml` (atomic copy + unlink — never a plain delete).
+  The flag errors at startup when no recycle-bin is configured.
+
+Fixed findings print an `action=` column (`repaired`, `recycled`,
+`repair_failed`, `recycle_failed`) and no longer count toward the non-zero
+exit code: the audit exits 0 when every finding was fixed.
+
+Hybrid-aspect findings can also be repaired directly from the CLI without
 enabling the daemon auto-fix:
 
 ```bash
