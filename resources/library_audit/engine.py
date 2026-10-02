@@ -198,19 +198,39 @@ class AuditEngine:
 # ---------------------------------------------------------------------------
 
 
-def run_audit_inline(roots: list[str], settings, logger, ffmpeg_dir: str | None = None) -> int:
+def run_audit_inline(
+  roots: list[str],
+  settings,
+  logger,
+  ffmpeg_dir: str | None = None,
+  repair_hybrid: bool = False,
+  recycle_failed: bool = False,
+  recycle_bin: str | None = None,
+) -> int:
   """Walk *roots* in-process and print one line per finding. Returns non-zero
-  when any finding was emitted (suitable for ``manual.py --audit`` exit code).
+  when any finding was emitted that was not fixed in place (suitable for
+  ``manual.py --audit`` exit code).
+
+  With *repair_hybrid*, hybrid-aspect findings are losslessly remuxed as they
+  are found. With *recycle_failed*, ffprobe-failed media is moved to
+  *recycle_bin* (never unlinked outright; no bin configured means no action).
   """
   skip_dirs = list(settings.skip_dirs) if settings is not None else None
   count = 0
+  fixed = 0
   observed_ids: dict[str, list[str]] = {}
   for path, hint in enumerate_paths(roots, skip_dirs=skip_dirs):
     finding = _inline_probe(path, hint, ffmpeg_dir, observed_ids)
     if finding is None:
       continue
     count += 1
-    print("%s\t%s\t%s" % (finding.kind.value, finding.path, _short_details(finding.details)))
+    action = _inline_fix(finding, logger, ffmpeg_dir, repair_hybrid, recycle_failed, recycle_bin)
+    if action in ("repaired", "recycled"):
+      fixed += 1
+    line = "%s\t%s\t%s" % (finding.kind.value, finding.path, _short_details(finding.details))
+    if action:
+      line += "\taction=%s" % action
+    print(line)
   for media_id, paths in observed_ids.items():
     if len(paths) <= 1:
       continue
@@ -219,9 +239,39 @@ def run_audit_inline(roots: list[str], settings, logger, ffmpeg_dir: str | None 
       print("%s\t%s\tmedia_id=%s n=%d" % (FindingKind.DUPLICATE_ID.value, p, media_id, len(paths)))
   if count == 0:
     logger.info("Audit complete — no findings across %d root(s)" % len(roots))
+  elif fixed:
+    logger.warning("Audit complete — %d finding(s) across %d root(s), %d fixed" % (count, len(roots), fixed))
   else:
     logger.warning("Audit complete — %d finding(s) across %d root(s)" % (count, len(roots)))
-  return 1 if count > 0 else 0
+  return 1 if count > fixed else 0
+
+
+def _inline_fix(
+  finding: Finding,
+  logger,
+  ffmpeg_dir: str | None,
+  repair_hybrid: bool,
+  recycle_failed: bool,
+  recycle_bin: str | None,
+) -> str | None:
+  """Attempt an in-place fix for *finding*; return the action taken or None."""
+  if finding.kind == FindingKind.HYBRID_ASPECT and repair_hybrid:
+    dar = finding.details.get("dar")
+    if not dar:
+      return "repair_failed"
+    ok = repair_hybrid_aspect(finding.path, dar, ffmpeg_dir=ffmpeg_dir, logger=logger)
+    return "repaired" if ok else "repair_failed"
+  if finding.kind == FindingKind.FFPROBE_FAILED and recycle_failed:
+    try:
+      dst = move_to_recycle_bin(finding.path, recycle_bin)
+    except OSError as e:
+      logger.error("Could not recycle %s: %s" % (finding.path, e))
+      return "recycle_failed"
+    if dst is None:
+      return "recycle_skipped"
+    logger.info("Recycled unreadable media %s -> %s" % (finding.path, dst))
+    return "recycled"
+  return None
 
 
 def _inline_probe(path: str, hint: str, ffmpeg_dir: str | None, observed_ids: dict[str, list[str]]) -> Finding | None:

@@ -275,6 +275,85 @@ def test_run_audit_inline_returns_zero_when_clean(tmp_path):
   assert rc == 0
 
 
+def test_run_audit_inline_repair_hybrid_fixes_and_exits_zero(tmp_path, monkeypatch, capsys):
+  (tmp_path / "show.mp4").write_bytes(b"x")
+  monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
+  monkeypatch.setattr(
+    "resources.library_audit.engine.hybrid_aspect_check",
+    lambda *a, **k: {"width": 1920, "height": 1088, "true_height": 1080, "dar": "16:9"},
+  )
+  monkeypatch.setattr("resources.library_audit.engine.repair_hybrid_aspect", lambda *a, **k: True)
+  rc = run_audit_inline([str(tmp_path)], mock.MagicMock(skip_dirs=[]), mock.MagicMock(), repair_hybrid=True)
+  assert rc == 0
+  assert "action=repaired" in capsys.readouterr().out
+
+
+def test_run_audit_inline_repair_hybrid_failure_exits_nonzero(tmp_path, monkeypatch, capsys):
+  (tmp_path / "show.mp4").write_bytes(b"x")
+  monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
+  monkeypatch.setattr(
+    "resources.library_audit.engine.hybrid_aspect_check",
+    lambda *a, **k: {"width": 1920, "height": 1088, "true_height": 1080, "dar": "16:9"},
+  )
+  monkeypatch.setattr("resources.library_audit.engine.repair_hybrid_aspect", lambda *a, **k: False)
+  rc = run_audit_inline([str(tmp_path)], mock.MagicMock(skip_dirs=[]), mock.MagicMock(), repair_hybrid=True)
+  assert rc == 1
+  assert "action=repair_failed" in capsys.readouterr().out
+
+
+def test_run_audit_inline_recycles_ffprobe_failed(tmp_path, monkeypatch, capsys):
+  media = tmp_path / "broken.mkv"
+  media.write_bytes(b"x")
+  bin_dir = tmp_path / "_recycle"
+  monkeypatch.setattr(
+    "resources.library_audit.engine.ffprobe_check",
+    lambda *a, **k: {"reason": "probe_error"},
+  )
+  rc = run_audit_inline(
+    [str(tmp_path)],
+    mock.MagicMock(skip_dirs=["_recycle"]),
+    mock.MagicMock(),
+    recycle_failed=True,
+    recycle_bin=str(bin_dir),
+  )
+  assert rc == 0
+  assert "action=recycled" in capsys.readouterr().out
+  assert not media.exists()
+  assert (bin_dir / "broken.mkv").exists()
+
+
+def test_run_audit_inline_recycle_without_bin_is_skipped(tmp_path, monkeypatch, capsys):
+  media = tmp_path / "broken.mkv"
+  media.write_bytes(b"x")
+  monkeypatch.setattr(
+    "resources.library_audit.engine.ffprobe_check",
+    lambda *a, **k: {"reason": "probe_error"},
+  )
+  rc = run_audit_inline(
+    [str(tmp_path)],
+    mock.MagicMock(skip_dirs=[]),
+    mock.MagicMock(),
+    recycle_failed=True,
+    recycle_bin=None,
+  )
+  assert rc == 1
+  assert "action=recycle_skipped" in capsys.readouterr().out
+  assert media.exists()
+
+
+def test_run_audit_inline_no_fix_flags_leaves_findings_alone(tmp_path, monkeypatch, capsys):
+  media = tmp_path / "broken.mkv"
+  media.write_bytes(b"x")
+  monkeypatch.setattr(
+    "resources.library_audit.engine.ffprobe_check",
+    lambda *a, **k: {"reason": "probe_error"},
+  )
+  rc = run_audit_inline([str(tmp_path)], mock.MagicMock(skip_dirs=[]), mock.MagicMock())
+  assert rc == 1
+  assert "action=" not in capsys.readouterr().out
+  assert media.exists()
+
+
 # ---------------------------------------------------------------------------
 # AuditEngine — extended coverage for probe_one, maybe_auto_fix, _recycle
 # ---------------------------------------------------------------------------

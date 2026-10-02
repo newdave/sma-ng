@@ -972,7 +972,13 @@ def main():
     nargs="?",
     const="remux",
     choices=["remux", "reencode"],
-    help="Repair hybrid-aspect MP4s (outputs stretched by the former QSV alignment bug, e.g. 1920x1088 from a 1080p source). 'remux' (default) losslessly stamps the correct display aspect ratio via stream-copy; 'reencode' rebuilds the video stream scaled back to its true dimensions. With a directory input, remux mode sweeps and repairs every detected file; reencode mode requires a single file.",
+    help="Repair hybrid-aspect MP4s (outputs stretched by the former QSV alignment bug, e.g. 1920x1088 from a 1080p source). 'remux' (default) losslessly stamps the correct display aspect ratio via stream-copy; 'reencode' rebuilds the video stream scaled back to its true dimensions. With a directory input, remux mode sweeps and repairs every detected file; reencode mode requires a single file. Combined with --audit, hybrid findings are remuxed as the audit finds them.",
+  )
+  parser.add_argument(
+    "--recycle-failed",
+    dest="recyclefailed",
+    action="store_true",
+    help="With --audit: move media that fails ffprobe to the configured recycle-bin instead of only reporting it. Requires recycle-bin to be set; files are never deleted outright.",
   )
 
   args = vars(parser.parse_args())
@@ -1039,10 +1045,29 @@ def main():
     from resources.config_schema import AuditSettings as _AuditSettings
     from resources.library_audit import run_audit_inline as _run_audit_inline
 
+    if args.get("repairhybrid") == "reencode":
+      log.error("--audit cannot combine with --repair-hybrid reencode; run the reencode repair on a single file without --audit")
+      sys.exit(2)
+    recycle_bin = getattr(settings, "recycle_bin", None) or None
+    if args.get("recyclefailed") and not recycle_bin:
+      log.error("--recycle-failed requires recycle-bin to be configured in sma-ng.yml")
+      sys.exit(2)
     audit_settings = _AuditSettings()
     ffmpeg_dir = getattr(settings, "ffmpeg_dir", None) or None
-    rc = _run_audit_inline([path], audit_settings, log, ffmpeg_dir=ffmpeg_dir)
+    rc = _run_audit_inline(
+      [path],
+      audit_settings,
+      log,
+      ffmpeg_dir=ffmpeg_dir,
+      repair_hybrid=bool(args.get("repairhybrid")),
+      recycle_failed=bool(args.get("recyclefailed")),
+      recycle_bin=recycle_bin,
+    )
     sys.exit(rc)
+
+  if args.get("recyclefailed"):
+    log.error("--recycle-failed only applies with --audit")
+    sys.exit(2)
 
   if args.get("repairhybrid"):
     from resources.library_audit.probes import hybrid_aspect_check

@@ -700,6 +700,47 @@ _HYBRID_DETAILS = {
 }
 
 
+class TestAuditCliFlags:
+  def _settings(self, recycle_bin=""):
+    s = MagicMock()
+    s.recycle_bin = recycle_bin
+    s.ffmpeg_dir = None
+    return s
+
+  def test_audit_with_reencode_errors(self, tmp_path):
+    with patch("sys.argv", ["manual.py", "-i", str(tmp_path), "--audit", "--repair-hybrid", "reencode", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._settings()):
+        with pytest.raises(SystemExit) as exc:
+          main()
+    assert exc.value.code == 2
+
+  def test_recycle_failed_without_audit_errors(self, tmp_path):
+    with patch("sys.argv", ["manual.py", "-i", str(tmp_path), "--recycle-failed", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._settings(recycle_bin="/bin")):
+        with pytest.raises(SystemExit) as exc:
+          main()
+    assert exc.value.code == 2
+
+  def test_recycle_failed_without_bin_errors(self, tmp_path):
+    with patch("sys.argv", ["manual.py", "-i", str(tmp_path), "--audit", "--recycle-failed", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._settings(recycle_bin="")):
+        with pytest.raises(SystemExit) as exc:
+          main()
+    assert exc.value.code == 2
+
+  def test_audit_passes_fix_flags_to_inline_runner(self, tmp_path):
+    with patch("sys.argv", ["manual.py", "-i", str(tmp_path), "--audit", "--repair-hybrid", "--recycle-failed", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._settings(recycle_bin="/bin")):
+        with patch("resources.library_audit.run_audit_inline", return_value=0) as mock_run:
+          with pytest.raises(SystemExit) as exc:
+            main()
+    assert exc.value.code == 0
+    kwargs = mock_run.call_args.kwargs
+    assert kwargs["repair_hybrid"] is True
+    assert kwargs["recycle_failed"] is True
+    assert kwargs["recycle_bin"] == "/bin"
+
+
 class TestRepairHybrid:
   def _mock_settings(self):
     s = MagicMock()
