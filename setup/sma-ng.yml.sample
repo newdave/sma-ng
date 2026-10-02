@@ -66,6 +66,7 @@ daemon:
       - Deleted Scenes
       - Interviews
       - Other
+      - Plex Versions
       - Specials
       - Trailers
     concurrency: 2

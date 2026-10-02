@@ -80,6 +80,14 @@ class TestSchemaDefaultsContract:
     assert cfg.daemon.media_extensions[:3] == [".mkv", ".m4v", ".avi"]
     assert ".mp4" not in cfg.daemon.media_extensions
 
+  def test_audit_skip_dirs_default_excludes_plex_owned_dirs(self):
+    # Plex Media Optimizer output must never be probed: mid-write files have
+    # no moov atom and flag as false ffprobe_failed findings, and the
+    # auto-fix/--recycle-failed paths could then act on Plex-owned media.
+    cfg = SmaConfig()
+    assert "Plex Versions" in cfg.daemon.audit.skip_dirs
+    assert "Extras" in cfg.daemon.audit.skip_dirs
+
   def test_base_defaults(self):
     cfg = SmaConfig()
     assert cfg.base.converter.ffmpeg == "ffmpeg"

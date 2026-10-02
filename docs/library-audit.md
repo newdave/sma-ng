@@ -31,12 +31,15 @@ daemon:
         enabled: true
     interval-seconds: 86400     # scheduled cycle (24h default)
     skip-dirs:                  # case-insensitive directory basenames to skip
+                                # (an explicit list REPLACES these defaults —
+                                # keep entries like Plex Versions when editing)
       - Extras
       - Featurettes
       - Behind The Scenes
       - Deleted Scenes
       - Interviews
       - Other
+      - Plex Versions
       - Specials
       - Trailers
     concurrency: 2              # max ffprobe subprocesses per node
