@@ -24,6 +24,23 @@ def _read(rel_path):
     return f.read()
 
 
+def _completion_words(stdout):
+  """Extract completion candidates from `usage complete-word --shell zsh` output.
+
+  usage >= 6.x emits tab-separated ``name<TAB>description<TAB>value`` lines;
+  older releases emit zsh ``name:description`` lines with literal colons
+  escaped as ``\\:``. Support both so the test tracks whichever usage CLI
+  mise installs.
+  """
+  words = []
+  for line in stdout.splitlines():
+    if "\t" in line:
+      words.append(line.split("\t", 1)[0])
+    else:
+      words.append(re.split(r"(?<!\\):", line, maxsplit=1)[0].replace("\\:", ":"))
+  return words
+
+
 class TestDeployDockerUpgradeTask:
   def test_sources_shared_library(self):
     text = _read(".mise/tasks/deploy/docker")
@@ -219,7 +236,7 @@ class TestMiseTaskLayout:
     )
 
     assert result.returncode == 0, result.stderr or result.stdout
-    completions = [re.split(r"(?<!\\):", line, maxsplit=1)[0].replace("\\:", ":") for line in result.stdout.splitlines()]
+    completions = _completion_words(result.stdout)
     assert "config:sample" in completions
     assert "config:generate" in completions
 
@@ -257,7 +274,7 @@ class TestMiseTaskLayout:
     )
 
     assert result.returncode == 0, result.stderr or result.stdout
-    completions = [re.split(r"(?<!\\):", line, maxsplit=1)[0].replace("\\:", ":") for line in result.stdout.splitlines()]
+    completions = _completion_words(result.stdout)
     assert "setup:deps" in completions
     assert "setup:deps:base" in completions
     assert "setup:docker:target" in completions
