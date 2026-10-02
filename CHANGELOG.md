@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.2.4](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.3...sma-ng-v3.2.4) (2026-10-02)
+
+
+### Features
+
+* **audit:** detect and repair hybrid-aspect (stretched) MP4s ([066ed6b](https://github.com/newdave/sma-ng/commit/066ed6bbcfe083b96efc276e7db087763bca57d3))
+
+
+### Bug Fixes
+
+* **converter:** default aspect mode to pad instead of stretch ([2e180a8](https://github.com/newdave/sma-ng/commit/2e180a80410934b1935814b75e6d6cadb0476f3b))
+* **ffmpeg:** never stretch QSV output to encoder-alignment boundaries ([479d487](https://github.com/newdave/sma-ng/commit/479d4874163381d42ff704fb97e064c9aa96738e))
+
 ## [3.2.3](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.2...sma-ng-v3.2.3) (2026-10-01)
 
 
