@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.5](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.4...sma-ng-v3.2.5) (2026-10-02)
+
+
+### Bug Fixes
+
+* **dashboard:** select all jobs across pages, not just current page ([cd9f953](https://github.com/newdave/sma-ng/commit/cd9f9535ab72c223d0fd0e9a90aed09ae1d537e5))
+
 ## [3.2.4](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.3...sma-ng-v3.2.4) (2026-10-02)
 
 
