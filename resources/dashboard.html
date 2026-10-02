@@ -607,7 +607,7 @@
                                     :checked="jobs.length > 0 && jobs.every(j => selectedJobIds.includes(j.id))"
                                     :indeterminate.prop="jobs.some(j => selectedJobIds.includes(j.id)) && !jobs.every(j => selectedJobIds.includes(j.id))"
                                     @change="$event.target.checked ? selectAllJobs() : clearSelection()"
-                                    title="Select all on page"
+                                    title="Select all matching jobs (all pages)"
                                     class="rounded border-gray-400 dark:border-gray-600 cursor-pointer" />
                             </th>
                             <th class="pb-2 pr-3 w-12 font-medium">ID</th>
@@ -872,11 +872,15 @@
                         this.lastUpdate = new Date().toLocaleTimeString();
                     } catch (e) { this.health = { status: 'error' }; }
                 },
-                async fetchJobs() {
-                    const params = new URLSearchParams({ limit: this.pageSize, offset: this.page * this.pageSize });
+                jobQueryParams(limit, offset) {
+                    const params = new URLSearchParams({ limit, offset });
                     if (this.filter !== 'all') params.set('status', this.filter);
                     if (this.searchQuery.trim()) params.set('search', this.searchQuery.trim());
                     if (this.profileFilter) params.set('profile', this.profileFilter);
+                    return params;
+                },
+                async fetchJobs() {
+                    const params = this.jobQueryParams(this.pageSize, this.page * this.pageSize);
                     if (this.sortMode && this.sortMode !== 'created') params.set('sort', this.sortMode);
                     try {
                         const r = await fetch('/jobs?' + params, { headers: this.authHeaders() }).then(r => r.json());
@@ -1045,8 +1049,16 @@
                     else this.selectedJobIds.splice(i, 1);
                     this.lastSelectedJobId = jobId;
                 },
-                selectAllJobs() {
-                    this.selectedJobIds = this.jobs.map(j => j.id);
+                async selectAllJobs() {
+                    // Select every job matching the current filters across all pages,
+                    // not just the rows rendered on the current page.
+                    try {
+                        const r = await fetch('/jobs?' + this.jobQueryParams(1000000, 0), { headers: this.authHeaders() }).then(r => r.json());
+                        const all = (r.jobs || []).map(j => j.id);
+                        this.selectedJobIds = all.length ? all : this.jobs.map(j => j.id);
+                    } catch (e) {
+                        this.selectedJobIds = this.jobs.map(j => j.id);
+                    }
                     this.lastSelectedJobId = this.jobs.length ? this.jobs[this.jobs.length - 1].id : null;
                 },
                 clearSelection() {
