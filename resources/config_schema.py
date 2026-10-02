@@ -866,6 +866,10 @@ _DEFAULT_AUDIT_SKIP_DIRS = [
   "Deleted Scenes",
   "Interviews",
   "Other",
+  # Plex Media Optimizer output. Plex owns these pre-transcoded copies and
+  # tracks them in its own DB; while one is being written it has no moov atom
+  # yet, so probing it yields a false ffprobe_failed finding.
+  "Plex Versions",
   "Specials",
   "Trailers",
 ]
