@@ -169,6 +169,25 @@ target as 1920x1072, or an untouched 1920x1080 source scaled to 1920x1088);
 that coercion has been removed — QSV drivers handle surface alignment
 internally without rescaling the picture.
 
+### Repairing previously stretched ("hybrid") outputs
+
+Files transcoded before the fix may still carry stretched geometry
+(1920x1088, 1920x1072, 1920x1056, 3840x2176, 3840x2144, 1280x736, 1280x704).
+Two repair paths exist:
+
+- **Lossless (recommended):** `python manual.py --repair-hybrid -i /path`
+  sweeps a file or directory and remuxes each detected MP4 with a corrective
+  display aspect ratio (`-c copy -aspect W:H`) — instant, no quality loss.
+  The library audit can do the same automatically via
+  `daemon.audit.auto-fix.hybrid-aspect: true` (see
+  [Library Audit](library-audit.md)).
+- **Full rebuild:** `python manual.py --repair-hybrid reencode -i file.mp4`
+  re-encodes one file back to its true dimensions through the normal
+  pipeline (logged as `[video-dims-override]`); costs an encode generation.
+
+Detection is signature-based and skips files already carrying a non-square
+pixel aspect ratio, so re-running the repair is safe and idempotent.
+
 ### Hardware acceleration not working
 
 - Verify `hwdevices` key matches encoder codec name (e.g., `qsv` for `h265qsv`)

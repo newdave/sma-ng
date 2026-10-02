@@ -12,7 +12,9 @@ from resources.library_audit.kinds import (
   FindingKind,
 )
 from resources.library_audit.probes import (
+  HYBRID_DIMS_TABLE,
   ffprobe_check,
+  hybrid_aspect_check,
   preconv_original_check,
   sidecar_orphan_check,
   tmp_artifact_check,
@@ -672,6 +674,240 @@ class TestInlineProbe:
     from resources.library_audit.engine import _inline_probe
 
     assert _inline_probe("/x", "unknown_hint", None, {}) is None
+
+
+# ---------------------------------------------------------------------------
+# Hybrid-aspect detection (probe + dims table)
+# ---------------------------------------------------------------------------
+
+
+def _hybrid_probe_patch(monkeypatch, width=1920, height=1088, sar=None, info="video"):
+  """Patch probes.FFMpeg with a probe returning a video stream of the given
+  dims/SAR. ``info=None`` → probe returns None; ``info="novideo"`` → probed
+  info has no video stream."""
+  fake_ffmpeg = mock.MagicMock()
+  if info is None:
+    fake_ffmpeg.probe.return_value = None
+  elif info == "novideo":
+    fake_ffmpeg.probe.return_value = mock.MagicMock(video=None)
+  else:
+    video = mock.MagicMock()
+    video.video_width = width
+    video.video_height = height
+    video.sample_aspect_ratio = sar
+    fake_ffmpeg.probe.return_value = mock.MagicMock(video=video)
+  monkeypatch.setattr("resources.library_audit.probes.FFMpeg", lambda **_: fake_ffmpeg)
+  return fake_ffmpeg
+
+
+class TestHybridAspectCheck:
+  def test_dims_table_exact_contents(self):
+    assert HYBRID_DIMS_TABLE == {
+      (1920, 1088): 1080,
+      (1920, 1072): 1080,
+      (1920, 1056): 1080,
+      (3840, 2176): 2160,
+      (3840, 2144): 2160,
+      (1280, 736): 720,
+      (1280, 704): 720,
+    }
+
+  def test_detects_stretched_1080p(self, tmp_path, monkeypatch):
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"\x00" * 64)
+    _hybrid_probe_patch(monkeypatch, width=1920, height=1088, sar=None)
+    details = hybrid_aspect_check(str(p))
+    assert details == {
+      "reason": "stretched_dims",
+      "width": 1920,
+      "height": 1088,
+      "true_height": 1080,
+      "dar": "1920:1080",
+    }
+
+  def test_detects_with_explicit_square_par(self, tmp_path, monkeypatch):
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"\x00" * 64)
+    _hybrid_probe_patch(monkeypatch, width=3840, height=2176, sar="1:1")
+    details = hybrid_aspect_check(str(p))
+    assert details is not None
+    assert details["true_height"] == 2160
+    assert details["dar"] == "3840:2160"
+
+  def test_non_square_par_means_already_repaired(self, tmp_path, monkeypatch):
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"\x00" * 64)
+    _hybrid_probe_patch(monkeypatch, width=1920, height=1088, sar="135:136")
+    assert hybrid_aspect_check(str(p)) is None
+
+  def test_standard_dims_not_flagged(self, tmp_path, monkeypatch):
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"\x00" * 64)
+    _hybrid_probe_patch(monkeypatch, width=1920, height=1080, sar=None)
+    assert hybrid_aspect_check(str(p)) is None
+
+  def test_non_mp4_extension_skipped_without_probe(self, tmp_path, monkeypatch):
+    p = tmp_path / "movie.mkv"
+    p.write_bytes(b"\x00" * 64)
+    fake = _hybrid_probe_patch(monkeypatch, width=1920, height=1088, sar=None)
+    assert hybrid_aspect_check(str(p)) is None
+    fake.probe.assert_not_called()
+
+  def test_missing_file_returns_none(self, tmp_path, monkeypatch):
+    fake = _hybrid_probe_patch(monkeypatch)
+    assert hybrid_aspect_check(str(tmp_path / "nope.mp4")) is None
+    fake.probe.assert_not_called()
+
+  def test_probe_returns_none(self, tmp_path, monkeypatch):
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"\x00" * 64)
+    _hybrid_probe_patch(monkeypatch, info=None)
+    assert hybrid_aspect_check(str(p)) is None
+
+  def test_probe_without_video_stream(self, tmp_path, monkeypatch):
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"\x00" * 64)
+    _hybrid_probe_patch(monkeypatch, info="novideo")
+    assert hybrid_aspect_check(str(p)) is None
+
+  def test_probe_exception_swallowed(self, tmp_path, monkeypatch):
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"\x00" * 64)
+    fake_ffmpeg = mock.MagicMock()
+    fake_ffmpeg.probe.side_effect = RuntimeError("probe blew up")
+    monkeypatch.setattr("resources.library_audit.probes.FFMpeg", lambda **_: fake_ffmpeg)
+    assert hybrid_aspect_check(str(p)) is None
+
+  def test_non_int_dims_returns_none(self, tmp_path, monkeypatch):
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"\x00" * 64)
+    _hybrid_probe_patch(monkeypatch, width=None, height=1088, sar=None)
+    assert hybrid_aspect_check(str(p)) is None
+
+
+# ---------------------------------------------------------------------------
+# Hybrid-aspect engine integration (probe_one, maybe_auto_fix, _inline_probe)
+# ---------------------------------------------------------------------------
+
+_HYBRID_DETAILS = {
+  "reason": "stretched_dims",
+  "width": 1920,
+  "height": 1088,
+  "true_height": 1080,
+  "dar": "1920:1080",
+}
+
+
+def _hybrid_auto_fix(enabled=True):
+  return mock.MagicMock(
+    ffprobe_failed=False,
+    orphan_sidecar=False,
+    leftover_tmp=False,
+    preconv_original=False,
+    hybrid_aspect=enabled,
+  )
+
+
+class TestEngineHybridAspect:
+  def test_probe_media_returns_hybrid_finding(self, monkeypatch):
+    monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
+    monkeypatch.setattr("resources.library_audit.engine.hybrid_aspect_check", lambda *a, **k: dict(_HYBRID_DETAILS))
+    engine, _db, _pcm = _engine()
+    finding = engine.probe_one({"path": "/x.mp4", "kind_hint": KIND_HINT_MEDIA})
+    assert finding is not None
+    assert finding.kind == FindingKind.HYBRID_ASPECT
+    assert finding.details["dar"] == "1920:1080"
+
+  def test_probe_media_clean_when_hybrid_check_passes(self, monkeypatch):
+    monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
+    monkeypatch.setattr("resources.library_audit.engine.hybrid_aspect_check", lambda *a, **k: None)
+    engine, _db, _pcm = _engine()
+    assert engine.probe_one({"path": "/x.mp4", "kind_hint": KIND_HINT_MEDIA}) is None
+
+  def test_ffprobe_failure_wins_over_hybrid_check(self, monkeypatch):
+    monkeypatch.setattr(
+      "resources.library_audit.engine.ffprobe_check",
+      lambda *a, **k: {"reason": "probe_returned_none"},
+    )
+    called = []
+    monkeypatch.setattr(
+      "resources.library_audit.engine.hybrid_aspect_check",
+      lambda *a, **k: called.append(True) or dict(_HYBRID_DETAILS),
+    )
+    engine, _db, _pcm = _engine()
+    finding = engine.probe_one({"path": "/x.mp4", "kind_hint": KIND_HINT_MEDIA})
+    assert finding is not None
+    assert finding.kind == FindingKind.FFPROBE_FAILED
+    assert called == []
+
+  def test_auto_fix_repairs_when_enabled(self, monkeypatch):
+    calls = []
+
+    def fake_repair(path, dar, ffmpeg_dir=None, logger=None):
+      calls.append((path, dar, ffmpeg_dir))
+      return True
+
+    monkeypatch.setattr("resources.library_audit.engine.repair_hybrid_aspect", fake_repair)
+    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_hybrid_auto_fix(enabled=True))
+    finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))
+    assert engine.maybe_auto_fix(finding) == "repaired"
+    assert calls == [("/x.mp4", "1920:1080", None)]
+
+  def test_auto_fix_skipped_when_repair_fails(self, monkeypatch):
+    monkeypatch.setattr(
+      "resources.library_audit.engine.repair_hybrid_aspect",
+      lambda *a, **k: False,
+    )
+    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_hybrid_auto_fix(enabled=True))
+    finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))
+    assert engine.maybe_auto_fix(finding) == "skipped"
+
+  def test_auto_fix_skipped_when_disabled(self, monkeypatch):
+    def boom(*_a, **_k):
+      raise AssertionError("repair must not run when disabled")
+
+    monkeypatch.setattr("resources.library_audit.engine.repair_hybrid_aspect", boom)
+    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_hybrid_auto_fix(enabled=False))
+    finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))
+    assert engine.maybe_auto_fix(finding) == "skipped"
+
+  def test_auto_fix_dry_run_returns_dry_run(self):
+    engine, _db, _pcm = _engine(dry_run=True, auto_fix=_hybrid_auto_fix(enabled=True))
+    finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))
+    assert engine.maybe_auto_fix(finding) == "dry_run"
+
+  def test_auto_fix_skipped_when_dar_missing(self, monkeypatch):
+    def boom(*_a, **_k):
+      raise AssertionError("repair must not run without a dar")
+
+    monkeypatch.setattr("resources.library_audit.engine.repair_hybrid_aspect", boom)
+    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_hybrid_auto_fix(enabled=True))
+    finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", {"reason": "stretched_dims"})
+    assert engine.maybe_auto_fix(finding) == "skipped"
+
+  def test_inline_probe_emits_hybrid_finding(self, monkeypatch):
+    from resources.library_audit.engine import _inline_probe
+
+    monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
+    monkeypatch.setattr("resources.library_audit.engine.read_media_ids", lambda _p: {})
+    monkeypatch.setattr("resources.library_audit.engine.hybrid_aspect_check", lambda *a, **k: dict(_HYBRID_DETAILS))
+    out = _inline_probe("/x.mp4", KIND_HINT_MEDIA, None, {})
+    assert out is not None
+    assert out.kind == FindingKind.HYBRID_ASPECT
+    assert out.details["true_height"] == 1080
+
+  def test_inline_probe_clean_when_no_hybrid(self, monkeypatch):
+    from resources.library_audit.engine import _inline_probe
+
+    monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
+    monkeypatch.setattr("resources.library_audit.engine.read_media_ids", lambda _p: {})
+    monkeypatch.setattr("resources.library_audit.engine.hybrid_aspect_check", lambda *a, **k: None)
+    assert _inline_probe("/x.mp4", KIND_HINT_MEDIA, None, {}) is None
+
+  def test_audit_auto_fix_schema_defaults_hybrid_off(self):
+    from resources.config_schema import AuditAutoFix
+
+    assert AuditAutoFix().hybrid_aspect is False
 
 
 class TestShortDetails:

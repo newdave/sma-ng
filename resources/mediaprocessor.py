@@ -928,8 +928,8 @@ class MediaProcessor:
     stream's resolution. Calls the custom streamTitle hook first if
     defined, or preserves the original title if keep-titles is enabled.
     """
-    width = options.get("width", 0)
-    height = options.get("height", 0)
+    width = options.get("width") or 0
+    height = options.get("height") or 0
     if not width and not height:
       width = stream.video_width or 0
       height = stream.video_height or 0
@@ -1997,6 +1997,19 @@ class MediaProcessor:
       vcodec = vcodecs[0]
       vwidth = self.settings.vwidth
 
+    # Runtime-only explicit output dimensions (manual.py --repair-hybrid
+    # reencode). Both axes are forced so the encoder applies a corrective
+    # scale — this intentionally resamples the picture (undoing a prior
+    # stretch), so it always implies a re-encode.
+    vheight = None
+    dims_override = getattr(self.settings, "video_dims_override", None)
+    if dims_override:
+      vwidth, vheight = int(dims_override[0]), int(dims_override[1])
+      if vcodec == "copy":
+        vcodec = vcodecs[0]
+      vdebug = vdebug + ".dims-override"
+      self.log.info("Explicit output dimensions %dx%d requested; video stream will be re-encoded with a corrective scale [video-dims-override]." % (vwidth, vheight))
+
     vlevel = self.settings.video_level
     if self.settings.video_level and info.video.video_level and (info.video.video_level > self.settings.video_level):
       self.log.debug("Video level %0.1f. Codec cannot be copied because video level is too high [video-max-level]." % (info.video.video_level))
@@ -2026,9 +2039,9 @@ class MediaProcessor:
 
     vmaxrate = None
     vbufsize = None
-    vheight = info.video.video_height
-    is_uhd = vheight is not None and vheight > 1080
-    is_hd = vheight is not None and 720 <= vheight <= 1080
+    src_height = info.video.video_height
+    is_uhd = src_height is not None and src_height > 1080
+    is_hd = src_height is not None and 720 <= src_height <= 1080
     profile_match = self._match_bitrate_profile(vbitrate_estimate, hd=is_hd, uhd=is_uhd)
     if profile_match:
       vbitrate = profile_match["target"]
@@ -2272,6 +2285,7 @@ class MediaProcessor:
       "pix_fmt": vpix_fmt,
       "field_order": vfieldorder,
       "width": vwidth,
+      "height": vheight,
       "filter": vfilter,
       "params": vparams,
       "framedata": vframedata,

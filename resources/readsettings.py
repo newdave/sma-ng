@@ -516,6 +516,10 @@ class ReadSettings:
     self.vfilter = cfg.filter
     self.vforcefilter = cfg.force_filter
     self.vwidth = cfg.max_width
+    # Runtime-only explicit output dimensions (w, h); never sourced from
+    # YAML. Set by manual.py --repair-hybrid reencode to force a corrective
+    # scale through MediaProcessor.generateOptions [video-dims-override].
+    self.video_dims_override: tuple[int, int] | None = None
     self.video_level = cfg.max_level
     self.vprofile = self._as_list(cfg.profile)
     self.pix_fmt = self._as_list(cfg.pix_fmt)

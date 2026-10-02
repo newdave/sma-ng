@@ -1350,6 +1350,78 @@ class TestSameFamilyVideoBitrateClamp:
     assert not any("video-same-family-bitrate-clamp" in w for w in warnings)
 
 
+class TestVideoDimsOverride:
+  """settings.video_dims_override (manual.py --repair-hybrid reencode) forces
+  explicit output dimensions and defeats stream-copy."""
+
+  def _make_mp(self, tmp_yaml, dims_override=None):
+    with patch("resources.readsettings.ReadSettings._validate_binaries"):
+      from resources.mediaprocessor import MediaProcessor
+      from resources.readsettings import ReadSettings
+
+      settings = ReadSettings(tmp_yaml())
+      settings.vcodec = ["h264"]
+      settings.vmaxbitrate = 50000  # high enough to never force a re-encode
+      settings.vprofile = ["high"]
+      settings.video_dims_override = dims_override
+
+    mock_converter = MagicMock()
+    mock_converter.ffmpeg.codecs = {
+      "h264": {"encoders": ["libx264"]},
+      "aac": {"encoders": ["aac"]},
+    }
+    mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8}
+    mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: {"h264": "libx264", "aac": "aac"}.get(c, c)
+
+    mp = MediaProcessor.__new__(MediaProcessor)
+    mp.settings = settings
+    mp.converter = mock_converter
+    mp.log = MagicMock()
+    mp.deletesubs = set()
+    from resources.subtitles import SubtitleProcessor
+
+    mp.subtitles = SubtitleProcessor(mp)
+    return mp
+
+  def _copyable_info(self, make_media_info, video_height=1080):
+    # Source already h264 with matching profile → copy without the override.
+    info = make_media_info(video_codec="h264", video_bitrate=10_000_000, total_bitrate=10_128_000, audio_bitrate=128_000, video_height=video_height)
+    info.video.profile = "high"
+    return info
+
+  def test_override_forces_dims_and_reencode(self, tmp_yaml, make_media_info):
+    # The hybrid-aspect scenario: a 1920x1088 stretched source rebuilt at
+    # its true 1920x1080 dimensions.
+    mp = self._make_mp(tmp_yaml, dims_override=(1920, 1080))
+    info = self._copyable_info(make_media_info, video_height=1088)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mp4", info=info)
+    assert options is not None
+    assert options["video"]["width"] == 1920
+    assert options["video"]["height"] == 1080
+    assert options["video"]["codec"] != "copy"
+    assert ".dims-override" in options["video"]["debug"]
+
+  def test_no_override_keeps_copy_and_no_height(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, dims_override=None)
+    info = self._copyable_info(make_media_info)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mp4", info=info)
+    assert options is not None
+    assert options["video"]["codec"] == "copy"
+    assert options["video"]["height"] is None
+    assert ".dims-override" not in options["video"]["debug"]
+
+  def test_override_coerces_dims_to_int(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, dims_override=("1280", "720"))
+    info = self._copyable_info(make_media_info)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mp4", info=info)
+    assert options is not None
+    assert options["video"]["width"] == 1280
+    assert options["video"]["height"] == 720
+
+
 class TestReencodeRateControlSelection:
   """Non-bitrate-driven re-encodes prefer ICQ (global-quality); the min-bitrate floor guards the VBR path."""
 
