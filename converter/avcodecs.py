@@ -407,9 +407,10 @@ class VideoCodec(BaseCodec):
     * width (integer) - video width
     * height (integer) - video height
     * mode (string) - aspect preserval mode; one of:
-          * stretch (default) - don't preserve aspect
+          * pad (default) - pad with black bars
           * crop - crop extra w/h
-          * pad - pad with black bars
+          * stretch - don't preserve aspect (distorts the picture;
+            must be requested explicitly)
     * src_width (int) - source width
     * src_height (int) - source height
 
@@ -559,7 +560,10 @@ class VideoCodec(BaseCodec):
         sw = None
         sh = None
 
-    mode = "stretch"
+    # Default to pad: when both target dims are given and they mismatch the
+    # source aspect ratio, letterbox rather than stretch — a stretched
+    # picture must be an explicit operator choice, never a silent default.
+    mode = "pad"
     if "mode" in safe:
       if safe["mode"] in ["stretch", "crop", "pad"]:
         mode = safe["mode"]

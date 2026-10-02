@@ -1096,6 +1096,29 @@ class TestVideoCodecFpsBitrateBranches:
     assert filters is not None
     assert "pad=" in filters
 
+  def test_pad_mode_wider_target(self):
+    """Pad left/right when the target is wider than the source aspect."""
+    codec = H264Codec()
+    # Source: 4:3 (640x480), target: 16:9 (1280x720) — target is wider
+    w, h, filters = codec._aspect_corrections(640, 480, 1280, 720, "pad")
+    assert filters is not None
+    assert "pad=" in filters
+
+  def test_default_mode_pads_instead_of_stretching(self):
+    """Regression: the implicit aspect mode used to be ``stretch``, so both
+    target dims mismatching the source aspect silently distorted the
+    picture. The default is now ``pad`` — stretching must be explicit."""
+    codec = H264Codec()
+    opts = codec.parse_options({"codec": "h264", "src_width": 1920, "src_height": 1080, "width": 800, "height": 600})
+    vf_str = " ".join(opts)
+    assert "pad=" in vf_str
+
+  def test_explicit_stretch_mode_still_honored(self):
+    codec = H264Codec()
+    opts = codec.parse_options({"codec": "h264", "src_width": 1920, "src_height": 1080, "width": 800, "height": 600, "mode": "stretch"})
+    vf_str = " ".join(opts)
+    assert "pad=" not in vf_str and "crop=" not in vf_str
+
 
 class TestH264CodecSpecifics:
   """Test H264Codec-specific production paths."""
