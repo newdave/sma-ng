@@ -235,7 +235,7 @@ _CAUSE_PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureCause, str], ...] = (
   (
     re.compile(r"(?:width|height).*(?:not aligned|alignment)|MFX_ERR_INVALID_VIDEO_PARAM.*(?:width|height)", re.IGNORECASE),
     FfmpegFailureCause.QSV_ALIGNMENT,
-    "Source dimensions are not aligned to the QSV encoder's required boundary (typically 16 for HEVC, 32 for 10-bit). Pad/scale to mod-16 via vpp_qsv=w=W:h=H.",
+    "Driver rejected the frame dimensions (alignment). SMA does not pre-scale to an aligned size — vpp_qsv w/h scales rather than pads and would stretch the picture; the hardware fallback tiers rescue the job instead. Persistent failures on one driver stack may need a different gpu backend.",
   ),
   (
     re.compile(r"MFX_ERR_GPU_HANG|GPU hang|device lost|VAAPI ERROR.*HW_HANG", re.IGNORECASE),

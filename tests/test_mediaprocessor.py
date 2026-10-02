@@ -3772,10 +3772,12 @@ class TestQsvVppPassthroughInjection:
     assert options["video"]["filter"] == "vpp_qsv=format=p010le"
     assert "-hwaccel_output_format" in preopts
 
-  def test_misaligned_height_pads_vpp_qsv_to_mod16(self):
-    # Regression: hevc_qsv refuses 1920x872 with bare `vpp_qsv` because
-    # the encoder demands mod-16 alignment. We must request explicit
-    # rounded-up dims so the GPU surface is acceptable.
+  def test_misaligned_height_is_never_stretched(self):
+    # Regression (hybrid-aspect outputs): a 1920x872 source used to be
+    # scaled to 1920x880 "for encoder alignment" — but vpp_qsv w/h SCALES
+    # (doesn't pad), so the picture shipped vertically stretched. QSV
+    # encoders accept any even dims (the driver handles surface alignment
+    # via conformance cropping), so only the format pin is emitted.
     mp = self._mp()
     mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
     mp.isDolbyVision = MagicMock(return_value=False)
@@ -3785,11 +3787,12 @@ class TestQsvVppPassthroughInjection:
     info.video.video_height = 872
     options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p"}}
     mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
-    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=880:format=nv12"
+    assert options["video"]["filter"] == "vpp_qsv=format=nv12"
 
-  def test_10bit_output_uses_mod32_alignment(self):
-    # Gen11+ Intel QSV requires mod-32 alignment for 10-bit surfaces.
-    # 1920x1080 is mod-16 but NOT mod-32, so we must pad height to 1088.
+  def test_10bit_1080p_is_never_stretched(self):
+    # Regression (hybrid-aspect outputs): 1920x1080 10-bit used to be
+    # stretched to 1920x1088 by the former mod-32 alignment pre-scale.
+    # Dimensions must pass through untouched.
     mp = self._mp()
     mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
     mp.isDolbyVision = MagicMock(return_value=False)
@@ -3798,9 +3801,9 @@ class TestQsvVppPassthroughInjection:
     info.video.video_height = 1080
     options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "p010le"}}
     mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
-    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1088:format=p010le"
+    assert options["video"]["filter"] == "vpp_qsv=format=p010le"
 
-  def test_8bit_output_keeps_mod16_alignment(self):
+  def test_8bit_source_dims_pass_through(self):
     mp = self._mp()
     mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
     mp.isDolbyVision = MagicMock(return_value=False)
@@ -3810,7 +3813,7 @@ class TestQsvVppPassthroughInjection:
     info.video.video_height = 1088
     options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p"}}
     mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
-    # 1088 is mod-16 — only the format pin is needed.
+    # No resize requested — only the format pin is needed.
     assert options["video"]["filter"] == "vpp_qsv=format=nv12"
 
   def test_operator_downscale_folds_into_single_vpp_qsv(self):
@@ -3828,10 +3831,10 @@ class TestQsvVppPassthroughInjection:
     info.video.video_height = 2160
     options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p", "width": 1920, "height": None}}
     mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
-    # 1920 -> derived height 1080, floor-aligned to mod-16 = 1072. Floor,
-    # never ceil: max-width is a cap and vpp_qsv scales (doesn't pad), so
-    # rounding up would stretch past the requested size.
-    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1072:format=nv12"
+    # 1920 -> height derived from the source aspect ratio = 1080, exactly.
+    # No mod-16 flooring: that used to ship 1920x1072, a vertically
+    # stretched ("hybrid" aspect) picture.
+    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1080:format=nv12"
     assert "width" not in options["video"] and "height" not in options["video"]
 
   def test_operator_height_only_target_folds(self):
@@ -3844,8 +3847,26 @@ class TestQsvVppPassthroughInjection:
     info.video.video_height = 2160
     options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p", "width": None, "height": 1080}}
     mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
-    # Width derived from aspect (1920), explicit height floor-aligned to 1072.
-    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1072:format=nv12"
+    # Width derived from aspect (1920); the explicit 1080 target is kept
+    # as-is (even already) so the aspect ratio is preserved.
+    assert options["video"]["filter"] == "vpp_qsv=w=1920:h=1080:format=nv12"
+    assert "width" not in options["video"] and "height" not in options["video"]
+
+  def test_odd_width_target_floors_to_even_and_rederives_height(self):
+    # An odd max-width floors to even (a cap is never rounded up) and the
+    # height is re-derived from the source aspect AFTER the floor so the
+    # output stays aspect-exact: 1279 -> 1278, 1278 * 2160/3840 = 718.875
+    # -> even-rounded 718.
+    mp = self._mp()
+    mp.setAcceleration = MagicMock(return_value=(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], "/dev/dri/renderD128"))
+    mp.isDolbyVision = MagicMock(return_value=False)
+    info = self._info()
+    info.video.pix_fmt = "yuv420p"
+    info.video.video_width = 3840
+    info.video.video_height = 2160
+    options = {"format": "mp4", "audio": [], "video": {"filter": None, "pix_fmt": "yuv420p", "width": 1279, "height": None}}
+    mp._build_preopts_postopts("hevc_qsv", ["hevc_qsv"], info, {}, {}, options, [])
+    assert options["video"]["filter"] == "vpp_qsv=w=1278:h=718:format=nv12"
     assert "width" not in options["video"] and "height" not in options["video"]
 
   def test_unresolvable_single_target_keeps_stream_keys(self):
