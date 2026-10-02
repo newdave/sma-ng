@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.6](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.5...sma-ng-v3.2.6) (2026-10-02)
+
+
+### Features
+
+* **audit:** in-place fixes during CLI audit (--repair-hybrid combo, --recycle-failed) ([e66d4c6](https://github.com/newdave/sma-ng/commit/e66d4c633f87dd45c03733b6f5bade6084cbc72f))
+
 ## [3.2.5](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.4...sma-ng-v3.2.5) (2026-10-02)
 
 
