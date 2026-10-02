@@ -105,6 +105,27 @@ Configure `services.plex.<name>` in `sma-ng.yml`. SMA-NG refreshes the matching 
 1. Disable automatic library scanning in Plex to prevent Plex from scanning files mid-conversion
 2. Connect directly to the Plex server using its local hostname or IP on port `32400` (or your custom port) and set `token` plus `refresh = true` in `[Plex]`
 
+#### Optimized versions for 4K content
+
+`scripts/plex-optimize-4k.py` queues Plex Media Optimizer jobs for every 4K
+movie/episode that doesn't already have an optimized version, defaulting to
+the `Universal TV` profile at 8 Mbps 1080p. Plex writes the result next to
+the original under `Plex Versions/` (a directory the library audit skips by
+default — see `docs/library-audit.md`).
+
+```bash
+PLEX_URL=http://plex.local:32400 PLEX_TOKEN=xxx \
+  python scripts/plex-optimize-4k.py --dry-run          # preview
+python scripts/plex-optimize-4k.py --libraries Movies   # movies only
+python scripts/plex-optimize-4k.py --quality 10mbps-1080p --limit 20
+```
+
+The script follows JBOPS `media_manager.py` conventions (`PLEX_URL` /
+`PLEX_TOKEN`, `--libraries`) but calls python-plexapi's `optimize()`
+directly, because the JBOPS `--action optimize` path is an unimplemented
+stub and its selectors cannot filter by resolution. Transcoding is done by
+Plex itself, not SMA-NG; re-running is idempotent.
+
 ### Emby
 
 Configure one or more `services.emby.<name>` instances in `sma-ng.yml`. After
