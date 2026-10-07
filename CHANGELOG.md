@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.9](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.8...sma-ng-v3.2.9) (2026-10-07)
+
+
+### Bug Fixes
+
+* **metadata:** pass source filename as original so daily shows resolve by air date ([6397dc4](https://github.com/newdave/sma-ng/commit/6397dc4681132dbeb341ed906db021016a47d4ee))
+
 ## [3.2.8](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.7...sma-ng-v3.2.8) (2026-10-02)
 
 
