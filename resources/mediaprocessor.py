@@ -588,7 +588,7 @@ class MediaProcessor:
         self._logSourceSummary(info)
 
         try:
-          tagdata = tagdata or Metadata(mediatype, tvdbid=tvdbid, tmdbid=tmdbid, imdbid=imdbid, season=season, episode=episode, original=original, language=language)
+          tagdata = tagdata or Metadata(mediatype, tvdbid=tvdbid, tmdbid=tmdbid, imdbid=imdbid, season=season, episode=episode, original=original or inputfile, language=language)
           tmdbid = tagdata.tmdbid
         except KeyboardInterrupt:
           raise

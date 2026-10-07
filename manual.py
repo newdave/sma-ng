@@ -247,6 +247,9 @@ def guessInfo(fileName, settings, tmdbid=None, tvdbid=None, imdbid=None, season=
   elif type_hint == "movie":
     guessit_opts["type"] = "movie"
   guess = guessit.guessit(original or fileName, guessit_opts)
+  # Without --original (every daemon job), Metadata still needs the source
+  # name: daily shows recover TMDB episodes from its air date.
+  original = original or fileName
   try:
     if guess["type"] == "movie":
       return movieInfo(guess, tmdbid=tmdbid, imdbid=imdbid, language=language, original=original)
@@ -348,7 +351,7 @@ def tvInfo(guessData, tmdbid=None, tvdbid=None, imdbid=None, season=None, episod
 
   metadata = Metadata(MediaType.TV, tmdbid=tmdbid, imdbid=imdbid, tvdbid=tvdbid, season=season, episode=episode, language=language, logger=log, original=original)
   ep_display = "E".join("%02d" % e for e in (metadata.episodes or []))
-  log.info("Matched TV episode as %s (TMDB ID: %d) S%02d%s" % (metadata.showname, int(metadata.tmdbid or 0), int(season or 0), ep_display))
+  log.info("Matched TV episode as %s (TMDB ID: %d) S%02d%s" % (metadata.showname, int(metadata.tmdbid or 0), int(metadata.season or season or 0), ep_display))
   return metadata
 
 
