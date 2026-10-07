@@ -362,6 +362,25 @@ class TestGuessInfo:
         guessInfo("Show.S01E01.mkv", settings, type_hint="tv")
     mock_guess.assert_called_once_with("Show.S01E01.mkv", {"type": "episode"})
 
+  def test_filename_used_as_original_when_unset(self):
+    # Daemon jobs carry no --original; Metadata still needs the source name
+    # to recover daily-show episodes by air date (S24E2517 -> S25E17).
+    settings = MagicMock()
+    settings.fullpathguess = False
+    path = "/tv/Show (2003)/Season 24/Show (2003) - 2026-10-06 - Guest.mkv"
+    with patch("manual.guessit.guessit", return_value={"type": "episode", "title": "Show"}):
+      with patch("manual.tvInfo", return_value=MagicMock()) as mock_tv:
+        guessInfo(path, settings, tvdbid=71998, season=24, episode=2517)
+    assert mock_tv.call_args[1]["original"] == "Show (2003) - 2026-10-06 - Guest.mkv"
+
+  def test_explicit_original_preserved(self):
+    settings = MagicMock()
+    settings.fullpathguess = True
+    with patch("manual.guessit.guessit", return_value={"type": "movie", "title": "Test"}):
+      with patch("manual.movieInfo", return_value=MagicMock()) as mock_movie:
+        guessInfo("/movies/Test.mkv", settings, original="Test.2020.1080p.mkv")
+    assert mock_movie.call_args[1]["original"] == "Test.2020.1080p.mkv"
+
   def test_returns_none_on_exception(self):
     settings = MagicMock()
     settings.fullpathguess = True
