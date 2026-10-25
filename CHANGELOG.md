@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.11](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.10...sma-ng-v3.2.11) (2026-10-25)
+
+
+### Features
+
+* **autoscan:** configurable trigger names for forwarded ARR webhooks ([3ed502c](https://github.com/newdave/sma-ng/commit/3ed502c7004fc5a4fa58e22ac19dc186ea5e3b04))
+
 ## [3.2.10](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.9...sma-ng-v3.2.10) (2026-10-25)
 
 
