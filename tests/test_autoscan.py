@@ -183,3 +183,9 @@ class TestForwardArrWebhook:
   def test_missing_url_skips_request(self, mock_post):
     assert forwardArrWebhook("main", self._instance(url=""), "sonarr", {}) is None
     mock_post.assert_not_called()
+
+  @patch("autoprocess.autoscan.requests.post")
+  def test_custom_trigger_name(self, mock_post):
+    mock_post.return_value = MagicMock(status_code=200)
+    forwardArrWebhook("main", self._instance(**{"sonarr-trigger": "sonarr-1080p"}), "sonarr", {"eventType": "Rename"})
+    assert mock_post.call_args[0][0] == "http://autoscan.local:3030/triggers/sonarr-1080p"

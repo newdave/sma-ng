@@ -728,6 +728,10 @@ class AutoscanInstance(_Base):
   path_mapping: str = ""
   ignore_certs: bool = False
   enabled: bool = True
+  # Autoscan trigger names that forwarded Sonarr/Radarr webhooks are posted
+  # to (``/triggers/<name>``); must match the trigger names in Autoscan's config.
+  sonarr_trigger: str = "sonarr"
+  radarr_trigger: str = "radarr"
 
 
 class EmbyInstance(_Base):

@@ -220,6 +220,8 @@ services:
       path-mapping: ''   # k=v[,k=v] — same syntax as plex.path-mapping
       ignore-certs: false
       enabled: true
+      sonarr-trigger: sonarr   # Autoscan trigger name for forwarded Sonarr events
+      radarr-trigger: radarr   # Autoscan trigger name for forwarded Radarr events
 ```
 
 Each instance is gated by the same `daemon.routing[].services` mechanism used by
@@ -267,7 +269,7 @@ mount points (e.g. `/library/Media` here, `/data/Media` there). Use the same
 `/webhook/sonarr` and `/webhook/radarr` only transcode `Download` (import/upgrade) events. Every other event type —
 `Grab`, `Rename`, `EpisodeFileDelete`, `SeriesDelete`, `MovieFileDelete`, `MovieDelete`, `Health`,
 `ApplicationUpdate`, and so on — is passed through unchanged to Autoscan's native trigger
-(`/triggers/sonarr` or `/triggers/radarr`), so SMA-NG can sit in front of Autoscan as the only webhook target.
+(`/triggers/<sonarr-trigger>` or `/triggers/<radarr-trigger>`), so SMA-NG can sit in front of Autoscan as the only webhook target.
 
 - **Target selection.** SMA-NG collects every path in the payload (series/movie folder, `episodeFile`/`movieFile`,
   `deletedFiles`, `renamed*Files`), applies `daemon.path_rewrites`, and forwards to each `autoscan.<name>`
@@ -278,7 +280,8 @@ mount points (e.g. `/library/Media` here, `/data/Media` there). Use the same
 - **Responses.** `200` with `status: forwarded` and per-instance results, `200` with `status: ignored` when no
   Autoscan instance matches, or `502` when every forward attempt failed, so the failure shows up in the
   Sonarr/Radarr connection health check.
-- **Autoscan setup.** Autoscan must have `sonarr` / `radarr` triggers enabled for the forwarded events to be acted on.
+- **Autoscan setup.** Autoscan must define `sonarr` / `radarr` triggers. Set `sonarr-trigger` / `radarr-trigger`
+  on the `services.autoscan.<name>` instance when they are named differently (e.g. `sonarr-1080p`).
 
 `Download` events are not forwarded: SMA-NG triggers Autoscan itself (`/triggers/manual`) after the converted file
 is back in place.
@@ -292,7 +295,7 @@ is back in place.
 | No POST issued    | File's directory isn't a prefix of any `daemon.routing[].match` that lists `autoscan.<name>` |
 | Wrong `dir` sent  | Add a `path-mapping` entry rewriting SMA's path to Autoscan's                                |
 | `status: ignored` | Forwarded event's paths don't match any routing rule listing `autoscan.<name>`               |
-| 502 from webhook  | Every Autoscan forward failed; check Autoscan has `sonarr`/`radarr` triggers configured      |
+| 502 from webhook  | Every forward failed; check `sonarr-trigger`/`radarr-trigger` match Autoscan's trigger names |
 
 ### Integration Flow
 

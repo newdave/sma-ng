@@ -154,6 +154,8 @@ def _illustrative_services() -> dict:
         "path-mapping": "",
         "ignore-certs": False,
         "enabled": True,
+        "sonarr-trigger": "sonarr",
+        "radarr-trigger": "radarr",
       },
     },
   }

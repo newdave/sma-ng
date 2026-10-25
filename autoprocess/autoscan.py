@@ -94,7 +94,7 @@ def forwardArrWebhook(name: str, instance: dict, arr_type: str, payload: dict, l
 
   *instance* is a ``services.autoscan.<name>`` dict (``url``, ``username``,
   ``password``, ``ignore-certs``). The payload is passed through unchanged
-  to ``/triggers/<arr_type>`` so Autoscan applies its own event handling
+  to ``/triggers/<trigger>`` (``<arr_type>-trigger``, default *arr_type*) so Autoscan applies its own event handling
   (rename, file/series/movie delete) and its own path rewrites. Returns
   the HTTP status code, or ``None`` when the request could not be sent.
   """
@@ -102,7 +102,8 @@ def forwardArrWebhook(name: str, instance: dict, arr_type: str, payload: dict, l
   base_url = (instance.get("url") or "").strip().rstrip("/")
   if not base_url:
     return None
-  url = "%s/triggers/%s" % (base_url, arr_type)
+  trigger = (instance.get("%s-trigger" % arr_type) or arr_type).strip("/")
+  url = "%s/triggers/%s" % (base_url, trigger)
 
   auth = None
   username = instance.get("username") or ""

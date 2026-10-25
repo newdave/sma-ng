@@ -435,3 +435,5 @@ services:
       path-mapping: ''
       ignore-certs: false
       enabled: true
+      sonarr-trigger: sonarr
+      radarr-trigger: radarr
