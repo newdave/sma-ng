@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.10](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.9...sma-ng-v3.2.10) (2026-10-25)
+
+
+### Features
+
+* **daemon:** forward non-Download Sonarr/Radarr webhooks to Autoscan ([76cfe70](https://github.com/newdave/sma-ng/commit/76cfe70977dfbd91d4056f614a2d6b02e2a767a9))
+* **deploy:** merge plain-folder daemon.routing rules from local.yml ([388b2c8](https://github.com/newdave/sma-ng/commit/388b2c80dd2de5a67e387dee29e4e9dc995712fc))
+
 ## [3.2.9](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.8...sma-ng-v3.2.9) (2026-10-07)
 
 
