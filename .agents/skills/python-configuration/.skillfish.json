@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "python-configuration",
+  "owner": "wshobson",
+  "repo": "agents",
+  "path": "plugins/python-development/skills/python-configuration",
+  "branch": "main",
+  "sha": "cbdb6fd72a93b47e677909e9a2fb07cdc16b24f8",
+  "source": "manual"
+}
