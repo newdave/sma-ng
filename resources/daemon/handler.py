@@ -9,6 +9,7 @@ from urllib.parse import unquote
 
 import requests
 
+from autoprocess import autoscan
 from resources.daemon import metrics_prom
 from resources.daemon.config import _strip_secrets
 from resources.daemon.constants import SCRIPT_DIR
@@ -18,7 +19,7 @@ from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_
 
 __all__ = ["WebhookHandler", "_inline"]
 from resources.daemon.routes import dispatch_get, dispatch_post, dispatch_post_job_action
-from resources.daemon.webhook_parsing import parse_generic_webhook_body, parse_radarr_body, parse_sonarr_body
+from resources.daemon.webhook_parsing import arr_payload_paths, parse_generic_webhook_body, parse_radarr_body, parse_sonarr_body
 
 if TYPE_CHECKING:
   from resources.daemon.server import DaemonServer
@@ -1414,7 +1415,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     Returns (path, extra_args, profile_override, tag_ids) on success, or (None, [], None, []) with an error
     response already sent on failure.  Test events return (None, []) with
-    a 200 response already sent.
+    a 200 response already sent.  Every other non-Download event is
+    forwarded to Autoscan via ``_forward_arr_event``.
 
     Expected payload shape (Sonarr Connection → Webhook, On Download/Upgrade):
     {
@@ -1426,14 +1428,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """
     content_length = int(self.headers.get("Content-Length", 0))
     body = self.rfile.read(content_length).decode("utf-8").strip()
-    return parse_sonarr_body(body, self.send_json_response)
+    return parse_sonarr_body(body, self.send_json_response, forward_event=lambda data: self._forward_arr_event("sonarr", data))
 
   def _parse_radarr_body(self):
     """Parse a Radarr-native webhook payload.
 
     Returns (path, extra_args, profile_override, tag_ids) on success, or (None, [], None, []) with an error
     response already sent on failure.  Test events return (None, []) with
-    a 200 response already sent.
+    a 200 response already sent.  Every other non-Download event is
+    forwarded to Autoscan via ``_forward_arr_event``.
 
     Expected payload shape (Radarr Connection → Webhook, On Download/Upgrade):
     {
@@ -1444,7 +1447,53 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """
     content_length = int(self.headers.get("Content-Length", 0))
     body = self.rfile.read(content_length).decode("utf-8").strip()
-    return parse_radarr_body(body, self.send_json_response)
+    return parse_radarr_body(body, self.send_json_response, forward_event=lambda data: self._forward_arr_event("radarr", data))
+
+  def _autoscan_targets_for_paths(self, paths):
+    """Return the ``services.autoscan`` instance names to forward an ARR event to.
+
+    Each payload path is rewritten and routed like a conversion job; any
+    ``autoscan.<name>`` ref on a matching rule is a target. Payloads that
+    carry no path (Health, ApplicationUpdate, ...) go to every instance.
+    """
+    pcm = self.server.path_config_manager
+    if not paths:
+      return list(pcm.get_service_instance_names("autoscan"))
+    targets = []
+    for path in paths:
+      for ref in pcm.get_services_for_path(pcm.rewrite_path(path)):
+        if isinstance(ref, str):
+          service_type, _, instance_name = ref.partition(".")
+        elif isinstance(ref, (list, tuple)) and len(ref) == 2:
+          service_type, instance_name = ref
+        else:
+          continue
+        if service_type == "autoscan" and instance_name and instance_name not in targets:
+          targets.append(instance_name)
+    return targets
+
+  def _forward_arr_event(self, arr_type, data):
+    """Forward a non-Download Sonarr/Radarr event to Autoscan's native trigger.
+
+    Responds 200 with per-instance results, or 502 when every forward
+    attempt failed so the failure surfaces in the ARR connection health.
+    """
+    event_type = data.get("eventType", "")
+    pcm = self.server.path_config_manager
+    forwarded = []
+    for name in self._autoscan_targets_for_paths(arr_payload_paths(data)):
+      instance = pcm.get_service_instance("autoscan", name)
+      if not isinstance(instance, dict) or not instance.get("enabled", True) or not instance.get("url"):
+        continue
+      status = autoscan.forwardArrWebhook(name, instance, arr_type, data, self.server.logger)
+      forwarded.append({"instance": name, "status": status})
+
+    if not forwarded:
+      self.server.logger.info("No Autoscan target for %s %s event; ignored" % (arr_type, event_type))
+      self.send_json_response(200, {"status": "ignored", "eventType": event_type, "forwarded": []})
+      return
+    ok = any(isinstance(f["status"], int) and 200 <= f["status"] < 300 for f in forwarded)
+    self.send_json_response(200 if ok else 502, {"status": "forwarded" if ok else "forward_failed", "eventType": event_type, "forwarded": forwarded})
 
   def _dispatch_path(self, path, extra_args, config_override=None, max_retries=0, *, request_source=None):
     """Shared tail: validate path, queue file or directory.

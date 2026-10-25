@@ -87,3 +87,38 @@ def triggerAutoscan(settings, path: str, logger: logging.Logger | None = None) -
         log.warning("Autoscan [%s] returned HTTP %s: %s" % (section, r.status_code, r.text[:200]))
     except Exception:
       log.exception("Autoscan [%s] request failed" % section)
+
+
+def forwardArrWebhook(name: str, instance: dict, arr_type: str, payload: dict, logger: logging.Logger | None = None) -> int | None:
+  """POST a raw Sonarr/Radarr webhook *payload* to Autoscan's native trigger.
+
+  *instance* is a ``services.autoscan.<name>`` dict (``url``, ``username``,
+  ``password``, ``ignore-certs``). The payload is passed through unchanged
+  to ``/triggers/<arr_type>`` so Autoscan applies its own event handling
+  (rename, file/series/movie delete) and its own path rewrites. Returns
+  the HTTP status code, or ``None`` when the request could not be sent.
+  """
+  log = logger or getLogger(__name__)
+  base_url = (instance.get("url") or "").strip().rstrip("/")
+  if not base_url:
+    return None
+  url = "%s/triggers/%s" % (base_url, arr_type)
+
+  auth = None
+  username = instance.get("username") or ""
+  password = instance.get("password") or ""
+  if username and password:
+    auth = HTTPBasicAuth(username, password)
+
+  verify = not instance.get("ignore-certs", False)
+  event_type = payload.get("eventType", "") if isinstance(payload, dict) else ""
+  try:
+    r = requests.post(url, json=payload, auth=auth, verify=verify, timeout=10)
+  except Exception:
+    log.exception("Autoscan [%s] %s %s forward failed" % (name, arr_type, event_type))
+    return None
+  if 200 <= r.status_code < 300:
+    log.info("Autoscan [%s] accepted %s %s (HTTP %s)" % (name, arr_type, event_type, r.status_code))
+  else:
+    log.warning("Autoscan [%s] returned HTTP %s for %s %s: %s" % (name, r.status_code, arr_type, event_type, r.text[:200]))
+  return r.status_code

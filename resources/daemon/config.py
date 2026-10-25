@@ -706,6 +706,15 @@ class PathConfigManager:
     res = self._loader.resolve_routing(self._cfg, file_path)
     return list(res.services)
 
+  def get_service_instance_names(self, service_type: str) -> list[str]:
+    """Return the names of every ``services.<type>.<name>`` instance."""
+    if self._cfg is None:
+      return []
+    service_map = getattr(self._cfg.services, service_type, None)
+    if not isinstance(service_map, dict):
+      return []
+    return list(service_map)
+
   def get_service_instance(self, service_type: str, instance_name: str):
     """Return one ``services.<type>.<name>`` instance as a plain dict.
 
