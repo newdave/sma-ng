@@ -772,7 +772,6 @@ class TestDeployLibHelpers:
     overrides = {
       "strict-routing": True,
       "path-rewrites": [{"from": "/mnt/local/", "to": "/mnt/unionfs/"}],
-      "routing": [{"match": "/should-be-ignored", "profile": "rq"}],
     }
     result = self._run_stamp_daemon(deploy_dir, {}, daemon_overrides=overrides)
     assert result.returncode == 0, result.stderr or result.stdout
@@ -780,9 +779,38 @@ class TestDeployLibHelpers:
     assert "strict-routing: true" in content
     assert "from: /mnt/local/" in content
     assert "to: /mnt/unionfs/" in content
-    # daemon.routing is rebuilt from services, so override entries must NOT
-    # leak through.
-    assert "/should-be-ignored" not in content
+
+  def test_stamp_daemon_merges_plain_folder_routing_from_local_yml(self, tmp_path):
+    """local.yml daemon.routing rules for paths no service covers (e.g. a
+    downloader drop folder) are kept verbatim — no fan-out services — while
+    a rule whose match a service already generates is dropped in favour of
+    the services-derived one."""
+    import yaml as _y
+
+    deploy_dir = tmp_path / "deploy"
+    config_dir = deploy_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "sma-ng.yml").write_text("daemon: {}\nservices: {}\n")
+    services = {
+      "sonarr": {"main": {"url": "http://x", "path": "/media/tv", "profile": "rq"}},
+      "autoscan": {"main": {"url": "http://autoscan"}},
+    }
+    overrides = {
+      "routing": [
+        {"match": "/downloads/metube", "profile": "preserve"},
+        {"match": "/media/tv", "profile": "lq", "services": ["sonarr.main"]},
+      ],
+    }
+    result = self._run_stamp_daemon(deploy_dir, services, daemon_overrides=overrides)
+    assert result.returncode == 0, result.stderr or result.stdout
+    routing = _y.safe_load((config_dir / "sma-ng.yml").read_text())["daemon"]["routing"]
+    by_match = {r["match"]: r for r in routing}
+    assert set(by_match) == {"/downloads/metube", "/media/tv"}
+    assert by_match["/downloads/metube"] == {"match": "/downloads/metube", "profile": "preserve", "services": []}
+    assert by_match["/media/tv"]["profile"] == "rq"
+    assert by_match["/media/tv"]["services"] == ["sonarr.main", "autoscan.main"]
+    # longest match first
+    assert routing[0]["match"] == "/downloads/metube"
 
   def test_stamp_daemon_profiles_are_authoritative(self, tmp_path):
     """Profiles present in the stamped sample but absent from local.yml are

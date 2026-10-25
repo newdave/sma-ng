@@ -1230,7 +1230,8 @@ For each host it:
   the sample.
 - **Stamps `services.<type>.<instance>`** from `setup/local.yml` into `services:` and
   rebuilds `daemon.routing` from every instance carrying both `path` and `profile`
-  (longest match first)
+  (longest match first), plus any `daemon.routing` rules in `setup/local.yml` for
+  plain folders no service covers
 - **Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir` / `daemon.node-id`**
   (kebab-case) into `daemon:`
 - **Stamps `base.converter.{ffmpeg,ffprobe}`** from the host's resolved `ffmpeg_dir`

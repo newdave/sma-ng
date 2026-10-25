@@ -34,7 +34,9 @@ mapping that mirrors ``services:`` in sma-ng.yml exactly. We:
 * rebuild ``daemon.routing`` from every instance that carries a
   ``path`` + ``profile`` pair and/or a ``routes`` list of such pairs —
   one rule per pair (longest-match-first so the daemon's prefix
-  matcher picks the most specific rule);
+  matcher picks the most specific rule), plus any ``daemon.routing``
+  rules from local.yml whose ``match`` no service generates (plain
+  folders such as a downloader drop directory);
 * stamp service credentials into ``services.<type>.<instance>``,
   filtering out routing-only metadata (``path``, ``profile``,
   ``routes``) which belongs in routing rules, not the service block.
@@ -192,9 +194,9 @@ if os.path.exists(yaml_path):
   # config-watch, scan-paths, etc. that don't have dedicated stamping.
   daemon_block = root.setdefault("daemon", {})
   if daemon_overrides:
-    # Routing is rebuilt below from services — don't let local.yml's
-    # daemon.routing overwrite that. Same for credential fields we
-    # explicitly stamp from local.yml.daemon below.
+    # Routing is rebuilt below from services, with local.yml's
+    # daemon.routing merged in only for prefixes no service covers —
+    # so it must not be deep-merged verbatim here.
     filtered = {k: v for k, v in daemon_overrides.items() if k not in ("routing",)}
     for path_, old, new in _deep_merge(daemon_block, filtered):
       print(f"  sma-ng.yml daemon.{path_}: {old!r} -> {new!r}")
@@ -301,12 +303,28 @@ if os.path.exists(yaml_path):
   if fanout_refs:
     for entry in routing_entries:
       entry["services"].extend(fanout_refs)
+  # Plain-folder rules from local.yml daemon.routing (paths no *arr manages,
+  # e.g. a downloader drop folder). Taken verbatim — no fan-out services —
+  # and only for matches no service instance already generates, so the
+  # services-derived rule always wins on the same prefix.
+  generated_matches = {e["match"] for e in routing_entries}
+  for rule in (daemon_overrides or {}).get("routing") or []:
+    if not isinstance(rule, dict):
+      continue
+    match = str(rule.get("match", "") or "").strip()
+    if not match or match in generated_matches:
+      continue
+    entry = {"match": match, "profile": str(rule.get("profile", "") or "").strip() or None, "services": [str(s) for s in rule.get("services") or []]}
+    if entry["profile"] is None:
+      del entry["profile"]
+    routing_entries.append(entry)
+    generated_matches.add(match)
   if routing_entries:
     routing_entries.sort(key=lambda e: len(e["match"]), reverse=True)
     if daemon_block.get("routing") != routing_entries:
       print(f"  sma-ng.yml daemon.routing: rebuilding {len(routing_entries)} rules")
       for e in routing_entries:
-        print(f"    {e['match']} -> profile={e['profile']} services={e['services']}")
+        print(f"    {e['match']} -> profile={e.get('profile')} services={e['services']}")
       daemon_block["routing"] = routing_entries
       changed = True
 
