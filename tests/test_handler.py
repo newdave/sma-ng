@@ -1070,11 +1070,12 @@ class TestParseSonarrBody:
     assert path is None
     assert h._response_code == 200
 
-  def test_unsupported_event_returns_400(self):
+  def test_non_download_event_without_autoscan_is_ignored(self):
     h = self._sonarr_body({"eventType": "Grab"})
+    h.server.path_config_manager.get_service_instance_names.return_value = []
     path, args, profile, tag_ids = h._parse_sonarr_body()
     assert path is None
-    assert h._response_code == 400
+    assert h._response_code == 200
 
   def test_download_event_extracts_path(self):
     payload = {
@@ -1213,11 +1214,12 @@ class TestParseRadarrBody:
     assert path is None
     assert h._response_code == 200
 
-  def test_unsupported_event_returns_400(self):
+  def test_non_download_event_without_autoscan_is_ignored(self):
     h = self._radarr_body({"eventType": "Grab"})
+    h.server.path_config_manager.get_service_instance_names.return_value = []
     path, args, profile, tag_ids = h._parse_radarr_body()
     assert path is None
-    assert h._response_code == 400
+    assert h._response_code == 200
 
   def test_download_event_extracts_path(self):
     payload = {
@@ -2911,3 +2913,90 @@ class TestHTMLRoutes:
     h._get_root("/", {})
     assert h._response_code == 301
     assert h._response_headers.get("Location") == "/dashboard"
+
+
+class TestArrPayloadPaths:
+  def test_sonarr_delete_and_rename_paths(self):
+    from resources.daemon.webhook_parsing import arr_payload_paths
+
+    data = {
+      "series": {"path": "/tv/Show"},
+      "episodeFile": {"path": "/tv/Show/S01E01.mkv"},
+      "deletedFiles": [{"path": "/tv/Show/S01E01.mkv"}, {"path": "/tv/Show/old.mkv"}],
+      "renamedEpisodeFiles": [{"path": "/tv/Show/new.mkv", "previousPath": "/tv/Show/prev.mkv"}],
+    }
+    assert arr_payload_paths(data) == ["/tv/Show", "/tv/Show/S01E01.mkv", "/tv/Show/old.mkv", "/tv/Show/new.mkv", "/tv/Show/prev.mkv"]
+
+  def test_radarr_paths(self):
+    from resources.daemon.webhook_parsing import arr_payload_paths
+
+    data = {"movie": {"folderPath": "/movies/Film (2020)"}, "movieFile": {"path": "/movies/Film (2020)/f.mkv"}}
+    assert arr_payload_paths(data) == ["/movies/Film (2020)", "/movies/Film (2020)/f.mkv"]
+
+  def test_health_event_has_no_paths(self):
+    from resources.daemon.webhook_parsing import arr_payload_paths
+
+    assert arr_payload_paths({"eventType": "Health", "message": "x"}) == []
+    assert arr_payload_paths(None) == []
+
+
+class TestForwardArrEvent:
+  def _handler(self, payload, arr="sonarr"):
+    body = json.dumps(payload).encode()
+    h = _make_handler(method="POST", body=body, headers={"Content-Length": str(len(body)), "Content-Type": "application/json"})
+    pcm = h.server.path_config_manager
+    pcm.rewrite_path.side_effect = lambda p: p
+    pcm.get_service_instance.side_effect = lambda stype, name: {"url": "http://%s:3030" % name, "enabled": True}
+    return h, pcm
+
+  @patch("resources.daemon.handler.autoscan.forwardArrWebhook", return_value=200)
+  def test_delete_event_forwarded_to_routed_autoscan(self, mock_fwd):
+    payload = {"eventType": "EpisodeFileDelete", "series": {"path": "/tv/Show"}, "episodeFile": {"path": "/tv/Show/e.mkv"}}
+    h, pcm = self._handler(payload)
+    pcm.get_services_for_path.return_value = [("sonarr", "main"), ("autoscan", "main")]
+    h._handle_sonarr_webhook()
+    assert h._response_code == 200
+    mock_fwd.assert_called_once()
+    assert mock_fwd.call_args[0][:4] == ("main", {"url": "http://main:3030", "enabled": True}, "sonarr", payload)
+
+  @patch("resources.daemon.handler.autoscan.forwardArrWebhook", return_value=200)
+  def test_pathless_event_goes_to_every_instance(self, mock_fwd):
+    h, pcm = self._handler({"eventType": "Health"})
+    pcm.get_service_instance_names.return_value = ["a", "b"]
+    h._handle_radarr_webhook()
+    assert h._response_code == 200
+    assert [c[0][0] for c in mock_fwd.call_args_list] == ["a", "b"]
+    assert all(c[0][2] == "radarr" for c in mock_fwd.call_args_list)
+
+  @patch("resources.daemon.handler.autoscan.forwardArrWebhook")
+  def test_no_matching_route_is_ignored(self, mock_fwd):
+    h, pcm = self._handler({"eventType": "MovieDelete", "movie": {"folderPath": "/elsewhere/Film"}})
+    pcm.get_services_for_path.return_value = [("radarr", "main")]
+    h._handle_radarr_webhook()
+    assert h._response_code == 200
+    mock_fwd.assert_not_called()
+
+  @patch("resources.daemon.handler.autoscan.forwardArrWebhook")
+  def test_disabled_instance_skipped(self, mock_fwd):
+    h, pcm = self._handler({"eventType": "Health"})
+    pcm.get_service_instance_names.return_value = ["main"]
+    pcm.get_service_instance.side_effect = lambda stype, name: {"url": "http://x", "enabled": False}
+    h._handle_sonarr_webhook()
+    assert h._response_code == 200
+    mock_fwd.assert_not_called()
+
+  @patch("resources.daemon.handler.autoscan.forwardArrWebhook", return_value=None)
+  def test_all_forwards_failing_returns_502(self, _mock_fwd):
+    h, pcm = self._handler({"eventType": "Rename", "series": {"path": "/tv/Show"}})
+    pcm.get_services_for_path.return_value = ["autoscan.main"]
+    h._handle_sonarr_webhook()
+    assert h._response_code == 502
+
+  @patch("resources.daemon.handler.autoscan.forwardArrWebhook", return_value=204)
+  def test_string_refs_deduplicated_across_paths(self, mock_fwd):
+    payload = {"eventType": "Rename", "series": {"path": "/tv/Show"}, "renamedEpisodeFiles": [{"path": "/tv/Show/a.mkv", "previousPath": "/tv/Show/b.mkv"}]}
+    h, pcm = self._handler(payload)
+    pcm.get_services_for_path.return_value = ["autoscan.main", "plex.main", "bogus"]
+    h._handle_sonarr_webhook()
+    assert h._response_code == 200
+    assert mock_fwd.call_count == 1

@@ -89,8 +89,12 @@ def parse_generic_webhook_body(body_text, content_type, send_json_response):
   return path, extra_args, config_override, max_retries
 
 
-def parse_sonarr_body(body_text, send_json_response):
-  """Parse Sonarr webhook input into (path, extra_args, profile_override, tag_ids)."""
+def parse_sonarr_body(body_text, send_json_response, forward_event=None):
+  """Parse Sonarr webhook input into (path, extra_args, profile_override, tag_ids).
+
+  Non-``Download`` events are handed to *forward_event(data)* when given
+  (which must send the response); otherwise they are rejected with 400.
+  """
   if not body_text:
     send_json_response(400, {"error": "Empty request body"})
     return None, [], None, []
@@ -106,7 +110,10 @@ def parse_sonarr_body(body_text, send_json_response):
     send_json_response(200, {"status": "ok", "message": "SMA-NG Sonarr webhook test successful"})
     return None, [], None, []
   if event_type != "Download":
-    send_json_response(400, {"error": "Unsupported eventType '%s'; only 'Download' is handled" % event_type})
+    if forward_event is not None:
+      forward_event(data)
+    else:
+      send_json_response(400, {"error": "Unsupported eventType '%s'; only 'Download' is handled" % event_type})
     return None, [], None, []
 
   episode_file = data.get("episodeFile") or {}
@@ -145,8 +152,12 @@ def parse_sonarr_body(body_text, send_json_response):
   return path, args, profile_override, tag_ids
 
 
-def parse_radarr_body(body_text, send_json_response):
-  """Parse Radarr webhook input into (path, extra_args, profile_override, tag_ids)."""
+def parse_radarr_body(body_text, send_json_response, forward_event=None):
+  """Parse Radarr webhook input into (path, extra_args, profile_override, tag_ids).
+
+  Non-``Download`` events are handed to *forward_event(data)* when given
+  (which must send the response); otherwise they are rejected with 400.
+  """
   if not body_text:
     send_json_response(400, {"error": "Empty request body"})
     return None, [], None, []
@@ -162,7 +173,10 @@ def parse_radarr_body(body_text, send_json_response):
     send_json_response(200, {"status": "ok", "message": "SMA-NG Radarr webhook test successful"})
     return None, [], None, []
   if event_type != "Download":
-    send_json_response(400, {"error": "Unsupported eventType '%s'; only 'Download' is handled" % event_type})
+    if forward_event is not None:
+      forward_event(data)
+    else:
+      send_json_response(400, {"error": "Unsupported eventType '%s'; only 'Download' is handled" % event_type})
     return None, [], None, []
 
   movie_file = data.get("movieFile") or {}
@@ -188,3 +202,37 @@ def parse_radarr_body(body_text, send_json_response):
       args += ["-imdb", str(imdb_id)]
 
   return path, args, profile_override, tag_ids
+
+
+def _append_path(paths, value):
+  if isinstance(value, str) and value.strip():
+    paths.append(value.strip())
+
+
+def arr_payload_paths(data):
+  """Return every filesystem path referenced by a Sonarr/Radarr payload.
+
+  Covers the series/movie folder, the imported file, and the
+  ``deletedFiles`` / ``renamed*Files`` lists carried by delete, upgrade,
+  and rename events. Order is preserved; duplicates are dropped.
+  """
+  paths = []
+  if not isinstance(data, dict):
+    return paths
+  series = data.get("series") or {}
+  movie = data.get("movie") or {}
+  if isinstance(series, dict):
+    _append_path(paths, series.get("path"))
+  if isinstance(movie, dict):
+    _append_path(paths, movie.get("folderPath"))
+    _append_path(paths, movie.get("path"))
+  for key in ("episodeFile", "movieFile"):
+    entry = data.get(key) or {}
+    if isinstance(entry, dict):
+      _append_path(paths, entry.get("path"))
+  for key in ("deletedFiles", "renamedEpisodeFiles", "renamedMovieFiles"):
+    for entry in data.get(key) or []:
+      if isinstance(entry, dict):
+        _append_path(paths, entry.get("path"))
+        _append_path(paths, entry.get("previousPath"))
+  return list(dict.fromkeys(paths))

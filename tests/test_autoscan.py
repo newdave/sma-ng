@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from autoprocess.autoscan import _apply_path_mapping, triggerAutoscan
+from autoprocess.autoscan import _apply_path_mapping, forwardArrWebhook, triggerAutoscan
 
 
 def _instance(**overrides):
@@ -141,3 +141,45 @@ class TestTriggerAutoscan:
     log = MagicMock()
     triggerAutoscan(_settings(_instance()), "/library/Media/Show/file.mp4", log)
     log.warning.assert_called()
+
+
+class TestForwardArrWebhook:
+  def _instance(self, **overrides):
+    base = {"url": "http://autoscan.local:3030/", "username": "", "password": "", "ignore-certs": False}
+    base.update(overrides)
+    return base
+
+  @patch("autoprocess.autoscan.requests.post")
+  def test_posts_raw_payload_to_native_trigger(self, mock_post):
+    mock_post.return_value = MagicMock(status_code=200)
+    payload = {"eventType": "EpisodeFileDelete", "series": {"path": "/tv/Show"}}
+    status = forwardArrWebhook("main", self._instance(), "sonarr", payload)
+    assert status == 200
+    args, kwargs = mock_post.call_args
+    assert args[0] == "http://autoscan.local:3030/triggers/sonarr"
+    assert kwargs["json"] is payload
+    assert kwargs["auth"] is None
+    assert kwargs["verify"] is True
+
+  @patch("autoprocess.autoscan.requests.post")
+  def test_basic_auth_and_ignore_certs(self, mock_post):
+    mock_post.return_value = MagicMock(status_code=200)
+    forwardArrWebhook("main", self._instance(username="u", password="p", **{"ignore-certs": True}), "radarr", {"eventType": "MovieDelete"})
+    _, kwargs = mock_post.call_args
+    assert kwargs["auth"] is not None
+    assert kwargs["verify"] is False
+    assert mock_post.call_args[0][0].endswith("/triggers/radarr")
+
+  @patch("autoprocess.autoscan.requests.post")
+  def test_non_2xx_returns_status(self, mock_post):
+    mock_post.return_value = MagicMock(status_code=401, text="nope")
+    assert forwardArrWebhook("main", self._instance(), "sonarr", {"eventType": "Rename"}) == 401
+
+  @patch("autoprocess.autoscan.requests.post", side_effect=RuntimeError("down"))
+  def test_request_failure_returns_none(self, _mock_post):
+    assert forwardArrWebhook("main", self._instance(), "sonarr", {"eventType": "Rename"}) is None
+
+  @patch("autoprocess.autoscan.requests.post")
+  def test_missing_url_skips_request(self, mock_post):
+    assert forwardArrWebhook("main", self._instance(url=""), "sonarr", {}) is None
+    mock_post.assert_not_called()

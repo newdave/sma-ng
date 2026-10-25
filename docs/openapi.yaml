@@ -634,10 +634,13 @@ paths:
     post:
       summary: Native Sonarr webhook endpoint
       description: |
-        Accepts a native Sonarr webhook payload (On Download / On Upgrade events).
+        Accepts a native Sonarr webhook payload for any event type.
         Extracts `episodeFile.path`, `series.tvdbId`, and episode numbers, then
         queues the file for conversion.  Test events return 200 without queuing.
-        Only the `Download` eventType is processed; all others return 400.
+        Only `Download` is queued for conversion. Every other eventType (Grab,
+        Rename, file/series/movie delete, Health, ...) is forwarded unchanged to
+        `/triggers/<sonarr|radarr>` on each matching `services.autoscan` instance
+        and answered with 200 (`forwarded` / `ignored`) or 502 when every forward fails.
       operationId: sonarrWebhook
       tags: [conversion]
       requestBody:
@@ -650,7 +653,7 @@ paths:
               properties:
                 eventType:
                   type: string
-                  enum: [Download, Test]
+                  description: "`Download` queues a job, `Test` is acknowledged, all others are forwarded to Autoscan"
                 episodeFile:
                   type: object
                   properties:
@@ -700,7 +703,7 @@ paths:
                   config:
                     type: string
         "200":
-          description: Test event acknowledged or duplicate job
+          description: Test event acknowledged, duplicate job, or non-Download event forwarded/ignored
           content:
             application/json:
               schema:
@@ -708,21 +711,44 @@ paths:
                 properties:
                   status:
                     type: string
+                    description: "`ok`, `forwarded`, or `ignored` (no matching Autoscan instance)"
+                  eventType:
+                    type: string
+                  forwarded:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        instance:
+                          type: string
+                        status:
+                          type: integer
+                          nullable: true
+                          description: HTTP status from Autoscan, null when the request failed
         "400":
-          description: Bad request (missing path, unsupported eventType)
+          description: Bad request (invalid JSON, missing path on a Download event)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "502":
+          description: Event forwarded to Autoscan but every instance failed or rejected it
+          content:
+            application/json:
+              schema:
+                type: object
 
   /webhook/radarr:
     post:
       summary: Native Radarr webhook endpoint
       description: |
-        Accepts a native Radarr webhook payload (On Download / On Upgrade events).
+        Accepts a native Radarr webhook payload for any event type.
         Extracts `movieFile.path` and `movie.tmdbId` (or `imdbId` as fallback),
         then queues the file for conversion.  Test events return 200 without queuing.
-        Only the `Download` eventType is processed; all others return 400.
+        Only `Download` is queued for conversion. Every other eventType (Grab,
+        Rename, file/series/movie delete, Health, ...) is forwarded unchanged to
+        `/triggers/<sonarr|radarr>` on each matching `services.autoscan` instance
+        and answered with 200 (`forwarded` / `ignored`) or 502 when every forward fails.
       operationId: radarrWebhook
       tags: [conversion]
       requestBody:
@@ -735,7 +761,7 @@ paths:
               properties:
                 eventType:
                   type: string
-                  enum: [Download, Test]
+                  description: "`Download` queues a job, `Test` is acknowledged, all others are forwarded to Autoscan"
                 movieFile:
                   type: object
                   properties:
@@ -773,7 +799,7 @@ paths:
                   config:
                     type: string
         "200":
-          description: Test event acknowledged or duplicate job
+          description: Test event acknowledged, duplicate job, or non-Download event forwarded/ignored
           content:
             application/json:
               schema:
@@ -781,12 +807,32 @@ paths:
                 properties:
                   status:
                     type: string
+                    description: "`ok`, `forwarded`, or `ignored` (no matching Autoscan instance)"
+                  eventType:
+                    type: string
+                  forwarded:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        instance:
+                          type: string
+                        status:
+                          type: integer
+                          nullable: true
+                          description: HTTP status from Autoscan, null when the request failed
         "400":
-          description: Bad request (missing path, unsupported eventType)
+          description: Bad request (invalid JSON, missing path on a Download event)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "502":
+          description: Event forwarded to Autoscan but every instance failed or rejected it
+          content:
+            application/json:
+              schema:
+                type: object
 
   /configs:
     get:

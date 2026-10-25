@@ -2978,12 +2978,13 @@ class TestParseSonarrBody:
     assert args == []
     assert resp.status == 200
 
-  def test_unsupported_event_type_returns_none_and_400(self):
+  def test_non_download_event_is_forwarded(self):
     payload = {"eventType": "Grab"}
-    handler, resp = _make_media_handler(payload)
+    handler, _resp = _make_media_handler(payload)
+    handler._forward_arr_event = MagicMock()  # type: ignore[method-assign]
     path, _args, _profile, _tags = handler._parse_sonarr_body()
     assert path is None
-    assert resp.status == 400
+    handler._forward_arr_event.assert_called_once_with("sonarr", payload)
 
   def test_missing_path_returns_none_and_400(self):
     payload = {
@@ -3060,12 +3061,13 @@ class TestParseRadarrBody:
     assert args == []
     assert resp.status == 200
 
-  def test_unsupported_event_type_returns_none_and_400(self):
+  def test_non_download_event_is_forwarded(self):
     payload = {"eventType": "Grab"}
-    handler, resp = _make_media_handler(payload)
+    handler, _resp = _make_media_handler(payload)
+    handler._forward_arr_event = MagicMock()  # type: ignore[method-assign]
     path, _args, _profile, _tags = handler._parse_radarr_body()
     assert path is None
-    assert resp.status == 400
+    handler._forward_arr_event.assert_called_once_with("radarr", payload)
 
   def test_missing_path_returns_none_and_400(self):
     payload = {
@@ -3153,6 +3155,16 @@ class TestPathConfigManagerExtendedYaml:
     pcm = PathConfigManager.__new__(PathConfigManager)
     pcm._cfg = None
     assert pcm.routing_rules_admin() == []
+
+  def test_get_service_instance_names(self):
+    from types import SimpleNamespace
+
+    pcm = PathConfigManager.__new__(PathConfigManager)
+    pcm._cfg = None
+    assert pcm.get_service_instance_names("autoscan") == []
+    pcm._cfg = SimpleNamespace(services=SimpleNamespace(autoscan={"main": object(), "alt": object()}))
+    assert pcm.get_service_instance_names("autoscan") == ["main", "alt"]
+    assert pcm.get_service_instance_names("missing") == []
 
   def test_get_services_for_path_empty_when_no_config(self):
     pcm = PathConfigManager.__new__(PathConfigManager)

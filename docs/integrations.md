@@ -15,6 +15,8 @@ Two integration methods are available:
    - If API key is configured, add header `X-API-Key: YOUR_SECRET_KEY`
 
 SMA-NG extracts `episodeFile.path`, `series.tvdbId`, and episode numbers from the Sonarr payload and queues the job automatically. Test events (from the **Test** button) return a 200 OK without queuing anything.
+Enable any other notification types (On Rename, On Episode File Delete, On Series Delete, ...) to have SMA-NG
+forward them to Autoscan — see [Forwarding other Sonarr/Radarr events](#forwarding-other-sonarrradarr-events).
 
 **Custom script:** Suitable when SMA-NG runs locally alongside Sonarr (not in a container).
 
@@ -46,6 +48,8 @@ Two integration methods are available:
    - If API key is configured, add header `X-API-Key: YOUR_SECRET_KEY`
 
 SMA-NG extracts `movieFile.path` and `movie.tmdbId` (or `imdbId` as fallback) and queues the job. Test events return 200 OK without queuing.
+Other notification types (On Rename, On Movie File Delete, On Movie Delete, ...) are forwarded to Autoscan — see
+[Forwarding other Sonarr/Radarr events](#forwarding-other-sonarrradarr-events).
 
 **Custom script:** Suitable when SMA-NG runs locally alongside Radarr.
 
@@ -258,14 +262,37 @@ Autoscan outage never fails the conversion job.
 mount points (e.g. `/library/Media` here, `/data/Media` there). Use the same
 `from=to[,from=to]` syntax as `plex.path-mapping`.
 
+#### Forwarding other Sonarr/Radarr events
+
+`/webhook/sonarr` and `/webhook/radarr` only transcode `Download` (import/upgrade) events. Every other event type —
+`Grab`, `Rename`, `EpisodeFileDelete`, `SeriesDelete`, `MovieFileDelete`, `MovieDelete`, `Health`,
+`ApplicationUpdate`, and so on — is passed through unchanged to Autoscan's native trigger
+(`/triggers/sonarr` or `/triggers/radarr`), so SMA-NG can sit in front of Autoscan as the only webhook target.
+
+- **Target selection.** SMA-NG collects every path in the payload (series/movie folder, `episodeFile`/`movieFile`,
+  `deletedFiles`, `renamed*Files`), applies `daemon.path_rewrites`, and forwards to each `autoscan.<name>`
+  referenced by a matching routing rule. Payloads with no paths (Health, ApplicationUpdate) go to every enabled
+  Autoscan instance.
+- **Path mapping.** The payload is not rewritten; SMA-NG's `path-mapping` only applies to post-conversion
+  `/triggers/manual` calls. Use Autoscan's own `rewrite` rules on its `sonarr` / `radarr` triggers instead.
+- **Responses.** `200` with `status: forwarded` and per-instance results, `200` with `status: ignored` when no
+  Autoscan instance matches, or `502` when every forward attempt failed, so the failure shows up in the
+  Sonarr/Radarr connection health check.
+- **Autoscan setup.** Autoscan must have `sonarr` / `radarr` triggers enabled for the forwarded events to be acted on.
+
+`Download` events are not forwarded: SMA-NG triggers Autoscan itself (`/triggers/manual`) after the converted file
+is back in place.
+
 #### Autoscan troubleshooting
 
-| Symptom          | Likely cause                                                                                 |
-| ---------------- | -------------------------------------------------------------------------------------------- |
-| 401 returned     | Wrong `username` / `password`, or Autoscan instance has no auth configured                   |
-| 404 returned     | `webroot` mismatch, or Autoscan running on a different path prefix                           |
-| No POST issued   | File's directory isn't a prefix of any `daemon.routing[].match` that lists `autoscan.<name>` |
-| Wrong `dir` sent | Add a `path-mapping` entry rewriting SMA's path to Autoscan's                                |
+| Symptom           | Likely cause                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| 401 returned      | Wrong `username` / `password`, or Autoscan instance has no auth configured                   |
+| 404 returned      | `webroot` mismatch, or Autoscan running on a different path prefix                           |
+| No POST issued    | File's directory isn't a prefix of any `daemon.routing[].match` that lists `autoscan.<name>` |
+| Wrong `dir` sent  | Add a `path-mapping` entry rewriting SMA's path to Autoscan's                                |
+| `status: ignored` | Forwarded event's paths don't match any routing rule listing `autoscan.<name>`               |
+| 502 from webhook  | Every Autoscan forward failed; check Autoscan has `sonarr`/`radarr` triggers configured      |
 
 ### Integration Flow
 
