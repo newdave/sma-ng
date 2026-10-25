@@ -232,6 +232,9 @@ hosts:
 daemon:
   api_key: your_secret_key
   # db_url:   # required for non-pg multi-node: postgresql://user:pass@host/db
+  routing:    # plain folders no service manages; merged with service-generated rules
+    - match: /mnt/unionfs/downloads/metube
+      profile: preserve
 
 base:                          # locks encoder defaults across every host
   video:
@@ -365,6 +368,11 @@ For each remote host the staging build:
    `services:` block, and rebuilds `daemon.routing` from every instance
    carrying path+profile pairs — the singular `path`/`profile` keys and/or
    a `routes` list of such pairs, one rule per pair (longest match first).
+   Rules listed under `daemon.routing` in `setup/local.yml` are merged in verbatim
+   for prefixes no service instance generates — use this for plain folders that no
+   Sonarr/Radarr manages, such as a downloader drop directory. A rule whose `match`
+   a service already generates is dropped in favour of the service-derived one, and
+   plain-folder rules get no Plex/Autoscan fan-out.
 5. Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir` /
    `daemon.node-id` (kebab-case) into `daemon:`.
 6. Deep-merges arbitrary `daemon:` keys from `setup/local.yml` (e.g.
