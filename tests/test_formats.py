@@ -4,6 +4,7 @@ import pytest
 
 from converter.formats import (
   MkvFormat,
+  MovFormat,
   Mp4Format,
   SrtFormat,
   WebmFormat,
@@ -20,11 +21,14 @@ class TestFormatParseOptions:
     assert "-f" in opts
     assert "mp4" in opts
 
+  @pytest.mark.parametrize("cls,name", [(Mp4Format, "mp4"), (MovFormat, "mov")])
+  def test_mp4_family_never_synthesises_tmcd(self, cls, name):
+    assert cls().parse_options({"format": name}) == ["-f", name, "-write_tmcd", "0"]
+
   def test_mkv_format(self):
     f = MkvFormat()
     opts = f.parse_options({"format": "mkv"})
-    assert "-f" in opts
-    assert "matroska" in opts
+    assert opts == ["-f", "matroska"]
 
   def test_webm_format(self):
     f = WebmFormat()

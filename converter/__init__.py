@@ -9,7 +9,7 @@ structured option dicts into FFmpeg command-line arguments and runs conversions.
 import os
 
 from converter.avcodecs import BaseDecoder, attachment_codec_list, audio_codec_list, decoder_list, subtitle_codec_list, video_codec_list
-from converter.ffmpeg import FFMpeg, FFMpegConvertError, FFMpegError, is_cover_art_attachment
+from converter.ffmpeg import FFMpeg, FFMpegConvertError, FFMpegError, is_unknown_stream
 from converter.formats import format_list
 
 __all__ = ["Converter", "ConverterError", "FFMpeg", "FFMpegConvertError", "FFMpegError"]
@@ -236,9 +236,10 @@ class Converter:
 
     Renames infile to a temporary '.tag' path, then remuxes it back to the
     original filename using stream-copy for all tracks. The metadata dict
-    entries are written as global container tags. Cover art is always
-    dropped: attached_pic video streams are excluded and only non-image
-    attachments (e.g. fonts) are kept.
+    entries are written as global container tags. Cover art
+    (MediaInfo.cover_art) is always dropped: attached pictures, posters
+    demoted to a real video track and image attachments; fonts are kept.
+    Data and unknown streams (is_unknown_stream) are never copied.
 
     Yields (percent_complete, debug_string) tuples driven by FFMpeg.convert().
 
@@ -263,18 +264,27 @@ class Converter:
       if info is None:
         raise ConverterError("FFprobe returned no info for %s" % infile)
 
-      # 0:V (capital) selects video streams that are not attached pictures.
-      opts = ["-i", infile, "-map", "0:V?", "-c:v", "copy", "-map", "0:a?", "-c:a", "copy", "-map", "0:s?", "-c:s", "copy"]
-      for a in info.attachment:
-        if not is_cover_art_attachment(a):
-          opts.extend(["-map", "0:%d" % a.index])
-      opts.extend(["-c:t", "copy"])
+      # Every stream is mapped by index so cover art (0:V would still keep a
+      # poster an older remux demoted to a real video track), data streams
+      # and unknown streams are never copied.
+      cover_art = info.cover_art
+      keep = [s for s in info.streams if s.type in ("video", "audio", "subtitle", "attachment") and not is_unknown_stream(s) and s not in cover_art]
+      opts = ["-i", infile]
+      for kind in ("video", "audio", "subtitle", "attachment"):
+        for s in keep:
+          if s.type == kind:
+            opts.extend(["-map", "0:%d" % s.index])
+      opts.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "copy", "-c:t", "copy"])
 
       for k in metadata:
         opts.extend(["-metadata", "%s=%s" % (k, metadata[k])])
 
       if cues_to_front:
         opts.extend(["-cues_to_front", "true"])
+
+      if os.path.splitext(outfile)[1].lower() in (".mp4", ".m4v", ".mov"):
+        # Stop the muxer rebuilding a tmcd data track from the timecode tag.
+        opts.extend(["-write_tmcd", "0"])
 
       duration = info.format.duration if info.format else 0
       for timecode, debug in self.ffmpeg.convert(outfile, opts, timeout=0):

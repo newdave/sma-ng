@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Repair damaged media by stream copy only: strip data streams and artwork, fix stretched aspect (usage: mise run media:repair -- [-n] /path/to/file-or-dir)"
+#MISE description="Repair damaged media by stream copy only: strip data streams, unknown streams and artwork, fix stretched aspect (usage: mise run media:repair -- [-n] /path/to/file-or-dir)"
 set -euo pipefail
 
 "$PY" repair.py "$@"

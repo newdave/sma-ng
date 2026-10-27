@@ -291,6 +291,22 @@ class TestProbe:
     assert result.video.codec == "h264"
     assert len(result.audio) == 1
 
+  def test_probe_reads_framedata_by_default(self):
+    ff = _make_ffmpeg()
+    with patch("os.path.exists", return_value=True), patch.object(ff, "_get_stdout", return_value=self.PROBE_OUTPUT), patch.object(ff, "framedata", return_value={"pix_fmt": "yuv420p"}) as fd:
+      result = ff.probe("movie.mkv")
+    fd.assert_called_once_with("movie.mkv")
+    assert result.video.framedata == {"pix_fmt": "yuv420p"}
+
+  def test_probe_framedata_false_skips_second_pass(self):
+    ff = _make_ffmpeg()
+    with patch("os.path.exists", return_value=True), patch.object(ff, "_get_stdout", return_value=self.PROBE_OUTPUT) as out, patch.object(ff, "framedata") as fd:
+      result = ff.probe("movie.mkv", posters_as_video=False, framedata=False)
+    fd.assert_not_called()
+    out.assert_called_once()
+    assert result is not None
+    assert result.video.codec == "h264"
+
 
 # ---------------------------------------------------------------------------
 # thumbnails

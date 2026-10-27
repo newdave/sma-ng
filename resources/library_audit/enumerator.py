@@ -13,9 +13,8 @@ from resources.library_audit.kinds import (
   MEDIA_CONTAINER_EXTS,
   NON_MP4_CONTAINERS,
   SIDECAR_EXTS,
-  TMP_EXTS,
-  TMP_SUFFIXES,
 )
+from resources.library_audit.probes import is_tmp_artifact
 
 
 def _is_skip_dir(name: str, skip_set: set[str]) -> bool:
@@ -27,6 +26,7 @@ def enumerate_paths(
   roots: list[str],
   skip_dirs: list[str] | None = None,
   is_recycle_bin_path=None,
+  temp_extension: str | None = None,
 ) -> Iterator[tuple[str, str]]:
   """Yield ``(absolute_path, kind_hint)`` tuples.
 
@@ -35,6 +35,8 @@ def enumerate_paths(
   case-insensitively). *is_recycle_bin_path* is an optional callable that
   takes a path and returns True when the path lives inside a configured
   recycle-bin directory; recycle-bin contents are not audited.
+  *temp_extension* is the configured temp-extension; files carrying it
+  are classified as leftover temp artifacts alongside .sma/.smatmp.
   """
   skip_set = {s.lower() for s in (skip_dirs or [])}
   for root in roots:
@@ -42,10 +44,10 @@ def enumerate_paths(
       continue
     if is_recycle_bin_path and is_recycle_bin_path(root):
       continue
-    yield from _walk_one(root, skip_set, is_recycle_bin_path)
+    yield from _walk_one(root, skip_set, is_recycle_bin_path, temp_extension)
 
 
-def _walk_one(root: str, skip_set: set[str], is_recycle_bin_path):
+def _walk_one(root: str, skip_set: set[str], is_recycle_bin_path, temp_extension: str | None = None):
   stack = [root]
   while stack:
     current = stack.pop()
@@ -66,7 +68,7 @@ def _walk_one(root: str, skip_set: set[str], is_recycle_bin_path):
               continue
             subdirs.append(entry.path)
             continue
-          hint = _classify(entry.name)
+          hint = _classify(entry.name, temp_extension)
           if hint is not None:
             yield (entry.path, hint)
         stack.extend(reversed(subdirs))
@@ -74,11 +76,11 @@ def _walk_one(root: str, skip_set: set[str], is_recycle_bin_path):
       continue
 
 
-def _classify(filename: str) -> str | None:
+def _classify(filename: str, temp_extension: str | None = None) -> str | None:
   ext = os.path.splitext(filename)[1].lower()
   if ext in SIDECAR_EXTS:
     return KIND_HINT_SIDECAR
-  if ext in TMP_EXTS or any(filename.endswith(suf) for suf in TMP_SUFFIXES):
+  if is_tmp_artifact(filename, temp_extension):
     return KIND_HINT_TMP
   if ext == ".mp4":
     return KIND_HINT_MEDIA

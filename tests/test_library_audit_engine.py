@@ -1,11 +1,14 @@
 """Unit tests for resources/library_audit (probes + engine + enumerator)."""
 
+import os
+import time
 import unittest.mock as mock
-from types import SimpleNamespace
 
+from converter.ffmpeg import MediaInfo
 from resources.library_audit.engine import AuditEngine, Finding, run_audit_inline
 from resources.library_audit.enumerator import enumerate_paths
 from resources.library_audit.kinds import (
+  IN_TRANSIT_MIN_AGE_SECONDS,
   KIND_HINT_MEDIA,
   KIND_HINT_PRECONV,
   KIND_HINT_SIDECAR,
@@ -16,11 +19,15 @@ from resources.library_audit.probes import (
   HYBRID_DIMS_TABLE,
   ffprobe_check,
   hybrid_aspect_check,
+  is_in_transit,
+  is_tmp_artifact,
   preconv_original_check,
+  repair_check,
   sidecar_orphan_check,
   tmp_artifact_check,
 )
 from resources.library_audit.tag_reader import derive_media_id
+from resources.media_repair import STATUS_FAILED, STATUS_REPAIRED, RepairResult
 
 # ---------------------------------------------------------------------------
 # Probes
@@ -178,6 +185,7 @@ def _engine(dry_run=True, auto_fix=None):
   pcm.default_config = "/tmp/sma.yml"
   pcm.get_recycle_bin.return_value = None
   pcm.get_config_for_path.return_value = "/tmp/sma.yml"
+  pcm.get_profile_for_path.return_value = None
   pcm.get_args_for_path.return_value = []
   log = mock.MagicMock()
   engine = AuditEngine(job_db, pcm, log, dry_run=dry_run, auto_fix=auto_fix)
@@ -280,12 +288,14 @@ def test_run_audit_inline_repair_hybrid_fixes_and_exits_zero(tmp_path, monkeypat
   (tmp_path / "show.mp4").write_bytes(b"x")
   monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
   monkeypatch.setattr(
-    "resources.library_audit.engine.hybrid_aspect_check",
-    lambda *a, **k: {"width": 1920, "height": 1088, "true_height": 1080, "dar": "16:9"},
+    "resources.library_audit.engine.repair_check",
+    lambda *a, **k: (FindingKind.HYBRID_ASPECT, {"reason": "stretched_dims", "width": 1920, "height": 1088, "true_height": 1080, "dar": "1920:1080"}),
   )
-  monkeypatch.setattr("resources.library_audit.engine.repair_hybrid_aspect", lambda *a, **k: True)
-  rc = run_audit_inline([str(tmp_path)], mock.MagicMock(skip_dirs=[]), mock.MagicMock(), repair_hybrid=True)
+  repairer = mock.MagicMock()
+  repairer.repair_file.return_value = RepairResult(str(tmp_path / "show.mp4"), STATUS_REPAIRED, "ok")
+  rc = run_audit_inline([str(tmp_path)], mock.MagicMock(skip_dirs=[]), mock.MagicMock(), repair_hybrid=True, repairer=repairer)
   assert rc == 0
+  repairer.repair_file.assert_called_once_with(str(tmp_path / "show.mp4"))
   assert "action=repaired" in capsys.readouterr().out
 
 
@@ -293,11 +303,12 @@ def test_run_audit_inline_repair_hybrid_failure_exits_nonzero(tmp_path, monkeypa
   (tmp_path / "show.mp4").write_bytes(b"x")
   monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
   monkeypatch.setattr(
-    "resources.library_audit.engine.hybrid_aspect_check",
-    lambda *a, **k: {"width": 1920, "height": 1088, "true_height": 1080, "dar": "16:9"},
+    "resources.library_audit.engine.repair_check",
+    lambda *a, **k: (FindingKind.HYBRID_ASPECT, {"reason": "stretched_dims", "width": 1920, "height": 1088, "true_height": 1080, "dar": "1920:1080"}),
   )
-  monkeypatch.setattr("resources.library_audit.engine.repair_hybrid_aspect", lambda *a, **k: False)
-  rc = run_audit_inline([str(tmp_path)], mock.MagicMock(skip_dirs=[]), mock.MagicMock(), repair_hybrid=True)
+  repairer = mock.MagicMock()
+  repairer.repair_file.return_value = RepairResult(str(tmp_path / "show.mp4"), STATUS_FAILED, "boom")
+  rc = run_audit_inline([str(tmp_path)], mock.MagicMock(skip_dirs=[]), mock.MagicMock(), repair_hybrid=True, repairer=repairer)
   assert rc == 1
   assert "action=repair_failed" in capsys.readouterr().out
 
@@ -382,7 +393,7 @@ class TestAuditEngineProbeOne:
   def test_tmp_hint_returns_none_when_no_artifact(self, monkeypatch):
     monkeypatch.setattr(
       "resources.library_audit.engine.tmp_artifact_check",
-      lambda _p: None,
+      lambda _p, **_k: None,
     )
     engine, _db, _pcm = _engine()
     assert engine.probe_one({"path": "/x.tmp", "kind_hint": KIND_HINT_TMP}) is None
@@ -390,7 +401,7 @@ class TestAuditEngineProbeOne:
   def test_tmp_hint_returns_leftover_finding(self, monkeypatch):
     monkeypatch.setattr(
       "resources.library_audit.engine.tmp_artifact_check",
-      lambda _p: {"reason": "stale", "size_bytes": 0},
+      lambda _p, **_k: {"reason": "stale", "size_bytes": 0},
     )
     engine, _db, _pcm = _engine()
     finding = engine.probe_one({"path": "/x.tmp", "kind_hint": KIND_HINT_TMP})
@@ -735,7 +746,7 @@ class TestInlineProbe:
 
     monkeypatch.setattr(
       "resources.library_audit.engine.tmp_artifact_check",
-      lambda _p: {"reason": "stale", "size_bytes": 0},
+      lambda _p, **_k: {"reason": "stale", "size_bytes": 0},
     )
     out = _inline_probe("/x.tmp", KIND_HINT_TMP, None, {})
     assert out is not None
@@ -746,7 +757,7 @@ class TestInlineProbe:
 
     monkeypatch.setattr(
       "resources.library_audit.engine.tmp_artifact_check",
-      lambda _p: None,
+      lambda _p, **_k: None,
     )
     assert _inline_probe("/x.tmp", KIND_HINT_TMP, None, {}) is None
 
@@ -757,30 +768,55 @@ class TestInlineProbe:
 
 
 # ---------------------------------------------------------------------------
-# Hybrid-aspect detection (probe + dims table)
+# repair_check (hybrid aspect + stream damage) and the dims table
 # ---------------------------------------------------------------------------
 
 
-def _hybrid_probe_patch(monkeypatch, width=1920, height=1088, sar=None, info="video"):
-  """Patch probes.FFMpeg with a probe returning a video stream of the given
-  dims/SAR. ``info=None`` → probe returns None; ``info="novideo"`` → probed
-  info has no video stream."""
+def _stream(index, kind, codec, **extra):
+  s = {"index": index, "codec_type": kind, "codec_name": codec}
+  s.update(extra)
+  return s
+
+
+def _vid(index=0, codec="h264", width=1920, height=1080, sar="1:1", attached_pic=0, tag="avc1"):
+  return _stream(index, "video", codec, codec_tag_string=tag, width=width, height=height, sample_aspect_ratio=sar if sar else "N/A", **{"DISPOSITION:attached_pic": attached_pic})
+
+
+def _aud(index=1):
+  return _stream(index, "audio", "aac", channels=2)
+
+
+def _media_info(streams, duration="100.0", path="/m/a.mp4"):
+  """Real MediaInfo as FFMpeg.probe(posters_as_video=False) builds it."""
+  raw = []
+  for s in streams:
+    raw.append("[STREAM]")
+    raw.extend("%s=%s" % kv for kv in s.items())
+    raw.append("[/STREAM]")
+  raw.extend(["[FORMAT]", "duration=%s" % duration, "[/FORMAT]"])
+  info = MediaInfo(posters_as_video=False)
+  info.parse_ffprobe("\n".join(raw))
+  info.path = path
+  return info
+
+
+def _patch_probe(monkeypatch, info=None, exc=None):
   fake_ffmpeg = mock.MagicMock()
-  if info is None:
-    fake_ffmpeg.probe.return_value = None
-  elif info == "novideo":
-    fake_ffmpeg.probe.return_value = mock.MagicMock(video=None)
+  if exc is not None:
+    fake_ffmpeg.probe.side_effect = exc
   else:
-    video = mock.MagicMock()
-    video.video_width = width
-    video.video_height = height
-    video.sample_aspect_ratio = sar
-    fake_ffmpeg.probe.return_value = mock.MagicMock(video=video)
+    fake_ffmpeg.probe.return_value = info
   monkeypatch.setattr("resources.library_audit.probes.FFMpeg", lambda **_: fake_ffmpeg)
   return fake_ffmpeg
 
 
-class TestHybridAspectCheck:
+def _media_file(tmp_path, name="movie.mp4"):
+  p = tmp_path / name
+  p.write_bytes(b"\x00" * 64)
+  return str(p)
+
+
+class TestRepairCheck:
   def test_dims_table_exact_contents(self):
     assert HYBRID_DIMS_TABLE == {
       (1920, 1088): 1080,
@@ -793,134 +829,281 @@ class TestHybridAspectCheck:
     }
 
   def test_detects_stretched_1080p(self, tmp_path, monkeypatch):
-    p = tmp_path / "movie.mp4"
-    p.write_bytes(b"\x00" * 64)
-    _hybrid_probe_patch(monkeypatch, width=1920, height=1088, sar=None)
-    details = hybrid_aspect_check(str(p))
+    fake = _patch_probe(monkeypatch, _media_info([_vid(height=1088, sar=None), _aud()]))
+    kind, details = repair_check(_media_file(tmp_path))
+    assert kind == FindingKind.HYBRID_ASPECT
     assert details == {
       "reason": "stretched_dims",
       "width": 1920,
       "height": 1088,
       "true_height": 1080,
       "dar": "1920:1080",
+      "repair": "display aspect 1920:1080",
     }
+    fake.probe.assert_called_once()
+    assert fake.probe.call_args.kwargs == {"posters_as_video": False, "framedata": False}
 
   def test_detects_with_explicit_square_par(self, tmp_path, monkeypatch):
-    p = tmp_path / "movie.mp4"
-    p.write_bytes(b"\x00" * 64)
-    _hybrid_probe_patch(monkeypatch, width=3840, height=2176, sar="1:1")
-    details = hybrid_aspect_check(str(p))
-    assert details is not None
+    _patch_probe(monkeypatch, _media_info([_vid(codec="hevc", width=3840, height=2176, sar="1:1"), _aud()]))
+    kind, details = repair_check(_media_file(tmp_path))
+    assert kind == FindingKind.HYBRID_ASPECT
     assert details["true_height"] == 2160
     assert details["dar"] == "3840:2160"
 
+  def test_mkv_is_now_checked(self, tmp_path, monkeypatch):
+    fake = _patch_probe(monkeypatch, _media_info([_vid(height=1088, sar=None), _aud()], path="/m/a.mkv"))
+    kind, details = repair_check(_media_file(tmp_path, "movie.mkv"))
+    assert kind == FindingKind.HYBRID_ASPECT
+    assert details["reason"] == "stretched_dims"
+    fake.probe.assert_called_once()
+
+  def test_corrected_aspect_with_intact_cover_is_stream_damage(self, tmp_path, monkeypatch):
+    # An attached_pic cover is not the old hybrid remux's demoted track.
+    _patch_probe(monkeypatch, _media_info([_vid(height=1088, sar="135:136"), _aud(), _vid(2, "mjpeg", 600, 900, attached_pic=1)]))
+    kind, details = repair_check(_media_file(tmp_path))
+    assert kind == FindingKind.STREAM_DAMAGE
+    assert details["artwork_streams"] == [2]
+
   def test_non_square_par_means_already_repaired(self, tmp_path, monkeypatch):
-    p = tmp_path / "movie.mp4"
-    p.write_bytes(b"\x00" * 64)
-    _hybrid_probe_patch(monkeypatch, width=1920, height=1088, sar="135:136")
-    assert hybrid_aspect_check(str(p)) is None
+    _patch_probe(monkeypatch, _media_info([_vid(height=1088, sar="135:136"), _aud()]))
+    assert repair_check(_media_file(tmp_path)) is None
 
-  def test_standard_dims_not_flagged(self, tmp_path, monkeypatch):
-    p = tmp_path / "movie.mp4"
-    p.write_bytes(b"\x00" * 64)
-    _hybrid_probe_patch(monkeypatch, width=1920, height=1080, sar=None)
-    assert hybrid_aspect_check(str(p)) is None
+  def test_normal_file_returns_none(self, tmp_path, monkeypatch):
+    _patch_probe(monkeypatch, _media_info([_vid(), _aud()]))
+    assert repair_check(_media_file(tmp_path)) is None
 
-  def test_non_mp4_extension_skipped_without_probe(self, tmp_path, monkeypatch):
-    p = tmp_path / "movie.mkv"
-    p.write_bytes(b"\x00" * 64)
-    fake = _hybrid_probe_patch(monkeypatch, width=1920, height=1088, sar=None)
-    assert hybrid_aspect_check(str(p)) is None
+  def test_unrepairable_extension_skipped_without_probe(self, tmp_path, monkeypatch):
+    fake = _patch_probe(monkeypatch, _media_info([_vid(height=1088, sar=None)]))
+    assert repair_check(_media_file(tmp_path, "movie.avi")) is None
     fake.probe.assert_not_called()
 
   def test_missing_file_returns_none(self, tmp_path, monkeypatch):
-    fake = _hybrid_probe_patch(monkeypatch)
-    assert hybrid_aspect_check(str(tmp_path / "nope.mp4")) is None
+    fake = _patch_probe(monkeypatch, _media_info([_vid()]))
+    assert repair_check(str(tmp_path / "nope.mp4")) is None
     fake.probe.assert_not_called()
 
   def test_probe_returns_none(self, tmp_path, monkeypatch):
-    p = tmp_path / "movie.mp4"
-    p.write_bytes(b"\x00" * 64)
-    _hybrid_probe_patch(monkeypatch, info=None)
-    assert hybrid_aspect_check(str(p)) is None
+    _patch_probe(monkeypatch, None)
+    assert repair_check(_media_file(tmp_path)) is None
 
-  def test_probe_without_video_stream(self, tmp_path, monkeypatch):
-    p = tmp_path / "movie.mp4"
-    p.write_bytes(b"\x00" * 64)
-    _hybrid_probe_patch(monkeypatch, info="novideo")
-    assert hybrid_aspect_check(str(p)) is None
+  def test_probe_without_streams(self, tmp_path, monkeypatch):
+    _patch_probe(monkeypatch, _media_info([]))
+    assert repair_check(_media_file(tmp_path)) is None
 
   def test_probe_exception_swallowed(self, tmp_path, monkeypatch):
-    p = tmp_path / "movie.mp4"
-    p.write_bytes(b"\x00" * 64)
-    fake_ffmpeg = mock.MagicMock()
-    fake_ffmpeg.probe.side_effect = RuntimeError("probe blew up")
-    monkeypatch.setattr("resources.library_audit.probes.FFMpeg", lambda **_: fake_ffmpeg)
-    assert hybrid_aspect_check(str(p)) is None
+    _patch_probe(monkeypatch, exc=RuntimeError("probe blew up"))
+    assert repair_check(_media_file(tmp_path)) is None
 
-  def _patch_streams(self, monkeypatch, streams):
-    fake_ffmpeg = mock.MagicMock()
-    fake_ffmpeg.probe.return_value = SimpleNamespace(streams=streams, video=streams[0] if streams else None)
-    monkeypatch.setattr("resources.library_audit.probes.FFMpeg", lambda **_: fake_ffmpeg)
+  def test_ffmpeg_dir_builds_explicit_binary_paths(self, tmp_path, monkeypatch):
+    built = {}
+
+    def factory(**kwargs):
+      built.update(kwargs)
+      fake = mock.MagicMock()
+      fake.probe.return_value = None
+      return fake
+
+    monkeypatch.setattr("resources.library_audit.probes.FFMpeg", factory)
+    repair_check(_media_file(tmp_path), ffmpeg_dir="/opt/ff")
+    assert built == {"ffmpeg_path": "/opt/ff/ffmpeg", "ffprobe_path": "/opt/ff/ffprobe"}
 
   def test_previously_repaired_with_demoted_poster_is_flagged(self, tmp_path, monkeypatch):
     # The old "-map 0 ... -aspect" remux corrected the PAR but turned the
     # poster into a real video track; the file must be re-repairable.
-    p = tmp_path / "movie.mp4"
-    p.write_bytes(b"\x00" * 64)
-    self._patch_streams(
-      monkeypatch,
-      [
-        SimpleNamespace(type="video", codec="hevc", attached_pic=0, video_width=3840, video_height=2176, sample_aspect_ratio="136:135"),
-        SimpleNamespace(type="audio", codec="eac3", attached_pic=0),
-        SimpleNamespace(type="video", codec="mjpeg", attached_pic=0, video_width=1000, video_height=1500, sample_aspect_ratio="8:3"),
-      ],
-    )
-    assert hybrid_aspect_check(str(p)) == {
-      "reason": "demoted_poster",
-      "width": 3840,
-      "height": 2176,
-      "true_height": 2160,
-      "dar": "3840:2160",
-    }
+    streams = [_vid(codec="hevc", width=3840, height=2176, sar="136:135", tag="hvc1"), _aud(), _vid(2, "mjpeg", 1000, 1500, "8:3", tag="mp4v")]
+    _patch_probe(monkeypatch, _media_info(streams))
+    kind, details = repair_check(_media_file(tmp_path))
+    assert kind == FindingKind.HYBRID_ASPECT
+    assert details["reason"] == "demoted_poster"
+    assert (details["width"], details["height"], details["true_height"], details["dar"]) == (3840, 2176, 2160, "3840:2160")
+    assert details["repair"] == "artwork streams 2"
 
-  def test_previously_repaired_with_intact_poster_not_flagged(self, tmp_path, monkeypatch):
-    p = tmp_path / "movie.mp4"
-    p.write_bytes(b"\x00" * 64)
-    self._patch_streams(
-      monkeypatch,
-      [
-        SimpleNamespace(type="video", codec="hevc", attached_pic=0, video_width=3840, video_height=2176, sample_aspect_ratio="136:135"),
-        SimpleNamespace(type="video", codec="mjpeg", attached_pic=1, video_width=1000, video_height=1500, sample_aspect_ratio="1:1"),
-      ],
-    )
-    assert hybrid_aspect_check(str(p)) is None
-
-  def test_primary_video_skips_leading_poster(self, tmp_path, monkeypatch):
-    # A poster listed first must not be mistaken for the main picture.
-    p = tmp_path / "movie.mp4"
-    p.write_bytes(b"\x00" * 64)
-    self._patch_streams(
-      monkeypatch,
-      [
-        SimpleNamespace(type="video", codec="mjpeg", attached_pic=1, video_width=1000, video_height=1500, sample_aspect_ratio="1:1"),
-        SimpleNamespace(type="video", codec="h264", attached_pic=0, video_width=1920, video_height=1088, sample_aspect_ratio="1:1"),
-      ],
-    )
-    details = hybrid_aspect_check(str(p))
-    assert details is not None
+  def test_leading_poster_skipped_when_picking_primary(self, tmp_path, monkeypatch):
+    streams = [_vid(0, "png", 1000, 1500, "1:1", attached_pic=1), _vid(1, "h264", 1920, 1088, "1:1"), _aud(2)]
+    _patch_probe(monkeypatch, _media_info(streams))
+    kind, details = repair_check(_media_file(tmp_path))
+    assert kind == FindingKind.HYBRID_ASPECT
     assert details["reason"] == "stretched_dims"
     assert details["dar"] == "1920:1080"
 
-  def test_non_int_dims_returns_none(self, tmp_path, monkeypatch):
-    p = tmp_path / "movie.mp4"
-    p.write_bytes(b"\x00" * 64)
-    _hybrid_probe_patch(monkeypatch, width=None, height=1088, sar=None)
-    assert hybrid_aspect_check(str(p)) is None
+  def test_data_stream_is_stream_damage(self, tmp_path, monkeypatch):
+    streams = [_vid(), _aud(), _stream(2, "data", "bin_data", codec_tag_string="tmcd")]
+    _patch_probe(monkeypatch, _media_info(streams))
+    kind, details = repair_check(_media_file(tmp_path))
+    assert kind == FindingKind.STREAM_DAMAGE
+    assert details == {
+      "reason": "stream_damage",
+      "repair": "data streams 2",
+      "data_streams": [2],
+      "unknown_streams": [],
+      "artwork_streams": [],
+    }
+
+  def test_unknown_stream_is_stream_damage(self, tmp_path, monkeypatch):
+    streams = [_vid(), _aud(), _stream(2, "unknown", "x")]
+    _patch_probe(monkeypatch, _media_info(streams))
+    kind, details = repair_check(_media_file(tmp_path))
+    assert kind == FindingKind.STREAM_DAMAGE
+    assert details["unknown_streams"] == [2]
+    assert details["data_streams"] == []
+
+  def test_artwork_on_standard_dims_is_stream_damage(self, tmp_path, monkeypatch):
+    streams = [_vid(), _aud(), _vid(2, "mjpeg", 600, 900, attached_pic=1)]
+    _patch_probe(monkeypatch, _media_info(streams, path="/m/a.mkv"))
+    kind, details = repair_check(_media_file(tmp_path, "movie.mkv"))
+    assert kind == FindingKind.STREAM_DAMAGE
+    assert details["artwork_streams"] == [2]
+    assert details["repair"] == "artwork streams 2"
+
+  def test_hybrid_aspect_check_wrapper_returns_details(self, tmp_path, monkeypatch):
+    _patch_probe(monkeypatch, _media_info([_vid(height=1088, sar=None), _aud()]))
+    details = hybrid_aspect_check(_media_file(tmp_path))
+    assert details is not None
+    assert details["dar"] == "1920:1080"
+
+  def test_hybrid_aspect_check_wrapper_ignores_stream_damage(self, tmp_path, monkeypatch):
+    _patch_probe(monkeypatch, _media_info([_vid(), _aud(), _stream(2, "data", "bin_data", codec_tag_string="tmcd")]))
+    assert hybrid_aspect_check(_media_file(tmp_path)) is None
+
+  def test_hybrid_aspect_check_wrapper_none_when_normal(self, tmp_path, monkeypatch):
+    _patch_probe(monkeypatch, _media_info([_vid(), _aud()]))
+    assert hybrid_aspect_check(_media_file(tmp_path)) is None
 
 
 # ---------------------------------------------------------------------------
-# Hybrid-aspect engine integration (probe_one, maybe_auto_fix, _inline_probe)
+# In-transit leftovers (age gate, configured temp extension)
+# ---------------------------------------------------------------------------
+
+
+def _age(path, seconds):
+  old = time.time() - seconds
+  os.utime(path, (old, old))
+
+
+class TestInTransitLeftovers:
+  def test_fresh_sma_skipped(self, tmp_path):
+    p = tmp_path / "movie.mp4.sma"
+    p.write_bytes(b"x")
+    assert tmp_artifact_check(str(p)) is None
+
+  def test_old_sma_flagged_as_in_transit_leftover(self, tmp_path):
+    p = tmp_path / "movie.mp4.sma"
+    p.write_bytes(b"x")
+    _age(p, IN_TRANSIT_MIN_AGE_SECONDS + 60)
+    result = tmp_artifact_check(str(p))
+    assert result is not None
+    assert result["reason"] == "in_transit_leftover"
+    assert "mtime" in result
+
+  def test_smatmp_gated_by_age(self, tmp_path):
+    p = tmp_path / "movie.mp4.smatmp"
+    p.write_bytes(b"x")
+    assert tmp_artifact_check(str(p)) is None
+    _age(p, IN_TRANSIT_MIN_AGE_SECONDS + 60)
+    assert tmp_artifact_check(str(p))["reason"] == "in_transit_leftover"
+
+  def test_custom_min_age_respected(self, tmp_path):
+    p = tmp_path / "movie.sma"
+    p.write_bytes(b"x")
+    _age(p, 120)
+    assert tmp_artifact_check(str(p)) is None
+    assert tmp_artifact_check(str(p), min_age_seconds=60)["reason"] == "in_transit_leftover"
+
+  def test_configured_temp_extension_is_in_transit(self, tmp_path):
+    p = tmp_path / "movie.mp4.part2"
+    p.write_bytes(b"x")
+    assert tmp_artifact_check(str(p)) is None
+    assert not is_in_transit(str(p))
+    assert is_in_transit(str(p), "part2")
+    assert is_in_transit(str(p), ".PART2")
+    assert tmp_artifact_check(str(p), temp_extension="part2") is None  # fresh
+    _age(p, IN_TRANSIT_MIN_AGE_SECONDS + 60)
+    assert tmp_artifact_check(str(p), temp_extension="part2")["reason"] == "in_transit_leftover"
+
+  def test_temp_extension_equal_to_media_container_ignored(self, tmp_path):
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"x")
+    _age(p, IN_TRANSIT_MIN_AGE_SECONDS + 60)
+    assert not is_in_transit(str(p), "mp4")
+    assert not is_tmp_artifact(str(p), ".mp4")
+    assert tmp_artifact_check(str(p), temp_extension="mp4") is None
+
+  def test_other_tmp_artifacts_have_no_age_gate(self, tmp_path):
+    p = tmp_path / "x.tmp"
+    p.write_bytes(b"x")
+    assert tmp_artifact_check(str(p))["reason"] == "leftover_artifact"
+
+  def test_missing_file_returns_none(self, tmp_path):
+    assert tmp_artifact_check(str(tmp_path / "gone.sma")) is None
+
+  def test_enumerator_classifies_temp_extension_as_tmp(self, tmp_path):
+    (tmp_path / "movie.mp4.part2").write_bytes(b"x")
+    (tmp_path / "movie.mp4.sma").write_bytes(b"x")
+    (tmp_path / "movie.mp4").write_bytes(b"x")
+    without = dict(enumerate_paths([str(tmp_path)]))
+    assert str(tmp_path / "movie.mp4.part2") not in without
+    assert without[str(tmp_path / "movie.mp4.sma")] == KIND_HINT_TMP
+    with_ext = dict(enumerate_paths([str(tmp_path)], temp_extension="part2"))
+    assert with_ext[str(tmp_path / "movie.mp4.part2")] == KIND_HINT_TMP
+    assert with_ext[str(tmp_path / "movie.mp4")] == KIND_HINT_MEDIA
+
+  def test_enumerator_media_temp_extension_does_not_hide_library(self, tmp_path):
+    (tmp_path / "movie.mp4").write_bytes(b"x")
+    units = dict(enumerate_paths([str(tmp_path)], temp_extension="mp4"))
+    assert units[str(tmp_path / "movie.mp4")] == KIND_HINT_MEDIA
+
+  def test_engine_probe_passes_pcm_temp_settings(self, monkeypatch):
+    seen = {}
+
+    def fake(path, temp_extension=None, min_age_seconds=None):
+      seen.update(path=path, temp_extension=temp_extension, min_age_seconds=min_age_seconds)
+      return {"reason": "in_transit_leftover"}
+
+    monkeypatch.setattr("resources.library_audit.engine.tmp_artifact_check", fake)
+    engine, _db, pcm = _engine()
+    pcm.temp_extension = "part2"
+    pcm.storage_janitor_max_age_seconds = 7200
+    finding = engine.probe_one({"path": "/x.part2", "kind_hint": KIND_HINT_TMP})
+    assert finding.kind == FindingKind.LEFTOVER_TMP
+    assert seen == {"path": "/x.part2", "temp_extension": "part2", "min_age_seconds": 7200}
+
+  def test_engine_probe_falsy_pcm_settings_become_none(self, monkeypatch):
+    seen = {}
+
+    def fake(path, temp_extension=None, min_age_seconds=None):
+      seen.update(temp_extension=temp_extension, min_age_seconds=min_age_seconds)
+
+    monkeypatch.setattr("resources.library_audit.engine.tmp_artifact_check", fake)
+    engine, _db, pcm = _engine()
+    pcm.temp_extension = ""
+    pcm.storage_janitor_max_age_seconds = 0
+    assert engine.probe_one({"path": "/x.tmp", "kind_hint": KIND_HINT_TMP}) is None
+    assert seen == {"temp_extension": None, "min_age_seconds": None}
+
+  def test_inline_probe_forwards_temp_extension(self, monkeypatch):
+    from resources.library_audit.engine import _inline_probe
+
+    seen = {}
+
+    def fake(path, temp_extension=None, min_age_seconds=None):
+      seen["temp_extension"] = temp_extension
+      return {"reason": "in_transit_leftover"}
+
+    monkeypatch.setattr("resources.library_audit.engine.tmp_artifact_check", fake)
+    out = _inline_probe("/x.part2", KIND_HINT_TMP, None, {}, temp_extension="part2")
+    assert out.kind == FindingKind.LEFTOVER_TMP
+    assert seen["temp_extension"] == "part2"
+
+  def test_run_audit_inline_forwards_temp_extension(self, tmp_path):
+    p = tmp_path / "movie.mp4.part2"
+    p.write_bytes(b"x")
+    _age(p, IN_TRANSIT_MIN_AGE_SECONDS + 60)
+    rc = run_audit_inline([str(tmp_path)], mock.MagicMock(skip_dirs=[]), mock.MagicMock(), temp_extension="part2")
+    assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# Repair findings through the engine (probe_one, maybe_auto_fix, _inline_probe)
 # ---------------------------------------------------------------------------
 
 _HYBRID_DETAILS = {
@@ -932,116 +1115,195 @@ _HYBRID_DETAILS = {
 }
 
 
-def _hybrid_auto_fix(enabled=True):
+def _repair_auto_fix(hybrid=True, damage=False):
   return mock.MagicMock(
     ffprobe_failed=False,
     orphan_sidecar=False,
     leftover_tmp=False,
     preconv_original=False,
-    hybrid_aspect=enabled,
+    hybrid_aspect=hybrid,
+    stream_damage=damage,
   )
 
 
-class TestEngineHybridAspect:
+class TestEngineRepairFindings:
   def test_probe_media_returns_hybrid_finding(self, monkeypatch):
     monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
-    monkeypatch.setattr("resources.library_audit.engine.hybrid_aspect_check", lambda *a, **k: dict(_HYBRID_DETAILS))
+    monkeypatch.setattr("resources.library_audit.engine.repair_check", lambda *a, **k: (FindingKind.HYBRID_ASPECT, dict(_HYBRID_DETAILS)))
     engine, _db, _pcm = _engine()
     finding = engine.probe_one({"path": "/x.mp4", "kind_hint": KIND_HINT_MEDIA})
     assert finding is not None
     assert finding.kind == FindingKind.HYBRID_ASPECT
     assert finding.details["dar"] == "1920:1080"
 
-  def test_probe_media_clean_when_hybrid_check_passes(self, monkeypatch):
+  def test_probe_media_returns_stream_damage_finding(self, monkeypatch):
     monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
-    monkeypatch.setattr("resources.library_audit.engine.hybrid_aspect_check", lambda *a, **k: None)
+    monkeypatch.setattr("resources.library_audit.engine.repair_check", lambda *a, **k: (FindingKind.STREAM_DAMAGE, {"reason": "stream_damage"}))
+    engine, _db, _pcm = _engine()
+    finding = engine.probe_one({"path": "/x.mkv", "kind_hint": KIND_HINT_MEDIA})
+    assert finding.kind == FindingKind.STREAM_DAMAGE
+
+  def test_probe_media_passes_ffmpeg_dir(self, monkeypatch):
+    seen = {}
+    monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
+    monkeypatch.setattr("resources.library_audit.engine.repair_check", lambda path, ffmpeg_dir=None: seen.update(dir=ffmpeg_dir))
+    engine, _db, _pcm = _engine()
+    engine.ffmpeg_dir = "/opt/ff"
+    assert engine.probe_one({"path": "/x.mp4", "kind_hint": KIND_HINT_MEDIA}) is None
+    assert seen["dir"] == "/opt/ff"
+
+  def test_probe_media_clean_when_repair_check_passes(self, monkeypatch):
+    monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
+    monkeypatch.setattr("resources.library_audit.engine.repair_check", lambda *a, **k: None)
     engine, _db, _pcm = _engine()
     assert engine.probe_one({"path": "/x.mp4", "kind_hint": KIND_HINT_MEDIA}) is None
 
-  def test_ffprobe_failure_wins_over_hybrid_check(self, monkeypatch):
-    monkeypatch.setattr(
-      "resources.library_audit.engine.ffprobe_check",
-      lambda *a, **k: {"reason": "probe_returned_none"},
-    )
+  def test_ffprobe_failure_wins_over_repair_check(self, monkeypatch):
+    monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: {"reason": "probe_returned_none"})
     called = []
-    monkeypatch.setattr(
-      "resources.library_audit.engine.hybrid_aspect_check",
-      lambda *a, **k: called.append(True) or dict(_HYBRID_DETAILS),
-    )
+    monkeypatch.setattr("resources.library_audit.engine.repair_check", lambda *a, **k: called.append(True))
     engine, _db, _pcm = _engine()
     finding = engine.probe_one({"path": "/x.mp4", "kind_hint": KIND_HINT_MEDIA})
-    assert finding is not None
     assert finding.kind == FindingKind.FFPROBE_FAILED
     assert called == []
 
-  def test_auto_fix_repairs_when_enabled(self, monkeypatch):
-    calls = []
-
-    def fake_repair(path, dar, ffmpeg_dir=None, logger=None):
-      calls.append((path, dar, ffmpeg_dir))
-      return True
-
-    monkeypatch.setattr("resources.library_audit.engine.repair_hybrid_aspect", fake_repair)
-    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_hybrid_auto_fix(enabled=True))
+  def test_auto_fix_hybrid_repairs_when_enabled(self):
+    engine, _db, pcm = _engine(dry_run=False, auto_fix=_repair_auto_fix(hybrid=True))
+    processor = mock.MagicMock()
+    processor.repair_file.return_value = RepairResult("/x.mp4", STATUS_REPAIRED, "display aspect 1920:1080")
+    engine._repairers[("/tmp/sma.yml", pcm.get_profile_for_path.return_value)] = processor
     finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))
     assert engine.maybe_auto_fix(finding) == "repaired"
-    assert calls == [("/x.mp4", "1920:1080", None)]
+    processor.repair_file.assert_called_once_with("/x.mp4")
 
-  def test_auto_fix_skipped_when_repair_fails(self, monkeypatch):
-    monkeypatch.setattr(
-      "resources.library_audit.engine.repair_hybrid_aspect",
-      lambda *a, **k: False,
-    )
-    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_hybrid_auto_fix(enabled=True))
+  def test_auto_fix_hybrid_skipped_when_repair_not_repaired(self):
+    engine, _db, pcm = _engine(dry_run=False, auto_fix=_repair_auto_fix(hybrid=True))
+    processor = mock.MagicMock()
+    processor.repair_file.return_value = RepairResult("/x.mp4", STATUS_FAILED, "boom")
+    engine._repairers[("/tmp/sma.yml", pcm.get_profile_for_path.return_value)] = processor
     finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))
     assert engine.maybe_auto_fix(finding) == "skipped"
+    engine.log.warning.assert_called()
 
-  def test_auto_fix_skipped_when_disabled(self, monkeypatch):
-    def boom(*_a, **_k):
-      raise AssertionError("repair must not run when disabled")
+  def test_auto_fix_hybrid_skipped_when_disabled(self):
+    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_repair_auto_fix(hybrid=False, damage=True))
+    with mock.patch.object(AuditEngine, "_repair", side_effect=AssertionError("must not repair")):
+      assert engine.maybe_auto_fix(Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))) == "skipped"
 
-    monkeypatch.setattr("resources.library_audit.engine.repair_hybrid_aspect", boom)
-    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_hybrid_auto_fix(enabled=False))
-    finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))
-    assert engine.maybe_auto_fix(finding) == "skipped"
+  def test_auto_fix_stream_damage_repairs_when_enabled(self):
+    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_repair_auto_fix(hybrid=False, damage=True))
+    with mock.patch.object(AuditEngine, "_repair", return_value="repaired") as repair:
+      assert engine.maybe_auto_fix(Finding(FindingKind.STREAM_DAMAGE, "/x.mkv", {})) == "repaired"
+    repair.assert_called_once_with("/x.mkv")
+
+  def test_auto_fix_stream_damage_skipped_when_disabled(self):
+    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_repair_auto_fix(hybrid=True, damage=False))
+    with mock.patch.object(AuditEngine, "_repair", side_effect=AssertionError("must not repair")):
+      assert engine.maybe_auto_fix(Finding(FindingKind.STREAM_DAMAGE, "/x.mkv", {})) == "skipped"
 
   def test_auto_fix_dry_run_returns_dry_run(self):
-    engine, _db, _pcm = _engine(dry_run=True, auto_fix=_hybrid_auto_fix(enabled=True))
-    finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))
-    assert engine.maybe_auto_fix(finding) == "dry_run"
+    engine, _db, _pcm = _engine(dry_run=True, auto_fix=_repair_auto_fix(hybrid=True, damage=True))
+    assert engine.maybe_auto_fix(Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))) == "dry_run"
+    assert engine.maybe_auto_fix(Finding(FindingKind.STREAM_DAMAGE, "/x.mp4", {})) == "dry_run"
 
-  def test_auto_fix_skipped_when_dar_missing(self, monkeypatch):
-    def boom(*_a, **_k):
-      raise AssertionError("repair must not run without a dar")
+  def test_repair_exception_returns_skipped(self):
+    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_repair_auto_fix(hybrid=True))
+    with mock.patch.object(AuditEngine, "_repair_processor", side_effect=RuntimeError("settings broke")):
+      assert engine._repair("/x.mp4") == "skipped"
+    engine.log.exception.assert_called_once()
 
-    monkeypatch.setattr("resources.library_audit.engine.repair_hybrid_aspect", boom)
-    engine, _db, _pcm = _engine(dry_run=False, auto_fix=_hybrid_auto_fix(enabled=True))
-    finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", {"reason": "stretched_dims"})
-    assert engine.maybe_auto_fix(finding) == "skipped"
+  def test_repair_file_exception_returns_skipped(self):
+    engine, _db, pcm = _engine(dry_run=False, auto_fix=_repair_auto_fix(hybrid=True))
+    processor = mock.MagicMock()
+    processor.repair_file.side_effect = OSError("disk")
+    engine._repairers[("/tmp/sma.yml", pcm.get_profile_for_path.return_value)] = processor
+    assert engine._repair("/x.mp4") == "skipped"
+    engine.log.exception.assert_called_once()
+
+  def test_repair_processor_built_with_routed_profile_and_cached(self):
+    engine, _db, pcm = _engine(dry_run=False, auto_fix=_repair_auto_fix())
+    engine.ffmpeg_dir = "/opt/ff"
+    pcm.get_profile_for_path.side_effect = lambda p: "rq" if "/rq/" in p else "default"
+    with mock.patch("resources.readsettings.ReadSettings") as rs, mock.patch("resources.library_audit.engine.RepairProcessor") as rp:
+      first = engine._repair_processor("/lib/a.mp4")
+      again = engine._repair_processor("/lib/b.mp4")
+      other = engine._repair_processor("/rq/c.mp4")
+    assert first is again
+    assert other is rp.return_value
+    assert rs.call_count == 2
+    assert [c.kwargs["profile"] for c in rs.call_args_list] == ["default", "rq"]
+    for c in rs.call_args_list:
+      assert c.args == ("/tmp/sma.yml",)
+      assert c.kwargs["logger"] is engine.log
+    assert rp.call_count == 2
+    assert rp.call_args.args[0] is rs.return_value
+    assert rp.call_args.kwargs == {"logger": engine.log, "ffmpeg_dir": "/opt/ff"}
+
+  def test_repair_processor_cache_keyed_by_config_too(self):
+    engine, _db, pcm = _engine(dry_run=False, auto_fix=_repair_auto_fix())
+    pcm.get_profile_for_path.return_value = None
+    pcm.get_config_for_path.side_effect = lambda p: "/b.yml" if "/b/" in p else "/a.yml"
+    with mock.patch("resources.readsettings.ReadSettings") as rs, mock.patch("resources.library_audit.engine.RepairProcessor"):
+      engine._repair_processor("/a/x.mp4")
+      engine._repair_processor("/b/x.mp4")
+      engine._repair_processor("/a/y.mp4")
+    assert [c.args[0] for c in rs.call_args_list] == ["/a.yml", "/b.yml"]
 
   def test_inline_probe_emits_hybrid_finding(self, monkeypatch):
     from resources.library_audit.engine import _inline_probe
 
     monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
     monkeypatch.setattr("resources.library_audit.engine.read_media_ids", lambda _p: {})
-    monkeypatch.setattr("resources.library_audit.engine.hybrid_aspect_check", lambda *a, **k: dict(_HYBRID_DETAILS))
+    monkeypatch.setattr("resources.library_audit.engine.repair_check", lambda *a, **k: (FindingKind.HYBRID_ASPECT, dict(_HYBRID_DETAILS)))
     out = _inline_probe("/x.mp4", KIND_HINT_MEDIA, None, {})
-    assert out is not None
     assert out.kind == FindingKind.HYBRID_ASPECT
     assert out.details["true_height"] == 1080
 
-  def test_inline_probe_clean_when_no_hybrid(self, monkeypatch):
+  def test_inline_probe_emits_stream_damage_finding(self, monkeypatch):
     from resources.library_audit.engine import _inline_probe
 
     monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
     monkeypatch.setattr("resources.library_audit.engine.read_media_ids", lambda _p: {})
-    monkeypatch.setattr("resources.library_audit.engine.hybrid_aspect_check", lambda *a, **k: None)
+    monkeypatch.setattr("resources.library_audit.engine.repair_check", lambda *a, **k: (FindingKind.STREAM_DAMAGE, {"reason": "stream_damage"}))
+    assert _inline_probe("/x.mp4", KIND_HINT_MEDIA, None, {}).kind == FindingKind.STREAM_DAMAGE
+
+  def test_inline_probe_clean_when_no_damage(self, monkeypatch):
+    from resources.library_audit.engine import _inline_probe
+
+    monkeypatch.setattr("resources.library_audit.engine.ffprobe_check", lambda *a, **k: None)
+    monkeypatch.setattr("resources.library_audit.engine.read_media_ids", lambda _p: {})
+    monkeypatch.setattr("resources.library_audit.engine.repair_check", lambda *a, **k: None)
     assert _inline_probe("/x.mp4", KIND_HINT_MEDIA, None, {}) is None
 
-  def test_audit_auto_fix_schema_defaults_hybrid_off(self):
+  def test_inline_fix_hybrid_without_repairer_does_nothing(self):
+    from resources.library_audit.engine import _inline_fix
+
+    finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))
+    assert _inline_fix(finding, mock.MagicMock(), None, False, None) is None
+
+  def test_inline_fix_stream_damage_is_not_repaired(self):
+    from resources.library_audit.engine import _inline_fix
+
+    repairer = mock.MagicMock()
+    finding = Finding(FindingKind.STREAM_DAMAGE, "/x.mp4", {})
+    assert _inline_fix(finding, mock.MagicMock(), repairer, False, None) is None
+    repairer.repair_file.assert_not_called()
+
+  def test_inline_fix_hybrid_failure_logs_error(self):
+    from resources.library_audit.engine import _inline_fix
+
+    repairer = mock.MagicMock()
+    repairer.repair_file.return_value = RepairResult("/x.mp4", STATUS_FAILED, "boom")
+    logger = mock.MagicMock()
+    finding = Finding(FindingKind.HYBRID_ASPECT, "/x.mp4", dict(_HYBRID_DETAILS))
+    assert _inline_fix(finding, logger, repairer, False, None) == "repair_failed"
+    logger.error.assert_called_once()
+
+  def test_audit_auto_fix_schema_defaults_repairs_off(self):
     from resources.config_schema import AuditAutoFix
 
     assert AuditAutoFix().hybrid_aspect is False
+    assert AuditAutoFix().stream_damage is False
 
 
 class TestShortDetails:

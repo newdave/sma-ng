@@ -1,9 +1,10 @@
 """Library audit subsystem.
 
 Locates corrupt media (FFprobe failures), orphan sidecars, leftover tmp/partial
-artifacts, leftover pre-conversion originals, TMDB/TVDB-ID duplicates, and
-hybrid-aspect MP4s (stretched by the former QSV alignment bug) across
-configured paths. Distributed across the SMA-NG cluster via PostgreSQL queue +
+artifacts and in-transit output, leftover pre-conversion originals,
+TMDB/TVDB-ID duplicates, hybrid-aspect MP4s (stretched by the former QSV
+alignment bug) and stream damage that ``repair.py`` fixes (data, unknown and
+artwork streams) across configured paths. Distributed across the SMA-NG cluster via PostgreSQL queue +
 ``FOR UPDATE SKIP LOCKED`` claim semantics — every live node contributes probes.
 
 Public API:

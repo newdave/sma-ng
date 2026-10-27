@@ -185,8 +185,8 @@ Two repair paths exist:
   It is instant but does not remove the resampled rows: players that ignore
   the sample aspect ratio for HEVC-in-MP4 (some TVs and Plex clients) still
   show a slightly tall picture, and non-square pixels make a Plex transcode
-  more likely. The remux keeps video, audio and subtitle streams only; cover
-  art and data streams are dropped. The library audit can do the same
+  more likely. This is the `repair.py` repair (below), so cover art, data and
+  unknown streams are dropped too. The library audit can do the same
   automatically via `daemon.audit.auto-fix.hybrid-aspect: true` (see
   [Library Audit](library-audit.md)).
 
@@ -201,39 +201,63 @@ that is the fix being applied.
 
 ### Repairing damaged media without transcoding
 
-`repair.py` fixes stream-level damage by remuxing with `-c copy`. It never re-encodes: a guard rejects any
-FFmpeg option other than stream mapping, `-c copy`, `-aspect:v:0`, `-write_tmcd` and `-movflags` before FFmpeg
-runs. It accepts any mix of files and directories (`.mp4`, `.m4v`, `.mov`, `.mkv`; directories are walked
-recursively, hidden files and folders are skipped) and leaves files that probe as normal alone.
+`repair.py` fixes stream-level damage by remuxing with `-c copy`; it never re-encodes. It accepts any mix of files
+and directories (`.mp4`, `.m4v`, `.mov`, `.mkv`; directories are walked recursively, hidden files and folders are
+skipped) and leaves files that probe as normal alone.
 
 ```bash
 python repair.py -n /mnt/unionfs/Media/TV          # dry run: report what would change
 python repair.py /path/to/file.mp4 /path/to/dir     # repair in place
-mise run media:repair -- /path/to/file-or-dir       # same via mise; sma-repair inside Docker
+mise run media:repair -- /path/to/file-or-dir       # same via mise; `sma repair PATH` inside Docker
 ```
 
 | Flag              | Effect                                                         |
 | ----------------- | -------------------------------------------------------------- |
 | `-n`, `--dry-run` | Report what would be repaired; change nothing                  |
-| `-c`, `--config`  | `sma-ng.yml` to read `ffmpeg`/`ffprobe` paths from             |
+| `-c`, `--config`  | Alternate `sma-ng.yml` path (disables per-path routing)        |
+| `--no-plex`       | Skip the Plex refresh after repairs                            |
 | `-v`, `--verbose` | Debug logging                                                  |
 
 What it fixes:
 
 | Damage       | Detected as                                                                                     | Fix                                    |
 | ------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------- |
-| Data streams | `tmcd` timecode tracks, stray `bin_data`, streams FFprobe cannot classify                       | Dropped (`-write_tmcd 0` on MP4)       |
+| Data streams | `tmcd` timecode tracks, stray `bin_data`                                                        | Dropped (`-write_tmcd 0` on MP4)       |
+| Unknown      | Streams FFprobe cannot classify or identify a codec for (`unknown`/`none`)                      | Dropped                                |
 | Artwork      | Attached pictures, cover art demoted to a real `mp4v` video track, image attachments in MKV     | Dropped; font attachments are kept     |
 | Aspect ratio | Stretched hybrid dims (see above) with square pixels                                            | `-aspect:v:0` corrective display ratio |
 
-The MP4 chapter text track (`bin_data`, written whenever a file has chapters) is not damage and is kept. The
+The MP4 chapter text track (`bin_data` tagged `text`, written whenever a file has chapters) is not damage and is
+kept. The
 aspect fix is display-only, as described above; use `manual.py --repair-hybrid reencode` to remove the
 resampled rows.
 
-Each repair writes a hidden `.<name>.repairing.<ext>` copy next to the original, re-probes it, and only replaces
-the original when the kept streams, duration (within 1 second) and chapter count match and the copy probes as
-normal. Otherwise the copy is deleted and the original is untouched. MP4 output gets `+faststart`. The exit code
-is 0 when nothing failed, 1 when any repair failed, and 2 for a missing path or missing FFmpeg binaries.
+FFmpeg/FFprobe paths, in-transit output settings and output permissions (`chmod`, `uid`, `gid`) come from
+`sma-ng.yml`, exactly as for a conversion: without `-c`, each file is routed to the profile the daemon would
+convert it with, so per-service `output-directory` and permissions apply. Each repair writes
+`<name>.<temp-extension>` (`<name>.sma` when unset) into `output-directory` (e.g. `/transcode`), or next to the
+original when no output directory is set. When
+`output-directory-space-ratio` is set and the output directory is short of space, the file fails with
+`insufficient free space in output directory` rather than falling back to the source directory. The copy is
+re-probed and only moved back over the original (a rename, or a copy via `<name>.smatmp` across filesystems) when
+the kept streams (codec, dimensions, channels, language and default/forced flags), duration (within 1 second) and
+chapter track match and the copy probes as normal. Otherwise the copy is deleted and the original is untouched.
+A leftover from an interrupted run is safe to delete; the library audit reports it as `leftover_tmp` once it is
+older than `storage-janitor-max-age-seconds`. MP4 output gets
+`+faststart`. After the run, each directory with a repaired file gets one Plex refresh when Plex refresh is
+configured (skip with `--no-plex`). The exit code is 0 when nothing failed and 1 when any path is missing, any
+repair failed, or the settings could not be loaded.
+
+The library audit reports the same damage as `stream_damage` findings and can repair them automatically with
+`daemon.audit.auto-fix.stream-damage: true` (see [Library Audit](library-audit.md)).
+
+### Source rejected: "only audio streams are unknown to FFprobe"
+
+A conversion never copies streams FFprobe cannot classify or identify a codec for; each one is logged as
+`Dropping unknown ... stream ... [unknown-stream]`. When every audio stream in the source is unknown, the file is
+rejected as an invalid source with `Invalid source, its only audio streams are unknown to FFprobe and cannot be
+converted [unknown-stream]` instead of producing video-only output. Check the file with `ffprobe -show_streams`;
+usually the FFmpeg build lacks the decoder, or the source is damaged and needs re-downloading.
 
 ### Hardware acceleration not working
 
@@ -244,6 +268,48 @@ is 0 when nothing failed, 1 when any repair failed, and 2 for a missing path or 
 - On Intel SR-IOV guests, verify the guest exposes the Intel VF as a matching `card*` and `renderD*` pair under `/dev/dri`
 - If `vainfo` still fails, verify the container has both the host `render` and `video` group IDs
 - On Linux, ensure the service user is in the `render` or `video` group: `usermod -aG render <user>`
+
+### Hardware encode failed and the job finished on the CPU
+
+- With `fallback-policy: aggressive`, a hardware encoder failure on QSV, VAAPI, NVENC or VideoToolbox ends
+  in the `full_sw` rung: the job is re-run with `libx264`/`libx265`/`libsvtav1` and every hardware filter,
+  device and decode flag removed. The warning `falling back to full software pipeline` lists the swaps.
+- The job succeeds but runs slower. Fix the hardware issue (see below) to get GPU speed back, or set
+  `fallback-policy: hw_only` while you diagnose it.
+
+### Output written as `name.2.mp4`
+
+- A file already existed at the output name, so SMA-NG kept it and numbered the new output
+  (`[output-collision]` warning). Remove or rename the old file and re-run if you want the plain name.
+- With `output-directory` and `delete-original: false`, a source that has the same name as the output
+  (`movie.mp4` to `movie.mp4`) is kept and the new file is restored as `movie.2.mp4`. Set
+  `delete-original: true` to replace the source instead.
+
+### `[dolby-vision]` warning on re-encode
+
+- The source carries Dolby Vision metadata, but the video stream is being re-encoded. The encoders can't
+  carry the Dolby Vision RPU, so the output plays as its HDR10 (or SDR) base layer. To keep Dolby Vision,
+  allow the source codec in the video codec pool so the stream can be copied.
+
+### "QT FastStart failed" warning
+
+- Moving the `moov` atom to the start of the file (`relocate-moov`) failed, usually because of an I/O
+  error. The converted file is kept as is (it still plays, but may start more slowly when streamed) and
+  the partial `*.QTFS` temp file is removed.
+
+### Job failed with "Job timed out after Ns"
+
+The conversion ran longer than `daemon.job-timeout-seconds` (or `--job-timeout`), so the worker killed the whole
+conversion process tree and failed the job with cause `timeout` (category `system`). The log shows
+`Job N timed out after Ns; killed conversion process tree: <path>`. Check whether ffmpeg was stalled (NFS or
+unionfs reads, a hung GPU) or the encode is genuinely slow (4K software encode); raise the timeout or set it to `0`
+to disable it. See [Job timeout](daemon.md#job-timeout).
+
+### "Job N completion discarded: job is no longer running on this node"
+
+The job finished, but its row had already been cancelled, requeued by stale-node recovery, or claimed by another
+node, so this node's result was dropped instead of overwriting the newer state. This is expected after a cancel
+or a network partition. A cancelled job's output may still exist on disk if ffmpeg finished before the kill landed.
 
 ### Conversion produces larger output file
 

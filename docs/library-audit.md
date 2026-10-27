@@ -13,10 +13,11 @@ live cluster node.
 | ------------------- | ---------------------------------------------------------------------------- |
 | `ffprobe_failed`    | FFprobe cannot read the file (corrupt, truncated, empty, or zero-byte).      |
 | `orphan_sidecar`    | A `.srt`/`.nfo`/`.jpg`/`.sub`/`.idx`/`.ass`/`.ssa`/`.vtt` with no matching parent media file in the same directory. |
-| `leftover_tmp`      | A `.tmp`/`.partial` file or a recycle-bin collision artifact (`*.2.mp4`, `*.3.mp4`, …). |
+| `leftover_tmp`      | A `.tmp`/`.partial` file or a recycle-bin collision artifact (`*.2.mp4`, `*.3.mp4`, …) (reason `leftover_artifact`), or in-transit SMA output left by an interrupted conversion or repair: the configured `temp-extension` (`.sma` by default) or a `.smatmp` atomic-copy partial (reason `in_transit_leftover`). In-transit files are only reported once older than `storage-janitor-max-age-seconds` (6 hours by default), so a file still being written is never flagged. |
 | `preconv_original`  | A non-MP4 (`.mkv`/`.avi`/etc.) sitting next to a same-stem `.mp4` that probes cleanly — the original was never deleted (`delete-original: false`). |
 | `duplicate_id`      | The same TMDB/TVDB id appears at two or more paths within the same audit run. |
-| `hybrid_aspect`     | An MP4 whose picture was stretched by the former QSV alignment bug (e.g. a 1080p source shipped as 1920x1088, or a max-width downscale as 1920x1072) and that carries no corrective display aspect ratio. Detection matches a fixed signature table (1920x1088/1072/1056, 3840x2176/2144, 1280x736/704) with a square pixel aspect (reason `stretched_dims`), so correctly repaired or genuinely anamorphic files are not flagged. A file that already carries a corrective pixel aspect is still flagged (reason `demoted_poster`) when an older repair remux turned its cover art into a real `mp4v` video track; re-running the repair drops that track. |
+| `stream_damage`     | An `.mp4`/`.m4v`/`.mov`/`.mkv` carrying streams SMA never keeps: data streams (`tmcd`, stray `bin_data`), unknown streams, or artwork (attached pictures, cover art demoted to a real `mp4v` video track, image attachments). The `repair` detail lists the affected stream indexes, as `repair.py -n` reports them. The MP4 chapter track is not damage. |
+| `hybrid_aspect`     | An MP4, M4V, MOV or MKV whose picture was stretched by the former QSV alignment bug (e.g. a 1080p source shipped as 1920x1088, or a max-width downscale as 1920x1072) and that carries no corrective display aspect ratio. Detection matches a fixed signature table (1920x1088/1072/1056, 3840x2176/2144, 1280x736/704) with a square pixel aspect (reason `stretched_dims`), so correctly repaired or genuinely anamorphic files are not flagged. A file that already carries a corrective pixel aspect is still flagged (reason `demoted_poster`) when an older repair remux turned its cover art into a real `mp4v` video track; re-running the repair drops that track. |
 
 ## Configuration (`sma-ng.yml`)
 
@@ -52,6 +53,7 @@ daemon:
       leftover-tmp: false       # recycle leftover .tmp / .partial files
       preconv-original: false   # recycle pre-conversion originals once mp4 is good
       hybrid-aspect: false      # losslessly remux stretched outputs with a corrective display aspect
+      stream-damage: false      # stream-copy away data, unknown and artwork streams (as repair.py)
 ```
 
 `paths` is a separate list from `daemon.scan-paths`; the auditor and the
@@ -104,6 +106,7 @@ python manual.py --audit --repair-hybrid --recycle-failed -i /path/to/library
 
 - `--repair-hybrid` (remux mode only; `reencode` is rejected with `--audit`)
   stamps the corrective display aspect ratio into each hybrid finding.
+  `stream_damage` findings are reported only; fix them with `repair.py`.
 - `--recycle-failed` moves ffprobe-failed media to the `recycle-bin`
   configured in `sma-ng.yml` (atomic copy + unlink — never a plain delete).
   The flag errors at startup when no recycle-bin is configured.
@@ -125,9 +128,10 @@ python manual.py --repair-hybrid -i /path/to/library
 python manual.py --repair-hybrid reencode -i /path/to/file.mp4
 ```
 
-The remux copies video, audio and subtitle streams only and scopes the aspect fix to the primary
-video stream. Cover art, data streams (e.g. `tmcd`, `bin_data`) and streams of unknown type are dropped.
-Re-running it on a file it already repaired is safe. The fix is display-only; see
+Remux mode is the `repair.py` repair applied to detected hybrids: it uses the same in-transit
+`output-directory`/`temp-extension`, verification and permissions, scopes the aspect fix to the
+primary video stream, and drops cover art, data streams (e.g. `tmcd`, `bin_data`) and unknown
+streams. Re-running it on a file it already repaired is safe. The fix is display-only; see
 [Troubleshooting](troubleshooting.md) for when to re-encode instead.
 
 Remux mode exits 0 when everything detected was repaired (or nothing was
@@ -174,13 +178,17 @@ When enabled:
 - `orphan-sidecar`, `leftover-tmp`, `preconv-original` → atomic copy to
   `base.converter.recycle-bin` (collision-safe with `.2`/`.3` suffix),
   followed by `os.remove` on the source. Files are never deleted directly.
-- `hybrid-aspect` → lossless in-place remux: the file is renamed aside to
-  `<file>.aspectfix`, stream-copied back with `-aspect W:H` stamping the
-  true display aspect ratio, and the aside copy is removed on success (on
-  failure the original is restored untouched). No re-encode occurs; storage
-  dimensions stay as-is and players render the corrected geometry from the
-  container aspect. To instead rebuild the video stream at its true
-  dimensions, use `manual.py --repair-hybrid reencode` per file.
+- `hybrid-aspect` and `stream-damage` → the same lossless repair as
+  `repair.py` (see [Troubleshooting](troubleshooting.md#repairing-damaged-media-without-transcoding)),
+  using the settings the daemon would convert the file with (its routed
+  profile): a stream-copy is written to `output-directory` under the
+  `temp-extension`, verified against the original, and only then moved over
+  it; any failure leaves the original untouched. Hybrid files get the true
+  display aspect ratio stamped with `-aspect`; both kinds drop data,
+  unknown and artwork streams. No re-encode occurs; storage dimensions stay
+  as-is and players render the corrected geometry from the container
+  aspect. To instead rebuild the video stream at its true dimensions, use
+  `manual.py --repair-hybrid reencode` per file.
 
 When `base.converter.recycle-bin` is empty the recycle path returns
 `skipped` for cleanup actions — the finding stays open until either an
