@@ -12,6 +12,7 @@ class FindingKind(str, Enum):
   PRECONV_ORIGINAL = "preconv_original"
   DUPLICATE_ID = "duplicate_id"
   HYBRID_ASPECT = "hybrid_aspect"
+  STREAM_DAMAGE = "stream_damage"
 
 
 # Per-kind hint stored on each library_audit_queue row so the worker knows
@@ -28,11 +29,20 @@ TMP_EXTS = frozenset({".tmp", ".partial", ".tag"})
 # converted output to `<file>.<ext>.tag` before re-muxing it; older releases
 # left these behind on tagging failure).
 TMP_SUFFIXES = (".2.mp4", ".3.mp4", ".4.mp4", ".5.mp4")  # recycle-bin collision leftovers
+# In-transit SMA output: the default temp-extension (the configured one is
+# matched too) and `.smatmp` atomic-copy partials, left by an interrupted
+# conversion or repair. Only reported once older than
+# IN_TRANSIT_MIN_AGE_SECONDS (the storage janitor's default max age) so a
+# file still being written is never flagged.
+IN_TRANSIT_EXTS = frozenset({".sma", ".smatmp"})
+IN_TRANSIT_MIN_AGE_SECONDS = 21600
 MEDIA_CONTAINER_EXTS = frozenset({".mp4", ".mkv", ".avi", ".mov", ".m4v", ".ts", ".m2ts", ".wmv", ".flv", ".webm"})
 NON_MP4_CONTAINERS = frozenset({".mkv", ".avi", ".mov", ".m4v", ".ts", ".m2ts", ".wmv", ".flv", ".webm"})
 
 
 __all__ = [
+  "IN_TRANSIT_EXTS",
+  "IN_TRANSIT_MIN_AGE_SECONDS",
   "KIND_HINT_MEDIA",
   "KIND_HINT_PRECONV",
   "KIND_HINT_SIDECAR",

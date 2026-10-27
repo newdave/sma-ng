@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 from converter.ffmpeg import FFMpeg
 from resources.library_audit.kinds import (
+  IN_TRANSIT_EXTS,
+  IN_TRANSIT_MIN_AGE_SECONDS,
   MEDIA_CONTAINER_EXTS,
   NON_MP4_CONTAINERS,
   SIDECAR_EXTS,
   TMP_EXTS,
   TMP_SUFFIXES,
+  FindingKind,
 )
+from resources.media_repair import HYBRID_DIMS_TABLE, REPAIRABLE_EXTS, diagnose
 
 
 def ffprobe_check(path: str, ffmpeg_dir: str | None = None) -> dict[str, Any] | None:
@@ -29,14 +34,7 @@ def ffprobe_check(path: str, ffmpeg_dir: str | None = None) -> dict[str, Any] | 
   if ext not in MEDIA_CONTAINER_EXTS:
     return None  # not a media file — skip
   try:
-    if ffmpeg_dir:
-      ffmpeg = FFMpeg(
-        ffmpeg_path=os.path.join(ffmpeg_dir, "ffmpeg"),
-        ffprobe_path=os.path.join(ffmpeg_dir, "ffprobe"),
-      )
-    else:
-      ffmpeg = FFMpeg()
-    info = ffmpeg.probe(path)
+    info = _ffmpeg(ffmpeg_dir).probe(path, framedata=False)
   except Exception as exc:
     return {"reason": "probe_exception", "error": str(exc)[:512], "size_bytes": size}
   if info is None:
@@ -44,115 +42,90 @@ def ffprobe_check(path: str, ffmpeg_dir: str | None = None) -> dict[str, Any] | 
   return None
 
 
-# Stretched-output signatures left behind by the (now fixed) QSV alignment
-# bug: standard-resolution sources whose height was force-scaled to a
-# mod-16/mod-32 boundary (ceil for "encoder alignment", floor for the
-# max-width downscale fold). Maps (stored_width, stored_height) -> the true
-# height the picture was stretched from. These heights essentially never
-# occur naturally at these widths, so matching the table (plus a 1:1/absent
-# SAR — a corrective DAR remux leaves a non-square PAR behind) identifies a
-# hybrid-aspect file with no realistic false positives.
-_HYBRID_STANDARD_DIMS = ((1920, 1080), (3840, 2160), (1280, 720))
-HYBRID_DIMS_TABLE: dict[tuple[int, int], int] = {}
-for _w, _h in _HYBRID_STANDARD_DIMS:
-  for _align in (16, 32):
-    for _stored in (((_h + _align - 1) // _align) * _align, (_h // _align) * _align):
-      if _stored != _h:
-        HYBRID_DIMS_TABLE[(_w, _stored)] = _h
-del _w, _h, _align, _stored
-
-# Still-image codecs that only appear as video streams when they carry cover
-# art. Before the repair remux mapped by type, it copied the poster with
-# -map 0, which dropped its attached_pic disposition and left it as a second
-# real (mp4v-tagged) video track.
-IMAGE_VIDEO_CODECS = frozenset({"mjpeg", "png", "bmp", "gif", "webp", "tiff"})
+def _ffmpeg(ffmpeg_dir: str | None) -> FFMpeg:
+  if ffmpeg_dir:
+    return FFMpeg(ffmpeg_path=os.path.join(ffmpeg_dir, "ffmpeg"), ffprobe_path=os.path.join(ffmpeg_dir, "ffprobe"))
+  return FFMpeg()
 
 
-def _video_streams(info) -> list:
-  streams = getattr(info, "streams", None)
-  if not isinstance(streams, list):
-    return []
-  return [s for s in streams if getattr(s, "type", None) == "video"]
+def repair_check(path: str, ffmpeg_dir: str | None = None) -> tuple[FindingKind, dict[str, Any]] | None:
+  """Stream damage that :class:`resources.media_repair.RepairProcessor` fixes
+  by stream copy. Returns ``(kind, details)`` or ``None`` when the file is
+  normal, not a repairable container, or unprobeable (``ffprobe_check``
+  reports those).
 
-
-def primary_video_stream(info):
-  """First video stream that is a real picture: not an attached picture and
-  not a still-image codec. Falls back to ``info.video`` when the stream list
-  is unavailable."""
-  for s in _video_streams(info):
-    if not getattr(s, "attached_pic", None) and getattr(s, "codec", None) not in IMAGE_VIDEO_CODECS:
-      return s
-  return getattr(info, "video", None)
-
-
-def demoted_posters(info) -> list:
-  """Still-image video streams that lost their attached_pic disposition."""
-  return [s for s in _video_streams(info) if not getattr(s, "attached_pic", None) and getattr(s, "codec", None) in IMAGE_VIDEO_CODECS]
+  - ``hybrid_aspect``: the primary picture matches the stretched-output
+    signature table (see ``resources.media_repair.HYBRID_DIMS_TABLE``).
+    Reason ``stretched_dims`` when it still has square pixels;
+    ``demoted_poster`` when an older repair already corrected the aspect but
+    turned the cover art into a real video track.
+  - ``stream_damage``: anything else the repair drops — data streams,
+    unknown streams and artwork (see :func:`resources.media_repair.diagnose`).
+  """
+  if os.path.splitext(path)[1].lower() not in REPAIRABLE_EXTS or not os.path.isfile(path):
+    return None
+  try:
+    info = _ffmpeg(ffmpeg_dir).probe(path, posters_as_video=False, framedata=False)
+  except Exception:
+    return None
+  if info is None or not info.streams:
+    return None
+  plan = diagnose(info)
+  if not plan.needs_repair:
+    return None
+  video = info.video
+  true_height = HYBRID_DIMS_TABLE.get((video.video_width, video.video_height)) if video is not None else None
+  # Only a poster demoted to a real video track (no attached_pic flag) marks
+  # the old hybrid remux; an intact cover is ordinary stream damage.
+  demoted = any(s.type == "video" and not s.attached_pic for s in info.cover_art)
+  if video is not None and true_height and (plan.dar or demoted):
+    return FindingKind.HYBRID_ASPECT, {
+      "reason": "stretched_dims" if plan.dar else "demoted_poster",
+      "width": video.video_width,
+      "height": video.video_height,
+      "true_height": true_height,
+      "dar": "%d:%d" % (video.video_width, true_height),
+      "repair": plan.describe(),
+    }
+  return FindingKind.STREAM_DAMAGE, {
+    "reason": "stream_damage",
+    "repair": plan.describe(),
+    "data_streams": plan.drop_data,
+    "unknown_streams": plan.drop_unknown,
+    "artwork_streams": plan.drop_artwork,
+  }
 
 
 def hybrid_aspect_check(path: str, ffmpeg_dir: str | None = None) -> dict[str, Any] | None:
-  """Detect an SMA-produced MP4 whose picture was stretched by the former
-  QSV alignment bug. Returns finding-details, or ``None`` when the file is
-  not a hybrid (wrong extension, unprobeable, dims not in the signature
-  table, or already correctly repaired).
-
-  Two reasons are reported:
-
-  - ``stretched_dims``: signature dims with a square/absent PAR (never repaired).
-  - ``demoted_poster``: signature dims already carrying a corrective PAR, but
-    the earlier repair remux turned the cover art into a real video track.
-    Re-running the repair drops the stray track.
-  """
-  if not path.lower().endswith(".mp4") or not os.path.isfile(path):
+  """Details of a ``hybrid_aspect`` finding for *path* (see :func:`repair_check`), or ``None``."""
+  result = repair_check(path, ffmpeg_dir=ffmpeg_dir)
+  if result is None or result[0] != FindingKind.HYBRID_ASPECT:
     return None
-  try:
-    if ffmpeg_dir:
-      ffmpeg = FFMpeg(
-        ffmpeg_path=os.path.join(ffmpeg_dir, "ffmpeg"),
-        ffprobe_path=os.path.join(ffmpeg_dir, "ffprobe"),
-      )
-    else:
-      ffmpeg = FFMpeg()
-    info = ffmpeg.probe(path)
-  except Exception:
-    return None
-  if info is None:
-    return None
-  video = primary_video_stream(info)
-  if video is None:
-    return None
-  width = getattr(video, "video_width", None)
-  height = getattr(video, "video_height", None)
-  if not isinstance(width, int) or not isinstance(height, int):
-    return None
-  true_height = HYBRID_DIMS_TABLE.get((width, height))
-  if not true_height:
-    return None
-  reason = "stretched_dims"
-  sar = getattr(video, "sample_aspect_ratio", None)
-  if sar and sar != "1:1":
-    # A non-square PAR means the display aspect is already corrected
-    # (either a prior remux repair or a genuinely anamorphic encode). Only
-    # flag it when that earlier remux left a demoted poster behind.
-    if not demoted_posters(info):
-      return None
-    reason = "demoted_poster"
-  return {
-    "reason": reason,
-    "width": width,
-    "height": height,
-    "true_height": true_height,
-    "dar": "%d:%d" % (width, true_height),
-  }
+  return result[1]
 
 
 def is_sidecar(path: str) -> bool:
   return os.path.splitext(path)[1].lower() in SIDECAR_EXTS
 
 
-def is_tmp_artifact(path: str) -> bool:
+def _in_transit_exts(temp_extension: str | None) -> set[str]:
+  exts = set(IN_TRANSIT_EXTS)
+  if temp_extension:
+    ext = "." + temp_extension.lstrip(".").lower()
+    # A temp-extension equal to a media container would flag the library itself.
+    if ext not in MEDIA_CONTAINER_EXTS:
+      exts.add(ext)
+  return exts
+
+
+def is_in_transit(path: str, temp_extension: str | None = None) -> bool:
+  """True for SMA in-transit output: the configured temp-extension, ``.sma`` or a ``.smatmp`` partial."""
+  return os.path.splitext(path)[1].lower() in _in_transit_exts(temp_extension)
+
+
+def is_tmp_artifact(path: str, temp_extension: str | None = None) -> bool:
   ext = os.path.splitext(path)[1].lower()
-  if ext in TMP_EXTS:
+  if ext in TMP_EXTS or is_in_transit(path, temp_extension):
     return True
   return any(path.endswith(suf) for suf in TMP_SUFFIXES)
 
@@ -188,8 +161,11 @@ def sidecar_orphan_check(path: str) -> dict[str, Any] | None:
   return {"reason": "no_parent_media", "directory": directory, "stem": stem}
 
 
-def tmp_artifact_check(path: str) -> dict[str, Any] | None:
-  if not is_tmp_artifact(path):
+def tmp_artifact_check(path: str, temp_extension: str | None = None, min_age_seconds: int | None = None) -> dict[str, Any] | None:
+  """Leftover transcoder artifact. In-transit output (see :func:`is_in_transit`)
+  is only reported once its mtime is older than *min_age_seconds* (default
+  ``IN_TRANSIT_MIN_AGE_SECONDS``), so a file still being written is skipped."""
+  if not is_tmp_artifact(path, temp_extension):
     return None
   if not os.path.isfile(path):
     return None
@@ -197,6 +173,11 @@ def tmp_artifact_check(path: str) -> dict[str, Any] | None:
     age = os.path.getmtime(path)
   except OSError:
     age = None
+  if is_in_transit(path, temp_extension):
+    min_age = min_age_seconds or IN_TRANSIT_MIN_AGE_SECONDS
+    if age is None or time.time() - age < min_age:
+      return None
+    return {"reason": "in_transit_leftover", "mtime": age}
   return {"reason": "leftover_artifact", "mtime": age}
 
 
@@ -221,13 +202,13 @@ def preconv_original_check(path: str) -> dict[str, Any] | None:
 
 __all__ = [
   "HYBRID_DIMS_TABLE",
-  "demoted_posters",
   "ffprobe_check",
   "hybrid_aspect_check",
+  "is_in_transit",
   "is_sidecar",
   "is_tmp_artifact",
   "preconv_original_check",
-  "primary_video_stream",
+  "repair_check",
   "sidecar_orphan_check",
   "tmp_artifact_check",
 ]

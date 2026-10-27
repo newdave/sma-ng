@@ -25,6 +25,7 @@ def _make_info(has_video=True, has_audio=True, duration=120.0):
   info.format.bitrate = 5_000_000
   if has_video:
     v = MediaStreamInfo()
+    v.index = 0
     v.type = "video"
     v.codec = "h264"
     v.video_width = 1920
@@ -32,6 +33,7 @@ def _make_info(has_video=True, has_audio=True, duration=120.0):
     info.streams.append(v)
   if has_audio:
     a = MediaStreamInfo()
+    a.index = 1
     a.type = "audio"
     a.codec = "aac"
     a.audio_channels = 2
@@ -422,10 +424,32 @@ class TestTagStripsCoverArt:
       list(c.tag(str(f), **kwargs))
     return captured["opts"]
 
-  def test_maps_non_attached_pic_video(self, tmp_path):
-    opts = self._run_tag(tmp_path, [])
-    assert "0:V?" in opts
-    assert "0:v?" not in opts
+  def _maps(self, opts):
+    return [opts[i + 1] for i, o in enumerate(opts) if o == "-map"]
+
+  def _stream(self, index, kind, codec, attached_pic=0):
+    s = MediaStreamInfo()
+    s.index = index
+    s.type = kind
+    s.codec = codec
+    s.attached_pic = attached_pic
+    return s
+
+  def test_maps_every_kept_stream_by_index(self, tmp_path):
+    assert self._maps(self._run_tag(tmp_path, [])) == ["0:0", "0:1"]
+
+  def test_attached_pic_and_demoted_poster_omitted(self, tmp_path):
+    posters = [self._stream(2, "video", "mjpeg", attached_pic=1), self._stream(3, "video", "png")]
+    assert self._maps(self._run_tag(tmp_path, posters)) == ["0:0", "0:1"]
+
+  def test_data_and_unknown_streams_omitted(self, tmp_path):
+    streams = [
+      self._stream(2, "data", "bin_data"),
+      self._stream(3, "unknown", None),
+      self._stream(4, "audio", "none"),
+      self._stream(5, "subtitle", "mov_text"),
+    ]
+    assert self._maps(self._run_tag(tmp_path, streams)) == ["0:0", "0:1", "0:5"]
 
   def test_font_attachment_mapped_image_omitted(self, tmp_path):
     atts = [
@@ -437,6 +461,23 @@ class TestTagStripsCoverArt:
     assert "0:3" in maps
     assert "0:4" not in maps
     assert opts[opts.index("-c:t") + 1] == "copy"
+
+  def test_mkv_output_has_no_mp4_muxer_flags(self, tmp_path):
+    assert "-write_tmcd" not in self._run_tag(tmp_path, [])
+
+  def test_mp4_output_never_synthesises_tmcd(self, tmp_path):
+    c = _make_converter()
+    f = tmp_path / "movie.mp4"
+    f.write_bytes(b"data")
+    captured = {}
+
+    def fake_convert(outfile, opts, timeout=0):
+      captured["opts"] = opts
+      yield 5.0, ""
+
+    with patch.object(c.ffmpeg, "probe", return_value=_make_info()), patch.object(c.ffmpeg, "convert", side_effect=fake_convert), patch("os.rename"), patch("os.remove"):
+      list(c.tag(str(f)))
+    assert captured["opts"][captured["opts"].index("-write_tmcd") + 1] == "0"
 
   def test_cues_to_front_passed(self, tmp_path):
     opts = self._run_tag(tmp_path, [], cues_to_front=True)
@@ -461,3 +502,67 @@ class TestIsCoverArtAttachment:
     from converter.ffmpeg import is_cover_art_attachment
 
     assert is_cover_art_attachment(_attachment(1, mimetype, filename)) is expected
+
+
+def _parsed(*streams):
+  """MediaInfo parsed from ffprobe -show_streams text; each stream is a dict of key=value lines."""
+  raw = []
+  for s in streams:
+    raw.append("[STREAM]")
+    raw.extend("%s=%s" % kv for kv in s.items())
+    raw.append("[/STREAM]")
+  info = MediaInfo(posters_as_video=False)
+  info.parse_ffprobe("\n".join(raw))
+  return info
+
+
+def _v(index, codec, attached_pic=0, tag="avc1"):
+  return {"index": index, "codec_type": "video", "codec_name": codec, "codec_tag_string": tag, "DISPOSITION:attached_pic": attached_pic}
+
+
+class TestMediaInfoCoverArtAndUnknown:
+  def test_codec_tag_parsed(self):
+    assert _parsed(_v(0, "h264"), {"index": 1, "codec_type": "data", "codec_name": "bin_data", "codec_tag_string": "text"}).streams[1].codec_tag == "text"
+
+  def test_demoted_poster_is_cover_art_not_primary(self):
+    # Byproduct of the old "-map 0" repair: mjpeg poster as a real mp4v track, ahead of the movie.
+    info = _parsed(_v(0, "mjpeg", tag="mp4v"), _v(1, "hevc", tag="hvc1"))
+    assert info.video.index == 1
+    assert [s.index for s in info.cover_art] == [0]
+
+  def test_attached_pic_is_cover_art(self):
+    info = _parsed(_v(0, "h264"), _v(1, "png", attached_pic=1))
+    assert info.video.index == 0
+    assert [s.index for s in info.cover_art] == [1]
+
+  def test_image_only_video_stays_primary(self):
+    info = _parsed(_v(0, "mjpeg"))
+    assert info.video.index == 0
+    assert info.cover_art == []
+
+  def test_image_attachment_is_cover_art_font_is_not(self):
+    info = _parsed(
+      _v(0, "h264"),
+      {"index": 1, "codec_type": "attachment", "codec_name": "ttf", "TAG:mimetype": "font/ttf", "TAG:filename": "f.ttf"},
+      {"index": 2, "codec_type": "attachment", "codec_name": "mjpeg", "TAG:mimetype": "image/jpeg", "TAG:filename": "cover.jpg"},
+    )
+    assert [s.index for s in info.cover_art] == [2]
+
+  def test_unknown_streams_excluded_from_typed_lists(self):
+    info = _parsed(
+      _v(0, "h264"),
+      {"index": 1, "codec_type": "audio", "codec_name": "aac"},
+      {"index": 2, "codec_type": "audio", "codec_name": "none"},
+      {"index": 3, "codec_type": "subtitle", "codec_name": "unknown"},
+      {"index": 4, "codec_type": "attachment"},
+      {"index": 5, "codec_type": "unknown", "codec_name": "foo"},
+      {"index": 6, "codec_type": "data", "codec_name": "unknown", "codec_tag_string": "tmcd"},
+    )
+    assert [s.index for s in info.audio] == [1]
+    assert info.subtitle == []
+    assert info.attachment == []
+    assert [s.index for s in info.unknown] == [2, 3, 4, 5, 6]
+
+  def test_unknown_video_never_primary(self):
+    info = _parsed(_v(0, "none"), _v(1, "h264"))
+    assert info.video.index == 1

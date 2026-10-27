@@ -109,6 +109,7 @@ class MediaStreamInfo:
     * index - stream index inside the container (0-based)
     * type - stream type, either 'audio' or 'video'
     * codec - codec (short) name (e.g "vorbis", "theora")
+    * codec_tag - container codec tag (e.g. "avc1", "tmcd", "text")
     * codec_desc - codec full (descriptive) name
     * duration - stream duration in seconds
     * map - stream index for ffmpeg mapping
@@ -130,6 +131,7 @@ class MediaStreamInfo:
     self.index = None
     self.type = None
     self.codec = None
+    self.codec_tag = None
     self.codec_desc = None
     self.duration = None
     self.bitrate = None
@@ -252,6 +254,8 @@ class MediaStreamInfo:
       self.type = val
     elif key == "codec_name":
       self.codec = val.lower()
+    elif key == "codec_tag_string":
+      self.codec_tag = val.lower()
     elif key == "codec_long_name":
       self.codec_desc = val
     elif key == "duration":
@@ -361,6 +365,21 @@ class MediaStreamInfo:
 
 COVER_ART_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
 
+# Still-image codecs that only appear as video streams when they carry cover
+# art: flagged attached_pic, or demoted to a real video track (mp4v tag, no
+# disposition) by an older "-map 0" repair remux.
+COVER_ART_VIDEO_CODECS = frozenset({"mjpeg", "png", "bmp", "gif", "webp", "tiff"})
+
+
+KNOWN_STREAM_TYPES = frozenset({"video", "audio", "subtitle", "attachment", "data"})
+UNKNOWN_CODECS = frozenset({"", "none", "unknown"})
+
+
+def is_unknown_stream(stream):
+  """True when FFprobe could not classify the stream (unknown codec_type) or
+  identify its codec. Such streams are never copied to any output."""
+  return stream.type not in KNOWN_STREAM_TYPES or (stream.codec or "") in UNKNOWN_CODECS
+
 
 def is_cover_art_attachment(stream):
   """True when an attachment stream is an image (cover art) rather than e.g. a font."""
@@ -439,15 +458,33 @@ class MediaInfo:
   def __repr__(self):
     return "MediaInfo(format=%s, streams=%s)" % (repr(self.format), repr(self.streams))
 
+  def _primary_video(self, include_posters):
+    videos = [s for s in self.streams if s.type == "video" and not is_unknown_stream(s) and (include_posters or not s.attached_pic)]
+    for s in videos:
+      if s.codec not in COVER_ART_VIDEO_CODECS:
+        return s
+    return videos[0] if videos else None
+
   @property
   def video(self):
     """
-    First video stream, or None if there are no video streams.
+    Primary video stream, or None if there are no video streams.
+
+    A still-image stream (cover art) is only returned when the file has no
+    real picture, e.g. a genuine MJPEG movie or, with posters_as_video, an
+    audio file's poster.
     """
-    for s in self.streams:
-      if s.type == "video" and (self.posters_as_video or not s.attached_pic):
-        return s
-    return None
+    return self._primary_video(self.posters_as_video)
+
+  @property
+  def cover_art(self):
+    """
+    Every artwork stream SMA must drop: attached pictures, still-image video
+    streams other than the primary picture (posters demoted to a real video
+    track) and image attachments. Font attachments are not artwork.
+    """
+    primary = self._primary_video(False)
+    return [s for s in self.streams if (s.type == "video" and s is not primary and (s.attached_pic or s.codec in COVER_ART_VIDEO_CODECS)) or (s.type == "attachment" and is_cover_art_attachment(s))]
 
   @property
   def posters(self):
@@ -455,37 +492,33 @@ class MediaInfo:
     return [s for s in self.streams if s.attached_pic]
 
   @property
+  def unknown(self):
+    """Streams FFprobe could not classify or identify (see is_unknown_stream)."""
+    return [s for s in self.streams if is_unknown_stream(s)]
+
+  def _of_type(self, kind):
+    return [s for s in self.streams if s.type == kind and not is_unknown_stream(s)]
+
+  @property
   def audio(self):
     """
-    All audio streams
+    All audio streams with an identified codec
     """
-    result = []
-    for s in self.streams:
-      if s.type == "audio":
-        result.append(s)
-    return result
+    return self._of_type("audio")
 
   @property
   def subtitle(self):
     """
-    All subtitle streams
+    All subtitle streams with an identified codec
     """
-    result = []
-    for s in self.streams:
-      if s.type == "subtitle":
-        result.append(s)
-    return result
+    return self._of_type("subtitle")
 
   @property
   def attachment(self):
     """
-    All attachment streams
+    All attachment streams with an identified codec
     """
-    result = []
-    for s in self.streams:
-      if s.type == "attachment":
-        result.append(s)
-    return result
+    return self._of_type("attachment")
 
 
 class FFMpeg:
@@ -679,7 +712,7 @@ class FFMpeg:
     except Exception:
       raise FFMpegError("Unable to obtain FFMPEG framedata")
 
-  def probe(self, fname, posters_as_video=True):
+  def probe(self, fname, posters_as_video=True, framedata=True):
     """
     Examine the media file and determine its format and media streams.
     Returns the MediaInfo object, or None if the specified file is
@@ -702,6 +735,9 @@ class FFMpeg:
     2
     :param posters_as_video: Take poster images (mainly for audio files) as
         A video stream, defaults to True
+    :param framedata: Read the primary video stream's first-frame side data
+        (HDR mastering/light levels) with a second ffprobe pass. Callers that
+        only need the stream layout (repair, library audit) pass False.
     """
 
     if not os.path.exists(fname):
@@ -717,7 +753,7 @@ class FFMpeg:
       return None
 
     try:
-      if info.video is not None:
+      if framedata and info.video is not None:
         info.video.framedata = self.framedata(fname)
     except KeyboardInterrupt:
       raise

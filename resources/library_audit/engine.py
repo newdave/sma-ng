@@ -25,14 +25,14 @@ from resources.library_audit.kinds import (
 )
 from resources.library_audit.probes import (
   ffprobe_check,
-  hybrid_aspect_check,
   preconv_original_check,
+  repair_check,
   sidecar_orphan_check,
   tmp_artifact_check,
 )
 from resources.library_audit.recycler import move_to_recycle_bin
-from resources.library_audit.repair import repair_hybrid_aspect
 from resources.library_audit.tag_reader import derive_media_id, read_media_ids
+from resources.media_repair import STATUS_REPAIRED, RepairProcessor
 
 
 @dataclass
@@ -61,6 +61,7 @@ class AuditEngine:
     self.ffmpeg_dir = ffmpeg_dir
     self.dry_run = dry_run
     self.auto_fix = auto_fix  # AuditAutoFix instance or None
+    self._repairers: dict[tuple, RepairProcessor] = {}
 
   # ------------------------------------------------------------------
   # Probing
@@ -82,7 +83,11 @@ class AuditEngine:
           return None
         return Finding(FindingKind.ORPHAN_SIDECAR, path, details)
       if hint == KIND_HINT_TMP:
-        details = tmp_artifact_check(path)
+        details = tmp_artifact_check(
+          path,
+          temp_extension=getattr(self.pcm, "temp_extension", None) or None,
+          min_age_seconds=getattr(self.pcm, "storage_janitor_max_age_seconds", None) or None,
+        )
         if details is None:
           return None
         return Finding(FindingKind.LEFTOVER_TMP, path, details)
@@ -104,9 +109,9 @@ class AuditEngine:
           self.job_db.record_media_id(audit_id, path, media_id)
       except Exception:
         self.log.exception("Audit id-record failed for %s" % path)
-    hybrid = hybrid_aspect_check(path, ffmpeg_dir=self.ffmpeg_dir)
-    if hybrid is not None:
-      return Finding(FindingKind.HYBRID_ASPECT, path, hybrid)
+    damage = repair_check(path, ffmpeg_dir=self.ffmpeg_dir)
+    if damage is not None:
+      return Finding(damage[0], path, damage[1])
     return None
 
   def _probe_preconv(self, path: str, audit_id: int | None) -> Finding | None:
@@ -142,7 +147,9 @@ class AuditEngine:
     if kind == FindingKind.PRECONV_ORIGINAL and getattr(self.auto_fix, "preconv_original", False):
       return self._recycle(finding.path)
     if kind == FindingKind.HYBRID_ASPECT and getattr(self.auto_fix, "hybrid_aspect", False):
-      return self._repair_hybrid(finding)
+      return self._repair(finding.path)
+    if kind == FindingKind.STREAM_DAMAGE and getattr(self.auto_fix, "stream_damage", False):
+      return self._repair(finding.path)
     return "skipped"
 
   def _queue_conversion(self, path: str) -> str:
@@ -157,12 +164,30 @@ class AuditEngine:
       return "queued"
     return "skipped"
 
-  def _repair_hybrid(self, finding: Finding) -> str:
-    dar = finding.details.get("dar")
-    if not dar:
+  def _repair_processor(self, path: str) -> RepairProcessor:
+    """RepairProcessor built from the settings the daemon would convert *path*
+    with (config + routed profile), cached per (config, profile)."""
+    from resources.readsettings import ReadSettings
+
+    config = self.pcm.get_config_for_path(path)
+    profile = self.pcm.get_profile_for_path(path)
+    key = (config, profile)
+    if key not in self._repairers:
+      self._repairers[key] = RepairProcessor(ReadSettings(config, logger=self.log, profile=profile), logger=self.log, ffmpeg_dir=self.ffmpeg_dir)
+    return self._repairers[key]
+
+  def _repair(self, path: str) -> str:
+    """Stream-copy repair of *path* in place (hybrid aspect and stream damage alike)."""
+    try:
+      result = self._repair_processor(path).repair_file(path)
+    except Exception:
+      self.log.exception("Audit repair failed for %s" % path)
       return "skipped"
-    ok = repair_hybrid_aspect(finding.path, dar, ffmpeg_dir=self.ffmpeg_dir, logger=self.log)
-    return "repaired" if ok else "skipped"
+    if result.status == STATUS_REPAIRED:
+      self.log.info("Audit repaired %s: %s" % (path, result.detail))
+      return "repaired"
+    self.log.warning("Audit repair of %s did not complete (%s): %s" % (path, result.status, result.detail))
+    return "skipped"
 
   def _recycle(self, path: str) -> str:
     bin_dir = self.pcm.get_recycle_bin(self.pcm.default_config)
@@ -206,25 +231,29 @@ def run_audit_inline(
   repair_hybrid: bool = False,
   recycle_failed: bool = False,
   recycle_bin: str | None = None,
+  repairer: RepairProcessor | None = None,
+  temp_extension: str | None = None,
 ) -> int:
   """Walk *roots* in-process and print one line per finding. Returns non-zero
   when any finding was emitted that was not fixed in place (suitable for
   ``manual.py --audit`` exit code).
 
-  With *repair_hybrid*, hybrid-aspect findings are losslessly remuxed as they
-  are found. With *recycle_failed*, ffprobe-failed media is moved to
-  *recycle_bin* (never unlinked outright; no bin configured means no action).
+  With *repair_hybrid*, hybrid-aspect findings are repaired by *repairer* (a
+  :class:`RepairProcessor`) as they are found. With *recycle_failed*,
+  ffprobe-failed media is moved to *recycle_bin* (never unlinked outright; no
+  bin configured means no action). *temp_extension* is the configured
+  in-transit extension reported as a leftover artifact.
   """
   skip_dirs = list(settings.skip_dirs) if settings is not None else None
   count = 0
   fixed = 0
   observed_ids: dict[str, list[str]] = {}
-  for path, hint in enumerate_paths(roots, skip_dirs=skip_dirs):
-    finding = _inline_probe(path, hint, ffmpeg_dir, observed_ids)
+  for path, hint in enumerate_paths(roots, skip_dirs=skip_dirs, temp_extension=temp_extension):
+    finding = _inline_probe(path, hint, ffmpeg_dir, observed_ids, temp_extension=temp_extension)
     if finding is None:
       continue
     count += 1
-    action = _inline_fix(finding, logger, ffmpeg_dir, repair_hybrid, recycle_failed, recycle_bin)
+    action = _inline_fix(finding, logger, repairer if repair_hybrid else None, recycle_failed, recycle_bin)
     if action in ("repaired", "recycled"):
       fixed += 1
     line = "%s\t%s\t%s" % (finding.kind.value, finding.path, _short_details(finding.details))
@@ -249,18 +278,18 @@ def run_audit_inline(
 def _inline_fix(
   finding: Finding,
   logger,
-  ffmpeg_dir: str | None,
-  repair_hybrid: bool,
+  repairer: RepairProcessor | None,
   recycle_failed: bool,
   recycle_bin: str | None,
 ) -> str | None:
-  """Attempt an in-place fix for *finding*; return the action taken or None."""
-  if finding.kind == FindingKind.HYBRID_ASPECT and repair_hybrid:
-    dar = finding.details.get("dar")
-    if not dar:
-      return "repair_failed"
-    ok = repair_hybrid_aspect(finding.path, dar, ffmpeg_dir=ffmpeg_dir, logger=logger)
-    return "repaired" if ok else "repair_failed"
+  """Attempt an in-place fix for *finding*; return the action taken or None.
+  *repairer* is set only when hybrid-aspect repair was requested."""
+  if finding.kind == FindingKind.HYBRID_ASPECT and repairer is not None:
+    result = repairer.repair_file(finding.path)
+    if result.status == STATUS_REPAIRED:
+      return "repaired"
+    logger.error("Hybrid-aspect repair failed for %s: %s" % (finding.path, result.detail))
+    return "repair_failed"
   if finding.kind == FindingKind.FFPROBE_FAILED and recycle_failed:
     try:
       dst = move_to_recycle_bin(finding.path, recycle_bin)
@@ -274,7 +303,7 @@ def _inline_fix(
   return None
 
 
-def _inline_probe(path: str, hint: str, ffmpeg_dir: str | None, observed_ids: dict[str, list[str]]) -> Finding | None:
+def _inline_probe(path: str, hint: str, ffmpeg_dir: str | None, observed_ids: dict[str, list[str]], temp_extension: str | None = None) -> Finding | None:
   if hint == KIND_HINT_MEDIA:
     fail = ffprobe_check(path, ffmpeg_dir=ffmpeg_dir)
     if fail is not None:
@@ -284,9 +313,9 @@ def _inline_probe(path: str, hint: str, ffmpeg_dir: str | None, observed_ids: di
       mid = derive_media_id(ids)
       if mid:
         observed_ids.setdefault(mid, []).append(path)
-    hybrid = hybrid_aspect_check(path, ffmpeg_dir=ffmpeg_dir)
-    if hybrid is not None:
-      return Finding(FindingKind.HYBRID_ASPECT, path, hybrid)
+    damage = repair_check(path, ffmpeg_dir=ffmpeg_dir)
+    if damage is not None:
+      return Finding(damage[0], path, damage[1])
     return None
   if hint == KIND_HINT_PRECONV:
     cand = preconv_original_check(path)
@@ -305,7 +334,7 @@ def _inline_probe(path: str, hint: str, ffmpeg_dir: str | None, observed_ids: di
       return None
     return Finding(FindingKind.ORPHAN_SIDECAR, path, details)
   if hint == KIND_HINT_TMP:
-    details = tmp_artifact_check(path)
+    details = tmp_artifact_check(path, temp_extension=temp_extension)
     if details is None:
       return None
     return Finding(FindingKind.LEFTOVER_TMP, path, details)
@@ -315,7 +344,7 @@ def _inline_probe(path: str, hint: str, ffmpeg_dir: str | None, observed_ids: di
 def _short_details(details: dict[str, Any]) -> str:
   if not details:
     return ""
-  return ", ".join("%s=%s" % (k, v) for k, v in details.items() if k in ("reason", "size_bytes", "mp4_sibling", "directory"))
+  return ", ".join("%s=%s" % (k, v) for k, v in details.items() if k in ("reason", "size_bytes", "mp4_sibling", "directory", "repair"))
 
 
 __all__ = ["AuditEngine", "Finding", "run_audit_inline"]

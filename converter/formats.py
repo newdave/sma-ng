@@ -11,11 +11,12 @@ class BaseFormat:
 
   format_name = None
   ffmpeg_format_name = None
+  muxer_options: list[str] = []
 
   def parse_options(self, opt):
     if "format" not in opt or opt.get("format") != self.format_name:
       raise ValueError("invalid Format format")
-    return ["-f", self.ffmpeg_format_name]
+    return ["-f", self.ffmpeg_format_name] + self.muxer_options
 
 
 class OggFormat(BaseFormat):
@@ -72,6 +73,9 @@ class MovFormat(BaseFormat):
 
   format_name = "mov"
   ffmpeg_format_name = "mov"
+  # The muxer otherwise writes a tmcd timecode data track from the video's
+  # timecode tag; SMA never copies data streams into its output.
+  muxer_options = ["-write_tmcd", "0"]
 
 
 class Mp4Format(BaseFormat):
@@ -82,6 +86,8 @@ class Mp4Format(BaseFormat):
 
   format_name = "mp4"
   ffmpeg_format_name = "mp4"
+  # See MovFormat: never let the muxer synthesise a tmcd data track.
+  muxer_options = ["-write_tmcd", "0"]
 
 
 class MpegFormat(BaseFormat):

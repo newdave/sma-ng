@@ -1,62 +1,65 @@
 """Tests for resources/media_repair.py — stream-copy-only media repair."""
 
-import json
 import os
-import subprocess
 from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
+from converter.ffmpeg import MediaInfo
 from resources import media_repair as mr
-from resources.media_repair import (
-  RepairError,
-  RepairPlan,
-  assert_stream_copy,
-  build_opts,
-  diagnose,
-  iter_targets,
-  probe,
-  repair_file,
-  verify,
-)
+from resources.media_repair import RepairError, RepairPlan, RepairProcessor, build_opts, diagnose, iter_targets, verify
 
 
-def _video(index, codec="h264", width=1920, height=1080, sar="1:1", attached_pic=0):
+def _video(index, codec="h264", width=1920, height=1080, sar="1:1", attached_pic=0, tag="avc1"):
   return {
     "index": index,
     "codec_type": "video",
     "codec_name": codec,
+    "codec_tag_string": tag,
     "width": width,
     "height": height,
-    "sample_aspect_ratio": sar,
-    "disposition": {"attached_pic": attached_pic},
+    "sample_aspect_ratio": sar if sar is not None else "N/A",
+    "DISPOSITION:attached_pic": attached_pic,
   }
 
 
 def _audio(index, codec="aac", channels=2):
-  return {"index": index, "codec_type": "audio", "codec_name": codec, "channels": channels, "disposition": {}}
+  return {"index": index, "codec_type": "audio", "codec_name": codec, "channels": channels}
 
 
 def _sub(index, codec="mov_text"):
-  return {"index": index, "codec_type": "subtitle", "codec_name": codec, "disposition": {}}
+  return {"index": index, "codec_type": "subtitle", "codec_name": codec}
 
 
 def _data(index, codec="bin_data", tag="tmcd"):
   return {"index": index, "codec_type": "data", "codec_name": codec, "codec_tag_string": tag}
 
 
-def _attachment(index, mimetype=None, filename=None):
-  tags = {}
+def _attachment(index, mimetype=None, filename=None, codec="ttf"):
+  s = {"index": index, "codec_type": "attachment", "codec_name": codec}
   if mimetype:
-    tags["mimetype"] = mimetype
+    s["TAG:mimetype"] = mimetype
   if filename:
-    tags["filename"] = filename
-  return {"index": index, "codec_type": "attachment", "codec_name": "none", "tags": tags}
+    s["TAG:filename"] = filename
+  return s
 
 
-def _info(streams, chapters=0, duration="100.0"):
-  return {"streams": streams, "chapters": [{"id": i} for i in range(chapters)], "format": {"duration": duration}}
+def _info(streams, path="/m/a.mp4", duration="100.0"):
+  """MediaInfo parsed from ffprobe text, as FFMpeg.probe(posters_as_video=False) builds it."""
+  raw = []
+  for s in streams:
+    raw.append("[STREAM]")
+    raw.extend("%s=%s" % kv for kv in s.items())
+    raw.append("[/STREAM]")
+  raw.extend(["[FORMAT]", "duration=%s" % duration, "[/FORMAT]"])
+  info = MediaInfo(posters_as_video=False)
+  info.parse_ffprobe("\n".join(raw))
+  info.path = path
+  return info
+
+
+CHAPTER_TRACK = _data(2, "bin_data", "text")
 
 
 # ---------------------------------------------------------------------------
@@ -66,97 +69,87 @@ def _info(streams, chapters=0, duration="100.0"):
 
 class TestDiagnose:
   def test_normal_file_needs_no_repair(self):
-    plan = diagnose("/m/a.mp4", _info([_video(0), _audio(1), _sub(2)]))
+    plan = diagnose(_info([_video(0), _audio(1), _sub(2)]))
     assert not plan.needs_repair
     assert plan.keep == [0, 1, 2]
     assert plan.describe() == "normal"
 
   def test_chapter_track_in_mp4_is_normal(self):
-    plan = diagnose("/m/a.mp4", _info([_video(0), _audio(1), _data(2, "bin_data", "text")], chapters=3))
+    plan = diagnose(_info([_video(0), _audio(1), CHAPTER_TRACK]))
     assert not plan.needs_repair
     # Never mapped: the muxer rewrites it from the chapter list.
     assert plan.keep == [0, 1]
 
-  def test_bin_data_without_chapters_is_dropped(self):
-    plan = diagnose("/m/a.mp4", _info([_video(0), _audio(1), _data(2, "bin_data", "text")]))
-    assert plan.drop_data == [2]
+  def test_text_data_track_in_mkv_is_dropped(self):
+    assert diagnose(_info([_video(0), _audio(1), CHAPTER_TRACK], path="/m/a.mkv")).drop_data == [2]
 
-  def test_bin_data_in_mkv_is_dropped_even_with_chapters(self):
-    plan = diagnose("/m/a.mkv", _info([_video(0), _audio(1), _data(2, "bin_data", "text")], chapters=2))
-    assert plan.drop_data == [2]
+  def test_tmcd_and_bin_data_dropped(self):
+    plan = diagnose(_info([_video(0), _audio(1), _data(2, "bin_data", "gpmd"), _data(3, "bin_data", "tmcd")]))
+    assert plan.drop_data == [2, 3]
+    assert plan.describe() == "data streams 2,3"
 
-  def test_tmcd_and_unknown_type_streams_are_dropped(self):
-    streams = [_video(0), _audio(1), _data(2, "none", "tmcd"), {"index": 3, "codec_type": "unknown"}, {"index": 4}]
-    plan = diagnose("/m/a.mp4", _info(streams))
-    assert plan.drop_data == [2, 3, 4]
+  def test_unknown_streams_dropped(self):
+    streams = [_video(0), _audio(1), _data(2, "unknown", "tmcd"), {"index": 3, "codec_type": "unknown", "codec_name": "x"}, _audio(4, "none"), _sub(5, "unknown")]
+    plan = diagnose(_info(streams))
+    assert plan.drop_unknown == [2, 3, 4, 5]
     assert plan.keep == [0, 1]
-    assert plan.describe() == "data streams 2,3,4"
+    assert plan.describe() == "unknown streams 2,3,4,5"
 
   def test_attached_picture_is_dropped(self):
-    plan = diagnose("/m/a.mp4", _info([_video(0), _audio(1), _video(2, "mjpeg", 600, 900, attached_pic=1)]))
+    plan = diagnose(_info([_video(0), _audio(1), _video(2, "mjpeg", 600, 900, attached_pic=1)]))
     assert plan.drop_artwork == [2]
     assert plan.keep == [0, 1]
 
   def test_demoted_poster_is_dropped(self):
     # Fallout S01E01 layout: the old repair remux turned the poster into a
     # real mp4v video track with no attached_pic flag.
-    streams = [_video(0, "hevc", 3840, 2176, "136:135"), _audio(1, "eac3", 6), _sub(2), _video(3, "mjpeg", 1000, 1500, "8:3")]
-    plan = diagnose("/m/a.mp4", _info(streams))
+    streams = [_video(0, "hevc", 3840, 2176, "136:135", tag="hvc1"), _audio(1, "eac3", 6), _sub(2), _video(3, "mjpeg", 1000, 1500, "8:3", tag="mp4v")]
+    plan = diagnose(_info(streams))
     assert plan.drop_artwork == [3]
     assert plan.dar is None  # aspect already corrected
     assert plan.keep == [0, 1, 2]
 
   def test_leading_poster_does_not_become_primary(self):
-    streams = [_video(0, "png", 600, 900), _video(1, "h264", 1920, 1088), _audio(2)]
-    plan = diagnose("/m/a.mp4", _info(streams))
+    plan = diagnose(_info([_video(0, "png", 600, 900), _video(1, "h264", 1920, 1088), _audio(2)]))
     assert plan.drop_artwork == [0]
     assert plan.dar == "1920:1080"
 
   def test_image_only_video_is_kept_as_primary(self):
     # A genuine MJPEG movie has no other video stream; never strip its picture.
-    plan = diagnose("/m/a.mov", _info([_video(0, "mjpeg", 640, 480), _audio(1)]))
-    assert not plan.needs_repair
+    assert not diagnose(_info([_video(0, "mjpeg", 640, 480), _audio(1)], path="/m/a.mov")).needs_repair
 
   def test_non_image_secondary_video_is_kept(self):
-    plan = diagnose("/m/a.mkv", _info([_video(0), _video(1, "h264", 1280, 720), _audio(2)]))
+    plan = diagnose(_info([_video(0), _video(1, "h264", 1280, 720), _audio(2)], path="/m/a.mkv"))
     assert not plan.needs_repair
     assert plan.keep == [0, 1, 2]
 
   def test_image_attachment_dropped_font_kept(self):
-    streams = [
-      _video(0),
-      _audio(1),
-      _attachment(2, "font/ttf", "f.ttf"),
-      _attachment(3, "image/jpeg", "cover.jpg"),
-      _attachment(4, None, "poster.PNG"),
-    ]
-    plan = diagnose("/m/a.mkv", _info(streams))
+    streams = [_video(0), _audio(1), _attachment(2, "font/ttf", "f.ttf"), _attachment(3, "image/jpeg", "cover.jpg", "mjpeg"), _attachment(4, None, "poster.PNG", "png")]
+    plan = diagnose(_info(streams, path="/m/a.mkv"))
     assert plan.drop_artwork == [3, 4]
     assert plan.keep == [0, 1, 2]
 
   @pytest.mark.parametrize("sar", [None, "1:1", "0:1"])
   def test_stretched_dims_get_corrective_dar(self, sar):
-    plan = diagnose("/m/a.mp4", _info([_video(0, "hevc", 3840, 2176, sar), _audio(1)]))
+    plan = diagnose(_info([_video(0, "hevc", 3840, 2176, sar), _audio(1)]))
     assert plan.dar == "3840:2160"
     assert plan.describe() == "display aspect 3840:2160"
 
   def test_corrected_or_standard_dims_left_alone(self):
-    assert diagnose("/m/a.mp4", _info([_video(0, "hevc", 3840, 2176, "136:135")])).dar is None
-    assert diagnose("/m/a.mp4", _info([_video(0, "hevc", 3840, 2160)])).dar is None
-    assert diagnose("/m/a.mp4", _info([{**_video(0, "hevc", 3840, 2176), "width": None}])).dar is None
+    assert diagnose(_info([_video(0, "hevc", 3840, 2176, "136:135")])).dar is None
+    assert diagnose(_info([_video(0, "hevc", 3840, 2160)])).dar is None
 
   def test_no_video_stream(self):
-    plan = diagnose("/m/a.mp4", _info([_audio(0)]))
-    assert not plan.needs_repair
+    assert not diagnose(_info([_audio(0)])).needs_repair
 
 
 # ---------------------------------------------------------------------------
-# build_opts / assert_stream_copy
+# build_opts
 # ---------------------------------------------------------------------------
 
 
 class TestBuildOpts:
-  def test_mp4_opts_are_stream_copy_with_scoped_aspect(self):
+  def test_mp4_opts_are_stream_copy_with_scoped_aspect_and_explicit_muxer(self):
     plan = RepairPlan(path="/m/a.mp4", keep=[0, 1, 3], drop_data=[4], drop_artwork=[2], dar="1920:1080")
     assert build_opts(plan, "/m/a.mp4") == [
       "-i",
@@ -175,63 +168,13 @@ class TestBuildOpts:
       "0",
       "-movflags",
       "+faststart",
+      "-f",
+      "mp4",
     ]
 
   def test_mkv_opts_skip_mp4_muxer_flags(self):
     plan = RepairPlan(path="/m/a.mkv", keep=[0, 1], drop_artwork=[2])
-    assert build_opts(plan, "/m/a.mkv") == ["-i", "/m/a.mkv", "-map", "0:0", "-map", "0:1", "-c", "copy"]
-
-  @pytest.mark.parametrize(
-    "opts",
-    [
-      ["-i", "x", "-c:v", "libx264"],
-      ["-i", "x", "-c", "copy", "-vf", "scale=1920:1080"],
-      ["-i", "x", "-c", "copy", "-b:v", "5M"],
-      ["-i", "x", "-c", "libx265"],
-      ["-i", "x", "-c", "copy", "-c", "aac"],
-      ["-i", "x", "-map", "0:0"],
-    ],
-  )
-  def test_guard_rejects_anything_but_stream_copy(self, opts):
-    with pytest.raises(RepairError):
-      assert_stream_copy(opts)
-
-  def test_guard_accepts_option_values_that_look_like_flags(self):
-    assert_stream_copy(["-i", "-odd-name.mp4", "-c", "copy"])
-
-
-# ---------------------------------------------------------------------------
-# probe
-# ---------------------------------------------------------------------------
-
-
-class TestProbe:
-  def _run(self, monkeypatch, returncode=0, stdout="", stderr="", exc=None):
-    def fake_run(cmd, **kwargs):
-      if exc:
-        raise exc
-      return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
-
-    monkeypatch.setattr(mr.subprocess, "run", fake_run)
-
-  def test_returns_parsed_json(self, monkeypatch):
-    self._run(monkeypatch, stdout=json.dumps(_info([_video(0)])))
-    assert probe("/m/a.mp4", "ffprobe")["streams"][0]["codec_name"] == "h264"
-
-  @pytest.mark.parametrize(
-    "kwargs,message",
-    [
-      ({"exc": OSError("no binary")}, "ffprobe failed"),
-      ({"exc": subprocess.TimeoutExpired("ffprobe", 1)}, "ffprobe failed"),
-      ({"returncode": 1, "stderr": "moov atom not found"}, "moov atom not found"),
-      ({"stdout": "not json"}, "invalid JSON"),
-      ({"stdout": json.dumps({"streams": []})}, "no streams"),
-    ],
-  )
-  def test_failures_raise_repair_error(self, monkeypatch, kwargs, message):
-    self._run(monkeypatch, **kwargs)
-    with pytest.raises(RepairError, match=message):
-      probe("/m/a.mp4", "ffprobe")
+    assert build_opts(plan, "/m/a.mkv") == ["-i", "/m/a.mkv", "-map", "0:0", "-map", "0:1", "-c", "copy", "-f", "matroska"]
 
 
 # ---------------------------------------------------------------------------
@@ -240,151 +183,248 @@ class TestProbe:
 
 
 class TestVerify:
-  SOURCE = _info([_video(0, "h264", 1920, 1088), _audio(1), _video(2, "mjpeg", 600, 900), _data(3)], chapters=2)
-  PLAN = RepairPlan(path="/m/a.mp4", keep=[0, 1], drop_data=[3], drop_artwork=[2], dar="1920:1080")
+  SOURCE = _info([_video(0, "h264", 1920, 1088), _audio(1), CHAPTER_TRACK, _video(3, "mjpeg", 600, 900), _data(4)])
+  PLAN = RepairPlan(path="/m/a.mp4", keep=[0, 1], drop_data=[4], drop_artwork=[3], dar="1920:1080")
 
-  def _output(self, **overrides):
-    streams = overrides.pop("streams", [_video(0, "h264", 1920, 1088, "136:135"), _audio(1), _data(2, "bin_data", "text")])
-    data = _info(streams, chapters=overrides.pop("chapters", 2), duration=overrides.pop("duration", "100.0"))
-    return data
+  def _output(self, streams=None, duration="100.0"):
+    if streams is None:
+      streams = [_video(0, "h264", 1920, 1088, "136:135"), _audio(1), CHAPTER_TRACK]
+    return _info(streams, path="/m/a.sma", duration=duration)
 
   def test_matching_output_passes(self):
-    verify(self.PLAN, self.SOURCE, self._output(), "/m/a.mp4")
+    verify(self.PLAN, self.SOURCE, self._output())
 
   def test_stream_mismatch_fails(self):
-    with pytest.raises(RepairError, match="do not match"):
-      verify(self.PLAN, self.SOURCE, self._output(streams=[_video(0, "hevc", 1920, 1088, "136:135"), _audio(1)]), "/m/a.mp4")
+    with pytest.raises(RepairError, match=r"do not match the source: expected \[video/h264 1920x1088, audio/.*got \[video/hevc 1920x1088"):
+      verify(self.PLAN, self.SOURCE, self._output([_video(0, "hevc", 1920, 1088, "136:135"), _audio(1), CHAPTER_TRACK]))
 
-  @pytest.mark.parametrize("duration", ["90.0", None, "garbage"])
+  @pytest.mark.parametrize("duration", ["90.0", "N/A"])
   def test_duration_drift_fails(self, duration):
     with pytest.raises(RepairError, match="duration"):
-      verify(self.PLAN, self.SOURCE, self._output(duration=duration), "/m/a.mp4")
+      verify(self.PLAN, self.SOURCE, self._output(duration=duration))
 
-  def test_chapter_loss_fails(self):
+  def test_chapter_track_loss_fails(self):
     with pytest.raises(RepairError, match="chapter"):
-      verify(self.PLAN, self.SOURCE, self._output(chapters=0), "/m/a.mp4")
+      verify(self.PLAN, self.SOURCE, self._output([_video(0, "h264", 1920, 1088, "136:135"), _audio(1)]))
+
+  def test_language_change_fails(self):
+    source = _info([_video(0), {**_audio(1), "TAG:language": "eng"}, _data(2)])
+    plan = RepairPlan(path="/m/a.mp4", keep=[0, 1], drop_data=[2])
+    output = _info([_video(0), {**_audio(1), "TAG:language": "und"}], path="/m/a.sma")
+    with pytest.raises(RepairError, match=r"do not match the source: expected \[video/h264 1920x1080, audio/aac 2ch eng\], got .*2ch und\]"):
+      verify(plan, source, output)
+
+  def test_default_disposition_change_fails(self):
+    source = _info([_video(0), {**_audio(1), "DISPOSITION:default": 1}, _data(2)])
+    plan = RepairPlan(path="/m/a.mp4", keep=[0, 1], drop_data=[2])
+    output = _info([_video(0), {**_audio(1), "DISPOSITION:default": 0}], path="/m/a.sma")
+    with pytest.raises(RepairError, match=r"expected \[.*audio/aac 2ch default\], got \[.*audio/aac 2ch\]"):
+      verify(plan, source, output)
+
+  def test_matching_language_and_default_pass(self):
+    audio = {**_audio(1), "TAG:language": "eng", "DISPOSITION:default": 1, "DISPOSITION:forced": 1}
+    source = _info([_video(0), audio, _data(2)])
+    plan = RepairPlan(path="/m/a.mp4", keep=[0, 1], drop_data=[2])
+    verify(plan, source, _info([_video(0), audio], path="/m/a.sma"))
 
   def test_output_still_damaged_fails(self):
     # Aspect fix did not land: output still has square pixels.
     with pytest.raises(RepairError, match="still needs repair"):
-      verify(self.PLAN, self.SOURCE, self._output(streams=[_video(0, "h264", 1920, 1088, "1:1"), _audio(1)]), "/m/a.mp4")
+      verify(self.PLAN, self.SOURCE, self._output([_video(0, "h264", 1920, 1088, "1:1"), _audio(1), CHAPTER_TRACK]))
 
 
 # ---------------------------------------------------------------------------
-# repair_file
+# RepairProcessor
 # ---------------------------------------------------------------------------
 
 
-DAMAGED = _info([_video(0, "h264", 1920, 1088), _audio(1), _video(2, "mjpeg", 600, 900), _data(3, "none", "tmcd")])
-REPAIRED = _info([_video(0, "h264", 1920, 1088, "136:135"), _audio(1)])
+DAMAGED = [_video(0, "h264", 1920, 1088), _audio(1), _video(2, "mjpeg", 600, 900, tag="mp4v"), _data(3, "unknown", "tmcd")]
+REPAIRED = [_video(0, "h264", 1920, 1088, "136:135"), _audio(1)]
 
 
 class FakeFFMpeg:
-  ffprobe_path = "/usr/bin/ffprobe"
+  """Stands in for converter.ffmpeg.FFMpeg: probe returns the source or the
+  repaired layout depending on the path, convert writes the output file."""
 
-  def __init__(self, output=b"repaired", error=None):
+  def __init__(self, source, output=None, convert_error=None):
+    self.source = source
     self.output = output
-    self.error = error
+    self.convert_error = convert_error
     self.calls = []
+
+  def probe(self, path, posters_as_video=True, framedata=True):
+    assert posters_as_video is False and framedata is False
+    streams = self.output if path.endswith(".sma") else self.source
+    if isinstance(streams, Exception):
+      raise streams
+    return _info(streams, path=path) if streams is not None else None
 
   def convert(self, outfile, opts, timeout=None):
     self.calls.append((outfile, list(opts), timeout))
     with open(outfile, "wb") as f:
-      f.write(self.output)
-    if self.error:
-      raise self.error
-    yield 0, "cmd"
+      f.write(b"repaired")
+    if self.convert_error:
+      raise self.convert_error
+    yield 0, ["ffmpeg", "-i", opts[1]]
+    yield 42, "frame="
 
 
-def _patch_probe(monkeypatch, source, output=None):
-  def fake_probe(path, ffprobe_path):
-    if mr.TEMP_MARKER in os.path.basename(path):
-      if isinstance(output, Exception):
-        raise output
-      return output
-    if isinstance(source, Exception):
-      raise source
-    return source
-
-  monkeypatch.setattr(mr, "probe", fake_probe)
+def _settings(temp_extension=None, output_dir=None, output_dir_ratio=None):
+  return SimpleNamespace(
+    ffmpeg="/usr/bin/ffmpeg",
+    ffprobe="/usr/bin/ffprobe",
+    temp_extension=temp_extension,
+    output_dir=output_dir,
+    output_dir_ratio=output_dir_ratio,
+    permissions={"chmod": 0o640, "uid": -1, "gid": -1},
+  )
 
 
-class TestRepairFile:
-  def test_normal_file_untouched(self, tmp_path, monkeypatch):
-    p = tmp_path / "a.mp4"
-    p.write_bytes(b"original")
-    _patch_probe(monkeypatch, _info([_video(0), _audio(1)]))
-    ff = FakeFFMpeg()
-    result = repair_file(str(p), ff)
-    assert result.status == mr.STATUS_NORMAL
+def _processor(ff, settings=None, logger=None):
+  with mock.patch.object(mr, "FFMpeg", return_value=ff):
+    return RepairProcessor(settings or _settings(), logger=logger)
+
+
+@pytest.fixture
+def media(tmp_path):
+  p = tmp_path / "a.mp4"
+  p.write_bytes(b"original")
+  return p
+
+
+class TestRepairProcessor:
+  def test_uses_ffmpeg_paths_from_settings(self):
+    with mock.patch.object(mr, "FFMpeg") as ff:
+      RepairProcessor(_settings())
+    ff.assert_called_once_with(ffmpeg_path="/usr/bin/ffmpeg", ffprobe_path="/usr/bin/ffprobe")
+
+  def test_normal_file_untouched(self, media):
+    ff = FakeFFMpeg([_video(0), _audio(1)])
+    assert _processor(ff).repair_file(str(media)).status == mr.STATUS_NORMAL
     assert ff.calls == []
-    assert p.read_bytes() == b"original"
+    assert media.read_bytes() == b"original"
 
-  def test_dry_run_reports_without_writing(self, tmp_path, monkeypatch):
-    p = tmp_path / "a.mp4"
-    p.write_bytes(b"original")
-    _patch_probe(monkeypatch, DAMAGED)
-    ff = FakeFFMpeg()
-    result = repair_file(str(p), ff, dry_run=True)
+  def test_dry_run_reports_without_writing(self, media):
+    ff = FakeFFMpeg(DAMAGED)
+    result = _processor(ff).repair_file(str(media), dry_run=True)
     assert result.status == mr.STATUS_WOULD_REPAIR
-    assert result.detail == "data streams 3; artwork streams 2; display aspect 1920:1080"
+    assert result.detail == "unknown streams 3; artwork streams 2; display aspect 1920:1080"
     assert ff.calls == []
 
-  def test_probe_failure_reported(self, tmp_path, monkeypatch):
-    p = tmp_path / "a.mp4"
-    p.write_bytes(b"original")
-    _patch_probe(monkeypatch, RepairError("ffprobe exited 1: broken"))
-    result = repair_file(str(p), FakeFFMpeg())
+  @pytest.mark.parametrize("source,message", [(RuntimeError("broken"), "broken"), (None, "no streams")])
+  def test_probe_failure_reported(self, media, source, message):
+    ff = FakeFFMpeg([])
+    ff.source = source
+    result = _processor(ff).repair_file(str(media))
     assert result.status == mr.STATUS_FAILED
-    assert "broken" in result.detail
+    assert message in result.detail
 
-  def test_successful_repair_swaps_in_verified_copy(self, tmp_path, monkeypatch):
-    p = tmp_path / "a.mp4"
-    p.write_bytes(b"original")
-    os.chmod(p, 0o640)
-    _patch_probe(monkeypatch, DAMAGED, REPAIRED)
-    ff = FakeFFMpeg()
-    result = repair_file(str(p), ff)
+  def test_successful_repair_uses_temp_extension_and_settings_permissions(self, media, tmp_path):
+    ff = FakeFFMpeg(DAMAGED, REPAIRED)
+    result = _processor(ff).repair_file(str(media))
     assert result.status == mr.STATUS_REPAIRED
-    assert p.read_bytes() == b"repaired"
-    assert os.stat(p).st_mode & 0o777 == 0o640
+    assert media.read_bytes() == b"repaired"
+    assert os.stat(media).st_mode & 0o777 == 0o640
     outfile, opts, timeout = ff.calls[0]
-    assert outfile == str(tmp_path / ".a.repairing.mp4")
-    assert opts[opts.index("-c") + 1] == "copy"
+    assert outfile == str(tmp_path / "a.sma")
+    assert opts[-2:] == ["-f", "mp4"]
     assert timeout == 0
     assert os.listdir(tmp_path) == ["a.mp4"]
 
-  def test_verification_failure_keeps_original(self, tmp_path, monkeypatch):
-    p = tmp_path / "a.mp4"
-    p.write_bytes(b"original")
-    _patch_probe(monkeypatch, DAMAGED, _info([_video(0, "h264", 1920, 1088, "136:135")]))
-    result = repair_file(str(p), FakeFFMpeg())
+  def test_writes_in_transit_copy_to_output_directory(self, media, tmp_path):
+    transcode = tmp_path / "transcode" / "new"
+    ff = FakeFFMpeg(DAMAGED, REPAIRED)
+    result = _processor(ff, _settings(output_dir=str(transcode))).repair_file(str(media))
+    assert result.status == mr.STATUS_REPAIRED
+    assert ff.calls[0][0] == str(transcode / "a.sma")
+    assert media.read_bytes() == b"repaired"
+    assert os.listdir(transcode) == []
+
+  def test_insufficient_output_directory_space_refuses_without_fallback(self, media, tmp_path):
+    ff = FakeFFMpeg(DAMAGED, REPAIRED)
+    rp = _processor(ff, _settings(output_dir=str(tmp_path / "transcode"), output_dir_ratio=1.0))
+    with mock.patch.object(mr.shutil, "disk_usage", return_value=SimpleNamespace(free=1)):
+      result = rp.repair_file(str(media))
+    assert result.status == mr.STATUS_FAILED
+    assert "insufficient free space" in result.detail
+    assert ff.calls == []
+    assert media.read_bytes() == b"original"
+
+  def test_space_check_error_fails_open(self, media, tmp_path):
+    rp = _processor(FakeFFMpeg(DAMAGED, REPAIRED), _settings(output_dir=str(tmp_path / "t"), output_dir_ratio=1.0))
+    with mock.patch.object(mr.shutil, "disk_usage", side_effect=OSError("gone")):
+      assert rp.outputDirHasFreeSpace(str(media)) is True
+
+  def test_cross_device_move_copies_via_smatmp(self, media, tmp_path):
+    ff = FakeFFMpeg(DAMAGED, REPAIRED)
+    rp = _processor(ff, _settings(output_dir=str(tmp_path / "transcode")))
+    real_replace = os.replace
+
+    def replace(src, dst):
+      if src.endswith(".sma"):
+        raise OSError(18, "Invalid cross-device link")
+      assert src == str(media) + ".smatmp"
+      real_replace(src, dst)
+
+    with mock.patch.object(mr.os, "replace", side_effect=replace):
+      assert rp.repair_file(str(media)).status == mr.STATUS_REPAIRED
+    assert media.read_bytes() == b"repaired"
+    assert os.listdir(tmp_path / "transcode") == []
+    assert sorted(os.listdir(tmp_path)) == ["a.mp4", "transcode"]
+
+  def test_cross_device_copy_failure_keeps_original(self, media, tmp_path):
+    rp = _processor(FakeFFMpeg(DAMAGED, REPAIRED), _settings(output_dir=str(tmp_path / "transcode")))
+    with mock.patch.object(mr.os, "replace", side_effect=OSError(18, "Invalid cross-device link")):
+      result = rp.repair_file(str(media))
+    assert result.status == mr.STATUS_FAILED
+    assert media.read_bytes() == b"original"
+    assert os.listdir(tmp_path / "transcode") == []
+    assert sorted(os.listdir(tmp_path)) == ["a.mp4", "transcode"]
+
+  def test_configured_temp_extension_and_collision_counter(self, media, tmp_path):
+    (tmp_path / "a.tmpx").write_bytes(b"other job")
+    rp = _processor(FakeFFMpeg(DAMAGED), _settings(temp_extension="tmpx"))
+    assert rp.getTempFile(str(media)) == str(tmp_path / "a.2.tmpx")
+
+  def test_logs_start_command_progress_and_verification(self, media, monkeypatch):
+    monkeypatch.setattr(mr, "PROGRESS_INTERVAL", 0)
+    log = mock.MagicMock()
+    assert _processor(FakeFFMpeg(DAMAGED, REPAIRED), logger=log).repair_file(str(media)).status == mr.STATUS_REPAIRED
+    log.info.assert_called_once()
+    assert log.info.call_args.args[0].startswith("Repairing %s" % media)
+    debug = [c.args[0] for c in log.debug.call_args_list]
+    assert any(m.startswith("Probed ") for m in debug)
+    assert "FFmpeg command: ffmpeg -i %s" % media in debug
+    assert any("42s copied" in m for m in debug)
+    assert any(m.startswith("Verified ") for m in debug)
+
+  def test_verification_failure_keeps_original(self, media, tmp_path):
+    result = _processor(FakeFFMpeg(DAMAGED, [_video(0, "h264", 1920, 1088, "136:135")])).repair_file(str(media))
     assert result.status == mr.STATUS_FAILED
     assert "do not match" in result.detail
-    assert p.read_bytes() == b"original"
+    assert media.read_bytes() == b"original"
     assert os.listdir(tmp_path) == ["a.mp4"]
 
-  def test_ffmpeg_failure_keeps_original(self, tmp_path, monkeypatch):
-    p = tmp_path / "a.mp4"
-    p.write_bytes(b"original")
-    _patch_probe(monkeypatch, DAMAGED)
-    log = mock.MagicMock()
-    result = repair_file(str(p), FakeFFMpeg(error=RuntimeError("mux failed")), logger=log)
+  def test_ffmpeg_failure_keeps_original(self, media, tmp_path):
+    result = _processor(FakeFFMpeg(DAMAGED, convert_error=RuntimeError("mux failed"))).repair_file(str(media))
     assert result.status == mr.STATUS_FAILED
     assert "mux failed" in result.detail
-    assert p.read_bytes() == b"original"
+    assert media.read_bytes() == b"original"
     assert os.listdir(tmp_path) == ["a.mp4"]
-    log.debug.assert_called()
 
-  def test_refuses_when_nothing_playable_survives(self, tmp_path, monkeypatch):
-    p = tmp_path / "a.mp4"
-    p.write_bytes(b"original")
-    _patch_probe(monkeypatch, _info([_video(0, "mjpeg", 600, 900, attached_pic=1), _data(1, "none", "tmcd")]))
-    ff = FakeFFMpeg()
-    result = repair_file(str(p), ff)
+  def test_refuses_when_nothing_playable_survives(self, media):
+    ff = FakeFFMpeg([_video(0, "mjpeg", 600, 900, attached_pic=1), _data(1, "unknown", "tmcd")])
+    result = _processor(ff).repair_file(str(media))
     assert result.status == mr.STATUS_FAILED
     assert "no audio or video" in result.detail
     assert ff.calls == []
+
+  def test_permission_failure_is_logged_not_fatal(self, media):
+    log = mock.MagicMock()
+    rp = _processor(FakeFFMpeg(DAMAGED, REPAIRED), logger=log)
+    with mock.patch.object(mr.os, "chmod", side_effect=PermissionError("denied")):
+      assert rp.repair_file(str(media)).status == mr.STATUS_REPAIRED
+    log.exception.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +435,7 @@ class TestRepairFile:
 def test_iter_targets_walks_dirs_and_filters(tmp_path):
   (tmp_path / "show" / "S01").mkdir(parents=True)
   (tmp_path / ".hidden").mkdir()
-  for name in ["show/S01/b.mp4", "show/S01/a.mkv", "show/S01/a.srt", "show/S01/.a.repairing.mp4", "show/.dot.mp4", ".hidden/x.mp4", "top.MOV"]:
+  for name in ["show/S01/b.mp4", "show/S01/a.mkv", "show/S01/a.srt", "show/S01/b.sma", "show/.dot.mp4", ".hidden/x.mp4", "top.MOV"]:
     (tmp_path / name).write_bytes(b"x")
   single = tmp_path / "show" / "S01" / "b.mp4"
   skipped = tmp_path / "show" / "S01" / "a.srt"
