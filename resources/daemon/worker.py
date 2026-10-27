@@ -3,6 +3,7 @@ import json
 import os
 import re as _re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -18,6 +19,7 @@ from resources.processor.failures import (
   WORKER_SENTINEL_INVALID_ARGS,
   WORKER_SENTINEL_PATH_MISSING,
   WORKER_SENTINEL_PROCESS_FAILED,
+  WORKER_SENTINEL_TIMEOUT,
   FailureCategory,
   categorize_failure,
 )
@@ -39,6 +41,117 @@ _DEFAULT_PROGRESS_LOG_INTERVAL = 60  # seconds between progress log entries
 # Pre-flight defer window: short enough to recover quickly after a janitor
 # pass, long enough that we don't burn the worker chain-waking itself.
 PREFLIGHT_DEFER_SECONDS = 300
+
+# How often the per-job watchdog re-reads the job row to notice a cancel or
+# requeue issued from another node (local cancels kill the process directly).
+JOB_STATUS_POLL_SECONDS = 10.0
+# Grace between SIGTERM and SIGKILL when tearing down a conversion tree.
+KILL_GRACE_SECONDS = 5.0
+# Back-off after an unexpected error in the worker loop (e.g. DB outage).
+LOOP_ERROR_BACKOFF_SECONDS = 5.0
+
+# Reasons a running conversion can be aborted by the daemon.
+ABORT_TIMEOUT = "timeout"
+ABORT_CANCELLED = "cancelled"
+ABORT_REASSIGNED = "reassigned"
+ABORT_SHUTDOWN = "shutdown"
+# failure_cause recorded on jobs killed by the job timeout watchdog.
+WORKER_CAUSE_TIMEOUT = WORKER_SENTINEL_TIMEOUT
+
+
+def kill_process_tree(process, grace=None, own_group=False):
+  """Terminate *process* and every process in its process group.
+
+  Conversions are launched with ``start_new_session=True`` so manual.py and
+  the ffmpeg it spawns share a dedicated process group; signalling the group
+  ensures a hung ffmpeg that holds the stdout pipe dies with its parent.
+  Pass *own_group=True* for children started with ``start_new_session``
+  (their pgid is their pid) so the group is still signalled after the
+  leader exits while a grandchild keeps running.
+  Sends SIGTERM, waits up to *grace* seconds, then SIGKILL. Never raises.
+  """
+  if grace is None:
+    grace = KILL_GRACE_SECONDS
+  pgid = None
+  try:
+    pid = process.pid
+    if isinstance(pid, int) and hasattr(os, "killpg"):
+      candidate = pid if own_group else os.getpgid(pid)
+      # Only signal the group when the child leads its own group; never
+      # signal the daemon's own process group.
+      if candidate == pid and candidate != os.getpgrp():
+        pgid = candidate
+  except Exception:
+    pgid = None
+
+  def _send(sig, fallback):
+    if pgid is not None:
+      try:
+        os.killpg(pgid, sig)
+        return
+      except ProcessLookupError:
+        return
+      except OSError:
+        pass
+    try:
+      fallback()
+    except Exception:
+      pass
+
+  _send(signal.SIGTERM, process.terminate)
+  try:
+    process.wait(timeout=grace)
+  except Exception:
+    pass
+  _send(getattr(signal, "SIGKILL", signal.SIGTERM), process.kill)
+
+
+class _JobWatchdog(threading.Thread):
+  """Enforces the job timeout and cross-node cancel for one conversion.
+
+  Runs alongside the blocking stdout read in ``_run_conversion_inner``. On
+  deadline, explicit abort, or a job row that is no longer running on this
+  node, it records the abort reason on the worker and kills the process
+  tree, which closes the pipe and unblocks the reader.
+  """
+
+  def __init__(self, worker, job_id, process, timeout_seconds, poll_seconds=None):
+    super().__init__(daemon=True, name="job-watchdog-%s" % job_id)
+    self.worker = worker
+    self.job_id = job_id
+    self.process = process
+    self.timeout_seconds = timeout_seconds if timeout_seconds and timeout_seconds > 0 else 0
+    self.poll_seconds = JOB_STATUS_POLL_SECONDS if poll_seconds is None else poll_seconds
+    self.wake = threading.Event()
+    self._done = threading.Event()
+    self.fired = False
+
+  def finish(self):
+    self._done.set()
+    self.wake.set()
+
+  def run(self):
+    start = time.monotonic()
+    deadline = start + self.timeout_seconds if self.timeout_seconds else None
+    next_poll = start + self.poll_seconds
+    while not self._done.is_set():
+      # Clear before checking so an abort_job() wake-up is never lost.
+      self.wake.clear()
+      reason = self.worker._abort_reason
+      now = time.monotonic()
+      if reason is None and deadline is not None and now >= deadline:
+        reason = self.worker._set_abort_reason(ABORT_TIMEOUT)
+      if reason is None and now >= next_poll:
+        reason = self.worker._check_job_ownership(self.job_id)
+        next_poll = now + self.poll_seconds
+      if reason is not None:
+        if self._done.is_set():
+          return
+        self.fired = True
+        kill_process_tree(self.process, own_group=(os.name == "posix"))
+        return
+      target = next_poll if deadline is None else min(next_poll, deadline)
+      self.wake.wait(timeout=max(0.05, target - time.monotonic()))
 
 
 def preflight_output_capacity(output_dir, output_dir_ratio, input_path, logger=None):
@@ -139,83 +252,151 @@ class ConversionWorker(threading.Thread):
     self._job_processes = job_processes if job_processes is not None else {}
     self._job_progress = job_progress if job_progress is not None else {}
     self._last_approval_log = 0.0
+    self._stop_event = threading.Event()
+    # Abort bookkeeping for the job currently being converted. The reason
+    # is set by the watchdog (timeout / remote cancel) or by abort_job()
+    # (local cancel / shutdown deadline) and read by process_job.
+    self._abort_lock = threading.Lock()
+    self._abort_reason = None
+    self._watchdog = None
 
   def stop(self):
     """Signal worker to stop."""
     self.running = False
+    self._stop_event.set()
     self.job_event.set()
+
+  def _set_abort_reason(self, reason):
+    """Record *reason* unless another abort reason won the race; return the winner."""
+    with self._abort_lock:
+      if self._abort_reason is None:
+        self._abort_reason = reason
+      return self._abort_reason
+
+  def abort_job(self, job_id, reason):
+    """Ask the watchdog to kill the conversion for *job_id* if this worker runs it.
+
+    Returns True when *job_id* is this worker's current job.
+    """
+    with self._abort_lock:
+      if job_id is None or self.current_job_id != job_id:
+        return False
+      if self._abort_reason is None:
+        self._abort_reason = reason
+      watchdog = self._watchdog
+    if watchdog is not None:
+      watchdog.wake.set()
+    return True
+
+  def _check_job_ownership(self, job_id):
+    """Return an abort reason when the job row no longer belongs to this run.
+
+    Catches cancels and requeues issued from another node (or the admin
+    API on a different process). DB errors are ignored — a transient
+    outage must not kill a healthy conversion.
+    """
+    try:
+      row = self.job_db.get_job(job_id)
+    except Exception:
+      self.log.debug("Job %d status poll failed; will retry" % job_id, exc_info=True)
+      return None
+    if row is None:
+      return self._set_abort_reason(ABORT_CANCELLED)
+    if not isinstance(row, dict):
+      return None
+    status = row.get("status")
+    if status == "cancelled":
+      return self._set_abort_reason(ABORT_CANCELLED)
+    owner = row.get("node_id")
+    if status in ("pending", "completed", "failed") or (status == "running" and isinstance(owner, str) and owner and owner != self.node_id):
+      return self._set_abort_reason(ABORT_REASSIGNED)
+    return None
 
   def run(self):
     while self.running:
-      # Wait for a wakeup on this worker's own event or periodic timeout.
-      # Stagger the timeout per worker so timeout-driven polls don't all
-      # hit claim_next_job() in the same instant — the worker with the
-      # lowest id always won that race historically. 5s base + worker_id
-      # * 50ms keeps total latency bounded while breaking the tie.
-      self.job_event.wait(timeout=5.0 + (self.worker_id - 1) * 0.05)
-      self.job_event.clear()
+      try:
+        self._run_once()
+      except Exception as e:
+        # A DB outage (claim_next_job, complete_job, fail_job, ...) must not
+        # kill the thread: log, back off, and retry. WorkerPool also
+        # respawns threads that die anyway.
+        self.log.exception("Worker %d loop error (%s); retrying in %ds" % (self.worker_id, type(e).__name__, LOOP_ERROR_BACKOFF_SECONDS))
+        self._stop_event.wait(timeout=LOOP_ERROR_BACKOFF_SECONDS)
 
-      if not self.running:
+  def _run_once(self):
+    """One wait-then-drain cycle of the worker loop."""
+    # Wait for a wakeup on this worker's own event or periodic timeout.
+    # Stagger the timeout per worker so timeout-driven polls don't all
+    # hit claim_next_job() in the same instant — the worker with the
+    # lowest id always won that race historically. 5s base + worker_id
+    # * 50ms keeps total latency bounded while breaking the tie.
+    self.job_event.wait(timeout=5.0 + (self.worker_id - 1) * 0.05)
+    self.job_event.clear()
+
+    if not self.running:
+      return
+
+    # Drain all available jobs before going back to sleep.
+    while self.running:
+      if getattr(self.job_db, "is_distributed", False) and hasattr(self.job_db, "is_node_approved"):
+        approved = False
+        try:
+          approved = self.job_db.is_node_approved(self.node_id)
+        except Exception:
+          self.log.exception("Worker %d failed to check node approval status" % self.worker_id)
+        if not approved:
+          now = time.monotonic()
+          if now - self._last_approval_log >= 60:
+            self.log.info("Worker %d waiting for admin approval of this node" % self.worker_id)
+            self._last_approval_log = now
+          break
+
+      # Pause gate: go back to the outer wait (5s timeout, or woken by
+      # clear_paused) instead of spinning while paused.
+      if self.pool is not None and self.pool._pause_mode.is_set():
         break
 
-      # Drain all available jobs before going back to sleep.
-      while self.running:
-        if getattr(self.job_db, "is_distributed", False) and hasattr(self.job_db, "is_node_approved"):
-          approved = False
-          try:
-            approved = self.job_db.is_node_approved(self.node_id)
-          except Exception:
-            self.log.exception("Worker %d failed to check node approval status" % self.worker_id)
-          if not approved:
-            now = time.monotonic()
-            if now - self._last_approval_log >= 60:
-              self.log.info("Worker %d waiting for admin approval of node %s" % (self.worker_id, self.node_id))
-              self._last_approval_log = now
-            break
+      # Drain gate: exit inner loop — worker goes idle but stays online
+      if self.pool is not None and self.pool._drain_mode.is_set():
+        break
 
-        # Pause gate: block workers until resumed
-        if self.pool is not None and self.pool._pause_mode.is_set():
-          self.pool._pause_mode.wait(timeout=5.0)
-          continue
-
-        # Drain gate: exit inner loop — worker goes idle but stays online
-        if self.pool is not None and self.pool._drain_mode.is_set():
-          break
-
-        locked = self.config_lock_manager.get_locked_configs()
-        profile_caps = None
-        profile_costs = None
-        profile_weights = None
-        budget = None
-        try:
-          profile_caps = self.path_config_manager.profile_concurrency_caps()
-          profile_costs = self.path_config_manager.profile_concurrency_costs()
-          profile_weights = self.path_config_manager.profile_priority_weights()
-          budget = self.path_config_manager.concurrency_budget
-        except Exception:
-          self.log.debug("profile cap/cost/weight/budget unavailable; ignoring", exc_info=True)
-        job = self.job_db.claim_next_job(
-          self.worker_id,
-          self.node_id,
-          exclude_configs=locked or None,
-          profile_caps=profile_caps or None,
-          profile_costs=profile_costs or None,
-          profile_weights=profile_weights or None,
-          concurrency_budget=budget or None,
-        )
-        if job:
-          # Chain-wake: notify the next idle worker before starting heavy
-          # work, so a burst of N arrivals fans across N workers instead
-          # of this thread looping through all of them serially.
-          if self.pool is not None:
-            self.pool.notify_one()
-          self.process_job(job)
-        else:
-          break
+      locked = self.config_lock_manager.get_locked_configs()
+      profile_caps = None
+      profile_costs = None
+      profile_weights = None
+      budget = None
+      try:
+        profile_caps = self.path_config_manager.profile_concurrency_caps()
+        profile_costs = self.path_config_manager.profile_concurrency_costs()
+        profile_weights = self.path_config_manager.profile_priority_weights()
+        budget = self.path_config_manager.concurrency_budget
+      except Exception:
+        self.log.debug("profile cap/cost/weight/budget unavailable; ignoring", exc_info=True)
+      job = self.job_db.claim_next_job(
+        self.worker_id,
+        self.node_id,
+        exclude_configs=locked or None,
+        profile_caps=profile_caps or None,
+        profile_costs=profile_costs or None,
+        profile_weights=profile_weights or None,
+        concurrency_budget=budget or None,
+      )
+      if job:
+        # Chain-wake: notify the next idle worker before starting heavy
+        # work, so a burst of N arrivals fans across N workers instead
+        # of this thread looping through all of them serially.
+        if self.pool is not None:
+          self.pool.notify_one()
+        self.process_job(job)
+      else:
+        break
 
   def process_job(self, job):
     job_id = job["id"]
-    self.current_job_id = job_id
+    with self._abort_lock:
+      self.current_job_id = job_id
+      self._abort_reason = None
+      self._watchdog = None
     # Reset per-job state captured from the ffmpeg.attempts JSON line so
     # one job's classification doesn't leak into the next.
     self._last_attempt_failure_class: str | None = None
@@ -232,7 +413,7 @@ class ConversionWorker(threading.Thread):
     except (TypeError, ValueError) as e:
       self.log.error("Job %d has invalid args payload: %s" % (job_id, e))
       cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
-      self.job_db.fail_job(job_id, "Invalid job args", failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS)
+      self.job_db.fail_job(job_id, "Invalid job args", failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, node_id=self.node_id)
       metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
       metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
       in_flight.dec()
@@ -242,7 +423,7 @@ class ConversionWorker(threading.Thread):
     if not os.path.exists(path):
       self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
       cat = categorize_failure(WORKER_SENTINEL_PATH_MISSING).value
-      self.job_db.fail_job(job_id, "Path does not exist", failure_category=cat, failure_cause=WORKER_SENTINEL_PATH_MISSING)
+      self.job_db.fail_job(job_id, "Path does not exist", failure_category=cat, failure_cause=WORKER_SENTINEL_PATH_MISSING, node_id=self.node_id)
       metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
       metrics_prom.record_failure(cat, WORKER_SENTINEL_PATH_MISSING)
       in_flight.dec()
@@ -292,7 +473,32 @@ class ConversionWorker(threading.Thread):
       success, final_output, source_duration_secs = self._run_conversion(job_id, path, config_file, args)
       elapsed = time.monotonic() - job_started_at
       output_size = None
-      if success:
+      # A conversion that exited 0 before the kill landed is still a
+      # success; the DB guard discards it if the row was cancelled.
+      abort_reason = None if success else self._abort_reason
+      if abort_reason == ABORT_SHUTDOWN:
+        # Killed at the shutdown deadline: leave the row 'running' so
+        # mark_node_offline (cluster) or the next startup (SQLite)
+        # requeues it instead of burning a retry or failing it.
+        self.log.warning("Job %d interrupted by daemon shutdown; it will be requeued: %s" % (job_id, path))
+        metrics_prom.record_job_terminal("cancelled", elapsed)
+      elif abort_reason in (ABORT_CANCELLED, ABORT_REASSIGNED):
+        self.log.info("Job %d stopped: job was %s while converting: %s" % (job_id, "cancelled" if abort_reason == ABORT_CANCELLED else "requeued or claimed elsewhere", path))
+        metrics_prom.record_job_terminal("cancelled", elapsed)
+      elif abort_reason == ABORT_TIMEOUT:
+        cat = categorize_failure(WORKER_CAUSE_TIMEOUT).value
+        updated = self.job_db.fail_job(
+          job_id,
+          "Job timed out after %ds" % self.job_timeout_seconds,
+          failure_category=cat,
+          failure_cause=WORKER_CAUSE_TIMEOUT,
+          node_id=self.node_id,
+        )
+        self._log_discarded(job_id, updated, "timeout failure")
+        self._ingest_ffmpeg_stderr_sidecars(job_id)
+        metrics_prom.record_job_terminal("failed", elapsed)
+        metrics_prom.record_failure(cat, WORKER_CAUSE_TIMEOUT)
+      elif success:
         # Stat the produced output before any post-process moves it. The
         # `final_output` is the SMA-tagged terminal path written into the
         # log; fall back to the input path for in-place transcodes.
@@ -301,14 +507,19 @@ class ConversionWorker(threading.Thread):
           output_size = os.path.getsize(stat_target)
         except OSError:
           self.log.warning("Could not stat output file for job %d: %s" % (job_id, stat_target))
-        self.job_db.complete_job(
+        updated = self.job_db.complete_job(
           job_id,
           input_size=input_size,
           output_size=output_size,
           source_duration_seconds=source_duration_secs,
           encoder_backend=self._last_encoder_backend,
           encoder_name=self._last_encoder_name,
+          node_id=self.node_id,
         )
+        if updated is False:
+          self._log_discarded(job_id, updated, "completion")
+          metrics_prom.record_job_terminal("cancelled", elapsed)
+          return
         metrics_prom.record_job_terminal("completed", elapsed)
         metrics_prom.record_job_savings(
           input_size,
@@ -328,7 +539,8 @@ class ConversionWorker(threading.Thread):
           # without emitting the structured line.
           cause = self._last_attempt_failure_class or WORKER_SENTINEL_PROCESS_FAILED
           cat = categorize_failure(cause).value
-          self.job_db.fail_job(job_id, "Conversion process failed", failure_category=cat, failure_cause=cause)
+          updated = self.job_db.fail_job(job_id, "Conversion process failed", failure_category=cat, failure_cause=cause, node_id=self.node_id)
+          self._log_discarded(job_id, updated, "failure")
           self._ingest_ffmpeg_stderr_sidecars(job_id)
           metrics_prom.record_job_terminal("failed", elapsed)
           metrics_prom.record_failure(cat, cause)
@@ -340,14 +552,27 @@ class ConversionWorker(threading.Thread):
         metrics_prom.record_job_terminal("cancelled", elapsed)
       else:
         cat = categorize_failure(WORKER_SENTINEL_EXCEPTION).value
-        self.job_db.fail_job(job_id, str(e), failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION)
+        updated = self.job_db.fail_job(job_id, str(e), failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION, node_id=self.node_id)
+        self._log_discarded(job_id, updated, "failure")
         self._ingest_ffmpeg_stderr_sidecars(job_id)
         metrics_prom.record_job_terminal("failed", elapsed)
         metrics_prom.record_failure(cat, WORKER_SENTINEL_EXCEPTION)
     finally:
       self.config_lock_manager.release(config_file, job_id)
       in_flight.dec()
-      self.current_job_id = None
+      with self._abort_lock:
+        self.current_job_id = None
+        self._watchdog = None
+
+  def _log_discarded(self, job_id, updated, what):
+    """Log when complete_job/fail_job reported that no row was updated.
+
+    ``updated is False`` means the row was no longer 'running' on this node
+    (cancelled, requeued by stale-node recovery, or claimed elsewhere), so
+    this worker's result was intentionally dropped.
+    """
+    if updated is False:
+      self.log.info("Job %d %s discarded: job is no longer running on this node (cancelled or requeued)" % (job_id, what))
 
   def _preflight_disk_pressure(self, job_id, path, config_file, profile):
     """Run the output-filesystem capacity check before invoking the subprocess.
@@ -478,6 +703,7 @@ class ConversionWorker(threading.Thread):
     _last_progress_log: float = 0.0
     final_output: str | None = None
 
+    watchdog = None
     try:
       process = subprocess.Popen(
         cmd,
@@ -485,8 +711,19 @@ class ConversionWorker(threading.Thread):
         stderr=subprocess.STDOUT,
         text=True,
         env=env,
+        # Own process group so timeout/cancel can kill manual.py *and*
+        # the ffmpeg it spawns (which inherits and holds the stdout pipe).
+        start_new_session=(os.name == "posix"),
       )
       self._job_processes[job_id] = process
+
+      # The stdout loop below blocks until EOF, so the timeout and remote
+      # cancel are enforced from a separate watchdog thread that kills
+      # the process tree (closing the pipe) when they trigger.
+      watchdog = _JobWatchdog(self, job_id, process, self.job_timeout_seconds)
+      with self._abort_lock:
+        self._watchdog = watchdog
+      watchdog.start()
 
       if process.stdout is None:
         return None
@@ -527,16 +764,19 @@ class ConversionWorker(threading.Thread):
         if self._fallback_counter_callback is not None and '"event": "ffmpeg.attempts"' in line:
           self._record_fallback_event(line)
 
-      try:
-        timeout = self.job_timeout_seconds if self.job_timeout_seconds > 0 else None
-        process.wait(timeout=timeout)
-      except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
-        config_logger.error("Job %d timed out after %ds: %s" % (job_id, self.job_timeout_seconds, path))
-        return False, final_output, total_duration_secs
+      # EOF reached; the watchdog still guards this wait.
+      process.wait()
 
       report_path = final_output or path
+      reason = self._abort_reason
+      if reason == ABORT_TIMEOUT and process.returncode != 0:
+        msg = "Job %d timed out after %ds; killed conversion process tree: %s" % (job_id, self.job_timeout_seconds, path)
+        config_logger.error(msg)
+        self.log.error(msg)
+        return False, final_output, total_duration_secs
+      if reason in (ABORT_CANCELLED, ABORT_REASSIGNED, ABORT_SHUTDOWN) and process.returncode != 0:
+        config_logger.warning("Job %d conversion killed (%s): %s" % (job_id, reason, path))
+        return False, final_output, total_duration_secs
       if process.returncode == 0:
         config_logger.info("Job %d completed successfully: %s" % (job_id, report_path))
         return True, final_output, total_duration_secs
@@ -548,6 +788,8 @@ class ConversionWorker(threading.Thread):
       config_logger.exception("Job %d failed: %s" % (job_id, e))
       return False, final_output, total_duration_secs
     finally:
+      if watchdog is not None:
+        watchdog.finish()
       self._job_processes.pop(job_id, None)
       self._job_progress.pop(job_id, None)
       config_logger.info("")  # blank line separates jobs in the per-config log
@@ -692,28 +934,70 @@ class WorkerPool:
     # while the queue serializes through one of them.
     self._notify_cursor = 0
     self._notify_lock = threading.Lock()
+    self._stopped = False
     self._start_workers()
 
+  def _make_worker(self, worker_id, template=None):
+    """Build (but do not start) a worker; *template* carries hot-reloaded settings."""
+    return ConversionWorker(
+      worker_id=worker_id,
+      job_db=self._job_db,
+      path_config_manager=self._path_config_manager,
+      config_log_manager=self._config_log_manager,
+      config_lock_manager=self._config_lock_manager,
+      logger=self._logger,
+      ffmpeg_dir=template.ffmpeg_dir if template is not None else self._ffmpeg_dir,
+      job_timeout_seconds=template.job_timeout_seconds if template is not None else self._job_timeout_seconds,
+      progress_log_interval=template.progress_log_interval if template is not None else self._progress_log_interval,
+      job_processes=self._job_processes,
+      job_progress=self._job_progress,
+      pool=self,
+      fallback_counter_callback=self._fallback_counter_callback,
+    )
+
   def _start_workers(self):
+    self._stopped = False
     for i in range(self._worker_count):
-      worker = ConversionWorker(
-        worker_id=i + 1,
-        job_db=self._job_db,
-        path_config_manager=self._path_config_manager,
-        config_log_manager=self._config_log_manager,
-        config_lock_manager=self._config_lock_manager,
-        logger=self._logger,
-        ffmpeg_dir=self._ffmpeg_dir,
-        job_timeout_seconds=self._job_timeout_seconds,
-        progress_log_interval=self._progress_log_interval,
-        job_processes=self._job_processes,
-        job_progress=self._job_progress,
-        pool=self,
-        fallback_counter_callback=self._fallback_counter_callback,
-      )
+      worker = self._make_worker(i + 1)
       worker.start()
       self._workers.append(worker)
       self._logger.debug("Started worker thread %d" % (i + 1))
+
+  def ensure_workers_alive(self):
+    """Respawn worker threads that died unexpectedly. Returns the respawn count.
+
+    ConversionWorker.run() already survives loop errors, so this is a last
+    line of defence (e.g. a BaseException escaping the loop). No-op once
+    the pool has been stopped for shutdown/restart.
+    """
+    if self._stopped:
+      return 0
+    respawned = 0
+    with self._notify_lock:
+      for idx, worker in enumerate(list(self._workers)):
+        if worker.is_alive() or not worker.running or worker.ident is None:
+          continue
+        replacement = self._make_worker(worker.worker_id, template=worker)
+        replacement.start()
+        self._workers[idx] = replacement
+        respawned += 1
+        self._logger.warning("Worker %d thread died unexpectedly; respawned" % worker.worker_id)
+    return respawned
+
+  def abort_job(self, job_id, reason):
+    """Ask the worker running *job_id* to kill its conversion. Returns True if found."""
+    for worker in list(self._workers):
+      if worker.abort_job(job_id, reason):
+        return True
+    return False
+
+  def abort_all(self, reason):
+    """Kill every in-flight conversion (used at the shutdown deadline)."""
+    aborted = 0
+    for worker in list(self._workers):
+      if worker.abort_job(worker.current_job_id, reason):
+        aborted += 1
+    return aborted
 
   def set_drain_mode(self) -> None:
     """Enter cluster drain mode: workers finish active jobs then go idle."""
@@ -769,6 +1053,7 @@ class WorkerPool:
 
   def stop(self):
     """Signal all workers to stop."""
+    self._stopped = True
     for worker in self._workers:
       worker.stop()
 

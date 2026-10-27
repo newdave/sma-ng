@@ -9,6 +9,7 @@ from urllib.parse import unquote, urlparse
 
 import yaml as _yaml
 
+from resources.daemon.config import _norm_key
 from resources.daemon.constants import (
   AUDIT_RUN_COMPLETED,
   AUDIT_RUN_ENUMERATING,
@@ -29,6 +30,37 @@ from resources.daemon.constants import (
 from resources.log import getLogger
 
 log = getLogger("DAEMON")
+
+
+def redact_db_url(db_url):
+  """Return *db_url* without credentials, safe for logging.
+
+  Keeps the scheme, host, port and database name; drops the username,
+  password and query string (which may carry ``password=``/``sslkey=``).
+  SQLite URLs carry no credentials and are returned as-is.
+  """
+  if not db_url:
+    return ""
+  text = str(db_url)
+  if text.startswith("sqlite:"):
+    return text
+  try:
+    parsed = urlparse(text)
+  except ValueError:
+    return "<unparseable database URL>"
+  if not parsed.scheme or not parsed.netloc:
+    # libpq key=value DSN or something else we can't safely trim.
+    return "<redacted DSN>"
+  try:
+    host = parsed.hostname or ""
+    port = parsed.port
+  except ValueError:
+    host, port = "", None
+  if host and ":" in host:
+    host = "[%s]" % host
+  netloc = host + (":%d" % port if port else "")
+  return "%s://%s%s" % (parsed.scheme, netloc, parsed.path or "")
+
 
 # Cap stored ffmpeg stderr per job at 1 MiB. ffmpeg can emit unbounded
 # stderr (e.g. on a tight retry loop or with -loglevel debug). Storing
@@ -333,6 +365,16 @@ def _backfill_request_profile(conn, *, is_sqlite, logger=None):
   return len(updates)
 
 
+def _owner_guard(node_id, placeholder):
+  """SQL fragment restricting an UPDATE to rows still claimed by *node_id*.
+
+  Rows with a NULL node_id (legacy start_job path) are accepted.
+  """
+  if not node_id:
+    return "", ()
+  return " AND (node_id IS NULL OR node_id = %s)" % placeholder, (node_id,)
+
+
 class SQLiteJobDatabase:
   """SQLite-backed job queue for single-node deployments.
 
@@ -451,7 +493,7 @@ class SQLiteJobDatabase:
   def _reset_running_jobs(self):
     count = self._requeue_running_jobs_for_node(self._node_id)
     if count > 0:
-      self.log.info("Reset %d interrupted jobs to pending (node: %s)" % (count, self._node_id))
+      self.log.info("Reset %d interrupted jobs to pending on this node" % count)
 
   def _requeue_running_jobs_for_node(self, node_id):
     with self._conn() as conn:
@@ -553,9 +595,14 @@ class SQLiteJobDatabase:
     source_duration_seconds=None,
     encoder_backend=None,
     encoder_name=None,
+    node_id=None,
   ):
+    """Mark a running job completed. Returns False if the row was no longer
+    running (cancelled/requeued) or, when *node_id* is given, is now owned
+    by a different node — the caller's result is then discarded."""
+    owner_sql, owner_params = _owner_guard(node_id, "?")
     with self._conn() as conn:
-      conn.execute(
+      cur = conn.execute(
         """UPDATE jobs
               SET status = ?,
                   completed_at = ?,
@@ -564,7 +611,8 @@ class SQLiteJobDatabase:
                   source_duration_seconds = ?,
                   encoder_backend = ?,
                   encoder_name = ?
-            WHERE id = ?""",
+            WHERE id = ? AND status = ?"""
+        + owner_sql,
         (
           STATUS_COMPLETED,
           _utc_now(),
@@ -574,9 +622,14 @@ class SQLiteJobDatabase:
           encoder_backend,
           encoder_name,
           job_id,
+          STATUS_RUNNING,
+          *owner_params,
         ),
       )
-    self.log.debug("Job %d completed" % job_id)
+      updated = cur.rowcount != 0
+    if updated:
+      self.log.debug("Job %d completed" % job_id)
+    return updated
 
   def update_job_ffmpeg_stderr(self, job_id: int, stderr: str | None) -> None:
     """Store the full ffmpeg stderr blob for *job_id*.
@@ -614,11 +667,22 @@ class SQLiteJobDatabase:
       )
     self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay_seconds, reason or ""))
 
-  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None):
+  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None):
+    """Fail (or requeue with backoff) a running job.
+
+    Returns False without touching the row when it is no longer running
+    (cancelled/requeued) or, when *node_id* is given, owned by another node.
+    """
     now = datetime.now(UTC).replace(microsecond=0)
+    owner_sql, owner_params = _owner_guard(node_id, "?")
     with self._conn() as conn:
-      row = conn.execute("SELECT retry_count, max_retries FROM jobs WHERE id = ?", (job_id,)).fetchone()
-      if row and row["retry_count"] < row["max_retries"]:
+      row = conn.execute(
+        "SELECT retry_count, max_retries FROM jobs WHERE id = ? AND status = ?" + owner_sql,
+        (job_id, STATUS_RUNNING, *owner_params),
+      ).fetchone()
+      if row is None:
+        return False
+      if row["retry_count"] < row["max_retries"]:
         retry_count = row["retry_count"] + 1
         delay = 2**retry_count * 60
         next_attempt = (now + timedelta(seconds=delay)).isoformat()
@@ -642,6 +706,7 @@ class SQLiteJobDatabase:
           (STATUS_FAILED, error, now.isoformat(), failure_category, failure_cause, job_id),
         )
         self.log.debug("Job %d failed: %s" % (job_id, error))
+    return True
 
   def get_job(self, job_id):
     with self._conn() as conn:
@@ -1193,7 +1258,7 @@ class PostgreSQLJobDatabase:
                     )
                 """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_media_ids_run_mid ON library_audit_media_ids (audit_id, media_id)")
-    self.log.info("PostgreSQL database initialized: %s" % self.db_url)
+    self.log.info("PostgreSQL database initialized: %s" % redact_db_url(self.db_url))
     with self._conn() as conn:
       _backfill_request_profile(conn, is_sqlite=False, logger=self.log)
     self._reset_running_jobs()
@@ -1202,7 +1267,7 @@ class PostgreSQLJobDatabase:
     """Reset only this node's interrupted running jobs back to pending on startup."""
     count = self._requeue_running_jobs_for_node(self._node_id)
     if count > 0:
-      self.log.info("Reset %d interrupted jobs to pending (node: %s)" % (count, self._node_id))
+      self.log.info("Reset %d interrupted jobs to pending on this node" % count)
 
   def _requeue_running_jobs_for_node(self, node_id):
     """Reset all running jobs for *node_id* to pending. Returns the number of rows updated."""
@@ -1392,8 +1457,14 @@ class PostgreSQLJobDatabase:
     source_duration_seconds=None,
     encoder_backend=None,
     encoder_name=None,
+    node_id=None,
   ):
-    """Mark a job as completed, optionally recording size + duration + encoder."""
+    """Mark a running job completed, optionally recording size + duration + encoder.
+
+    Returns False when the row is no longer running (cancelled or requeued)
+    or, when *node_id* is given, now belongs to another node.
+    """
+    owner_sql, owner_params = _owner_guard(node_id, "%s")
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
@@ -1405,7 +1476,8 @@ class PostgreSQLJobDatabase:
                     source_duration_seconds = %s,
                     encoder_backend = %s,
                     encoder_name = %s
-              WHERE id = %s""",
+              WHERE id = %s AND status = %s"""
+          + owner_sql,
           (
             STATUS_COMPLETED,
             input_size,
@@ -1414,9 +1486,14 @@ class PostgreSQLJobDatabase:
             encoder_backend,
             encoder_name,
             job_id,
+            STATUS_RUNNING,
+            *owner_params,
           ),
         )
-    self.log.debug("Job %d completed" % job_id)
+        updated = cur.rowcount != 0
+    if updated:
+      self.log.debug("Job %d completed" % job_id)
+    return updated
 
   def update_job_ffmpeg_stderr(self, job_id: int, stderr: str | None) -> None:
     """Store the full ffmpeg stderr blob for *job_id*.
@@ -1456,14 +1533,24 @@ class PostgreSQLJobDatabase:
         )
     self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay, reason or ""))
 
-  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None):
-    """Mark a job as failed, or requeue with exponential backoff if retries remain."""
+  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None):
+    """Mark a running job as failed, or requeue with exponential backoff if retries remain.
+
+    The row is locked and must still be running (and owned by *node_id*
+    when given); otherwise nothing is written and False is returned.
+    """
+    owner_sql, owner_params = _owner_guard(node_id, "%s")
     with self._conn() as conn:
       requeued = False
       with conn.cursor() as cur:
-        cur.execute("SELECT retry_count, max_retries FROM jobs WHERE id = %s", (job_id,))
+        cur.execute(
+          "SELECT retry_count, max_retries FROM jobs WHERE id = %s AND status = %s" + owner_sql + " FOR UPDATE",
+          (job_id, STATUS_RUNNING, *owner_params),
+        )
         row = cur.fetchone()
-        if row and row["retry_count"] < row["max_retries"]:
+        if row is None:
+          return False
+        if row["retry_count"] < row["max_retries"]:
           retry_count = row["retry_count"] + 1
           delay = 2**retry_count * 60
           cur.execute(
@@ -1489,6 +1576,7 @@ class PostgreSQLJobDatabase:
           self.log.debug("Job %d failed: %s" % (job_id, error))
       if requeued:
         _backfill_one_request_profile(conn, job_id, is_sqlite=False)
+    return True
 
   def get_job(self, job_id):
     """Get a specific job by ID."""
@@ -1909,6 +1997,9 @@ class PostgreSQLJobDatabase:
     Returns a list of (node_id, recovered_job_count) tuples for any nodes cleaned up.
     """
     recovered = []
+    # One transaction: lock the stale node rows (SKIP LOCKED so a peer that
+    # is already recovering them is not blocked or duplicated), requeue
+    # their running jobs and mark them offline, then commit together.
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
@@ -1916,18 +2007,29 @@ class PostgreSQLJobDatabase:
                     SELECT node_id FROM cluster_nodes
                     WHERE status = 'online'
                     AND last_seen < NOW() - make_interval(secs => %s)
+                    FOR UPDATE SKIP LOCKED
                 """,
           (stale_seconds,),
         )
         stale_nodes = [r["node_id"] for r in cur.fetchall()]
 
         for stale_node_id in stale_nodes:
-          job_count = self._requeue_running_jobs_for_node(stale_node_id)
+          cur.execute(
+            """
+            UPDATE jobs
+            SET status = %s, worker_id = NULL, node_id = NULL, started_at = NULL
+            WHERE status = %s AND node_id = %s
+            """,
+            (STATUS_PENDING, STATUS_RUNNING, stale_node_id),
+          )
+          job_count = cur.rowcount if isinstance(cur.rowcount, int) and cur.rowcount > 0 else 0
           cur.execute("UPDATE cluster_nodes SET status = 'offline' WHERE node_id = %s", (stale_node_id,))
           recovered.append((stale_node_id, job_count))
+      if any(count for _, count in recovered):
+        _backfill_request_profile(conn, is_sqlite=False)
 
-    for stale_node_id, job_count in recovered:
-      self.log.warning("Node %s declared stale — requeued %d running jobs" % (stale_node_id, job_count))
+    for _stale_node_id, job_count in recovered:
+      self.log.warning("Stale cluster node declared offline; requeued %d running jobs" % job_count)
     return recovered
 
   def mark_node_offline(self, node_id, remove=False):
@@ -1947,7 +2049,7 @@ class PostgreSQLJobDatabase:
     if requeued:
       self.log.info("Requeued %d running jobs on shutdown" % requeued)
     if remove:
-      self.log.info("Removed node %s from cluster registry" % node_id)
+      self.log.info("Removed this node from cluster registry")
 
   def send_node_command(self, node_id, command, requested_by=None):
     """Insert a command into node_commands for one or all online nodes.
@@ -2076,7 +2178,8 @@ class PostgreSQLJobDatabase:
     data = copy.deepcopy(config_dict)
     daemon = data.get("daemon", {})
     for key in list(daemon):
-      if key in SECRET_KEYS:
+      # Match kebab-case YAML keys (api-key, db-url, node-id) too.
+      if _norm_key(key) in SECRET_KEYS:
         del daemon[key]
     config_str = _yaml.safe_dump(data)
     with self._conn() as conn:
@@ -2116,8 +2219,7 @@ class PostgreSQLJobDatabase:
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute("DELETE FROM cluster_nodes WHERE node_id = ANY(%s)", (expired,))
-    for nid in expired:
-      self.log.info("Expired offline node: %s" % nid)
+    self.log.info("Expired %d offline node(s)" % len(expired))
     return expired
 
   def cleanup_orphaned_commands(self, node_ids):

@@ -6,6 +6,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -26,7 +27,17 @@ from resources.daemon.threads import (
   ScannerThread,
   StorageJanitorThread,
 )
-from resources.daemon.worker import WorkerPool
+from resources.daemon.worker import ABORT_CANCELLED, ABORT_SHUTDOWN, WorkerPool, kill_process_tree
+
+# Shutdown/restart drain: wait for in-flight conversions for the job timeout
+# plus this grace, or SHUTDOWN_MAX_DRAIN_SECONDS when no job timeout is set.
+SHUTDOWN_DRAIN_GRACE_SECONDS = 300
+SHUTDOWN_MAX_DRAIN_SECONDS = 24 * 3600
+# After the drain deadline, conversions are killed; wait this long for the
+# worker threads to notice before giving up on them.
+SHUTDOWN_KILL_WAIT_SECONDS = 30
+# How often serve_forever's service_actions() checks worker-thread liveness.
+WORKER_LIVENESS_CHECK_SECONDS = 30
 
 
 def _is_public_ip_address(value):
@@ -386,23 +397,39 @@ class DaemonServer(ThreadingHTTPServer):
     self.worker_pool.notify()
 
   def cancel_job(self, job_id):
-    """Cancel a job by terminating its process (if running) and updating the DB.
+    """Cancel a job by updating the DB and killing its process tree (if running).
 
     Returns True if the job was cancelled (either by killing a running process
     or by marking a pending job as cancelled in the database).
     """
-    # Terminate the subprocess if it is currently running
     process = self._job_processes.get(job_id)
-    if process is not None:
+    # Mark the row first so the worker's guarded complete/fail is discarded.
+    cancelled = self.job_db.cancel_job(job_id)
+    if process is None:
+      return cancelled
+    # Hand the kill to the owning worker's watchdog (kills manual.py and its
+    # ffmpeg child); fall back to a background tree-kill if no worker owns it.
+    pool = getattr(self, "worker_pool", None)
+    handed_off = False
+    if pool is not None:
       try:
-        process.terminate()
+        handed_off = pool.abort_job(job_id, ABORT_CANCELLED) is True
       except Exception:
-        pass
-      # Also update DB status; the worker's finally block will clean up
-      self.job_db.cancel_job(job_id)
-      return True
-    # Job is not actively running — mark it cancelled in DB if still pending
-    return self.job_db.cancel_job(job_id)
+        handed_off = False
+    if not handed_off:
+      threading.Thread(target=kill_process_tree, args=(process,), kwargs={"own_group": os.name == "posix"}, daemon=True, name="cancel-kill-%s" % job_id).start()
+    return True
+
+  def service_actions(self):
+    """Called by serve_forever() each poll; periodically respawns dead workers."""
+    now = time.monotonic()
+    if now - getattr(self, "_last_liveness_check", 0.0) < WORKER_LIVENESS_CHECK_SECONDS:
+      return
+    self._last_liveness_check = now
+    try:
+      self.worker_pool.ensure_workers_alive()
+    except Exception:
+      self.logger.exception("Worker liveness check failed")
 
   def reload_config(self):
     """Reload sma-ng.yml in-place without stopping workers or active conversions.
@@ -499,10 +526,47 @@ class DaemonServer(ThreadingHTTPServer):
     self.logger.info("Configuration reloaded.")
     return True
 
-  def graceful_restart(self):
-    """Drain active conversions then re-exec the daemon process."""
-    self.logger.info("Graceful restart — waiting for active conversions to finish...")
+  def _drain_deadline_seconds(self):
+    """Upper bound on how long shutdown/restart waits for in-flight jobs."""
+    timeouts = [getattr(w, "job_timeout_seconds", 0) for w in getattr(self.worker_pool, "_workers", [])]
+    timeouts = [t for t in timeouts if isinstance(t, int) and t > 0]
+    if timeouts:
+      return max(timeouts) + SHUTDOWN_DRAIN_GRACE_SECONDS
+    return SHUTDOWN_MAX_DRAIN_SECONDS
 
+  def _drain_workers(self, deadline_seconds):
+    """Join worker threads until they exit or *deadline_seconds* elapses.
+
+    At the deadline, in-flight conversions are killed (their jobs are left
+    'running' so they are requeued) and the workers get a short final
+    window to exit. Returns the list of workers still alive afterwards.
+    """
+    end = time.monotonic() + deadline_seconds
+    active = [w for w in self.worker_pool._workers if w.is_alive()]
+    while active and time.monotonic() < end:
+      names = [str(w.worker_id) for w in active if w.current_job_id]
+      if names:
+        self.logger.info("Waiting for worker(s) %s to finish..." % ", ".join(names))
+      for w in active:
+        w.join(timeout=max(0.0, min(10.0, end - time.monotonic())))
+      active = [w for w in active if w.is_alive()]
+    if not active:
+      return []
+    self.logger.warning("Drain deadline of %ds reached; killing %d in-flight conversion(s) so they are requeued" % (deadline_seconds, len(active)))
+    try:
+      self.worker_pool.abort_all(ABORT_SHUTDOWN)
+    except Exception:
+      self.logger.exception("Failed to abort in-flight conversions at drain deadline")
+    kill_end = time.monotonic() + SHUTDOWN_KILL_WAIT_SECONDS
+    for w in active:
+      w.join(timeout=max(0.0, kill_end - time.monotonic()))
+    active = [w for w in active if w.is_alive()]
+    if active:
+      self.logger.warning("Worker(s) %s did not exit after kill; continuing anyway" % ", ".join(str(w.worker_id) for w in active))
+    return active
+
+  def _stop_and_drain(self, action):
+    """Shared shutdown/restart sequence: stop threads, drain workers, go offline."""
     self.worker_pool.stop()
     self.heartbeat_thread.stop()
     self.scanner_thread.stop()
@@ -513,75 +577,35 @@ class DaemonServer(ThreadingHTTPServer):
     if self.config_watcher_thread:
       self.config_watcher_thread.stop()
 
-    active = [w for w in self.worker_pool._workers if w.is_alive()]
-    while active:
-      names = [str(w.worker_id) for w in active if w.current_job_id]
-      if names:
-        self.logger.info("Waiting for worker(s) %s to finish..." % ", ".join(names))
-      for w in active:
-        w.join(timeout=10)
-      active = [w for w in active if w.is_alive()]
+    self._drain_workers(self._drain_deadline_seconds())
+    self.logger.info("All workers finished, %s." % action)
 
-    self.logger.info("All workers finished, restarting...")
-
+    # Mark this node offline in the cluster table. Do NOT remove the row —
+    # that drops approval_status and the operator would have to re-approve
+    # after every redeploy. delete_node remains available via the admin API
+    # for genuine decommissions. mark_node_offline also requeues any jobs
+    # still 'running' on this node (e.g. killed at the drain deadline).
     if self.job_db.is_distributed:
       try:
-        # Mark offline but keep the row — removing it drops approval_status
-        # and the operator would have to re-approve after every restart.
         self.job_db.mark_node_offline(self.node_id)
-      except Exception:
-        pass
+      except Exception as e:
+        self.logger.warning("Could not mark this node offline during %s: %s" % (action, e))
 
     self.heartbeat_thread.join(timeout=5)
     self.scanner_thread.join(timeout=5)
     self.library_audit_thread.join(timeout=5)
     self.library_audit_worker_thread.join(timeout=5)
 
+  def graceful_restart(self):
+    """Drain active conversions then re-exec the daemon process."""
+    self.logger.info("Graceful restart — waiting for active conversions to finish...")
+    self._stop_and_drain("restarting")
     super().shutdown()
-
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
   def shutdown(self):
     self.logger.info("Shutting down — waiting for active conversions to finish...")
-
-    # Stop workers from picking up new jobs
-    self.worker_pool.stop()
-    self.heartbeat_thread.stop()
-    self.scanner_thread.stop()
-    self.recycle_cleaner_thread.stop()
-    self.storage_janitor_thread.stop()
-    self.library_audit_thread.stop()
-    self.library_audit_worker_thread.stop()
-    if self.config_watcher_thread:
-      self.config_watcher_thread.stop()
-
-    # Wait for in-progress conversions to complete
-    active = [w for w in self.worker_pool._workers if w.is_alive()]
-    while active:
-      names = [str(w.worker_id) for w in active if w.current_job_id]
-      if names:
-        self.logger.info("Waiting for worker(s) %s to finish..." % ", ".join(names))
-      for w in active:
-        w.join(timeout=10)
-      active = [w for w in active if w.is_alive()]
-
-    self.logger.info("All workers finished, shutting down.")
-
-    # Mark this node offline in the cluster table on clean shutdown.
-    # Do NOT remove the row — that drops approval_status and the operator
-    # would have to re-approve after every redeploy. delete_node remains
-    # available via the admin API for genuine decommissions.
-    if self.job_db.is_distributed:
-      try:
-        self.job_db.mark_node_offline(self.node_id)
-      except Exception:
-        pass
-
-    self.heartbeat_thread.join(timeout=5)
-    self.scanner_thread.join(timeout=5)
-    self.library_audit_thread.join(timeout=5)
-    self.library_audit_worker_thread.join(timeout=5)
-
+    self._stop_and_drain("shutting down")
     super().shutdown()
 
 

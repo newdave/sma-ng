@@ -134,7 +134,7 @@ class TestConversionWorkerProcessJob:
     worker = _make_worker(job_db=db)
     job = {"id": 1, "path": str(tmp_path / "missing.mkv"), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(1, "Path does not exist", failure_category="source_media", failure_cause="path_missing")
+    db.fail_job.assert_called_once_with(1, "Path does not exist", failure_category="source_media", failure_cause="path_missing", node_id=worker.node_id)
 
   def test_skips_cancelled_job_before_start(self, tmp_path):
     media = tmp_path / "movie.mkv"
@@ -186,7 +186,7 @@ class TestConversionWorkerProcessJob:
     worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
     job = {"id": 5, "path": str(media), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(5, "Conversion process failed", failure_category="system", failure_cause="process_failed")
+    db.fail_job.assert_called_once_with(5, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id)
     db.complete_job.assert_not_called()
 
   def test_does_not_overwrite_cancelled_status_after_failed_conversion(self, tmp_path):
@@ -244,7 +244,7 @@ class TestConversionWorkerProcessJob:
     worker._run_conversion = mock.MagicMock()
     job = {"id": 8, "path": str(media), "config": "/cfg.ini", "args": '["-tmdb", '}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(8, "Invalid job args", failure_category="config", failure_cause="invalid_args")
+    db.fail_job.assert_called_once_with(8, "Invalid job args", failure_category="config", failure_cause="invalid_args", node_id=worker.node_id)
     worker._run_conversion.assert_not_called()
     assert worker.current_job_id is None
 
@@ -363,7 +363,7 @@ class TestIngestFfmpegStderrSidecars:
     worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
     worker.process_job({"id": 8, "path": str(media), "config": "/cfg.ini", "args": None})
 
-    db.fail_job.assert_called_once_with(8, "Conversion process failed", failure_category="system", failure_cause="process_failed")
+    db.fail_job.assert_called_once_with(8, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id)
     db.update_job_ffmpeg_stderr.assert_called_once()
     args, _ = db.update_job_ffmpeg_stderr.call_args
     assert args[0] == 8
@@ -421,20 +421,6 @@ class TestRunConversionInner:
     with mock.patch("subprocess.Popen", return_value=proc):
       result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
     assert result[0] is False
-
-  def test_returns_false_on_timeout(self, tmp_path):
-    import subprocess as _subprocess
-
-    media = tmp_path / "movie.mkv"
-    media.write_bytes(b"")
-    worker = _make_worker()
-    worker.job_timeout_seconds = 10
-    proc = _make_fake_process([], returncode=0)
-    proc.wait.side_effect = _subprocess.TimeoutExpired(cmd="manual.py", timeout=10)
-    with mock.patch("subprocess.Popen", return_value=proc):
-      result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
-    assert result[0] is False
-    proc.kill.assert_called_once()
 
   def test_returns_false_on_popen_exception(self, tmp_path):
     media = tmp_path / "movie.mkv"
@@ -518,7 +504,9 @@ class TestRunConversionInner:
     progress_line = "frame=  100 fps= 25 speed=1.50x time=00:01:00 size=  5000kB"
     proc = _make_fake_process([duration_line, progress_line], returncode=0)
 
-    with mock.patch("subprocess.Popen", return_value=proc):
+    # The watchdog thread also reads time.monotonic; stub it out so the
+    # patched clock is consumed only by the progress loop.
+    with mock.patch("subprocess.Popen", return_value=proc), mock.patch("resources.daemon.worker._JobWatchdog"):
       with mock.patch("resources.daemon.worker.time.monotonic", side_effect=[0.0, 10.0]):
         result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
 

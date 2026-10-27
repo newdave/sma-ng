@@ -1108,3 +1108,130 @@ class TestStorageJanitorThread:
     ):
       # Should not raise.
       j._sweep_once()
+
+
+# ---------------------------------------------------------------------------
+# Scanner: strict-routing skips are not recorded as scanned
+# ---------------------------------------------------------------------------
+
+
+class TestScannerRecordsOnlyHandledFiles:
+  def _scanner(self, tmp_path, db, matches):
+    pcm = mock.MagicMock()
+    pcm.media_extensions = frozenset([".mkv"])
+    pcm.get_config_for_path.return_value = "/default.ini"
+    pcm.get_profile_for_path.return_value = None
+    pcm.strict_routing = True
+    pcm.has_routing_match.side_effect = lambda p: p in matches
+    return _make_scanner([{"path": str(tmp_path)}], job_db=db, path_config_manager=pcm)
+
+  def test_strict_routing_skip_is_not_recorded(self, tmp_path):
+    routed = str(tmp_path / "routed.mkv")
+    unrouted = str(tmp_path / "unrouted.mkv")
+    for p in (routed, unrouted):
+      open(p, "wb").close()
+    db = mock.MagicMock()
+    db.filter_unscanned.return_value = [routed, unrouted]
+    db.add_job.return_value = 5
+    scanner = self._scanner(tmp_path, db, matches={routed})
+    assert scanner._scan({"path": str(tmp_path)}) == 1
+    db.record_scanned.assert_called_once_with([routed])
+
+  def test_already_active_duplicate_is_recorded(self, tmp_path):
+    dup = str(tmp_path / "dup.mkv")
+    open(dup, "wb").close()
+    db = mock.MagicMock()
+    db.filter_unscanned.return_value = [dup]
+    db.add_job.return_value = None  # pending/running job already exists
+    scanner = self._scanner(tmp_path, db, matches={dup})
+    assert scanner._scan({"path": str(tmp_path)}) == 0
+    db.record_scanned.assert_called_once_with([dup])
+
+  def test_nothing_recorded_when_everything_skipped(self, tmp_path):
+    skipped = str(tmp_path / "skipped.mkv")
+    open(skipped, "wb").close()
+    db = mock.MagicMock()
+    db.filter_unscanned.return_value = [skipped]
+    scanner = self._scanner(tmp_path, db, matches=set())
+    assert scanner._scan({"path": str(tmp_path)}) == 0
+    db.record_scanned.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat: maintenance throttled to hourly, logs omit node IDs
+# ---------------------------------------------------------------------------
+
+
+class TestHeartbeatMaintenanceThrottle:
+  def _run_ticks(self, ht, ticks):
+    count = [0]
+
+    def fake_wait(timeout=None):
+      count[0] += 1
+      if count[0] >= ticks:
+        ht.running = False
+      return False
+
+    ht._stop_event.wait = fake_wait
+    ht.run()
+
+  def _ht(self, db):
+    server = mock.MagicMock()
+    server.path_config_manager.node_expiry_days = 7
+    server.path_config_manager.log_archive_dir = "/archive"
+    server.path_config_manager.log_archive_after_days = 7
+    server.path_config_manager.log_delete_after_days = 30
+    ht = _make_heartbeat(job_db=db, server=server)
+    ht.log_ttl_days = 14
+    return ht
+
+  def test_maintenance_runs_once_across_many_heartbeats(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = []
+    db.expire_offline_nodes.return_value = []
+    ht = self._ht(db)
+    with mock.patch("resources.daemon.threads.LogArchiver") as archiver_cls:
+      self._run_ticks(ht, 5)
+    assert db.heartbeat.call_count == 5
+    assert db.recover_stale_nodes.call_count == 5
+    db.cleanup_old_logs.assert_called_once_with(14)
+    db.expire_offline_nodes.assert_called_once_with(7)
+    archiver_cls.return_value.run.assert_called_once_with(db)
+
+  def test_maintenance_reruns_after_interval(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    ht = self._ht(db)
+    with mock.patch("resources.daemon.threads.LogArchiver"):
+      ht._maybe_run_maintenance()
+      ht._maybe_run_maintenance()
+      assert db.cleanup_old_logs.call_count == 1
+      ht._last_maintenance -= HeartbeatThread.MAINTENANCE_INTERVAL_SECONDS + 1
+      ht._maybe_run_maintenance()
+    assert db.cleanup_old_logs.call_count == 2
+
+  def test_maintenance_error_does_not_break_heartbeat(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = []
+    db.cleanup_old_logs.side_effect = RuntimeError("db down")
+    ht = self._ht(db)
+    self._run_ticks(ht, 3)
+    assert db.heartbeat.call_count == 3
+    db.cleanup_old_logs.assert_called_once()
+
+  def test_stale_recovery_log_omits_node_ids(self, caplog):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    db.poll_node_command.return_value = None
+    db.recover_stale_nodes.return_value = [("secret-node-a", 2), ("secret-node-b", 1)]
+    ht = self._ht(db)
+    with caplog.at_level(logging.DEBUG, logger="test.heartbeat"), mock.patch("resources.daemon.threads.LogArchiver"):
+      self._run_ticks(ht, 1)
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "Recovered 3 jobs from 2 stale node(s)" in text
+    assert "secret-node" not in text
+    ht.server.notify_workers.assert_called_once()

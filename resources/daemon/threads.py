@@ -32,6 +32,9 @@ class HeartbeatThread(_StoppableThread):
   and recovers jobs from nodes that have gone stale.
   """
 
+  # Housekeeping (log TTL, offline-node expiry, log archival) cadence.
+  MAINTENANCE_INTERVAL_SECONDS = 3600
+
   def __init__(self, job_db, node_id, host, worker_count, server, interval, stale_seconds, logger, started_at, version="", hwaccel="", log_ttl_days=30, node_name=None):
     super().__init__()
     self.job_db = job_db
@@ -47,6 +50,7 @@ class HeartbeatThread(_StoppableThread):
     self.hwaccel = hwaccel
     self.log_ttl_days = log_ttl_days
     self.node_name = node_name or None
+    self._last_maintenance = None
 
   def run(self):
     if not self.job_db.is_distributed:
@@ -62,28 +66,44 @@ class HeartbeatThread(_StoppableThread):
           if should_exit:
             return
         recovered = self.job_db.recover_stale_nodes(self.stale_seconds)
-        for stale_id, job_count in recovered:
-          self.log.warning("Recovered %d jobs from stale node %s" % (job_count, stale_id))
-        if any(job_count > 0 for _, job_count in recovered):
+        recovered_jobs = sum(job_count for _, job_count in recovered)
+        if recovered:
+          self.log.warning("Recovered %d jobs from %d stale node(s)" % (recovered_jobs, len(recovered)))
+        if recovered_jobs > 0:
           self.server.notify_workers()  # Wake workers to pick up requeued jobs
-        if self.log_ttl_days > 0:
-          self.job_db.cleanup_old_logs(self.log_ttl_days)
-        if self.job_db.is_distributed:
-          expiry_days = self.server.path_config_manager.node_expiry_days
-          if expiry_days > 0:
-            expired = self.job_db.expire_offline_nodes(expiry_days)
-            for nid in expired:
-              self.log.info("Expired offline node: %s" % nid)
-        if self.job_db.is_distributed:
-          archive_dir = self.server.path_config_manager.log_archive_dir
-          archive_after = self.server.path_config_manager.log_archive_after_days
-          delete_after = self.server.path_config_manager.log_delete_after_days
-          if archive_dir and archive_after > 0:
-            archiver = LogArchiver(archive_dir, archive_after, delete_after, self.log)
-            archiver.run(self.job_db)
       except Exception:
         self.log.exception("Heartbeat error")
+      self._maybe_run_maintenance()
       self._stop_event.wait(timeout=self.interval)
+
+  def _maybe_run_maintenance(self):
+    """Run log TTL cleanup, offline-node expiry and log archival at most hourly.
+
+    These are housekeeping sweeps over whole tables; running them on every
+    30s heartbeat on every node only adds DB load. The first heartbeat runs
+    them immediately, then they are throttled to MAINTENANCE_INTERVAL_SECONDS.
+    """
+    now = time.monotonic()
+    if self._last_maintenance is not None and now - self._last_maintenance < self.MAINTENANCE_INTERVAL_SECONDS:
+      return
+    # Stamp before running so a failing sweep is retried next hour, not every tick.
+    self._last_maintenance = now
+    try:
+      if self.log_ttl_days > 0:
+        self.job_db.cleanup_old_logs(self.log_ttl_days)
+      if self.job_db.is_distributed:
+        expiry_days = self.server.path_config_manager.node_expiry_days
+        if expiry_days > 0:
+          # expire_offline_nodes logs the count itself.
+          self.job_db.expire_offline_nodes(expiry_days)
+        archive_dir = self.server.path_config_manager.log_archive_dir
+        archive_after = self.server.path_config_manager.log_archive_after_days
+        delete_after = self.server.path_config_manager.log_delete_after_days
+        if archive_dir and archive_after > 0:
+          archiver = LogArchiver(archive_dir, archive_after, delete_after, self.log)
+          archiver.run(self.job_db)
+    except Exception:
+      self.log.exception("Heartbeat maintenance error")
 
   def _execute_command(self, cmd: dict) -> bool:
     """Execute a cluster command. Returns True if the heartbeat loop should exit."""
@@ -232,6 +252,10 @@ class ScannerThread(_StoppableThread):
 
     self.log.info("Scanner: found %d new file(s) in %s" % (len(unscanned), scan_dir))
     queued = 0
+    # Only files that were queued, or are already pending/running, are
+    # recorded as scanned. Files skipped by strict-routing stay unrecorded
+    # so they are picked up once a matching routing rule is added.
+    handled = []
     strict = getattr(self.path_config_manager, "strict_routing", False)
     has_match = getattr(self.path_config_manager, "has_routing_match", None)
     for filepath in unscanned:
@@ -257,14 +281,16 @@ class ScannerThread(_StoppableThread):
         request_source="scan",
         request_profile=scan_profile,
       )
+      # add_job returns None when a pending/running job already exists for
+      # the path; that file is handled too, so record it either way.
+      handled.append(filepath)
       if job_id is not None:
         self.log.info("Scanner queued job %d: %s" % (job_id, submit_path))
         queued += 1
         metrics_prom.record_job_enqueued("scan", scan_profile)
 
-    # Record all candidates (including already-queued ones) as scanned so
-    # we don't re-evaluate them on the next pass.
-    self.job_db.record_scanned(unscanned)
+    if handled:
+      self.job_db.record_scanned(handled)
 
     if queued:
       self.log.info("Scanner: queued %d new job(s) from %s" % (queued, scan_dir))
@@ -551,7 +577,7 @@ class LibraryAuditThread(_StoppableThread):
     is_recycle_bin_path = getattr(self.pcm, "is_recycle_bin_path", None)
     batch = []
     total = 0
-    for path, hint in enumerate_paths(paths, skip_dirs=list(settings.skip_dirs), is_recycle_bin_path=is_recycle_bin_path):
+    for path, hint in enumerate_paths(paths, skip_dirs=list(settings.skip_dirs), is_recycle_bin_path=is_recycle_bin_path, temp_extension=getattr(self.pcm, "temp_extension", None) or None):
       batch.append((path, hint))
       if len(batch) >= 500:
         self.job_db.enqueue_audit_units(audit_id, batch)
@@ -612,7 +638,7 @@ class LibraryAuditWorkerThread(_StoppableThread):
       self.job_db.requeue_audit_claims_for_node(self.node_id)
     except Exception:
       self.log.exception("Library audit worker: requeue-on-startup failed")
-    self.log.info("Library audit worker started on node %s" % self.node_id)
+    self.log.info("Library audit worker started")
     while self.running:
       try:
         progressed = self._tick()

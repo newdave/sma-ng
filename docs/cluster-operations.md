@@ -231,14 +231,22 @@ to continue but new pickups halted (e.g. while you investigate a slow job).
 
 ## Runbook: recover from a crashed or unreachable node
 
-When a node misses heartbeats for `--stale-seconds` (default 120s), the
-master's `HeartbeatThread.recover_stale_nodes` fires:
+When a node misses heartbeats for `--stale-seconds` / `daemon.stale-seconds`
+(default 120s), the next heartbeat of any live node runs
+`recover_stale_nodes`, which in a single transaction:
 
-- Marks the row `status='offline'`
+- Locks the stale `cluster_nodes` rows with `FOR UPDATE SKIP LOCKED`, so two
+  live nodes never recover the same node twice
 - Re-queues every job that node had marked `running` so another node can claim
   it on its next poll
+- Marks the row `status='offline'`
 
-If the node never comes back, eventually `--node-expiry-days` (default 7) will
+The daemon log shows `Recovered N jobs from M stale node(s)` (node IDs are not
+logged). If the stale node was only partitioned and comes back, its workers
+notice within about 10 seconds that their jobs were requeued, kill the local
+ffmpeg, and discard their results instead of overwriting the new owner's row.
+
+If the node never comes back, eventually `daemon.node-expiry-days` (default 7) will
 delete the row. To force it sooner:
 
 ```bash

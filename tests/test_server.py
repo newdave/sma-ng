@@ -40,6 +40,13 @@ def _make_server():
   return server
 
 
+def _run_thread_inline(target=None, args=(), kwargs=None, **_ignored):
+  """threading.Thread stand-in that runs *target* synchronously on start()."""
+  thread = MagicMock()
+  thread.start.side_effect = lambda: target(*args, **(kwargs or {}))
+  return thread
+
+
 # ---------------------------------------------------------------------------
 # Hardware capability probe + fallback counters (T5)
 # ---------------------------------------------------------------------------
@@ -292,11 +299,41 @@ class TestDaemonServerCancelJob:
     server._job_processes[42] = proc
     server.job_db.cancel_job.return_value = True
 
-    result = server.cancel_job(42)
+    with patch("resources.daemon.server.threading.Thread", side_effect=_run_thread_inline):
+      result = server.cancel_job(42)
 
     proc.terminate.assert_called_once()
+    proc.kill.assert_called_once()
     server.job_db.cancel_job.assert_called_once_with(42)
     assert result is True
+
+  def test_hands_running_job_to_worker_watchdog(self):
+    server = _make_server()
+    proc = MagicMock()
+    server._job_processes[42] = proc
+    server.worker_pool = MagicMock()
+    server.worker_pool.abort_job.return_value = True
+    server.job_db.cancel_job.return_value = True
+
+    with patch("resources.daemon.server.threading.Thread") as thread_cls:
+      assert server.cancel_job(42) is True
+
+    server.worker_pool.abort_job.assert_called_once_with(42, "cancelled")
+    thread_cls.assert_not_called()
+    proc.terminate.assert_not_called()
+
+  def test_db_marked_cancelled_before_kill(self):
+    server = _make_server()
+    order = []
+    proc = MagicMock()
+    proc.terminate.side_effect = lambda: order.append("kill")
+    server._job_processes[3] = proc
+    server.job_db.cancel_job.side_effect = lambda jid: order.append("db") or True
+
+    with patch("resources.daemon.server.threading.Thread", side_effect=_run_thread_inline):
+      server.cancel_job(3)
+
+    assert order[:2] == ["db", "kill"]
 
   def test_returns_db_result_when_no_active_process_false(self):
     server = _make_server()
@@ -322,7 +359,8 @@ class TestDaemonServerCancelJob:
     server._job_processes[7] = proc
     server.job_db.cancel_job.return_value = True
 
-    result = server.cancel_job(7)  # must not raise
+    with patch("resources.daemon.server.threading.Thread", side_effect=_run_thread_inline):
+      result = server.cancel_job(7)  # must not raise
     assert result is True
 
   def test_calls_db_cancel_after_terminate_exception(self):
@@ -332,7 +370,8 @@ class TestDaemonServerCancelJob:
     server._job_processes[5] = proc
     server.job_db.cancel_job.return_value = True
 
-    server.cancel_job(5)
+    with patch("resources.daemon.server.threading.Thread", side_effect=_run_thread_inline):
+      server.cancel_job(5)
 
     server.job_db.cancel_job.assert_called_once_with(5)
 
@@ -776,6 +815,53 @@ class TestDaemonServerShutdown:
     with patch("http.server.HTTPServer.shutdown"):
       server.shutdown()  # must not raise
 
+  def test_shutdown_logs_warning_when_mark_offline_fails(self):
+    server = self._make_shutdown_server()
+    server.job_db.is_distributed = True
+    server.node_id = "node-id-xyz"
+    server.job_db.mark_node_offline.side_effect = RuntimeError("db gone")
+    with patch("http.server.HTTPServer.shutdown"):
+      server.shutdown()
+    warnings = [c.args[0] for c in server.logger.warning.call_args_list]
+    assert any("Could not mark this node offline" in w and "db gone" in w for w in warnings)
+    assert all("node-id-xyz" not in w for w in warnings)
+
+  def test_drain_deadline_kills_in_flight_jobs(self):
+    server = self._make_shutdown_server()
+    stuck = MagicMock()
+    stuck.is_alive.return_value = True
+    stuck.current_job_id = 9
+    stuck.worker_id = 1
+    server.worker_pool._workers = [stuck]
+    with patch("resources.daemon.server.SHUTDOWN_KILL_WAIT_SECONDS", 0):
+      remaining = server._drain_workers(0)
+    server.worker_pool.abort_all.assert_called_once_with("shutdown")
+    assert remaining == [stuck]
+    warnings = " ".join(c.args[0] for c in server.logger.warning.call_args_list)
+    assert "Drain deadline" in warnings
+    assert "did not exit" in warnings
+
+  def test_drain_returns_empty_when_workers_finish(self):
+    server = self._make_shutdown_server()
+    done = MagicMock()
+    done.is_alive.return_value = False
+    server.worker_pool._workers = [done]
+    assert server._drain_workers(5) == []
+    server.worker_pool.abort_all.assert_not_called()
+
+  def test_drain_deadline_uses_job_timeout_plus_grace(self):
+    from resources.daemon.server import SHUTDOWN_DRAIN_GRACE_SECONDS, SHUTDOWN_MAX_DRAIN_SECONDS
+
+    server = self._make_shutdown_server()
+    w1, w2 = MagicMock(), MagicMock()
+    w1.job_timeout_seconds = 100
+    w2.job_timeout_seconds = 300
+    server.worker_pool._workers = [w1, w2]
+    assert server._drain_deadline_seconds() == 300 + SHUTDOWN_DRAIN_GRACE_SECONDS
+    w1.job_timeout_seconds = 0
+    w2.job_timeout_seconds = 0
+    assert server._drain_deadline_seconds() == SHUTDOWN_MAX_DRAIN_SECONDS
+
   def test_shutdown_waits_for_active_workers(self):
     server = self._make_shutdown_server()
     alive_worker = MagicMock()
@@ -790,6 +876,24 @@ class TestDaemonServerShutdown:
 # ---------------------------------------------------------------------------
 # TestDaemonServerGracefulRestart
 # ---------------------------------------------------------------------------
+
+
+class TestDaemonServerServiceActions:
+  def test_checks_worker_liveness_at_most_every_interval(self):
+    server = _make_server()
+    server.worker_pool = MagicMock()
+    server.logger = MagicMock()
+    server.service_actions()
+    server.service_actions()
+    server.worker_pool.ensure_workers_alive.assert_called_once()
+
+  def test_liveness_errors_are_logged_not_raised(self):
+    server = _make_server()
+    server.worker_pool = MagicMock()
+    server.worker_pool.ensure_workers_alive.side_effect = RuntimeError("boom")
+    server.logger = MagicMock()
+    server.service_actions()
+    server.logger.exception.assert_called_once()
 
 
 class TestDaemonServerGracefulRestart:

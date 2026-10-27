@@ -16,6 +16,7 @@ from resources.processor.failures import (
   WORKER_SENTINEL_INVALID_ARGS,
   WORKER_SENTINEL_PATH_MISSING,
   WORKER_SENTINEL_PROCESS_FAILED,
+  WORKER_SENTINEL_TIMEOUT,
   FailureCategory,
   FfmpegFailureCause,
   FfmpegFailureClass,
@@ -43,6 +44,7 @@ def test_every_failure_cause_maps_to_non_unknown_category(value):
     (WORKER_SENTINEL_PROCESS_FAILED, FailureCategory.SYSTEM),
     (WORKER_SENTINEL_EXCEPTION, FailureCategory.SYSTEM),
     (WORKER_SENTINEL_DISK_PRESSURE, FailureCategory.DISK),
+    (WORKER_SENTINEL_TIMEOUT, FailureCategory.SYSTEM),
   ],
 )
 def test_worker_sentinels_map_to_documented_categories(sentinel, expected):
