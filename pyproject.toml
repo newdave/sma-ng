@@ -49,7 +49,7 @@ dependencies = [
   "pydantic>=2,<3",
   "ruamel.yaml>=0.18,<1",
   "prometheus-client>=0.20,<1",
-  "python-json-logger>=3.2,<4",
+  "python-json-logger>=3.2,<5",
   "mistune>=3.0,<4",
 ]
 
