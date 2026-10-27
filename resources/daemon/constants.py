@@ -38,6 +38,9 @@ AUDIT_RUN_FAILED = "failed"
 
 _node_id_cache: str | None = None
 
+# Maximum accepted HTTP request body size (bytes).
+MAX_REQUEST_BODY_BYTES = 1024 * 1024
+
 SECRET_KEYS: frozenset = frozenset({"api_key", "db_url", "username", "password", "node_id"})
 
 # Per-instance service secret fields. _strip_secrets walks

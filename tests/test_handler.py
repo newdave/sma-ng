@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
@@ -2900,13 +2901,16 @@ class TestHTMLRoutes:
       h._get_dashboard("/dashboard", {})
     assert h._response_code == 200
     body = _get_response_bytes(h).decode()
-    assert "topsecret" in body
+    assert "topsecret" not in body
+    assert "sessionStorage" in body
+    assert "X-API-Key" in body
 
-  def test_get_admin_injects_api_key(self):
+  def test_get_admin_never_renders_api_key(self):
     h = _make_handler(api_key="topsecret")
     with patch("resources.daemon.handler._load_admin_html", return_value="<html><head></head></html>"):
       h._get_admin("/admin", {})
     assert h._response_code == 200
+    assert "topsecret" not in _get_response_bytes(h).decode()
 
   def test_get_root_redirects_to_dashboard(self):
     h = _make_handler()
@@ -3000,3 +3004,89 @@ class TestForwardArrEvent:
     h._handle_sonarr_webhook()
     assert h._response_code == 200
     assert mock_fwd.call_count == 1
+
+
+from resources.daemon.constants import SCRIPT_DIR  # noqa: E402
+
+
+class TestSecurityHardening:
+  def test_status_public_view_is_minimal(self):
+    h = _make_handler(api_key="k", headers={})
+    h.server.job_db.get_cluster_nodes.return_value = [{"node_id": "n1", "host": "10.0.0.5"}]
+    h._get_status()
+    body = _get_response_body(h)
+    assert h._response_code == 200
+    assert "cluster" not in body
+    assert "n1" not in json.dumps(body)
+    assert body["status"] == "ok"
+
+  def test_status_authenticated_has_full_detail(self):
+    h = _make_handler(api_key="k", headers={"X-API-Key": "k"})
+    h.server.job_db.get_cluster_nodes.return_value = [{"node_id": "n1", "host": "10.0.0.5"}]
+    h._get_status()
+    assert _get_response_body(h)["cluster"][0]["node_id"] == "n1"
+
+  def test_invalid_content_length_returns_400(self):
+    h = _make_handler(method="POST", path="/jobs/bulk", headers={"Content-Length": "abc"}, body=b"{}")
+    h.do_POST()
+    assert h._response_code == 400
+    assert "Content-Length" in _get_response_body(h)["error"]
+
+  def test_oversized_body_returns_413(self):
+    from resources.daemon.constants import MAX_REQUEST_BODY_BYTES
+
+    h = _make_handler(method="POST", path="/jobs/bulk", headers={"Content-Length": str(MAX_REQUEST_BODY_BYTES + 1)})
+    h.do_POST()
+    assert h._response_code == 413
+
+  def test_invalid_query_int_returns_400(self):
+    h = _make_handler(path="/jobs?limit=abc")
+    h.do_GET()
+    assert h._response_code == 400
+    assert "limit" in _get_response_body(h)["error"]
+
+  def test_negative_query_int_returns_400(self):
+    h = _make_handler(path="/jobs?offset=-1")
+    h.do_GET()
+    assert h._response_code == 400
+
+  def test_docs_404_does_not_leak_path(self):
+    h = _make_handler()
+    with patch("resources.daemon.handler.doc_file_for_slug", return_value=os.path.join(SCRIPT_DIR, "nope.md")):
+      h._get_docs("/docs/nope", {})
+    assert h._response_code == 404
+    assert SCRIPT_DIR not in _get_response_bytes(h).decode()
+
+  def test_browse_ancestor_is_not_a_subtree_grant(self, tmp_path):
+    root = tmp_path / "a" / "media"
+    root.mkdir(parents=True)
+    (tmp_path / "a" / "other").mkdir()
+    (tmp_path / "a" / "secret.mkv").write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.routing_match_paths.return_value = [str(root)]
+    h._get_browse({"path": [str(tmp_path / "a" / "other")]})
+    assert h._response_code == 403
+    h = _make_handler()
+    h.server.path_config_manager.routing_match_paths.return_value = [str(root)]
+    h._get_browse({"path": [str(tmp_path / "a")]})
+    body = _get_response_body(h)
+    assert h._response_code == 200
+    assert [os.path.basename(d) for d in body["dirs"]] == ["media"]
+    assert body["files"] == []
+
+  def test_browse_symlink_cannot_escape_root(self, tmp_path):
+    root = tmp_path / "media"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "link").symlink_to(outside)
+    h = _make_handler()
+    h.server.path_config_manager.routing_match_paths.return_value = [str(root)]
+    h._get_browse({"path": [str(root / "link")]})
+    assert h._response_code == 403
+
+  def test_api_key_compare_uses_constant_time(self):
+    with patch("resources.daemon.handler.hmac.compare_digest", return_value=True) as cd:
+      h = _make_handler(api_key="secret", headers={"X-API-Key": "anything"})
+      assert h.check_auth() is True
+    cd.assert_called()
