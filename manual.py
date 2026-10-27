@@ -21,11 +21,11 @@ import guessit
 import tmdbsimple as tmdb
 
 from converter.avcodecs import attachment_codec_list, audio_codec_list, subtitle_codec_list, video_codec_list
-from converter.ffmpeg import is_cover_art_attachment
 from resources.config_loader import ConfigError, ConfigLoader
 from resources.daemon.context import set_job_id
 from resources.extensions import tmdb_api_key
 from resources.log import getLogger
+from resources.media_repair import STATUS_REPAIRED, RepairProcessor
 from resources.mediaprocessor import InsufficientOutputSpace, MediaProcessor
 from resources.metadata import MediaType, Metadata
 from resources.readsettings import ReadSettings
@@ -572,7 +572,7 @@ def processFile(
         raise
       except Exception:
         log.exception("There was an error tagging the file")
-    elif info.posters or any(is_cover_art_attachment(a) for a in info.attachment):
+    elif info.cover_art:
       # No metadata match, but cover art must still never survive a tag-only pass.
       log.info("No metadata match, stripping cover art from %s [strip-cover-art]." % inputfile)
       try:
@@ -629,9 +629,10 @@ def processFile(
       except Exception:
         log.exception("Error during file rename")
 
-    # When output_dir is set without moveto, restoreFromOutput will atomically
-    # overwrite the input path with the output. Recycle the original now, while
-    # it still exists, so it is preserved before the path is replaced.
+    # When output_dir is set without moveto, restoreFromOutput moves the output
+    # back next to the input. If the names collide it only replaces the input
+    # when delete is enabled (recycle the original now, while it still exists);
+    # with delete disabled it keeps the original and numbers the output.
     _overwrite_input = mp.settings.output_dir and not mp.settings.moveto and os.path.commonpath([mp.settings.output_dir, output["output"]]) == mp.settings.output_dir
     if _overwrite_input and output.get("delete"):
       mp._recycle_to_bin(output["input"])
@@ -701,9 +702,9 @@ def processFile(
     # settings.postprocess hid the Plex refresh whenever post-process
     # scripts were disabled, which is the default.
     if tagdata:
-      mp.post(output_files, tagdata.mediatype, tmdbid=tagdata.tmdbid, season=tagdata.season, episode=tagdata.episodes or tagdata.episode)
+      mp.post(output_files, tagdata.mediatype, tmdbid=tagdata.tmdbid, season=tagdata.season, episode=tagdata.episodes or tagdata.episode, input_path=output["input"])
     elif type_hint:
-      mp.post(output_files, type_hint, tmdbid=tmdbid, season=season, episode=episode)
+      mp.post(output_files, type_hint, tmdbid=tmdbid, season=season, episode=episode, input_path=output["input"])
     addtoProcessedArchive(output_files + [output["input"]] if not output["input_deleted"] else output_files, processedList, processedArchive)
 
     # Trigger rescan on matching Sonarr/Radarr instance; may also rename
@@ -976,7 +977,7 @@ def main():
   parser.add_argument(
     "--audit",
     action="store_true",
-    help="Run a library audit on the input path: locate ffprobe failures, orphan sidecars, leftover .tmp files, leftover pre-conversion originals, TMDB/TVDB-id duplicates, and hybrid-aspect (stretched) MP4s. Prints findings and exits non-zero when any are found.",
+    help="Run a library audit on the input path: locate ffprobe failures, orphan sidecars, leftover .tmp and in-transit files, leftover pre-conversion originals, TMDB/TVDB-id duplicates, hybrid-aspect (stretched) media, and stream damage (data, unknown or artwork streams). Prints findings and exits non-zero when any are found.",
   )
   parser.add_argument(
     "--repair-hybrid",
@@ -1074,6 +1075,8 @@ def main():
       repair_hybrid=bool(args.get("repairhybrid")),
       recycle_failed=bool(args.get("recyclefailed")),
       recycle_bin=recycle_bin,
+      repairer=RepairProcessor(settings, logger=log, ffmpeg_dir=ffmpeg_dir) if args.get("repairhybrid") else None,
+      temp_extension=getattr(settings, "temp_extension", None) or None,
     )
     sys.exit(rc)
 
@@ -1083,7 +1086,6 @@ def main():
 
   if args.get("repairhybrid"):
     from resources.library_audit.probes import hybrid_aspect_check
-    from resources.library_audit.repair import repair_hybrid_aspect
 
     repair_mode = args["repairhybrid"]
     ffmpeg_dir = getattr(settings, "ffmpeg_dir", None) or None
@@ -1095,14 +1097,18 @@ def main():
       else:
         targets.append(path)
       detected = repaired = 0
+      repairer = RepairProcessor(settings, logger=log, ffmpeg_dir=ffmpeg_dir)
       for target in sorted(targets):
         details = hybrid_aspect_check(target, ffmpeg_dir=ffmpeg_dir)
         if details is None:
           continue
         detected += 1
         log.info("Hybrid-aspect file detected: %s (%dx%d, true height %d, %s)" % (target, details["width"], details["height"], details["true_height"], details.get("reason", "stretched_dims")))
-        if repair_hybrid_aspect(target, details["dar"], ffmpeg_dir=ffmpeg_dir, logger=log):
+        result = repairer.repair_file(target)
+        if result.status == STATUS_REPAIRED:
           repaired += 1
+        else:
+          log.error("Hybrid-aspect repair failed for %s: %s" % (target, result.detail))
       if detected == 0:
         log.info("No hybrid-aspect files detected under %s" % path)
         sys.exit(0)

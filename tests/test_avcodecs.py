@@ -200,7 +200,7 @@ class TestQsvScaleFormatSuppression:
     codec = H265QSVCodec()
     opts = codec.parse_options({"codec": "h265qsv", "pix_fmt": "yuv420p", "width": 1280, "height": 720, "filter": "vpp_qsv=format=nv12"})
     vf_parts = [opts[i + 1] for i, v in enumerate(opts) if v == "-vf"]
-    assert any("scale_qsv=1280:720" in v for v in vf_parts)
+    assert any("scale_qsv=w=1280:h=720:format=nv12" in v for v in vf_parts)
 
 
 class TestVaapiHybridUploadSuppression:

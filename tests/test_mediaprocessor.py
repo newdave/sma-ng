@@ -1,6 +1,7 @@
 """Tests for resources/mediaprocessor.py - core processing logic."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -4426,12 +4427,12 @@ class TestSwapQsvCodecToSw:
     assert f(options) == "h264qsv"
     assert options["video"]["codec"] == "h264"
 
-  def test_swaps_av1qsv_to_av1(self):
+  def test_swaps_av1qsv_to_svtav1(self):
     from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
 
     options = {"video": {"codec": "av1qsv"}}
     assert f(options) == "av1qsv"
-    assert options["video"]["codec"] == "av1"
+    assert options["video"]["codec"] == "svtav1"
 
   def test_swaps_first_entry_in_codec_list(self):
     from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
@@ -5967,6 +5968,48 @@ class TestIsValidSourceExtended:
     result = mp.isValidSource(str(f))
     assert result is None
 
+  def test_unknown_streams_logged_as_dropped(self, tmp_path):
+    mp = self._make_mp()
+    f = tmp_path / "video.mkv"
+    f.write_bytes(b"x" * 1024)
+    info = MagicMock()
+    info.video = MagicMock()
+    info.audio = [MagicMock()]
+    info.unknown = [SimpleNamespace(type="data", index=3, codec=None), SimpleNamespace(type="subtitle", index=4, codec="unknown")]
+    mp.converter.probe.return_value = info
+    with patch("resources.mediaprocessor.validation", MagicMock(return_value=True)):
+      assert mp.isValidSource(str(f)) is info
+    messages = [c.args[0] for c in mp.log.info.call_args_list]
+    assert any("Dropping unknown data stream 3 (codec none)" in m and "[unknown-stream]" in m for m in messages)
+    assert any("Dropping unknown subtitle stream 4 (codec unknown)" in m for m in messages)
+    mp.log.warning.assert_not_called()
+
+  def test_only_unknown_audio_returns_none_with_warning(self, tmp_path):
+    mp = self._make_mp()
+    f = tmp_path / "video.mkv"
+    f.write_bytes(b"x" * 1024)
+    info = MagicMock()
+    info.video = MagicMock()
+    info.audio = []
+    info.unknown = [SimpleNamespace(type="audio", index=1, codec="none")]
+    mp.converter.probe.return_value = info
+    assert mp.isValidSource(str(f)) is None
+    warning = mp.log.warning.call_args.args[0]
+    assert "only audio streams are unknown" in warning
+    assert "[unknown-stream]" in warning
+
+  def test_no_audio_with_unknown_non_audio_does_not_warn(self, tmp_path):
+    mp = self._make_mp()
+    f = tmp_path / "video.mkv"
+    f.write_bytes(b"x" * 1024)
+    info = MagicMock()
+    info.video = MagicMock()
+    info.audio = []
+    info.unknown = [SimpleNamespace(type="data", index=2, codec=None)]
+    mp.converter.probe.return_value = info
+    assert mp.isValidSource(str(f)) is None
+    mp.log.warning.assert_not_called()
+
   def test_no_audio_stream_returns_none(self, tmp_path):
     mp = self._make_mp()
     f = tmp_path / "video.mkv"
@@ -6812,12 +6855,12 @@ class TestSwapQsvCodecToSwDup:
     assert f(options) == "h264qsv"
     assert options["video"]["codec"] == "h264"
 
-  def test_swaps_av1qsv_to_av1(self):
+  def test_swaps_av1qsv_to_svtav1(self):
     from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
 
     options = {"video": {"codec": "av1qsv"}}
     assert f(options) == "av1qsv"
-    assert options["video"]["codec"] == "av1"
+    assert options["video"]["codec"] == "svtav1"
 
   def test_swaps_first_entry_in_codec_list(self):
     from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
