@@ -57,7 +57,6 @@ The default compose mounts are:
 - `/opt/sma/logs` → container `/logs`
 - `/opt/sma/data` → container `/data`
 - `/mnt` → container `/mnt`
-- `/mnt/unionfs/downloads` → container `/downloads`
 - `/transcode` → container `/transcode`
 
 Adjust the compose file if your host uses different media paths.
@@ -133,31 +132,67 @@ GPU device permissions (`/dev/dri/*`) are reconciled automatically by the contai
 
 Put daemon/container settings in `/opt/sma/config/daemon.env` instead.
 
-## 6. Load CLI Aliases
+## 6. Install the `sma` Host Command
 
-The installer writes a sourceable Bash helper snippet to `/opt/sma/sma-ng-docker-aliases.sh`.
-Load it in your interactive shell:
+`sma` is one POSIX `sh` script shipped inside the image, so it always matches the image version. Install it on the
+Docker host (no sourcing needed; works from `sh`, `bash`, `zsh`, cron, and `ssh host sma ...`):
 
 ```bash
-source /opt/sma/sma-ng-docker-aliases.sh
+docker run --rm --entrypoint cat ghcr.io/newdave/sma-ng:latest /usr/local/bin/sma-host | sudo tee /usr/local/bin/sma >/dev/null
+sudo chmod 755 /usr/local/bin/sma
 ```
 
-Useful aliases:
+`mise run setup:docker:target` also installs it to `/usr/local/bin/sma` from the repo checkout.
 
-| Alias                                     | Command                                              |
-| ----------------------------------------- | ---------------------------------------------------- |
-| `sma-manual`                              | Run `python manual.py` inside the `sma-ng` container |
-| `sma-convert /mnt/unionfs/Media/file.mkv` | Run `manual.py -i <file> -a`                         |
-| `sma-preview /mnt/unionfs/Media/file.mkv` | Run `manual.py -i <file> -oo`                        |
-| `sma-codecs`                              | Run `manual.py -cl`                                  |
-| `sma-smoke`                               | Run `python daemon.py --smoke-test`                  |
-| `sma-rename`                              | Run `python rename.py`                               |
-| `sma-repair`                              | Run `python repair.py`                               |
-| `sma-logs`                                | Follow `docker logs` for the `sma-ng` container      |
-| `sma-shell`                               | Open an interactive shell in the `sma-ng` container  |
+| Command                                | Runs in the container                |
+| -------------------------------------- | ------------------------------------ |
+| `sma convert /mnt/unionfs/Media/f.mkv` | `python manual.py -i <file> -a`      |
+| `sma preview /mnt/unionfs/Media/f.mkv` | `python manual.py -i <file> -oo`     |
+| `sma manual ARGS...`                   | `python manual.py ARGS...`           |
+| `sma repair PATH...`                   | `python repair.py PATH...`           |
+| `sma rename PATH`                      | `python rename.py PATH`              |
+| `sma audit PATH`                       | `python manual.py --audit -i PATH`   |
+| `sma codecs`                           | `python manual.py -cl`               |
+| `sma smoke`                            | `python daemon.py --smoke-test`      |
+| `sma shell`                            | `bash` as the daemon user            |
+| `sma logs`                             | `docker logs -f` for the container   |
+| `sma status`                           | Container state                      |
+| `sma version`                          | Host script and image versions       |
 
-Paths passed to these aliases must be container-visible paths, such as `/mnt/...`, `/downloads/...`,
-`/transcode/...`, or another path mounted into the compose service.
+Every command runs through `entrypoint.sh run`, so it has the daemon's identity: output files are owned by `ubuntu`,
+the supplementary GPU groups match the daemon, and `LIBVA_DRIVER_NAME` is set the same way. A TTY is only requested
+when stdin and stdout are terminals, so scripts and cron work. For root debugging use
+`docker exec -u 0 -it sma-ng bash`.
+
+Container selection: `SMA_CONTAINER` (or `CONTAINER`) if set; otherwise the first running service in the compose
+project at `SMA_COMPOSE_DIR` (default `/opt/sma/docker`, narrowed by `SMA_COMPOSE_SERVICE`); otherwise the container
+named `sma-ng`. `DOCKER_BIN` overrides the `docker` executable. Exit codes: the command's own code, `2` for usage
+errors or a bad path, `3` when no running container is found.
+
+### One path per file
+
+Pass the same path you see on the host. `/mnt`, `/transcode`, and `/recycle` are mounted at identical paths; `/config`,
+`/logs`, and `/data` are container-only (use `sma shell` to inspect them). `sma` rejects any host path that is not
+under a mount whose host and container paths match, with exit code `2` and a single-line error, before running
+anything.
+
+### Migrating from the alias file
+
+- `source /opt/sma/sma-ng-docker-aliases.sh` is no longer needed. The file is now a deprecated shim that forwards the
+  old `sma-*` names to `sma` and will be removed in a later release.
+- The `/mnt/unionfs/downloads:/downloads` mount was removed from every compose service. Replace `/downloads/...`
+  arguments with `/mnt/unionfs/downloads/...`.
+- Webhooks from download clients that still report `/downloads/...` keep working with a path rewrite in `sma-ng.yml`:
+
+  ```yaml
+  daemon:
+    path-rewrites:
+      - from: /downloads
+        to: /mnt/unionfs/downloads
+  ```
+
+- CLI output is now owned by `ubuntu` instead of `root`. Fix old root-owned output once with
+  `docker exec -u 0 sma-ng chown -R ubuntu:ubuntu <path>` if needed.
 
 ## 7. Edit `daemon.env`
 

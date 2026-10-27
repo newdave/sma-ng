@@ -374,12 +374,15 @@ class TestDockerTargetInstaller:
     assert "${install_dir}/data" in lib
     assert '"${install_dir}/data"' in setup
 
-  def test_docker_alias_snippet_wraps_manual_py(self):
+  def test_deprecated_alias_shim_forwards_to_sma_command(self, tmp_path):
+    # The alias file is now a deprecated shim over the `sma` host command.
+    fake_sma = tmp_path / "sma"
+    fake_sma.write_text("#!/bin/sh\nprintf '%s\\n' \"sma $*\"\n")
+    fake_sma.chmod(0o755)
     bash_script = textwrap.dedent(
       """
       set -euo pipefail
       shopt -s expand_aliases
-      docker() { printf '%s\\n' "$*"; }
       source setup/sma-ng-docker-aliases.sh
       sma-convert /mnt/unionfs/Media/movie.mkv --profile rq
       sma-preview /mnt/unionfs/Media/movie.mkv
@@ -388,18 +391,33 @@ class TestDockerTargetInstaller:
     )
 
     result = subprocess.run(
-      ["bash", "-lc", bash_script],
+      ["bash", "-c", bash_script],
       cwd=PROJECT_ROOT,
       capture_output=True,
       text=True,
       check=False,
+      env={**os.environ, "PATH": "%s%s%s" % (tmp_path, os.pathsep, os.environ.get("PATH", ""))},
     )
 
     assert result.returncode == 0, result.stderr or result.stdout
-    lines = result.stdout.splitlines()
-    assert lines[0] == "exec -it sma-ng python manual.py -i /mnt/unionfs/Media/movie.mkv -a --profile rq"
-    assert lines[1] == "exec -it sma-ng python manual.py -i /mnt/unionfs/Media/movie.mkv -oo"
-    assert lines[2] == "exec -it sma-ng python manual.py -cl"
+    assert "deprecated" in result.stderr
+    assert result.stdout.splitlines() == [
+      "sma convert /mnt/unionfs/Media/movie.mkv --profile rq",
+      "sma preview /mnt/unionfs/Media/movie.mkv",
+      "sma codecs",
+    ]
+
+  def test_deprecated_alias_shim_without_sma_installed_fails_clearly(self):
+    result = subprocess.run(
+      ["bash", "-c", "shopt -s expand_aliases\nsource setup/sma-ng-docker-aliases.sh\nsma-codecs"],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+      env={**os.environ, "PATH": "/usr/bin:/bin"},
+    )
+    assert result.returncode == 3
+    assert "host command not installed" in result.stderr
 
 
 class TestDeployConfigTask:

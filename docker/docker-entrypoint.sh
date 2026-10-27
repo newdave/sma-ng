@@ -1,5 +1,6 @@
 #!/bin/sh
 # docker-entrypoint.sh — seed /app/config on first run, then exec the daemon.
+# `docker-entrypoint.sh run CMD...` skips seeding and just execs CMD as ubuntu.
 #
 # Behaviour
 # ─────────
@@ -33,11 +34,53 @@ seed_file() {
     fi
 }
 
+# ── shared runtime setup (daemon start and `run` mode) ───────────────────────
+
+# Environment-only setup that `docker exec` does not inherit from PID 1.
+# Must be set before detect-gpu.sh calls vainfo so the iHD driver is selected.
+# The Intel compose profiles mount /dev/dri so guests with SR-IOV VFs exposed as
+# card1/renderD128 still present the full DRI topology inside the container.
+set_runtime_env() {
+    if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -d /sys/module/i915 ]; then
+        export LIBVA_DRIVER_NAME=iHD
+        log "LIBVA_DRIVER_NAME=iHD (Intel GPU detected)"
+    fi
+}
+
+# When started as root, drop to the unprivileged `ubuntu` user. We do NOT use
+# `setpriv --init-groups`: it rebuilds the supplementary groups from
+# /etc/group and would discard the GIDs the container was started with
+# (compose `group_add: [video, render, 992]` / `docker run --group-add`).
+# Instead pass an explicit list: ubuntu's own groups (including any added by
+# the SMA_ENTRYPOINT_FIX_GIDS block below) plus the numeric supplementary
+# groups of this process, minus root's GID 0.
+drop_privileges() {
+    if [ "$(id -u)" = "0" ]; then
+        keep_groups="$(printf '%s %s\n' "$(id -G ubuntu)" "$(id -G)" | tr ' ' '\n' | grep -vx '0' | grep -v '^$' | sort -un | paste -sd, -)"
+        if [ -n "$keep_groups" ]; then
+            exec setpriv --reuid=ubuntu --regid=ubuntu --groups "$keep_groups" -- "$@"
+        fi
+        exec setpriv --reuid=ubuntu --regid=ubuntu --clear-groups -- "$@"
+    fi
+    exec "$@"
+}
+
+# ── `run` mode: host CLI commands via `docker exec` ──────────────────────────
+# `entrypoint.sh run CMD...` gives the command the daemon's identity (ubuntu,
+# same supplementary groups, same VAAPI env) without first-run seeding, defaults
+# refresh, GID edits or GPU detection: those belong to container start.
+if [ "${1:-}" = "run" ]; then
+    shift
+    [ "$#" -gt 0 ] || { log "run: no command given"; exit 2; }
+    set_runtime_env
+    drop_privileges "$@"
+fi
+
 # ── reconcile /dev/dri device GIDs (opt-in, root only) ───────────────────────
 # Default deployment path is now declarative: docker-compose's `group_add:
 # [video, render, 992]` joins the container `ubuntu` user to the host's
 # render/video groups at container start, so the daemon process runs as
-# unprivileged from PID-1 onward.
+# unprivileged from PID-1 onward (the final setpriv hand-off preserves them).
 #
 # Operators running bare `docker run` on hosts with non-standard render
 # GIDs (where neither `video` nor `render` resolves and 992 doesn't match)
@@ -118,22 +161,9 @@ fi
 
 log "Config directory ready: $CONFIG_DIR"
 
-# ── set LIBVA_DRIVER_NAME for Intel VAAPI/QSV ────────────────────────────────
-# Must be set before detect-gpu.sh calls vainfo so the iHD driver is selected.
-# The Intel compose profiles mount /dev/dri so guests with SR-IOV VFs exposed as
-# card1/renderD128 still present the full DRI topology inside the container.
-if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -d /sys/module/i915 ]; then
-    export LIBVA_DRIVER_NAME=iHD
-    log "LIBVA_DRIVER_NAME=iHD (Intel GPU detected)"
-fi
-
 # ── hand off to the container CMD ─────────────────────────────────────────────
-# When started as root (so we could fix up /dev/dri GIDs above), drop to the
-# unprivileged `ubuntu` user with --init-groups so the supplementary groups
-# we just added (render/video/dri_*) take effect.
+set_runtime_env
 if [ "$(id -u)" = "0" ]; then
     chown -R ubuntu:ubuntu "$CONFIG_DIR" "$DEFAULTS_DIR" 2>/dev/null || true
-    exec setpriv --reuid=ubuntu --regid=ubuntu --init-groups -- "$@"
 fi
-
-exec "$@"
+drop_privileges "$@"
