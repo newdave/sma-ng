@@ -3387,8 +3387,6 @@ class TestFullProcess:
   def test_tagging_enabled_calls_write_tags(self):
     mp = self._make_mp()
     mp.settings.tagfile = True
-    mp.settings.artwork = True
-    mp.settings.thumbnail = True
     info = MagicMock()
     mp.isValidSource = MagicMock(return_value=info)
     tagdata = MagicMock()
@@ -3446,8 +3444,6 @@ class TestFullProcess:
     mp = self._make_mp()
     mp.settings.relocate_moov = True
     mp.settings.tagfile = True
-    mp.settings.artwork = False
-    mp.settings.thumbnail = False
     info = MagicMock()
     mp.isValidSource = MagicMock(return_value=info)
     tagdata = MagicMock()
@@ -6392,8 +6388,6 @@ class TestFullProcessDup:
   def test_tagging_enabled_calls_write_tags(self):
     mp = self._make_mp()
     mp.settings.tagfile = True
-    mp.settings.artwork = True
-    mp.settings.thumbnail = True
     info = MagicMock()
     mp.isValidSource = MagicMock(return_value=info)
     tagdata = MagicMock()
@@ -6451,8 +6445,6 @@ class TestFullProcessDup:
     mp = self._make_mp()
     mp.settings.relocate_moov = True
     mp.settings.tagfile = True
-    mp.settings.artwork = False
-    mp.settings.thumbnail = False
     info = MagicMock()
     mp.isValidSource = MagicMock(return_value=info)
     tagdata = MagicMock()
@@ -9087,3 +9079,32 @@ class TestInsufficientOutputSpace:
     # Should not raise — ratio falsy disables the gate in this path.
     result = mp.process(str(f))
     assert result is None
+
+
+class TestImageAttachmentsDropped:
+  """generateOptions never maps image attachments, even if their codec is selected."""
+
+  def _attachment(self, index, codec, mimetype, filename):
+    from converter.ffmpeg import MediaStreamInfo
+
+    a = MediaStreamInfo()
+    a.index = index
+    a.type = "attachment"
+    a.codec = codec
+    a.metadata = {"mimetype": mimetype, "filename": filename}
+    return a
+
+  def test_image_attachment_dropped_font_kept(self, tmp_yaml, make_media_info):
+    mp = TestMaxBitrateVBV()._make_mp(tmp_yaml, vmaxbitrate=0)
+    mp.settings.attachmentcodec = ["ttf", "mjpeg"]
+    info = make_media_info(video_codec="h264")
+    info.streams.extend(
+      [
+        self._attachment(3, "ttf", "application/x-truetype-font", "font.ttf"),
+        self._attachment(4, "mjpeg", "image/jpeg", "cover.jpg"),
+      ]
+    )
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options is not None
+    assert [a["map"] for a in options["attachment"]] == [3]

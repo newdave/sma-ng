@@ -414,8 +414,6 @@ class TestProcessFile:
     mp = MagicMock()
     mp.settings.taglanguage = None
     mp.settings.tagfile = True
-    mp.settings.artwork = False
-    mp.settings.thumbnail = False
     mp.settings.relocate_moov = False
     mp.settings.postprocess = False
     mp.settings.plexmatch_enabled = False
@@ -480,6 +478,40 @@ class TestProcessFile:
       result = processFile("/file.mp4", mp, info=MagicMock(), tagOnly=True)
     mock_tagdata.writeTags.assert_called_once()
     assert result is None  # tagOnly returns early (None)
+
+  def test_tagonly_no_tagdata_with_posters_strips_cover_art(self):
+    mp = self._make_mp()
+    info = MagicMock()
+    info.posters = [MagicMock()]
+    info.attachment = []
+    mp.converter.tag.return_value = iter([(1, "")])
+    with patch("manual.getInfo", return_value=None):
+      result = processFile("/file.mp4", mp, info=info, tagOnly=True)
+    mp.converter.tag.assert_called_once()
+    assert mp.converter.tag.call_args[0][0] == "/file.mp4"
+    assert result is None
+
+  def test_tagonly_no_tagdata_font_only_does_not_tag(self):
+    mp = self._make_mp()
+    font = MagicMock()
+    font.metadata = {"mimetype": "application/x-truetype-font", "filename": "f.ttf"}
+    info = MagicMock()
+    info.posters = []
+    info.attachment = [font]
+    with patch("manual.getInfo", return_value=None):
+      result = processFile("/file.mp4", mp, info=info, tagOnly=True)
+    mp.converter.tag.assert_not_called()
+    assert result is None
+
+  def test_tagonly_strip_failure_is_swallowed(self):
+    mp = self._make_mp()
+    info = MagicMock()
+    info.posters = [MagicMock()]
+    info.attachment = []
+    mp.converter.tag.side_effect = Exception("boom")
+    with patch("manual.getInfo", return_value=None):
+      result = processFile("/file.mp4", mp, info=info, tagOnly=True)
+    assert result is None
 
   def test_overwrite_input_unlinks_original_when_extension_changed(self, tmp_path):
     """Regression: in the no-moveto + output_dir case, restoreFromOutput

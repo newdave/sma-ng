@@ -400,7 +400,7 @@ Generates an additional stereo AAC stream for device compatibility.
 | `encoding`                  | string |            | Manual character-set override passed to FFmpeg as `-sub_charenc` for every subtitle source. Rarely needed: external sidecar files have their encoding auto-detected per file (see below), and the detected value wins over this global setting for that file.       |
 | `remove-bitstream-subs`     | list   | `true`     | Remove bitstream subtitle formats                                                                                                                                                                                                                                   |
 | `include-original-language` | bool   | `false`    | Include original language subs                                                                                                                                                                                                                                      |
-| `attachment-codec`          | list   |            | Attachment codecs (e.g. `ttf` fonts) to copy into the output. Only honored on containers that support attachments (never MP4); empty (the default) drops all attachment streams.                                                                                   |
+| `attachment-codec`          | list   |            | Attachment codecs (e.g. `ttf` fonts) to copy into the output. Only honored on containers that support attachments (never MP4); empty (the default) drops all attachment streams. Image attachments (cover art) are always dropped.                                  |
 
 Only whitelisted stream types reach the output: the selected video stream, the
 selected audio streams, and embedded subtitle streams. Everything else is
@@ -454,9 +454,22 @@ automatically, logging `[sub-encoding-detect]` when a non-UTF-8 file is found.
 | `full-path-guess`  | bool   | `true`  | Use full file path for guessit metadata matching      |
 | `tag`              | bool   | `true`  | Enable TMDB metadata tagging                          |
 | `tag-language`     | string | `eng`   | Language for TMDB metadata                            |
-| `download-artwork` | bool   | `false` | Embed cover art from TMDB                             |
 | `strip-metadata`   | bool   | `true`  | Remove existing metadata before tagging               |
 | `keep-titles`      | bool   | `false` | Preserve original stream titles                       |
+
+Cover art is always stripped. SMA never embeds artwork, and every conversion and tag pass removes existing cover art
+(MP4 `covr` atoms, attached-picture streams, and image attachments such as `cover.jpg` in MKV). Font attachments
+selected by `attachment-codec` are kept. `download-artwork` has been removed; if it is still in your config it is
+ignored and reported as an unknown key.
+
+To strip cover art from media already in a library, run a tag-only pass over it:
+
+```bash
+python manual.py -i /path/to/library -a -to
+```
+
+Files with a metadata match are re-tagged without artwork. Files without a match are remuxed only if they contain
+cover art, and their other tags are left unchanged.
 
 ---
 

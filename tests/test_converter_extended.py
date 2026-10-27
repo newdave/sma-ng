@@ -118,50 +118,6 @@ class TestConverterTag:
       results = list(c.tag(str(f), metadata={"title": "Test Movie"}))
     assert len(results) > 0
 
-  def test_tag_with_png_cover(self, tmp_path):
-    c = _make_converter()
-    f = tmp_path / "movie.mp4"
-    f.write_bytes(b"data")
-    cover = tmp_path / "cover.png"
-    cover.write_bytes(b"png")
-
-    fake_info = _make_info()
-    fake_info.format.duration = 10.0
-
-    def fake_convert(outfile, opts, timeout=0):
-      yield 5.0, ""
-
-    with (
-      patch.object(c.ffmpeg, "probe", return_value=fake_info),
-      patch.object(c.ffmpeg, "convert", side_effect=fake_convert),
-      patch("os.rename"),
-      patch("os.remove"),
-    ):
-      results = list(c.tag(str(f), coverpath=str(cover)))
-    assert isinstance(results, list)
-
-  def test_tag_with_jpg_cover(self, tmp_path):
-    c = _make_converter()
-    f = tmp_path / "movie.mp4"
-    f.write_bytes(b"data")
-    cover = tmp_path / "cover.jpg"
-    cover.write_bytes(b"jpg")
-
-    fake_info = _make_info()
-    fake_info.format.duration = 10.0
-
-    def fake_convert(outfile, opts, timeout=0):
-      yield 5.0, ""
-
-    with (
-      patch.object(c.ffmpeg, "probe", return_value=fake_info),
-      patch.object(c.ffmpeg, "convert", side_effect=fake_convert),
-      patch("os.rename"),
-      patch("os.remove"),
-    ):
-      results = list(c.tag(str(f), coverpath=str(cover)))
-    assert isinstance(results, list)
-
   def test_tag_with_existing_tag_file(self, tmp_path):
     """When .tag file already exists, suffix counter is appended."""
     c = _make_converter()
@@ -429,3 +385,79 @@ class TestConverterConvertFull:
       )
     charenc_at = opts.index("-sub_charenc")
     assert opts[charenc_at + 1] == "utf-16le"
+
+
+def _attachment(index, mimetype=None, filename=None):
+  a = MediaStreamInfo()
+  a.index = index
+  a.type = "attachment"
+  a.codec = "ttf"
+  a.metadata = {}
+  if mimetype:
+    a.metadata["mimetype"] = mimetype
+  if filename:
+    a.metadata["filename"] = filename
+  return a
+
+
+class TestTagStripsCoverArt:
+  def _run_tag(self, tmp_path, attachments, **kwargs):
+    c = _make_converter()
+    f = tmp_path / "movie.mkv"
+    f.write_bytes(b"data")
+    info = _make_info()
+    info.streams.extend(attachments)
+    captured = {}
+
+    def fake_convert(outfile, opts, timeout=0):
+      captured["opts"] = opts
+      yield 5.0, ""
+
+    with (
+      patch.object(c.ffmpeg, "probe", return_value=info),
+      patch.object(c.ffmpeg, "convert", side_effect=fake_convert),
+      patch("os.rename"),
+      patch("os.remove"),
+    ):
+      list(c.tag(str(f), **kwargs))
+    return captured["opts"]
+
+  def test_maps_non_attached_pic_video(self, tmp_path):
+    opts = self._run_tag(tmp_path, [])
+    assert "0:V?" in opts
+    assert "0:v?" not in opts
+
+  def test_font_attachment_mapped_image_omitted(self, tmp_path):
+    atts = [
+      _attachment(3, "application/x-truetype-font", "font.ttf"),
+      _attachment(4, "image/jpeg", "cover.jpg"),
+    ]
+    opts = self._run_tag(tmp_path, atts)
+    maps = [opts[i + 1] for i, o in enumerate(opts) if o == "-map"]
+    assert "0:3" in maps
+    assert "0:4" not in maps
+    assert opts[opts.index("-c:t") + 1] == "copy"
+
+  def test_cues_to_front_passed(self, tmp_path):
+    opts = self._run_tag(tmp_path, [], cues_to_front=True)
+    assert opts[opts.index("-cues_to_front") + 1] == "true"
+
+
+class TestIsCoverArtAttachment:
+  @pytest.mark.parametrize(
+    "mimetype,filename,expected",
+    [
+      ("image/jpeg", "whatever.bin", True),
+      ("IMAGE/PNG", None, True),
+      ("application/x-truetype-font", "font.ttf", False),
+      (None, "cover.jpg", True),
+      (None, "Poster.PNG", True),
+      (None, "art.webp", True),
+      (None, "font.otf", False),
+      (None, None, False),
+    ],
+  )
+  def test_cases(self, mimetype, filename, expected):
+    from converter.ffmpeg import is_cover_art_attachment
+
+    assert is_cover_art_attachment(_attachment(1, mimetype, filename)) is expected

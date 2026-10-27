@@ -2,23 +2,21 @@
 TMDB metadata lookup and MP4/MKV tag writing for SMA-NG.
 
 Provides the Metadata class which fetches movie/TV metadata from TMDB and
-writes tags (title, year, description, artwork, etc.) into the output file
+writes tags (title, year, description, etc.) into the output file
 using mutagen. Also handles .plexmatch sidecar file generation.
 """
 
 import enum
 import logging
 import os
-import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
-import requests
 import tmdbsimple as tmdb
-from mutagen.mp4 import MP4, MP4Cover, MP4StreamInfoError
+from mutagen.mp4 import MP4, MP4StreamInfoError
 
 from converter.ffmpeg import FFMpegConvertError
-from resources.extensions import tmdb_api_key, valid_poster_extensions
+from resources.extensions import tmdb_api_key
 from resources.lang import getAlpha2BCode, getAlpha3TCode
 from resources.naming import extract_air_date
 
@@ -388,7 +386,7 @@ class Metadata:
 
     return None
 
-  def writeTags(self, path, inputfile, converter, artwork=True, thumbnail=False, width=None, height=None, cues_to_front=False):
+  def writeTags(self, path, inputfile, converter, width=None, height=None, cues_to_front=False):
     """
     Write metadata tags to the converted media file.
 
@@ -397,18 +395,17 @@ class Metadata:
 
     Tags written for movies: title, tagline (short description), overview
     (long description), release date, genre, HD flag, content rating,
-    iTunes XML (cast/crew), encoder string, and cover art.
+    iTunes XML (cast/crew), and encoder string.
 
     Tags written for TV episodes: show title, episode title, short and long
     description, network, air date, season number, episode number, genre,
-    HD flag, content rating, iTunes XML, encoder string, and cover art.
+    HD flag, content rating, iTunes XML, and encoder string.
+
+    Cover art is never embedded and any existing cover art is removed.
 
     path          -- absolute path to the output file to be tagged
-    inputfile     -- path to the original source file (used for artwork lookup)
+    inputfile     -- path to the original source file
     converter     -- FFmpeg converter instance (used for the fallback tag pass)
-    artwork       -- download and embed cover art when True (default True)
-    thumbnail     -- use the episode still image instead of the season poster
-                     when tagging TV content (default False)
     width         -- video width in pixels; used to set the HD flag
     height        -- video height in pixels; used to set the HD flag
     cues_to_front -- pass cues-to-front flag to the FFmpeg fallback tagger
@@ -445,12 +442,8 @@ class Metadata:
 
         metadata["ENCODER"] = "SMA-NG"
 
-        coverpath = None
-        if artwork:
-          coverpath = self.getArtwork(path, inputfile, thumbnail=thumbnail)
-
         try:
-          conv = converter.tag(path, metadata, coverpath, cues_to_front=cues_to_front)
+          conv = converter.tag(path, metadata, cues_to_front=cues_to_front)
         except KeyboardInterrupt:
           raise
         except Exception:
@@ -479,6 +472,10 @@ class Metadata:
       raise
     except Exception:
       self.log.debug("Unable to clear original tags, will proceed.")
+
+    # Cover art is always stripped, even when clearing the other tags failed.
+    if video.tags is not None and "covr" in video.tags:
+      del video.tags["covr"]
 
     if self.mediatype == MediaType.Movie:
       video["\xa9nam"] = self.title  # Movie title
@@ -523,16 +520,6 @@ class Metadata:
       video["----:com.apple.iTunes:TVDB"] = str(self.tvdbid).encode("UTF-8")
     if getattr(self, "imdbid", None):
       video["----:com.apple.iTunes:IMDB"] = str(self.imdbid).encode("UTF-8")
-
-    if artwork:
-      coverpath = self.getArtwork(path, inputfile, thumbnail=thumbnail)
-      if coverpath is not None:
-        with open(coverpath, "rb") as f:
-          cover = f.read()
-        if coverpath.endswith("png"):
-          video["covr"] = [MP4Cover(cover, MP4Cover.FORMAT_PNG)]  # png poster
-        else:
-          video["covr"] = [MP4Cover(cover, MP4Cover.FORMAT_JPEG)]  # jpeg poster
 
     if self.original:
       video["\xa9too"] = "SMA-NG:" + os.path.basename(self.original)
@@ -670,105 +657,6 @@ class Metadata:
     # Close XML
     output.write(footer)
     return output.getvalue()
-
-  def urlretrieve(self, url, fn):
-    """
-    Download a URL to a local file and return a (filename, file) tuple.
-
-    A thin wrapper around requests.get used for poster downloads. Follows
-    redirects and applies a 30-second timeout.
-
-    url -- the URL to fetch
-    fn  -- local filesystem path to write the response content to
-
-    Returns a tuple of (fn, file_object).
-    """
-    with open(fn, "wb") as f:
-      f.write(requests.get(url, allow_redirects=True, timeout=30).content)
-    return (fn, f)
-
-  def getArtwork(self, path, inputfile, thumbnail=False):
-    """
-    Locate or download artwork for the media file and return its local path.
-
-    Artwork is sourced in the following priority order:
-      1. A file with the same base name as inputfile or path, with a
-         recognised image extension (jpg, png, etc.).
-      2. A file named 'smaposter.<ext>' in the same directory as path.
-      3. The TMDB poster image for the title, downloaded to a temporary
-         file. For TV content, uses the episode still when thumbnail is
-         True, falling back to the season poster and then the show poster.
-
-    path      -- path to the converted output file (used for directory
-                 and base-name artwork lookup)
-    inputfile -- path to the original source file (checked first for
-                 a sidecar image with the same base name)
-    thumbnail -- when True, prefer the episode still image over the season
-                 poster for TV content (default False)
-
-    Returns the local path to the artwork file, or None if no artwork
-    could be found or downloaded.
-    """
-    # Check for artwork in the same directory as the source
-    poster = None
-    base, _ = os.path.splitext(inputfile)
-    base2, _ = os.path.splitext(path)
-    for b in [base, base2]:
-      for e in valid_poster_extensions:
-        path = b + os.extsep + e
-        if os.path.exists(path):
-          poster = path
-          self.log.info("Local artwork detected, using %s." % path)
-          break
-      if poster:
-        break
-
-    if not poster:
-      d, _f = os.path.split(path)
-      for e in valid_poster_extensions:
-        path = os.path.join(d, "smaposter" + os.extsep + e)
-        if os.path.exists(path):
-          poster = path
-          self.log.info("Local artwork detected, using %s." % path)
-          break
-
-    # If no local files are found, attempt to download them
-    if not poster:
-      poster_path = None
-      if self.mediatype == MediaType.Movie:
-        poster_path = self.moviedata.get("poster_path")
-      elif self.mediatype == MediaType.TV:
-        if thumbnail:
-          poster_path = self.episodedata.get("still_path")
-        else:
-          poster_path = self.seasondata.get("poster_path")
-
-        if not poster_path:
-          poster_path = self.showdata.get("poster_path")
-
-      if not poster_path:
-        self.log.debug("No artwork found for media file.")
-        return None
-
-      savepath = os.path.join(tempfile.gettempdir(), "poster-%s.jpg" % (self.tmdbid))
-
-      # Ensure the save path is clear
-      if os.path.exists(savepath):
-        try:
-          os.remove(savepath)
-        except KeyboardInterrupt:
-          raise
-        except Exception:
-          i = 2
-          while os.path.exists(savepath):
-            savepath = os.path.join(tempfile.gettempdir(), "poster-%s.%d.jpg" % (self.tmdbid, i))
-            i += 1
-
-      try:
-        poster = self.urlretrieve("https://image.tmdb.org/t/p/original" + poster_path, savepath)[0]
-      except Exception:
-        self.log.exception("Exception while retrieving poster: %s" % poster_path)
-    return poster
 
 
 def update_plexmatch(filepath, tagdata, settings, log=None):

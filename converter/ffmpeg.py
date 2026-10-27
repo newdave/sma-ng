@@ -359,6 +359,16 @@ class MediaStreamInfo:
     return value
 
 
+COVER_ART_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+
+
+def is_cover_art_attachment(stream):
+  """True when an attachment stream is an image (cover art) rather than e.g. a font."""
+  mimetype = str(stream.metadata.get("mimetype", "")).lower()
+  filename = str(stream.metadata.get("filename", "")).lower()
+  return mimetype.startswith("image/") or filename.endswith(COVER_ART_EXTENSIONS)
+
+
 class MediaInfo:
   """
   Information about media object, as parsed by ffprobe.

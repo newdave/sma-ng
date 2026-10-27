@@ -211,7 +211,6 @@ class MetadataSettings(_Base):
   full_path_guess: bool = True
   tag: bool = True
   tag_language: str = "eng"
-  download_artwork: str = "poster"
   sanitize_disposition: str = ""
   strip_metadata: bool = False
   keep_titles: bool = False

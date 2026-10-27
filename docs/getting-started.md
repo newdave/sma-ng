@@ -328,7 +328,6 @@ Check:
 Check:
 
 - tagging enabled/disabled
-- artwork download behavior
 - language for metadata
 
 ### `[Sonarr]`, `[Radarr]`, `[Plex]`
@@ -397,7 +396,7 @@ python manual.py -i "/path/to/Show Name" -a --tv -fr
 # Convert without tagging
 python manual.py -i /path/to/file.mkv -a -nt
 
-# Tag only (no conversion)
+# Tag only (no conversion); also strips any embedded cover art
 python manual.py -i /path/to/file.mp4 -to
 
 # Skip file operations (no move, no copy, no delete)

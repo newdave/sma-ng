@@ -124,7 +124,6 @@ base:
     full-path-guess: true
     tag: true
     tag-language: eng
-    download-artwork: poster
     sanitize-disposition: ''
     strip-metadata: false
     keep-titles: false

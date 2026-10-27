@@ -483,20 +483,6 @@ class ReadSettings:
     self.fullpathguess = cfg.full_path_guess
     self.tagfile = cfg.tag
     self.taglanguage = (cfg.tag_language or "").lower()
-    artwork = str(cfg.download_artwork).lower()
-    if artwork == "poster":
-      self.artwork = True
-      self.thumbnail = False
-    elif "thumb" in artwork:
-      self.artwork = True
-      self.thumbnail = True
-    else:
-      self.thumbnail = False
-      try:
-        self.artwork = bool(cfg.download_artwork)
-      except (ValueError, TypeError):
-        self.artwork = True
-        self.log.error("Invalid download-artwork value, defaulting to 'poster'.")
     self.sanitize_disposition = self._as_list(cfg.sanitize_disposition)
     self.strip_metadata = cfg.strip_metadata
     self.keep_titles = cfg.keep_titles

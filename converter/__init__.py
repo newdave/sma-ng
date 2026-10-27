@@ -9,7 +9,7 @@ structured option dicts into FFmpeg command-line arguments and runs conversions.
 import os
 
 from converter.avcodecs import BaseDecoder, attachment_codec_list, audio_codec_list, decoder_list, subtitle_codec_list, video_codec_list
-from converter.ffmpeg import FFMpeg, FFMpegConvertError, FFMpegError
+from converter.ffmpeg import FFMpeg, FFMpegConvertError, FFMpegError, is_cover_art_attachment
 from converter.formats import format_list
 
 __all__ = ["Converter", "ConverterError", "FFMpeg", "FFMpegConvertError", "FFMpegError"]
@@ -231,13 +231,14 @@ class Converter:
 
     return optlist
 
-  def tag(self, infile, metadata={}, coverpath=None, cues_to_front=False):
-    """Re-mux infile in-place, embedding metadata and optional cover art.
+  def tag(self, infile, metadata={}, cues_to_front=False):
+    """Re-mux infile in-place, embedding metadata and stripping cover art.
 
     Renames infile to a temporary '.tag' path, then remuxes it back to the
     original filename using stream-copy for all tracks. The metadata dict
-    entries are written as global container tags. If coverpath is given, the
-    image is attached as a cover art attachment stream (PNG or JPEG).
+    entries are written as global container tags. Cover art is always
+    dropped: attached_pic video streams are excluded and only non-image
+    attachments (e.g. fonts) are kept.
 
     Yields (percent_complete, debug_string) tuples driven by FFMpeg.convert().
 
@@ -258,19 +259,16 @@ class Converter:
     os.rename(outfile, infile)
     success = False
     try:
-      opts = ["-i", infile, "-map", "0:v?", "-c:v", "copy", "-map", "0:a?", "-c:a", "copy", "-map", "0:s?", "-c:s", "copy", "-map", "0:t?", "-c:t", "copy"]
-
       info = self.ffmpeg.probe(infile)
       if info is None:
         raise ConverterError("FFprobe returned no info for %s" % infile)
-      i = len(info.attachment)
 
-      if coverpath:
-        opts.extend(["-attach", coverpath])
-        if coverpath.endswith("png"):
-          opts.extend(["-metadata:s:t:" + str(i), "mimetype=image/png", "-metadata:s:t:" + str(i), "filename=cover.png"])
-        else:
-          opts.extend(["-metadata:s:t:" + str(i), "mimetype=image/jpeg", "-metadata:s:t:" + str(i), "filename=cover.jpg"])
+      # 0:V (capital) selects video streams that are not attached pictures.
+      opts = ["-i", infile, "-map", "0:V?", "-c:v", "copy", "-map", "0:a?", "-c:a", "copy", "-map", "0:s?", "-c:s", "copy"]
+      for a in info.attachment:
+        if not is_cover_art_attachment(a):
+          opts.extend(["-map", "0:%d" % a.index])
+      opts.extend(["-c:t", "copy"])
 
       for k in metadata:
         opts.extend(["-metadata", "%s=%s" % (k, metadata[k])])
