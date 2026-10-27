@@ -1,5 +1,28 @@
 # Changelog
 
+## [3.2.13](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.12...sma-ng-v3.2.13) (2026-10-27)
+
+
+### Features
+
+* **docker:** sma host command, daemon identity for CLI runs, one path per file ([9f3bd08](https://github.com/newdave/sma-ng/commit/9f3bd08793d77ab7ad8a423f12fa58aa291aa8ab))
+* strip artwork, unknown and data streams everywhere; rebuild repair on shared rules ([5d2ca7b](https://github.com/newdave/sma-ng/commit/5d2ca7bb9a6c7ffaa7555497d4f4a6e1c31fd1f3))
+
+
+### Bug Fixes
+
+* **config:** deep-merge profiles, validate bad values, document the schema ([7b7a5ea](https://github.com/newdave/sma-ng/commit/7b7a5ea2b0245e9b81feeb2e72cf9953e2dfccf5))
+* **daemon:** enforce job timeouts and keep workers alive through DB errors ([37624d1](https://github.com/newdave/sma-ng/commit/37624d1ad8c9d2e248f07edd9082bd09ba2e8230))
+* **daemon:** stop leaking the API key and secrets; harden public endpoints ([0c775f8](https://github.com/newdave/sma-ng/commit/0c775f87e3da5c0398970f7eedd08ef2357a07d6))
+* **integrations:** correct arr rename payloads, path matching and trigger failures ([45ed329](https://github.com/newdave/sma-ng/commit/45ed329273157c4b9d3d1c6e41bcf10800ee246c))
+* **pipeline:** recover from hardware failures and never overwrite existing output ([9f7d86a](https://github.com/newdave/sma-ng/commit/9f7d86a16a8537a1c2f5961867e125de86c8bc8a))
+
+
+### Documentation
+
+* library-audit.md, troubleshooting.md; mise media:repair description. ([5d2ca7b](https://github.com/newdave/sma-ng/commit/5d2ca7bb9a6c7ffaa7555497d4f4a6e1c31fd1f3))
+* prune completed docker-host-cli PRP ([36bd7bc](https://github.com/newdave/sma-ng/commit/36bd7bce952f5ad93abd541d6706289f79427e51))
+
 ## [3.2.12](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.11...sma-ng-v3.2.12) (2026-10-27)
 
 
