@@ -11,18 +11,42 @@ from ruamel.yaml import YAML
 _TOPLEVEL_KEY_RE = re.compile(r"(?m)^([A-Za-z_][\w-]*):")
 
 
-def _canonicalize_keys(obj):
-  """Recursively rewrite mapping keys to use underscores (snake_case) so
-  ``foo-bar`` and ``foo_bar`` collapse onto a single key during dedup.
-  Lists are walked element-wise; scalars pass through."""
+# Mappings whose keys are operator data (names / channel pairs), not schema
+# field names. Their keys must survive canonicalisation untouched.
+_DATA_KEYED_FIELDS = frozenset({"channel_filters", "bitrate_ratio", "hwdevices", "hwaccel_output_format"})
+
+
+def _is_data_keyed(path: tuple) -> bool:
+  """True when the mapping at ``path`` is keyed by operator-chosen names."""
+  if not path:
+    return False
+  if path == ("profiles",):
+    return True  # profiles.<profile-name>
+  if len(path) == 2 and path[0] == "services":
+    return True  # services.<type>.<instance-name>
+  return path[-1] in _DATA_KEYED_FIELDS
+
+
+def _canonicalize_keys(obj, path: tuple = ()):
+  """Recursively rewrite schema field names to snake_case so ``foo-bar`` and
+  ``foo_bar`` collapse onto a single key during dedup. Keys of data-keyed
+  maps (profile names, service instance names, channel-filters pairs such
+  as ``6-2``) are left untouched. Lists are walked element-wise; scalars
+  pass through."""
   if isinstance(obj, dict):
+    data_keyed = _is_data_keyed(path)
     out = {}
     for k, v in obj.items():
-      key = k.replace("-", "_") if isinstance(k, str) else k
-      out[key] = _canonicalize_keys(v)
+      if data_keyed or not isinstance(k, str):
+        key = k
+        child = path + (k,)
+      else:
+        key = k.replace("-", "_")
+        child = path + (key,)
+      out[key] = _canonicalize_keys(v, child)
     return out
   if isinstance(obj, list):
-    return [_canonicalize_keys(v) for v in obj]
+    return [_canonicalize_keys(v, path) for v in obj]
   return obj
 
 

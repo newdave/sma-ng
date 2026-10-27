@@ -173,7 +173,9 @@ _SECTION_COMMENTS: dict[str, str] = {
   "daemon": (
     "── Daemon settings ──────────────────────────────────────────────────\nOnly used when running daemon.py. manual.py ignores this section.\nPer-flag precedence: CLI > sma-ng.yml > default."
   ),
-  "base": ("── Base media-conversion settings ───────────────────────────────────\nDefaults applied to every conversion. Profiles below shallow-merge on top\nof these per-section."),
+  "base": (
+    "── Base media-conversion settings ───────────────────────────────────\nDefaults applied to every conversion. Profiles below deep-merge on top\nof these (nested blocks merge key by key; lists replace)."
+  ),
   "profiles": (
     "── Profiles ─────────────────────────────────────────────────────────\n"
     "Named overlays referenced from daemon.routing[].profile or via\n"

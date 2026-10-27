@@ -12,6 +12,8 @@ daemon:
   username: ''
   password: ''
   job-timeout-seconds: 7200
+  heartbeat-interval: 30
+  stale-seconds: 120
   progress-log-interval: 30
   smoke-test: true
   recycle-bin-max-age-days: 30
@@ -79,9 +81,10 @@ daemon:
       leftover-tmp: false
       preconv-original: false
       hybrid-aspect: false
+      stream-damage: false
 # ── Base media-conversion settings ───────────────────────────────────
-# Defaults applied to every conversion. Profiles below shallow-merge on top
-# of these per-section.
+# Defaults applied to every conversion. Profiles below deep-merge on top
+# of these (nested blocks merge key by key; lists replace).
 base:
   converter:
     ffmpeg: ffmpeg
