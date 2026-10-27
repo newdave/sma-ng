@@ -14,6 +14,7 @@ import guessit
 
 os.environ["REGEX_DISABLED"] = "1"  # Fixes Toilal/rebulk#20
 
+from autoprocess._media_server import path_under
 from autoprocess.plex import refreshPlex
 from resources.mediaprocessor import MediaProcessor
 from resources.metadata import MediaType, Metadata, update_plexmatch
@@ -367,6 +368,7 @@ class RenameProcessor:
       "new": filepath,
       "changed": False,
       "dry_run": dry_run,
+      "tagdata": None,
     }
 
     if use_arr:
@@ -386,6 +388,7 @@ class RenameProcessor:
     )
     if info is None:
       return result
+    result["tagdata"] = tagdata
 
     guess_data = guessit.guessit(os.path.basename(filepath))
 
@@ -435,13 +438,13 @@ class RenameProcessor:
     arr_type = None
     for inst in getattr(self.settings, "sonarr_instances", []):
       ipath = inst.get("path", "")
-      if ipath and dirpath.startswith(ipath) and inst.get("apikey"):
+      if ipath and path_under(dirpath, ipath) and inst.get("apikey"):
         instance, arr_type = inst, "sonarr"
         break
     if instance is None:
       for inst in getattr(self.settings, "radarr_instances", []):
         ipath = inst.get("path", "")
-        if ipath and dirpath.startswith(ipath) and inst.get("apikey"):
+        if ipath and path_under(dirpath, ipath) and inst.get("apikey"):
           instance, arr_type = inst, "radarr"
           break
 
@@ -450,7 +453,7 @@ class RenameProcessor:
       return result
 
     base_url, headers = build_api(instance, "SMA-NG rename")
-    new_path = rename_via_arr(base_url, headers, arr_type, filepath, self.log)
+    new_path = rename_via_arr(base_url, headers, arr_type, filepath, self.log, path_mapping=instance.get("path-mapping") or None)
     if new_path and new_path != filepath:
       result["new"] = new_path
       result["changed"] = True
@@ -514,8 +517,13 @@ class RenameProcessor:
     for r in results:
       if not r.get("changed") or r.get("dry_run"):
         continue
+      tagdata = r.get("tagdata")
+      if tagdata is None or isinstance(tagdata, _TypeStub):
+        # No resolved TMDB metadata (stub or arr-delegated rename): nothing to write.
+        self.log.debug("Skipping .plexmatch for %s: no resolved metadata" % r["new"])
+        continue
       try:
-        update_plexmatch(r["new"], None, self.settings, log=self.log)
+        update_plexmatch(r["new"], tagdata, self.settings, log=self.log)
       except Exception:
         self.log.exception("Error updating .plexmatch for %s" % r["new"])
 
@@ -525,7 +533,11 @@ class RenameProcessor:
 
     Silently skips when Plex is not fully configured for direct refresh.
     """
-    if not self.settings.Plex.get("host") or not self.settings.Plex.get("token"):
+    instances = getattr(self.settings, "plex_instances", None)
+    if isinstance(instances, list) and instances:
+      if not any(i.get("refresh", False) for i in instances):
+        return
+    elif not (self.settings.Plex.get("host") and self.settings.Plex.get("token")):
       return
 
     # Build a mapping of parent-dir -> one representative file path so that

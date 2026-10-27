@@ -11,6 +11,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
+from xml.sax.saxutils import escape as xml_escape
 
 import tmdbsimple as tmdb
 from mutagen.mp4 import MP4, MP4StreamInfoError
@@ -184,8 +185,13 @@ class Metadata:
       credit_list = []
       for ep in self.episodes:
         try:
-          self.episodedata_list.append(ep_info_futures[ep].result())
-          credit_list.append(ep_credit_futures[ep].result())
+          # Resolve both futures before appending either, so a credits
+          # failure cannot leave info appended and then appended again by
+          # the fallback below (which would misalign the two lists).
+          ep_info = ep_info_futures[ep].result()
+          ep_credits = ep_credit_futures[ep].result()
+          self.episodedata_list.append(ep_info)
+          credit_list.append(ep_credits)
         except Exception as e:
           self.log.warning("Unable to retrieve episode S%sE%s data from TMDB (tmdbid %s): %s", season, ep, self.tmdbid, e)
           # Try to resolve via air date → season episode list.
@@ -462,6 +468,7 @@ class Metadata:
         self.log.exception("Error tagging file using FFMPEG fallback method, FFMPEG error.")
         self.log.error(e.cmd)
         self.log.error(e.output)
+        return False
       except Exception:
         self.log.exception("Unexpected tagging error using FFMPEG fallback method.")
         return False
@@ -578,18 +585,30 @@ class Metadata:
     sentence boundary.
 
     If the description fits within length it is returned unchanged.
-    Otherwise the text is split on periods and the last incomplete sentence
-    is discarded; suffix is appended to the result.
+    Otherwise the text is cut at the last sentence boundary within length and the incomplete sentence
+    is discarded. Text with no sentence boundary is hard-truncated with an ellipsis.
 
     description -- the full text to shorten
     length      -- maximum character count (default 255)
     splitter    -- sentence boundary character (default '.')
-    suffix      -- string appended when truncation occurs (default '.')
+    suffix      -- unused; kept for backward compatibility
     """
     if len(description) <= length:
       return description
-    else:
-      return " ".join(description[: length + 1].split(".")[0:-1]) + suffix
+    window = description[:length]
+    # Cut at the last sentence boundary inside the window, keeping its punctuation.
+    cut = max(window.rfind(splitter + " "), window.rfind(splitter + "\n"))
+    if window.endswith(splitter):
+      cut = max(cut, len(window) - 1)
+    if cut > 0:
+      return window[: cut + 1].rstrip()
+    # No sentence boundary: hard-truncate on a word boundary with an ellipsis.
+    ellipsis = "\u2026"
+    room = window[: length - len(ellipsis)]
+    space = room.rfind(" ")
+    if space > 0:
+      room = room[:space]
+    return room.rstrip() + ellipsis
 
   def getRating(self, rating):
     """
@@ -633,25 +652,25 @@ class Metadata:
       output.write(castheader)
       for a in self.credit["cast"][:5]:
         if a is not None and a["name"] is not None:
-          output.write("<dict><key>name</key><string>%s</string></dict>\n" % a["name"])
+          output.write("<dict><key>name</key><string>%s</string></dict>\n" % xml_escape(a["name"]))
       output.write(subfooter)
       # Write screenwriters
       output.write(writerheader)
       for w in [x for x in self.credit["crew"] if x["department"].lower() == "writing"][:5]:
         if w is not None:
-          output.write("<dict><key>name</key><string>%s</string></dict>\n" % w["name"])
+          output.write("<dict><key>name</key><string>%s</string></dict>\n" % xml_escape(w["name"]))
       output.write(subfooter)
       # Write directors
       output.write(directorheader)
       for d in [x for x in self.credit["crew"] if x["department"].lower() == "directing"][:5]:
         if d is not None:
-          output.write("<dict><key>name</key><string>%s</string></dict>\n" % d["name"])
+          output.write("<dict><key>name</key><string>%s</string></dict>\n" % xml_escape(d["name"]))
       output.write(subfooter)
       # Write producers
       output.write(producerheader)
       for p in [x for x in self.credit["crew"] if x["department"].lower() == "production"][:5]:
         if p is not None:
-          output.write("<dict><key>name</key><string>%s</string></dict>\n" % p["name"])
+          output.write("<dict><key>name</key><string>%s</string></dict>\n" % xml_escape(p["name"]))
       output.write(subfooter)
 
     # Close XML

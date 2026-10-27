@@ -487,15 +487,16 @@ class TestUpdatePlexmatchForResults:
   def test_calls_update_plexmatch_for_changed(self):
     proc = _make_processor()
     proc.settings.plexmatch_enabled = True
-    results = [{"changed": True, "dry_run": False, "new": "/media/file.mp4"}]
+    tagdata = MagicMock()
+    results = [{"changed": True, "dry_run": False, "new": "/media/file.mp4", "tagdata": tagdata}]
     with patch("resources.rename_util.update_plexmatch") as mock_pm:
       proc.update_plexmatch_for_results(results)
-    mock_pm.assert_called_once_with("/media/file.mp4", None, proc.settings, log=proc.log)
+    mock_pm.assert_called_once_with("/media/file.mp4", tagdata, proc.settings, log=proc.log)
 
   def test_exception_is_swallowed(self):
     proc = _make_processor()
     proc.settings.plexmatch_enabled = True
-    results = [{"changed": True, "dry_run": False, "new": "/media/file.mp4"}]
+    results = [{"changed": True, "dry_run": False, "new": "/media/file.mp4", "tagdata": MagicMock()}]
     with patch("resources.rename_util.update_plexmatch", side_effect=Exception("boom")):
       proc.update_plexmatch_for_results(results)  # must not raise
 

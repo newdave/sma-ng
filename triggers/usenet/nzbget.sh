@@ -52,17 +52,6 @@ info() { log "INFO: $*"; }
 warn() { log "WARNING: $*"; }
 err()  { log "ERROR: $*"; }
 
-submit_file() {
-    local filepath="$1"
-    local payload
-    payload=$(sma_build_generic_payload "$filepath" "")
-    curl -sf -X POST \
-        -H "Content-Type: application/json" \
-        "${AUTH_ARGS[@]}" \
-        -d "$payload" \
-        "${DAEMON_BASE}/webhook/generic" > /dev/null
-}
-
 # ── validate NZBGet environment ───────────────────────────────────────────────
 
 if [[ -z "${NZBOP_VERSION:-}" ]]; then
@@ -108,22 +97,17 @@ fi
 
 # ── submit files ──────────────────────────────────────────────────────────────
 
-SUBMITTED=0
-FAILED=0
+read -r SUBMITTED FAILED <<< "$(sma_submit_path "$DIRECTORY")"
 
-while IFS= read -r -d '' filepath; do
-    if submit_file "$filepath"; then
-        SUBMITTED=$(( SUBMITTED + 1 ))
-    else
-        warn "Failed to submit: ${filepath}"
-        FAILED=$(( FAILED + 1 ))
-    fi
-done < <(find "$DIRECTORY" -type f -print0)
+if [[ $FAILED -gt 0 ]]; then
+    err "${FAILED} file(s) failed to submit (${SUBMITTED} submitted)."
+    exit $POSTPROCESS_ERROR
+fi
 
 if [[ $SUBMITTED -gt 0 ]]; then
     info "Submitted ${SUBMITTED} job(s) to daemon."
     exit $POSTPROCESS_SUCCESS
 else
-    warn "No jobs submitted."
+    warn "No media files submitted."
     exit $POSTPROCESS_NONE
 fi

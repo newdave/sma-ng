@@ -65,7 +65,7 @@ fi
 if [[ -z "${SMA_API_KEY:-}" && -f "$DAEMON_CONFIG" ]]; then
     if ! SMA_API_KEY=$("$SMA_PY" "$SCRIPT_DIR/scripts/local-config.py" "$DAEMON_CONFIG" daemon api_key 2>&1); then
         echo "Warning: failed to read daemon.api_key from $DAEMON_CONFIG:" >&2
-        echo "$SMA_API_KEY" | sed 's/^/  /' >&2
+        printf '%s\n' "${SMA_API_KEY//$'\n'/$'\n'  }" | sed '1s/^/  /' >&2
         echo "  Set SMA_API_KEY in the environment to bypass." >&2
         SMA_API_KEY=""
     fi
@@ -86,6 +86,18 @@ usage() {
 }
 
 die() { echo "Error: $*" >&2; exit 1; }
+
+# Request timeouts (seconds); override via the environment.
+: "${SMA_CONNECT_TIMEOUT:=5}"
+: "${SMA_MAX_TIME:=30}"
+
+# api METHOD URL [curl args...] - call the daemon, fail on HTTP errors, pretty-print JSON.
+api() {
+    local method="$1" url="$2"
+    shift 2
+    curl -sS -f --connect-timeout "$SMA_CONNECT_TIMEOUT" --max-time "$SMA_MAX_TIME" \
+        -X "$method" "$url" "${auth_headers[@]+"${auth_headers[@]}"}" "$@" | jq .
+}
 
 cmd_submit() {
     [[ $# -ge 1 ]] || die "submit requires a file path"
@@ -132,14 +144,11 @@ cmd_submit() {
     local json
     json=$(jq -n "${payload[@]}" "$jq_expr")
 
-    curl -s -X POST "$SMA_DAEMON_URL/webhook/generic" \
-        -H "Content-Type: application/json" \
-        "${auth_headers[@]}" \
-        -d "$json" | jq .
+    api POST "$SMA_DAEMON_URL/webhook/generic" -H "Content-Type: application/json" -d "$json"
 }
 
 cmd_health() {
-    curl -s "$SMA_DAEMON_URL/health" | jq .
+    api GET "$SMA_DAEMON_URL/health"
 }
 
 cmd_jobs() {
@@ -148,51 +157,51 @@ cmd_jobs() {
     if [[ -n "$status" ]]; then
         url+="?status=$status"
     fi
-    curl -s "$url" "${auth_headers[@]}" | jq .
+    api GET "$url"
 }
 
 cmd_job() {
     [[ $# -ge 1 ]] || die "job requires an ID"
-    curl -s "$SMA_DAEMON_URL/jobs/$1" "${auth_headers[@]}" | jq .
+    api GET "$SMA_DAEMON_URL/jobs/$1"
 }
 
 cmd_stats() {
-    curl -s "$SMA_DAEMON_URL/stats" "${auth_headers[@]}" | jq .
+    api GET "$SMA_DAEMON_URL/stats"
 }
 
 cmd_configs() {
-    curl -s "$SMA_DAEMON_URL/configs" "${auth_headers[@]}" | jq .
+    api GET "$SMA_DAEMON_URL/configs"
 }
 
 cmd_cleanup() {
     local days="${1:-30}"
-    curl -s -X POST "$SMA_DAEMON_URL/cleanup?days=$days" "${auth_headers[@]}" | jq .
+    api POST "$SMA_DAEMON_URL/cleanup?days=$days"
 }
 
 cmd_requeue() {
     if [[ $# -ge 1 ]]; then
         local job_id="$1"
-        curl -s -X POST "$SMA_DAEMON_URL/jobs/$job_id/requeue" "${auth_headers[@]}" | jq .
+        api POST "$SMA_DAEMON_URL/jobs/$job_id/requeue"
     else
-        curl -s -X POST "$SMA_DAEMON_URL/jobs/requeue" "${auth_headers[@]}" | jq .
+        api POST "$SMA_DAEMON_URL/jobs/requeue"
     fi
 }
 
 cmd_cancel() {
     [[ $# -ge 1 ]] || die "cancel requires a job ID"
-    curl -s -X POST "$SMA_DAEMON_URL/jobs/$1/cancel" "${auth_headers[@]}" | jq .
+    api POST "$SMA_DAEMON_URL/jobs/$1/cancel"
 }
 
 cmd_reload() {
-    curl -s -X POST "$SMA_DAEMON_URL/reload" "${auth_headers[@]}" | jq .
+    api POST "$SMA_DAEMON_URL/reload"
 }
 
 cmd_restart() {
-    curl -s -X POST "$SMA_DAEMON_URL/restart" "${auth_headers[@]}" | jq .
+    api POST "$SMA_DAEMON_URL/restart"
 }
 
 cmd_shutdown() {
-    curl -s -X POST "$SMA_DAEMON_URL/shutdown" "${auth_headers[@]}" | jq .
+    api POST "$SMA_DAEMON_URL/shutdown"
 }
 
 # --- Main ---

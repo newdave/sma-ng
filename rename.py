@@ -149,20 +149,19 @@ def main():
       rp = _get_rp(args.path)
       result = rp.rename_file(args.path, type_hint=_type_hint_for(args.path), **common_kwargs)
       results = [result]
-      # Use whichever rp was used for plexmatch/plex (single file → single rp)
-      primary_rp = rp
     else:
       results = _rename_directory(args.path, _get_rp, _type_hint_for, common_kwargs)
-      # For plexmatch/plex we need a representative rp; use the first cached one.
-      primary_rp = next(iter(_rp_cache.values())) if _rp_cache else _get_rp(args.path)
 
     _print_results(results)
 
-    if not args.no_plexmatch:
-      primary_rp.update_plexmatch_for_results(results)
-
-    if not args.no_plex:
-      primary_rp.refresh_plex_for_results(results)
+    # Group results per RenameProcessor so each file is handled with the
+    # settings its own path-routed config selects.
+    groups = _group_results_by_processor(results, _get_rp)
+    for rp_group, group_results in groups:
+      if not args.no_plexmatch:
+        rp_group.update_plexmatch_for_results(group_results)
+      if not args.no_plex:
+        rp_group.refresh_plex_for_results(group_results)
 
     if not results:
       log.error("No files were processed under path: %s" % args.path)
@@ -176,6 +175,20 @@ def main():
   except Exception:
     log.exception("Unexpected error during rename")
     sys.exit(1)
+
+
+def _group_results_by_processor(results, get_rp):
+  """Return ``[(processor, [results...])]`` preserving first-seen order."""
+  groups = {}
+  order = []
+  for r in results:
+    rp = get_rp(r.get("old") or r.get("new"))
+    key = id(rp)
+    if key not in groups:
+      groups[key] = (rp, [])
+      order.append(key)
+    groups[key][1].append(r)
+  return [groups[k] for k in order]
 
 
 def _iter_media_files(dirpath, media_exts):

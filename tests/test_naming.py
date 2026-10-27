@@ -888,7 +888,7 @@ class TestRenameFileEdgeCases:
   def test_oserror_returns_original(self, tmp_path):
     src = tmp_path / "file.mp4"
     src.touch()
-    with patch("os.rename", side_effect=OSError("permission denied")):
+    with patch("os.link", side_effect=OSError("permission denied")), patch("os.rename", side_effect=OSError("permission denied")):
       result = rename_file(str(src), "new_name")
     assert result == str(src)
 

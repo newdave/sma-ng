@@ -24,13 +24,13 @@ from autoprocess._media_server import trigger_refresh
 from resources.log import getLogger
 
 
-def refreshJellyfin(settings, path: str, logger: logging.Logger | None = None) -> None:
+def refreshJellyfin(settings, path: str, logger: logging.Logger | None = None, deleted_path: str | None = None) -> None:
   """Trigger a targeted Jellyfin refresh for the directory containing *path*."""
   log = logger or getLogger(__name__)
   instances = [i for i in (getattr(settings, "jellyfin_instances", []) or []) if i.get("refresh", False)]
   if not instances:
     return
-  trigger_refresh(instances, path, product_label="Jellyfin", logger=log)
+  trigger_refresh(instances, path, product_label="Jellyfin", logger=log, deleted_path=deleted_path)
 
 
 __all__ = ["refreshJellyfin"]

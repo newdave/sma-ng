@@ -23,13 +23,13 @@ from autoprocess._media_server import trigger_refresh
 from resources.log import getLogger
 
 
-def refreshEmby(settings, path: str, logger: logging.Logger | None = None) -> None:
+def refreshEmby(settings, path: str, logger: logging.Logger | None = None, deleted_path: str | None = None) -> None:
   """Trigger a targeted Emby refresh for the directory containing *path*."""
   log = logger or getLogger(__name__)
   instances = [i for i in (getattr(settings, "emby_instances", []) or []) if i.get("refresh", False)]
   if not instances:
     return
-  trigger_refresh(instances, path, product_label="Emby", logger=log)
+  trigger_refresh(instances, path, product_label="Emby", logger=log, deleted_path=deleted_path)
 
 
 __all__ = ["refreshEmby"]

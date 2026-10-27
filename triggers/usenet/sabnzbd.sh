@@ -37,17 +37,6 @@ log()  { echo "[sabnzbd] $*" >&2; }
 info() { log "INFO: $*"; }
 err()  { log "ERROR: $*"; }
 
-submit_file() {
-    local filepath="$1"
-    local payload
-    payload=$(sma_build_generic_payload "$filepath" "")
-    curl -sf -X POST \
-        -H "Content-Type: application/json" \
-        "${AUTH_ARGS[@]}" \
-        -d "$payload" \
-        "${DAEMON_BASE}/webhook/generic" > /dev/null
-}
-
 is_bypassed() {
     local category="$1"
     local cat_lower="${category,,}"
@@ -94,22 +83,21 @@ fi
 
 # ── submit path (file or directory) ──────────────────────────────────────────
 
-if [[ -f "$PATH_ARG" ]]; then
-    if submit_file "$PATH_ARG"; then
-        info "Submitted: ${PATH_ARG}"
-    else
-        err "Failed to submit job to daemon at ${DAEMON_BASE}."
-        exit 1
-    fi
-elif [[ -d "$PATH_ARG" ]]; then
-    SUBMITTED=0
-    while IFS= read -r -d '' filepath; do
-        if submit_file "$filepath"; then
-            SUBMITTED=$(( SUBMITTED + 1 ))
-        fi
-    done < <(find "$PATH_ARG" -type f -print0)
-    info "Submitted ${SUBMITTED} job(s) to daemon."
-else
+if [[ ! -e "$PATH_ARG" ]]; then
     err "Path does not exist: ${PATH_ARG}"
     exit 1
 fi
+
+read -r SUBMITTED FAILED <<< "$(sma_submit_path "$PATH_ARG")"
+
+if [[ "$FAILED" -gt 0 ]]; then
+    err "${FAILED} file(s) failed to submit to daemon at ${DAEMON_BASE} (${SUBMITTED} submitted)."
+    exit 1
+fi
+
+if [[ "$SUBMITTED" -eq 0 ]]; then
+    err "No media files found to submit under: ${PATH_ARG}"
+    exit 1
+fi
+
+info "Submitted ${SUBMITTED} job(s) to daemon."

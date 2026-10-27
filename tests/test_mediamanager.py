@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 from resources.mediamanager import (
+  REQUEST_TIMEOUT,
   api_command,
   api_get,
   api_put,
@@ -41,7 +42,7 @@ class TestApiCommand:
     mock_post.return_value.json.return_value = {"id": 42, "status": "queued"}
     log = MagicMock()
     result = api_command("http://localhost:8989", {"X-Api-Key": "k"}, {"name": "RescanSeries"}, log)
-    mock_post.assert_called_once_with("http://localhost:8989/api/v3/command", json={"name": "RescanSeries"}, headers={"X-Api-Key": "k"})
+    mock_post.assert_called_once_with("http://localhost:8989/api/v3/command", json={"name": "RescanSeries"}, headers={"X-Api-Key": "k"}, timeout=REQUEST_TIMEOUT)
     assert result["id"] == 42
 
   @patch("resources.mediamanager.requests.post")
@@ -101,7 +102,7 @@ class TestApiGet:
     mock_get.return_value.json.return_value = [{"id": 1}]
     log = MagicMock()
     result = api_get("http://localhost:8989", {"X-Api-Key": "k"}, "series", log)
-    mock_get.assert_called_once_with("http://localhost:8989/api/v3/series", headers={"X-Api-Key": "k"})
+    mock_get.assert_called_once_with("http://localhost:8989/api/v3/series", headers={"X-Api-Key": "k"}, timeout=REQUEST_TIMEOUT)
     assert result == [{"id": 1}]
 
 
