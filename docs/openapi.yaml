@@ -262,8 +262,13 @@ paths:
   /status:
     get:
       summary: Cluster status
-      description: Returns cluster-wide node and job status. No authentication required.
-      security: []
+      description: >-
+        Without credentials returns a minimal view (status, version, job counts). With a valid
+        API key returns full cluster detail (nodes, hosts, active jobs).
+      security:
+        - {}
+        - apiKey: []
+        - bearerToken: []
       operationId: getStatus
       tags: [monitoring]
       responses:
@@ -274,6 +279,10 @@ paths:
               schema:
                 type: object
                 properties:
+                  status:
+                    type: string
+                    description: Present only in the minimal unauthenticated view
+                    example: ok
                   version:
                     type: string
                     description: SMA-NG release version of the local node answering the request
@@ -286,7 +295,7 @@ paths:
                     example: 2e26970
                   cluster:
                     type: array
-                    description: One entry per known node, including its version and last-seen time
+                    description: Authenticated only. One entry per known node, including its version and last-seen time
                     items:
                       type: object
                   jobs:
@@ -1123,7 +1132,7 @@ paths:
           in: query
           schema:
             type: string
-          description: Absolute path to browse (must be under a configured media root)
+          description: Absolute path to browse (must be under a configured media root; symlinks are resolved; ancestors of a root list only entries leading to it)
       responses:
         "200":
           description: Directory listing

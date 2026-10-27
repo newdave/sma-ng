@@ -1,3 +1,4 @@
+import hmac
 import json
 import os
 import re as _re
@@ -12,7 +13,7 @@ import requests
 from autoprocess import autoscan
 from resources.daemon import metrics_prom
 from resources.daemon.config import _strip_secrets
-from resources.daemon.constants import SCRIPT_DIR
+from resources.daemon.constants import MAX_REQUEST_BODY_BYTES, SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase
 from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html, doc_file_for_slug
@@ -40,12 +41,69 @@ def _json_default(value):
   raise TypeError("Object of type %s is not JSON serializable" % type(value).__name__)
 
 
+class _BadRequest(Exception):
+  """Raised by request-parsing helpers; do_GET/do_POST turn it into a JSON error response."""
+
+  def __init__(self, status, message):
+    super().__init__(message)
+    self.status = status
+    self.message = message
+
+
+# Injected into the dashboard/admin/metrics HTML. The API key is never rendered
+# into the page: the browser keeps it in sessionStorage (entered by the user)
+# and this shim adds it as X-API-Key to every fetch, prompting on a 401.
+_AUTH_SHIM = """<script>
+(function () {
+  var STORE = 'sma_api_key';
+  var origFetch = window.fetch.bind(window);
+  var pending = null;
+  window.SMA_API_KEY = sessionStorage.getItem(STORE) || '';
+  function ask() {
+    if (!pending) {
+      pending = Promise.resolve().then(function () {
+        var k = window.prompt('This SMA-NG daemon requires an API key:');
+        if (k) { sessionStorage.setItem(STORE, k); window.SMA_API_KEY = k; }
+        return k;
+      }).finally(function () { pending = null; });
+    }
+    return pending;
+  }
+  function withKey(input, init, key) {
+    var headers = new Headers((init && init.headers) || (input instanceof Request ? input.headers : undefined));
+    if (key) { headers.set('X-API-Key', key); }
+    return Object.assign({}, init || {}, { headers: headers });
+  }
+  window.fetch = function (input, init) {
+    return origFetch(input, withKey(input, init, window.SMA_API_KEY)).then(function (resp) {
+      if (resp.status !== 401) { return resp; }
+      return ask().then(function (k) {
+        return k ? origFetch(input, withKey(input, init, k)) : resp;
+      });
+    });
+  };
+})();
+</script>"""
+
+
+def _with_auth_shim(html):
+  return html.replace("</head>", _AUTH_SHIM + "</head>", 1)
+
+
 def _is_explicitly_local_db(job_db):
   return isinstance(job_db, SQLiteJobDatabase)
 
 
 def _is_not_distributed(job_db):
   return getattr(job_db, "is_distributed", None) is False
+
+
+class _NullWriter:
+  def write(self, _data):
+    return 0
+
+  def flush(self):
+    pass
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
@@ -109,12 +167,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
           colon = decoded.index(":")
           req_user = decoded[:colon]
           req_pass = decoded[colon + 1 :]
-          if req_user == basic_auth[0] and req_pass == basic_auth[1]:
+          user_ok = hmac.compare_digest(req_user.encode("utf-8"), basic_auth[0].encode("utf-8"))
+          pass_ok = hmac.compare_digest(req_pass.encode("utf-8"), basic_auth[1].encode("utf-8"))
+          if user_ok and pass_ok:
             return True
         except Exception:
           pass
 
-    if api_key and request_key == api_key:
+    if api_key and request_key and hmac.compare_digest(request_key.encode("utf-8"), api_key.encode("utf-8")):
       return True
 
     # Authentication failed
@@ -126,6 +186,51 @@ class WebhookHandler(BaseHTTPRequestHandler):
     self.wfile.write(json.dumps({"error": "Unauthorized", "message": "Valid API key required"}).encode("utf-8"))
     return False
 
+  def _is_authenticated(self):
+    """Return True if the request carries valid credentials (or none are required). Sends no response."""
+    if not self.server.api_key and not self.server.basic_auth:
+      return True
+    saved = (self.send_response, self.send_header, self.end_headers, self.wfile)
+    try:
+      self.send_response = lambda *a, **k: None
+      self.send_header = lambda *a, **k: None
+      self.end_headers = lambda *a, **k: None
+      self.wfile = _NullWriter()
+      return self.check_auth()
+    finally:
+      self.send_response, self.send_header, self.end_headers, self.wfile = saved
+
+  def _content_length(self):
+    """Return the validated Content-Length (0 if absent); raise _BadRequest on bad or oversized values."""
+    raw = self.headers.get("Content-Length", 0)
+    try:
+      length = int(raw)
+    except (TypeError, ValueError):
+      raise _BadRequest(400, "Invalid Content-Length header")
+    if length < 0:
+      raise _BadRequest(400, "Invalid Content-Length header")
+    if length > MAX_REQUEST_BODY_BYTES:
+      raise _BadRequest(413, "Request body too large (limit %d bytes)" % MAX_REQUEST_BODY_BYTES)
+    return length
+
+  @staticmethod
+  def _query_int(query, name, default, minimum=0):
+    """Parse an integer query parameter; raise _BadRequest(400) if invalid or below *minimum*."""
+    raw = query.get(name, [default])[0]
+    try:
+      value = int(raw)
+    except (TypeError, ValueError):
+      raise _BadRequest(400, "Invalid '%s' parameter: must be an integer" % name)
+    if minimum is not None and value < minimum:
+      raise _BadRequest(400, "Invalid '%s' parameter: must be >= %d" % (name, minimum))
+    return value
+
+  def _guarded(self, func):
+    try:
+      func(self)
+    except _BadRequest as exc:
+      self.send_json_response(exc.status, {"error": exc.message})
+
   def is_public_endpoint(self, path):
     """Check if the endpoint is public (doesn't require auth)."""
     return path in self.PUBLIC_ENDPOINTS or path.startswith("/docs/")
@@ -136,7 +241,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     Returns the paths list on success.  On parse failure, sends a 400
     response and returns None — callers must check for None and return.
     """
-    content_length = int(self.headers.get("Content-Length", 0))
+    content_length = self._content_length()
     body = self.rfile.read(content_length) if content_length else b"{}"
     try:
       data = json.loads(body)
@@ -186,6 +291,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
     self.send_json_response(200, payload)
 
   def _get_status(self):
+    if not self._is_authenticated():
+      # Unauthenticated callers get a minimal liveness view only: no node ids,
+      # hosts, or job paths.
+      stats = self.server.job_db.get_stats()
+      self.send_json_response(200, {"status": "ok", "version": self.server.version, "jobs": stats})
+      return
     nodes = self.server.job_db.get_cluster_nodes()
     display_host = None
     try:
@@ -221,8 +332,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
     # ?library=hq with the same effect as ?profile=hq.
     profile = query.get("profile", [None])[0] or query.get("library", [None])[0]
     sort = query.get("sort", [None])[0]
-    limit = int(query.get("limit", [100])[0])
-    offset = int(query.get("offset", [0])[0])
+    limit = self._query_int(query, "limit", 100)
+    offset = self._query_int(query, "offset", 0)
     if search:
       offset = 0
       limit = max(limit, 200)
@@ -290,36 +401,36 @@ class WebhookHandler(BaseHTTPRequestHandler):
     path = query.get("path", [""])[0].strip()
     pcm = self.server.path_config_manager
 
-    # Sources of valid root prefixes: routing-rule match paths and scan-path
-    # entries. Add every ancestor directory of each so navigation from "/"
-    # down through the tree works.
+    # Sources of valid roots: routing-rule match paths and scan-path entries.
+    # A real root allows its whole subtree. Ancestors of a root may only be
+    # listed as exact paths (to navigate down), and then only the children on
+    # the way to a root are shown.
     base_roots = list(pcm.routing_match_paths())
     base_roots.extend(sp["path"] for sp in pcm.scan_paths if sp.get("path"))
 
-    allowed_roots = set()
-    for raw in base_roots:
-      p = os.path.normpath(raw)
-      allowed_roots.add(p)
-      parts = p.rstrip("/").split("/")
-      for i in range(1, len(parts)):
-        allowed_roots.add("/".join(parts[:i]) or "/")
+    roots = {os.path.realpath(r) for r in base_roots}
+    ancestors = set()
+    for root in roots:
+      parent = os.path.dirname(root)
+      while parent != root:
+        ancestors.add(parent)
+        root, parent = parent, os.path.dirname(parent)
 
-    def is_allowed(check_path):
-      check_path = os.path.normpath(check_path)
-      for root in allowed_roots:
-        root_norm = os.path.normpath(root)
-        if check_path == root_norm or check_path.startswith(root_norm + os.sep):
-          return True
-      return False
+    def in_root(check_path):
+      return any(check_path == r or check_path.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
+
+    def toward_root(check_path):
+      """True if check_path is a root, inside one, or an ancestor leading to one."""
+      return in_root(check_path) or any(r.startswith(check_path.rstrip(os.sep) + os.sep) for r in roots)
 
     if not path:
       # Return the top-level configured path prefixes as starting points
       dirs = sorted({os.path.normpath(r) for r in base_roots if os.path.isdir(r)})
       return self.send_json_response(200, {"dirs": dirs, "files": []})
 
-    path = os.path.normpath(path)
+    path = os.path.realpath(path)
 
-    if not is_allowed(path):
+    if not (in_root(path) or path in ancestors):
       return self.send_json_response(403, {"error": "Path is outside configured media roots"})
 
     if not os.path.isdir(path):
@@ -332,8 +443,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
           if entry.name.startswith("."):
             continue
           if entry.is_dir(follow_symlinks=False):
-            dirs.append(os.path.join(path, entry.name))
-          elif entry.is_file(follow_symlinks=False):
+            child = os.path.join(path, entry.name)
+            if in_root(path) or toward_root(os.path.realpath(child)):
+              dirs.append(child)
+          elif in_root(path) and entry.is_file(follow_symlinks=False):
             ext = os.path.splitext(entry.name)[1].lower()
             if ext in pcm.media_extensions:
               files.append(os.path.join(path, entry.name))
@@ -415,11 +528,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
     # Parse query params
     job_id_filter = query.get("job_id", [None])[0]
     level_filter = (query.get("level", [None])[0] or "").upper() or None
-    lines_param = int(query.get("lines", [500])[0])
+    lines_param = self._query_int(query, "lines", 500)
     lines_param = min(lines_param, 2000)
     offset_param = query.get("offset", [None])[0]
     if offset_param is not None:
-      offset_param = int(offset_param)
+      try:
+        offset_param = int(offset_param)
+      except ValueError:
+        raise _BadRequest(400, "Invalid 'offset' parameter")
 
     # Get current file size for tail polling
     try:
@@ -512,8 +628,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     node_id = query.get("node_id", [None])[0] or None
     level = query.get("level", [None])[0] or None
-    limit = min(int(query.get("limit", [100])[0]), 500)
-    offset = int(query.get("offset", [0])[0])
+    limit = min(self._query_int(query, "limit", 100), 500)
+    offset = self._query_int(query, "offset", 0)
 
     logs = self.server.job_db.get_logs(node_id=node_id, level=level, limit=limit, offset=offset)
 
@@ -541,7 +657,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       self.send_json_response(503, {"error": "Cluster config is only available in distributed (PostgreSQL) mode"})
       return
     actor = self.headers.get("X-Actor", "admin-ui")
-    content_length = int(self.headers.get("Content-Length", 0))
+    content_length = self._content_length()
     try:
       body = json.loads(self.rfile.read(content_length) if content_length else b"{}")
     except (json.JSONDecodeError, ValueError):
@@ -567,14 +683,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
     self.end_headers()
 
   def _get_dashboard(self, _path, _query):
-    api_key = self.server.api_key or ""
-    key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
-    self.send_html_response(200, _load_dashboard_html().replace("</head>", key_script + "</head>", 1))
+    self.send_html_response(200, _with_auth_shim(_load_dashboard_html()))
 
   def _get_admin(self, _path, _query):
-    api_key = self.server.api_key or ""
-    key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
-    self.send_html_response(200, _load_admin_html().replace("</head>", key_script + "</head>", 1))
+    self.send_html_response(200, _with_auth_shim(_load_admin_html()))
 
   def _get_docs(self, path, _query):
     # Resolve slug: /docs → index, /docs/daemon → daemon
@@ -590,7 +702,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         md_content = f.read()
       self.send_html_response(200, _load_docs_template(slug, version=self.server.version) % _render_markdown_to_html(md_content))
     except FileNotFoundError:
-      self.send_html_response(404, "<h1>Page not found</h1><p>%s</p>" % md_file)
+      self.send_html_response(404, "<h1>Page not found</h1>")
 
   def _get_stats(self, _path, _query):
     self.send_json_response(200, self.server.job_db.get_stats())
@@ -612,9 +724,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     self.send_json_response(200, self.server.job_db.get_metrics(window=window))
 
   def _get_metrics_page(self, _path, _query):
-    api_key = self.server.api_key or ""
-    key_script = "<script>window.SMA_API_KEY=%s;</script>" % json.dumps(api_key)
-    self.send_html_response(200, _load_metrics_html().replace("</head>", key_script + "</head>", 1))
+    self.send_html_response(200, _with_auth_shim(_load_metrics_html()))
 
   def _get_metrics_prom(self, _path, _query):
     """Prometheus text exposition. Industry-convention path; the HTML
@@ -640,14 +750,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
       self.send_json_response(404, {"error": "favicon not found"})
 
   def do_GET(self):
-    dispatch_get(self)
+    self._guarded(dispatch_get)
 
   # ------------------------------------------------------------------
   # POST route handlers
   # ------------------------------------------------------------------
 
   def _post_cleanup(self, query):
-    days = int(query.get("days", [30])[0])
+    days = self._query_int(query, "days", 30)
     deleted = self.server.job_db.cleanup_old_jobs(days)
     self.send_json_response(200, {"deleted": deleted, "days": days})
 
@@ -690,7 +800,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     actor = self.headers.get("X-Actor", "admin-ui")
 
     if action in {"approve", "reject"}:
-      content_length = int(self.headers.get("Content-Length", 0))
+      content_length = self._content_length()
       note = None
       if content_length:
         try:
@@ -771,7 +881,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         {"action": "...", "succeeded": [...], "skipped": [...], "not_found": [...]}
     """
-    content_length = int(self.headers.get("Content-Length", 0))
+    content_length = self._content_length()
     try:
       body = json.loads(self.rfile.read(content_length) if content_length else b"{}")
     except (json.JSONDecodeError, ValueError):
@@ -861,7 +971,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     job_id = self._parse_job_id(path)
     if job_id is None:
       return
-    content_length = int(self.headers.get("Content-Length", 0))
+    content_length = self._content_length()
     try:
       body = json.loads(self.rfile.read(content_length) if content_length else b"{}")
     except (json.JSONDecodeError, ValueError):
@@ -957,15 +1067,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
         {
           "runs": [],
           "count": 0,
-          "limit": int(query.get("limit", [50])[0]),
-          "offset": int(query.get("offset", [0])[0]),
+          "limit": self._query_int(query, "limit", 50),
+          "offset": self._query_int(query, "offset", 0),
           "available": False,
           "reason": "Library audit requires PostgreSQL cluster mode.",
         },
       )
       return
-    limit = int(query.get("limit", [50])[0])
-    offset = int(query.get("offset", [0])[0])
+    limit = self._query_int(query, "limit", 50)
+    offset = self._query_int(query, "offset", 0)
     runs = self.server.job_db.list_audit_runs(limit=limit, offset=offset)
     self.send_json_response(200, {"runs": runs, "count": len(runs), "limit": limit, "offset": offset})
 
@@ -986,8 +1096,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
         {
           "findings": [],
           "count": 0,
-          "limit": int(query.get("limit", [50])[0]),
-          "offset": int(query.get("offset", [0])[0]),
+          "limit": self._query_int(query, "limit", 50),
+          "offset": self._query_int(query, "offset", 0),
           "available": False,
           "reason": "Library audit requires PostgreSQL cluster mode.",
         },
@@ -996,8 +1106,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
     status = query.get("status", [None])[0]
     kind = query.get("kind", [None])[0]
     path_q = query.get("path", [None])[0]
-    limit = int(query.get("limit", [50])[0])
-    offset = int(query.get("offset", [0])[0])
+    limit = self._query_int(query, "limit", 50)
+    offset = self._query_int(query, "offset", 0)
     findings = self.server.job_db.get_findings(status=status, kind=kind, path=path_q, limit=limit, offset=offset)
     self.send_json_response(200, {"findings": findings, "count": len(findings), "limit": limit, "offset": offset})
 
@@ -1021,7 +1131,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       self.send_json_response(409, {"error": "Library audit requires PostgreSQL cluster mode."})
       return
     body = {}
-    content_length = int(self.headers.get("Content-Length", 0))
+    content_length = self._content_length()
     if content_length:
       try:
         body = json.loads(self.rfile.read(content_length))
@@ -1110,7 +1220,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       return None
 
   def do_POST(self):
-    dispatch_post(self)
+    self._guarded(dispatch_post)
 
   def _walk_media_files(self, directory):
     """Yield media file paths lazily using os.scandir.
@@ -1148,7 +1258,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     Returns (None, [], None, 0) with an error response already sent on failure.
     """
-    content_length = int(self.headers.get("Content-Length", 0))
+    content_length = self._content_length()
     body = self.rfile.read(content_length).decode("utf-8").strip()
     return parse_generic_webhook_body(body, self.headers.get("Content-Type", ""), self.send_json_response)
 
@@ -1426,7 +1536,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       "episodeFile": { "path": "/mnt/unionfs/Media/TV/Show/S03E10.mkv" }
     }
     """
-    content_length = int(self.headers.get("Content-Length", 0))
+    content_length = self._content_length()
     body = self.rfile.read(content_length).decode("utf-8").strip()
     return parse_sonarr_body(body, self.send_json_response, forward_event=lambda data: self._forward_arr_event("sonarr", data))
 
@@ -1445,7 +1555,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       "movieFile": { "path": "/mnt/unionfs/Media/Movies/The Matrix.mkv" }
     }
     """
-    content_length = int(self.headers.get("Content-Length", 0))
+    content_length = self._content_length()
     body = self.rfile.read(content_length).decode("utf-8").strip()
     return parse_radarr_body(body, self.send_json_response, forward_event=lambda data: self._forward_arr_event("radarr", data))
 
@@ -1527,6 +1637,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
       if profile_override:
         extra_args = self._merge_profile_arg(extra_args, profile_override)
       self._dispatch_path(path, extra_args, request_source="sonarr")
+    except _BadRequest:
+      raise
     except Exception as e:
       self.server.logger.exception("Error handling Sonarr webhook: %s" % e)
       self.send_json_response(500, {"error": str(e)})
@@ -1541,6 +1653,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
       if profile_override:
         extra_args = self._merge_profile_arg(extra_args, profile_override)
       self._dispatch_path(path, extra_args, request_source="radarr")
+    except _BadRequest:
+      raise
     except Exception as e:
       self.server.logger.exception("Error handling Radarr webhook: %s" % e)
       self.send_json_response(500, {"error": str(e)})
@@ -1556,6 +1670,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
       override = override.strip().lower()
       request_source = override if override in metrics_prom.REQUEST_SOURCES else "webhook"
       self._dispatch_path(path, extra_args, config_override, max_retries, request_source=request_source)
+    except _BadRequest:
+      raise
     except Exception as e:
       self.server.logger.exception("Error handling request: %s" % e)
       self.send_json_response(500, {"error": str(e)})

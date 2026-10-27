@@ -122,7 +122,9 @@ def _redact_keys():
   try:
     from resources.daemon.constants import SECRET_KEYS, SERVICE_SECRET_FIELDS
 
-    return frozenset(SECRET_KEYS) | frozenset(SERVICE_SECRET_FIELDS)
+    base = frozenset(SECRET_KEYS) | frozenset(SERVICE_SECRET_FIELDS)
+    # YAML keys are kebab-case; redact both spellings.
+    return base | frozenset(k.replace("_", "-") for k in base)
   except Exception:
     return frozenset({"api_key", "api-key", "db_url", "db-url", "username", "password", "node_id", "node-id", "apikey", "token"})
 

@@ -59,13 +59,18 @@ def _strip_secrets(data: dict) -> dict:
     username, password, node_id)
   - SERVICE_SECRET_FIELDS from every ``services.<type>.<instance>`` map
     (apikey, token, password)
+  - ``username``/``password`` under ``base.subtitle.subliminal.auth`` (and
+    the same path inside ``profiles.<name>``)
+
+  Key names are matched with ``-`` normalised to ``_`` so kebab-case YAML
+  keys (``api-key``, ``db-url``, ``node-id``) are caught as well.
   """
   result = copy.deepcopy(data)
 
   daemon = result.get("daemon", {})
   if isinstance(daemon, dict):
     for key in list(daemon):
-      if key in SECRET_KEYS:
+      if _norm_key(key) in SECRET_KEYS:
         del daemon[key]
 
   services = result.get("services", {})
@@ -77,9 +82,27 @@ def _strip_secrets(data: dict) -> dict:
         if not isinstance(instance, dict):
           continue
         for field in list(instance):
-          if field in SERVICE_SECRET_FIELDS:
+          if _norm_key(field) in SERVICE_SECRET_FIELDS:
             del instance[field]
+
+  sections = [result.get("base")]
+  profiles = result.get("profiles", {})
+  if isinstance(profiles, dict):
+    sections.extend(profiles.values())
+  for section in sections:
+    if not isinstance(section, dict):
+      continue
+    subtitle = section.get("subtitle")
+    subliminal = subtitle.get("subliminal") if isinstance(subtitle, dict) else None
+    auth = subliminal.get("auth") if isinstance(subliminal, dict) else None
+    if isinstance(auth, dict):
+      subliminal["auth"] = {k: ("***" if v else v) for k, v in auth.items()}
   return result
+
+
+def _norm_key(key) -> str:
+  """Normalise a YAML key (kebab-case) to snake_case for secret-name matching."""
+  return key.replace("-", "_") if isinstance(key, str) else key
 
 
 class ConfigLockManager:
