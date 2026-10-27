@@ -1,60 +1,31 @@
 # shellcheck shell=bash
-# SMA-NG Docker CLI helpers.
-# Source this file from Bash after the sma-ng container is running:
-#   source /opt/sma/sma-ng-docker-aliases.sh
+# DEPRECATED: thin shim over the `sma` host command. Removed in a later release.
+# Install `sma` instead (no sourcing needed):
+#   docker run --rm --entrypoint cat ghcr.io/newdave/sma-ng:latest /usr/local/bin/sma-host > /usr/local/bin/sma
+#   chmod 755 /usr/local/bin/sma
 
-CONTAINER="${CONTAINER:-sma-ng}"
-DOCKER_BIN="${DOCKER_BIN:-docker}"
+printf '%s\n' "sma-ng-docker-aliases.sh is deprecated: use the 'sma' command (sma convert, sma repair, ...)" >&2
 
-_sma_exec() {
-  "$DOCKER_BIN" exec -it "$CONTAINER" "$@"
-}
-
-sma_manual() {
-  _sma_exec python manual.py "$@"
-}
-
-sma_convert() {
-  if [ "$#" -lt 1 ]; then
-    echo "usage: sma-convert /container/path/to/file.mkv [manual.py args...]" >&2
-    return 2
+_sma_cmd() {
+  if command -v sma >/dev/null 2>&1; then
+    command sma "$@"
+  else
+    echo "sma: host command not installed; see docs/docker-compose-quickstart.md" >&2
+    return 3
   fi
-  local input="$1"
-  shift
-  sma_manual -i "$input" -a "$@"
 }
 
-sma_preview() {
-  if [ "$#" -lt 1 ]; then
-    echo "usage: sma-preview /container/path/to/file.mkv [manual.py args...]" >&2
-    return 2
-  fi
-  local input="$1"
-  shift
-  sma_manual -i "$input" -oo "$@"
-}
+sma_manual() { _sma_cmd manual "$@"; }
+sma_convert() { _sma_cmd convert "$@"; }
+sma_preview() { _sma_cmd preview "$@"; }
+sma_codecs() { _sma_cmd codecs "$@"; }
+sma_daemon_smoke() { _sma_cmd smoke "$@"; }
+sma_rename() { _sma_cmd rename "$@"; }
+sma_repair() { _sma_cmd repair "$@"; }
+sma_logs() { _sma_cmd logs "$@"; }
+sma_shell() { _sma_cmd shell "$@"; }
 
-sma_codecs() {
-  sma_manual -cl "$@"
-}
-
-sma_daemon_smoke() {
-  _sma_exec python daemon.py --smoke-test "$@"
-}
-
-sma_rename() {
-  _sma_exec python rename.py "$@"
-}
-
-sma_repair() {
-  _sma_exec python repair.py "$@"
-}
-
-sma_logs() {
-  "$DOCKER_BIN" logs -f "$CONTAINER" "$@"
-}
-
-alias sma-shell='_sma_exec bash'
+alias sma-shell='sma_shell'
 alias sma-manual='sma_manual'
 alias sma-convert='sma_convert'
 alias sma-preview='sma_preview'

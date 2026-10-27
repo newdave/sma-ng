@@ -93,7 +93,7 @@ The safest clustered layout is for all nodes to see the same media roots under t
 ```text
 /mnt/unionfs/Media/TV
 /mnt/unionfs/Media/Movies
-/downloads
+/mnt/unionfs/downloads
 ```
 
 If that is not possible, normalize incoming paths with `path_rewrites`:
@@ -106,6 +106,9 @@ If that is not possible, normalize incoming paths with `path_rewrites`:
   ]
 }
 ```
+
+The shipped compose file no longer mounts `/downloads`. Download clients in other containers that report
+`/downloads/...` need `{"from": "/downloads", "to": "/mnt/unionfs/downloads"}` in `path_rewrites`.
 
 This is especially important when:
 
@@ -294,7 +297,7 @@ Daemon:
   db_url: postgresql://sma:password@db.example.com:5432/sma
   path_rewrites:
     - from: /downloads
-      to: /mnt/downloads
+      to: /mnt/unionfs/downloads
   path_configs:
     - path: /mnt/unionfs/Media/TV
       profile: rq

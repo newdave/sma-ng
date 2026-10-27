@@ -84,13 +84,16 @@ class TestDockerfileStages:
     assert _stages(dockerfile) == ["ffmpeg-builder", "python-builder", "runtime"]
 
   def test_ffmpeg_builder_from_ubuntu(self, dockerfile_raw):
-    assert "FROM ubuntu:24.04 AS ffmpeg-builder" in dockerfile_raw
+    assert "FROM ${UBUNTU_IMAGE} AS ffmpeg-builder" in dockerfile_raw
+
+  def test_base_image_pinned_by_digest(self, dockerfile_raw):
+    assert re.search(r"^ARG UBUNTU_IMAGE=ubuntu:24\.04@sha256:[0-9a-f]{64}$", dockerfile_raw, re.M)
 
   def test_python_builder_from_ubuntu(self, dockerfile_raw):
-    assert "FROM ubuntu:24.04 AS python-builder" in dockerfile_raw
+    assert "FROM ${UBUNTU_IMAGE} AS python-builder" in dockerfile_raw
 
   def test_runtime_from_ubuntu(self, dockerfile_raw):
-    assert "FROM ubuntu:24.04 AS runtime" in dockerfile_raw
+    assert "FROM ${UBUNTU_IMAGE} AS runtime" in dockerfile_raw
 
   def test_runtime_copies_ffmpeg_from_builder(self, dockerfile_raw):
     assert "--from=ffmpeg-builder" in dockerfile_raw
@@ -199,10 +202,12 @@ class TestDockerfileRuntime:
   def test_runtime_drops_to_ubuntu_via_setpriv(self, dockerfile_raw, entrypoint_raw):
     # The entrypoint starts as root so it can reconcile /dev/dri device GIDs
     # at startup, then drops privileges to the built-in `ubuntu` user
-    # (UID/GID 1000) via setpriv with --init-groups.
+    # (UID/GID 1000) via setpriv, preserving the supplementary GIDs from `group_add`.
     assert "USER ubuntu" not in dockerfile_raw
     assert "util-linux" in dockerfile_raw
-    assert "setpriv --reuid=ubuntu --regid=ubuntu --init-groups" in entrypoint_raw
+    assert "setpriv --reuid=ubuntu --regid=ubuntu --groups" in entrypoint_raw
+    # --init-groups would rebuild groups from /etc/group and drop group_add GIDs.
+    assert "exec setpriv --reuid=ubuntu --regid=ubuntu --init-groups" not in entrypoint_raw
 
   def test_render_group_created_with_fixed_gid(self, dockerfile_raw):
     assert "getent group render" in dockerfile_raw
@@ -596,3 +601,82 @@ class TestDockerWorkflow:
     assert meta_step is not None
     tags_config = meta_step["with"]["tags"]
     assert "semver" in tags_config
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Entrypoint `run` mode and one-path-per-file compose mounts
+# ──────────────────────────────────────────────────────────────────────────────
+
+CONTAINER_ONLY_MOUNTS = ("/config", "/logs", "/data")
+
+
+class TestEntrypointRunMode:
+  def test_run_branch_precedes_seeding_and_gid_fixup(self, entrypoint_raw):
+    run_idx = entrypoint_raw.index('if [ "${1:-}" = "run" ]')
+    assert run_idx < entrypoint_raw.index("SMA_ENTRYPOINT_FIX_GIDS:-0")
+    assert run_idx < entrypoint_raw.index('seed_file "$SETUP_DIR')
+    assert run_idx < entrypoint_raw.index("/app/scripts/detect-gpu.sh")
+
+  def test_run_branch_uses_shared_functions(self, entrypoint_raw):
+    branch = entrypoint_raw[entrypoint_raw.index('if [ "${1:-}" = "run" ]') :]
+    branch = branch[: branch.index("\nfi\n")]
+    assert "set_runtime_env" in branch
+    assert 'drop_privileges "$@"' in branch
+    assert "setpriv" not in branch
+    assert "cd " not in branch
+
+  def test_setpriv_defined_once_in_drop_privileges(self, entrypoint_raw):
+    assert entrypoint_raw.count("exec setpriv --reuid=ubuntu --regid=ubuntu --groups") == 1
+    assert "--init-groups" not in re.sub(r"#.*", "", entrypoint_raw)
+    body = entrypoint_raw[entrypoint_raw.index("drop_privileges() {") :]
+    assert "setpriv" in body[: body.index("\n}\n")]
+
+  def test_libva_export_only_in_set_runtime_env(self, entrypoint_raw):
+    assert entrypoint_raw.count("export LIBVA_DRIVER_NAME=iHD") == 1
+    body = entrypoint_raw[entrypoint_raw.index("set_runtime_env() {") :]
+    assert "LIBVA_DRIVER_NAME=iHD" in body[: body.index("\n}\n")]
+
+  def test_daemon_path_still_calls_shared_functions(self, entrypoint_raw):
+    tail = entrypoint_raw[entrypoint_raw.index("# ── hand off to the container CMD") :]
+    assert "set_runtime_env" in tail
+    assert 'drop_privileges "$@"' in tail
+
+
+class TestHostCommandInImage:
+  def test_sma_host_copied_and_executable(self, dockerfile_raw):
+    assert "COPY setup/sma-host.sh /usr/local/bin/sma-host" in dockerfile_raw
+    assert "chmod 755 /usr/local/bin/sma-host" in dockerfile_raw
+
+  def test_sma_host_script_ships_in_repo(self):
+    assert os.access(os.path.join(PROJECT_ROOT, "setup", "sma-host.sh"), os.X_OK)
+
+  def test_alias_file_is_deprecation_shim(self):
+    text = _read("setup/sma-ng-docker-aliases.sh")
+    assert "deprecated" in text.lower()
+    assert "docker exec" not in text
+    for name in ("sma-convert", "sma-repair", "sma-shell", "sma-logs"):
+      assert "alias %s=" % name in text
+
+
+class TestComposeOnePathPerFile:
+  def _mounts(self, compose):
+    for name, svc in compose["services"].items():
+      for vol in svc.get("volumes", []) or []:
+        if isinstance(vol, str):
+          parts = vol.split(":")
+          yield name, parts[0], parts[1]
+
+  def test_no_downloads_mount_in_any_service(self, compose):
+    for name, _src, dst in self._mounts(compose):
+      assert dst != "/downloads", name
+    assert "/downloads" not in _read("docker/docker-compose.yml")
+
+  def test_media_mounts_are_identity_mounts(self, compose):
+    seen = 0
+    for name, src, dst in self._mounts(compose):
+      if dst in CONTAINER_ONLY_MOUNTS:
+        continue
+      if src.startswith("/"):
+        assert src == dst, (name, src, dst)
+        seen += 1
+    assert seen > 0

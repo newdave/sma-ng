@@ -36,7 +36,6 @@ services:
       - "/opt/sma/logs:/logs:rslave"
       - "/opt/sma/data:/data:rslave"
       - "/mnt:/mnt:rslave"
-      - "/mnt/unionfs/downloads:/downloads:rslave"
       - "/transcode:/transcode:rslave"
       - "/recycle:/recycle:rslave"
     env_file:
@@ -64,7 +63,6 @@ services:
       - "/opt/sma/logs:/logs:rslave"
       - "/opt/sma/data:/data:rslave"
       - "/mnt:/mnt:rslave"
-      - "/mnt/unionfs/downloads:/downloads:rslave"
       - "/transcode:/transcode:rslave"
       - "/recycle:/recycle:rslave"
     env_file:
@@ -92,7 +90,6 @@ services:
       - "/opt/sma/logs:/logs:rslave"
       - "/opt/sma/data:/data:rslave"
       - "/mnt:/mnt:rslave"
-      - "/mnt/unionfs/downloads:/downloads:rslave"
       - "/transcode:/transcode:rslave"
       - "/recycle:/recycle:rslave"
     deploy:
@@ -130,7 +127,6 @@ services:
       - "/opt/sma/logs:/logs:rslave"
       - "/opt/sma/data:/data:rslave"
       - "/mnt:/mnt:rslave"
-      - "/mnt/unionfs/downloads:/downloads:rslave"
       - "/transcode:/transcode:rslave"
       - "/recycle:/recycle:rslave"
     deploy:
@@ -168,7 +164,6 @@ services:
       - "/opt/sma/logs:/logs:rslave"
       - "/opt/sma/data:/data:rslave"
       - "/mnt:/mnt:rslave"
-      - "/mnt/unionfs/downloads:/downloads:rslave"
       - "/transcode:/transcode:rslave"
       - "/recycle:/recycle:rslave"
     devices:
@@ -210,7 +205,6 @@ services:
       - "/opt/sma/logs:/logs:rslave"
       - "/opt/sma/data:/data:rslave"
       - "/mnt:/mnt:rslave"
-      - "/mnt/unionfs/downloads:/downloads:rslave"
       - "/transcode:/transcode:rslave"
       - "/recycle:/recycle:rslave"
     devices:

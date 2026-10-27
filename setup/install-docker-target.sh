@@ -7,6 +7,7 @@ install_dir="${INSTALL_DIR:-/opt/sma}"
 transcode_dir="${TRANSCODE_DIR:-/transcode}"
 owner="${OWNER:-${SUDO_USER:-${USER:-}}}"
 snippet_path="${BASH_SNIPPET:-${install_dir}/sma-ng-docker-aliases.sh}"
+sma_bin_path="${SMA_BIN_PATH:-/usr/local/bin/sma}"
 config_source="${CONFIG_SOURCE:-${repo_root}/setup/sma-ng.yml.sample}"
 env_source="${ENV_SOURCE:-${repo_root}/setup/daemon.env.sample}"
 use_sudo="${USE_SUDO:-auto}"
@@ -81,7 +82,10 @@ echo "==> Seeding config files"
 install_file_if_missing "$config_source" "${install_dir}/config/sma-ng.yml" 640
 install_file_if_missing "$env_source" "${install_dir}/config/daemon.env" 640
 
-echo "==> Writing Bash helper snippet"
+echo "==> Installing sma host command to ${sma_bin_path}"
+as_root install -m 755 "${repo_root}/setup/sma-host.sh" "$sma_bin_path"
+
+echo "==> Writing deprecated Bash helper shim"
 as_root install -m 644 "${repo_root}/setup/sma-ng-docker-aliases.sh" "$snippet_path"
 as_root chown "$owner" "$snippet_path"
 
@@ -96,6 +100,6 @@ Host paths:
   data:       ${install_dir}/data
   transcodes: ${transcode_dir}/sma
 
-Load CLI helpers in Bash with:
-  source ${snippet_path}
+Host command installed: ${sma_bin_path}  (try: sma codecs)
+Deprecated alias shim:  ${snippet_path}
 EOF

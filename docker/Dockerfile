@@ -10,7 +10,12 @@
 # available in Ubuntu's main repository. FFmpeg's native AAC encoder is used
 # instead (--enable-encoder=aac is on by default).
 # ──────────────────────────────────────────────────────────────────────────────
-FROM ubuntu:24.04 AS ffmpeg-builder
+# Base image pinned by digest (ubuntu:24.04 multi-arch index, resolved 2026-10-28).
+# The tag is kept for readability; the digest is what Docker resolves. Refresh
+# both together (Dependabot's docker ecosystem does this automatically).
+ARG UBUNTU_IMAGE=ubuntu:24.04@sha256:24737cef17f4e22b1977df7d9a05e77c4e28b7da5b8911f8d8ccda136bf3573c
+
+FROM ${UBUNTU_IMAGE} AS ffmpeg-builder
 
 ARG FFMPEG_VERSION=8.1.2
 # nv-codec-headers must match the NVENC API that FFMPEG_VERSION compiles
@@ -130,7 +135,7 @@ RUN VPL_FLAG=$([ "$TARGETARCH" = "amd64" ] && echo "--enable-libvpl" || true); \
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 2: Python dependency builder
 # ──────────────────────────────────────────────────────────────────────────────
-FROM ubuntu:24.04 AS python-builder
+FROM ${UBUNTU_IMAGE} AS python-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -152,7 +157,7 @@ RUN python3 -m venv /venv \
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 3: Runtime image
 # ──────────────────────────────────────────────────────────────────────────────
-FROM ubuntu:24.04 AS runtime
+FROM ${UBUNTU_IMAGE} AS runtime
 
 # Injected automatically by Docker Buildx for multi-arch builds
 ARG TARGETARCH
@@ -303,11 +308,19 @@ ENV SMA_GIT_SHA=${SMA_GIT_SHA}
 COPY docker/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# Host CLI: operators install it with
+#   docker run --rm --entrypoint cat IMAGE /usr/local/bin/sma-host > /usr/local/bin/sma
+# The build SHA is substituted so `sma version` can detect a stale host copy.
+COPY setup/sma-host.sh /usr/local/bin/sma-host
+RUN sed "s|@SMA_GIT_SHA@|${SMA_GIT_SHA}|" /usr/local/bin/sma-host > /tmp/sma-host \
+    && mv /tmp/sma-host /usr/local/bin/sma-host \
+    && chmod 755 /usr/local/bin/sma-host
+
 # Runtime directories (seeded at startup via entrypoint; override with volume mounts)
-RUN mkdir -p /config /logs /data /mnt /downloads /transcode \
+RUN mkdir -p /config /logs /data /mnt /transcode \
     && chown -R ubuntu:ubuntu /config /logs /data /app
 
-VOLUME ["/config", "/logs", "/data", "/mnt", "/downloads", "/transcode"]
+VOLUME ["/config", "/logs", "/data", "/mnt", "/transcode"]
 
 EXPOSE 8585
 
