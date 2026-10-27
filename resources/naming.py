@@ -523,12 +523,75 @@ def rename_file(filepath, new_name, log=None):
     return filepath
 
   try:
-    os.rename(filepath, new_path)
-    log.info("Renamed: %s -> %s" % (os.path.basename(filepath), os.path.basename(new_path)))
-    return new_path
+    _rename_no_clobber(filepath, new_path)
+  except FileExistsError:
+    log.warning("Target filename already exists: %s" % new_path)
+    return filepath
   except OSError:
     log.exception("Failed to rename file")
     return filepath
+
+  log.info("Renamed: %s -> %s" % (os.path.basename(filepath), os.path.basename(new_path)))
+  _rename_sidecars(filepath, new_path, log)
+  return new_path
+
+
+_SIDECAR_EXTS = (".srt", ".ass", ".vtt", ".sub", ".idx")
+_SIDECAR_SUFFIX_RE = re.compile(r"^(?:\.[A-Za-z0-9-]{1,10}){0,2}$")
+
+
+def _rename_no_clobber(src, dst):
+  """Rename *src* to *dst*, raising FileExistsError instead of overwriting.
+
+  Uses a hard link + unlink so an existing *dst* is never replaced. On
+  filesystems without hard-link support, falls back to creating *dst*
+  exclusively (O_EXCL) and renaming over that placeholder.
+  """
+  try:
+    os.link(src, dst)
+  except FileExistsError:
+    raise
+  except OSError:
+    fd = os.open(dst, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    os.close(fd)
+    try:
+      os.rename(src, dst)
+    except OSError:
+      try:
+        os.unlink(dst)
+      except OSError:
+        pass
+      raise
+    return
+  os.unlink(src)
+
+
+def _rename_sidecars(old_path, new_path, log):
+  """Rename subtitle sidecars (same stem, optional language suffix) next to a renamed media file."""
+  directory = os.path.dirname(old_path)
+  old_stem = os.path.splitext(os.path.basename(old_path))[0]
+  new_stem = os.path.splitext(os.path.basename(new_path))[0]
+  try:
+    names = os.listdir(directory or ".")
+  except OSError:
+    return
+  for name in names:
+    base, ext = os.path.splitext(name)
+    if ext.lower() not in _SIDECAR_EXTS or not base.startswith(old_stem):
+      continue
+    if not _SIDECAR_SUFFIX_RE.match(base[len(old_stem) :]):
+      continue
+    src = os.path.join(directory, name)
+    dst = os.path.join(directory, new_stem + base[len(old_stem) :] + ext)
+    if src == dst:
+      continue
+    try:
+      _rename_no_clobber(src, dst)
+      log.info("Renamed sidecar: %s -> %s" % (name, os.path.basename(dst)))
+    except FileExistsError:
+      log.warning("Sidecar target already exists, left in place: %s" % dst)
+    except OSError:
+      log.exception("Failed to rename sidecar %s" % name)
 
 
 def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, lookup_path=None):

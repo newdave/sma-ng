@@ -32,30 +32,6 @@ log()  { echo "[qbittorrent] $*" >&2; }
 info() { log "INFO: $*"; }
 err()  { log "ERROR: $*"; }
 
-submit_file() {
-    local filepath="$1"
-    local payload
-    payload=$(sma_build_generic_payload "$filepath" "")
-    curl -sf -X POST \
-        -H "Content-Type: application/json" \
-        "${AUTH_ARGS[@]}" \
-        -d "$payload" \
-        "${DAEMON_BASE}/webhook/generic" > /dev/null
-}
-
-submit_path() {
-    local target="$1"
-    local submitted=0
-    if [[ -f "$target" ]]; then
-        submit_file "$target" && submitted=1
-    elif [[ -d "$target" ]]; then
-        while IFS= read -r -d '' filepath; do
-            submit_file "$filepath" && submitted=$(( submitted + 1 ))
-        done < <(find "$target" -type f -print0)
-    fi
-    echo "$submitted"
-}
-
 is_bypassed() {
     local label="$1"
     local label_lower="${label,,}"
@@ -84,12 +60,10 @@ fi
 LABEL="$1"
 # $2 = tracker (unused)
 if [[ $# -ge 6 ]]; then
-    ROOT_PATH="$3"
     CONTENT_PATH="$4"
     TORRENT_NAME="$5"
     INFO_HASH="$6"
 else
-    ROOT_PATH="$3"
     CONTENT_PATH="$3"
     TORRENT_NAME="$4"
     INFO_HASH="$5"
@@ -108,10 +82,15 @@ fi
 
 # ── submit path ───────────────────────────────────────────────────────────────
 
-COUNT=$(submit_path "$CONTENT_PATH")
+read -r COUNT FAILED <<< "$(sma_submit_path "$CONTENT_PATH")"
+
+if [[ "$FAILED" -gt 0 ]]; then
+    err "${FAILED} file(s) failed to submit to daemon at ${DAEMON_BASE} (${COUNT} submitted)."
+    exit 1
+fi
 
 if [[ "$COUNT" -eq 0 ]]; then
-    err "No files submitted from: ${CONTENT_PATH}"
+    err "No media files submitted from: ${CONTENT_PATH}"
     exit 1
 fi
 

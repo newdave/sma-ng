@@ -14,6 +14,24 @@ import os
 import requests
 
 
+def path_under(path: str, prefix: str) -> bool:
+  """Return True when *path* equals *prefix* or lies beneath it (separator-aware).
+
+  ``/media/TV`` matches ``/media/TV`` and ``/media/TV/Show`` but not ``/media/TV-Anime``.
+  """
+  if not prefix:
+    return False
+  stripped = prefix.rstrip("/") or "/"
+  if path == stripped or path.rstrip("/") == stripped:
+    return True
+  return path.startswith(stripped.rstrip("/") + "/")
+
+
+def apply_path_mapping(targetpath: str, mapping: dict) -> str:
+  """Public alias of :func:`_apply_path_mapping`."""
+  return _apply_path_mapping(targetpath, mapping)
+
+
 def _apply_path_mapping(targetpath: str, mapping: dict) -> str:
   """Replace the longest matching mapping prefix in *targetpath*.
 
@@ -41,6 +59,7 @@ def trigger_refresh(
   *,
   product_label: str,
   logger: logging.Logger | None = None,
+  deleted_path: str | None = None,
 ) -> None:
   """Notify each matching Emby/Jellyfin instance that *path*'s directory changed.
 
@@ -49,6 +68,9 @@ def trigger_refresh(
   the file's directory, POSTs ``/Library/Media/Updated`` with the mapped
   target directory. Per-instance failures are logged and swallowed so a
   transient outage never fails the conversion job.
+
+  When *deleted_path* is given (the pre-conversion file, e.g. the ``.mkv``
+  that was replaced by an ``.mp4``) it is also reported as ``Deleted``.
   """
   log = logger or logging.getLogger(__name__)
   if not instances:
@@ -58,7 +80,7 @@ def trigger_refresh(
 
   for instance in instances:
     instance_path = instance.get("path") or ""
-    if not instance_path or not targetpath.startswith(instance_path):
+    if not instance_path or not path_under(targetpath, instance_path):
       continue
     if not instance.get("apikey"):
       log.warning("%s [%s] skipped: no apikey configured" % (product_label, instance.get("section", "main")))
@@ -74,7 +96,12 @@ def trigger_refresh(
       "Content-Type": "application/json",
       "X-Emby-Token": instance["apikey"],
     }
-    payload = {"Updates": [{"Path": mapped, "UpdateType": "Modified"}]}
+    updates = [{"Path": mapped, "UpdateType": "Modified"}]
+    if deleted_path and deleted_path != path:
+      old_dir = os.path.dirname(deleted_path)
+      old_mapped = os.path.join(_apply_path_mapping(old_dir, instance.get("path-mapping") or {}), os.path.basename(deleted_path))
+      updates.append({"Path": old_mapped, "UpdateType": "Deleted"})
+    payload = {"Updates": updates}
     verify = not instance.get("ignore-certs", False)
 
     try:
@@ -88,4 +115,4 @@ def trigger_refresh(
       log.exception("%s [%s] request failed" % (product_label, section))
 
 
-__all__ = ["trigger_refresh"]
+__all__ = ["trigger_refresh", "path_under", "apply_path_mapping"]

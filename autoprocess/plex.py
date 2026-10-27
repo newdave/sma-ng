@@ -8,6 +8,7 @@ import requests
 from plexapi.library import LibrarySection
 from plexapi.server import PlexServer
 
+from autoprocess._media_server import path_under
 from resources.log import getLogger
 from resources.readsettings import ReadSettings
 
@@ -95,7 +96,7 @@ def _refresh_with_connected_server(plex, inst: dict, path: str, log: logging.Log
       location: str
       for location in section.locations:
         log.debug("Checking section %s path %s." % (section.title, location))
-        if os.path.commonprefix([targetpath, location]) == location:
+        if path_under(targetpath, location):
           section.update(path=targetpath)
           log.info("Refreshing %s with path %s" % (section.title, targetpath))
   else:

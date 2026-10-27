@@ -31,30 +31,6 @@ log()  { echo "[deluge] $*" >&2; }
 info() { log "INFO: $*"; }
 err()  { log "ERROR: $*"; }
 
-submit_file() {
-    local filepath="$1"
-    local payload
-    payload=$(sma_build_generic_payload "$filepath" "")
-    curl -sf -X POST \
-        -H "Content-Type: application/json" \
-        "${AUTH_ARGS[@]}" \
-        -d "$payload" \
-        "${DAEMON_BASE}/webhook/generic" > /dev/null
-}
-
-submit_path() {
-    local target="$1"
-    local submitted=0
-    if [[ -f "$target" ]]; then
-        submit_file "$target" && submitted=1
-    elif [[ -d "$target" ]]; then
-        while IFS= read -r -d '' filepath; do
-            submit_file "$filepath" && submitted=$(( submitted + 1 ))
-        done < <(find "$target" -type f -print0)
-    fi
-    echo "$submitted"
-}
-
 is_bypassed() {
     local label="$1"
     local label_lower="${label,,}"
@@ -87,6 +63,7 @@ INFO_HASH="${4:-}"
 info "Torrent: ${TORRENT_NAME}"
 info "Path:    ${PATH_ARG}"
 info "Label:   ${LABEL}"
+info "Hash:    ${INFO_HASH:-n/a}"
 
 # ── bypass check ──────────────────────────────────────────────────────────────
 
@@ -98,15 +75,20 @@ fi
 # ── submit path ───────────────────────────────────────────────────────────────
 
 # Try the path directly; if nothing found, try path/torrent_name
-COUNT=$(submit_path "$PATH_ARG")
+read -r COUNT FAILED <<< "$(sma_submit_path "$PATH_ARG")"
 
-if [[ "$COUNT" -eq 0 ]]; then
+if [[ "$COUNT" -eq 0 && "$FAILED" -eq 0 ]]; then
     COMBINED="${PATH_ARG%/}/${TORRENT_NAME}"
-    COUNT=$(submit_path "$COMBINED")
+    read -r COUNT FAILED <<< "$(sma_submit_path "$COMBINED")"
+fi
+
+if [[ "$FAILED" -gt 0 ]]; then
+    err "${FAILED} file(s) failed to submit to daemon at ${DAEMON_BASE} (${COUNT} submitted)."
+    exit 1
 fi
 
 if [[ "$COUNT" -eq 0 ]]; then
-    err "No files submitted. Path does not exist or is empty: ${PATH_ARG}"
+    err "No media files submitted. Path does not exist or has no media: ${PATH_ARG}"
     exit 1
 fi
 

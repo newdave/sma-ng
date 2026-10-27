@@ -381,12 +381,12 @@ class TestPostSonarr:
 
 
 class TestSABPostProcess:
-  def test_submits_files_in_directory(self, tmp_path):
+  def test_submits_only_media_files_in_directory(self, tmp_path):
     (tmp_path / "movie.mkv").touch()
     (tmp_path / "movie.nfo").touch()
     args = [str(tmp_path), "nzb", "clean", "0", "movies", "group", "0"]
     result, submissions = _run("sabnzbd", args=args)
-    assert len(submissions) == 2
+    assert [os.path.basename(s["path"]) for s in submissions] == ["movie.mkv"]
 
   def test_failed_status_skips(self, tmp_path):
     (tmp_path / "movie.mkv").touch()

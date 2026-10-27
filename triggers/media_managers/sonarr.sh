@@ -42,17 +42,14 @@ DAEMON_PASSWORD="${DAEMON_PASSWORD:-}"
 POLL_INTERVAL="${POLL_INTERVAL:-5}"
 TIMEOUT="${TIMEOUT:-0}"
 
-DAEMON_HOST_VALUE="$DAEMON_HOST"
-DAEMON_PORT_VALUE="$DAEMON_PORT"
-DAEMON_BASE="http://${DAEMON_HOST_VALUE}:${DAEMON_PORT_VALUE}"
-POLL_INTERVAL="$POLL_INTERVAL"
-TIMEOUT="$TIMEOUT"
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 log() { echo "[sonarr] $*" >&2; }
 
 sma_init_daemon
+
+RESPONSE_FILE=$(mktemp "${TMPDIR:-/tmp}/sma_response.XXXXXX")
+trap 'rm -f "$RESPONSE_FILE"' EXIT
 
 wait_for_job() {
     sma_wait_for_job "sonarr" "$1" "$POLL_INTERVAL" "$TIMEOUT"
@@ -92,13 +89,13 @@ PAYLOAD=$(python3 "$JSON_TOOL" build-sonarr-env)
 
 log "Submitting job to ${DAEMON_BASE}/webhook/sonarr..."
 
-HTTP_CODE=$(curl -s -o /tmp/sma_response.json -w "%{http_code}" -X POST \
+HTTP_CODE=$(curl -s -o "$RESPONSE_FILE" --connect-timeout 10 --max-time 60 -w "%{http_code}" -X POST \
     -H "Content-Type: application/json" \
-    "${AUTH_ARGS[@]}" \
+    "${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}" \
     -d "$PAYLOAD" \
     "${DAEMON_BASE}/webhook/sonarr" 2>/dev/null) || HTTP_CODE="000"
 
-RESPONSE=$(cat /tmp/sma_response.json 2>/dev/null || true)
+RESPONSE=$(cat "$RESPONSE_FILE" 2>/dev/null || true)
 
 if [[ "$HTTP_CODE" == "000" ]]; then
     log "ERROR: Failed to connect to SMA-NG daemon at ${DAEMON_BASE}. Is the daemon running?"
@@ -106,7 +103,7 @@ if [[ "$HTTP_CODE" == "000" ]]; then
 elif [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
     # Show which auth vars are set (mask secrets).
     if [[ -n "${DAEMON_API_KEY:-}" ]]; then
-        _key_hint="DAEMON_API_KEY=${DAEMON_API_KEY:0:4}**** (set)"
+        _key_hint="DAEMON_API_KEY=(set)"
     else
         _key_hint="DAEMON_API_KEY=(not set)"
     fi

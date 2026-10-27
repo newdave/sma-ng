@@ -1,14 +1,20 @@
 """Shared API helpers for Sonarr/Radarr post-processing scripts."""
 
+import os
 import time
 
 import requests
+
+from autoprocess._media_server import apply_path_mapping
+
+# Seconds before any Sonarr/Radarr HTTP call is abandoned.
+REQUEST_TIMEOUT = 30
 
 
 def build_api(settings_section, user_agent):
   """Build base URL and headers from a Sonarr/Radarr settings dict."""
   protocol = "https://" if settings_section.get("ssl") else "http://"
-  base_url = protocol + settings_section["host"] + ":" + str(settings_section["port"]) + settings_section.get("webroot", "")
+  base_url = protocol + settings_section["host"] + ":" + str(settings_section["port"]) + (settings_section.get("webroot") or "")
   headers = {"X-Api-Key": settings_section["apikey"], "User-Agent": user_agent}
   return base_url, headers
 
@@ -17,7 +23,7 @@ def api_command(base_url, headers, payload, log):
   """POST a command to /api/v3/command and return the response."""
   url = base_url + "/api/v3/command"
   log.debug("API command: %s" % str(payload))
-  r = requests.post(url, json=payload, headers=headers)
+  r = requests.post(url, json=payload, headers=headers, timeout=REQUEST_TIMEOUT)
   rstate = r.json()
   try:
     rstate = rstate[0]
@@ -30,12 +36,12 @@ def api_command(base_url, headers, payload, log):
 def wait_for_command(base_url, headers, command_id, log, retries=6, delay=10):
   """Poll /api/v3/command/{id} until completed or retries exhausted."""
   url = base_url + "/api/v3/command/" + str(command_id)
-  r = requests.get(url, headers=headers)
+  r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
   command = r.json()
   attempts = 0
   while command["status"].lower() not in ["complete", "completed"] and attempts < retries:
     time.sleep(delay)
-    r = requests.get(url, headers=headers)
+    r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
     command = r.json()
     attempts += 1
   return command["status"].lower() in ["complete", "completed"]
@@ -44,14 +50,14 @@ def wait_for_command(base_url, headers, command_id, log, retries=6, delay=10):
 def api_get(base_url, headers, endpoint, log):
   """GET /api/v3/{endpoint}."""
   url = base_url + "/api/v3/" + endpoint
-  r = requests.get(url, headers=headers)
+  r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
   return r.json()
 
 
 def api_put(base_url, headers, endpoint, data, log):
   """PUT /api/v3/{endpoint}."""
   url = base_url + "/api/v3/" + endpoint
-  r = requests.put(url, json=data, headers=headers)
+  r = requests.put(url, json=data, headers=headers, timeout=REQUEST_TIMEOUT)
   return r.json()
 
 
@@ -74,14 +80,12 @@ def rescan_via_arr(base_url, headers, arr_type, file_path, log):
   The caller decides whether to wait for completion (e.g. before issuing a
   follow-up RenameFiles command).
   """
-  import os
-
   try:
     parse_resp = requests.get(
       base_url + "/api/v3/parse",
       headers=headers,
       params={"title": os.path.basename(file_path)},
-      timeout=10,
+      timeout=REQUEST_TIMEOUT,
     )
     parse_data = parse_resp.json()
     if arr_type == "sonarr":
@@ -97,7 +101,7 @@ def rescan_via_arr(base_url, headers, arr_type, file_path, log):
       if not media_id:
         log.warning("rescan_via_arr: Radarr could not parse movie for %s" % file_path)
         return None
-      payload = {"name": "RescanMovie", "movieIds": [media_id]}
+      payload = {"name": "RescanMovie", "movieId": media_id, "movieIds": [media_id]}
 
     log.info("rescan_via_arr: triggering %s for id=%s" % (payload["name"], media_id))
     cmd = api_command(base_url, headers, payload, log)
@@ -148,7 +152,30 @@ def rename(base_url, headers, file_id, command_name_files, command_name_all, id_
   wait_for_command(base_url, headers, cmd["id"], log)
 
 
-def rename_via_arr(base_url, headers, arr_type, file_path, log):
+def _find_file_id(records, file_path, path_mapping=None):
+  """Return the id of the Arr file record that corresponds to *file_path*.
+
+  Tries an exact match, then the path rewritten through the instance's
+  ``path-mapping`` (local path -> path as seen by Sonarr/Radarr), then a
+  unique basename match as a last resort for undeclared container mounts.
+  """
+  candidates = [file_path]
+  if path_mapping:
+    mapped = os.path.join(apply_path_mapping(os.path.dirname(file_path), path_mapping), os.path.basename(file_path))
+    if mapped not in candidates:
+      candidates.append(mapped)
+  for cand in candidates:
+    for rec in records:
+      if rec.get("path") == cand:
+        return rec["id"]
+  base = os.path.basename(file_path)
+  matches = [rec for rec in records if os.path.basename(rec.get("path") or "") == base]
+  if len(matches) == 1:
+    return matches[0]["id"]
+  return None
+
+
+def rename_via_arr(base_url, headers, arr_type, file_path, log, path_mapping=None):
   """Trigger Sonarr/Radarr's built-in RenameFiles command for a specific file.
 
   Looks up the file record by matching *file_path* against the path field in
@@ -158,15 +185,13 @@ def rename_via_arr(base_url, headers, arr_type, file_path, log):
   Returns the new file path string on success, or None if the file record
   could not be found or the command failed.
   """
-  import os
-
   try:
     if arr_type == "sonarr":
       parse_resp = requests.get(
         base_url + "/api/v3/parse",
         headers=headers,
         params={"title": os.path.basename(file_path)},
-        timeout=10,
+        timeout=REQUEST_TIMEOUT,
       )
       parse_data = parse_resp.json()
       series = parse_data.get("series") or {}
@@ -179,14 +204,10 @@ def rename_via_arr(base_url, headers, arr_type, file_path, log):
         base_url + "/api/v3/episodefile",
         headers=headers,
         params={"seriesId": media_id},
-        timeout=10,
+        timeout=REQUEST_TIMEOUT,
       )
       file_records = files_resp.json()
-      file_id = None
-      for rec in file_records:
-        if rec.get("path") == file_path:
-          file_id = rec["id"]
-          break
+      file_id = _find_file_id(file_records, file_path, path_mapping)
 
       if not file_id:
         log.warning("rename_via_arr: no Sonarr episodefile record matched path %s" % file_path)
@@ -210,7 +231,7 @@ def rename_via_arr(base_url, headers, arr_type, file_path, log):
       updated = requests.get(
         base_url + "/api/v3/episodefile/" + str(file_id),
         headers=headers,
-        timeout=10,
+        timeout=REQUEST_TIMEOUT,
       )
       return updated.json().get("path")
 
@@ -219,7 +240,7 @@ def rename_via_arr(base_url, headers, arr_type, file_path, log):
         base_url + "/api/v3/parse",
         headers=headers,
         params={"title": os.path.basename(file_path)},
-        timeout=10,
+        timeout=REQUEST_TIMEOUT,
       )
       parse_data = parse_resp.json()
       movie = parse_data.get("movie") or {}
@@ -232,16 +253,12 @@ def rename_via_arr(base_url, headers, arr_type, file_path, log):
         base_url + "/api/v3/moviefile",
         headers=headers,
         params={"movieId": media_id},
-        timeout=10,
+        timeout=REQUEST_TIMEOUT,
       )
       file_records = files_resp.json()
       if isinstance(file_records, dict):
         file_records = [file_records]
-      file_id = None
-      for rec in file_records:
-        if rec.get("path") == file_path:
-          file_id = rec["id"]
-          break
+      file_id = _find_file_id(file_records, file_path, path_mapping)
 
       if not file_id:
         log.warning("rename_via_arr: no Radarr moviefile record matched path %s" % file_path)
@@ -253,7 +270,8 @@ def rename_via_arr(base_url, headers, arr_type, file_path, log):
         headers,
         {
           "name": "RenameFiles",
-          "movieIds": [media_id],
+          "movieId": media_id,
+          "files": [file_id],
         },
         log,
       )
@@ -264,7 +282,7 @@ def rename_via_arr(base_url, headers, arr_type, file_path, log):
       updated = requests.get(
         base_url + "/api/v3/moviefile/" + str(file_id),
         headers=headers,
-        timeout=10,
+        timeout=REQUEST_TIMEOUT,
       )
       return updated.json().get("path")
 

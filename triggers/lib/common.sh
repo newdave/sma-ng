@@ -52,7 +52,7 @@ sma_wait_for_job() {
     echo "[${label}] Waiting for job ${job_id} to complete (polling every ${poll_interval}s)..." >&2
 
     while true; do
-        response=$(curl -sf "${AUTH_ARGS[@]}" "${DAEMON_BASE}/jobs/${job_id}" 2>/dev/null) || {
+        response=$(curl -sf --connect-timeout 5 --max-time 30 "${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}" "${DAEMON_BASE}/jobs/${job_id}" 2>/dev/null) || {
             echo "[${label}] ERROR: Lost contact with daemon while polling job ${job_id}." >&2
             return 1
         }
@@ -85,4 +85,60 @@ sma_wait_for_job() {
                 ;;
         esac
     done
+}
+
+# Space-separated list of extensions (no dots) treated as media; override with SMA_MEDIA_EXTS.
+SMA_MEDIA_EXTS="${SMA_MEDIA_EXTS:-mkv mp4 m4v avi mov wmv ts m2ts mpg mpeg flv webm}"
+
+sma_is_media_file() {
+    local name="$1"
+    local ext ext_list e
+    [[ "$name" == *.* ]] || return 1
+    ext="${name##*.}"
+    ext="${ext,,}"
+    read -ra ext_list <<< "$SMA_MEDIA_EXTS"
+    for e in "${ext_list[@]}"; do
+        [[ "$ext" == "$e" ]] && return 0
+    done
+    return 1
+}
+
+# sma_submit_file PATH - POST one file to /webhook/generic; non-zero on failure.
+sma_submit_file() {
+    local filepath="$1"
+    local payload
+    payload=$(sma_build_generic_payload "$filepath" "") || return 1
+    curl -sf --connect-timeout 10 --max-time 60 -X POST \
+        -H "Content-Type: application/json" \
+        "${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}" \
+        -d "$payload" \
+        "${DAEMON_BASE}/webhook/generic" > /dev/null
+}
+
+# sma_submit_path TARGET - submit every media file at/under TARGET.
+# Prints "<submitted> <failed>" on stdout; failures are logged to stderr.
+sma_submit_path() {
+    local target="$1"
+    local submitted=0 failed=0 filepath
+    if [[ -f "$target" ]]; then
+        if sma_is_media_file "$target"; then
+            if sma_submit_file "$target"; then
+                submitted=1
+            else
+                echo "Failed to submit: ${target}" >&2
+                failed=1
+            fi
+        fi
+    elif [[ -d "$target" ]]; then
+        while IFS= read -r -d '' filepath; do
+            sma_is_media_file "$filepath" || continue
+            if sma_submit_file "$filepath"; then
+                submitted=$(( submitted + 1 ))
+            else
+                echo "Failed to submit: ${filepath}" >&2
+                failed=$(( failed + 1 ))
+            fi
+        done < <(find "$target" -type f -print0)
+    fi
+    echo "${submitted} ${failed}"
 }

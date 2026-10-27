@@ -21,6 +21,7 @@ import os
 import requests
 from requests.auth import HTTPBasicAuth
 
+from autoprocess._media_server import path_under
 from resources.log import getLogger
 
 
@@ -59,7 +60,7 @@ def triggerAutoscan(settings, path: str, logger: logging.Logger | None = None) -
 
   for instance in instances:
     instance_path = instance.get("path") or ""
-    if not instance_path or not targetpath.startswith(instance_path):
+    if not instance_path or not path_under(targetpath, instance_path):
       continue
 
     section = instance.get("section", "main")

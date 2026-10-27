@@ -322,11 +322,43 @@ sequenceDiagram
     W->>MM: Rescan / import notify (optional)
 ```
 
+### Path matching and request timeouts
+
+- Instance routing (`path` on Sonarr, Radarr, Plex, Emby, Jellyfin and Autoscan instances) matches on whole path
+  components: `/media/TV` matches `/media/TV` and `/media/TV/Show`, but no longer `/media/TV-Anime`. Plex refreshes
+  use the same rule when comparing a file against library section locations.
+- Sonarr/Radarr API calls time out after 30 seconds (`REQUEST_TIMEOUT` in `resources/mediamanager.py`).
+- `rename.py --arr-rename` finds the Sonarr/Radarr file record by exact path, then by the path rewritten through
+  the instance `path-mapping`, then by a unique basename. Radarr `RenameFiles` is sent with `movieId` and `files`.
+- Emby/Jellyfin refreshes can also report the pre-conversion path as `Deleted` when the caller supplies it
+  (`deleted_path`); the current conversion pipeline does not pass it yet.
+
+### rename.py behaviour
+
+- `.plexmatch` files are written from the metadata resolved during the rename (skipped when only a media type could
+  be guessed, or with `--arr-rename`).
+- With path-based config routing, `.plexmatch` writing and Plex refreshes use each file's own routed settings.
+  The Plex refresh honours every `services.plex.<name>` instance with `refresh: true`.
+- Renames never overwrite an existing file. Subtitle sidecars (`.srt`, `.ass`, `.vtt`, `.sub`, `.idx`, with optional
+  language suffixes such as `.en.forced`) are renamed alongside the media file.
+
 ---
 
 ## Download Clients
 
 All download client integrations use bash scripts in `triggers/` that submit jobs to the daemon via webhook. These are not required if you are using Completed Download Handling with Sonarr/Radarr.
+
+### Trigger script behaviour
+
+The download-client scripts submit only media files (`mkv mp4 m4v avi mov wmv ts m2ts mpg mpeg flv webm`; override
+with the space-separated `SMA_MEDIA_EXTS` environment variable). They exit non-zero when a submission fails or when
+no media file was submitted: NZBGet exits `94` (error) for failed submissions and `95` (nothing to do) when no media
+was found; SABnzbd, qBittorrent, Deluge and uTorrent exit `1`. Daemon requests use a 10 second connect timeout and
+a 60 second overall timeout. `triggers/media_managers/sonarr.sh` and `radarr.sh` keep the daemon response in a
+per-invocation temporary file, so concurrent imports no longer overwrite each other.
+
+`sma-webhook.sh` now fails on HTTP errors (non-zero exit) and applies `SMA_CONNECT_TIMEOUT` (default 5) and
+`SMA_MAX_TIME` (default 30) seconds to every request.
 
 ### NZBGet
 
