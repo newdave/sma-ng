@@ -1100,7 +1100,7 @@ def main():
         if details is None:
           continue
         detected += 1
-        log.info("Hybrid-aspect file detected: %s (%dx%d, true height %d)" % (target, details["width"], details["height"], details["true_height"]))
+        log.info("Hybrid-aspect file detected: %s (%dx%d, true height %d, %s)" % (target, details["width"], details["height"], details["true_height"], details.get("reason", "stretched_dims")))
         if repair_hybrid_aspect(target, details["dar"], ffmpeg_dir=ffmpeg_dir, logger=log):
           repaired += 1
       if detected == 0:

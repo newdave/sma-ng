@@ -61,12 +61,47 @@ for _w, _h in _HYBRID_STANDARD_DIMS:
         HYBRID_DIMS_TABLE[(_w, _stored)] = _h
 del _w, _h, _align, _stored
 
+# Still-image codecs that only appear as video streams when they carry cover
+# art. Before the repair remux mapped by type, it copied the poster with
+# -map 0, which dropped its attached_pic disposition and left it as a second
+# real (mp4v-tagged) video track.
+IMAGE_VIDEO_CODECS = frozenset({"mjpeg", "png", "bmp", "gif", "webp", "tiff"})
+
+
+def _video_streams(info) -> list:
+  streams = getattr(info, "streams", None)
+  if not isinstance(streams, list):
+    return []
+  return [s for s in streams if getattr(s, "type", None) == "video"]
+
+
+def primary_video_stream(info):
+  """First video stream that is a real picture: not an attached picture and
+  not a still-image codec. Falls back to ``info.video`` when the stream list
+  is unavailable."""
+  for s in _video_streams(info):
+    if not getattr(s, "attached_pic", None) and getattr(s, "codec", None) not in IMAGE_VIDEO_CODECS:
+      return s
+  return getattr(info, "video", None)
+
+
+def demoted_posters(info) -> list:
+  """Still-image video streams that lost their attached_pic disposition."""
+  return [s for s in _video_streams(info) if not getattr(s, "attached_pic", None) and getattr(s, "codec", None) in IMAGE_VIDEO_CODECS]
+
 
 def hybrid_aspect_check(path: str, ffmpeg_dir: str | None = None) -> dict[str, Any] | None:
   """Detect an SMA-produced MP4 whose picture was stretched by the former
   QSV alignment bug. Returns finding-details, or ``None`` when the file is
   not a hybrid (wrong extension, unprobeable, dims not in the signature
-  table, or already carrying a corrective non-square PAR).
+  table, or already correctly repaired).
+
+  Two reasons are reported:
+
+  - ``stretched_dims``: signature dims with a square/absent PAR (never repaired).
+  - ``demoted_poster``: signature dims already carrying a corrective PAR, but
+    the earlier repair remux turned the cover art into a real video track.
+    Re-running the repair drops the stray track.
   """
   if not path.lower().endswith(".mp4") or not os.path.isfile(path):
     return None
@@ -81,22 +116,29 @@ def hybrid_aspect_check(path: str, ffmpeg_dir: str | None = None) -> dict[str, A
     info = ffmpeg.probe(path)
   except Exception:
     return None
-  if info is None or info.video is None:
+  if info is None:
     return None
-  width = getattr(info.video, "video_width", None)
-  height = getattr(info.video, "video_height", None)
+  video = primary_video_stream(info)
+  if video is None:
+    return None
+  width = getattr(video, "video_width", None)
+  height = getattr(video, "video_height", None)
   if not isinstance(width, int) or not isinstance(height, int):
     return None
   true_height = HYBRID_DIMS_TABLE.get((width, height))
   if not true_height:
     return None
-  sar = getattr(info.video, "sample_aspect_ratio", None)
+  reason = "stretched_dims"
+  sar = getattr(video, "sample_aspect_ratio", None)
   if sar and sar != "1:1":
     # A non-square PAR means the display aspect is already corrected
-    # (either a prior remux repair or a genuinely anamorphic encode).
-    return None
+    # (either a prior remux repair or a genuinely anamorphic encode). Only
+    # flag it when that earlier remux left a demoted poster behind.
+    if not demoted_posters(info):
+      return None
+    reason = "demoted_poster"
   return {
-    "reason": "stretched_dims",
+    "reason": reason,
     "width": width,
     "height": height,
     "true_height": true_height,
@@ -179,11 +221,13 @@ def preconv_original_check(path: str) -> dict[str, Any] | None:
 
 __all__ = [
   "HYBRID_DIMS_TABLE",
+  "demoted_posters",
   "ffprobe_check",
   "hybrid_aspect_check",
   "is_sidecar",
   "is_tmp_artifact",
   "preconv_original_check",
+  "primary_video_stream",
   "sidecar_orphan_check",
   "tmp_artifact_check",
 ]

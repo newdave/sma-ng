@@ -45,6 +45,7 @@ curl https://mise.run | sh
 | `mise run media:preview -- /path/to/file.mkv`   | Preview FFmpeg conversion options without converting |
 | `mise run media:codecs`                         | List all supported video and audio codecs            |
 | `mise run media:rename -- /path/to/file-or-dir` | Rename media files using naming templates            |
+| `mise run media:repair -- /path/to/file-or-dir` | Repair damaged media by stream copy, no transcoding  |
 
 ### GPU and Configuration
 
