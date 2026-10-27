@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.12](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.11...sma-ng-v3.2.12) (2026-10-27)
+
+
+### Features
+
+* always strip cover art from media ([059b125](https://github.com/newdave/sma-ng/commit/059b12533b3a4dbd3b3b048333c37b8065a2d785))
+
 ## [3.2.11](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.10...sma-ng-v3.2.11) (2026-10-25)
 
 
