@@ -56,7 +56,7 @@ from daemon import (
   _load_dashboard_html,
   _render_markdown_to_html,
 )
-from resources.daemon.constants import resolve_node_id
+from resources.daemon.constants import STATUS_RUNNING, resolve_node_id
 from resources.daemon.docs_ui import _load_admin_html, _load_docs_template
 from resources.daemon.server import _is_public_ip_address, _resolve_advertised_host
 
@@ -1536,18 +1536,75 @@ class TestPostgreSQLJobDatabase:
     assert STATUS_PENDING in params
     assert 1 in params  # retry_count
 
-  def test_fail_job_no_row_still_marks_failed(self):
-    """If the job row can't be found, fail gracefully — just mark failed."""
+  def test_fail_job_no_running_row_is_discarded(self):
+    """If the row is no longer running (cancelled/requeued), nothing is written."""
     from unittest.mock import MagicMock
 
     cur = MagicMock()
     cur.fetchone.return_value = None
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
-    db.fail_job(job_id=99, error="not found")
-    # Ensure we still try to mark as failed
-    last_call = cur.execute.call_args_list[-1]
-    _sql, params = last_call[0]
-    assert STATUS_FAILED in params
+    assert db.fail_job(job_id=99, error="not found") is False
+    # Only the guarded SELECT ... FOR UPDATE ran; no UPDATE followed.
+    assert cur.execute.call_count == 1
+    sql, params = cur.execute.call_args[0]
+    assert "status = %s" in sql and "FOR UPDATE" in sql
+    assert params == (99, STATUS_RUNNING)
+
+  def test_fail_job_guards_on_node_id(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchone.return_value = {"retry_count": 0, "max_retries": 0}
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    assert db.fail_job(job_id=5, error="x", node_id="node-a") is True
+    select_sql, select_params = cur.execute.call_args_list[0][0]
+    assert "node_id = %s" in select_sql
+    assert select_params == (5, STATUS_RUNNING, "node-a")
+
+  def test_complete_job_guards_on_running_and_node(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.rowcount = 0
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    assert db.complete_job(job_id=8, node_id="node-a") is False
+    sql, params = cur.execute.call_args[0]
+    assert "status = %s" in sql and "node_id = %s" in sql
+    assert params[-2:] == (STATUS_RUNNING, "node-a")
+
+  def test_recover_stale_nodes_single_locked_transaction(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchall.return_value = [{"node_id": "dead-1"}]
+    cur.rowcount = 3
+    db, pool, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    pool.getconn.reset_mock()
+    db._requeue_running_jobs_for_node = MagicMock(side_effect=AssertionError("must not use a second connection"))
+    with patch("resources.daemon.db._backfill_request_profile") as backfill:
+      result = db.recover_stale_nodes(stale_seconds=60)
+    assert result == [("dead-1", 3)]
+    assert pool.getconn.call_count == 1
+    select_sql = cur.execute.call_args_list[0][0][0]
+    assert "FOR UPDATE SKIP LOCKED" in select_sql
+    requeue_sql, requeue_params = cur.execute.call_args_list[1][0]
+    assert "UPDATE jobs" in requeue_sql
+    assert requeue_params == (STATUS_PENDING, STATUS_RUNNING, "dead-1")
+    assert "offline" in cur.execute.call_args_list[2][0][0]
+    backfill.assert_called_once()
+
+  def test_recover_stale_nodes_log_omits_node_id(self, caplog):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchall.return_value = [{"node_id": "secret-node-xyz"}]
+    cur.rowcount = 1
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    db.log = MagicMock()
+    with patch("resources.daemon.db._backfill_request_profile"):
+      db.recover_stale_nodes(stale_seconds=60)
+    logged = " ".join(str(c) for c in db.log.method_calls)
+    assert "secret-node-xyz" not in logged
 
   # ------------------------------------------------------------------
   # get_stats
@@ -1707,11 +1764,11 @@ class TestPostgreSQLJobDatabase:
 
     cur = MagicMock()
     cur.fetchall.return_value = [{"node_id": "dead_node"}]
+    cur.rowcount = 2
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
-    with patch.object(db, "_requeue_running_jobs_for_node", return_value=2) as mock_req:
+    with patch("resources.daemon.db._backfill_request_profile"):
       with patch.object(db.log, "warning") as mock_warn:
         result = db.recover_stale_nodes(stale_seconds=60)
-        mock_req.assert_called_once_with("dead_node")
         mock_warn.assert_called_once()
         assert result == [("dead_node", 2)]
 
@@ -3537,6 +3594,27 @@ class TestPGExtendedMocked:
     written_yaml = cur.execute.call_args[0][1][0]
     # api_key should be stripped from the serialized output
     assert "api_key" not in written_yaml
+
+  def test_set_cluster_config_strips_kebab_case_secrets(self):
+    db, _, _, cur = _make_db_with_mock_pool()
+    cfg = {
+      "daemon": {
+        "api-key": "leak-key",
+        "db-url": "postgresql://u:pw@h/db",
+        "node-id": "node-leak",
+        "username": "admin",
+        "password": "pw",
+        "workers": 4,
+      },
+      "base": {},
+    }
+    db.set_cluster_config(cfg, updated_by="ui")
+    written_yaml = cur.execute.call_args[0][1][0]
+    for leaked in ("api-key", "leak-key", "db-url", "pw@h", "node-id", "node-leak", "username", "password"):
+      assert leaked not in written_yaml
+    assert "workers: 4" in written_yaml
+    # The caller's dict is not mutated.
+    assert "api-key" in cfg["daemon"]
 
   # ------------------------------------------------------------------
   # node lifecycle

@@ -483,6 +483,9 @@ WORKER_SENTINEL_EXCEPTION = "exception"
 # ``FfmpegFailureCause.DISK_FULL`` (which is an ffmpeg-stderr classification)
 # but raised before ffmpeg is even invoked.
 WORKER_SENTINEL_DISK_PRESSURE = "disk_pressure"
+# The job exceeded daemon.job-timeout-seconds and the worker's watchdog
+# killed the conversion process tree.
+WORKER_SENTINEL_TIMEOUT = "timeout"
 
 # Every value in :class:`FfmpegFailureClass`, :class:`FfmpegFailureCause`,
 # and the worker sentinels must appear here. The drift-guard test
@@ -538,6 +541,7 @@ _FAILURE_CATEGORY_MAP: dict[str, FailureCategory] = {
   WORKER_SENTINEL_PROCESS_FAILED: FailureCategory.SYSTEM,
   WORKER_SENTINEL_EXCEPTION: FailureCategory.SYSTEM,
   WORKER_SENTINEL_DISK_PRESSURE: FailureCategory.DISK,
+  WORKER_SENTINEL_TIMEOUT: FailureCategory.SYSTEM,
 }
 
 
@@ -562,6 +566,7 @@ __all__ = [
   "WORKER_SENTINEL_INVALID_ARGS",
   "WORKER_SENTINEL_PATH_MISSING",
   "WORKER_SENTINEL_PROCESS_FAILED",
+  "WORKER_SENTINEL_TIMEOUT",
   "AttemptRecord",
   "FailureCategory",
   "FailureDiagnosis",

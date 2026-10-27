@@ -42,7 +42,8 @@ from resources.daemon import (
   _load_dashboard_html,  # pyright: ignore[reportUnusedImport]
   _render_markdown_to_html,  # pyright: ignore[reportUnusedImport]
 )
-from resources.daemon.constants import LOGS_DIR, SCRIPT_DIR, resolve_node_id
+from resources.daemon.constants import LOGS_DIR, SCRIPT_DIR
+from resources.daemon.db import redact_db_url
 from resources.daemon.server import _validate_hwaccel
 from resources.log import getLogger
 from resources.version import version_string
@@ -53,12 +54,37 @@ log = getLogger("DAEMON")
 _SMOKE_TEST_FIXTURE = os.path.join(SCRIPT_DIR, "tests", "fixtures", "test1.mkv")
 DEFAULT_DAEMON_CONFIG = os.path.join(SCRIPT_DIR, "config", "sma-ng.yml")
 
+# Fallbacks used only when neither the CLI nor sma-ng.yml supplies a value
+# (e.g. a PathConfigManager without a loaded config tree).
+_DEFAULT_HEARTBEAT_INTERVAL = 30
+_DEFAULT_STALE_SECONDS = 120
+
+
+def _resolve_setting(cli_value, path_config_manager, name, default):
+  """Resolve a daemon setting: CLI flag > ``daemon.<name>`` in sma-ng.yml > *default*.
+
+  ``cli_value`` is None when the flag was not given, so an explicit ``0``
+  on the command line still overrides the config file.
+  """
+  if cli_value is not None:
+    return cli_value
+  cfg = getattr(path_config_manager, "_cfg", None)
+  daemon_cfg = getattr(cfg, "daemon", None)
+  value = getattr(daemon_cfg, name, None) if daemon_cfg is not None else None
+  if isinstance(value, int) and not isinstance(value, bool):
+    return value
+  value = getattr(path_config_manager, name, None)
+  if isinstance(value, int) and not isinstance(value, bool):
+    return value
+  return default
+
 
 def _create_job_database(db_url, logger):
   """Create the configured job database backend."""
+  # Labels are logged: never include credentials from the URL.
   if db_url.startswith("sqlite:"):
-    return SQLiteJobDatabase(db_url, logger=logger), "SQLite: %s" % db_url
-  return PostgreSQLJobDatabase(db_url, logger=logger), "PostgreSQL: %s" % db_url
+    return SQLiteJobDatabase(db_url, logger=logger), "SQLite: %s" % redact_db_url(db_url)
+  return PostgreSQLJobDatabase(db_url, logger=logger), "PostgreSQL: %s" % redact_db_url(db_url)
 
 
 def run_smoke_test(path_config_manager, ffmpeg_dir, logger):
@@ -117,8 +143,8 @@ def run_smoke_test(path_config_manager, ffmpeg_dir, logger):
 def main():
   """Parse CLI arguments, configure the daemon, and start the HTTP server.
 
-  Resolves runtime options from CLI flags, environment variables, and
-  the ``Daemon`` config section. The job database URL is only loaded from
+  Resolves runtime options as CLI flag > ``daemon:`` section of
+  ``sma-ng.yml`` > built-in default. The job database URL is only loaded from
   ``daemon.db_url`` in ``sma-ng.yml``. Initialises the job database backend,
   sets up per-config logging and concurrency locks,
   and then serves requests until interrupted.
@@ -133,21 +159,26 @@ def main():
   parser.add_argument(
     "--ffmpeg-dir", help="Directory containing ffmpeg and ffprobe binaries. Prepended to PATH for each conversion subprocess. If omitted, relies on PATH already containing the binaries."
   )
-  parser.add_argument("--heartbeat-interval", type=int, default=30, help="Seconds between cluster heartbeat updates (default: 30). Only used with PostgreSQL backend.")
+  parser.add_argument(
+    "--heartbeat-interval",
+    type=int,
+    default=None,
+    help="Seconds between cluster heartbeat updates (default: daemon.heartbeat-interval in sma-ng.yml, or 30). Only used with PostgreSQL backend.",
+  )
   parser.add_argument(
     "--stale-seconds",
     type=int,
-    default=120,
-    help="Seconds without a heartbeat before a node is declared stale and its running jobs are requeued (default: 120). Only used with PostgreSQL backend.",
+    default=None,
+    help="Seconds without a heartbeat before a node is declared stale and its running jobs are requeued (default: daemon.stale-seconds in sma-ng.yml, or 120). Only used with PostgreSQL backend.",
   )
   parser.add_argument("--api-key", help="API key for authentication")
   parser.add_argument("--smoke-test", action="store_true", help="Run a dry-run option-generation check against all configured config files at startup, then exit with 0 on success or 1 on failure")
   parser.add_argument(
     "--job-timeout",
     type=int,
-    default=0,
+    default=None,
     metavar="SECONDS",
-    help="Maximum seconds a conversion job may run before being killed (default: 0, no timeout). Can also be set via Daemon job_timeout_seconds.",
+    help="Maximum seconds a conversion job may run before its process tree is killed and the job failed (0 = no timeout; default: daemon.job-timeout-seconds in sma-ng.yml).",
   )
 
   args = parser.parse_args()
@@ -172,8 +203,11 @@ def main():
   # Determine FFmpeg directory (priority: CLI --ffmpeg-dir > config file)
   ffmpeg_dir = args.ffmpeg_dir or path_config_manager.ffmpeg_dir
 
-  # Determine job timeout (priority: CLI --job-timeout > config; 0 means no timeout)
-  job_timeout_seconds = args.job_timeout or path_config_manager.job_timeout_seconds
+  # Determine job timeout (priority: CLI --job-timeout > config; 0 means no timeout).
+  # `is not None` so an explicit `--job-timeout 0` disables a configured timeout.
+  job_timeout_seconds = args.job_timeout if args.job_timeout is not None else path_config_manager.job_timeout_seconds
+  heartbeat_interval = _resolve_setting(args.heartbeat_interval, path_config_manager, "heartbeat_interval", _DEFAULT_HEARTBEAT_INTERVAL)
+  stale_seconds = _resolve_setting(args.stale_seconds, path_config_manager, "stale_seconds", _DEFAULT_STALE_SECONDS)
   progress_log_interval = path_config_manager.progress_log_interval
 
   # Run smoke test if requested via CLI or config.
@@ -202,11 +236,10 @@ def main():
     _db_log_handler.setLevel(logging.DEBUG)
     logging.getLogger("DAEMON").addHandler(_db_log_handler)
 
-  log.info("Node: %s" % resolve_node_id())
   log.info("Database: %s" % db_label)
   if ffmpeg_dir:
     log.debug("FFmpeg/FFprobe directory: %s" % ffmpeg_dir)
-  log.debug("Heartbeat interval: %ds (stale after %ds)" % (args.heartbeat_interval, args.stale_seconds))
+  log.debug("Heartbeat interval: %ds (stale after %ds)" % (heartbeat_interval, stale_seconds))
   log.debug("Logs directory: %s" % config_log_manager.logs_dir)
   from resources.daemon.constants import FFMPEG_STDERR_DIR
 
@@ -244,8 +277,8 @@ def main():
       worker_count=workers,
       api_key=api_key,
       basic_auth=basic_auth,
-      heartbeat_interval=args.heartbeat_interval,
-      stale_seconds=args.stale_seconds,
+      heartbeat_interval=heartbeat_interval,
+      stale_seconds=stale_seconds,
       ffmpeg_dir=ffmpeg_dir,
       cli_api_key=args.api_key,
       cli_basic_auth=None,  # basic_auth is env/config only — no CLI exposure
