@@ -16,8 +16,9 @@ qBittorrent/uTorrent attribute population, and ``writeConfig`` are gone.
 The schema is the single source of truth for defaults; the YAML file is
 the single source of truth for values; users edit it by hand.
 
-For multi-instance Sonarr/Radarr, the per-instance ``path`` field is
-derived from ``daemon.routing`` rules — every routing rule that
+Service instances (Sonarr/Radarr/Autoscan) have no ``path`` or ``profile``
+fields in the schema. The legacy per-instance ``path`` is derived from
+``daemon.routing`` rules — every routing rule that
 references an instance contributes one ``sonarr_instances``/
 ``radarr_instances`` entry with that rule's ``match`` as the path.
 ``manual.py``'s longest-prefix path-match logic
@@ -274,12 +275,14 @@ class ReadSettings:
         continue
       parts = entry.split(":")
       if len(parts) != 4:
+        logging.getLogger(__name__).warning("Ignoring malformed crf-profiles entry %r (expected source_kbps:quality:target:max)", entry)
         continue
       try:
         source_kbps = int(parts[0])
         target = ReadSettings._parse_bitrate_value(parts[2])
         maxrate = ReadSettings._parse_bitrate_value(parts[3])
       except (ValueError, TypeError):
+        logging.getLogger(__name__).warning("Ignoring unparsable crf-profiles entry %r", entry)
         continue
       profiles.append({"source_kbps": source_kbps, "target": target, "maxrate": maxrate})
     profiles.sort(key=lambda p: p["source_kbps"])

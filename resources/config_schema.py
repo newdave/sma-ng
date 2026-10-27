@@ -17,10 +17,14 @@ ConfigLoader after validation — see brainstorming/2026-04-26-config-restructur
 
 from __future__ import annotations
 
+import logging
+import re
 from enum import Enum
 from typing import Annotated, Any
 
-from pydantic import AliasChoices, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
+
+_log = logging.getLogger(__name__)
 
 
 def _flatten_codec_parameters(value: Any) -> Any:
@@ -203,6 +207,10 @@ class PermissionSettings(_Base):
       if v < 0 or any(c not in "01234567" for c in s) or len(s) > 4:
         raise ValueError(f"chmod must be a 3-4 digit octal mode, got {v!r}")
       data["chmod"] = s.zfill(4) if len(s) == 4 else "0" + s.zfill(3)
+    elif isinstance(v, str) and not re.fullmatch(r"[0-7]{3,4}", v.strip()):
+      # Soft failure: keep the config loadable and fall back to the default.
+      _log.warning("permissions.chmod %r is not a 3-4 digit octal mode; defaulting to 0664", v)
+      data["chmod"] = "0664"
     return data
 
 
@@ -566,6 +574,19 @@ class AudioSettings(_Base):
     }
   )
 
+  @field_validator("channel_filters")
+  @classmethod
+  def _check_channel_filter_keys(cls, value: dict[str, str]) -> dict[str, str]:
+    """Warn about keys that are not ``<in-channels>-<out-channels>``.
+
+    Such keys are skipped at runtime; warn rather than reject so an
+    otherwise working config keeps loading.
+    """
+    for key in value:
+      if not re.fullmatch(r"\d+-\d+", str(key)):
+        _log.warning("audio.channel-filters key %r is not of the form '<in>-<out>' (e.g. '6-2'); ignored", key)
+    return value
+
 
 # ---------------------------------------------------------------------------
 # Subtitle (with nested sorting / cleanit / ffsubsync / subliminal)
@@ -793,17 +814,16 @@ class Services(_Base):
             1080p:
               url: https://sonarr-1080p.example.com
               apikey: abc
-              path: /mnt/unionfs/Media/TV/1080P
-              profile: rq
             4k:
               url: https://sonarr-4k.example.com
               apikey: def
-              path: /mnt/unionfs/Media/TV/4K
-              profile: hq
+              rescan: false
 
     Each named instance dict is merged ON TOP OF the type's ``_defaults``
-    so per-instance values win (URLs, paths, profiles override; common
-    flags like ``rescan: true`` inherit). The ``_defaults`` entry is
+    so per-instance values win (URLs and keys are per-instance; common
+    flags like ``rescan: true`` inherit). Instances carry no path or
+    profile; those come from ``daemon.routing`` rules that reference the
+    instance as ``<type>.<name>``. The ``_defaults`` entry is
     consumed here and never appears as a real instance — downstream code
     (stamp_daemon, services-json, readsettings) sees the same fully-
     expanded shape as today.
@@ -831,7 +851,7 @@ class Services(_Base):
 
 class ScanPath(_Base):
   path: str
-  interval: int = 3600
+  interval: int = Field(default=3600, ge=1)
   enabled: bool = True
   rewrite_from: str = ""
   rewrite_to: str = ""
@@ -848,6 +868,19 @@ class RoutingRule(_Base):
   match: str
   profile: str | None = None
   services: list[str] = Field(default_factory=list)
+
+  @field_validator("match")
+  @classmethod
+  def _match_not_empty(cls, value: str) -> str:
+    """Reject empty / ``/`` patterns.
+
+    Such a pattern matches every path and silently defeats
+    ``daemon.strict-routing``. Use an explicit directory prefix such as
+    ``/media/tv`` (an explicit glob catch-all like ``**`` is still accepted).
+    """
+    if not value.strip().strip("/"):
+      raise ValueError(f"routing match {value!r} would match every path; use a directory prefix such as '/media/tv'")
+    return value
 
 
 class ConfigWatchSettings(_Base):
@@ -893,6 +926,9 @@ class AuditAutoFix(_Base):
   # Losslessly remux hybrid-aspect findings (outputs stretched by the former
   # QSV alignment bug) with a corrective display aspect ratio.
   hybrid_aspect: bool = False
+  # Stream-copy repair of stream-damage findings: drop data streams, unknown
+  # streams and artwork (the same fix as repair.py).
+  stream_damage: bool = False
 
 
 class AuditSettings(_Base):
@@ -909,8 +945,8 @@ class AuditSettings(_Base):
 
 class DaemonConfig(_Base):
   host: str = "0.0.0.0"
-  port: int = 8585
-  workers: int = 4
+  port: int = Field(default=8585, ge=1, le=65535)
+  workers: int = Field(default=4, ge=1)
   api_key: str | None = None
   db_url: str | None = None
   ffmpeg_dir: str | None = None
@@ -918,6 +954,10 @@ class DaemonConfig(_Base):
   username: str = ""
   password: str = ""
   job_timeout_seconds: int = 7200
+  # Cluster (PostgreSQL) heartbeat cadence and stale-node threshold.
+  # CLI --heartbeat-interval / --stale-seconds override these.
+  heartbeat_interval: int = Field(default=30, ge=1)
+  stale_seconds: int = Field(default=120, ge=1)
   progress_log_interval: int = 30
   smoke_test: bool = True
   recycle_bin_max_age_days: int = 30
@@ -984,6 +1024,10 @@ class SmaConfig(_Base):
     for prof in self.profiles.values():
       if prof.audio is not None and prof.audio.universal_audio is not None:
         prof.audio.universal.enabled = bool(prof.audio.universal_audio)
+        # Mark the nested field as explicitly set so apply_profile's
+        # ``exclude_unset`` dump carries the shortcut onto the base config.
+        prof.audio.universal.model_fields_set.add("enabled")
+        prof.audio.model_fields_set.add("universal")
     return self
 
   @model_validator(mode="after")

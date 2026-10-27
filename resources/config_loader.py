@@ -7,8 +7,8 @@ Public surface:
   human-readable error to display at startup.
 * ``ConfigLoader.load(path)`` → ``SmaConfig``
 * ``ConfigLoader.apply_profile(cfg, profile_name)`` → ``BaseConfig`` with the
-  named profile shallow-merged onto base. Mirrors the existing semantic of
-  ``readsettings._apply_profile`` (readsettings.py:497-504).
+  named profile deep-merged onto base (nested blocks merge recursively;
+  scalars and lists replace).
 * ``ConfigLoader.resolve_routing(cfg, file_path)`` → ``RoutingResolution``
   with longest-prefix match and bare-base fallback.
 
@@ -47,6 +47,30 @@ def _collect_alias_choices(model_cls: type[BaseModel]) -> set[str]:
     elif isinstance(alias, str):
       names.add(alias)
   return names
+
+
+def _deep_merge(base: dict, overlay: dict) -> dict:
+  """Recursively merge ``overlay`` onto ``base`` without mutating either.
+
+  Dicts merge key-by-key; every other value (scalars, lists) in the overlay
+  replaces the base value.
+  """
+  out = dict(base)
+  for key, value in overlay.items():
+    if isinstance(value, dict) and isinstance(out.get(key), dict):
+      out[key] = _deep_merge(out[key], value)
+    else:
+      out[key] = value
+  return out
+
+
+def _has_path_prefix(path: str, prefix: str) -> bool:
+  """True when ``path`` equals ``prefix`` or sits beneath it (directory boundary)."""
+  if not prefix:
+    return False
+  if path == prefix:
+    return True
+  return path.startswith(prefix if prefix.endswith("/") else prefix + "/")
 
 
 class ConfigError(Exception):
@@ -192,6 +216,10 @@ class ConfigLoader:
     field_names = set(type(model).model_fields.keys())
     alias_choices = _collect_alias_choices(type(model))
     for key in extras:
+      # Internal sentinels (e.g. ``_software_fallback_deprecated``) are
+      # consumed by ReadSettings, never typed by operators.
+      if key.startswith("_"):
+        continue
       # Skip the warning if this extra is the snake form of an existing
       # field whose kebab alias already populated it.
       if "_" in key and key in field_names:
@@ -227,12 +255,15 @@ class ConfigLoader:
   # ---------------------------------------------------------------------
 
   def apply_profile(self, cfg: SmaConfig, profile_name: str | None) -> BaseConfig:
-    """Return base shallow-merged with the named profile.
+    """Return base deep-merged with the named profile.
 
-    Mirrors ``readsettings._apply_profile`` (readsettings.py:497-504):
-    each section in the profile *replaces* the corresponding section in
-    base, but only for the fields the profile actually set. Sections the
-    profile doesn't mention pass through unchanged from base.
+    Only the fields the profile actually set are applied. Nested blocks
+    (``video.qsv``, ``audio.universal``, ``audio.sorting``,
+    ``subtitle.subliminal.auth``, ``hdr.vaapi`` ...) and dict fields
+    (``audio.channel-filters``, ``video.bitrate-ratio``) are merged
+    recursively, so a profile that sets one leaf keeps its siblings from
+    base. Scalars and lists replace the base value. Sections the profile
+    doesn't mention pass through unchanged from base.
 
     A None profile name returns base unchanged (no overlay). An unknown
     name is rejected with ``ConfigError`` — but this should not happen
@@ -258,8 +289,7 @@ class ConfigLoader:
       if not overlay_data:
         continue
       yaml_key = type(cfg.base).model_fields[section_name].alias or section_name
-      base_section = base_data.setdefault(yaml_key, {})
-      base_section.update(overlay_data)
+      base_data[yaml_key] = _deep_merge(base_data.get(yaml_key) or {}, overlay_data)
 
     return BaseConfig.model_validate(base_data)
 
@@ -298,7 +328,7 @@ class ConfigLoader:
     rewritten = file_path
     rewrites = sorted(cfg.daemon.path_rewrites, key=lambda r: len(r.from_), reverse=True)
     for r in rewrites:
-      if file_path.startswith(r.from_):
+      if _has_path_prefix(file_path, r.from_):
         rewritten = r.to + file_path[len(r.from_) :]
         break
     return os.path.normpath(rewritten)
