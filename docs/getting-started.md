@@ -138,7 +138,7 @@ What this gives you:
 Useful follow-up commands:
 
 ```bash
-mise run dev:check
+mise run dev:precommit
 mise run config:gpu
 mise run test:openapi
 mise run media:preview -- /path/to/file.mkv

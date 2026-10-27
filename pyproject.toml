@@ -49,10 +49,13 @@ dependencies = [
   "pydantic>=2,<3",
   "ruamel.yaml>=0.18,<1",
   "prometheus-client>=0.20,<1",
+  "python-json-logger>=3.2,<4",
+  "mistune>=3.0,<4",
 ]
 
 [project.optional-dependencies]
-openvino = ["openvino>=2025.0,<2027"]
+openvino = ["openvino>=2025.0,<2027", "numpy>=1.26"]
+postgres = ["psycopg2-binary>=2.9,<3"]
 qbittorrent = ["python-qbittorrent>=0.4.3,<1"]
 deluge = ["deluge-client>=1.10,<2", "gevent>=25.9,<26"]
 dev = [

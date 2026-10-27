@@ -12,11 +12,6 @@ omit =
     # exercised on every dev box, but unit-testing the analyzer
     # itself needs hardware that's not available in CI.
     resources/openvino_analyzer.py
-    # Calls ffprobe on a real file path; covered indirectly via the
-    # library_audit engine tests that mock its module-level FFMpeg
-    # reference. The remaining missed lines here are the real-FFprobe
-    # path used in production but not in CI.
-    resources/library_audit/probes.py
 
 [report]
 exclude_lines =

@@ -1094,14 +1094,14 @@ mise run setup:deps:dev      # Install dev + test dependencies
 mise run test             # Run test suite
 mise run test:daemon      # Run focused daemon/API worker tests
 mise run test:deploy      # Run focused deploy/config task tests
-mise run dev:check            # Run local CI-equivalent checks
+mise run dev:precommit        # Run pre-commit checks against all files
 mise run test:lint             # Run ruff linter
 mise run dev:lint         # Auto-fix lint issues
 mise run dev:format           # Format Python code
 mise run test:openapi          # Validate docs/openapi.yaml
 mise run config:gpu       # Detect available GPU acceleration
 mise run config:generate           # Generate config with auto-detected GPU
-mise run config:audit     # Audit local config files
+mise run config:validate  # Validate the effective config
 mise run daemon:smoke     # Validate daemon config and exit
 mise run daemon:start           # Start daemon on 0.0.0.0:8585
 mise run media:convert -- /path/to/file.mkv  # Convert a file
@@ -1115,7 +1115,7 @@ mise run media:codecs           # List supported codecs
 mise run build:docker     # Build image locally (TAG=sma-ng:local to override)
 mise run docker:run       # Uses daemon.db_url from config/sma-ng.yml
 mise run build:shell      # Open shell in locally-built image
-mise run test:smoke       # Smoke-test imports and ffmpeg
+mise run build:smoke      # Smoke-test the built image (imports and ffmpeg)
 ```
 
 ### Deployment System

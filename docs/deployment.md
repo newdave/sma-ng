@@ -15,26 +15,29 @@ curl https://mise.run | sh
 | Task                           | Description                                                                      |
 | ------------------------------ | -------------------------------------------------------------------------------- |
 | `mise run setup:venv`          | Create the Python virtual environment                                            |
-| `mise run setup:deps`          | Install base runtime dependencies from `setup/requirements.txt`                  |
-| `mise run setup:deps:dev`      | Install dev dependencies (lint, test tools)                                      |
+| `mise run setup:deps`          | Alias of `setup:deps:base`                                                       |
+| `mise run setup:deps:base`     | Install base runtime dependencies from `setup/requirements.txt`                  |
+| `mise run setup:deps:dev`      | Install dev dependencies (`pip install -e '.[dev]'`: lint, test, build tools)    |
 | `mise run setup:deps:all`      | Install all optional dependencies including qBittorrent and Deluge integrations  |
 | `mise run setup:clean`         | Remove build artifacts, caches, and compiled bytecode                            |
-| `mise run setup:docker:target` | Create Docker bind-mount directories, seed config files, and install CLI aliases |
+| `mise run setup:docker:target` | Create Docker bind-mount directories, seed config files, and install the `sma` host command |
 
 ### Development
 
 | Task                     | Description                                              |
 | ------------------------ | -------------------------------------------------------- |
-| `mise run test:lint`     | Run the ruff linter and report issues                    |
+| `mise run test:lint`     | Run ruff and the bandit security scan, report issues     |
 | `mise run dev:lint`      | Run the ruff linter and auto-fix issues                  |
 | `mise run dev:format`    | Format Python code with ruff                             |
 | `mise run dev:precommit` | Run pre-commit checks against all files                  |
 | `mise run test:openapi`  | Validate `docs/openapi.yaml`                             |
 | `mise run test`          | Run the test suite (daemon tests require `TEST_DB_URL`)  |
-| `mise run test:cov`      | Run tests with coverage report (HTML + terminal summary) |
+| `mise run test:run`      | Same as `mise run test` (the task behind the alias)      |
+| `mise run test:shell`    | Run `shellcheck -x` over tracked shell scripts and `.mise/tasks` entrypoints |
+| `mise run test:cov`      | Run tests with coverage (HTML, JSON) and enforce the per-module coverage floor |
+| `mise run build:dist`    | Build wheel and sdist artifacts into `dist/`             |
 | `mise run test:daemon`   | Run focused daemon/API worker tests                      |
 | `mise run test:deploy`   | Run focused deploy/config task tests                     |
-| `mise run dev:check`     | Run the local CI-equivalent check set                    |
 
 ### Media Tools
 
@@ -53,7 +56,7 @@ curl https://mise.run | sh
 | -------------------------- | ---------------------------------------------------------------------------------- |
 | `mise run config:gpu`      | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
 | `mise run config:generate` | Generate `config/sma-ng.yml` with GPU auto-detection                               |
-| `mise run config:audit`    | Audit local config files against the YAML sample                                   |
+| `mise run config:sample`   | Regenerate `setup/sma-ng.yml.sample` from the schema (`-- --check` fails on drift) |
 | `mise run config:show`     | Render the effective resolved config for a profile (`-- --profile rq --section video --diff`). With `-- --input <file>`: print the full FFmpeg command for a real source without transcoding. |
 | `mise run config:validate` | Validate the effective config — schema, unknown keys, encoder-flag leaks, routing refs |
 | `mise run daemon:smoke`    | Run daemon smoke-test config validation and exit                                   |
@@ -80,7 +83,6 @@ curl https://mise.run | sh
 | `mise run deploy:sync`     | Sync code and install dependencies on all hosts                                                 |
 | `mise run deploy:reload`   | Hot-reload `config/sma-ng.yml` on every host with `POST /reload`                                |
 | `mise run deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container               |
-| `mise run config:audit`    | Audit local configs                                                                             |
 | `mise run deploy:docker`   | Push `docker-compose.yml`. Compare the registry's current image digest against the running container; if they match, only `docker compose restart $service` to pick up bind-mounted config changes (~3–5s). Otherwise pull, `compose down`, `up -d --force-recreate` (~30s+). Either path ends with a freshness verification against the registry. Override with `FORCE_RECREATE=1` to always take the full path. |
 
 Use `HOST=<host>` for one node or `HOSTS="<host1> <host2>"` for multiple nodes.
@@ -132,9 +134,12 @@ mise run setup:docker:target
 ```
 
 This creates `/opt/sma/config`, `/opt/sma/logs`, `/opt/sma/cache`, `/opt/sma/data`, and `/transcode/sma`, then seeds
-`/opt/sma/config/sma-ng.yml` and `/opt/sma/config/daemon.env` if they are missing. It also installs
-`/opt/sma/sma-ng-docker-aliases.sh`; source that file in Bash to get aliases such as `sma-manual`,
-`sma-convert`, `sma-preview`, `sma-codecs`, and `sma-logs`.
+`/opt/sma/config/sma-ng.yml` and `/opt/sma/config/daemon.env` if they are missing. It also installs the
+`sma` host command to `/usr/local/bin/sma` (override with `SMA_BIN_PATH`); use `sma convert`, `sma preview`,
+`sma repair`, `sma rename`, `sma audit`, `sma codecs`, `sma logs`, and `sma shell` from the host (see
+[docker-compose-quickstart.md](docker-compose-quickstart.md)). `/opt/sma/sma-ng-docker-aliases.sh` is still written
+but is a deprecated shim over `sma` and will be removed in a later release. The `/downloads` compose mount is gone:
+add `path-rewrites: [{from: /downloads, to: /mnt/unionfs/downloads}]` if download clients report `/downloads/...`.
 
 Override the default host paths when your compose mounts differ:
 
@@ -391,7 +396,6 @@ For each remote host the staging build:
 | `deploy:sync`     | Sync code and install deps on all hosts                                                   |
 | `deploy:reload`   | Hot-reload `config/sma-ng.yml` on every host with `POST /reload`                          |
 | `deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container         |
-| `config:audit`    | Audit local configs                                                                       |
 | `config:show`     | Render the effective resolved config for a profile                                        |
 | `config:validate` | Validate effective config — schema, unknowns, encoder-flag leaks, routing refs            |
 | `deploy:docker`   | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate`   |

@@ -16,6 +16,8 @@
 
 set -euo pipefail
 
+HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_json_helper.py"
+
 DAEMON_HOST_VALUE="${DAEMON_HOST:-127.0.0.1}"
 DAEMON_PORT_VALUE="${DAEMON_PORT:-8585}"
 DAEMON_BASE="http://${DAEMON_HOST_VALUE}:${DAEMON_PORT_VALUE}"
@@ -27,19 +29,18 @@ log()  { echo "[utorrent_post_process] $*" >&2; }
 info() { log "INFO: $*"; }
 err()  { log "ERROR: $*"; }
 
-auth_args() {
-    if [[ -n "${DAEMON_API_KEY:-}" ]]; then
-        echo "-H" "X-API-Key: ${DAEMON_API_KEY}"
-    fi
-}
+AUTH_ARGS=()
+if [[ -n "${DAEMON_API_KEY:-}" ]]; then
+    AUTH_ARGS=(-H "X-API-Key: ${DAEMON_API_KEY}")
+fi
 
 submit_file() {
     local filepath="$1"
     local payload
-    payload=$(python3 -c "import json,sys; print(json.dumps({'path': sys.argv[1]}))" "$filepath")
+    payload=$(python3 "$HELPER" path-payload "$filepath")
     curl -sf -X POST \
         -H "Content-Type: application/json" \
-        $(auth_args) \
+        ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
         -d "$payload" \
         "${DAEMON_BASE}/webhook" > /dev/null
 }

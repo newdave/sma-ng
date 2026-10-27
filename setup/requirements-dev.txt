@@ -1,4 +1,8 @@
+# Mirrors [project.optional-dependencies].dev in pyproject.toml (kept in sync by tests/test_requirements_sync.py).
 pytest>=8.0
 pytest-cov>=5.0
 ruff>=0.5
 openapi-spec-validator>=0.7
+build>=1.2
+bandit[toml]>=1.7
+pre-commit>=3.7

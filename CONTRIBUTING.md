@@ -19,7 +19,7 @@ Preferred:
 
 ```bash
 mise install
-mise run install
+mise run setup:deps
 ```
 
 Alternative manual setup:
@@ -33,12 +33,12 @@ pip install -r setup/requirements.txt
 Useful tasks:
 
 ```bash
-mise run install-dev
+mise run setup:deps:dev
 mise run test
-mise run lint
-mise run detect-gpu
-mise run config
-mise run daemon
+mise run test:lint
+mise run config:gpu
+mise run config:generate
+mise run daemon:start
 ```
 
 ## Change Expectations
@@ -99,7 +99,7 @@ venv/bin/python -m pytest tests/test_docker.py -q
 mise run test
 
 # Coverage report
-mise run test-cov
+mise run test:cov
 ```
 
 Docs-only changes usually do not require tests unless code changed in the same task.
