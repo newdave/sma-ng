@@ -46,6 +46,10 @@ sma_rename() {
   _sma_exec python rename.py "$@"
 }
 
+sma_repair() {
+  _sma_exec python repair.py "$@"
+}
+
 sma_logs() {
   "$DOCKER_BIN" logs -f "$CONTAINER" "$@"
 }
@@ -57,4 +61,5 @@ alias sma-preview='sma_preview'
 alias sma-codecs='sma_codecs'
 alias sma-smoke='sma_daemon_smoke'
 alias sma-rename='sma_rename'
+alias sma-repair='sma_repair'
 alias sma-logs='sma_logs'

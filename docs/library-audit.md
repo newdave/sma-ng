@@ -16,7 +16,7 @@ live cluster node.
 | `leftover_tmp`      | A `.tmp`/`.partial` file or a recycle-bin collision artifact (`*.2.mp4`, `*.3.mp4`, …). |
 | `preconv_original`  | A non-MP4 (`.mkv`/`.avi`/etc.) sitting next to a same-stem `.mp4` that probes cleanly — the original was never deleted (`delete-original: false`). |
 | `duplicate_id`      | The same TMDB/TVDB id appears at two or more paths within the same audit run. |
-| `hybrid_aspect`     | An MP4 whose picture was stretched by the former QSV alignment bug (e.g. a 1080p source shipped as 1920x1088, or a max-width downscale as 1920x1072) and that carries no corrective display aspect ratio. Detection matches a fixed signature table (1920x1088/1072/1056, 3840x2176/2144, 1280x736/704) with a square pixel aspect, so already-repaired or genuinely anamorphic files are never flagged. |
+| `hybrid_aspect`     | An MP4 whose picture was stretched by the former QSV alignment bug (e.g. a 1080p source shipped as 1920x1088, or a max-width downscale as 1920x1072) and that carries no corrective display aspect ratio. Detection matches a fixed signature table (1920x1088/1072/1056, 3840x2176/2144, 1280x736/704) with a square pixel aspect (reason `stretched_dims`), so correctly repaired or genuinely anamorphic files are not flagged. A file that already carries a corrective pixel aspect is still flagged (reason `demoted_poster`) when an older repair remux turned its cover art into a real `mp4v` video track; re-running the repair drops that track. |
 
 ## Configuration (`sma-ng.yml`)
 
@@ -124,6 +124,11 @@ python manual.py --repair-hybrid -i /path/to/library
 # (e.g. 1920x1088 -> 1920x1080) through the normal conversion pipeline.
 python manual.py --repair-hybrid reencode -i /path/to/file.mp4
 ```
+
+The remux copies video, audio and subtitle streams only and scopes the aspect fix to the primary
+video stream. Cover art, data streams (e.g. `tmcd`, `bin_data`) and streams of unknown type are dropped.
+Re-running it on a file it already repaired is safe. The fix is display-only; see
+[Troubleshooting](troubleshooting.md) for when to re-encode instead.
 
 Remux mode exits 0 when everything detected was repaired (or nothing was
 detected), 1 when a repair failed. Reencode mode requires a single file and

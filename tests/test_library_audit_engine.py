@@ -1,6 +1,7 @@
 """Unit tests for resources/library_audit (probes + engine + enumerator)."""
 
 import unittest.mock as mock
+from types import SimpleNamespace
 
 from resources.library_audit.engine import AuditEngine, Finding, run_audit_inline
 from resources.library_audit.enumerator import enumerate_paths
@@ -856,6 +857,60 @@ class TestHybridAspectCheck:
     fake_ffmpeg.probe.side_effect = RuntimeError("probe blew up")
     monkeypatch.setattr("resources.library_audit.probes.FFMpeg", lambda **_: fake_ffmpeg)
     assert hybrid_aspect_check(str(p)) is None
+
+  def _patch_streams(self, monkeypatch, streams):
+    fake_ffmpeg = mock.MagicMock()
+    fake_ffmpeg.probe.return_value = SimpleNamespace(streams=streams, video=streams[0] if streams else None)
+    monkeypatch.setattr("resources.library_audit.probes.FFMpeg", lambda **_: fake_ffmpeg)
+
+  def test_previously_repaired_with_demoted_poster_is_flagged(self, tmp_path, monkeypatch):
+    # The old "-map 0 ... -aspect" remux corrected the PAR but turned the
+    # poster into a real video track; the file must be re-repairable.
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"\x00" * 64)
+    self._patch_streams(
+      monkeypatch,
+      [
+        SimpleNamespace(type="video", codec="hevc", attached_pic=0, video_width=3840, video_height=2176, sample_aspect_ratio="136:135"),
+        SimpleNamespace(type="audio", codec="eac3", attached_pic=0),
+        SimpleNamespace(type="video", codec="mjpeg", attached_pic=0, video_width=1000, video_height=1500, sample_aspect_ratio="8:3"),
+      ],
+    )
+    assert hybrid_aspect_check(str(p)) == {
+      "reason": "demoted_poster",
+      "width": 3840,
+      "height": 2176,
+      "true_height": 2160,
+      "dar": "3840:2160",
+    }
+
+  def test_previously_repaired_with_intact_poster_not_flagged(self, tmp_path, monkeypatch):
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"\x00" * 64)
+    self._patch_streams(
+      monkeypatch,
+      [
+        SimpleNamespace(type="video", codec="hevc", attached_pic=0, video_width=3840, video_height=2176, sample_aspect_ratio="136:135"),
+        SimpleNamespace(type="video", codec="mjpeg", attached_pic=1, video_width=1000, video_height=1500, sample_aspect_ratio="1:1"),
+      ],
+    )
+    assert hybrid_aspect_check(str(p)) is None
+
+  def test_primary_video_skips_leading_poster(self, tmp_path, monkeypatch):
+    # A poster listed first must not be mistaken for the main picture.
+    p = tmp_path / "movie.mp4"
+    p.write_bytes(b"\x00" * 64)
+    self._patch_streams(
+      monkeypatch,
+      [
+        SimpleNamespace(type="video", codec="mjpeg", attached_pic=1, video_width=1000, video_height=1500, sample_aspect_ratio="1:1"),
+        SimpleNamespace(type="video", codec="h264", attached_pic=0, video_width=1920, video_height=1088, sample_aspect_ratio="1:1"),
+      ],
+    )
+    details = hybrid_aspect_check(str(p))
+    assert details is not None
+    assert details["reason"] == "stretched_dims"
+    assert details["dar"] == "1920:1080"
 
   def test_non_int_dims_returns_none(self, tmp_path, monkeypatch):
     p = tmp_path / "movie.mp4"

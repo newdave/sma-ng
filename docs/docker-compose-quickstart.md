@@ -152,6 +152,7 @@ Useful aliases:
 | `sma-codecs`                              | Run `manual.py -cl`                                  |
 | `sma-smoke`                               | Run `python daemon.py --smoke-test`                  |
 | `sma-rename`                              | Run `python rename.py`                               |
+| `sma-repair`                              | Run `python repair.py`                               |
 | `sma-logs`                                | Follow `docker logs` for the `sma-ng` container      |
 | `sma-shell`                               | Open an interactive shell in the `sma-ng` container  |
 

@@ -175,18 +175,65 @@ Files transcoded before the fix may still carry stretched geometry
 (1920x1088, 1920x1072, 1920x1056, 3840x2176, 3840x2144, 1280x736, 1280x704).
 Two repair paths exist:
 
-- **Lossless (recommended):** `python manual.py --repair-hybrid -i /path`
-  sweeps a file or directory and remuxes each detected MP4 with a corrective
-  display aspect ratio (`-c copy -aspect W:H`) — instant, no quality loss.
-  The library audit can do the same automatically via
-  `daemon.audit.auto-fix.hybrid-aspect: true` (see
-  [Library Audit](library-audit.md)).
-- **Full rebuild:** `python manual.py --repair-hybrid reencode -i file.mp4`
+- **Full rebuild (recommended):** `python manual.py --repair-hybrid reencode -i file.mp4`
   re-encodes one file back to its true dimensions through the normal
   pipeline (logged as `[video-dims-override]`); costs an encode generation.
+  Re-downloading and re-encoding from the original source is better still.
+- **Lossless (display-only):** `python manual.py --repair-hybrid -i /path`
+  sweeps a file or directory and remuxes each detected MP4 with a corrective
+  display aspect ratio on the primary video stream (`-c copy -aspect:v:0 W:H`).
+  It is instant but does not remove the resampled rows: players that ignore
+  the sample aspect ratio for HEVC-in-MP4 (some TVs and Plex clients) still
+  show a slightly tall picture, and non-square pixels make a Plex transcode
+  more likely. The remux keeps video, audio and subtitle streams only; cover
+  art and data streams are dropped. The library audit can do the same
+  automatically via `daemon.audit.auto-fix.hybrid-aspect: true` (see
+  [Library Audit](library-audit.md)).
 
 Detection is signature-based and skips files already carrying a non-square
-pixel aspect ratio, so re-running the repair is safe and idempotent.
+pixel aspect ratio, so re-running the repair is safe and idempotent. The one
+exception is files damaged by the remux in releases before this fix: it mapped
+every stream (`-map 0`) and applied `-aspect` to all video streams, turning
+the cover art into a second real `mp4v` video track. Those files are reported
+with reason `demoted_poster`, and running the lossless repair again removes
+the stray track. If the log shows `Hybrid-aspect file detected: ... demoted_poster`,
+that is the fix being applied.
+
+### Repairing damaged media without transcoding
+
+`repair.py` fixes stream-level damage by remuxing with `-c copy`. It never re-encodes: a guard rejects any
+FFmpeg option other than stream mapping, `-c copy`, `-aspect:v:0`, `-write_tmcd` and `-movflags` before FFmpeg
+runs. It accepts any mix of files and directories (`.mp4`, `.m4v`, `.mov`, `.mkv`; directories are walked
+recursively, hidden files and folders are skipped) and leaves files that probe as normal alone.
+
+```bash
+python repair.py -n /mnt/unionfs/Media/TV          # dry run: report what would change
+python repair.py /path/to/file.mp4 /path/to/dir     # repair in place
+mise run media:repair -- /path/to/file-or-dir       # same via mise; sma-repair inside Docker
+```
+
+| Flag              | Effect                                                         |
+| ----------------- | -------------------------------------------------------------- |
+| `-n`, `--dry-run` | Report what would be repaired; change nothing                  |
+| `-c`, `--config`  | `sma-ng.yml` to read `ffmpeg`/`ffprobe` paths from             |
+| `-v`, `--verbose` | Debug logging                                                  |
+
+What it fixes:
+
+| Damage       | Detected as                                                                                     | Fix                                    |
+| ------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------- |
+| Data streams | `tmcd` timecode tracks, stray `bin_data`, streams FFprobe cannot classify                       | Dropped (`-write_tmcd 0` on MP4)       |
+| Artwork      | Attached pictures, cover art demoted to a real `mp4v` video track, image attachments in MKV     | Dropped; font attachments are kept     |
+| Aspect ratio | Stretched hybrid dims (see above) with square pixels                                            | `-aspect:v:0` corrective display ratio |
+
+The MP4 chapter text track (`bin_data`, written whenever a file has chapters) is not damage and is kept. The
+aspect fix is display-only, as described above; use `manual.py --repair-hybrid reencode` to remove the
+resampled rows.
+
+Each repair writes a hidden `.<name>.repairing.<ext>` copy next to the original, re-probes it, and only replaces
+the original when the kept streams, duration (within 1 second) and chapter count match and the copy probes as
+normal. Otherwise the copy is deleted and the original is untouched. MP4 output gets `+faststart`. The exit code
+is 0 when nothing failed, 1 when any repair failed, and 2 for a missing path or missing FFmpeg binaries.
 
 ### Hardware acceleration not working
 
