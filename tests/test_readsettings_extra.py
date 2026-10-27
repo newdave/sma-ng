@@ -207,32 +207,6 @@ class TestPlexProjection:
     assert settings.Plex["ssl"] is False
 
 
-class TestMetadataArtworkBranches:
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_thumbnail_branch(self, _mock, tmp_yaml):
-    yml = tmp_yaml(overrides={"base": {"metadata": {"download-artwork": "thumb"}}})
-    settings = ReadSettings(yml)
-    assert settings.artwork is True
-    assert settings.thumbnail is True
-
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_poster_branch(self, _mock, tmp_yaml):
-    yml = tmp_yaml(overrides={"base": {"metadata": {"download-artwork": "poster"}}})
-    settings = ReadSettings(yml)
-    assert settings.artwork is True
-    assert settings.thumbnail is False
-
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_false_branch(self, _mock, tmp_yaml):
-    yml = tmp_yaml(overrides={"base": {"metadata": {"download-artwork": "false"}}})
-    settings = ReadSettings(yml)
-    assert settings.thumbnail is False
-    # download_artwork == "false" -> bool("false") == True actually, but the
-    # legacy code computes bool(cfg.download_artwork) which on the string
-    # "false" gives True. Just assert thumbnail is False (the documented
-    # branch behavior).
-
-
 class TestSubliminalAuth:
   @patch("resources.readsettings.ReadSettings._validate_binaries")
   def test_parses_provider_credentials(self, _mock, tmp_yaml):

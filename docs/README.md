@@ -342,7 +342,6 @@ Generates an additional audio stream (usually stereo AAC) for maximum device com
 | `full-path-guess`  | bool   | `true`  | Use full file path for guessit metadata matching      |
 | `tag`              | bool   | `true`  | Enable TMDB metadata tagging                          |
 | `tag-language`     | string | `eng`   | Language for TMDB metadata                            |
-| `download-artwork` | bool   | `false` | Embed cover art from TMDB                             |
 | `strip-metadata`   | bool   | `true`  | Remove existing metadata before tagging               |
 | `keep-titles`      | bool   | `false` | Preserve original stream titles                       |
 

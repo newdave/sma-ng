@@ -290,21 +290,6 @@ class TestForceReencodeOverride:
     assert settings.force_reencode is False
 
 
-class TestArtworkParsing:
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_poster_artwork(self, mock_validate, tmp_yaml):
-    settings = ReadSettings(tmp_yaml())
-    # Default is 'false' in the test fixture
-    assert settings.thumbnail is False
-
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_thumbnail_artwork(self, mock_validate, tmp_yaml):
-    yml = tmp_yaml(overrides={"base": {"metadata": {"download-artwork": "thumbnail"}}})
-    settings = ReadSettings(yml)
-    assert settings.artwork is True
-    assert settings.thumbnail is True
-
-
 class TestPermissionsParsing:
   @patch("resources.readsettings.ReadSettings._validate_binaries")
   def test_invalid_chmod_defaults_to_664(self, mock_validate, tmp_yaml):
@@ -317,21 +302,6 @@ class TestPermissionsParsing:
     yml = tmp_yaml(overrides={"base": {"permissions": {"chmod": "0755"}}})
     settings = ReadSettings(yml)
     assert settings.permissions["chmod"] == 0o755
-
-
-class TestArtworkParsingExtended:
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_poster_value(self, mock_validate, tmp_yaml):
-    yml = tmp_yaml(overrides={"base": {"metadata": {"download-artwork": "poster"}}})
-    settings = ReadSettings(yml)
-    assert settings.artwork is True
-    assert settings.thumbnail is False
-
-  @patch("resources.readsettings.ReadSettings._validate_binaries")
-  def test_invalid_artwork_value_defaults_to_true(self, mock_validate, tmp_yaml):
-    yml = tmp_yaml(overrides={"base": {"metadata": {"download-artwork": "maybe"}}})
-    settings = ReadSettings(yml)
-    assert settings.artwork is True
 
 
 class TestReadSettingsUniversalAudio:

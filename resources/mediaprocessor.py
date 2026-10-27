@@ -518,6 +518,7 @@ from collections.abc import Callable
 
 from converter import Converter, FFMpegConvertError
 from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, parse_filter_segments
+from converter.ffmpeg import is_cover_art_attachment
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
@@ -607,7 +608,7 @@ class MediaProcessor:
           if self.settings.tagfile and tagdata:
             try:
               self.log.info("Tagging %s with TMDB ID %s." % (inputfile, tagdata.tmdbid))
-              tagdata.writeTags(output["output"], inputfile, self.converter, self.settings.artwork, self.settings.thumbnail, output["x"], output["y"], cues_to_front=output["cues_to_front"])
+              tagdata.writeTags(output["output"], inputfile, self.converter, output["x"], output["y"], cues_to_front=output["cues_to_front"])
             except KeyboardInterrupt:
               raise
             except Exception:
@@ -1631,6 +1632,9 @@ class MediaProcessor:
     ###############################################################
     attachments = []
     for f in info.attachment:
+      if is_cover_art_attachment(f):
+        self.log.debug("Dropping cover art attachment stream %d [strip-cover-art]." % f.index)
+        continue
       if f.codec in self.settings.attachmentcodec and "mimetype" in f.metadata and "filename" in f.metadata:
         attachment = {"map": f.index, "codec": "copy", "filename": f.metadata["filename"], "mimetype": f.metadata["mimetype"]}
         attachments.append(attachment)

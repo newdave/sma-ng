@@ -134,7 +134,6 @@ def tmp_yaml(tmp_path):
         "metadata": {
           "tag": True,
           "tag-language": "eng",
-          "download-artwork": "false",
           "strip-metadata": True,
         },
         "video": {

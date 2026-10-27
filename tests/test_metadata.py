@@ -558,76 +558,6 @@ class TestXml:
     assert "cast" not in xml
 
 
-class TestUrlretrieve:
-  def _make_metadata(self):
-    m = Metadata.__new__(Metadata)
-    return m
-
-  @patch("resources.metadata.requests.get")
-  def test_downloads_to_file(self, mock_get, tmp_path):
-    mock_get.return_value.content = b"image data"
-    m = self._make_metadata()
-    fn = str(tmp_path / "poster.jpg")
-    result = m.urlretrieve("https://example.com/poster.jpg", fn)
-    assert result[0] == fn
-    with open(fn, "rb") as f:
-      assert f.read() == b"image data"
-
-
-class TestGetArtwork:
-  def _make_metadata(self):
-    m = Metadata.__new__(Metadata)
-    m.log = MagicMock()
-    m.mediatype = MediaType.Movie
-    m.moviedata = {"poster_path": "/abc.jpg"}
-    m.tmdbid = 603
-    return m
-
-  def test_local_artwork_found(self, tmp_path):
-    m = self._make_metadata()
-    src = tmp_path / "movie.mkv"
-    src.write_text("x")
-    poster = tmp_path / "movie.jpg"
-    poster.write_text("image")
-    result = m.getArtwork(str(tmp_path / "movie.mp4"), str(src))
-    assert result == str(poster)
-
-  def test_local_artwork_png(self, tmp_path):
-    m = self._make_metadata()
-    src = tmp_path / "movie.mkv"
-    src.write_text("x")
-    poster = tmp_path / "movie.png"
-    poster.write_text("image")
-    result = m.getArtwork(str(tmp_path / "movie.mp4"), str(src))
-    assert result == str(poster)
-
-  def test_smaposter_found(self, tmp_path):
-    m = self._make_metadata()
-    src = tmp_path / "movie.mkv"
-    src.write_text("x")
-    poster = tmp_path / "smaposter.jpg"
-    poster.write_text("image")
-    result = m.getArtwork(str(tmp_path / "movie.mp4"), str(src))
-    assert result == str(poster)
-
-  @patch("resources.metadata.Metadata.urlretrieve")
-  def test_downloads_artwork(self, mock_url, tmp_path):
-    m = self._make_metadata()
-    src = tmp_path / "movie.mkv"
-    src.write_text("x")
-    mock_url.return_value = ("/tmp/poster-603.jpg", None)
-    result = m.getArtwork(str(tmp_path / "movie.mp4"), str(src))
-    assert result == "/tmp/poster-603.jpg"
-
-  def test_no_poster_path_returns_none(self, tmp_path):
-    m = self._make_metadata()
-    m.moviedata = {"poster_path": None}
-    src = tmp_path / "movie.mkv"
-    src.write_text("x")
-    result = m.getArtwork(str(tmp_path / "movie.mp4"), str(src))
-    assert result is None
-
-
 class TestGetDefaultLanguage:
   @patch("resources.metadata.tmdb.Movies")
   def test_movie_language(self, mock_movies):
@@ -757,15 +687,14 @@ class TestWriteTags:
     m.network = [{"name": "AMC"}]
     return m
 
-  @patch("resources.metadata.MP4Cover")
   @patch("resources.metadata.MP4")
-  def test_write_movie_tags(self, mock_mp4_cls, mock_cover_cls):
+  def test_write_movie_tags(self, mock_mp4_cls):
     """writeTags sets Movie-specific MP4 tags and returns True on success."""
     mock_video = MagicMock()
     mock_mp4_cls.return_value = mock_video
 
     m = self._make_metadata(MediaType.Movie)
-    with patch.object(m, "getArtwork", return_value=None), patch.object(m, "setHD"), patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"):
+    with patch.object(m, "setHD"), patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"):
       result = m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock())
 
     assert result is True
@@ -773,16 +702,14 @@ class TestWriteTags:
     mock_video.__setitem__.assert_any_call("stik", [9])
     mock_video.save.assert_called_once()
 
-  @patch("resources.metadata.MP4Cover")
   @patch("resources.metadata.MP4")
-  def test_write_tv_tags(self, mock_mp4_cls, mock_cover_cls):
+  def test_write_tv_tags(self, mock_mp4_cls):
     """writeTags sets TV-specific MP4 tags and returns True on success."""
     mock_video = MagicMock()
     mock_mp4_cls.return_value = mock_video
 
     m = self._make_metadata(MediaType.TV)
     with (
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(m, "setHD"),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
       patch.object(type(m), "shortDescription", new_callable=PropertyMock, return_value="Short."),
@@ -793,45 +720,6 @@ class TestWriteTags:
     mock_video.__setitem__.assert_any_call("tvsh", "Breaking Bad")
     mock_video.__setitem__.assert_any_call("stik", [10])
     mock_video.__setitem__.assert_any_call("tvsn", [3])
-
-  @patch("resources.metadata.MP4Cover")
-  @patch("resources.metadata.MP4")
-  def test_artwork_jpeg_embedded(self, mock_mp4_cls, mock_cover_cls, tmp_path):
-    """writeTags embeds JPEG artwork when getArtwork returns a path."""
-    mock_video = MagicMock()
-    mock_mp4_cls.return_value = mock_video
-    cover_path = str(tmp_path / "cover.jpg")
-    with open(cover_path, "wb") as f:
-      f.write(b"\xff\xd8\xff")  # JPEG magic bytes
-
-    mock_cover_cls.FORMAT_JPEG = 13
-    mock_cover_cls.return_value = MagicMock()
-
-    m = self._make_metadata(MediaType.Movie)
-    with patch.object(m, "getArtwork", return_value=cover_path), patch.object(m, "setHD"), patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"):
-      result = m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock(), artwork=True)
-
-    assert result is True
-    mock_video.__setitem__.assert_any_call("covr", [mock_cover_cls.return_value])
-
-  @patch("resources.metadata.MP4Cover")
-  @patch("resources.metadata.MP4")
-  def test_artwork_png_embedded(self, mock_mp4_cls, mock_cover_cls, tmp_path):
-    """writeTags embeds PNG artwork when cover path ends with .png."""
-    mock_video = MagicMock()
-    mock_mp4_cls.return_value = mock_video
-    cover_path = str(tmp_path / "cover.png")
-    with open(cover_path, "wb") as f:
-      f.write(b"\x89PNG")
-
-    mock_cover_cls.FORMAT_PNG = 14
-    mock_cover_cls.return_value = MagicMock()
-
-    m = self._make_metadata(MediaType.Movie)
-    with patch.object(m, "getArtwork", return_value=cover_path), patch.object(m, "setHD"), patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"):
-      result = m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock(), artwork=True)
-
-    assert result is True
 
   @patch("resources.metadata.MP4")
   def test_fallback_ffmpeg_on_invalid_mp4(self, mock_mp4_cls):
@@ -848,56 +736,51 @@ class TestWriteTags:
     )
 
     m = self._make_metadata(MediaType.Movie)
-    with patch.object(m, "getArtwork", return_value=None):
-      result = m.writeTags("/fake/file.mp4", "/fake/file.mp4", mock_converter)
+    result = m.writeTags("/fake/file.mp4", "/fake/file.mp4", mock_converter)
 
     mock_converter.tag.assert_called_once()
     assert result is True
 
-  @patch("resources.metadata.MP4Cover")
   @patch("resources.metadata.MP4")
-  def test_save_failure_returns_false(self, mock_mp4_cls, mock_cover_cls):
+  def test_save_failure_returns_false(self, mock_mp4_cls):
     """writeTags returns False when video.save() raises."""
     mock_video = MagicMock()
     mock_video.save.side_effect = OSError("disk full")
     mock_mp4_cls.return_value = mock_video
 
     m = self._make_metadata(MediaType.Movie)
-    with patch.object(m, "getArtwork", return_value=None), patch.object(m, "setHD"), patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"):
+    with patch.object(m, "setHD"), patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"):
       result = m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock())
 
     assert result is False
 
-  @patch("resources.metadata.MP4Cover")
   @patch("resources.metadata.MP4")
-  def test_hd_tag_set_when_provided(self, mock_mp4_cls, mock_cover_cls):
+  def test_hd_tag_set_when_provided(self, mock_mp4_cls):
     """writeTags calls setHD and writes hdvd tag when width/height provided."""
     mock_video = MagicMock()
     mock_mp4_cls.return_value = mock_video
 
     m = self._make_metadata(MediaType.Movie)
-    with patch.object(m, "getArtwork", return_value=None), patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"):
+    with patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"):
       m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock(), width=1920, height=1080)
 
     mock_video.__setitem__.assert_any_call("hdvd", m.HD)
 
-  @patch("resources.metadata.MP4Cover")
   @patch("resources.metadata.MP4")
-  def test_original_tool_tag(self, mock_mp4_cls, mock_cover_cls):
+  def test_original_tool_tag(self, mock_mp4_cls):
     """writeTags embeds original filename in the tool tag when original is set."""
     mock_video = MagicMock()
     mock_mp4_cls.return_value = mock_video
 
     m = self._make_metadata(MediaType.Movie)
     m.original = "/source/original.mkv"
-    with patch.object(m, "getArtwork", return_value=None), patch.object(m, "setHD"), patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"):
+    with patch.object(m, "setHD"), patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"):
       m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock())
 
     mock_video.__setitem__.assert_any_call("\xa9too", "SMA-NG:original.mkv")
 
-  @patch("resources.metadata.MP4Cover")
   @patch("resources.metadata.MP4")
-  def test_multi_episode_omits_tves_trkn(self, mock_mp4_cls, mock_cover_cls):
+  def test_multi_episode_omits_tves_trkn(self, mock_mp4_cls):
     """tves/trkn are omitted for multi-episode files so Plex uses the filename."""
     mock_video = MagicMock()
     mock_mp4_cls.return_value = mock_video
@@ -906,7 +789,6 @@ class TestWriteTags:
     m.episodes = [1, 2, 3]
     m.episode = 1
     with (
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(m, "setHD"),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
       patch.object(type(m), "shortDescription", new_callable=PropertyMock, return_value="Short."),
@@ -917,9 +799,8 @@ class TestWriteTags:
     assert "tves" not in set_keys
     assert "trkn" not in set_keys
 
-  @patch("resources.metadata.MP4Cover")
   @patch("resources.metadata.MP4")
-  def test_single_episode_includes_tves_trkn(self, mock_mp4_cls, mock_cover_cls):
+  def test_single_episode_includes_tves_trkn(self, mock_mp4_cls):
     """tves/trkn are written normally for single-episode files."""
     mock_video = MagicMock()
     mock_mp4_cls.return_value = mock_video
@@ -928,7 +809,6 @@ class TestWriteTags:
     m.episodes = [5]
     m.episode = 5
     with (
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(m, "setHD"),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
       patch.object(type(m), "shortDescription", new_callable=PropertyMock, return_value="Short."),
@@ -1320,7 +1200,6 @@ class TestWriteTagsMutagen:
     mock_video = MagicMock()
     with (
       patch("resources.metadata.MP4", return_value=mock_video),
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
     ):
       result = m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock())
@@ -1334,7 +1213,6 @@ class TestWriteTagsMutagen:
     mock_video = MagicMock()
     with (
       patch("resources.metadata.MP4", return_value=mock_video),
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
     ):
       m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock())
@@ -1346,7 +1224,6 @@ class TestWriteTagsMutagen:
     mock_video = MagicMock()
     with (
       patch("resources.metadata.MP4", return_value=mock_video),
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
       patch.object(type(m), "shortDescription", new_callable=PropertyMock, return_value="Short."),
     ):
@@ -1359,7 +1236,6 @@ class TestWriteTagsMutagen:
     mock_video = MagicMock()
     with (
       patch("resources.metadata.MP4", return_value=mock_video),
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
       patch.object(type(m), "shortDescription", new_callable=PropertyMock, return_value="Short."),
     ):
@@ -1374,7 +1250,6 @@ class TestWriteTagsMutagen:
     mock_video = MagicMock()
     with (
       patch("resources.metadata.MP4", return_value=mock_video),
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
       patch.object(type(m), "shortDescription", new_callable=PropertyMock, return_value="Short."),
     ):
@@ -1389,7 +1264,6 @@ class TestWriteTagsMutagen:
     mock_video = MagicMock()
     with (
       patch("resources.metadata.MP4", return_value=mock_video),
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
     ):
       m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock())
@@ -1401,7 +1275,6 @@ class TestWriteTagsMutagen:
     mock_video = MagicMock()
     with (
       patch("resources.metadata.MP4", return_value=mock_video),
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
     ):
       m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock())
@@ -1413,7 +1286,6 @@ class TestWriteTagsMutagen:
     mock_video = MagicMock()
     with (
       patch("resources.metadata.MP4", return_value=mock_video),
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
     ):
       m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock(), width=1920, height=1080)
@@ -1426,9 +1298,36 @@ class TestWriteTagsMutagen:
     mock_converter = MagicMock()
     mock_conv = iter([(None, ["ffmpeg", "-i", "x"]), (100, "done")])
     mock_converter.tag.return_value = mock_conv
-    with patch("resources.metadata.MP4", side_effect=MP4StreamInfoError), patch.object(m, "getArtwork", return_value=None):
+    with patch("resources.metadata.MP4", side_effect=MP4StreamInfoError):
       result = m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", mock_converter)
     assert result is True
+
+  def test_removes_existing_covr_even_when_delete_fails(self):
+    m = self._make_movie_metadata()
+    mock_video = MagicMock()
+    mock_video.delete.side_effect = Exception("cannot delete")
+    mock_video.tags = {"covr": [b"img"], "\xa9nam": ["old"]}
+    mock_video.__setitem__ = MagicMock()
+    with (
+      patch("resources.metadata.MP4", return_value=mock_video),
+      patch.object(m, "setHD"),
+      patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
+    ):
+      result = m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock())
+    assert result is True
+    assert "covr" not in mock_video.tags
+    mock_video.save.assert_called_once()
+
+  def test_no_covr_atom_is_noop(self):
+    m = self._make_movie_metadata()
+    mock_video = MagicMock()
+    mock_video.tags = None
+    with (
+      patch("resources.metadata.MP4", return_value=mock_video),
+      patch.object(m, "setHD"),
+      patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
+    ):
+      assert m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock()) is True
 
   def test_returns_false_on_save_error(self):
     m = self._make_movie_metadata()
@@ -1436,73 +1335,10 @@ class TestWriteTagsMutagen:
     mock_video.save.side_effect = Exception("disk full")
     with (
       patch("resources.metadata.MP4", return_value=mock_video),
-      patch.object(m, "getArtwork", return_value=None),
       patch.object(type(m), "xml", new_callable=PropertyMock, return_value="<dict/>"),
     ):
       result = m.writeTags("/fake/movie.mp4", "/fake/movie.mp4", MagicMock())
     assert result is False
-
-
-class TestGetArtworkDup:
-  def _make_metadata(self, mediatype=MediaType.Movie):
-    m = Metadata.__new__(Metadata)
-    m.log = MagicMock()
-    m.mediatype = mediatype
-    m.tmdbid = 603
-    m.moviedata = {"poster_path": "/abc.jpg"}
-    m.episodedata = {"still_path": None}
-    m.seasondata = {"poster_path": "/season.jpg"}
-    m.showdata = {"poster_path": "/show.jpg"}
-    return m
-
-  def test_local_poster_file_used(self, tmp_path):
-    m = self._make_metadata()
-    # Create a local jpg next to inputfile
-    inputfile = str(tmp_path / "movie.mkv")
-    poster = str(tmp_path / "movie.jpg")
-    open(poster, "wb").close()
-    result = m.getArtwork(inputfile, inputfile)
-    assert result == poster
-
-  def test_smaposter_file_used_when_no_basename_match(self, tmp_path):
-    m = self._make_metadata()
-    inputfile = str(tmp_path / "movie.mkv")
-    smaposter = str(tmp_path / "smaposter.jpg")
-    open(smaposter, "wb").close()
-    result = m.getArtwork(inputfile, inputfile)
-    assert result == smaposter
-
-  def test_downloads_when_no_local_file(self, tmp_path):
-    m = self._make_metadata()
-    inputfile = str(tmp_path / "movie.mkv")
-    with patch.object(m, "urlretrieve", return_value=("/tmp/poster-603.jpg", None)) as mock_url:
-      result = m.getArtwork(inputfile, inputfile)
-    mock_url.assert_called_once()
-    assert result == "/tmp/poster-603.jpg"
-
-  def test_returns_none_when_no_poster_path(self, tmp_path):
-    m = self._make_metadata()
-    m.moviedata = {"poster_path": None}
-    inputfile = str(tmp_path / "movie.mkv")
-    result = m.getArtwork(inputfile, inputfile)
-    assert result is None
-
-  def test_tv_thumbnail_uses_still_path(self, tmp_path):
-    m = self._make_metadata(MediaType.TV)
-    m.episodedata = {"still_path": "/still.jpg"}
-    inputfile = str(tmp_path / "episode.mkv")
-    with patch.object(m, "urlretrieve", return_value=("/tmp/poster-603.jpg", None)):
-      result = m.getArtwork(inputfile, inputfile, thumbnail=True)
-    assert result == "/tmp/poster-603.jpg"
-
-  def test_tv_falls_back_to_show_poster(self, tmp_path):
-    m = self._make_metadata(MediaType.TV)
-    m.seasondata = {"poster_path": None}
-    m.showdata = {"poster_path": "/show.jpg"}
-    inputfile = str(tmp_path / "episode.mkv")
-    with patch.object(m, "urlretrieve", return_value=("/tmp/poster-603.jpg", None)):
-      result = m.getArtwork(inputfile, inputfile, thumbnail=False)
-    assert result == "/tmp/poster-603.jpg"
 
 
 class TestWriteTvPlexmatchDup:
@@ -1667,8 +1503,7 @@ class TestWriteTagsFFmpegFallback:
     path = str(tmp_path / "movie.mp4")
     open(path, "w").close()
 
-    with patch.object(m, "getArtwork", return_value=None):
-      m.writeTags(path, path, converter, artwork=False)
+    m.writeTags(path, path, converter)
 
     converter.tag.assert_called_once()
     call_kwargs = converter.tag.call_args
@@ -1683,8 +1518,7 @@ class TestWriteTagsFFmpegFallback:
     path = str(tmp_path / "episode.mp4")
     open(path, "w").close()
 
-    with patch.object(m, "getArtwork", return_value=None):
-      m.writeTags(path, path, converter, artwork=False)
+    m.writeTags(path, path, converter)
 
     metadata_arg = converter.tag.call_args[0][1]
     assert "ALBUM" in metadata_arg
@@ -1697,8 +1531,7 @@ class TestWriteTagsFFmpegFallback:
     path = str(tmp_path / "movie.mp4")
     open(path, "w").close()
 
-    with patch.object(m, "getArtwork", return_value=None):
-      result = m.writeTags(path, path, converter, artwork=False)
+    result = m.writeTags(path, path, converter)
 
     assert result is True
 
@@ -1712,8 +1545,7 @@ class TestWriteTagsFFmpegFallback:
     path = str(tmp_path / "movie.mp4")
     open(path, "w").close()
 
-    with patch.object(m, "getArtwork", return_value=None):
-      result = m.writeTags(path, path, converter, artwork=False)
+    result = m.writeTags(path, path, converter)
 
     assert result is False
 
@@ -1724,54 +1556,10 @@ class TestWriteTagsFFmpegFallback:
     path = str(tmp_path / "movie.mp4")
     open(path, "w").close()
 
-    with patch.object(m, "getArtwork", return_value=None):
-      m.writeTags(path, path, converter, artwork=False)
+    m.writeTags(path, path, converter)
 
     metadata_arg = converter.tag.call_args[0][1]
     assert metadata_arg.get("GENRE") == "Action"
-
-
-# ---------------------------------------------------------------------------
-# getArtwork edge cases
-# ---------------------------------------------------------------------------
-
-
-class TestGetArtworkEdgeCases:
-  def _make_metadata(self, poster_path: str | None = "/poster.jpg"):
-    m = Metadata.__new__(Metadata)
-    m.log = MagicMock()
-    m.mediatype = MediaType.Movie
-    m.tmdbid = 603
-    m.moviedata = {"poster_path": poster_path}
-    return m
-
-  def test_returns_none_when_no_poster_and_no_local(self, tmp_path):
-    m = self._make_metadata(poster_path=None)
-    path = str(tmp_path / "movie.mp4")
-    result = m.getArtwork(path, path, thumbnail=False)
-    assert result is None
-
-  def test_local_jpg_takes_priority(self, tmp_path):
-    m = self._make_metadata()
-    path = str(tmp_path / "movie.mp4")
-    poster = tmp_path / "movie.jpg"
-    poster.write_bytes(b"fake jpeg")
-    result = m.getArtwork(path, path, thumbnail=False)
-    assert result == str(poster)
-
-  def test_smaposter_used_when_no_basename_match(self, tmp_path):
-    m = self._make_metadata()
-    path = str(tmp_path / "movie.mp4")
-    # No movie.jpg — smaposter.jpg should be found as fallback
-    smaposter = tmp_path / "smaposter.jpg"
-    smaposter.write_bytes(b"sma poster")
-    result = m.getArtwork(path, path, thumbnail=False)
-    assert result == str(smaposter)
-
-
-# ---------------------------------------------------------------------------
-# resolveTmdbID — error / edge cases
-# ---------------------------------------------------------------------------
 
 
 class TestResolveTmdbIDEdgeCases:

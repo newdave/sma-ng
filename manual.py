@@ -21,6 +21,7 @@ import guessit
 import tmdbsimple as tmdb
 
 from converter.avcodecs import attachment_codec_list, audio_codec_list, subtitle_codec_list, video_codec_list
+from converter.ffmpeg import is_cover_art_attachment
 from resources.config_loader import ConfigError, ConfigLoader
 from resources.daemon.context import set_job_id
 from resources.extensions import tmdb_api_key
@@ -564,15 +565,23 @@ def processFile(
   if tagOnly:
     if tagdata:
       try:
-        tagdata.writeTags(
-          inputfile, inputfile, mp.converter, mp.settings.artwork, mp.settings.thumbnail, cues_to_front=(os.path.splitext(inputfile)[1].lower() in [".mkv"] and mp.settings.relocate_moov)
-        )
+        tagdata.writeTags(inputfile, inputfile, mp.converter, cues_to_front=(os.path.splitext(inputfile)[1].lower() in [".mkv"] and mp.settings.relocate_moov))
         if mp.settings.relocate_moov:
           mp.QTFS(inputfile)
       except KeyboardInterrupt:
         raise
       except Exception:
         log.exception("There was an error tagging the file")
+    elif info.posters or any(is_cover_art_attachment(a) for a in info.attachment):
+      # No metadata match, but cover art must still never survive a tag-only pass.
+      log.info("No metadata match, stripping cover art from %s [strip-cover-art]." % inputfile)
+      try:
+        for _ in mp.converter.tag(inputfile, cues_to_front=(os.path.splitext(inputfile)[1].lower() in [".mkv"] and mp.settings.relocate_moov)):
+          pass
+      except KeyboardInterrupt:
+        raise
+      except Exception:
+        log.exception("There was an error stripping cover art from the file")
     return None
 
   output = mp.process(inputfile, True, info=info, original=original, tagdata=tagdata)
@@ -595,7 +604,7 @@ def processFile(
     tagfailed = False
     if tagdata:
       try:
-        tagdata.writeTags(output["output"], inputfile, mp.converter, mp.settings.artwork, mp.settings.thumbnail, width=output["x"], height=output["y"], cues_to_front=output["cues_to_front"])
+        tagdata.writeTags(output["output"], inputfile, mp.converter, width=output["x"], height=output["y"], cues_to_front=output["cues_to_front"])
       except KeyboardInterrupt:
         raise
       except Exception:
