@@ -24,6 +24,7 @@ from manual import (
   showCodecs,
   tvInfo,
 )
+from resources.media_repair import STATUS_FAILED, STATUS_REPAIRED, RepairResult
 
 # ---------------------------------------------------------------------------
 # checkAlreadyProcessed
@@ -482,8 +483,7 @@ class TestProcessFile:
   def test_tagonly_no_tagdata_with_posters_strips_cover_art(self):
     mp = self._make_mp()
     info = MagicMock()
-    info.posters = [MagicMock()]
-    info.attachment = []
+    info.cover_art = [MagicMock()]
     mp.converter.tag.return_value = iter([(1, "")])
     with patch("manual.getInfo", return_value=None):
       result = processFile("/file.mp4", mp, info=info, tagOnly=True)
@@ -493,11 +493,8 @@ class TestProcessFile:
 
   def test_tagonly_no_tagdata_font_only_does_not_tag(self):
     mp = self._make_mp()
-    font = MagicMock()
-    font.metadata = {"mimetype": "application/x-truetype-font", "filename": "f.ttf"}
     info = MagicMock()
-    info.posters = []
-    info.attachment = [font]
+    info.cover_art = []
     with patch("manual.getInfo", return_value=None):
       result = processFile("/file.mp4", mp, info=info, tagOnly=True)
     mp.converter.tag.assert_not_called()
@@ -506,8 +503,7 @@ class TestProcessFile:
   def test_tagonly_strip_failure_is_swallowed(self):
     mp = self._make_mp()
     info = MagicMock()
-    info.posters = [MagicMock()]
-    info.attachment = []
+    info.cover_art = [MagicMock()]
     mp.converter.tag.side_effect = Exception("boom")
     with patch("manual.getInfo", return_value=None):
       result = processFile("/file.mp4", mp, info=info, tagOnly=True)
@@ -790,6 +786,16 @@ class TestAuditCliFlags:
     assert kwargs["repair_hybrid"] is True
     assert kwargs["recycle_failed"] is True
     assert kwargs["recycle_bin"] == "/bin"
+    assert kwargs["repairer"] is not None
+    assert "temp_extension" in kwargs
+
+  def test_audit_without_repair_hybrid_passes_no_repairer(self, tmp_path):
+    with patch("sys.argv", ["manual.py", "-i", str(tmp_path), "--audit", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._settings()):
+        with patch("resources.library_audit.run_audit_inline", return_value=0) as mock_run:
+          with pytest.raises(SystemExit):
+            main()
+    assert mock_run.call_args.kwargs["repairer"] is None
 
 
 class TestRepairHybrid:
@@ -813,13 +819,14 @@ class TestRepairHybrid:
     fake_file = tmp_path / "movie.mp4"
     fake_file.write_bytes(b"fake")
     with patch("sys.argv", ["manual.py", "-i", str(fake_file), "--repair-hybrid", "-a"]):
-      with patch("manual.ReadSettings", return_value=self._mock_settings()):
+      with patch("manual.ReadSettings", return_value=self._mock_settings()), patch("manual.RepairProcessor") as mock_rp:
         with patch("resources.library_audit.probes.hybrid_aspect_check", return_value=None) as mock_check:
           with pytest.raises(SystemExit) as exc:
             main()
     assert exc.value.code == 0
     mock_check.assert_called_once()
     assert mock_check.call_args.args[0] == str(fake_file)
+    mock_rp.return_value.repair_file.assert_not_called()
 
   def test_bare_flag_defaults_to_remux_and_sweeps_directory(self, tmp_path):
     # const="remux": the flag with no value takes the remux path, which
@@ -827,7 +834,7 @@ class TestRepairHybrid:
     (tmp_path / "a.mp4").write_bytes(b"fake")
     (tmp_path / "b.mkv").write_bytes(b"fake")
     with patch("sys.argv", ["manual.py", "-i", str(tmp_path), "--repair-hybrid", "-a"]):
-      with patch("manual.ReadSettings", return_value=self._mock_settings()):
+      with patch("manual.ReadSettings", return_value=self._mock_settings()), patch("manual.RepairProcessor"):
         with patch("resources.library_audit.probes.hybrid_aspect_check", return_value=None) as mock_check:
           with pytest.raises(SystemExit) as exc:
             main()
@@ -838,26 +845,39 @@ class TestRepairHybrid:
   def test_remux_repairs_detected_file(self, tmp_path):
     fake_file = tmp_path / "movie.mp4"
     fake_file.write_bytes(b"fake")
+    settings = self._mock_settings()
     with patch("sys.argv", ["manual.py", "-i", str(fake_file), "--repair-hybrid", "remux", "-a"]):
-      with patch("manual.ReadSettings", return_value=self._mock_settings()):
+      with patch("manual.ReadSettings", return_value=settings), patch("manual.RepairProcessor") as mock_rp:
+        mock_rp.return_value.repair_file.return_value = RepairResult(str(fake_file), STATUS_REPAIRED, "dar 1920:1080")
         with patch("resources.library_audit.probes.hybrid_aspect_check", return_value=dict(_HYBRID_DETAILS)):
-          with patch("resources.library_audit.repair.repair_hybrid_aspect", return_value=True) as mock_repair:
-            with pytest.raises(SystemExit) as exc:
-              main()
+          with pytest.raises(SystemExit) as exc:
+            main()
     assert exc.value.code == 0
-    mock_repair.assert_called_once()
-    assert mock_repair.call_args.args[0] == str(fake_file)
-    assert mock_repair.call_args.args[1] == "1920:1080"
+    assert mock_rp.call_args.args[0] is settings
+    mock_rp.return_value.repair_file.assert_called_once_with(str(fake_file))
+
+  def test_remux_builds_single_processor_for_multiple_files(self, tmp_path):
+    for n in ("a.mp4", "b.mp4"):
+      (tmp_path / n).write_bytes(b"fake")
+    with patch("sys.argv", ["manual.py", "-i", str(tmp_path), "--repair-hybrid", "remux", "-a"]):
+      with patch("manual.ReadSettings", return_value=self._mock_settings()), patch("manual.RepairProcessor") as mock_rp:
+        mock_rp.return_value.repair_file.return_value = RepairResult("x", STATUS_REPAIRED, "ok")
+        with patch("resources.library_audit.probes.hybrid_aspect_check", return_value=dict(_HYBRID_DETAILS)):
+          with pytest.raises(SystemExit) as exc:
+            main()
+    assert exc.value.code == 0
+    assert mock_rp.call_count == 1
+    assert mock_rp.return_value.repair_file.call_count == 2
 
   def test_remux_repair_failure_exits_1(self, tmp_path):
     fake_file = tmp_path / "movie.mp4"
     fake_file.write_bytes(b"fake")
     with patch("sys.argv", ["manual.py", "-i", str(fake_file), "--repair-hybrid", "remux", "-a"]):
-      with patch("manual.ReadSettings", return_value=self._mock_settings()):
+      with patch("manual.ReadSettings", return_value=self._mock_settings()), patch("manual.RepairProcessor") as mock_rp:
+        mock_rp.return_value.repair_file.return_value = RepairResult(str(fake_file), STATUS_FAILED, "boom")
         with patch("resources.library_audit.probes.hybrid_aspect_check", return_value=dict(_HYBRID_DETAILS)):
-          with patch("resources.library_audit.repair.repair_hybrid_aspect", return_value=False):
-            with pytest.raises(SystemExit) as exc:
-              main()
+          with pytest.raises(SystemExit) as exc:
+            main()
     assert exc.value.code == 1
 
   def test_reencode_on_directory_exits_2(self, tmp_path):

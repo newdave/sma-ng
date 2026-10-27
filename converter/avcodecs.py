@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Codec class definitions mapping SMA-NG codec names to FFmpeg encoder/decoder identifiers."""
 
+import glob
+import os
+
 
 class BaseCodec:
   """
@@ -1269,6 +1272,21 @@ def _filter_wrong_encoder_tokens(tokens: list[str], forbidden: frozenset[str], e
   return out
 
 
+_DEFAULT_VAAPI_RENDER_NODE = "/dev/dri/renderD128"
+
+
+def _default_vaapi_render_node():
+  """Return the VAAPI render node used when no hwdevice is configured.
+
+  renderD128 is preferred; when it does not exist the first existing
+  /dev/dri/renderD* node is used, falling back to renderD128.
+  """
+  if os.path.exists(_DEFAULT_VAAPI_RENDER_NODE):
+    return _DEFAULT_VAAPI_RENDER_NODE
+  nodes = sorted(glob.glob("/dev/dri/renderD*"))
+  return nodes[0] if nodes else _DEFAULT_VAAPI_RENDER_NODE
+
+
 class HWAccelVideoCodec:
   """Mixin providing shared parse/produce helpers for hardware-accelerated video codecs.
 
@@ -1375,13 +1393,13 @@ class HWAccelVideoCodec:
   def _hw_parse_pix_fmt(self, safe):
     """Move pix_fmt to hw-prefixed key.
 
-    For QSV, also translate CPU planar names (yuv420p, yuv420p10le) to
-    the matching surface name (nv12, p010le) since scale_qsv/vpp_qsv
-    refuse the CPU names.
+    For QSV and VAAPI, also translate CPU planar names (yuv420p,
+    yuv420p10le) to the matching surface name (nv12, p010le) since
+    scale_qsv/vpp_qsv/scale_vaapi refuse the CPU names.
     """
     if "pix_fmt" in safe:
       value = safe["pix_fmt"]
-      if self.hw_prefix == "qsv":
+      if self.hw_prefix in ("qsv", "vaapi"):
         value = self._QSV_SURFACE_FMT_MAP.get(value, value)
       safe[self.hw_prefix + "_pix_fmt"] = value
       del safe["pix_fmt"]
@@ -1491,13 +1509,19 @@ class NVEncH264Codec(HWAccelVideoCodec, H264Codec):
   def _codec_specific_parse_options(self, safe, stream=0):
     self._hw_parse_scale(safe)
     self._hw_parse_quality(safe)
+    self._hw_parse_pix_fmt(safe)
     return safe
 
   def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
     optlist = super()._codec_specific_produce_ffmpeg_list(safe, stream)
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
-    optlist.extend(self._hw_scale_opts(safe))
+    fmtstr = ":format=%s" % safe["nvenc_pix_fmt"] if "nvenc_pix_fmt" in safe else ""
+    scale = self._hw_scale_opts(safe, fmtstr)
+    if scale:
+      optlist.extend(scale)
+    elif fmtstr:
+      optlist.extend(["-vf", "%s=%s" % (self.scale_filter, fmtstr[1:])])
     return optlist
 
 
@@ -1547,7 +1571,7 @@ class VAAPIVideoCodec(HWAccelVideoCodec):
       if "decode_device" in safe and safe["decode_device"] != safe["device"]:
         optlist.extend(["-vf", hwdownload_filter])
     else:
-      optlist.extend(["-init_hw_device", "vaapi=vaapi0:/dev/dri/renderD128", "-filter_hw_device", "vaapi0"])
+      optlist.extend(["-init_hw_device", "vaapi=vaapi0:%s" % _default_vaapi_render_node(), "-filter_hw_device", "vaapi0"])
       if "decode_device" in safe:
         optlist.extend(["-vf", hwdownload_filter])
     return optlist
@@ -1645,8 +1669,11 @@ class H264QSVCodec(QSVVideoCodec, H264Codec):
   )
 
   def _codec_specific_parse_options(self, safe, stream=0):
-    safe = super()._codec_specific_parse_options(safe, stream)
+    # Convert width/height to qsv_wscale/qsv_hscale BEFORE the software
+    # parent maps them to wscale/hscale, so scale and format fold into a
+    # single scale_qsv filter (two chained QSV VPP sessions abort on ffmpeg 8).
     self._hw_parse_scale(safe)
+    safe = super()._codec_specific_parse_options(safe, stream)
     self._hw_parse_quality(safe)
     self._hw_parse_pix_fmt(safe)
     self._hw_parse_preset(safe)
@@ -1856,8 +1883,11 @@ class H265QSVCodec(QSVVideoCodec, H265Codec):
   )
 
   def _codec_specific_parse_options(self, safe, stream=0):
-    safe = super()._codec_specific_parse_options(safe, stream)
+    # Convert width/height to qsv_wscale/qsv_hscale BEFORE the software
+    # parent maps them to wscale/hscale, so scale and format fold into a
+    # single scale_qsv filter (two chained QSV VPP sessions abort on ffmpeg 8).
     self._hw_parse_scale(safe)
+    safe = super()._codec_specific_parse_options(safe, stream)
     self._hw_parse_quality(safe)
     self._hw_parse_pix_fmt(safe)
     self._hw_parse_preset(safe)

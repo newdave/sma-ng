@@ -65,7 +65,9 @@ _QSV_INPUT_PIPELINE_FLAGS = (
   "-init_hw_device",
   "-filter_hw_device",
   "-hwaccel_device",
+  "-hwaccel_flags",
   "-qsv_device",
+  "-vaapi_device",
 )
 
 
@@ -103,23 +105,92 @@ def _strip_qsv_input_pipeline_from_preopts(preopts):
   return out if changed else None
 
 
-_QSV_CODEC_TO_SW = {
+# Hardware encoder (SMA codec name) -> software encoder of the same family,
+# used by the last-resort ``full_sw`` tier. Covers every hardware encoder
+# family SMA-NG can emit (QSV, VAAPI, NVENC, VideoToolbox, V4L2 M2M, OMX).
+# AV1 maps to SVT-AV1: libaom (``av1``) is an order of magnitude slower and
+# would turn a rescued 4K job into a multi-day encode.
+_HW_CODEC_TO_SW = {
+  # Intel QSV
   "h264qsv": "h264",
   "h265qsv": "h265",
   "hevc_qsv": "h265",
   "hevcqsvpatched": "h265",
-  "av1qsv": "av1",
+  "av1qsv": "svtav1",
+  "vp9qsv": "vp9",
+  "vp9_qsv": "vp9",
+  # VAAPI
+  "h264vaapi": "h264",
+  "h264_vaapi": "h264",
+  "h265vaapi": "h265",
+  "hevc_vaapi": "h265",
+  "av1vaapi": "svtav1",
+  "av1_vaapi": "svtav1",
+  # NVENC
+  "h264_nvenc": "h264",
+  "h264_nvenc_cuda": "h264",
+  "h265_nvenc": "h265",
+  "hevc_nvenc": "h265",
+  "h265_nvenc_cuda": "h265",
+  "hevc_nvenc_cuda": "h265",
+  "hevc_nvenc_patched": "h265",
+  "av1nvenc": "svtav1",
+  "av1_nvenc": "svtav1",
+  # VideoToolbox
+  "h264_videotoolbox": "h264",
+  "h265_videotoolbox": "h265",
+  "hevc_videotoolbox": "h265",
+  # V4L2 M2M / OMX
+  "h264_v4l2m2m": "h264",
+  "hevc_v4l2m2m": "h265",
+  "h264_omx": "h264",
+}
+
+# Backwards-compatible alias (historical name; now covers all hw families).
+_QSV_CODEC_TO_SW = _HW_CODEC_TO_SW
+
+# Video option keys that only mean something to a hardware encoder. The
+# software codecs ignore unknown keys, but ``device``/``decode_device`` make
+# a VAAPI/NVENC codec emit ``-filter_hw_device``/``hwupload`` and
+# ``global_quality`` would otherwise be dropped silently anyway.
+_HW_ONLY_VIDEO_KEYS = ("qsv_pix_fmt", "vaapi_pix_fmt", "device", "decode_device", "global_quality", "look_ahead_depth")
+
+_X26X_PRESETS = frozenset({"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow", "placebo"})
+
+# Hardware surface pixel formats -> CPU planar equivalent for software encode.
+_HW_SURFACE_TO_SW_PIX_FMT = {
+  "nv12": "yuv420p",
+  "p010le": "yuv420p10le",
+  "p010": "yuv420p10le",
+  "p016le": "yuv420p10le",
+}
+
+# Pseudo pixel formats that only name a hardware frame pool.
+_HW_FRAME_FORMATS = frozenset({"vaapi", "qsv", "cuda", "videotoolbox", "vulkan", "drm_prime", "opencl", "d3d11", "dxva2_vld"})
+
+# Hardware filter-name suffixes. Any segment with one of these suffixes (or a
+# bridge filter below) cannot run without a device context.
+_HW_FILTER_SUFFIXES = ("_qsv", "_vaapi", "_cuda", "_npp", "_opencl", "_vulkan", "_videotoolbox", "_vt")
+_HW_BRIDGE_FILTERS = frozenset({"hwmap", "hwupload", "hwupload_cuda", "hwdownload"})
+_HW_DEINTERLACE_TO_SW = {
+  "deinterlace_qsv": "yadif",
+  "deinterlace_vaapi": "yadif",
+  "yadif_cuda": "yadif",
+  "yadif_videotoolbox": "yadif",
+  "bwdif_cuda": "bwdif",
+  "bwdif_vulkan": "bwdif",
 }
 
 
-def _swap_qsv_codec_to_sw(options):
-  """Swap a QSV video encoder in *options* to its software equivalent.
+def _swap_hw_codec_to_sw(options):
+  """Swap a hardware video encoder in *options* to its software equivalent.
 
-  Returns the original codec name on success (so the caller can log
-  the swap and restore on a final retry attempt), or ``None`` if the
-  options dict didn't carry a known QSV encoder. Mutates *options*
-  in place by replacing ``options['video']['codec']`` and removing
-  ``qsv_pix_fmt`` if present (which only applies to ``scale_qsv``).
+  Returns the original codec name on success (so the caller can log the
+  swap), or ``None`` if the options dict didn't carry a known hardware
+  encoder. Mutates *options* in place by replacing
+  ``options['video']['codec']`` (list head only for fallback chains) and
+  removing hardware-only keys (surface pix_fmt aliases, device bindings,
+  ICQ ``global_quality``).
   """
   if not options or not isinstance(options.get("video"), dict):
     return None
@@ -132,18 +203,127 @@ def _swap_qsv_codec_to_sw(options):
     head = codec[0] if codec else None
     if head is None:
       return None
-    sw = _QSV_CODEC_TO_SW.get(head)
+    sw = _HW_CODEC_TO_SW.get(head)
     if not sw:
       return None
     video["codec"] = [sw] + list(codec[1:])
-    video.pop("qsv_pix_fmt", None)
-    return head
-  sw = _QSV_CODEC_TO_SW.get(codec)
-  if not sw:
+    original = head
+  else:
+    sw = _HW_CODEC_TO_SW.get(codec)
+    if not sw:
+      return None
+    video["codec"] = sw
+    original = codec
+  for key in _HW_ONLY_VIDEO_KEYS:
+    video.pop(key, None)
+  return original
+
+
+# Historical name kept for callers/tests; now handles every hw family.
+_swap_qsv_codec_to_sw = _swap_hw_codec_to_sw
+
+
+def _sw_pix_fmt(fmt):
+  """Map a hardware surface format to its CPU equivalent; ``None`` for frame-pool pseudo formats."""
+  if not fmt:
     return None
-  video["codec"] = sw
-  video.pop("qsv_pix_fmt", None)
-  return codec
+  if fmt in _HW_FRAME_FORMATS:
+    return None
+  return _HW_SURFACE_TO_SW_PIX_FMT.get(fmt, fmt)
+
+
+def _rewrite_options_for_full_sw(options):
+  """Strip every hardware-only element from *options* for the ``full_sw`` tier.
+
+  Must run after :func:`_swap_hw_codec_to_sw`. Mutates ``options['video']``:
+
+  - Hardware scale filters (``vpp_qsv``, ``scale_qsv``, ``scale_vaapi``,
+    ``scale_cuda``, ``scale_npp``, ``scale_vt``) become a software
+    ``scale=W:H`` when they carried dimensions; their ``format=`` pin becomes
+    a CPU ``format=`` (``nv12`` -> ``yuv420p``, ``p010le`` -> ``yuv420p10le``).
+  - Bridge filters (``hwmap``, ``hwupload``, ``hwdownload``) are dropped, as
+    are ``format=`` tokens naming a hardware frame pool (``vaapi``, ``cuda``).
+  - Hardware deinterlacers map to ``yadif``/``bwdif``; any other hardware-only
+    filter (``tonemap_vaapi`` etc.) is dropped.
+  - Hardware-encoder ``params`` (``-flag value`` tokens such as ``-low_power``)
+    are dropped: the software encoders take ``x26x-params`` ``key=value``
+    strings and would reject them. An x26x-style string is kept.
+  - Non-x26x presets (``p1``..``p7``) and tunes (``hq``/``ll``) are dropped.
+  - A hardware surface ``pix_fmt`` is mapped to its CPU name.
+
+  Returns a list of human-readable notes describing what was dropped or
+  rewritten (empty when nothing changed) for the caller's log line.
+  """
+  notes: list[str] = []
+  if not options or not isinstance(options.get("video"), dict):
+    return notes
+  video = options["video"]
+
+  segments: list[str] = []
+  for name, args, raw in parse_filter_segments(video.get("filter")):
+    if name in _HW_BRIDGE_FILTERS:
+      notes.append("dropped %s" % raw)
+      continue
+    if name == "format":
+      _, _, argstr = raw.partition("=")
+      fmts = [f for f in (_sw_pix_fmt(x.strip()) for x in argstr.replace("pix_fmts=", "").split("|")) if f]
+      if fmts:
+        new = "format=%s" % "|".join(dict.fromkeys(fmts))
+        if new != raw:
+          notes.append("%s -> %s" % (raw, new))
+        segments.append(new)
+      else:
+        notes.append("dropped %s" % raw)
+      continue
+    if name in _HW_DEINTERLACE_TO_SW:
+      segments.append(_HW_DEINTERLACE_TO_SW[name])
+      notes.append("%s -> %s" % (raw, _HW_DEINTERLACE_TO_SW[name]))
+      continue
+    if name in ("vpp_qsv", "scale_qsv", "scale_vaapi", "scale_cuda", "scale_npp", "scale_vt"):
+      w, h = args.get("w") or args.get("width"), args.get("h") or args.get("height")
+      positional = [p for p in raw.partition("=")[2].split(":") if p and "=" not in p]
+      if not (w and h) and len(positional) >= 2:
+        w, h = positional[0], positional[1]
+      replacement = []
+      if w and h:
+        replacement.append("scale=%s:%s" % (w, h))
+      sw_fmt = _sw_pix_fmt(args.get("format"))
+      if sw_fmt:
+        replacement.append("format=%s" % sw_fmt)
+      segments.extend(replacement)
+      notes.append("%s -> %s" % (raw, ",".join(replacement) or "(dropped)"))
+      continue
+    if name.endswith(_HW_FILTER_SUFFIXES):
+      notes.append("dropped %s" % raw)
+      continue
+    segments.append(raw)
+  if video.get("filter"):
+    video["filter"] = ",".join(segments) or None
+
+  params = video.get("params")
+  if params and str(params).lstrip().startswith("-"):
+    notes.append("dropped hw codec-parameters")
+    video["params"] = None
+
+  preset = video.get("preset")
+  if preset and str(preset) not in _X26X_PRESETS:
+    notes.append("dropped preset %s" % preset)
+    video.pop("preset", None)
+  tune = video.get("tune")
+  if tune and str(tune) in ("hq", "ll", "ull", "lossless"):
+    notes.append("dropped tune %s" % tune)
+    video.pop("tune", None)
+
+  pix = video.get("pix_fmt")
+  if pix:
+    sw_pix = _sw_pix_fmt(pix)
+    if sw_pix != pix:
+      notes.append("pix_fmt %s -> %s" % (pix, sw_pix))
+      if sw_pix:
+        video["pix_fmt"] = sw_pix
+      else:
+        video.pop("pix_fmt", None)
+  return notes
 
 
 _QSV_TO_VAAPI_CODEC_MAP = {
@@ -294,12 +474,13 @@ def _rewrite_qsv_preopts_for_vaapi_encode(preopts):
 
   Idempotent: if ``-init_hw_device vaapi=...`` is already present, returns
   the input unchanged. The render-node path is sourced from the existing
-  ``-qsv_device`` token, falling back to ``/dev/dri/renderD128``.
+  ``-qsv_device`` token, falling back to the first available render node
+  (``/dev/dri/renderD128`` when present).
   """
   if not preopts:
     return preopts
   out = list(preopts)
-  device = "/dev/dri/renderD128"
+  device = _default_vaapi_render_node()
   for i, tok in enumerate(out):
     if tok == "-qsv_device" and i + 1 < len(out):
       device = out[i + 1]
@@ -517,8 +698,7 @@ def _resolve_hdr_color_tags(hdr_input, hdr_output, hdr_settings):
 from collections.abc import Callable
 
 from converter import Converter, FFMpegConvertError
-from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, parse_filter_segments
-from converter.ffmpeg import is_cover_art_attachment
+from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
@@ -656,7 +836,7 @@ class MediaProcessor:
               self.log.exception("Error updating .plexmatch")
 
           if post:
-            self.post(output_files, mediatype, tmdbid=tmdbid, tvdbid=tvdbid, imdbid=imdbid, season=season, episode=episode)
+            self.post(output_files, mediatype, tmdbid=tmdbid, tvdbid=tvdbid, imdbid=imdbid, season=season, episode=episode, input_path=inputfile)
 
           return output_files
       else:
@@ -667,13 +847,20 @@ class MediaProcessor:
       self.log.exception("Error processing")
     return False
 
-  def post(self, output_files, mediatype, tvdbid=None, tmdbid=None, imdbid=None, season=None, episode=None):
+  def post(self, output_files, mediatype, tvdbid=None, tmdbid=None, imdbid=None, season=None, episode=None, input_path=None):
     """
     Run post-processing steps after a successful conversion.
 
     Executes any configured post-process scripts and triggers a Plex
     library refresh if enabled in settings.
+
+    *input_path* is the original source. When it was a different file that
+    no longer exists (e.g. mkv -> mp4 with the original deleted), Emby and
+    Jellyfin are told it was deleted so the stale library entry is removed.
     """
+    deleted_path = None
+    if input_path and output_files and os.path.abspath(input_path) != os.path.abspath(output_files[0]) and not os.path.exists(input_path):
+      deleted_path = input_path
     if self.settings.postprocess:
       # Run any post process scripts
       postprocessor = PostProcessor(output_files, self.log, wait=self.settings.waitpostprocess)
@@ -704,7 +891,7 @@ class MediaProcessor:
     # Refresh Emby
     if getattr(self.settings, "emby_instances", None):
       try:
-        emby_refresh.refreshEmby(self.settings, output_files[0], self.log)
+        emby_refresh.refreshEmby(self.settings, output_files[0], self.log, deleted_path=deleted_path)
       except KeyboardInterrupt:
         raise
       except Exception as err:
@@ -713,7 +900,7 @@ class MediaProcessor:
     # Refresh Jellyfin
     if getattr(self.settings, "jellyfin_instances", None):
       try:
-        jellyfin_refresh.refreshJellyfin(self.settings, output_files[0], self.log)
+        jellyfin_refresh.refreshJellyfin(self.settings, output_files[0], self.log, deleted_path=deleted_path)
       except KeyboardInterrupt:
         raise
       except Exception as err:
@@ -1054,11 +1241,16 @@ class MediaProcessor:
       if not info:
         self.log.debug("Invalid source, no data returned.")
         return None
+      for s in info.unknown:
+        self.log.info("Dropping unknown %s stream %s (codec %s); it is never copied to the output [unknown-stream]." % (s.type, s.index, s.codec or "none"))
       if not info.video:
         self.log.debug("Invalid source, no video stream detected.")
         return None
       if not info.audio or len(info.audio) < 1:
-        self.log.debug("Invalid source, no audio stream detected.")
+        if any(s.type == "audio" for s in info.unknown):
+          self.log.warning("Invalid source, its only audio streams are unknown to FFprobe and cannot be converted [unknown-stream].")
+        else:
+          self.log.debug("Invalid source, no audio stream detected.")
         return None
       if validation:
         try:
@@ -1318,7 +1510,17 @@ class MediaProcessor:
     whitelists if no streams match. Returns the (possibly modified) awl and
     swl lists.
     """
-    awl = self.settings.awl
+    # Per-job isolation: the original-language expansion below must not leak
+    # into the next file of a batch (walkDir reuses one MediaProcessor).
+    # Restore the configured default audio/subtitle languages captured on
+    # the first call, and work on copies of the allow-lists.
+    baseline = getattr(self, "_language_baseline", None)
+    if baseline is None or baseline[0] is not self.settings:
+      self._language_baseline = (self.settings, self.settings.adl, self.settings.sdl)
+    else:
+      self.settings.adl, self.settings.sdl = baseline[1], baseline[2]
+
+    awl = list(self.settings.awl or [])
     original_language = None
     if self.settings.audio_original_language and tagdata:
       try:
@@ -1332,7 +1534,7 @@ class MediaProcessor:
       except Exception:
         self.log.exception("Exception while trying to determine original language [include-original-language].")
 
-    swl = self.settings.swl
+    swl = list(self.settings.swl or [])
     if self.settings.subtitle_original_language and tagdata:
       try:
         original_language = tagdata.original_language
@@ -1454,7 +1656,9 @@ class MediaProcessor:
   # Sorter used by purgeDuplicateStreams
   def duplicateStreamSort(self, options, info):
     """Sort stream options in-place: copy first, then by default, then by bitrate descending."""
-    options.sort(key=lambda x: x["bitrate"], reverse=True)
+    # A copied stream from a source without a bitrate tag carries bitrate=None;
+    # sort those last instead of raising TypeError and failing the job.
+    options.sort(key=lambda x: x.get("bitrate") or 0, reverse=True)
     options.sort(key=lambda x: self.getSourceStream(x["map"], info).disposition["default"], reverse=True)
     options.sort(key=lambda x: x["codec"] == "copy", reverse=True)
 
@@ -1631,8 +1835,9 @@ class MediaProcessor:
     # Attachments
     ###############################################################
     attachments = []
+    cover_art = info.cover_art
     for f in info.attachment:
-      if is_cover_art_attachment(f):
+      if f in cover_art:
         self.log.debug("Dropping cover art attachment stream %d [strip-cover-art]." % f.index)
         continue
       if f.codec in self.settings.attachmentcodec and "mimetype" in f.metadata and "filename" in f.metadata:
@@ -1643,19 +1848,24 @@ class MediaProcessor:
     # Chapters / external metadata
     ###############################################################
     metadata_map = []
+    keep_metadata = False
     metadata_file = self.scanForExternalMetadata(inputfile)
     if metadata_file:
       self.log.info("Adding metadata file %s to sources and mapping metadata." % (metadata_file))
       sources.append(metadata_file)
       metadata_map = ["-map_chapters", str(sources.index(metadata_file)), "-map_metadata", str(sources.index(metadata_file))]
       if self.settings.strip_metadata:
-        self.log.debug("Setting strip-metadata to False since metadata will be coming from external metadata file [strip-metadata].")
-        self.settings.strip_metadata = False
+        # Per-job override carried on the options dict; never mutate settings
+        # (that would leak into later files of a batch).
+        self.log.debug("Disabling strip-metadata for this file since metadata will be coming from external metadata file [strip-metadata].")
+        keep_metadata = True
 
     ###############################################################
     # Assemble options and build FFmpeg flags
     ###############################################################
     options = {"source": sources, "format": self.settings.output_format, "video": video_settings, "audio": audio_settings, "subtitle": subtitle_settings, "attachment": attachments}
+    if keep_metadata:
+      options["_keep_metadata"] = True
 
     # Annotate action (copy vs transcode) for display in the log viewer
     if video_settings and video_settings.get("codec"):
@@ -1869,6 +2079,8 @@ class MediaProcessor:
             video_opts.pop("width", None)
             video_opts.pop("height", None)
           self.log.debug("Injected %s to preserve QSV GPU pipeline [hwaccel-output-format]." % video_opts["filter"])
+        elif "qsv" in vcodec:
+          self._fold_scale_into_explicit_qsv_filter(info, options.get("video") or {})
         for k in self.settings.hwdevices:
           if k in vcodec:
             match = self.settings.hwdevices[k]
@@ -2180,12 +2392,32 @@ class MediaProcessor:
 
     vcolor_primaries, vcolor_transfer, vcolor_space = _resolve_hdr_color_tags(hdrInput, hdrOutput, self.settings.hdr)
 
+    # filter_units NAL types are codec-specific: SEI is type 6 in H.264 but
+    # 39/40 (prefix/suffix SEI) in HEVC, where type 6 is RADL_R — removing
+    # it would delete real pictures. Pick SEI types for the codec that
+    # actually lands in the output bitstream (source codec when copying).
     vbsf = None
+    bsf_family = self._codec_family(info.video.codec if vcodec == "copy" else vcodec)
+    sei_types = {"h264": ["6"], "h265": ["39", "40"]}.get(bsf_family or "")
+    remove_types: list[str] = []
     if self.settings.removebvs and self.hasBitstreamVideoSubs(info.video.framedata):
-      self.log.debug("Found side data type with closed captioning [remove-bitstream-subs]")
-      vbsf = "filter_units=remove_types=6"
-    if hdrInput and not hdrOutput:
-      vbsf = vbsf + "|39" if vbsf else "filter_units=remove_types=39"
+      if sei_types:
+        self.log.debug("Found side data type with closed captioning [remove-bitstream-subs]")
+        remove_types.extend(sei_types)
+      else:
+        self.log.debug("Closed captioning side data found but output codec %s has no SEI NAL filter; leaving bitstream untouched [remove-bitstream-subs]." % bsf_family)
+    if hdrInput and not hdrOutput and bsf_family == "h265":
+      # Drop HDR SEI (mastering display / content light) from an HEVC stream
+      # that is no longer HDR. Prefix SEI only, as before.
+      remove_types.append("39")
+    if remove_types:
+      vbsf = "filter_units=remove_types=%s" % "|".join(dict.fromkeys(remove_types))
+
+    if vcodec != "copy" and self.isDolbyVision(info.video.framedata):
+      self.log.warning(
+        "Source has Dolby Vision metadata but the video stream is being re-encoded with %s; the Dolby Vision RPU will be dropped and the output will play as the HDR10/SDR base layer [dolby-vision]."
+        % vcodec
+      )
 
     self.log.debug("Video codec: %s." % vcodec)
     self.log.debug("Video bitrate: %s." % vbitrate)
@@ -2302,6 +2534,11 @@ class MediaProcessor:
       "color_transfer": vcolor_transfer,
       "color_space": vcolor_space,
     }
+    if dims_override:
+      # The override dims ARE the corrected geometry (e.g. undoing a hybrid
+      # 1920x1088 stretch): scale exactly to them. The default pad mode
+      # would emit pad=W:H smaller than the scaled picture and abort.
+      video_settings["mode"] = "stretch"
     if vglobal_quality and vglobal_quality > 0:
       if vbitrate:
         self.log.debug("global_quality=%d configured but bitrate target is set; ICQ will be ignored in favor of VBR." % vglobal_quality)
@@ -2612,10 +2849,42 @@ class MediaProcessor:
     if not (enabled and pool):
       return None
     chosen = "copy" if source_codec in pool else pool[0]
+    if embed and str(self.settings.output_format or "").lower() == "mp4":
+      return self._mp4_safe_subtitle_codec(source_codec, image_based, chosen, pool)
     if image_based and chosen != "copy" and chosen in self._TEXT_ONLY_SUBTITLE_CODECS:
       self.log.warning("Skipping image-based subtitle (source codec %s): cannot convert directly to text-only codec %s without OCR [adaptive-image-sub-skip]." % (source_codec, chosen))
       return None
     return chosen
+
+  # Subtitle codecs (ffprobe names) the mp4 muxer can actually carry.
+  # SubRip/ASS/PGS/DVB are rejected at mux time ("codec not currently
+  # supported in container"), and so is WebVTT despite being text.
+  _MP4_SUBTITLE_CODECS = frozenset({"mov_text", "dvd_subtitle"})
+
+  def _mp4_safe_subtitle_codec(self, source_codec, image_based, chosen, pool):
+    """Return the first pool codec an mp4 output can hold, or ``None``.
+
+    Walks the pool starting with the default choice. ``copy`` resolves to
+    the source codec. Text subtitles with no mp4-capable pool entry fall back
+    to ``mov_text`` (always convertible from text); image subtitles with no
+    mp4-capable entry are skipped (they can't be converted to text without
+    OCR). Each rejected candidate is logged at debug.
+    """
+    candidates = [chosen] + [p for p in pool if p != chosen]
+    for cand in candidates:
+      effective = source_codec if cand == "copy" else (Converter.codec_name_to_ffprobe_codec_name(cand) or cand)
+      if image_based and cand != "copy" and cand in self._TEXT_ONLY_SUBTITLE_CODECS:
+        self.log.debug("Subtitle pool entry %s skipped for image-based source %s: needs OCR [adaptive-subtitle-container]." % (cand, source_codec))
+        continue
+      if effective not in self._MP4_SUBTITLE_CODECS:
+        self.log.debug("Subtitle pool entry %s (%s) cannot be muxed into mp4; trying next pool entry [adaptive-subtitle-container]." % (cand, effective))
+        continue
+      return cand
+    if not image_based:
+      self.log.info("No subtitle pool entry is mp4-compatible for %s source; converting to mov_text [adaptive-subtitle-container]." % source_codec)
+      return "mov_text"
+    self.log.warning("Skipping image-based subtitle (source codec %s): no mp4-compatible codec in the pool %s [adaptive-subtitle-container]." % (source_codec, pool))
+    return None
 
   def _subtitle_passes_filter(self, stream, swl, blocked_subtitle_languages, blocked_subtitle_dispositions, prefer_non_hi_subs=True):
     """Return True if a subtitle stream passes language and disposition filters.
@@ -3028,7 +3297,7 @@ class MediaProcessor:
       if default_stream.get("disposition"):
         default_stream["disposition"] = default_stream.get("disposition").replace("-default", "+default")
         if "+default" not in default_stream.get("disposition"):
-          default_stream["disposition"] += "+defaultDOESTHISEVENWORK"
+          default_stream["disposition"] += "+default"
       else:
         default_stream["disposition"] = "+default"
 
@@ -3224,6 +3493,15 @@ class MediaProcessor:
       input_dir, _, _ = self.parseFile(inputfile)
       outputfilename = os.path.split(outputfile)[1]
       newoutputfile = os.path.join(input_dir, outputfilename)
+      # Collision handling applies to the media file only; ripped subtitle
+      # sidecars keep their language-coded names and replace older copies.
+      is_media = self.parseFile(outputfile)[2] == str(self.settings.output_extension or "").lower()
+      if is_media and os.path.isfile(newoutputfile) and os.path.abspath(newoutputfile) != os.path.abspath(outputfile):
+        resolved = self._resolve_restore_collision(inputfile, outputfile, newoutputfile)
+        if resolved is None:
+          # Identical bytes already in place (bypass copy): nothing to move.
+          return newoutputfile
+        newoutputfile = resolved
       self.log.info("Output file is in output_dir %s, moving back to original directory %s." % (self.settings.output_dir, input_dir))
       self.log.debug("New outputfile %s." % (newoutputfile))
       try:
@@ -3241,6 +3519,39 @@ class MediaProcessor:
           return outputfile
       return newoutputfile
     return outputfile
+
+  def _resolve_restore_collision(self, inputfile, outputfile, target):
+    """Pick a safe destination when moving *outputfile* back onto an existing *target*.
+
+    - *target* is the input and ``delete`` is enabled: replace it by design
+      (the caller recycles the original first). Returns *target*.
+    - *target* holds the same bytes as *outputfile* (a bypass copy of the
+      input): drop the redundant copy and return ``None`` (nothing to move).
+    - Otherwise (``delete`` is off, or *target* is an unrelated file): keep
+      the existing file and return a numbered path (``name.2.mp4``).
+    """
+    import filecmp
+
+    is_input = os.path.abspath(target) == os.path.abspath(inputfile)
+    if is_input and self.settings.delete:
+      return target
+    try:
+      if os.path.getsize(target) == os.path.getsize(outputfile) and filecmp.cmp(target, outputfile, shallow=False):
+        self.log.debug("%s already holds identical content; dropping redundant output copy %s." % (target, outputfile))
+        self.removeFile(outputfile)
+        return None
+    except OSError:
+      pass
+    base, ext = os.path.splitext(target)
+    i = 2
+    candidate = "%s.%d%s" % (base, i, ext)
+    while os.path.exists(candidate):
+      i += 1
+      candidate = "%s.%d%s" % (base, i, ext)
+    self.log.warning(
+      "%s already exists and %s; keeping it and restoring the output as %s [output-collision]." % (target, "delete is disabled" if is_input else "is not the input being replaced", candidate),
+    )
+    return candidate
 
   # Reverse map option back to source stream
   def getSourceStream(self, index, info):
@@ -3651,6 +3962,48 @@ class MediaProcessor:
     self.log.info("Profile %s %s; %s to %s to avoid encoder_init_failed [adaptive-profile-bit-depth]." % (vprofile, reason, verb, replacement))
     return replacement
 
+  def _fold_scale_into_explicit_qsv_filter(self, info, video_opts):
+    """Fold stream width/height into an explicit ``vpp_qsv``/``scale_qsv`` filter.
+
+    When the configured filter chain already carries a QSV VPP segment and
+    the stream also has a target width/height, the QSV codec would append
+    its own ``scale_qsv`` — two chained QSV VPP sessions abort graph init on
+    ffmpeg 8.x/iHD. Fold the dims into the existing segment (``w=``/``h=``)
+    and drop width/height from the codec options. A segment that already
+    scales keeps its own dims. A single-dimension target that can't be
+    resolved (unknown source dims) is left untouched.
+    """
+    tw = int(video_opts.get("width") or 0)
+    th = int(video_opts.get("height") or 0)
+    if not (tw or th):
+      return
+    segments = parse_filter_segments(video_opts.get("filter"))
+    idx = next((i for i, (name, _args, _raw) in enumerate(segments) if name in ("vpp_qsv", "scale_qsv")), None)
+    if idx is None:
+      return
+    name, args, raw = segments[idx]
+    if "w" in args or "h" in args:
+      self.log.info("Explicit %s filter already scales; ignoring stream target %sx%s to avoid chaining a second QSV scaler [adaptive-qsv-downscale]." % (name, tw or "auto", th or "auto"))
+      video_opts.pop("width", None)
+      video_opts.pop("height", None)
+      return
+    width = getattr(info.video, "video_width", None)
+    height = getattr(info.video, "video_height", None)
+    if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+      if tw and not th:
+        th = 2 * round(tw * height / width / 2)
+      elif th and not tw:
+        tw = 2 * round(th * width / height / 2)
+    if not (tw and th):
+      return
+    aw, ah = max(2, (tw // 2) * 2), max(2, (th // 2) * 2)
+    argstr = raw.partition("=")[2]
+    new_raw = "%s=%s" % (name, ":".join(x for x in (argstr, "w=%d" % aw, "h=%d" % ah) if x))
+    video_opts["filter"] = ",".join(new_raw if i == idx else seg[2] for i, seg in enumerate(segments))
+    video_opts.pop("width", None)
+    video_opts.pop("height", None)
+    self.log.info("Folded stream downscale into explicit %s w=%d:h=%d to avoid chaining a second QSV scaler [adaptive-qsv-downscale]." % (name, aw, ah))
+
   def _qsv_passthrough_filter(self, info, output_pix_fmt=None, target_width=None, target_height=None):
     """Build the implicit ``vpp_qsv`` filter for the full-GPU QSV pipeline.
 
@@ -3798,6 +4151,22 @@ class MediaProcessor:
       return True
     return False
 
+  @staticmethod
+  def _already_processed_by_sma(info):
+    """True when the container carries the SMA-NG stamp.
+
+    Output is stamped ``-metadata:g encoding_tool=SMA-NG``; the muxer
+    overwrites ``encoder`` with ``Lavf...`` so that tag alone never matches.
+    ``encoder`` is still checked for files written by older releases.
+    ffprobe format tags are parsed with lowercase keys and values.
+    """
+    metadata = getattr(getattr(info, "format", None), "metadata", None) or {}
+    for key in ("encoding_tool", "encoder"):
+      value = metadata.get(key)
+      if isinstance(value, str) and value.strip().lower().startswith("sma"):
+        return True
+    return False
+
   # Check if video file meets criteria to just bypass conversion
   def canBypassConvert(self, inputfile, info, options=None):
     """
@@ -3814,7 +4183,7 @@ class MediaProcessor:
       if not self.settings.force_convert and not self.settings.process_same_extensions:
         self.log.info("Input and output extensions are the same so passing back the original file [process-same-extensions: %s]." % self.settings.process_same_extensions)
         return True
-      elif info.format.metadata.get("encoder", "").startswith("sma") and not self.settings.force_convert:
+      elif self._already_processed_by_sma(info) and not self.settings.force_convert:
         self.log.info(
           "Input and output extensions match and the file appears to have already been processed by SMA-NG, enable force-convert to override [force-convert: %s]." % self.settings.force_convert
         )
@@ -3989,47 +4358,64 @@ class MediaProcessor:
     # Tier 3: sw decode (hw encode retained)
     retry_preopts = _strip_hw_decoder_from_preopts(preopts)
     if retry_preopts is None:
-      self._emit_attempt_log(records, "failed")
-      # Prefer the most recent error in the chain.
-      assert (hw_alt_err or hw_err) is not None
-      raise hw_alt_err or hw_err
-    cls_prev = records[-1].failure_class
-    self.log.warning(
-      "Conversion failed (cause=%s); retrying with software decode (stripping `-vcodec` from preopts). Last error: %s" % (cls_prev.value if cls_prev else "unknown", str(hw_alt_err or hw_err)[:300]),
-    )
-    getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("hw" if hw_alt_err is None else "hw_alt", "sw_decode", cls_prev.value if cls_prev else "other")
-    if outputfile is not None and os.path.isfile(outputfile):
-      self.removeFile(outputfile)
-    t1 = time.monotonic()
-    try:
-      run_fn(retry_preopts, options)
-      records.append(AttemptRecord(tier="sw_decode", failure_class=None, duration_ms=_ms(t1)))
-      self._emit_attempt_log(records, "ok")
-      return
-    except FFMpegConvertError as err:
-      sw_decode_err = err
-      cls = _classify(err)
-      records.append(AttemptRecord(tier="sw_decode", failure_class=cls, duration_ms=_ms(t1)))
-      if policy == FallbackPolicy.SW_DECODE_ONLY:
-        self.log.warning(
-          "Conversion failed with sw decode and fallback-policy=sw_decode_only; surfacing error (cause=%s)." % cls.value,
-        )
+      # No explicit hw decoder to strip (e.g. VAAPI/NVENC encode fed by a
+      # software decoder): the sw_decode rung would re-run the identical
+      # command. Go straight to the full-software rung when policy allows.
+      if policy == FallbackPolicy.SW_DECODE_ONLY or _swap_hw_codec_to_sw(copy.deepcopy(options)) is None:
         self._emit_attempt_log(records, "failed")
-        raise
+        # Prefer the most recent error in the chain.
+        assert (hw_alt_err or hw_err) is not None
+        raise hw_alt_err or hw_err
+      sw_decode_err = hw_alt_err or hw_err
+      from_tier = "hw" if hw_alt_err is None else "hw_alt"
+    else:
+      cls_prev = records[-1].failure_class
+      self.log.warning(
+        "Conversion failed (cause=%s); retrying with software decode (stripping `-vcodec` from preopts). Last error: %s" % (cls_prev.value if cls_prev else "unknown", str(hw_alt_err or hw_err)[:300]),
+      )
+      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("hw" if hw_alt_err is None else "hw_alt", "sw_decode", cls_prev.value if cls_prev else "other")
+      if outputfile is not None and os.path.isfile(outputfile):
+        self.removeFile(outputfile)
+      t1 = time.monotonic()
+      try:
+        run_fn(retry_preopts, options)
+        records.append(AttemptRecord(tier="sw_decode", failure_class=None, duration_ms=_ms(t1)))
+        self._emit_attempt_log(records, "ok")
+        return
+      except FFMpegConvertError as err:
+        sw_decode_err = err
+        cls = _classify(err)
+        records.append(AttemptRecord(tier="sw_decode", failure_class=cls, duration_ms=_ms(t1)))
+        if policy == FallbackPolicy.SW_DECODE_ONLY:
+          self.log.warning(
+            "Conversion failed with sw decode and fallback-policy=sw_decode_only; surfacing error (cause=%s)." % cls.value,
+          )
+          self._emit_attempt_log(records, "failed")
+          raise
+      from_tier = "sw_decode"
 
-    # Tier 4: full software (encoder swap)
-    sw_preopts = _strip_qsv_input_pipeline_from_preopts(preopts) or []
-    original_codec = _swap_qsv_codec_to_sw(options)
+    # Tier 4: full software (encoder swap + every hw filter/preopt stripped)
+    stripped_preopts = _strip_qsv_input_pipeline_from_preopts(preopts)
+    sw_preopts = stripped_preopts if stripped_preopts is not None else list(preopts or [])
+    original_codec = _swap_hw_codec_to_sw(options)
     if original_codec is None:
       self._emit_attempt_log(records, "failed")
       assert sw_decode_err is not None
       raise sw_decode_err
+    sw_notes = _rewrite_options_for_full_sw(options)
     cls1 = records[-1].failure_class
     self.log.warning(
-      "Software-decode retry also failed (cause=%s); falling back to full software pipeline (swapping encoder %s -> %s). Error: %s"
-      % (cls1.value if cls1 else "unknown", original_codec, options["video"]["codec"], str(sw_decode_err)[:300]),
+      "Hardware retries failed (last tier=%s, cause=%s); falling back to full software pipeline (swapping encoder %s -> %s; %s). Error: %s"
+      % (
+        from_tier,
+        cls1.value if cls1 else "unknown",
+        original_codec,
+        options["video"]["codec"],
+        "; ".join(sw_notes) or "no hw filters to rewrite",
+        str(sw_decode_err)[:300],
+      ),
     )
-    getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("sw_decode", "full_sw", cls1.value if cls1 else "other")
+    getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)(from_tier, "full_sw", cls1.value if cls1 else "other")
     if outputfile is not None and os.path.isfile(outputfile):
       self.removeFile(outputfile)
     t2 = time.monotonic()
@@ -4274,16 +4660,24 @@ class MediaProcessor:
       self.log.error("Unable to determine output file path, aborting conversion.")
       return None, inputfile
 
-    # Delete output file if it already exists and deleting enabled
-    if os.path.exists(outputfile) and self.settings.delete:
+    # A leftover temp-extension file is our own partial output from an
+    # interrupted run: clear it when delete is enabled. A file already at the
+    # FINAL name is never removed or overwritten — it may be an unrelated
+    # file — so the new output is numbered instead (name.2.mp4).
+    if self.settings.temp_extension and outputfile != finaloutputfile and os.path.isfile(outputfile) and self.settings.delete:
+      self.log.debug("Removing leftover temporary output %s [temp_extension]." % outputfile)
       self.removeFile(outputfile)
 
-    # Final sweep to make sure outputfile does not exist, renaming as the final solution
+    # Final sweep to make sure neither the working nor the final output path
+    # exists, numbering as the final solution
     i = 2
-    while outputfile and os.path.isfile(outputfile):
+    original_final = finaloutputfile
+    while outputfile and finaloutputfile and (os.path.isfile(outputfile) or os.path.isfile(finaloutputfile)):
       outputfile, _output_dir = self.getOutputFile(input_dir, filename, input_extension, self.settings.temp_extension, number=i)
       finaloutputfile, _ = self.getOutputFile(input_dir, filename, input_extension, number=i)
       i += 1
+    if finaloutputfile != original_final:
+      self.log.warning("Output path %s already exists; writing the new output to %s instead of replacing it [output-collision]." % (original_final, finaloutputfile))
 
     if outputfile is None or finaloutputfile is None:
       self.log.error("Unable to determine output file path, aborting conversion.")
@@ -4304,7 +4698,7 @@ class MediaProcessor:
         timeout=0,
         preopts=_preopts,
         postopts=postopts,
-        strip_metadata=self.settings.strip_metadata,
+        strip_metadata=self.settings.strip_metadata and not _opts.get("_keep_metadata"),
       )
       _, _cmds = next(conv)
       self.log.info("FFmpeg command:")
@@ -4328,38 +4722,49 @@ class MediaProcessor:
       self.log.info("%s created." % outputfile)
       self.setPermissions(outputfile)
 
-    try:
-      self._attempt_ladder(preopts, options, outputfile, _run_convert)
-    except FFMpegConvertError as e:
-      sidecar_path = self._write_ffmpeg_stderr_sidecar(e)
-      self.log.error("Error converting file, FFMPEG error (pid=%s, msg=%s). Full cmd + stderr in sidecar: %s" % (getattr(e, "pid", "?"), getattr(e, "message", "?"), sidecar_path or "<unavailable>"))
-      self._emit_failure_diagnosis(e, options, sidecar_path)
-      if outputfile is not None and os.path.isfile(outputfile):
-        self.removeFile(outputfile)
-        self.log.error("%s deleted." % outputfile)
-      outputfile = None
+    def _restore_after_failure(failed_output):
+      """Remove the partial output and put the input back under its original name."""
+      if failed_output is not None and os.path.isfile(failed_output):
+        self.removeFile(failed_output)
+        self.log.error("%s deleted." % failed_output)
+      if inputfile == originalinputfile:
+        return None, originalinputfile
       try:
         os.rename(inputfile, originalinputfile)
         return None, originalinputfile
       except KeyboardInterrupt:
         raise
       except Exception:
-        self.log.exception("Error restoring original inputfile after exception.")
+        self.log.exception("Error restoring original inputfile after a failed conversion.")
         return None, inputfile
+
+    try:
+      self._attempt_ladder(preopts, options, outputfile, _run_convert)
+    except FFMpegConvertError as e:
+      sidecar_path = self._write_ffmpeg_stderr_sidecar(e)
+      self.log.error("Error converting file, FFMPEG error (pid=%s, msg=%s). Full cmd + stderr in sidecar: %s" % (getattr(e, "pid", "?"), getattr(e, "message", "?"), sidecar_path or "<unavailable>"))
+      self._emit_failure_diagnosis(e, options, sidecar_path)
+      return _restore_after_failure(outputfile)
     except KeyboardInterrupt:
       raise
     except Exception:
       self.log.exception("Unexpected exception during conversion.")
-      try:
-        os.rename(inputfile, originalinputfile)
-        return None, originalinputfile
-      except Exception:
-        self.log.exception("Error restoring original inputfile after FFMPEG error.")
-        return None, inputfile
+      return _restore_after_failure(outputfile)
 
     # Check if the finaloutputfile differs from the outputfile. This can happen during above renaming or from temporary extension option
     if outputfile != finaloutputfile and outputfile is not None and finaloutputfile is not None:
       self.log.debug("Outputfile and finaloutputfile are different attempting to rename to final extension [temp_extension].")
+      if os.path.exists(finaloutputfile):
+        # Something appeared at the final name during the encode; never
+        # clobber it (os.rename would silently replace it on POSIX).
+        i = 2
+        candidate = finaloutputfile
+        while candidate and os.path.exists(candidate):
+          candidate, _ = self.getOutputFile(input_dir, filename, input_extension, number=i)
+          i += 1
+        candidate = candidate or outputfile
+        self.log.warning("Output path %s appeared during conversion; renaming the new output to %s instead [output-collision]." % (finaloutputfile, candidate))
+        finaloutputfile = candidate
       try:
         os.rename(outputfile, finaloutputfile)
       except KeyboardInterrupt:
@@ -4460,8 +4865,26 @@ class MediaProcessor:
           return False
       except exceptions.FastStartException:
         self.log.debug("QT FastStart did not run - perhaps moov atom was at the start already or file is in the wrong format.")
+        self._remove_qtfs_partial(outputfile)
+        return inputfile
+      except KeyboardInterrupt:
+        self._remove_qtfs_partial(outputfile)
+        raise
+      except Exception as e:
+        # Faststart is an optimisation; the converted file is already good.
+        # Never let an IO error here fail the job or leave *.QTFS behind.
+        self.log.warning("QT FastStart failed (%s: %s); keeping the converted file without moov relocation [relocate-moov]." % (type(e).__name__, e))
+        self._remove_qtfs_partial(outputfile)
         return inputfile
     return inputfile
+
+  def _remove_qtfs_partial(self, path):
+    """Best-effort removal of a partial ``*.QTFS`` faststart temp file."""
+    try:
+      if os.path.isfile(path):
+        os.remove(path)
+    except OSError:
+      self.log.debug("Unable to remove QTFS temp file %s." % path)
 
   # Makes additional copies of the input file in each directory specified in the copy_to option
   def replicate(self, inputfile, relativePath=None):
