@@ -26,9 +26,19 @@ tests/
 coverage.xml
 htmlcov/
 
+# Coverage / build reports
+cov.json
+.coverage.*
+
 # Dev tooling
 .pre-commit-config.yaml
 .ruff_cache/
+.claude/
+.codex/
+
+# Operator-local deploy overrides (never bake into the image)
+setup/local.yml
+setup/.local.*
 
 # Runtime state (injected via volume mounts)
 config/
@@ -42,6 +52,7 @@ docs/tasks/
 *.md
 !README.md
 !CHANGELOG.md
+!license.md
 
 # Editor
 .vscode/

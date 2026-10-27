@@ -31,6 +31,8 @@
 
 set -euo pipefail
 
+HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_json_helper.py"
+
 # NZBGet exit codes
 POSTPROCESS_SUCCESS=93
 POSTPROCESS_ERROR=94
@@ -47,19 +49,18 @@ info() { log "INFO: $*"; }
 warn() { log "WARNING: $*"; }
 err()  { log "ERROR: $*"; }
 
-auth_args() {
-    if [[ -n "${DAEMON_API_KEY:-}" ]]; then
-        echo "-H" "X-API-Key: ${DAEMON_API_KEY}"
-    fi
-}
+AUTH_ARGS=()
+if [[ -n "${DAEMON_API_KEY:-}" ]]; then
+    AUTH_ARGS=(-H "X-API-Key: ${DAEMON_API_KEY}")
+fi
 
 submit_file() {
     local filepath="$1"
     local payload
-    payload=$(python3 -c "import json,sys; print(json.dumps({'path': sys.argv[1]}))" "$filepath")
+    payload=$(python3 "$HELPER" path-payload "$filepath")
     curl -sf -X POST \
         -H "Content-Type: application/json" \
-        $(auth_args) \
+        ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
         -d "$payload" \
         "${DAEMON_BASE}/webhook" > /dev/null
 }

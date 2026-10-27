@@ -21,8 +21,8 @@ python manual.py -i "/path/to/file.mkv" -a
 Or with mise:
 
 ```bash
-mise install && mise run install && mise run config
-mise run convert -- /path/to/file.mkv
+mise install && mise run setup:deps && mise run config:generate
+mise run media:convert -- /path/to/file.mkv
 ```
 
 ## Documentation

@@ -15,6 +15,8 @@
 
 set -euo pipefail
 
+HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_json_helper.py"
+
 DAEMON_HOST_VALUE="${DAEMON_HOST:-127.0.0.1}"
 DAEMON_PORT_VALUE="${DAEMON_PORT:-8585}"
 DAEMON_BASE="http://${DAEMON_HOST_VALUE}:${DAEMON_PORT_VALUE}"
@@ -25,15 +27,14 @@ TIMEOUT="${TIMEOUT:-0}"
 
 log() { echo "[radarr_post_process] $*" >&2; }
 
-auth_header() {
-    if [[ -n "${DAEMON_API_KEY:-}" ]]; then
-        echo "-H" "X-API-Key: ${DAEMON_API_KEY}"
-    fi
-}
+AUTH_ARGS=()
+if [[ -n "${DAEMON_API_KEY:-}" ]]; then
+    AUTH_ARGS=(-H "X-API-Key: ${DAEMON_API_KEY}")
+fi
 
 curl_get() {
     local url="$1"
-    curl -sf $(auth_header) "$url"
+    curl -sf ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} "$url"
 }
 
 curl_post_json() {
@@ -41,7 +42,7 @@ curl_post_json() {
     local body="$2"
     curl -sf -X POST \
         -H "Content-Type: application/json" \
-        $(auth_header) \
+        ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
         -d "$body" \
         "$url"
 }
@@ -60,7 +61,7 @@ wait_for_job() {
             return 1
         }
 
-        status=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+        status=$(echo "$response" | python3 "$HELPER" get status 2>/dev/null)
 
         case "$status" in
             completed)
@@ -70,7 +71,7 @@ wait_for_job() {
                 ;;
             failed)
                 local err
-                err=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error','unknown'))" 2>/dev/null)
+                err=$(echo "$response" | python3 "$HELPER" get error unknown 2>/dev/null)
                 log "ERROR: Job ${job_id} failed: ${err}"
                 return 1
                 ;;
@@ -121,29 +122,8 @@ log "Input file: ${INPUTFILE}"
 log "TMDB ID: ${TMDB_ID}, IMDB ID: ${IMDB_ID}"
 
 # Build args array: [-tmdb <id>] [-imdb <id>]
-ARGS="[]"
-if [[ -n "$TMDB_ID" ]]; then
-    ARGS=$(echo "$ARGS" | python3 -c "
-import sys, json
-a = json.load(sys.stdin)
-a += ['-tmdb', '${TMDB_ID}']
-print(json.dumps(a))
-")
-fi
-
-if [[ -n "$IMDB_ID" ]]; then
-    ARGS=$(echo "$ARGS" | python3 -c "
-import sys, json
-a = json.load(sys.stdin)
-a += ['-imdb', '${IMDB_ID}']
-print(json.dumps(a))
-")
-fi
-
-PAYLOAD=$(python3 -c "
-import json
-print(json.dumps({'path': '${INPUTFILE}', 'args': $(echo "$ARGS")}))
-")
+ARGS=$(python3 "$HELPER" radarr-args "$TMDB_ID" "$IMDB_ID")
+PAYLOAD=$(python3 "$HELPER" payload "$INPUTFILE" "$ARGS")
 
 # ── submit job ─────────────────────────────────────────────────────────────────
 
@@ -154,10 +134,10 @@ RESPONSE=$(curl_post_json "${DAEMON_BASE}/webhook" "$PAYLOAD") || {
     exit 1
 }
 
-JOB_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('job_id',''))" 2>/dev/null)
+JOB_ID=$(echo "$RESPONSE" | python3 "$HELPER" get job_id 2>/dev/null)
 
 if [[ -z "$JOB_ID" ]]; then
-    ERR=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error','unknown'))" 2>/dev/null)
+    ERR=$(echo "$RESPONSE" | python3 "$HELPER" get error unknown 2>/dev/null)
     log "ERROR: Daemon rejected job: ${ERR}"
     exit 1
 fi

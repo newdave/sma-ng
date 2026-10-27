@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Run tests with coverage (HTML + terminal summary)"
+#MISE description="Run tests with coverage (HTML + terminal summary) and enforce the per-module floor"
 #MISE aliases=["dev:test:cov"]
 set -euo pipefail
 
@@ -10,3 +10,6 @@ set -euo pipefail
   --cov-report=json:cov.json \
   --cov-report=term-missing:skip-covered \
   --cov-fail-under="${COV_FAIL_UNDER:-90}"
+
+# Per-module floor (70% for modules with >=100 statements); reads cov.json above.
+"$PY" scripts/check-coverage-floor.py --json cov.json --floor "${COV_MODULE_FLOOR:-70}"

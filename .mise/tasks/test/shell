@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+#MISE description="Run shellcheck -x over tracked shell scripts and .mise/tasks shell entrypoints"
+set -euo pipefail
+
+command -v shellcheck >/dev/null 2>&1 || {
+  echo "shellcheck is not installed (apt-get install shellcheck / brew install shellcheck)" >&2
+  exit 2
+}
+
+files=()
+while IFS= read -r f; do
+  case "$f" in
+    .claude/* | .codex/* | .agents/*) continue ;;
+  esac
+  [ -f "$f" ] || continue
+  case "$f" in
+    *.sh) files+=("$f") ;;
+    .mise/tasks/*)
+      # Only shell task scripts (skip any Python helpers kept in the tree).
+      if head -n 1 "$f" | grep -Eq '^#!.*(ba|da|z)?sh'; then
+        files+=("$f")
+      fi
+      ;;
+  esac
+done < <(git ls-files)
+
+[ "${#files[@]}" -gt 0 ] || { echo "no shell scripts found" >&2; exit 2; }
+
+# -P SCRIPTDIR resolves `source ../lib/x.sh` relative to each script.
+shellcheck -x -P SCRIPTDIR "${files[@]}"
+echo "shellcheck: ${#files[@]} files clean"

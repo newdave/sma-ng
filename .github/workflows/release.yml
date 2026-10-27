@@ -13,10 +13,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
-  pull-requests: write
-  packages: write
+# Least privilege: nothing at workflow level; each job declares what it needs.
+permissions: {}
 
 jobs:
   # ── Step 1: Run release-please on every push to main ────────────────────────
@@ -28,6 +26,9 @@ jobs:
   release-please:
     name: Release Please
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
@@ -37,7 +38,7 @@ jobs:
       minor: ${{ steps.detect.outputs.minor }}
       major: ${{ steps.detect.outputs.major }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         id: rp
         with:
           config-file: .release-please-config.json
@@ -55,8 +56,10 @@ jobs:
       - name: Detect release type from PR title
         id: detect
         if: steps.rp.outputs.pr
+        env:
+          PR_TITLE: ${{ fromJSON(steps.rp.outputs.pr).title }}
         run: |
-          pr_title="${{ fromJSON(steps.rp.outputs.pr).title }}"
+          pr_title="$PR_TITLE"
           patch=false; minor=false; major=false
           if [[ "$pr_title" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
             y="${BASH_REMATCH[2]}"; z="${BASH_REMATCH[3]}"
@@ -81,6 +84,9 @@ jobs:
     needs: release-please
     if: needs.release-please.outputs.pr != '' && needs.release-please.outputs.patch == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Enable auto-merge (squash)
         env:
@@ -99,6 +105,8 @@ jobs:
     needs: release-please
     if: needs.release-please.outputs.pr != '' && needs.release-please.outputs.minor == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     steps:
       - name: Add label and request approval
         env:
@@ -120,12 +128,14 @@ jobs:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
@@ -133,7 +143,7 @@ jobs:
             pyproject.toml
             setup/requirements*.txt
 
-      - uses: jdx/mise-action@v2
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
         with:
           install: false
 
@@ -144,7 +154,7 @@ jobs:
         run: mise run build:dist
 
       - name: Upload dist to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: dist/*

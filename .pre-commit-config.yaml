@@ -25,7 +25,8 @@ repos:
     rev: v0.10.0.1
     hooks:
       - id: shellcheck
-        files: ^(\.mise/tasks/|\.mise/shared/.*\.sh$|scripts/.*\.sh$|docker/docker-entrypoint\.sh$|setup/sma-(daemon-start|healthcheck)\.sh$)
+        args: [-x, -P, SCRIPTDIR]
+        files: ^(\.mise/tasks/|\.mise/shared/.*\.sh$|scripts/.*\.sh$|docker/.*\.sh$|setup/.*\.sh$|triggers/.*\.sh$|sma-webhook\.sh$)
 
   - repo: https://github.com/DavidAnson/markdownlint-cli2
     rev: v0.17.2

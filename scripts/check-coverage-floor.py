@@ -5,7 +5,7 @@ Reads ``coverage.json`` (produced by ``pytest --cov --cov-report=json:cov.json``
 or by ``mise run test:cov``) and exits non-zero when any production module of
 ``--min-statements`` statements or more falls below ``--floor``%.
 
-Default floor is 80%. The repo-wide ≥90% gate is enforced separately by
+Default floor is 70%. The repo-wide ≥90% gate is enforced separately by
 pytest's ``--cov-fail-under``. This script catches the case where the global
 % passes only because well-covered modules outweigh a single weak one.
 
@@ -14,8 +14,8 @@ NOT present in the JSON's ``files`` map is implicitly accepted (it was
 omitted at measurement time).
 
 Usage:
-    python scripts/check-coverage-floor.py              # default: cov.json, 80%, 100 stmts
-    python scripts/check-coverage-floor.py --floor 70   # lower the bar
+    python scripts/check-coverage-floor.py              # default: cov.json, 70%, 100 stmts
+    python scripts/check-coverage-floor.py --floor 80   # raise the bar
     python scripts/check-coverage-floor.py --json other.json
 """
 
