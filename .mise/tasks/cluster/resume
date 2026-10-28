@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 #MISE description="Resume remote SMA nodes from drain or pause (HOST or HOSTS to scope)"
-#MISE depends=["deploy:mise"]
 set -euo pipefail
 
 # shellcheck disable=SC1091

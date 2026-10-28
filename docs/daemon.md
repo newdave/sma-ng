@@ -847,7 +847,7 @@ host's local daemon (uses the host key as `node_id`):
 mise run cluster:drain  HOST=media-server-2
 mise run cluster:pause  HOST=media-server-2
 mise run cluster:resume HOST=media-server-2
-mise run cluster:upgrade        # rolling drain + deploy:docker, all hosts
+mise run cluster:upgrade        # rolling drain + deploy:remote, all hosts
 ```
 
 For runbooks combining these — bootstrap, add a node, roll a config,

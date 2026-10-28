@@ -4,7 +4,6 @@ LOCAL="setup/local.yml"
 CFG="python3 scripts/local-config.py"
 # lc() is a shorthand for querying local.yml without needing to handle $CFG quoting.
 lc() { python3 scripts/local-config.py "$LOCAL" "$@"; }
-MISSING_PREREQ_PATTERN='(command not found|No such file or directory|mise.*not found|python3.*not found|python.*not found|rsync.*not found|venv.*not found)'
 
 mk_ssh_opts() {
   local port="$1" key="$2"
@@ -21,9 +20,6 @@ init_host_context() {
   key=$($cfg ssh_key "")
   # shellcheck disable=SC2034  # ffmpeg_dir is consumed by task scripts that source this library
   ffmpeg_dir=$($cfg ffmpeg_dir "")
-  auto_create_venv=$($cfg auto_create_venv true)
-  venv_dir=$($cfg venv_dir venv)
-  python_bin=$($cfg python_bin /usr/bin/python3)
   remote_user=$($cfg user "")
   remote_user="${remote_user:-$(whoami)}"
   remote_address=$($cfg address "$host")
@@ -62,27 +58,6 @@ ensure_remote_deploy_dir() {
     # shellcheck disable=SC2086,SC2029  # ssh_opts must word-split; dir expands client-side intentionally
     ssh $ssh_opts "$ssh_target" "mkdir -p $dir"
   fi
-}
-
-sync_codebase_to_host() {
-  local host="$1" rsync_extra="${2:-}"
-
-  echo "==> [$host] syncing to $dir"
-  # shellcheck disable=SC2086
-  rsync -az --delete \
-    -e "ssh $ssh_opts" \
-    --exclude='.git/' \
-    --exclude='venv/' \
-    --exclude='config/' \
-    --exclude='logs/' \
-    --exclude='__pycache__/' \
-    --exclude='*.pyc' \
-    --exclude='.local' \
-    --exclude='*.egg-info/' \
-    $rsync_extra \
-    . "$ssh_target:$dir"
-
-  chown_remote_path_to_ssh_user "$host" "$dir"
 }
 
 # Recursively reassign ownership of a path on the remote host to the SSH
@@ -176,54 +151,6 @@ docker_profile_is_pg() {
   [[ "$1" == *-pg ]]
 }
 
-# Stop and remove any stale postgres container left over from earlier
-# deploys when the container_name differed from today's canonical
-# `sma-pgsql`. Historically the container was named `sma-postgres`
-# while the compose service stayed `sma-pgsql`, leaving lib.sh helpers
-# unable to find the running container by name and (more importantly)
-# blocking the next recreate because port 5432 was still bound.
-#
-# Safe: only `docker rm -f` is run, never `docker volume rm`, so the
-# named `sma-pgdata` volume keeps the database files. The new
-# sma-pgsql container re-mounts the same volume and picks up the
-# existing data on first start.
-#
-# Same SSH context requirements as ensure_remote_docker; respects
-# deploy.use_sudo via the caller-populated sudo_prefix.
-remove_stale_pg_containers() {
-  local host="$1" active_name="${2:-sma-pgsql}"
-  local known_names=(sma-postgres sma-pgsql)
-  local stale=()
-  for name in "${known_names[@]}"; do
-    if [ "$name" = "$active_name" ]; then
-      continue
-    fi
-    stale+=("$name")
-  done
-  if [ ${#stale[@]} -eq 0 ]; then
-    return 0
-  fi
-  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts must word-split for ssh; remote command intentionally expands client-side
-  ssh $ssh_opts "$ssh_target" "bash -s" "${sudo_prefix:-}" "${stale[@]}" <<'REMOTE'
-    set -euo pipefail
-    sudo_prefix="$1"
-    shift
-    _run() {
-      if [ -n "$sudo_prefix" ]; then
-        sudo "$@"
-      else
-        "$@"
-      fi
-    }
-    for name in "$@"; do
-      if _run docker inspect "$name" >/dev/null 2>&1; then
-        echo "  removing stale postgres container: $name (volume sma-pgdata preserved)"
-        _run docker rm -f "$name" >/dev/null
-      fi
-    done
-REMOTE
-}
-
 # Stop and remove any legacy SMA daemon containers whose container_name
 # pre-dates the standardization on a single canonical `sma-ng` name.
 # Earlier compose configs gave each profile its own container_name
@@ -267,24 +194,6 @@ run_remote_compose() {
   local host="$1" compose_args="$2"
   # shellcheck disable=SC2029,SC2086
   ssh $ssh_opts "$ssh_target" "cd $compose_dir && ${compose_cmd} ${compose_args}"
-}
-
-wait_for_remote_container_health() {
-  local host="$1" container_name="$2" timeout="${3:-120}"
-  local elapsed=0 status=""
-
-  while true; do
-    # shellcheck disable=SC2029,SC2086
-    status=$(ssh $ssh_opts "$ssh_target" "${sudo_prefix}docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' ${container_name}" 2>/dev/null || true)
-    if [ "$status" = "healthy" ] || [ "$status" = "running" ]; then
-      return 0
-    fi
-    if [ "$elapsed" -ge "$timeout" ]; then
-      return 1
-    fi
-    sleep 5
-    elapsed=$((elapsed + 5))
-  done
 }
 
 print_remote_container_summary() {
@@ -396,113 +305,10 @@ verify_remote_image_current() {
   return 1
 }
 
-remove_remote_pg_volume() {
-  local host="$1" requested_volumes="${2:-}"
-  local remote_script
-  remote_script=$(cat <<'EOF'
-set -euo pipefail
-
-requested_volumes="${REQUESTED_VOLUMES:-}"
-
-if [ -n "$requested_volumes" ]; then
-  volumes="$requested_volumes"
-else
-  project_name=$(
-    docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' sma-pgsql 2>/dev/null || true
-  )
-
-  if [ -z "$project_name" ]; then
-    project_name=$(basename "$PWD")
-  fi
-
-  volumes=$(docker volume ls -q \
-    --filter "label=com.docker.compose.project=${project_name}" \
-    --filter "label=com.docker.compose.volume=sma-pgdata")
-fi
-
-if [ -z "$volumes" ]; then
-  echo "  no compose-managed sma-pgdata volume found"
-  exit 0
-fi
-
-echo "  removing postgres volume(s):"
-printf '    %s\n' $volumes
-docker volume rm $volumes
-EOF
-)
-
-if [ "$use_sudo" = "true" ]; then
-    # shellcheck disable=SC2029,SC2086
-    REQUESTED_VOLUMES="$requested_volumes" printf '%s\n' "$remote_script" | ssh $ssh_opts "$ssh_target" "cd $compose_dir && sudo env REQUESTED_VOLUMES=$(printf '%q' "$requested_volumes") bash -s"
-  else
-    # shellcheck disable=SC2029,SC2086
-    REQUESTED_VOLUMES="$requested_volumes" printf '%s\n' "$remote_script" | ssh $ssh_opts "$ssh_target" "cd $compose_dir && env REQUESTED_VOLUMES=$(printf '%q' "$requested_volumes") bash -s"
-  fi
-}
-
-capture_remote_pg_volume_names() {
-  local host="$1"
-  # shellcheck disable=SC2029,SC2086
-  ssh $ssh_opts "$ssh_target" "${sudo_prefix}docker inspect --format '{{range .Mounts}}{{if .Name}}{{.Name}}{{println}}{{end}}{{end}}' sma-pgsql 2>/dev/null || true"
-}
-
 run_remote_command() {
   local host="$1" command="$2"
   # shellcheck disable=SC2029,SC2086  # dir/command_env/command expand locally so the remote shell receives the composed command.
   ssh $ssh_opts "$ssh_target" "cd $dir && PATH=/usr/bin:/usr/local/bin:\$PATH $command_env $command"
-}
-
-run_remote_mise_task() {
-  local host="$1" task="$2"
-  run_remote_command "$host" "mise run $task"
-}
-
-install_remote_base_deps() {
-  local host="$1"
-  run_remote_command "$host" "$venv_dir/bin/pip install -r setup/requirements.txt"
-}
-
-venv_healthy() {
-  local host="$1"
-  run_remote_command "$host" "test -x $venv_dir/bin/python && test -x $venv_dir/bin/pip && $venv_dir/bin/python scripts/check_python_encodings.py >/dev/null 2>&1"
-}
-
-recreate_venv() {
-  local host="$1"
-  run_remote_command "$host" "rm -rf $venv_dir && $python_bin -m venv $venv_dir && chmod 755 $venv_dir $venv_dir/bin || true && chmod 755 $venv_dir/bin/python $venv_dir/bin/python3 $venv_dir/bin/python3.* 2>/dev/null || true && $venv_dir/bin/pip install --upgrade pip"
-}
-
-run_with_prereq_retry() {
-  local host="$1" warning="$2" retry_label="$3" fn_name="$4"
-  local errfile
-  errfile=$(mktemp)
-
-  if ! "$fn_name" "$host" 2> >(tee "$errfile" >&2); then
-    if grep -qE "$MISSING_PREREQ_PATTERN" "$errfile"; then
-      echo ""
-      echo "  WARNING: [$host] $warning"
-      HOST="$host" mise run deploy:setup
-      echo ""
-      [ -n "$retry_label" ] && echo "==> [$host] retrying: $retry_label"
-      if ! "$fn_name" "$host"; then
-        rm -f "$errfile"
-        return 1
-      fi
-    else
-      rm -f "$errfile"
-      return 1
-    fi
-  fi
-
-  rm -f "$errfile"
-}
-
-ensure_venv_ready() {
-  local host="$1"
-  if [ "$auto_create_venv" = "true" ] && ! venv_healthy "$host" >/dev/null 2>&1; then
-    echo "==> [$host] virtualenv missing or unhealthy ($venv_dir), recreating with $python_bin"
-    run_with_prereq_retry "$host" "pre-req missing — running deploy:setup then retrying venv recreation" "" recreate_venv
-  fi
 }
 
 # Idempotently install Docker (Engine + Compose plugin + buildx) on a remote
@@ -535,64 +341,5 @@ ensure_remote_docker() {
       | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
     sudo apt-get update
     sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-REMOTE
-}
-
-# Idempotently install mise on a remote host via the official install script
-# (https://mise.run). Symlinks ~/.local/bin/mise to /usr/local/bin/mise so the
-# binary is available to non-interactive SSH sessions without requiring shell
-# init (.bashrc/.zshrc). Returns 0 if mise is already installed or installs
-# successfully; 1 on failure. Same SSH context requirements as
-# ensure_remote_docker.
-ensure_remote_mise() {
-  local host="$1"
-  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by the caller
-  if ssh $ssh_opts "$ssh_target" "command -v mise >/dev/null 2>&1 || test -x \$HOME/.local/bin/mise"; then
-    echo "==> [$host] mise already installed"
-    # shellcheck disable=SC2086,SC2029  # ssh_opts must word-split for ssh
-    ssh $ssh_opts "$ssh_target" "command -v mise >/dev/null 2>&1 || sudo ln -sf \$HOME/.local/bin/mise /usr/local/bin/mise"
-    return 0
-  fi
-  echo "==> [$host] mise not found — installing via https://mise.run"
-  # shellcheck disable=SC2086,SC2029  # ssh_opts must word-split for ssh
-  ssh $ssh_opts "$ssh_target" "bash -s" <<'REMOTE'
-    set -euo pipefail
-    if ! command -v curl >/dev/null 2>&1; then
-      sudo apt-get install -y curl
-    fi
-    curl -fsSL https://mise.run | sh
-    if [ -x "$HOME/.local/bin/mise" ] && ! command -v mise >/dev/null 2>&1; then
-      sudo ln -sf "$HOME/.local/bin/mise" /usr/local/bin/mise
-    fi
-    /usr/local/bin/mise --version 2>/dev/null || "$HOME/.local/bin/mise" --version
-REMOTE
-}
-
-# Ensure ruamel.yaml is importable by python3 on a remote host. The deploy
-# stampers (stamp_daemon.py / stamp_ffmpeg.py / stamp_postprocess.py) all
-# import it. Tries the project venv first; falls back to apt-installing the
-# distro package (python3-ruamel.yaml on Debian/Ubuntu) so the system python3
-# satisfies the import even when the venv has not yet been created.
-# Same SSH context requirements as ensure_remote_docker.
-ensure_remote_python_deps() {
-  local host="$1" dir="$2"
-  local probe="$dir/.mise/shared/deploy/lib/probe_ruamel.py"
-  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by the caller
-  if ssh $ssh_opts "$ssh_target" "[ -x $dir/venv/bin/python3 ] && $dir/venv/bin/python3 $probe 2>/dev/null"; then
-    return 0
-  fi
-  # shellcheck disable=SC2086,SC2029
-  if ssh $ssh_opts "$ssh_target" "command -v python3 >/dev/null 2>&1 && python3 $probe 2>/dev/null"; then
-    return 0
-  fi
-  echo "==> [$host] installing python3-ruamel.yaml so the deploy stampers can run"
-  # shellcheck disable=SC2086,SC2029
-  ssh $ssh_opts "$ssh_target" "bash -s" <<'REMOTE'
-    set -euo pipefail
-    if ! command -v apt-get >/dev/null 2>&1; then
-      echo '  ERROR: apt-get not found — install ruamel.yaml manually on this host' >&2
-      exit 1
-    fi
-    sudo apt-get install -y python3-ruamel.yaml
 REMOTE
 }

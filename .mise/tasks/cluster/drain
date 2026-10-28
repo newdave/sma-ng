@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 #MISE description="Drain remote SMA nodes (workers finish active jobs then go idle; HOST or HOSTS to scope)"
-#MISE depends=["deploy:mise"]
 set -euo pipefail
 
 # shellcheck disable=SC1091

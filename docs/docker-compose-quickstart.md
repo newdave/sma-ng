@@ -194,6 +194,13 @@ anything.
 - CLI output is now owned by `ubuntu` instead of `root`. Fix old root-owned output once with
   `docker exec -u 0 sma-ng chown -R ubuntu:ubuntu <path>` if needed.
 
+## Stop grace period
+
+Every daemon service sets `stop_grace_period: ${STOP_GRACE_PERIOD:-2m}`. `docker compose stop`, `restart`, and
+`mise run cluster:stop` / `cluster:restart` give the daemon that long to drain before Docker sends SIGKILL; jobs still
+running at the deadline are requeued. Raise it for long transcodes by setting `STOP_GRACE_PERIOD=10m` in a `.env` file
+next to `docker-compose.yml` or in the shell running compose (compose substitution; `daemon.env` does not apply).
+
 ## 7. Edit `daemon.env`
 
 For single-node non-`-pg` profiles, set `daemon.db_url` in `sma-ng.yml` to:

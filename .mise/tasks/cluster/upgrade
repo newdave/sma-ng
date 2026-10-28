@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 #MISE description="Rolling cluster upgrade: drain each node in sequence, wait for queue to empty, then deploy:remote (HOST or HOSTS to scope)"
-#MISE depends=["deploy:mise"]
 set -euo pipefail
 
 # shellcheck disable=SC1091

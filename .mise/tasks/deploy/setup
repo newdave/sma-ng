@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Prepare remote hosts: SSH key + ~/.ssh/config + ssh-copy-id, install apt deps + Docker + mise, create deploy_dir, sync code"
+#MISE description="Prepare remote Docker hosts: SSH key + ~/.ssh/config + ssh-copy-id, install Docker, create the install dir and seed config/logs/data"
 #MISE depends=["deploy:check"]
 set -euo pipefail
 
@@ -80,35 +80,7 @@ for host in $DEPLOY_HOSTS; do
     ssh-copy-id -i "$pubkey" -p "$port" "$ssh_target"
 done
 
-# ── 4. install apt prerequisites on each host ──────────────────────────────
-APT_PACKAGES="build-essential python3-dev python3-venv python3-ruamel.yaml"
-for host in $DEPLOY_HOSTS; do
-    cfg="$CFG $LOCAL $host"
-    port=$($cfg ssh_port 22)
-    key=$($cfg ssh_key "")
-    use_sudo=$($cfg use_sudo "false")
-
-    remote_user=$($cfg user "$(whoami)")
-    remote_address=$($cfg address "")
-    ssh_target="${remote_user}@${remote_address}"
-
-    mk_ssh_opts "$port" "$key"
-
-    sudo_prefix=""
-    [ "$use_sudo" = "true" ] && sudo_prefix="sudo "
-
-    echo "==> [$host] installing apt prerequisites: $APT_PACKAGES"
-    # shellcheck disable=SC2029,SC2087,SC2153  # sudo_prefix expands client-side; the heredoc body stays literal until the remote shell runs it; SSH_OPTS is the array set by mk_ssh_opts above.
-  ssh "${SSH_OPTS[@]}" "$ssh_target" "${sudo_prefix}bash -s" <<'REMOTE'
-    if ! command -v apt-get >/dev/null 2>&1; then
-      echo '  SKIP: apt-get not found'
-      exit 0
-    fi
-    apt-get install -y build-essential python3-dev python3-venv python3-ruamel.yaml
-REMOTE
-done
-
-# ── 5. install Docker via the Docker apt repo on each host ──────────────────
+# ── 4. install Docker via the Docker apt repo on each host ──────────────────
 for host in $DEPLOY_HOSTS; do
     cfg="$CFG $LOCAL $host"
     port=$($cfg ssh_port 22)
@@ -124,79 +96,23 @@ for host in $DEPLOY_HOSTS; do
     ensure_remote_docker "$host"
 done
 
-# ── 6. install mise on each host (drives all remote .mise/tasks/* helpers) ──
-for host in $DEPLOY_HOSTS; do
-    cfg="$CFG $LOCAL $host"
-    port=$($cfg ssh_port 22)
-    key=$($cfg ssh_key "")
-
-    remote_user=$($cfg user "$(whoami)")
-    remote_address=$($cfg address "")
-    ssh_target="${remote_user}@${remote_address}"
-
-    ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-    [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
-
-    ensure_remote_mise "$host"
-done
-
-# ── 7. create deploy_dir on each host ──────────────────────────────────────
+# ── 5. create the install dir and seed config/ logs/ data/ on each host ────
+# The image carries the code; hosts only need the directories the compose file
+# bind-mounts (deploy:docker pushes docker/, deploy:config pushes sma-ng.yml).
 for host in $DEPLOY_HOSTS; do
     init_host_context "$host"
     ensure_remote_deploy_dir "$host"
-done
-
-# ── 8. sync code and seed config/ + logs/ on each host ───────────────────
-for host in $DEPLOY_HOSTS; do
-    cfg="$CFG $LOCAL $host"
-    dir=$($cfg deploy_dir ~/sma)
-    port=$($cfg ssh_port 22)
-    key=$($cfg ssh_key "")
-    rsync_extra=$($cfg rsync_extra "")
-
     remote_user=$($cfg user "$(whoami)")
-    remote_address=$($cfg address "")
-    ssh_target="${remote_user}@${remote_address}"
-
-    mk_ssh_opts "$port" "$key"
-    ssh_opts="-p $port -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-    [ -n "$key" ] && ssh_opts="$ssh_opts -i $(eval echo "$key")"
-
-    echo "==> [$host] syncing code to $dir"
-    # shellcheck disable=SC2086
-    rsync -az --delete \
-    -e "ssh ${SSH_OPTS[*]}" \
-    --exclude='.git/' \
-    --exclude='venv/' \
-    --exclude='config/' \
-    --exclude='logs/' \
-    --exclude='__pycache__/' \
-    --exclude='*.pyc' \
-    --exclude='.local' \
-    --exclude='*.egg-info/' \
-    $rsync_extra \
-    . "$ssh_target:$dir"
-    chown_remote_path_to_ssh_user "$host" "$dir"
-
     install_dir=$($cfg sma_install_dir "/opt/sma")
+    mk_ssh_opts "$($cfg ssh_port 22)" "$($cfg ssh_key "")"
+
     echo "==> [$host] seeding ${install_dir}/{config,logs,data} (owner: $remote_user)"
-    # shellcheck disable=SC2029,SC2087  # remote_user/install_dir expand client-side; heredoc stays literal until the remote shell runs it.
-    ssh "${SSH_OPTS[@]}" "$ssh_target" 'bash -s' "$dir" "$remote_user" "$install_dir" <<'REMOTE'
-      set -euo pipefail
-      dir="$1"
-      service_user="$2"
-      install_dir="$3"
-      cd "$dir"
-
-      sudo mkdir -p "${install_dir}/config" "${install_dir}/logs" "${install_dir}/data"
-      sudo chown -R "$service_user": "${install_dir}/config" "${install_dir}/logs" "${install_dir}/data"
-
-      if [ ! -f "${install_dir}/config/daemon.env" ]; then
-        sudo install -o "$service_user" -m 640 setup/daemon.env.sample "${install_dir}/config/daemon.env"
-      fi
-REMOTE
-    # The seed step above already chowns ${install_dir}/{config,logs,data} to
-    # service_user, but the Docker compose host (and any other root-owned
-    # paths under the install_dir umbrella) may still need correcting.
+    # shellcheck disable=SC2029  # remote_user/install_dir expand client-side on purpose.
+    ssh "${SSH_OPTS[@]}" "$ssh_target" "sudo mkdir -p '${install_dir}/config' '${install_dir}/logs' '${install_dir}/data' \
+      && sudo chown -R '${remote_user}': '${install_dir}/config' '${install_dir}/logs' '${install_dir}/data'"
+    # Seed daemon.env from the local sample only when the host has none.
+    # shellcheck disable=SC2029
+    ssh "${SSH_OPTS[@]}" "$ssh_target" "test -f '${install_dir}/config/daemon.env' \
+      || sudo install -o '${remote_user}' -m 640 /dev/stdin '${install_dir}/config/daemon.env'" < setup/daemon.env.sample
     chown_remote_path_to_ssh_user "$host" "$install_dir"
 done

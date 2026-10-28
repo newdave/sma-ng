@@ -101,7 +101,7 @@ python3 -m venv venv && source venv/bin/activate
 pip install ".[postgres]"
 
 # Generate config with auto GPU detection
-make config
+mise run config:generate
 
 # Or copy sample and edit manually
 cp setup/sma-ng.yml.sample config/sma-ng.yml
@@ -967,7 +967,7 @@ mise run media:codecs            # List supported codecs
 
 ```bash
 mise run build:docker     # Build image locally (TAG=sma-ng:local to override)
-mise run docker:run       # Uses daemon.db_url from config/sma-ng.yml
+mise run build:run        # Uses daemon.db_url from config/sma-ng.yml
 mise run build:shell      # Open shell in locally-built image
 mise run build:smoke      # Smoke-test the built image (imports and ffmpeg)
 ```
@@ -1031,7 +1031,7 @@ services:                        # nested <type>.<instance>; auto-builds daemon.
       profile: rq
 ```
 
-1. Run first-time setup (generates SSH key, installs apt dependencies, installs Docker, creates deploy directory):
+1. Run first-time setup (generates SSH key, installs Docker, creates the install directory with config/logs/data):
 
 ```bash
 mise run deploy:setup
@@ -1057,14 +1057,8 @@ Docker workflow finishes, `deploy:remote` runs `deploy:config` then
 latest image, and recreating the Docker container. It never builds an image
 locally. Use `HOST=<name>` or `HOSTS="<name1> <name2>"` to scope a deploy.
 
-`deploy:sync` remains available for non-Docker/source-checkout maintenance.
-It does the following on each host in `deploy.hosts`:
-
-- rsyncs the repo (excluding `venv/`, `config/`, `logs/`, `__pycache__/`)
-- creates or repairs the virtualenv and installs base Python dependencies
-
-If dependency installation fails due to missing prerequisites (Python, `rsync`, or `venv` support), it automatically
-runs `deploy:setup` for that host and retries.
+Hosts run the Docker image only. Run `mise run deploy:setup` once per host (SSH key, Docker, install dir),
+then `deploy:remote` for every change.
 
 #### Rolling config to remote hosts
 
@@ -1088,7 +1082,8 @@ For each host it:
 - **Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir` / `daemon.node-id`**
   (kebab-case) into `daemon:`
 - **Stamps `base.converter.{ffmpeg,ffprobe}`** from the host's resolved `ffmpeg_dir`
-- **Copies `setup/post_process/*.py`** to `post_process/` and updates shebangs to the venv Python
+
+`deploy:config` pushes only `sma-ng.yml`; it does not copy post-process scripts.
 
 #### Per-host overrides
 
@@ -1104,28 +1099,26 @@ hosts:
     ffmpeg_dir: /opt/ffmpeg/bin
 ```
 
-#### Restarting without deploying
+#### Restarting and reloading without deploying
 
 ```bash
-mise run deploy:restart
+mise run cluster:restart   # docker compose restart; daemon gets STOP_GRACE_PERIOD (default 2m) to drain
+mise run cluster:reload    # POST /reload; hot-reloadable config changes only
 ```
 
-Sends a graceful shutdown webhook to each host, waits for the daemon to drain, then runs `docker compose --profile <docker_profile> restart sma`.
+Jobs still running when the grace period ends are requeued.
 
 #### Summary of deploy tasks
 
 | Task              | Description                                                                          |
 | ----------------- | ------------------------------------------------------------------------------------ |
 | `deploy:check`    | Verify `setup/local.yml` exists and `deploy.hosts` is set                            |
-| `deploy:setup`    | First-time host prep: SSH key, apt deps, deploy dir, Docker install                  |
-| `deploy:mise`     | Sync the local `.mise/` deploy control plane to each remote `deploy_dir`             |
+| `deploy:setup`    | First-time host prep: SSH key, Docker install, install dir with config/logs/data     |
 | `deploy:remote`   | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker)     |
 | `deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry     |
-| `deploy:sync`     | Sync code and install deps on all hosts                                              |
-| `deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container    |
 | `deploy:docker`   | Push docker-compose.yml, pull image, `docker compose down` + `up -d --force-recreate`|
 
-Cluster lifecycle: `cluster:start`, `cluster:stop`, `cluster:restart`, `cluster:status`,
+Cluster lifecycle: `cluster:start`, `cluster:stop`, `cluster:restart`, `cluster:reload`, `cluster:status`,
 `cluster:drain`, `cluster:pause`, `cluster:resume`, `cluster:upgrade` — see
 [Cluster Operations](cluster-operations.md).
 
