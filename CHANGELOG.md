@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.2.30](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.29...sma-ng-v3.2.30) (2026-10-28)
+
+
+### Bug Fixes
+
+* **build:** local image builds use the Dockerfile's FFmpeg version ([a2c0b30](https://github.com/newdave/sma-ng/commit/a2c0b3054f7608a2cd1481a609cb49f142f98d84))
+* **cli:** mount the config directory read-write in throwaway runs ([5d49413](https://github.com/newdave/sma-ng/commit/5d49413e6656e1bb76c78f29340adc58244b18b1))
+* repair.py and rename.py no longer write a node_id into sma-ng.yml ([29d0bc7](https://github.com/newdave/sma-ng/commit/29d0bc75664e1662067f01324e60e03df0b4db62))
+
+
+### Documentation
+
+* CLI quick start no longer calls the config mount read-only. ([5d49413](https://github.com/newdave/sma-ng/commit/5d49413e6656e1bb76c78f29340adc58244b18b1))
+* mark the sma CLI container runtime plan complete ([8294592](https://github.com/newdave/sma-ng/commit/8294592c08fb21663c6ab1306d2b0faaccff2605))
+* prune the completed sma CLI PRP and task breakdown ([b641428](https://github.com/newdave/sma-ng/commit/b6414286908a351d64fad49ab350b1a2416823ba))
+
 ## [3.2.29](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.28...sma-ng-v3.2.29) (2026-10-28)
 
 
