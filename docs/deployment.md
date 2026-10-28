@@ -516,7 +516,9 @@ See also:
 Docker images are built and pushed only by `docker.yml`; there is no local push task. A push to `main` builds the
 image only after CI passes on that commit, and every image is smoke-tested before it is pushed, so `latest` never
 carries code that failed CI. Hosts then pick the image up with `mise run deploy:remote`. Trivy findings are
-report-only (Security tab) for now.
+report-only (Security tab) for now. Each platform builds and is smoke-tested on a native runner (arm64 on
+`ubuntu-24.04-arm`, not QEMU emulation) and is pushed untagged by digest; a final job publishes one multi-arch
+manifest under the tags.
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please). **Do not manually create `v*` tags** — this causes duplicate releases.
 

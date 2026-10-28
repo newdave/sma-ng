@@ -8,6 +8,10 @@ name: Docker
 #   workflow_call  from release.yml when a release is created: build the tag,
 #                  smoke test, push X.Y.Z, X.Y and X (linux/amd64 + linux/arm64).
 # workflow_dispatch builds the current ref and pushes when `push` is checked.
+#
+# Every platform builds on a native runner (arm64 under QEMU exceeds the job
+# timeout), is smoke-tested there and pushed by digest; the merge job then
+# publishes one multi-arch manifest under the tags.
 on:
   pull_request:
     branches: [main]
@@ -50,24 +54,25 @@ env:
   SMOKE_TAG: sma-ng:ci-smoke
 
 jobs:
-  build:
-    name: Build, test & push image
+  plan:
+    name: Plan image build
     # workflow_run fires for every CI completion on main; only a passing CI on
     # a push (not a PR merge-queue or a failed run) builds the main image.
     if: >-
       github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 5
     # Job-level so a call from release.yml does not share the caller's group.
     concurrency:
-      group: docker-${{ inputs.version || github.event.pull_request.number || github.ref }}
+      group: docker-${{ inputs.version || github.event.pull_request.number || github.ref }}-plan
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    permissions:
-      contents: read
-      packages: write
-      security-events: write
-
+    outputs:
+      push: ${{ steps.plan.outputs.push }}
+      sha: ${{ steps.commit.outputs.sha }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      tags: ${{ steps.meta.outputs.tags }}
+      labels: ${{ steps.meta.outputs.labels }}
     steps:
       - name: Plan build
         id: plan
@@ -78,10 +83,14 @@ jobs:
           DISPATCH_PUSH: ${{ inputs.push }}
           EVENT: ${{ github.event_name }}
         run: |
-          release=false; push=false; channel=none; platforms=linux/amd64
+          release=false; push=false; channel=none
           ref="${CALL_REF:-${RUN_SHA:-$GITHUB_SHA}}"
+          amd64='{"arch":"amd64","platform":"linux/amd64","runner":"ubuntu-latest","cache":"main","regcache":"buildcache"}'
+          arm64='{"arch":"arm64","platform":"linux/arm64","runner":"ubuntu-24.04-arm","cache":"main-arm64","regcache":"buildcache-arm64"}'
+          matrix="{\"include\":[$amd64]}"
           if [ -n "$VERSION" ]; then
-            release=true; push=true; channel=release; platforms=linux/amd64,linux/arm64
+            release=true; push=true; channel=release
+            matrix="{\"include\":[$amd64,$arm64]}"
           elif [ "$EVENT" = "workflow_run" ]; then
             push=true; channel=main
           elif [ "$EVENT" = "workflow_dispatch" ] && [ "$DISPATCH_PUSH" = "true" ]; then
@@ -91,8 +100,8 @@ jobs:
             echo "release=$release"
             echo "push=$push"
             echo "channel=$channel"
-            echo "platforms=$platforms"
             echo "ref=$ref"
+            echo "matrix=$matrix"
           } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -105,74 +114,7 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Set up QEMU (arm64 for release builds)
-        if: steps.plan.outputs.release == 'true'
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-        with:
-          platforms: arm64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      # Build the native image first and load it for the smoke test and scan;
-      # the push step below reuses these layers from the build cache.
-      # PR builds write a min-mode cache under their own scope so they do not
-      # evict main's FFmpeg-builder layers from the 10 GB GHA cache.
-      - name: Build image for testing (linux/amd64)
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: docker/Dockerfile
-          target: runtime
-          platforms: linux/amd64
-          load: true
-          tags: ${{ env.SMOKE_TAG }}
-          cache-from: |
-            type=gha,scope=main
-            type=gha,scope=pr-${{ github.event.pull_request.number }}
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: ${{ github.event_name == 'pull_request' && format('type=gha,mode=min,scope=pr-{0}', github.event.pull_request.number) || 'type=gha,mode=max,scope=main' }}
-          build-args: |
-            SMA_GIT_SHA=${{ steps.commit.outputs.sha }}
-
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
-        with:
-          install: false
-
-      - name: Smoke-test image
-        env:
-          TAG: ${{ env.SMOKE_TAG }}
-        run: mise run build:smoke
-
-      # Report-only for now: findings land in code scanning (Security tab)
-      # without failing the build. Fork PRs cannot upload, hence continue-on-error.
-      - name: Scan image (Trivy)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.SMOKE_TAG }}
-          format: sarif
-          output: trivy-results.sarif
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "0"
-
-      - name: Upload scan results
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
-        continue-on-error: true
-        with:
-          sarif_file: trivy-results.sarif
-          category: trivy-image
-
-      - name: Log in to GitHub Container Registry
-        if: steps.plan.outputs.push == 'true'
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Image tags
-        if: steps.plan.outputs.push == 'true'
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
@@ -186,25 +128,176 @@ jobs:
             type=raw,value=sha-${{ steps.commit.outputs.short }}
           flavor: |
             latest=false
+          labels: |
+            org.opencontainers.image.revision=${{ steps.commit.outputs.sha }}
 
-      - name: Push image
-        if: steps.plan.outputs.push == 'true'
+  build:
+    name: Build, test & push image (${{ matrix.arch }})
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: true
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    concurrency:
+      group: docker-${{ inputs.version || github.event.pull_request.number || github.ref }}-${{ matrix.arch }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Build the native image first and load it for the smoke test and scan;
+      # the push step below reuses these layers from the build cache.
+      # PR builds write a min-mode cache under their own scope so they do not
+      # evict main's FFmpeg-builder layers from the 10 GB GHA cache.
+      - name: Build image for testing
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: docker/Dockerfile
           target: runtime
-          platforms: ${{ steps.plan.outputs.platforms }}
-          push: true
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: ${{ env.SMOKE_TAG }}
+          cache-from: |
+            type=gha,scope=${{ matrix.cache }}
+            type=gha,scope=pr-${{ github.event.pull_request.number }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.regcache }}
+          cache-to: ${{ github.event_name == 'pull_request' && format('type=gha,mode=min,scope=pr-{0}', github.event.pull_request.number) || format('type=gha,mode=max,scope={0}', matrix.cache) }}
+          build-args: |
+            SMA_GIT_SHA=${{ needs.plan.outputs.sha }}
+
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install: false
+
+      - name: Smoke-test image
+        env:
+          TAG: ${{ env.SMOKE_TAG }}
+        run: mise run build:smoke
+
+      # Report-only for now: findings land in code scanning (Security tab)
+      # without failing the build. Fork PRs cannot upload, hence continue-on-error.
+      # Both platforms share one package set, so amd64 is scanned only.
+      - name: Scan image (Trivy)
+        if: matrix.arch == 'amd64'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.SMOKE_TAG }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Upload scan results
+        if: matrix.arch == 'amd64'
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        continue-on-error: true
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-image
+
+      - name: Log in to GitHub Container Registry
+        if: needs.plan.outputs.push == 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pushed untagged; the merge job tags the multi-arch manifest.
+      - name: Push image
+        id: push
+        if: needs.plan.outputs.push == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           provenance: mode=max
           sbom: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: ${{ needs.plan.outputs.labels }}
           cache-from: |
-            type=gha,scope=main
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+            type=gha,scope=${{ matrix.cache }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.regcache }}
           cache-to: |
-            type=gha,mode=max,scope=main
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+            type=gha,mode=max,scope=${{ matrix.cache }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.regcache }},mode=max
           build-args: |
-            SMA_GIT_SHA=${{ steps.commit.outputs.sha }}
+            SMA_GIT_SHA=${{ needs.plan.outputs.sha }}
+
+      - name: Export digest
+        if: needs.plan.outputs.push == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        if: needs.plan.outputs.push == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish image tags
+    needs: [plan, build]
+    if: needs.plan.outputs.push == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: docker-${{ inputs.version || github.event.pull_request.number || github.ref }}-merge
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          TAGS: ${{ needs.plan.outputs.tags }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          tag_args=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && tag_args+=(-t "$tag")
+          done <<<"$TAGS"
+          sources=()
+          for digest in *; do
+            sources+=("$IMAGE@sha256:$digest")
+          done
+          docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+          docker buildx imagetools inspect "${tag_args[1]}"

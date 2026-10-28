@@ -537,14 +537,16 @@ def docker_workflow():
 class TestDockerWorkflow:
   def test_main_image_waits_for_passing_ci(self, docker_workflow):
     # PyYAML parses bare 'on' key as boolean True. The main image is built only
-    # after CI completes on main, and the job only runs when CI succeeded on a push.
+    # after CI completes on main, and the plan job (which every other job needs)
+    # only runs when CI succeeded on a push.
     triggers = docker_workflow[True]
     assert "push" not in triggers
     assert triggers["workflow_run"]["workflows"] == ["CI"]
     assert triggers["workflow_run"]["branches"] == ["main"]
-    job_if = docker_workflow["jobs"]["build"]["if"]
+    job_if = docker_workflow["jobs"]["plan"]["if"]
     assert "workflow_run.conclusion == 'success'" in job_if
     assert "workflow_run.event == 'push'" in job_if
+    assert docker_workflow["jobs"]["build"]["needs"] == "plan"
 
   def test_release_images_built_via_workflow_call(self, docker_workflow):
     # Tags created by release-please (sma-ng-vX.Y.Z, via GITHUB_TOKEN) start no
@@ -558,28 +560,31 @@ class TestDockerWorkflow:
     triggers = docker_workflow[True]
     assert "pull_request" in triggers
 
-  def test_build_job_exists(self, docker_workflow):
-    assert "build" in docker_workflow["jobs"]
-
-  def test_runs_on_ubuntu(self, docker_workflow):
-    assert "ubuntu" in docker_workflow["jobs"]["build"]["runs-on"]
+  def test_every_platform_builds_on_a_native_runner(self, docker_workflow):
+    # arm64 under QEMU exceeded the 90-minute job timeout; no emulation allowed.
+    assert "setup-qemu-action" not in str(docker_workflow)
+    build = docker_workflow["jobs"]["build"]
+    assert build["runs-on"] == "${{ matrix.runner }}"
+    assert build["strategy"]["matrix"] == "${{ fromJSON(needs.plan.outputs.matrix) }}"
+    script = next(s for s in docker_workflow["jobs"]["plan"]["steps"] if s.get("id") == "plan")["run"]
+    assert '"platform":"linux/amd64","runner":"ubuntu-latest"' in script
+    assert '"platform":"linux/arm64","runner":"ubuntu-24.04-arm"' in script
 
   def test_uses_buildx(self, docker_workflow):
-    steps = docker_workflow["jobs"]["build"]["steps"]
-    step_uses = [s.get("uses", "") for s in steps]
-    assert any("setup-buildx-action" in u for u in step_uses)
+    for job in ("build", "merge"):
+      step_uses = [s.get("uses", "") for s in docker_workflow["jobs"][job]["steps"]]
+      assert any("setup-buildx-action" in u for u in step_uses), job
 
   def test_uses_ghcr_registry(self, docker_workflow):
     assert "ghcr.io" in str(docker_workflow)
 
-  def test_uses_build_push_action(self, docker_workflow):
-    steps = docker_workflow["jobs"]["build"]["steps"]
-    assert any("build-push-action" in s.get("uses", "") for s in steps)
-
   def test_targets_runtime_stage(self, docker_workflow):
     steps = docker_workflow["jobs"]["build"]["steps"]
-    build_step = next(s for s in steps if "build-push-action" in s.get("uses", ""))
-    assert build_step["with"]["target"] == "runtime"
+    builds = [s for s in steps if "build-push-action" in s.get("uses", "")]
+    assert len(builds) == 2
+    for step in builds:
+      assert step["with"]["target"] == "runtime"
+      assert step["with"]["platforms"] == "${{ matrix.platform }}"
 
   def test_ffmpeg_version_comes_only_from_dockerfile(self, docker_workflow):
     # Single source of truth: ARG FFMPEG_VERSION in docker/Dockerfile.
@@ -587,9 +592,9 @@ class TestDockerWorkflow:
 
   def test_layer_cache_configured(self, docker_workflow):
     steps = docker_workflow["jobs"]["build"]["steps"]
-    build_step = next(s for s in steps if "build-push-action" in s.get("uses", ""))
-    assert "cache-from" in build_step["with"]
-    assert "cache-to" in build_step["with"]
+    for step in (s for s in steps if "build-push-action" in s.get("uses", "")):
+      assert "matrix.cache" in step["with"]["cache-from"]
+      assert "matrix.cache" in step["with"]["cache-to"]
 
   def test_image_is_smoke_tested_before_any_push(self, docker_workflow):
     steps = docker_workflow["jobs"]["build"]["steps"]
@@ -597,26 +602,37 @@ class TestDockerWorkflow:
     smoke = names.index("Smoke-test image")
     push = names.index("Push image")
     assert smoke < push
-    assert "if" not in steps[smoke]  # every event runs the smoke test
-    assert steps[push]["if"] == "steps.plan.outputs.push == 'true'"
-    test_build = steps[names.index("Build image for testing (linux/amd64)")]
+    assert "if" not in steps[smoke]  # every event and platform runs the smoke test
+    assert steps[push]["if"] == "needs.plan.outputs.push == 'true'"
+    test_build = steps[names.index("Build image for testing")]
     assert test_build["with"]["load"] is True and "push" not in test_build["with"]
 
+  def test_platform_images_pushed_by_digest_and_tagged_once(self, docker_workflow):
+    steps = docker_workflow["jobs"]["build"]["steps"]
+    push = next(s for s in steps if s.get("name") == "Push image")
+    assert "push-by-digest=true" in push["with"]["outputs"]
+    assert "tags" not in push["with"]
+    merge = docker_workflow["jobs"]["merge"]
+    assert merge["needs"] == ["plan", "build"]
+    assert merge["if"] == "needs.plan.outputs.push == 'true'"
+    create = next(s for s in merge["steps"] if s.get("name") == "Create multi-arch manifest")
+    assert "imagetools create" in create["run"]
+    assert create["env"]["TAGS"] == "${{ needs.plan.outputs.tags }}"
+
   def test_pull_requests_never_push(self, docker_workflow):
-    plan = next(s for s in docker_workflow["jobs"]["build"]["steps"] if s.get("id") == "plan")
+    plan = next(s for s in docker_workflow["jobs"]["plan"]["steps"] if s.get("id") == "plan")
     script = plan["run"]
     assert "push=false" in script and "pull_request" not in script
 
   def test_packages_write_permission(self, docker_workflow):
-    perms = docker_workflow["jobs"]["build"]["permissions"]
-    assert perms.get("packages") == "write"
+    for job in ("build", "merge"):
+      assert docker_workflow["jobs"][job]["permissions"].get("packages") == "write", job
 
   def test_semver_tags_configured(self, docker_workflow):
-    steps = docker_workflow["jobs"]["build"]["steps"]
+    steps = docker_workflow["jobs"]["plan"]["steps"]
     meta_step = next((s for s in steps if "metadata-action" in s.get("uses", "")), None)
     assert meta_step is not None
-    tags_config = meta_step["with"]["tags"]
-    assert "semver" in tags_config
+    assert "semver" in meta_step["with"]["tags"]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
