@@ -327,6 +327,21 @@ usually the FFmpeg build lacks the decoder, or the source is damaged and needs r
 - The source carries Dolby Vision metadata, but the video stream is being re-encoded. The encoders can't
   carry the Dolby Vision RPU, so the output plays as its HDR10 (or SDR) base layer. To keep Dolby Vision,
   allow the source codec in the video codec pool so the stream can be copied.
+- This applies to profiles 7 and 8, whose base layer is HDR10 (8.4: HLG, 8.2: SDR). Profile 5 is handled
+  differently, see below.
+
+### `[dolby-vision-p5]` warning: video copied instead of re-encoded
+
+- The source is Dolby Vision profile 5 (common in streaming WEB-DLs), detected from the container's DOVI
+  configuration record. Profile 5 has no HDR10 or SDR base layer: its picture only looks right once a player
+  applies the Dolby Vision metadata, so a re-encode would bake in a green/purple picture.
+- SMA therefore copies the video stream whatever asked for the re-encode (codec, `max-bitrate`, `max-width`,
+  `force-reencode`, a filter or the analyzer). The log names the reason it overrode. Audio and subtitles are
+  processed as usual, but subtitles are never burned in, because that needs a re-encode.
+- The output keeps Dolby Vision (MP4 output is tagged `dvh1` and muxed with `-strict unofficial`, so players
+  engage Dolby Vision and the `dvcC` box survives), plays correctly on Dolby Vision devices and keeps the
+  source's size. Devices without Dolby Vision show the
+  same wrong colours they would show for the source.
 
 ### "QT FastStart failed" warning
 
