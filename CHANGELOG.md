@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.2.34](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.33...sma-ng-v3.2.34) (2026-10-28)
+
+
+### Features
+
+* **agents:** load the FFmpeg skills for FFmpeg prompts in Claude and Codex ([734effb](https://github.com/newdave/sma-ng/commit/734effbeba9e3df2e30fad716731bfc39b0950e3))
+* **dev:** add an omnigent agent team (manager, architect, two engineers) ([7ed96b2](https://github.com/newdave/sma-ng/commit/7ed96b28c2a0ac4b8449a8e4bd17208ca812d5dc))
+* **dev:** run agent sessions through omnigent with smart routing ([874ff60](https://github.com/newdave/sma-ng/commit/874ff60965a2f3c0c882d57c0f2d311e459762f8))
+
 ## [3.2.33](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.32...sma-ng-v3.2.33) (2026-10-28)
 
 
