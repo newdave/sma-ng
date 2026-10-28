@@ -5,7 +5,7 @@
 enabled = true
 
 [plugins."bp@cc-blueprint-toolkit"]
-enabled = false
+enabled = true
 
 [plugins."codex@openai-codex"]
 enabled = false
