@@ -13,7 +13,8 @@
 #                   release on arm64 because latest is linux/amd64 only)
 #   --bin-dir DIR   where to install sma (SMA_BIN_DIR; default /usr/local/bin,
 #                   or ~/.local/bin without root or sudo)
-#   --daemon        also set up the long-running daemon (not available yet)
+#   --daemon        also start the long-running daemon (sma daemon up); needs
+#   --media PATH    the media directory it serves (repeatable)
 #   SMA_HOME        data directory (default /opt/sma on Linux, ~/.local/share/sma
 #                   on macOS)
 #   DESTDIR         prefix for every host path (testing/staging only)
@@ -28,6 +29,9 @@ SMA_BIN_DIR="${SMA_BIN_DIR:-}"
 SMA_HOME="${SMA_HOME:-}"
 DESTDIR="${DESTDIR:-}"
 WANT_DAEMON=0
+NL='
+'
+MEDIA_ARGS=""
 
 say() { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -50,13 +54,24 @@ while [ "$#" -gt 0 ]; do
             WANT_DAEMON=1
             shift
             ;;
+        --media)
+            case "${2:?--media needs a path}" in
+                *"$NL"* | *" "*) die "--media paths cannot contain spaces or newlines; run sma daemon up --media yourself" ;;
+            esac
+            MEDIA_ARGS="$MEDIA_ARGS --media $2"
+            shift 2
+            ;;
         -h | --help)
-            echo "usage: install-smang.sh [--tag TAG] [--bin-dir DIR] [--daemon]"
+            echo "usage: install-smang.sh [--tag TAG] [--bin-dir DIR] [--daemon --media PATH...]"
             exit 0
             ;;
         *) die "unknown option: $1" ;;
     esac
 done
+
+if [ "$WANT_DAEMON" = "1" ] && [ -z "$MEDIA_ARGS" ]; then
+    die "--daemon needs at least one --media PATH (the media the daemon serves)"
+fi
 
 # Root for system paths: run directly as root, else via sudo (SUDO= disables it).
 if [ "${SUDO+set}" != set ]; then
@@ -176,8 +191,17 @@ else
     fi
 fi
 
+
 if [ "$WANT_DAEMON" = "1" ]; then
-    warn "--daemon: 'sma daemon up' is not available yet; for a daemon today see docs/docker-compose-quickstart.md"
+    say "Starting the daemon (sma daemon up$MEDIA_ARGS)"
+    # The daemon settings belong to the invoking user, not root.
+    if [ "$(id -u)" -eq 0 ] && [ "$OWNER" != "root" ] && command -v sudo >/dev/null 2>&1; then
+        # shellcheck disable=SC2086  # MEDIA_ARGS is a list of space-free --media options
+        sudo -u "$OWNER" -H env SMA_HOME="$SMA_HOME" "$BIN" daemon up $MEDIA_ARGS
+    else
+        # shellcheck disable=SC2086  # MEDIA_ARGS is a list of space-free --media options
+        SMA_HOME="$SMA_HOME" "$BIN" daemon up $MEDIA_ARGS
+    fi
 fi
 
 cat <<EOF

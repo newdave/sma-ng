@@ -20,7 +20,6 @@ curl https://mise.run | sh
 | `mise run setup:deps:dev`      | Install dev dependencies (`pip install -e '.[dev]'`: lint, test, build tools)    |
 | `mise run setup:deps:all`      | Install dev, qBittorrent and Deluge extras (`pip install -e '.[dev,qbittorrent,deluge]'`) |
 | `mise run setup:clean`         | Remove build artifacts, caches, and compiled bytecode                            |
-| `mise run setup:docker:target` | Create Docker bind-mount directories, seed config files, and install the `sma` host command |
 
 ### Development
 
@@ -148,24 +147,18 @@ No containers are left running afterwards.
 
 ### Prepare a Docker target host
 
-```bash
-mise run setup:docker:target
-```
-
-This creates `/opt/sma/config`, `/opt/sma/logs`, `/opt/sma/cache`, `/opt/sma/data`, and `/transcode/sma`, then seeds
-`/opt/sma/config/sma-ng.yml` and `/opt/sma/config/daemon.env` if they are missing. It also installs the
-`sma` host command to `/usr/local/bin/sma` (override with `SMA_BIN_PATH`). Without a checkout, install `sma` with
-`curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.sh | sh`; its commands run in
-throwaway containers (see [sma-cli-quickstart.md](sma-cli-quickstart.md)).
-`/opt/sma/sma-ng-docker-aliases.sh` is still written but is a deprecated shim over `sma` and will be removed in a
-later release. The `/downloads` compose mount is gone: add
-`path-rewrites: [{from: /downloads, to: /mnt/unionfs/downloads}]` if download clients report `/downloads/...`.
-
-Override the default host paths when your compose mounts differ:
+No checkout is needed on the host. Install `sma`, then start the daemon with it, or with Compose:
 
 ```bash
-INSTALL_DIR=/srv/sma TRANSCODE_DIR=/srv/transcode mise run setup:docker:target
+curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.sh | sh -s -- --daemon --media /mnt/media
 ```
+
+The installer creates `/opt/sma/{config,logs,data}` with a sample `sma-ng.yml`, installs `sma`, and with `--daemon`
+runs `sma daemon up --media ...` (see [sma-cli-quickstart.md](sma-cli-quickstart.md#11-running-the-daemon)). For a
+Compose-managed daemon follow [Docker Compose Quick Start](docker-compose-quickstart.md); `sma daemon` then drives
+that compose project. Clusters keep using `mise run deploy:setup` and `mise run deploy:remote` below. The
+`/downloads` compose mount is gone: add `path-rewrites: [{from: /downloads, to: /mnt/unionfs/downloads}]` if
+download clients report `/downloads/...`.
 
 ### Open a shell in the Docker image for debugging
 

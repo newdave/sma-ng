@@ -261,7 +261,6 @@ class TestMiseTaskLayout:
     completions = _completion_words(result.stdout)
     assert "setup:deps" in completions
     assert "setup:deps:base" in completions
-    assert "setup:docker:target" in completions
 
   def test_shared_deploy_library_is_not_a_task(self):
     assert not os.path.exists(os.path.join(PROJECT_ROOT, ".mise/tasks/deploy/lib.sh"))
@@ -315,93 +314,12 @@ class TestMiseTaskLayout:
     assert "mise run" in text
 
 
-class TestDockerTargetInstaller:
-  def test_setup_task_calls_installer(self):
-    text = _read(".mise/tasks/setup/docker/target")
-    assert "#MISE description=" in text
-    assert "setup/install-docker-target.sh" in text
-
-  def test_installer_creates_docker_host_layout_and_alias_snippet(self, tmp_path):
-    install_dir = tmp_path / "sma"
-    transcode_dir = tmp_path / "transcodes"
-    snippet_path = tmp_path / "sma-aliases.sh"
-
-    env = {
-      **os.environ,
-      "INSTALL_DIR": str(install_dir),
-      "TRANSCODE_DIR": str(transcode_dir),
-      "BASH_SNIPPET": str(snippet_path),
-      "USE_SUDO": "false",
-      "OWNER": f"{os.getuid()}:{os.getgid()}",
-    }
-    result = subprocess.run(
-      ["bash", "setup/install-docker-target.sh"],
-      cwd=PROJECT_ROOT,
-      env=env,
-      capture_output=True,
-      text=True,
-      check=False,
-    )
-
-    assert result.returncode == 0, result.stderr or result.stdout
-    assert (install_dir / "config" / "sma-ng.yml").is_file()
-    assert (install_dir / "config" / "daemon.env").is_file()
-    assert (install_dir / "logs").is_dir()
-    assert (install_dir / "cache").is_dir()
-    assert (install_dir / "data").is_dir()
-    assert (transcode_dir / "sma").is_dir()
-    assert snippet_path.read_text() == _read("setup/sma-ng-docker-aliases.sh")
-
+class TestRemoteInstallDirs:
   def test_remote_install_dirs_include_sqlite_data_dir(self):
     lib = _read(".mise/shared/deploy/lib.sh")
     setup = _read(".mise/tasks/deploy/setup")
     assert "${install_dir}/data" in lib
     assert "${install_dir}/data" in setup
-
-  def test_deprecated_alias_shim_forwards_to_sma_command(self, tmp_path):
-    # The alias file is now a deprecated shim over the `sma` host command.
-    fake_sma = tmp_path / "sma"
-    fake_sma.write_text("#!/bin/sh\nprintf '%s\\n' \"sma $*\"\n")
-    fake_sma.chmod(0o755)
-    bash_script = textwrap.dedent(
-      """
-      set -euo pipefail
-      shopt -s expand_aliases
-      source setup/sma-ng-docker-aliases.sh
-      sma-convert /mnt/unionfs/Media/movie.mkv --profile rq
-      sma-preview /mnt/unionfs/Media/movie.mkv
-      sma-codecs
-      """
-    )
-
-    result = subprocess.run(
-      ["bash", "-c", bash_script],
-      cwd=PROJECT_ROOT,
-      capture_output=True,
-      text=True,
-      check=False,
-      env={**os.environ, "PATH": "%s%s%s" % (tmp_path, os.pathsep, os.environ.get("PATH", ""))},
-    )
-
-    assert result.returncode == 0, result.stderr or result.stdout
-    assert "deprecated" in result.stderr
-    assert result.stdout.splitlines() == [
-      "sma convert /mnt/unionfs/Media/movie.mkv --profile rq",
-      "sma preview /mnt/unionfs/Media/movie.mkv",
-      "sma codecs",
-    ]
-
-  def test_deprecated_alias_shim_without_sma_installed_fails_clearly(self):
-    result = subprocess.run(
-      ["bash", "-c", "shopt -s expand_aliases\nsource setup/sma-ng-docker-aliases.sh\nsma-codecs"],
-      cwd=PROJECT_ROOT,
-      capture_output=True,
-      text=True,
-      check=False,
-      env={**os.environ, "PATH": "/usr/bin:/bin"},
-    )
-    assert result.returncode == 3
-    assert "host command not installed" in result.stderr
 
 
 class TestDeployConfigTask:

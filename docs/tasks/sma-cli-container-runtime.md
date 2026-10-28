@@ -392,16 +392,16 @@ installers retired.
 - **Dependencies**: P1-T6, P2-T15
 - **Size**: L
 - **Acceptance criteria**:
-  - [ ] Given `daemon.json` with compose labels, when `up/stop/restart/logs/upgrade` run, then the plan uses
+  - [x] Given `daemon.json` with compose labels, when `up/stop/restart/logs/upgrade` run, then the plan uses
     `docker compose -p P --project-directory W -f F... <verb> SERVICE`.
-  - [ ] Given no compose labels, when `daemon up --media /m` runs, then the plan removes a stale non-compose
+  - [x] Given no compose labels, when `daemon up --media /m` runs, then the plan removes a stale non-compose
     container, runs `run -d --name NAME --restart unless-stopped -p PORT:8585` with config/logs/data mounts, `-v /m:/m`
     and GPU flags, then waits via `_wait-health ... 60`.
-  - [ ] Given a plain `up` with no `--media` and no saved roots, when run, then it exits 2; given `--media`, then
+  - [x] Given a plain `up` with no `--media` and no saved roots, when run, then it exits 2; given `--media`, then
     the roots are saved to `daemon.media-roots`.
-  - [ ] Given `daemon status`, when run, then it reports `/health` of the local target plus container state, with
+  - [x] Given `daemon status`, when run, then it reports `/health` of the local target plus container state, with
     `--json` support; `_wait-health` exits 0 on success and 3 on timeout.
-  - [ ] Given `down`, `restart`, `logs` and `upgrade` on a plain daemon, when run, then they plan stop+rm,
+  - [x] Given `down`, `restart`, `logs` and `upgrade` on a plain daemon, when run, then they plan stop+rm,
     `docker restart`, `logs -f --tail 200` and pull+up respectively.
 - **Validation**: `python -m pytest tests/test_cli_daemonctl.py tests/test_cli_commands.py tests/test_sma_host.py -q`;
   `mise run test:shell`
@@ -415,13 +415,13 @@ installers retired.
 - **Dependencies**: P3-T17
 - **Size**: M
 - **Acceptance criteria**:
-  - [ ] Given the repository, when searched, then no reference to `install-docker-target.sh`,
+  - [x] Given the repository, when searched, then no reference to `install-docker-target.sh`,
     `sma-ng-docker-aliases.sh` or `mise run setup:docker:target` remains.
-  - [ ] Given `install-smang.sh --daemon --media PATH`, when run, then it invokes `sma daemon up` instead of the
+  - [x] Given `install-smang.sh --daemon --media PATH`, when run, then it invokes `sma daemon up` instead of the
     "not yet available" message.
-  - [ ] Given the docs, when read, then compose is optional, `sma daemon up` is primary, clusters are unchanged and
+  - [x] Given the docs, when read, then compose is optional, `sma daemon up` is primary, clusters are unchanged and
     the `docs/deployment.md` task table matches the remaining mise tasks.
-  - [ ] Given `mise run docs:check`, when run, then links, mise references and wiki page mapping pass.
+  - [x] Given `mise run docs:check`, when run, then links, mise references and wiki page mapping pass.
 - **Validation**: `mise run docs:check`; `mise run test:shell`;
   `python -m pytest tests/test_install_smang.py tests/test_docker.py -q`
 
@@ -431,13 +431,13 @@ installers retired.
 - **Dependencies**: P3-T17, P3-T18
 - **Size**: S
 - **Acceptance criteria**:
-  - [ ] Given all changes, when the final checklist runs, then `mise run test`, `mise run test:cov`,
+  - [x] Given all changes, when the final checklist runs, then `mise run test`, `mise run test:cov`,
     `mise run test:lint`, `mise run test:shell`, `mise run test:openapi` and `mise run docs:check` pass.
   - [ ] Given the image, when `mise run build:smoke` runs (with operator consent), then it passes, and a manual
     throwaway run leaves no container (`docker ps -a --filter label=sma.throwaway=1` empty).
-  - [ ] Given the error cases, when exercised, then unreachable target gives 3, auth failure 4, plan version skew 5
+  - [x] Given the error cases, when exercised, then unreachable target gives 3, auth failure 4, plan version skew 5
     and Ctrl-C detach 130, and no API key is ever printed or logged.
-  - [ ] Given the commit history, when reviewed, then retirement of legacy files is a separate commit from the
+  - [x] Given the commit history, when reviewed, then retirement of legacy files is a separate commit from the
     `daemon` lifecycle feature, each with tests and docs, no AI attribution, no manual `v*` tags.
   - [ ] Given the PRP and this file, when the work is done, then both banners are set to `STATUS: COMPLETE` and
     the PRP checklist boxes are ticked, then pruned in a follow-up per repository policy.
