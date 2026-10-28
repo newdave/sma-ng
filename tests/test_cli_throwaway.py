@@ -63,7 +63,7 @@ def test_repair_full_argv():
     "-e",
     "HOME=/tmp",
     "-v",
-    "/opt/sma/config:/app/config:ro",
+    "/opt/sma/config:/app/config",
     "-v",
     "/opt/sma/logs:/app/logs",
     "-v",
@@ -89,7 +89,7 @@ def test_rootless_and_root_skip_user_selinux_adds_z():
   facts = _facts([ArgStat(1, "d", "/a")], rootless=True, selinux=True)
   args = _args(throwaway.build_plan(_req("repair", "/a"), facts).steps[0].items)
   assert "--user" not in args
-  assert "/a:/a:z" in args and "/opt/sma/config:/app/config:ro,z" in args and "/opt/sma/logs:/app/logs:z" in args
+  assert "/a:/a:z" in args and "/opt/sma/config:/app/config:z" in args and "/opt/sma/logs:/app/logs:z" in args
   args = _args(throwaway.build_plan(_req("repair", "/a"), _facts([ArgStat(1, "d", "/a")], uid=0)).steps[0].items)
   assert "--user" not in args
 
@@ -107,7 +107,7 @@ def test_logs_tmpfs_and_no_config():
   facts = _facts([ArgStat(1, "d", "/a")], logs_writable=False, config_present=False)
   args = _args(throwaway.build_plan(_req("repair", "/a"), facts).steps[0].items)
   assert args[args.index("--tmpfs") + 1] == "/app/logs"
-  assert not any(a.endswith(":/app/config:ro") for a in args)
+  assert not any(a.endswith(":/app/config") for a in args)
 
 
 def test_optional_mounts_are_optmount_lines_before_image():
