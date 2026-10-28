@@ -1259,6 +1259,39 @@ class TestMaxBitrateVBV:
     with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
       options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
     assert options is not None
+    # The cap forced this re-encode: 8000k is the average target and the VBV
+    # may peak at VBV_PEAK_RATIO (1.5x) above it.
+    assert options["video"]["bitrate"] == 8000
+    assert options["video"]["maxrate"] == "12000k"
+    assert options["video"]["bufsize"] == "24000k"
+
+  @pytest.mark.parametrize(
+    "level,maxrate,bufsize,target,expected",
+    [
+      (5.2, "37500k", "75000k", 25000, ("37500k", "60000k")),  # hq HDR peak: buffer over the L5.2 CPB
+      (4.1, "27000k", "54000k", 18000, ("20000k", "20000k")),  # both over L4.1
+      (4.1, "27000k", "54000k", 22000, ("22000k", "22000k")),  # never below the target
+      (5.2, "5250k", "10500k", 3500, ("5250k", "10500k")),  # within limits: unchanged
+      (None, "37500k", "75000k", 25000, ("37500k", "75000k")),  # no level set
+      (3.9, "37500k", "75000k", 25000, ("37500k", "75000k")),  # unknown level
+    ],
+  )
+  def test_vbv_clamped_to_hevc_level(self, tmp_yaml, level, maxrate, bufsize, target, expected):
+    mp = self._make_mp(tmp_yaml, vmaxbitrate=0)
+    assert mp._clamp_vbv_to_level("h265qsv", level, target, maxrate, bufsize) == expected
+
+  def test_vbv_level_clamp_skips_copy_and_other_codecs(self, tmp_yaml):
+    mp = self._make_mp(tmp_yaml, vmaxbitrate=0)
+    assert mp._clamp_vbv_to_level("copy", 4.1, 18000, "27000k", "54000k") == ("27000k", "54000k")
+    assert mp._clamp_vbv_to_level("h264", 4.1, 18000, "27000k", "54000k") == ("27000k", "54000k")
+
+  def test_vmaxbitrate_is_the_ceiling_when_it_did_not_force_the_reencode(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, vmaxbitrate=8000)
+    mp.settings.force_reencode = True
+    mp.settings.global_quality = 0  # VBR at the ratio target, not ICQ
+    info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
     assert options["video"]["maxrate"] == "8000k"
     assert options["video"]["bufsize"] == "16000k"
 
