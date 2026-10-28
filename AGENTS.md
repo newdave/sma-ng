@@ -36,8 +36,10 @@ Work should protect conversion correctness, daemon reliability, config schema sa
 
 ## Docs And Commits
 
-- User-facing behavior changes require updates in `docs/`; check them with `mise run docs:check` and publish the
-  generated wiki with `mise run wiki:publish` after they land on `main`.
+- User-facing behavior changes require updates in `docs/`; check them with `mise run docs:check`.
+- After every push to GitHub whose commits changed `docs/` or `.mise/tasks/`, run `mise run wiki:publish`. The
+  `.codex/hooks.json` PostToolUse hook (`.claude/hooks/wiki-publish-after-push.sh`) does this after a `git push`
+  of `main`; run it by hand otherwise.
 - Keep code, tests, samples, and docs for one behavior change in the same logical change.
 - If committing multiple areas, split by behavior or operational outcome.
 - Conventional commit prefixes are expected.
