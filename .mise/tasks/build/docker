@@ -9,12 +9,17 @@ source "${MISE_PROJECT_ROOT}/.mise/shared/docker/env.sh"
 NATIVE="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
 PLATFORM="${PLATFORM:-$NATIVE}"
 
-echo "Building $TAG (FFmpeg ${FFMPEG_VERSION}, platform: ${PLATFORM})..."
+# Only override the Dockerfile's FFmpeg version when asked to.
+version_args=()
+if [ -n "${FFMPEG_VERSION}" ]; then
+    version_args=(--build-arg "FFMPEG_VERSION=${FFMPEG_VERSION}")
+fi
+echo "Building $TAG (FFmpeg ${FFMPEG_VERSION:-from docker/Dockerfile}, platform: ${PLATFORM})..."
 docker build \
     --file docker/Dockerfile \
     --target runtime \
     --platform "${PLATFORM}" \
-    --build-arg FFMPEG_VERSION="${FFMPEG_VERSION}" \
+    ${version_args[@]+"${version_args[@]}"} \
     --tag "$TAG" \
     .
 echo ""
