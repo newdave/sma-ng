@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.26](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.25...sma-ng-v3.2.26) (2026-10-28)
+
+
+### Documentation
+
+* tick off the Phase 1 sma CLI release checkpoint ([9bc7baa](https://github.com/newdave/sma-ng/commit/9bc7baa85e4a678027003bfb53e7118233b2ebe1))
+
 ## [3.2.25](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.24...sma-ng-v3.2.25) (2026-10-28)
 
 
