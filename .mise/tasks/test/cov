@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 #MISE description="Run tests with coverage (HTML + terminal summary) and enforce the per-module floor"
-#MISE aliases=["dev:test:cov"]
 set -euo pipefail
 
 "$PY" -m pytest \

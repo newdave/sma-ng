@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-#MISE description="Install all optional dependencies (qbittorrent, deluge, dev)"
+#MISE description="Install dev dependencies plus the optional download-client extras (qbittorrent, deluge) from pyproject.toml"
 #MISE depends=["setup:deps:dev"]
 set -euo pipefail
 
-"$PIP" install -r setup/requirements-qbittorrent.txt
-"$PIP" install -r setup/requirements-deluge.txt
+"$PIP" install -e '.[dev,qbittorrent,deluge]'

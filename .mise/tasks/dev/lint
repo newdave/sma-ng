@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 #MISE description="Run the ruff linter and auto-fix issues"
-#MISE aliases=["dev:lint:fix"]
 set -euo pipefail
 
 "$PY" -m ruff check --fix .
