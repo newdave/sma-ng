@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.2.17](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.16...sma-ng-v3.2.17) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ci:** release job no longer crashes when no release PR is open ([8152e2b](https://github.com/newdave/sma-ng/commit/8152e2bd3605354d17cc40e76778aa70b4e13fe8))
+
+
+### Documentation
+
+* deployment.md (rebuilding a release, RELEASE_PLEASE_TOKEN). ([8152e2b](https://github.com/newdave/sma-ng/commit/8152e2bd3605354d17cc40e76778aa70b4e13fe8))
+
 ## [3.2.16](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.15...sma-ng-v3.2.16) (2026-10-28)
 
 
