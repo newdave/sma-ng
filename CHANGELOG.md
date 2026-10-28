@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.2.31](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.30...sma-ng-v3.2.31) (2026-10-28)
+
+
+### Bug Fixes
+
+* **dashboard:** ask for the API key once, in a page dialog, not with prompt() ([2127eec](https://github.com/newdave/sma-ng/commit/2127eec34dfcaaa0a5ae857614131443469d864e))
+
+
+### Documentation
+
+* daemon.md and the docs index describe the dialog and storage. ([2127eec](https://github.com/newdave/sma-ng/commit/2127eec34dfcaaa0a5ae857614131443469d864e))
+
 ## [3.2.30](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.29...sma-ng-v3.2.30) (2026-10-28)
 
 
