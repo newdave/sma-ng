@@ -193,6 +193,11 @@ Plugins and skills are scoped to this project:
 - Add new plugins or skills here, never in `~/.claude/`.
 - The skill-reminder hook runs on `UserPromptSubmit`: Claude via `.claude/settings.json` `hooks`
   (`.claude/hooks/claude-code/`), Codex via `.codex/hooks.json` (`.claude/hooks/codex/`).
+- When the prompt is about FFmpeg work (`.claude/hooks/ffmpeg-prompt-match.sh`), both hooks tell the agent to load
+  `ffmpeg-cli` and `ffmpeg-hardware-acceleration`. Claude loads them from `.claude/skills/`, Codex from the
+  `.agents/skills/` copies, so keep both copies identical. Both hooks also name the `ffmpeg-args-auditor` review.
+  - Matched anywhere: tool and codec terms such as `ffmpeg` or `hwaccel`, and the FFmpeg-building files.
+  - Matched as whole words: short tokens such as `qsv`, `hevc` or `mp4`.
 - The wiki-publish hook runs on `PostToolUse` (`Bash`) from both files: `.claude/hooks/wiki-publish-after-push.sh`
   publishes the generated wiki after a `git push` of `main` that changed docs; `SMA_HOOK_WIKI_DRY_RUN=1` makes it
   a dry run.

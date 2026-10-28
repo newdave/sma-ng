@@ -106,6 +106,12 @@ Say explicitly when the relevant validation could not be run.
 Codex treats `.claude/` as active compatibility configuration.
 When workflow rules change, update `CLAUDE.md` first, then sync this file and any Codex mirrors under `.codex/`.
 
+Codex loads project skills from `.agents/skills/`, copies of `.claude/skills/`; keep them identical. The
+`UserPromptSubmit` hook in `.codex/hooks.json` (`.claude/hooks/codex/skill-reminder.sh`) detects FFmpeg work with
+`.claude/hooks/ffmpeg-prompt-match.sh`. On a match it tells Codex to read `.agents/skills/ffmpeg-cli/SKILL.md` and
+`.agents/skills/ffmpeg-hardware-acceleration/SKILL.md`, and to run the `ffmpeg-args-auditor` agent for
+`converter/*.py`, `resources/mediaprocessor.py` and `resources/media_repair.py` edits.
+
 Multi-provider sessions run through omnigent (`omni`). `.omnigent/config.yaml` holds the project default harness
 (`claude`); providers and credentials stay in the user's `~/.omnigent/config.yaml`. `mise run dev:agent` starts
 `omni claude --smart-routing` (model picked from the first prompt, subagents routed to cheaper models, fail-open);
