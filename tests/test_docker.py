@@ -393,16 +393,18 @@ class TestComposeGpuProfiles:
       assert hostname, f"{service_name} is missing a hostname pin"
       assert "SMA_NODE_NAME" not in hostname
 
-  def test_intel_exposes_render_node(self, compose):
-    # Headless QSV/VAAPI encoding needs at least the render node. Either
-    # the whole `/dev/dri` tree (preferred, lets SR-IOV guests map every
-    # card*/renderD* pair without per-host edits) or an explicit renderD*
-    # mapping is acceptable.
-    def _exposes_dri(devices):
-      return any(("renderD" in str(d)) or (str(d).split(":", 1)[0] == "/dev/dri") for d in devices)
+  def test_intel_maps_whole_dri_tree(self, compose):
+    # SR-IOV guests may expose the VF as card1/renderD129; fixed card0/renderD128
+    # mappings miss it, so both Intel profiles map the whole /dev/dri tree.
+    for service in ("sma-intel", "sma-intel-pg"):
+      assert compose["services"][service]["devices"] == ["/dev/dri:/dev/dri"], service
 
-    assert _exposes_dri(compose["services"]["sma-intel"]["devices"])
-    assert _exposes_dri(compose["services"]["sma-intel-pg"]["devices"])
+  @pytest.mark.parametrize("base", ["software", "intel", "nvidia"])
+  def test_pg_profile_is_same_container_as_base(self, compose, base):
+    # daemon.db_url picks the database; -pg profiles differ only by profile name.
+    plain = {k: v for k, v in compose["services"]["sma-" + base].items() if k != "profiles"}
+    pg = {k: v for k, v in compose["services"]["sma-%s-pg" % base].items() if k != "profiles"}
+    assert plain == pg
 
   def test_intel_declarative_group_add(self, compose):
     """Intel profiles ship declarative group_add for /dev/dri access.
