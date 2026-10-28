@@ -53,7 +53,7 @@ docker run --rm -p 8585:8585 \
   ghcr.io/newdave/sma-ng:latest
 ```
 
-Tags: `latest`, `1`, `1.2`, `1.2.3` (semver), `main` (rolling).
+Tags: `latest` / `main` (main after CI passes), `sha-<commit>`, and `X.Y.Z` / `X.Y` / `X` per release (amd64 + arm64).
 
 ## Credits
 

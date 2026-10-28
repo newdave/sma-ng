@@ -1,29 +1,39 @@
 name: Docker
 
+# Three ways in:
+#   pull_request   build + smoke test + scan the PR's image; never pushes.
+#   workflow_run   after CI passes on a push to main: build, smoke test, push
+#                  ghcr.io/<repo>:latest, :main and :sha-<short> (linux/amd64).
+#                  latest therefore always tracks main HEAD that passed CI.
+#   workflow_call  from release.yml when a release is created: build the tag,
+#                  smoke test, push X.Y.Z, X.Y and X (linux/amd64 + linux/arm64).
+# workflow_dispatch builds the current ref and pushes when `push` is checked.
 on:
-  push:
-    branches: [ main ]
-    tags: [ "v*" ]
-    paths:
-      - "docker/Dockerfile"
-      - "docker/docker-entrypoint.sh"
-      - "setup/requirements*.txt"
-      - "pyproject.toml"
-      - "**.py"
-      - "resources/**"
-      - ".github/workflows/docker.yml"
-      - ".mise/tasks/**"
   pull_request:
-    branches: [ main ]
-    paths:
-      - "docker/Dockerfile"
-      - "docker/docker-entrypoint.sh"
-      - "setup/requirements*.txt"
-      - "pyproject.toml"
-      - "**.py"
-      - "resources/**"
-      - ".github/workflows/docker.yml"
-      - ".mise/tasks/**"
+    branches: [main]
+    paths-ignore:
+      - "tests/**"
+      - "*.md"
+      - ".claude/**"
+      - ".codex/**"
+      - ".github/dependabot.yml"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/codeql.yml"
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref (release tag) to build"
+        type: string
+        required: true
+      version:
+        description: "Release version (X.Y.Z) for the semver image tags"
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       push:
@@ -31,30 +41,72 @@ on:
         type: boolean
         default: true
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  # Single source of truth for the FFmpeg version used in build-args.
-  # Must match ARG FFMPEG_VERSION default in docker/Dockerfile.
-  FFMPEG_VERSION: "8.1.2"
+  SMOKE_TAG: sma-ng:ci-smoke
 
 jobs:
   build:
-    name: Build & push image
+    name: Build, test & push image
+    # workflow_run fires for every CI completion on main; only a passing CI on
+    # a push (not a PR merge-queue or a failed run) builds the main image.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Job-level so a call from release.yml does not share the caller's group.
+    concurrency:
+      group: docker-${{ inputs.version || github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: read
       packages: write
+      security-events: write
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Plan build
+        id: plan
+        env:
+          VERSION: ${{ inputs.version }}
+          CALL_REF: ${{ inputs.ref }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_PUSH: ${{ inputs.push }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          release=false; push=false; channel=none; platforms=linux/amd64
+          ref="${CALL_REF:-${RUN_SHA:-$GITHUB_SHA}}"
+          if [ -n "$VERSION" ]; then
+            release=true; push=true; channel=release; platforms=linux/amd64,linux/arm64
+          elif [ "$EVENT" = "workflow_run" ]; then
+            push=true; channel=main
+          elif [ "$EVENT" = "workflow_dispatch" ] && [ "$DISPATCH_PUSH" = "true" ]; then
+            push=true; channel=dispatch
+          fi
+          {
+            echo "release=$release"
+            echo "push=$push"
+            echo "channel=$channel"
+            echo "platforms=$platforms"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Set up QEMU (cross-platform emulation — release builds only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.plan.outputs.ref }}
+
+      - name: Resolve commit
+        id: commit
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU (arm64 for release builds)
+        if: steps.plan.outputs.release == 'true'
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: arm64
@@ -62,66 +114,97 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
+      # Build the native image first and load it for the smoke test and scan;
+      # the push step below reuses these layers from the build cache.
+      # PR builds write a min-mode cache under their own scope so they do not
+      # evict main's FFmpeg-builder layers from the 10 GB GHA cache.
+      - name: Build image for testing (linux/amd64)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.SMOKE_TAG }}
+          cache-from: |
+            type=gha,scope=main
+            type=gha,scope=pr-${{ github.event.pull_request.number }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: ${{ github.event_name == 'pull_request' && format('type=gha,mode=min,scope=pr-{0}', github.event.pull_request.number) || 'type=gha,mode=max,scope=main' }}
+          build-args: |
+            SMA_GIT_SHA=${{ steps.commit.outputs.sha }}
+
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install: false
+
+      - name: Smoke-test image
+        env:
+          TAG: ${{ env.SMOKE_TAG }}
+        run: mise run build:smoke
+
+      # Report-only for now: findings land in code scanning (Security tab)
+      # without failing the build. Fork PRs cannot upload, hence continue-on-error.
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.SMOKE_TAG }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Upload scan results
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        continue-on-error: true
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-image
+
       - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
+        if: steps.plan.outputs.push == 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Image tags
+        if: steps.plan.outputs.push == 'true'
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
-            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ steps.plan.outputs.channel == 'main' }}
+            type=raw,value=main,enable=${{ steps.plan.outputs.channel == 'main' }}
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ steps.plan.outputs.release == 'true' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ steps.plan.outputs.release == 'true' }}
+            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ steps.plan.outputs.release == 'true' }}
+            type=raw,value=sha-${{ steps.commit.outputs.short }}
+          flavor: |
+            latest=false
 
-      # Platform strategy:
-      #   PR / push to main  → linux/amd64 only (fast; smoke-testable with --load)
-      #   Release tag (v*)   → linux/amd64 + linux/arm64 (covers Apple Silicon)
-      #
-      # Multi-platform + --load are mutually exclusive in Docker Buildx, so
-      # --load is only set on PRs (single-arch).
-      #
-      # Registry cache (type=registry) persists indefinitely in GHCR,
-      # keeping the ffmpeg-builder stage cached across runs without
-      # relying solely on the 10GB/7-day GHA cache limit.
-      - name: Build and push
+      - name: Push image
+        if: steps.plan.outputs.push == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/Dockerfile
           target: runtime
-          platforms: ${{ startsWith(github.ref, 'refs/tags/v') &&
-            'linux/amd64,linux/arm64' || 'linux/amd64' }}
-          push: ${{ github.event_name == 'workflow_dispatch' && inputs.push || github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          platforms: ${{ steps.plan.outputs.platforms }}
+          push: true
+          provenance: mode=max
+          sbom: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=gha,scope=${{ github.ref_name }}
             type=gha,scope=main
             type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: |
-            type=gha,mode=max,scope=${{ github.ref_name }}
-            ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}:buildcache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}
+            type=gha,mode=max,scope=main
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
           build-args: |
-            FFMPEG_VERSION=${{ env.FFMPEG_VERSION }}
-            SMA_GIT_SHA=${{ github.sha }}
-
-      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
-        with:
-          install: false
-
-      - name: Smoke-test image (PR only)
-        if: github.event_name == 'pull_request'
-        env:
-          TAG: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-        run: mise run build:smoke
+            SMA_GIT_SHA=${{ steps.commit.outputs.sha }}

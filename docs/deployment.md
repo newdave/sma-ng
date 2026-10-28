@@ -487,7 +487,8 @@ mise run build:run
 # Or point at PostgreSQL explicitly by setting daemon.db_url in config/sma-ng.yml
 ```
 
-**Tags:** `latest`, `1`, `1.2`, `1.2.3` (semver), `main` (rolling build from main branch).
+**Tags:** `latest` and `main` (main HEAD, rebuilt after CI passes on every push to `main`), `sha-<commit>`, and
+per release `X.Y.Z`, `X.Y`, `X` (linux/amd64 + linux/arm64).
 
 For hardware acceleration diagnostics in containers, the runtime image includes `vainfo` and VAAPI userspace drivers.
 For Intel/QSV setups, use either the Intel profile (`docker compose --profile intel up`) or the bundled-PostgreSQL Intel profile (`docker compose --profile intel-pg up`) so `/dev/dri` is mapped into the container. This is important on SR-IOV guests where the Intel VF may appear as `card1` while still using `renderD128`.
@@ -505,14 +506,17 @@ See also:
 
 ## CI / Release
 
-| Workflow      | Trigger                       | Description                                                                                    |
-| ------------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
-| `ci.yml`      | PR / push to main             | Runs test suite                                                                                |
-| `docker.yml`  | PR / push to main or `v*` tag | PR: build-only + smoke test; main/tag: build + push to GHCR                                    |
-| `release.yml` | Push to main                  | release-please manages release PR + version bump; on release: wheel/sdist + Docker semver tags |
+| Workflow      | Trigger                                  | Description                                                                 |
+| ------------- | ---------------------------------------- | --------------------------------------------------------------------------- |
+| `ci.yml`      | PR / push to main                        | Tests + coverage gates, pre-commit lint, OpenAPI/docs/config checks, runtime `pip-audit` |
+| `docker.yml`  | PR; CI passed on main; called by release | Build, smoke test and Trivy-scan the image; push only for main and releases |
+| `release.yml` | Push to main; manual with `tag`          | release-please PR + version bump; on release: wheel/sdist + release image   |
+| `codeql.yml`  | PR / push to main / weekly               | CodeQL static analysis (results in the Security tab)                        |
 
-Docker images are built and pushed only by `docker.yml` (multi-architecture, on `main` and tags); there is no local
-push task. Hosts then pick the image up with `mise run deploy:remote`.
+Docker images are built and pushed only by `docker.yml`; there is no local push task. A push to `main` builds the
+image only after CI passes on that commit, and every image is smoke-tested before it is pushed, so `latest` never
+carries code that failed CI. Hosts then pick the image up with `mise run deploy:remote`. Trivy findings are
+report-only (Security tab) for now.
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please). **Do not manually create `v*` tags** — this causes duplicate releases.
 
@@ -540,14 +544,17 @@ Minor and major versions only occur via an explicit `release-as` override
 Auto-merge uses `gh pr merge --auto` when branch protection with required checks is enabled and falls
 back to a direct squash merge otherwise.
 
-Merging the Release PR creates the GitHub Release and `sma-ng-vX.Y.Z` tag, which triggers the Docker
-semver + `latest` image builds. The version reported by the daemon's `/health` endpoint is baked into
-the image from the latest tag at build time, so a running daemon shows the new version only after the
-tagged image is built **and** `mise run deploy:remote` re-pulls it; the `commit` field in `/health`
-always identifies the exact code running regardless of the version label.
+Merging the Release PR creates the GitHub Release and `sma-ng-vX.Y.Z` tag. The Release workflow then attaches the
+wheel and sdist and builds the release image (`X.Y.Z`, `X.Y`, `X`; linux/amd64 + linux/arm64) by calling
+`docker.yml` directly: tags created with `GITHUB_TOKEN` start no workflow on their own. When the patch auto-merge
+merges the Release PR directly, the same run creates the release immediately; with branch-protection auto-merge
+it is created by the next push to `main`. `latest` keeps tracking `main`, so `deploy:remote` (which pulls
+`latest`) deploys main HEAD; deploy a release with an explicit `IMAGE_TAG=X.Y.Z`. The version reported by the
+daemon's `/health` endpoint is baked into the image from the latest tag at build time; the `commit` field in
+`/health` always identifies the exact code running.
 
-To rebuild a release's wheel and sdist (for example after a failed run), dispatch the Release workflow with the
-tag: `gh workflow run release.yml -f tag=sma-ng-vX.Y.Z`. Events created with the default `GITHUB_TOKEN` never
-start other workflows, so the Release PR gets no CI checks and a merged Release PR is only released by the next
-push to `main`. Adding a `RELEASE_PLEASE_TOKEN` repository secret (a GitHub App or fine-grained token with
-contents and pull-requests write) lets release-please's PRs and tags trigger CI normally.
+To rebuild a release's wheel, sdist and image (for example after a failed run), dispatch the Release workflow
+with the tag: `gh workflow run release.yml -f tag=sma-ng-vX.Y.Z`. Events created with the default `GITHUB_TOKEN`
+never start other workflows, so the Release PR gets no CI checks. Adding a `RELEASE_PLEASE_TOKEN` repository
+secret (a GitHub App or fine-grained token with contents and pull-requests write) lets release-please's PRs and
+tags trigger CI normally.
