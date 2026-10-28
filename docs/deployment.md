@@ -18,7 +18,7 @@ curl https://mise.run | sh
 | `mise run setup:deps`          | Alias of `setup:deps:base`                                                       |
 | `mise run setup:deps:base`     | Install base runtime dependencies from `setup/requirements.txt`                  |
 | `mise run setup:deps:dev`      | Install dev dependencies (`pip install -e '.[dev]'`: lint, test, build tools)    |
-| `mise run setup:deps:all`      | Install all optional dependencies including qBittorrent and Deluge integrations  |
+| `mise run setup:deps:all`      | Install dev, qBittorrent and Deluge extras (`pip install -e '.[dev,qbittorrent,deluge]'`) |
 | `mise run setup:clean`         | Remove build artifacts, caches, and compiled bytecode                            |
 | `mise run setup:docker:target` | Create Docker bind-mount directories, seed config files, and install the `sma` host command |
 
@@ -43,7 +43,7 @@ curl https://mise.run | sh
 
 | Task                                            | Description                                          |
 | ----------------------------------------------- | ---------------------------------------------------- |
-| `mise run daemon:start`                         | Start the daemon HTTP server on `0.0.0.0:8585`       |
+| `mise run daemon:start`                         | Start the daemon; bind, port, workers come from `daemon:` (flags after `--`) |
 | `mise run media:convert -- /path/to/file.mkv`   | Convert a media file with auto-tagging               |
 | `mise run media:preview -- /path/to/file.mkv`   | Preview FFmpeg conversion options without converting |
 | `mise run media:codecs`                         | List all supported video and audio codecs            |
@@ -66,8 +66,7 @@ curl https://mise.run | sh
 | Task                    | Description                                                                            |
 | ----------------------- | -------------------------------------------------------------------------------------- |
 | `mise run build:docker` | Build the Docker image locally for the native platform                                 |
-| `mise run build:push`   | Build and push a Docker image — requires `IMAGE=`, override platforms with `PLATFORM=` |
-| `mise run docker:run`   | Run the locally-built image with SQLite by default                                     |
+| `mise run build:run`    | Run the locally-built image with SQLite by default                                     |
 | `mise run build:shell`  | Open an interactive shell inside the locally-built image                               |
 | `mise run build:smoke`  | Smoke-test the image: verify Python imports and FFmpeg binary                          |
 
@@ -76,13 +75,9 @@ curl https://mise.run | sh
 | Task                       | Description                                                                                     |
 | -------------------------- | ----------------------------------------------------------------------------------------------- |
 | `mise run deploy:check`    | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                       |
-| `mise run deploy:setup`    | First-time host prep: SSH key, apt deps, deploy dir, Docker install                             |
-| `mise run deploy:mise`     | Sync the local `.mise/` deploy control plane to all hosts                                       |
+| `mise run deploy:setup`    | First-time host prep: SSH key, Docker install, install dir with config/logs/data, `daemon.env`  |
 | `mise run deploy:remote`   | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker)                |
 | `mise run deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry                |
-| `mise run deploy:sync`     | Sync code and install dependencies on all hosts                                                 |
-| `mise run deploy:reload`   | Hot-reload `config/sma-ng.yml` on every host with `POST /reload`                                |
-| `mise run deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container               |
 | `mise run deploy:docker`   | Push `docker-compose.yml`. Compare the registry's current image digest against the running container; if they match, only `docker compose restart $service` to pick up bind-mounted config changes (~3–5s). Otherwise pull, `compose down`, `up -d --force-recreate` (~30s+). Either path ends with a freshness verification against the registry. Override with `FORCE_RECREATE=1` to always take the full path. |
 
 Use `HOST=<host>` for one node or `HOSTS="<host1> <host2>"` for multiple nodes.
@@ -170,15 +165,6 @@ Override the default host paths when your compose mounts differ:
 ```bash
 INSTALL_DIR=/srv/sma TRANSCODE_DIR=/srv/transcode mise run setup:docker:target
 ```
-
-### Push a multi-architecture image to a registry
-
-```bash
-IMAGE=ghcr.io/myorg/sma-ng:2.0.0 mise run build:push
-```
-
-Builds for both `linux/amd64` and `linux/arm64` via `docker buildx` and pushes both manifests.
-Requires `docker buildx` and registry credentials.
 
 ### Open a shell in the Docker image for debugging
 
@@ -337,39 +323,29 @@ HOSTS="sma-master sma-worker-1" mise run deploy:remote
 IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:remote
 ```
 
-If you need to build and push an image by hand (e.g. a one-off tag outside CI), use
-`build:push` first, then `deploy:remote`:
+Images are only built and pushed by CI (see [CI / Release](#ci--release)); there is no
+local push task. To deploy a specific published tag, pass `IMAGE=` to `deploy:remote`.
+
+The workflow is `deploy:setup` once per host, then `deploy:remote` for every change:
 
 ```bash
-IMAGE=ghcr.io/newdave/sma-ng:2.0.0 mise run build:push
-IMAGE=ghcr.io/newdave/sma-ng:2.0.0 mise run deploy:remote
-```
-
-Lower-level tasks are still available when you need one specific phase:
-
-```bash
-# 1. First-time: SSH key, apt deps, install Docker, deploy dir
+# 1. Once per host: SSH key, Docker, install dir with config/logs/data
 mise run deploy:setup
 
-# 2. Optional: sync only the remote .mise task/control-plane code
-mise run deploy:mise
-
-# 3. Sync code and install deps
-mise run deploy:sync
-
-# 4. Push configs (create missing, merge new keys, stamp credentials)
-mise run deploy:config
-
-# 5. Restart daemon on all hosts
-mise run deploy:restart
-
-# Build the next sma-ng.yml locally and recreate Docker on every host
+# 2. Every change: build sma-ng.yml locally, push it, recreate Docker
 mise run deploy:remote
 
 # Or do the two halves separately:
 mise run deploy:config   # generate + push sma-ng.yml only
-mise run deploy:docker   # push compose yml + docker compose down/up
+mise run deploy:docker   # push compose yml + pull + restart or recreate
+
+# After deploy:config alone, apply the new config:
+mise run cluster:reload    # hot-reloadable changes
+mise run cluster:restart   # everything else
 ```
+
+`deploy:config` pushes only `sma-ng.yml`; it does not copy post-process scripts. Bake them
+into the image or mount them into the container.
 
 If the GHCR image is private, `deploy:docker` pulls with the host's own registry
 credentials. Authenticate each host once with a GitHub token that has `read:packages`:
@@ -413,20 +389,17 @@ For each remote host the staging build:
 | Task              | Description                                                                               |
 | ----------------- | ----------------------------------------------------------------------------------------- |
 | `deploy:check`    | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                 |
-| `deploy:setup`    | First-time host prep: SSH key, apt deps, deploy dir, Docker install                       |
-| `deploy:mise`     | Sync the local `.mise/` deploy control plane to each remote `DEPLOY_DIR`                  |
+| `deploy:setup`    | First-time host prep: SSH key, Docker install, install dir with config/logs/data          |
 | `deploy:remote`   | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker)          |
 | `deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry          |
-| `deploy:sync`     | Sync code and install deps on all hosts                                                   |
-| `deploy:reload`   | Hot-reload `config/sma-ng.yml` on every host with `POST /reload`                          |
-| `deploy:restart`  | Gracefully shut down `sma-daemon` on all hosts, then restart its Docker container         |
 | `config:show`     | Render the effective resolved config for a profile                                        |
 | `config:validate` | Validate effective config — schema, unknowns, encoder-flag leaks, routing refs            |
 | `deploy:docker`   | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate`   |
 | `cluster:start`   | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`)                            |
-| `cluster:stop`    | `docker compose stop` for selected hosts                                                  |
-| `cluster:restart` | `docker compose restart` for selected hosts                                               |
+| `cluster:stop`    | `docker compose stop` for selected hosts (graceful drain, see `STOP_GRACE_PERIOD`)        |
+| `cluster:restart` | `docker compose restart` for selected hosts (graceful drain, see `STOP_GRACE_PERIOD`)     |
 | `cluster:status`  | `docker compose ps` for selected hosts                                                    |
+| `cluster:reload`  | `POST /reload` on selected hosts so daemons re-read `sma-ng.yml` without a restart        |
 | `cluster:drain`   | `POST /admin/nodes/<host>/drain`; workers finish active jobs then go idle                 |
 | `cluster:pause`   | `POST /admin/nodes/<host>/pause`; workers stop picking up new jobs                        |
 | `cluster:resume`  | `POST /admin/nodes/<host>/resume`; clear drain or pause                                   |
@@ -434,13 +407,32 @@ For each remote host the staging build:
 
 See [Cluster Operations](cluster-operations.md) for runbooks combining these.
 
-`deploy:config` and `deploy:docker` run locally — they only need an SSH path to
-each host. Tasks that invoke remote helpers or remote `mise` commands
-(`deploy:sync`, `deploy:restart`, `cluster:*`) depend on
-`deploy:mise` so the remote `.mise/` control plane is refreshed first. The
+Hosts run the Docker image only: no code, Python, or `mise` is installed on them. Every
+deploy and cluster task runs locally and only needs an SSH path to each host. The
 Docker-specific tasks require `docker_profile` to be set per host (or under
 `deploy:`) in `setup/local.yml`. Use `HOST=<host>` to target one node, or
-`HOSTS="<host1> <host2>"` to target multiple nodes.
+`HOSTS="<host1> <host2>"` to target multiple nodes (this applies to every `cluster:*` task,
+including `cluster:reload`).
+
+`cluster:start`, `cluster:stop`, `cluster:restart` and `cluster:status` share
+`.mise/shared/deploy/cluster_compose.sh`, which runs
+`docker compose --profile <docker_profile> start|stop|restart|ps` on each host.
+
+#### Graceful stop and restart
+
+Every daemon service in `docker/docker-compose.yml` sets
+`stop_grace_period: ${STOP_GRACE_PERIOD:-2m}`. `cluster:stop` and `cluster:restart` therefore
+give the daemon up to two minutes to drain before Docker sends SIGKILL; jobs still running at
+the deadline are requeued. To change the window, set `STOP_GRACE_PERIOD` (for example `10m`)
+in a `.env` file next to `docker-compose.yml` on the host or in the shell that runs `docker compose` (it is a compose
+substitution, so `config/daemon.env` does not apply). To avoid requeues entirely,
+run `cluster:drain` first (or use `cluster:upgrade`, which does).
+
+#### Reload or restart
+
+After `deploy:config`, use `mise run cluster:reload` for hot-reloadable changes (API key,
+routing rules, scan paths, codec lists, profile overlays). Use `mise run cluster:restart`
+for anything else, such as worker count or the API bind address and port.
 
 ### Fallback Policy Rollout
 
@@ -454,7 +446,7 @@ Recommended phased rollout when introducing `hw_alt` to a cluster:
 
 1. **Observation window — `hw_alt`** (one to two weeks): set
    `base.converter.fallback-policy: hw_alt` in `setup/local.yml` and run
-   `mise run deploy:config && mise run deploy:reload`. The ladder will retry
+   `mise run deploy:config && mise run cluster:reload`. The ladder will retry
    tier-1 QSV failures on the same-vendor VAAPI encoder (10-bit preserved) and
    stop there. No software fallback runs, so any unrecovered job still surfaces
    as a failure — making the new tier easy to evaluate.
@@ -487,10 +479,10 @@ docker run --rm -p 8585:8585 \
   ghcr.io/newdave/sma-ng:latest
 
 # Build locally
-make docker-build
+mise run build:docker
 
 # Run locally-built image with SQLite at ./data/sma-ng.db
-make docker-run
+mise run build:run
 
 # Or point at PostgreSQL explicitly by setting daemon.db_url in config/sma-ng.yml
 ```
@@ -518,6 +510,9 @@ See also:
 | `ci.yml`      | PR / push to main             | Runs test suite                                                                                |
 | `docker.yml`  | PR / push to main or `v*` tag | PR: build-only + smoke test; main/tag: build + push to GHCR                                    |
 | `release.yml` | Push to main                  | release-please manages release PR + version bump; on release: wheel/sdist + Docker semver tags |
+
+Docker images are built and pushed only by `docker.yml` (multi-architecture, on `main` and tags); there is no local
+push task. Hosts then pick the image up with `mise run deploy:remote`.
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please). **Do not manually create `v*` tags** — this causes duplicate releases.
 

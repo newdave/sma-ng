@@ -23,6 +23,9 @@ services:
     hostname: "sma-ng"
     profiles: [software]
     restart: unless-stopped
+    # SIGTERM starts the daemon's graceful drain; give it time before SIGKILL.
+    # Jobs still running at the deadline are requeued on the next start.
+    stop_grace_period: ${STOP_GRACE_PERIOD:-2m}
     # Workaround for host AppArmor docker-default profile denying AF_UNIX
     # socket creation when dockerd runs nested inside an LXC. Affects pgsql
     # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
@@ -50,6 +53,9 @@ services:
     hostname: "sma-ng"
     profiles: [software-pg]
     restart: unless-stopped
+    # SIGTERM starts the daemon's graceful drain; give it time before SIGKILL.
+    # Jobs still running at the deadline are requeued on the next start.
+    stop_grace_period: ${STOP_GRACE_PERIOD:-2m}
     # Workaround for host AppArmor docker-default profile denying AF_UNIX
     # socket creation when dockerd runs nested inside an LXC. Affects pgsql
     # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
@@ -77,6 +83,9 @@ services:
     hostname: "sma-ng"
     profiles: [nvidia]
     restart: unless-stopped
+    # SIGTERM starts the daemon's graceful drain; give it time before SIGKILL.
+    # Jobs still running at the deadline are requeued on the next start.
+    stop_grace_period: ${STOP_GRACE_PERIOD:-2m}
     # Workaround for host AppArmor docker-default profile denying AF_UNIX
     # socket creation when dockerd runs nested inside an LXC. Affects pgsql
     # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
@@ -114,6 +123,9 @@ services:
     hostname: "sma-ng"
     profiles: [nvidia-pg]
     restart: unless-stopped
+    # SIGTERM starts the daemon's graceful drain; give it time before SIGKILL.
+    # Jobs still running at the deadline are requeued on the next start.
+    stop_grace_period: ${STOP_GRACE_PERIOD:-2m}
     # Workaround for host AppArmor docker-default profile denying AF_UNIX
     # socket creation when dockerd runs nested inside an LXC. Affects pgsql
     # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
@@ -151,6 +163,9 @@ services:
     hostname: "sma-ng"
     profiles: [intel]
     restart: unless-stopped
+    # SIGTERM starts the daemon's graceful drain; give it time before SIGKILL.
+    # Jobs still running at the deadline are requeued on the next start.
+    stop_grace_period: ${STOP_GRACE_PERIOD:-2m}
     # Workaround for host AppArmor docker-default profile denying AF_UNIX
     # socket creation when dockerd runs nested inside an LXC. Affects pgsql
     # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX
@@ -192,6 +207,9 @@ services:
     hostname: "sma-ng"
     profiles: [intel-pg]
     restart: unless-stopped
+    # SIGTERM starts the daemon's graceful drain; give it time before SIGKILL.
+    # Jobs still running at the deadline are requeued on the next start.
+    stop_grace_period: ${STOP_GRACE_PERIOD:-2m}
     # Workaround for host AppArmor docker-default profile denying AF_UNIX
     # socket creation when dockerd runs nested inside an LXC. Affects pgsql
     # (cannot create /var/run/postgresql/.s.PGSQL.5432) and python AF_UNIX

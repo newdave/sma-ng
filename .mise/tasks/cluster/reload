@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-#MISE description="POST /reload on every deploy host so daemons re-read config/sma-ng.yml in place (no container restart)"
-#MISE depends=["deploy:mise"]
+#MISE description="POST /reload on remote nodes so daemons re-read config/sma-ng.yml without a restart (HOST or HOSTS to scope, default all)"
 set -euo pipefail
 
-# Hot-reload counterpart to deploy:restart. Use after `mise run deploy:config`
+# Hot-reload counterpart to cluster:restart. Use after `mise run deploy:config`
 # when the change is hot-reloadable (api_key, scan_paths, audit settings,
 # routing rules, codec lists, profile overlays, etc.). Worker count and
-# API server bind host/port still require deploy:restart.
+# API server bind host/port still require cluster:restart.
 
 # shellcheck disable=SC1091  # lib.sh is sourced relative to this script's directory at runtime.
 source "$(dirname "$0")/../../shared/deploy/lib.sh"
+# shellcheck disable=SC1091
+source "$(dirname "$0")/../../shared/deploy/cluster_compose.sh"
 
-DEPLOY_HOSTS=$(lc deploy hosts "")
+select_cluster_hosts
 daemon_api_key=$(lc daemon api_key "")
 
 failed=""
@@ -45,6 +46,6 @@ if [ -n "$ok" ]; then
 fi
 if [ -n "$failed" ]; then
   echo "Failed: $failed" >&2
-  echo "Run \`mise run deploy:restart\` for hosts whose daemon isn't responding to /reload." >&2
+  echo "Run \`mise run cluster:restart\` for hosts whose daemon isn't responding to /reload." >&2
   exit 1
 fi

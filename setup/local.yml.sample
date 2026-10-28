@@ -71,11 +71,6 @@ deploy:
   # built-in default of 4.
   # workers: 4
 
-  # Virtualenv management on remote hosts.
-  # auto_create_venv: true            # recreate venv if missing/unhealthy
-  # venv_dir: venv                    # path is relative to deploy_dir
-  # python_bin: /usr/bin/python3      # interpreter used to build the venv
-
   # Database connection details (for external PostgreSQL).
   # db_host: "db.example.com"
   # db_port: 5432

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 #MISE description="Push docker/docker-compose.yml to each host, pull the latest image, then `docker compose down` + `up -d --force-recreate`"
-#MISE aliases=["deploy:docker:upgrade"]
 #MISE depends=["deploy:check"]
 set -euo pipefail
 

@@ -99,20 +99,14 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
      api_key: <random-string>
    ```
 
-2. **Bootstrap each host (once)** — installs apt deps, Docker, mise, the
-   `/opt/sma` layout, and an ssh key:
+2. **Bootstrap each host (once)** — installs Docker, creates the
+   `/opt/sma` layout (config, logs, data, seeded `daemon.env`), and sets up an ssh key:
 
    ```bash
    mise run deploy:setup
    ```
 
-3. **Sync code to every host:**
-
-   ```bash
-   mise run deploy:sync
-   ```
-
-4. **Stamp configs and credentials:** writes `config/sma-ng.yml` and
+3. **Stamp configs and credentials:** writes `config/sma-ng.yml` and
    `config/daemon.env` on every host, with `SMA_NODE_NAME=<host-key>` baked
    into the env file:
 
@@ -120,14 +114,14 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
    mise run deploy:config
    ```
 
-5. **Bring up the containers:**
+4. **Bring up the containers:**
 
    ```bash
    mise run cluster:start
    mise run cluster:status   # confirm sma + sma-pgsql healthy on master, sma on slaves
    ```
 
-6. **Approve every pending node** in the master's `/admin` UI (or via
+5. **Approve every pending node** in the master's `/admin` UI (or via
    `POST /admin/nodes/<host>/approve` with `X-API-Key`). Until a node is
    approved its workers wait without claiming jobs — see
    [Daemon Mode → Node approval](daemon.md#node-approval).
@@ -151,7 +145,6 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
 
    ```bash
    mise run deploy:setup HOST=sma-slave2
-   mise run deploy:sync   HOST=sma-slave2
    mise run deploy:config   HOST=sma-slave2
    mise run cluster:start HOST=sma-slave2
    ```
@@ -172,12 +165,15 @@ mise run deploy:config
 
 `deploy:config` is non-destructive: it merges new keys into the existing
 `config/sma-ng.yml` on each host, leaving operator-tuned values in place. It
-does **not** restart the daemon. To apply changes that require a restart
-(routing, profile selection, codec defaults), follow with:
+does **not** restart the daemon. Apply it with:
 
 ```bash
-mise run cluster:restart    # recreates the sma container; in-flight jobs are interrupted
+mise run cluster:reload     # hot-reloadable changes (routing, scan paths, codec lists, profile overlays)
+mise run cluster:restart    # anything else (worker count, bind address/port)
 ```
+
+`cluster:restart` gives the daemon `STOP_GRACE_PERIOD` (default `2m`) to drain before SIGKILL; jobs still
+running at the deadline are requeued. Both tasks honour `HOST=` / `HOSTS=`.
 
 For zero-loss restarts, use the upgrade runbook below.
 
@@ -199,7 +195,7 @@ For each host it:
    accepting new ones).
 2. Polls `GET /admin/nodes/<host>` for `running_jobs == 0` (default timeout
    1800s; override with `DRAIN_TIMEOUT=<seconds>`).
-3. Runs `mise run deploy:docker HOST=<host>` (rsync, `docker compose pull`,
+3. Runs `mise run deploy:remote HOST=<host>` (config push, `docker compose pull`,
    `docker compose up -d --force-recreate sma`, healthcheck).
 4. The new daemon starts fresh and heartbeats `online` automatically — no
    explicit resume needed.
