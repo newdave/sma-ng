@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.2.35](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.34...sma-ng-v3.2.35) (2026-10-28)
+
+
+### Features
+
+* **video:** VBV headroom above max-bitrate and HEVC level clamp ([dc77921](https://github.com/newdave/sma-ng/commit/dc7792127ab35d9edbe1c6c0827943dbc43ec8a5))
+
+
+### Bug Fixes
+
+* **audio:** keep TrueHD Atmos out of the default MP4 track ([db3e328](https://github.com/newdave/sma-ng/commit/db3e328e897a1afbb32009269b1d742c8b767e3a))
+* **video:** never re-encode Dolby Vision profile 5 ([5858031](https://github.com/newdave/sma-ng/commit/58580314e29491a182a7889b1e3e349ae5158d3c))
+
 ## [3.2.34](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.33...sma-ng-v3.2.34) (2026-10-28)
 
 
