@@ -2902,8 +2902,11 @@ class TestHTMLRoutes:
     assert h._response_code == 200
     body = _get_response_bytes(h).decode()
     assert "topsecret" not in body
-    assert "sessionStorage" in body
+    assert "localStorage" in body
     assert "X-API-Key" in body
+    # One in-page dialog, never window.prompt (it stacked a prompt per failed request).
+    assert "window.prompt(" not in body
+    assert "sma-api-key-dialog" in body and "sma-api-key-banner" in body
 
   def test_get_admin_never_renders_api_key(self):
     h = _make_handler(api_key="topsecret")

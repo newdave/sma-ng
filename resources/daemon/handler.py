@@ -53,34 +53,143 @@ class _BadRequest(Exception):
 
 
 # Injected into the dashboard/admin/metrics HTML. The API key is never rendered
-# into the page: the browser keeps it in sessionStorage (entered by the user)
-# and this shim adds it as X-API-Key to every fetch, prompting on a 401.
+# into the page: the user enters it once in an in-page dialog, the browser keeps
+# it in localStorage, and this shim adds it as X-API-Key to every fetch.
 _AUTH_SHIM = """<script>
 (function () {
+  // SMA-NG API key handling for the dashboard, admin and metrics pages.
+  // One in-page dialog at a time (never window.prompt: it blocks, stacks one
+  // dialog per failed request, and browsers let users suppress it for good).
   var STORE = 'sma_api_key';
   var origFetch = window.fetch.bind(window);
-  var pending = null;
-  window.SMA_API_KEY = sessionStorage.getItem(STORE) || '';
-  function ask() {
-    if (!pending) {
-      pending = Promise.resolve().then(function () {
-        var k = window.prompt('This SMA-NG daemon requires an API key:');
-        if (k) { sessionStorage.setItem(STORE, k); window.SMA_API_KEY = k; }
-        return k;
-      }).finally(function () { pending = null; });
-    }
-    return pending;
+  var asking = null;
+  var dismissed = false;
+
+  function load() {
+    try { return localStorage.getItem(STORE) || sessionStorage.getItem(STORE) || ''; } catch (e) { return ''; }
   }
+  function save(key) {
+    try {
+      if (key) { localStorage.setItem(STORE, key); } else { localStorage.removeItem(STORE); }
+      sessionStorage.removeItem(STORE);
+    } catch (e) { /* storage disabled: keep the key for this page only */ }
+    window.SMA_API_KEY = key || '';
+  }
+  window.SMA_API_KEY = load();
+
+  function el(tag, style, text) {
+    var node = document.createElement(tag);
+    if (style) { node.setAttribute('style', style); }
+    if (text) { node.textContent = text; }
+    return node;
+  }
+  function ready(fn) {
+    if (document.body) { fn(); } else { document.addEventListener('DOMContentLoaded', fn); }
+  }
+
+  var banner = null;
+  function showBanner() {
+    ready(function () {
+      if (banner) { return; }
+      banner = el('button', 'position:fixed;right:16px;bottom:16px;z-index:2147483646;padding:8px 14px;' +
+        'border-radius:8px;border:1px solid #f59e0b;background:#1f2937;color:#fbbf24;font:14px sans-serif;cursor:pointer',
+        'API key required: enter key');
+      banner.id = 'sma-api-key-banner';
+      banner.type = 'button';
+      banner.onclick = function () {
+        dismissed = false;
+        ask(false).then(function (key) { if (key) { window.location.reload(); } });
+      };
+      document.body.appendChild(banner);
+    });
+  }
+  function hideBanner() {
+    if (banner) { banner.remove(); banner = null; }
+  }
+
+  function showDialog(rejected, done) {
+    ready(function () {
+      hideBanner();
+      var overlay = el('div', 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);' +
+        'display:flex;align-items:center;justify-content:center;font:14px sans-serif');
+      overlay.id = 'sma-api-key-dialog';
+      var form = el('form', 'background:#111827;color:#e5e7eb;padding:20px;border-radius:10px;width:min(360px,90vw);' +
+        'box-shadow:0 10px 30px rgba(0,0,0,.5)');
+      var title = el('div', 'font-size:16px;font-weight:600;margin-bottom:8px', 'API key');
+      var note = el('div', 'margin-bottom:12px;color:' + (rejected ? '#f87171' : '#9ca3af'),
+        rejected ? 'That key was rejected. Enter the daemon.api-key from sma-ng.yml.'
+                 : 'This SMA-NG daemon requires an API key (daemon.api-key in sma-ng.yml).');
+      var input = el('input', 'width:100%;box-sizing:border-box;padding:8px;border-radius:6px;border:1px solid #374151;' +
+        'background:#030712;color:#e5e7eb;margin-bottom:12px');
+      input.type = 'password';
+      input.name = 'api-key';
+      input.autocomplete = 'current-password';
+      input.setAttribute('aria-label', 'API key');
+      var buttons = el('div', 'display:flex;gap:8px;justify-content:flex-end');
+      var cancel = el('button', 'padding:6px 12px;border-radius:6px;border:1px solid #374151;background:transparent;' +
+        'color:#e5e7eb;cursor:pointer', 'Cancel');
+      cancel.type = 'button';
+      var ok = el('button', 'padding:6px 12px;border-radius:6px;border:0;background:#2563eb;color:white;cursor:pointer',
+        'Save');
+      ok.type = 'submit';
+      buttons.appendChild(cancel);
+      buttons.appendChild(ok);
+      form.appendChild(title);
+      form.appendChild(note);
+      form.appendChild(input);
+      form.appendChild(buttons);
+      overlay.appendChild(form);
+      function finish(key) {
+        overlay.remove();
+        done(key);
+      }
+      form.onsubmit = function (event) {
+        event.preventDefault();
+        var key = input.value.trim();
+        if (!key) { input.focus(); return; }
+        save(key);
+        finish(key);
+      };
+      cancel.onclick = function () {
+        dismissed = true;
+        showBanner();
+        finish('');
+      };
+      overlay.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') { cancel.onclick(); }
+      });
+      document.body.appendChild(overlay);
+      input.focus();
+    });
+  }
+
+  // Every request that fails while the dialog is open waits for the same answer.
+  function ask(rejected) {
+    if (!asking) {
+      asking = new Promise(function (resolve) { showDialog(rejected, resolve); })
+        .then(function (key) { asking = null; return key; });
+    }
+    return asking;
+  }
+
   function withKey(input, init, key) {
     var headers = new Headers((init && init.headers) || (input instanceof Request ? input.headers : undefined));
-    if (key) { headers.set('X-API-Key', key); }
+    if (key) { headers.set('X-API-Key', key); } else { headers.delete('X-API-Key'); }
     return Object.assign({}, init || {}, { headers: headers });
   }
+
   window.fetch = function (input, init) {
-    return origFetch(input, withKey(input, init, window.SMA_API_KEY)).then(function (resp) {
+    var used = window.SMA_API_KEY;
+    return origFetch(input, withKey(input, init, used)).then(function (resp) {
       if (resp.status !== 401) { return resp; }
-      return ask().then(function (k) {
-        return k ? origFetch(input, withKey(input, init, k)) : resp;
+      // A key was entered while this request was in flight: retry with it.
+      if (window.SMA_API_KEY && window.SMA_API_KEY !== used) {
+        return origFetch(input, withKey(input, init, window.SMA_API_KEY));
+      }
+      if (dismissed) { return resp; }
+      if (used) { save(''); }  // the stored key is wrong: forget it
+      return ask(!!used).then(function (key) {
+        return key ? origFetch(input, withKey(input, init, key)) : resp;
       });
     });
   };
