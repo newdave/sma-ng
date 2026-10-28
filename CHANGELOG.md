@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.15](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.14...sma-ng-v3.2.15) (2026-10-28)
+
+
+### Features
+
+* **mise:** generated GitHub wiki, docs checks, release and dependency tasks ([ad3b709](https://github.com/newdave/sma-ng/commit/ad3b709fccb9f7dc411d09f2eb66f209007ee29d))
+
 ## [3.2.14](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.13...sma-ng-v3.2.14) (2026-10-28)
 
 
