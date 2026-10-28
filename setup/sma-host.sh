@@ -262,6 +262,16 @@ main() {
     if [ "$SMA_HOST_CONFIG" = "1" ]; then set -- -v "$SMA_HOME/config:/app/config:ro${_z:+,z}" "$@"; fi
     if [ -d "$SMA_CONFIG_HOME" ]; then set -- -v "$SMA_CONFIG_HOME:/home-config$_z" "$@"; fi
     set -- -v "$plan_dir:/plan$_z" -e HOME=/tmp "$@"
+    # Reach a daemon on this host's 127.0.0.1 (Docker Desktop uses host.docker.internal instead).
+    if [ "$SMA_HOST_OS" = "Linux" ]; then set -- --network host "$@"; fi
+    # Only `target add --api-key-stdin` reads stdin; never hold it open otherwise, so a
+    # later throwaway step still gets it.
+    for _a in "$@"; do
+        if [ "$_a" = "--api-key-stdin" ]; then
+            set -- -i "$@"
+            break
+        fi
+    done
     if [ "$SMA_HOST_ROOTLESS" != "1" ] && [ "$SMA_HOST_UID" != "0" ]; then
         set -- --user "$SMA_HOST_UID:$SMA_HOST_GID" "$@"
     fi
