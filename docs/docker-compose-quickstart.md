@@ -138,36 +138,18 @@ Put daemon/container settings in `/opt/sma/config/daemon.env` instead.
 Docker host (no sourcing needed; works from `sh`, `bash`, `zsh`, cron, and `ssh host sma ...`):
 
 ```bash
-docker run --rm --entrypoint cat ghcr.io/newdave/sma-ng:latest /usr/local/bin/sma-host | sudo tee /usr/local/bin/sma >/dev/null
-sudo chmod 755 /usr/local/bin/sma
+# Copies the script out of the image without running it. `latest` is linux/amd64 only; --platform lets an arm64
+# host fetch it too (the script is architecture-independent).
+id=$(docker create --platform linux/amd64 ghcr.io/newdave/sma-ng:latest)
+sudo docker cp "$id":/usr/local/bin/sma-host /usr/local/bin/sma
+docker rm "$id"
 ```
 
-`mise run setup:docker:target` also installs it to `/usr/local/bin/sma` from the repo checkout.
+`mise run setup:docker:target` also installs it to `/usr/local/bin/sma` from the repo checkout. Once the container
+is running, `sudo docker cp sma-ng:/usr/local/bin/sma-host /usr/local/bin/sma` installs the exact running version.
 
-| Command                                | Runs in the container                |
-| -------------------------------------- | ------------------------------------ |
-| `sma convert /mnt/unionfs/Media/f.mkv` | `python manual.py -i <file> -a`      |
-| `sma preview /mnt/unionfs/Media/f.mkv` | `python manual.py -i <file> -oo`     |
-| `sma manual ARGS...`                   | `python manual.py ARGS...`           |
-| `sma repair PATH...`                   | `python repair.py PATH...`           |
-| `sma rename PATH`                      | `python rename.py PATH`              |
-| `sma audit PATH`                       | `python manual.py --audit -i PATH`   |
-| `sma codecs`                           | `python manual.py -cl`               |
-| `sma smoke`                            | `python daemon.py --smoke-test`      |
-| `sma shell`                            | `bash` as the daemon user            |
-| `sma logs`                             | `docker logs -f` for the container   |
-| `sma status`                           | Container state                      |
-| `sma version`                          | Host script and image versions       |
-
-Every command runs through `entrypoint.sh run`, so it has the daemon's identity: output files are owned by `ubuntu`,
-the supplementary GPU groups match the daemon, and `LIBVA_DRIVER_NAME` is set the same way. A TTY is only requested
-when stdin and stdout are terminals, so scripts and cron work. For root debugging use
-`docker exec -u 0 -it sma-ng bash`.
-
-Container selection: `SMA_CONTAINER` (or `CONTAINER`) if set; otherwise the first running service in the compose
-project at `SMA_COMPOSE_DIR` (default `/opt/sma/docker`, narrowed by `SMA_COMPOSE_SERVICE`); otherwise the container
-named `sma-ng`. `DOCKER_BIN` overrides the `docker` executable. Exit codes: the command's own code, `2` for usage
-errors or a bad path, `3` when no running container is found.
+See the [`sma` CLI Quick Start](sma-cli-quickstart.md) for the command list, path rules, scripting and cron, exit
+codes, choosing a container and troubleshooting.
 
 ### One path per file
 

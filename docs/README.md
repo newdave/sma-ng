@@ -368,12 +368,14 @@ The library audit reports the same damage as `stream_damage` findings and can fi
 ## Running from the Docker host
 
 The image ships a POSIX `sh` script, `sma`, that runs CLI commands inside the running container from the Docker host.
-Install it from the image so it always matches the image version:
+Copy it out of the running container so it always matches the image version:
 
 ```bash
-docker run --rm --entrypoint cat ghcr.io/newdave/sma-ng:latest /usr/local/bin/sma-host | sudo tee /usr/local/bin/sma >/dev/null
-sudo chmod 755 /usr/local/bin/sma
+sudo docker cp sma-ng:/usr/local/bin/sma-host /usr/local/bin/sma
 ```
+
+The [`sma` CLI Quick Start](sma-cli-quickstart.md) covers installing without a running container, every command,
+path rules, scripting and troubleshooting.
 
 `mise run setup:docker:target` also installs it from a repo checkout. Then:
 

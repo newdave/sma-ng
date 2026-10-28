@@ -42,6 +42,7 @@ PAGES: list[tuple[str, str, str]] = [
   ("docs/README.md", "Home", ""),
   ("docs/getting-started.md", "Getting-Started", "User Guide"),
   ("docs/docker-compose-quickstart.md", "Docker-Compose-Quick-Start", "User Guide"),
+  ("docs/sma-cli-quickstart.md", "SMA-CLI-Quick-Start", "User Guide"),
   ("docs/configuration.md", "Configuration", "User Guide"),
   ("docs/integrations.md", "Integrations", "User Guide"),
   ("docs/library-audit.md", "Library-Audit", "User Guide"),
