@@ -26,6 +26,8 @@ Optimize work for:
 - Settings schema and projection: `resources/config_schema.py`, `resources/readsettings.py`
 - FFmpeg wrapper and codec/container definitions: `converter/ffmpeg.py`, `converter/avcodecs.py`, `converter/formats.py`
 - Metadata and integrations: `resources/metadata.py`, `resources/mediamanager.py`, `autoprocess/plex.py`, `triggers/`
+- Stream-copy repair and library audit: `repair.py`, `resources/media_repair.py`, `resources/library_audit/`
+- Docker host CLI and container entrypoint: `setup/sma-host.sh` (shipped as `sma`), `docker/docker-entrypoint.sh`
 - Canonical docs: `docs/`, served help: `resources/docs.html`, wiki copy: `/tmp/sma-wiki/`
 - Generated/local files to avoid: `venv/`, `**/__pycache__/`, `*.pyc`, `config/sma-ng.yml`
 
@@ -34,6 +36,9 @@ Optimize work for:
 - Read the nearby implementation and tests before changing code.
 - Keep changes small and aligned with existing Python patterns.
 - Do not add abstractions, settings, or integrations unless the task requires them.
+- Every FFmpeg remux or conversion drops cover art, unknown and data streams: select streams with
+  `MediaInfo.cover_art` / `is_unknown_stream` (`converter/ffmpeg.py`) and map by index, never with type maps
+  like `0:V` / `0:a?`. Never overwrite an existing output; number it instead.
 - Keep shell entrypoints POSIX/ShellCheck clean.
   Do not embed inline Python in shell scripts or committed shell commands; move Python logic to a `.py` helper.
 - Keep application log records single-line.
@@ -104,6 +109,9 @@ mise run daemon:start
 mise run media:convert -- /path/to/file.mkv
 mise run media:preview -- /path/to/file.mkv
 mise run media:codecs
+mise run media:repair -- -n /path/to/file-or-dir
+mise run test:cov
+mise run test:shell
 ```
 
 Direct commands that are often useful:
@@ -112,9 +120,13 @@ Direct commands that are often useful:
 python manual.py -i "/path/to/file.mkv" -a
 python manual.py -i "/path/to/file.mkv" -oo
 python manual.py -cl
+python manual.py --audit -i /path/to/library
+python repair.py -n /path/to/file-or-dir
 python daemon.py --host 0.0.0.0 --port 8585 --workers 4
 python daemon.py --smoke-test
 ```
+
+On a Docker host, operators use the `sma` command (`sma convert|repair|audit ...`) rather than `docker exec`.
 
 ## Validation Matrix
 
@@ -123,10 +135,13 @@ Run the smallest meaningful check for the files touched.
 - Daemon: `venv/bin/python -m pytest tests/test_daemon.py tests/test_handler.py tests/test_worker.py -q`
 - Media/FFmpeg: `venv/bin/python -m pytest tests/test_mediaprocessor.py tests/test_metadata.py -q`
 - Rename/log helpers: `venv/bin/python -m pytest tests/test_rename.py tests/test_log.py -q`
-- Docker/compose: `venv/bin/python -m pytest tests/test_docker.py -q`
+- Repair/audit: `venv/bin/python -m pytest tests/test_media_repair.py tests/test_repair.py tests/test_library_audit_engine.py -q`
+- Docker/compose and host CLI: `venv/bin/python -m pytest tests/test_docker.py tests/test_sma_host.py -q`
+- Shell scripts: `mise run test:shell`
 - Broad pass: `mise run test`
 - Coverage policy: global line coverage is at least 90%, and production modules with at least 100 statements need
-  at least 70% per-module coverage. Do not lower thresholds or hide logic with `# pragma: no cover`.
+  at least 70% per-module coverage; `mise run test:cov` (also run in CI) enforces both. Do not lower thresholds or
+  hide logic with `# pragma: no cover`.
 
 ## Change Recipes
 

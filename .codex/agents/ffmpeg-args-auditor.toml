@@ -21,7 +21,7 @@ Audit diffs that touch any of:
 2. **Codec/container compatibility**: codec ↔ container, profile ↔ level, pixel format ↔ encoder support.
 3. **Hwaccel pipelines**: device init, `hwupload`/`hwdownload` placement, filter graph format negotiation, encoder ↔ decoder device match (VAAPI/QSV/NVENC/AMF/VideoToolbox).
 4. **Encoder option leaks**: software-only flags reaching hardware encoders (or vice versa); options bleeding across the qsv/vaapi/nvenc subblocks introduced in the schema split.
-5. **Stream selection & mapping**: `-map` correctness, language/title preservation, subtitle/audio stream handling, default/forced flags.
+5. **Stream selection & mapping**: `-map` correctness (by index; cover art, unknown and data streams excluded via `MediaInfo.cover_art` / `is_unknown_stream`, no `0:V`/`0:a?` type maps), language/title preservation, subtitle/audio stream handling, default/forced flags, MP4-holdable subtitle codecs only.
 6. **Failure recovery**: do pre-flight checks fix params in place rather than just classifying failure? (per repo golden rule)
 7. **Tests**: parametrized coverage for the option matrix touched.
 
