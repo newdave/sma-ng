@@ -13,6 +13,7 @@
 #   SMA_IMAGE        image to run (default: ~/.config/sma/image, else ghcr.io/newdave/sma-ng:latest)
 #   SMA_HOME         host data directory with config/, logs/, data/ (default: /opt/sma)
 #   SMA_CONFIG_HOME  client settings directory (default: ~/.config/sma)
+#   SMA_DAEMON_NAME  name of the daemon container (default: sma-ng)
 #   DOCKER_BIN       docker executable (default: docker)
 #
 # Exit codes: the tool's own code for a run; 2 usage error or bad path;
@@ -173,9 +174,10 @@ collect_facts() {
     SMA_HOST_CONFIG=0
     if [ -d "$SMA_HOME/config" ]; then SMA_HOST_CONFIG=1; fi
     SMA_IMAGE="$(image_ref)"
+    SMA_DAEMON_NAME="${SMA_DAEMON_NAME:-sma-ng}"
     export SMA_HOST_PWD SMA_HOST_UID SMA_HOST_GID SMA_HOST_OS SMA_HOST_HOME SMA_HOST_TTY SMA_HOST_STDIN \
         SMA_HOST_DRI_GIDS SMA_HOST_NVIDIA SMA_HOST_ROOTLESS SMA_HOST_SELINUX SMA_HOST_LOGS_WRITABLE \
-        SMA_HOST_CONFIG SMA_HOST_VERSION SMA_HOME SMA_IMAGE
+        SMA_HOST_CONFIG SMA_HOST_VERSION SMA_HOME SMA_IMAGE SMA_DAEMON_NAME
 }
 
 # ── plan execution ───────────────────────────────────────────────────────────
@@ -251,7 +253,7 @@ main() {
         rm -rf "$plan_dir"
         exit 2
     }
-    "$DOCKER_BIN" inspect "${SMA_DAEMON_NAME:-sma-ng}" >"$plan_dir/daemon.json" 2>/dev/null ||
+    "$DOCKER_BIN" inspect "$SMA_DAEMON_NAME" >"$plan_dir/daemon.json" 2>/dev/null ||
         rm -f "$plan_dir/daemon.json"
     mkdir -p "$SMA_CONFIG_HOME" 2>/dev/null
     _z=""
@@ -277,7 +279,7 @@ main() {
     fi
     for _v in SMA_HOST_PWD SMA_HOST_UID SMA_HOST_GID SMA_HOST_OS SMA_HOST_HOME SMA_HOST_TTY SMA_HOST_STDIN \
         SMA_HOST_DRI_GIDS SMA_HOST_NVIDIA SMA_HOST_ROOTLESS SMA_HOST_SELINUX SMA_HOST_LOGS_WRITABLE \
-        SMA_HOST_CONFIG SMA_HOST_VERSION SMA_HOME SMA_IMAGE; do
+        SMA_HOST_CONFIG SMA_HOST_VERSION SMA_HOME SMA_IMAGE SMA_DAEMON_NAME; do
         set -- -e "$_v" "$@"
     done
     "$DOCKER_BIN" run --rm "$@"

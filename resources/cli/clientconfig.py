@@ -10,6 +10,9 @@
       mappings:
         - {local: /Volumes/Media, remote: /mnt/unionfs/Media}
   extra-mounts: [/srv/scratch]
+  daemon:                       # written by `sma daemon up` (plain, non-compose daemon)
+    media-roots: [/mnt/media]
+    port: 8585
 
 A file holding API keys must not be readable by group or others.
 """
@@ -43,6 +46,7 @@ class ClientConfig:
   default_target: str | None = None
   targets: dict[str, Target] = field(default_factory=dict)
   extra_mounts: list[str] = field(default_factory=list)
+  daemon: dict = field(default_factory=dict)
   raw: dict = field(default_factory=dict)
 
 
@@ -93,10 +97,13 @@ def load(env=None):
   if not isinstance(mounts, list) or not all(isinstance(m, str) for m in mounts):
     _fail("extra-mounts must be a list of paths")
   targets = _parse_targets(raw)
+  daemon = raw.get("daemon") or {}
+  if not isinstance(daemon, dict):
+    _fail("daemon must be a mapping")
   if any(t.api_key for t in targets.values()) and os.stat(path).st_mode & (stat.S_IRWXG | stat.S_IRWXO):
     _fail("holds API keys but other users can read it; run: chmod 600 ~/.config/sma/%s" % FILENAME)
   default = raw.get("default-target")
-  return ClientConfig(default_target=default if isinstance(default, str) else None, targets=targets, extra_mounts=list(mounts), raw=raw)
+  return ClientConfig(default_target=default if isinstance(default, str) else None, targets=targets, extra_mounts=list(mounts), daemon=dict(daemon), raw=raw)
 
 
 def save(cfg, env=None):
@@ -112,6 +119,10 @@ def save(cfg, env=None):
     raw["targets"][t.name] = entry
   if not raw["targets"]:
     del raw["targets"]
+  if cfg.daemon:
+    raw["daemon"] = dict(cfg.daemon)
+  else:
+    raw.pop("daemon", None)
   if cfg.default_target:
     raw["default-target"] = cfg.default_target
   else:

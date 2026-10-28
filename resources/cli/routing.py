@@ -30,14 +30,20 @@ def host_url(url, facts):
   return url
 
 
+def _local_url(cfg):
+  """The local daemon's URL, on the port `sma daemon up --port` saved (default 8585)."""
+  port = (getattr(cfg, "daemon", None) or {}).get("port")
+  return "http://127.0.0.1:%d" % int(port) if port else LOCAL_URL
+
+
 def resolve_target(cfg, flag=None, env_target=None):
   name = flag or env_target or cfg.default_target
   if not name:
-    return Resolved(cfg.targets.get(LOCAL_TARGET) or Target(LOCAL_TARGET, LOCAL_URL), explicit=False)
+    return Resolved(cfg.targets.get(LOCAL_TARGET) or Target(LOCAL_TARGET, _local_url(cfg)), explicit=False)
   if name in cfg.targets:
     return Resolved(cfg.targets[name], explicit=True)
   if name == LOCAL_TARGET:
-    return Resolved(Target(LOCAL_TARGET, LOCAL_URL), explicit=True)
+    return Resolved(Target(LOCAL_TARGET, _local_url(cfg)), explicit=True)
   raise UsageError("sma: unknown target %r (sma target list)" % name)
 
 
