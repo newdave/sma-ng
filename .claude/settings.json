@@ -25,6 +25,24 @@
     "config/sma-ng.yml"
   ],
   "enabledPlugins": {
-    "voltagent-domains@voltagent-subagents": true
+    "pyright-lsp@claude-plugins-official": true,
+    "bp@cc-blueprint-toolkit": false,
+    "codex@openai-codex": false,
+    "code-simplifier@claude-plugins-official": false,
+    "frontend-design@claude-plugins-official": false,
+    "rust-analyzer-lsp@claude-plugins-official": false
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/claude-code/skill-reminder.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }

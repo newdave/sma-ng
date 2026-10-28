@@ -1,0 +1,20 @@
+# Project-scoped Codex plugin set; mirrors enabledPlugins in .claude/settings.json.
+# Hooks live in .codex/hooks.json.
+
+[plugins."pyright-lsp@claude-plugins-official"]
+enabled = true
+
+[plugins."bp@cc-blueprint-toolkit"]
+enabled = false
+
+[plugins."codex@openai-codex"]
+enabled = false
+
+[plugins."code-simplifier@claude-plugins-official"]
+enabled = false
+
+[plugins."frontend-design@claude-plugins-official"]
+enabled = false
+
+[plugins."rust-analyzer-lsp@claude-plugins-official"]
+enabled = false
