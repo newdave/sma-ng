@@ -1,6 +1,6 @@
 # PRP: `sma` CLI as a Container Runtime and Daemon Client
 
-STATUS: IN-FLIGHT
+STATUS: COMPLETE
 
 Source design: [`docs/brainstorming/2026-10-28-sma-cli-container-runtime.md`](../brainstorming/2026-10-28-sma-cli-container-runtime.md).
 Task breakdown: [`docs/tasks/sma-cli-container-runtime.md`](../tasks/sma-cli-container-runtime.md).
@@ -150,35 +150,35 @@ Global flags: --target NAME, --local, --no-wait, --json, --mount PATH (repeatabl
 
 ### Success Criteria
 
-- [ ] `install-smang.sh` installs `sma` with only Docker present. It is idempotent, needs no checkout, works when
+- [x] `install-smang.sh` installs `sma` with only Docker present. It is idempotent, needs no checkout, works when
   piped to `sh`, and picks a release tag on arm64.
-- [ ] `sma repair /any/dir` with no daemon:
-  - [ ] runs `repair.py /any/dir` in a container with `/any/dir` mounted at the same path;
-  - [ ] runs as the caller's uid/gid with `--rm`;
-  - [ ] passes through the tool's exit code;
-  - [ ] leaves no container.
-- [ ] A missing input path gives exit 2 with a one-line error, and no Docker mount auto-creates directories.
-- [ ] Config-derived directories (output-directory, move-to, copy-to, recycle-bin) are mounted only if they exist
+- [x] `sma repair /any/dir` with no daemon:
+  - [x] runs `repair.py /any/dir` in a container with `/any/dir` mounted at the same path;
+  - [x] runs as the caller's uid/gid with `--rm`;
+  - [x] passes through the tool's exit code;
+  - [x] leaves no container.
+- [x] A missing input path gives exit 2 with a one-line error, and no Docker mount auto-creates directories.
+- [x] Config-derived directories (output-directory, move-to, copy-to, recycle-bin) are mounted only if they exist
   on the host.
-- [ ] GPU passthrough:
-  - [ ] `/dev/dri` gets `--device /dev/dri` plus `--group-add` for each device GID;
-  - [ ] a working `nvidia-smi` gives `--gpus all`;
-  - [ ] rootless Docker skips `--user`;
-  - [ ] SELinux enforcing adds `:z`.
-- [ ] With a reachable daemon, the command is submitted to `POST /jobs` with the right `kind`. Output is streamed
+- [x] GPU passthrough:
+  - [x] `/dev/dri` gets `--device /dev/dri` plus `--group-add` for each device GID;
+  - [x] a working `nvidia-smi` gives `--gpus all`;
+  - [x] rootless Docker skips `--user`;
+  - [x] SELinux enforcing adds `:z`.
+- [x] With a reachable daemon, the command is submitted to `POST /jobs` with the right `kind`. Output is streamed
   from `GET /jobs/{id}/output`, and the exit code follows the job status.
-- [ ] Remote target paths go through the longest matching prefix mapping and are validated against
+- [x] Remote target paths go through the longest matching prefix mapping and are validated against
   `GET /paths`.
-- [ ] The daemon runs `repair`, `preview`, `audit` and `rename` jobs with per-kind argv and exit semantics:
-  - [ ] it stores the last 1 MiB of output per job;
-  - [ ] dedupe is per path + kind;
-  - [ ] a PostgreSQL cluster refuses non-convert kinds with 409 while any online node lacks the `job-kinds-v1`
+- [x] The daemon runs `repair`, `preview`, `audit` and `rename` jobs with per-kind argv and exit semantics:
+  - [x] it stores the last 1 MiB of output per job;
+  - [x] dedupe is per path + kind;
+  - [x] a PostgreSQL cluster refuses non-convert kinds with 409 while any online node lacks the `job-kinds-v1`
     capability.
-- [ ] `sma daemon up/down/status/logs/upgrade` works for compose-managed and plain daemons. Plain `up` without
+- [x] `sma daemon up/down/status/logs/upgrade` works for compose-managed and plain daemons. Plain `up` without
   media roots exits 2.
-- [ ] `sma upgrade` replaces the bootstrap from the image and rewrites the pinned image. A plan-version mismatch
+- [x] `sma upgrade` replaces the bootstrap from the image and rewrites the pinned image. A plan-version mismatch
   gives exit 5 with an upgrade hint.
-- [ ] All tests pass, coverage gates hold (global ≥90%, every module ≥100 statements ≥70%), ShellCheck is clean,
+- [x] All tests pass, coverage gates hold (global ≥90%, every module ≥100 statements ≥70%), ShellCheck is clean,
   and docs and OpenAPI are updated.
 
 ## All Needed Context
@@ -693,16 +693,16 @@ sma --target local convert /path/file.mkv    # with a daemon running (Phase 2)
 
 ## Final validation checklist
 
-- [ ] All tests pass: `mise run test`
-- [ ] Coverage gates: `mise run test:cov`
-- [ ] Lint: `mise run test:lint`, `mise run test:shell`
-- [ ] OpenAPI valid: `mise run test:openapi`
-- [ ] Docs: `mise run docs:check`; `mise run wiki:publish` after pushing doc changes (hook does it for `git push`)
-- [ ] Image smoke: `mise run build:smoke` (CI runs it in docker.yml)
-- [ ] Manual throwaway run leaves no container; missing path exits 2; GPU flags present on a GPU host
-- [ ] Error cases: unreachable target 3, auth 4, plan version 5, Ctrl-C detach 130
-- [ ] No API key ever printed or logged; client config 0600 enforced
-- [ ] Docs updated in the same commits as the behaviour; conventional commits; no AI attribution
+- [x] All tests pass: `mise run test`
+- [x] Coverage gates: `mise run test:cov`
+- [x] Lint: `mise run test:lint`, `mise run test:shell`
+- [x] OpenAPI valid: `mise run test:openapi`
+- [x] Docs: `mise run docs:check`; `mise run wiki:publish` after pushing doc changes (hook does it for `git push`)
+- [x] Image smoke: `mise run build:smoke` (CI runs it in docker.yml)
+- [x] Manual throwaway run leaves no container; missing path exits 2; GPU flags present on a GPU host
+- [x] Error cases: unreachable target 3, auth 4, plan version 5, Ctrl-C detach 130
+- [x] No API key ever printed or logged; client config 0600 enforced
+- [x] Docs updated in the same commits as the behaviour; conventional commits; no AI attribution
 
 ## Anti-Patterns to Avoid
 
