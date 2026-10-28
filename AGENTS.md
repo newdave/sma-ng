@@ -18,7 +18,7 @@ Work should protect conversion correctness, daemon reliability, config schema sa
 - `resources/metadata.py`, `resources/mediamanager.py`, `autoprocess/plex.py`, `triggers/` - tagging and integrations
 - `repair.py`, `resources/media_repair.py`, `resources/library_audit/` - stream-copy repair and library audit
 - `setup/sma-host.sh`, `docker/docker-entrypoint.sh` - Docker host `sma` command and container entrypoint
-- `docs/`, `/tmp/sma-wiki/`, `resources/docs.html` - docs surfaces that must stay synchronized
+- `docs/` - canonical docs; the GitHub wiki is generated from it (`mise run wiki:build`), never hand-edited
 
 ## Rules
 
@@ -36,8 +36,8 @@ Work should protect conversion correctness, daemon reliability, config schema sa
 
 ## Docs And Commits
 
-- User-facing behavior changes require synchronized updates in `docs/`, matching `/tmp/sma-wiki/` pages, and
-  `resources/docs.html`.
+- User-facing behavior changes require updates in `docs/`; check them with `mise run docs:check` and publish the
+  generated wiki with `mise run wiki:publish` after they land on `main`.
 - Keep code, tests, samples, and docs for one behavior change in the same logical change.
 - If committing multiple areas, split by behavior or operational outcome.
 - Conventional commit prefixes are expected.
@@ -60,6 +60,9 @@ mise run media:codecs
 mise run media:repair -- -n /path/to/file-or-dir
 mise run test:cov
 mise run test:shell
+mise run docs:check
+mise run wiki:publish
+mise run release:status
 ```
 
 Direct equivalents:
@@ -81,6 +84,7 @@ python daemon.py --smoke-test
 - Repair/audit: `venv/bin/python -m pytest tests/test_media_repair.py tests/test_repair.py tests/test_library_audit_engine.py -q`
 - Docker/compose and host CLI: `venv/bin/python -m pytest tests/test_docker.py tests/test_sma_host.py -q`
 - Shell scripts: `mise run test:shell`
+- Docs and wiki: `mise run docs:check`
 - Broad pass: `mise run test`; coverage gates (90% global, 70% per module): `mise run test:cov`
 
 Say explicitly when the relevant validation could not be run.

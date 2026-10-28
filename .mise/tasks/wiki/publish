@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#MISE description="Regenerate the wiki from committed docs and push it to GitHub (usage: mise run wiki:publish [-- --dry-run] [--allow-dirty])"
+#MISE depends=["wiki:build"]
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+WIKI_DIR="${SMA_WIKI_DIR:-/tmp/sma-wiki}"
+dry_run=0
+allow_dirty=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) dry_run=1 ;;
+    --allow-dirty) allow_dirty=1 ;;
+    *) echo "unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
+# The wiki should reflect committed docs, not work in progress.
+if [ "$allow_dirty" -eq 0 ] && [ -n "$(git status --porcelain -- docs .mise/tasks)" ]; then
+  echo "docs/ or .mise/tasks/ has uncommitted changes; commit them first or pass --allow-dirty" >&2
+  exit 1
+fi
+
+git -C "$WIKI_DIR" add --all
+if git -C "$WIKI_DIR" diff --cached --quiet; then
+  echo "wiki is already up to date"
+  exit 0
+fi
+git -C "$WIKI_DIR" diff --cached --stat
+
+if [ "$dry_run" -eq 1 ]; then
+  git -C "$WIKI_DIR" reset --quiet
+  echo "dry run: nothing committed or pushed"
+  exit 0
+fi
+
+git -C "$WIKI_DIR" commit --quiet -m "docs: sync from sma-ng@$(git rev-parse --short HEAD)"
+git -C "$WIKI_DIR" push --quiet
+echo "wiki published at $(git -C "$WIKI_DIR" rev-parse --short HEAD)"

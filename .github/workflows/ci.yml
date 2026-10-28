@@ -90,7 +90,7 @@ jobs:
         run: mise run test:shell
 
   openapi:
-    name: Validate OpenAPI spec
+    name: Validate OpenAPI spec and docs references
     runs-on: ubuntu-latest
 
     steps:
@@ -113,6 +113,14 @@ jobs:
 
       - name: Validate OpenAPI spec
         run: mise run test:openapi
+
+      # markdownlint runs in the lint job via pre-commit; these catch broken
+      # relative links, stale `mise run` references and docs with no wiki page.
+      - name: Check docs links and task references
+        run: venv/bin/python scripts/check_docs.py
+
+      - name: Check wiki pages render
+        run: mise run wiki:check
 
   config-sample-consistency:
     name: setup/sma-ng.yml.sample matches schema

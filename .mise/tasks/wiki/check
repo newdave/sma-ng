@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Verify every top-level doc maps to a wiki page and every relative link renders for the wiki (no network)"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+"$PY" scripts/wiki_sync.py check

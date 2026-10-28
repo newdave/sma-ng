@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#MISE description="Clone or reset the GitHub wiki checkout to the remote (SMA_WIKI_DIR, default /tmp/sma-wiki); local changes there are discarded"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+WIKI_DIR="${SMA_WIKI_DIR:-/tmp/sma-wiki}"
+origin="$(git remote get-url origin)"
+WIKI_URL="${SMA_WIKI_URL:-${origin%.git}.wiki.git}"
+
+if [ -d "$WIKI_DIR/.git" ]; then
+  # The checkout is a generated mirror: wiki:build rewrites every page, so a
+  # previous build or dry run is thrown away rather than merged.
+  branch="$(git -C "$WIKI_DIR" rev-parse --abbrev-ref HEAD)"
+  git -C "$WIKI_DIR" fetch --quiet origin
+  git -C "$WIKI_DIR" reset --quiet --hard "origin/$branch"
+  git -C "$WIKI_DIR" clean --quiet -fd
+else
+  git clone --quiet "$WIKI_URL" "$WIKI_DIR"
+fi
+echo "wiki checkout: $WIKI_DIR at $(git -C "$WIKI_DIR" rev-parse --short HEAD)"

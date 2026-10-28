@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Regenerate the wiki pages from docs/, openapi.yaml and mise task descriptions into the wiki checkout (pass --prune to drop unmanaged pages)"
+#MISE depends=["wiki:pull"]
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+WIKI_DIR="${SMA_WIKI_DIR:-/tmp/sma-wiki}"
+"$PY" scripts/wiki_sync.py build --out "$WIKI_DIR" "$@"
+git -C "$WIKI_DIR" status --short
