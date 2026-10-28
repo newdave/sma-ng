@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Start a Claude Code session through omnigent with smart routing (model picked per session, subagents on cheaper models)"
+set -euo pipefail
+
+if ! command -v omni >/dev/null 2>&1; then
+  echo "dev:agent: omni not found; install omnigent (uv tool install omnigent) and run 'omni setup'" >&2
+  exit 1
+fi
+
+exec omni claude --smart-routing "$@"

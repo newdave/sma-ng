@@ -29,6 +29,7 @@ curl https://mise.run | sh
 | `mise run dev:lint`      | Run the ruff linter and auto-fix issues                  |
 | `mise run dev:format`    | Format Python code with ruff                             |
 | `mise run dev:precommit` | Run pre-commit checks against all files                  |
+| `mise run dev:agent`     | Start a Claude Code session through omnigent (`omni`) with smart routing; extra arguments go to `omni claude` |
 | `mise run test:openapi`  | Validate `docs/openapi.yaml`                             |
 | `mise run test`          | Run the test suite (daemon tests require `TEST_DB_URL`)  |
 | `mise run test:run`      | Same as `mise run test` (the task behind the alias)      |
