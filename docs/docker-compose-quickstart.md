@@ -130,29 +130,20 @@ Put daemon/container settings in `/opt/sma/config/daemon.env` instead.
 
 ## 6. Install the `sma` Host Command
 
-`sma` is one POSIX `sh` script shipped inside the image, so it always matches the image version. Install it on the
-Docker host (no sourcing needed; works from `sh`, `bash`, `zsh`, cron, and `ssh host sma ...`):
+`sma` runs SMA-NG's tools (convert, preview, repair, audit, rename) from the Docker host. Install it with the one-line
+installer, which needs only Docker:
 
 ```bash
-# Copies the script out of the image without running it. `latest` is linux/amd64 only; --platform lets an arm64
-# host fetch it too (the script is architecture-independent).
-id=$(docker create --platform linux/amd64 ghcr.io/newdave/sma-ng:latest)
-sudo docker cp "$id":/usr/local/bin/sma-host /usr/local/bin/sma
-docker rm "$id"
+curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.sh | sh
 ```
 
-`mise run setup:docker:target` also installs it to `/usr/local/bin/sma` from the repo checkout. Once the container
-is running, `sudo docker cp sma-ng:/usr/local/bin/sma-host /usr/local/bin/sma` installs the exact running version.
+Each `sma` command runs in its own throwaway container that mounts exactly the paths you name and reads the same
+`/opt/sma/config/sma-ng.yml` as the daemon, so it works alongside a running daemon. Paths no longer have to sit
+under the daemon's `/mnt`, `/transcode` and `/recycle` mounts. See the [`sma` CLI Quick Start](sma-cli-quickstart.md)
+for every command, what gets mounted, exit codes and upgrading.
 
-See the [`sma` CLI Quick Start](sma-cli-quickstart.md) for the command list, path rules, scripting and cron, exit
-codes, choosing a container and troubleshooting.
-
-### One path per file
-
-Pass the same path you see on the host. `/mnt`, `/transcode`, and `/recycle` are mounted at identical paths; `/config`,
-`/logs`, and `/data` are container-only (use `sma shell` to inspect them). `sma` rejects any host path that is not
-under a mount whose host and container paths match, with exit code `2` and a single-line error, before running
-anything.
+The daemon itself still uses the compose mounts above: webhook paths must be visible at the same path inside the
+daemon container, so keep media under `/mnt` (or add mounts) for Sonarr, Radarr and other integrations.
 
 ### Migrating from the alias file
 
