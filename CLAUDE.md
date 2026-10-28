@@ -206,6 +206,15 @@ Multi-provider sessions run through omnigent (`omni`):
   native subagent spawns (`Task`) are routed to a cheaper model when the task allows. Routing fails open, so a
   routing outage only means the inherited model is used.
 - `omni usage` shows usage and cost across providers.
+- `mise run dev:team` runs the agent team in `.omnigent/agents/team/` (modelled on omnigent's bundled `polly`).
+  - The manager plans and never edits code.
+  - `architect` is read-only by policy (`read_only_os`).
+  - `engineer_a` and `engineer_b` implement in `.worktrees/<task>` and review each other's saved diffs, using a
+    different model from the implementer.
+  - Every change lands as a PR for a human to merge.
+  - Sub-agents run headless with `permission_mode: auto`, bounded by the `blast_radius` guardrail.
+  - A Codex engineer would need `yolo: true` (no approvals, no sandbox), so it is left out on purpose.
+  - Check edits with omnigent's spec validator (`omnigent.spec.load` plus `validate`) before running them.
 
 ### Activation Routing
 

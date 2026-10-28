@@ -110,3 +110,5 @@ Multi-provider sessions run through omnigent (`omni`). `.omnigent/config.yaml` h
 (`claude`); providers and credentials stay in the user's `~/.omnigent/config.yaml`. `mise run dev:agent` starts
 `omni claude --smart-routing` (model picked from the first prompt, subagents routed to cheaper models, fail-open);
 use `omni codex --smart-routing` for a routed Codex session and `omni usage` for cost across providers.
+`mise run dev:team` runs the team in `.omnigent/agents/team/`: a manager that never edits code, a read-only
+architect and two Claude engineers that cross-review each other in `.worktrees/<task>`; every change is a PR.
