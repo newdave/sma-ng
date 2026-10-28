@@ -66,12 +66,12 @@ container. No daemon features.
 - **Dependencies**: none
 - **Size**: S
 - **Acceptance criteria**:
-  - [ ] Given a Plan with args and optmount items, when serialized, then items keep their order and the output
+  - [x] Given a Plan with args and optmount items, when serialized, then items keep their order and the output
     starts with `sma-plan 1`.
-  - [ ] Given args with spaces, quotes, globs or a leading dash, when serialized, then each is preserved verbatim
+  - [x] Given args with spaces, quotes, globs or a leading dash, when serialized, then each is preserved verbatim
     on its own `arg` line.
-  - [ ] Given a value containing `\n` or `\0`, when added, then `PlanError` is raised (maps to exit 5).
-  - [ ] Given a step whose subcommand is not allow-listed (`run pull rm stop logs compose exec create cp inspect`),
+  - [x] Given a value containing `\n` or `\0`, when added, then `PlanError` is raised (maps to exit 5).
+  - [x] Given a step whose subcommand is not allow-listed (`run pull rm stop logs compose exec create cp inspect`),
     when built, then `PlanError` is raised.
 - **Validation**: `python -m pytest tests/test_cli_plan.py -q`
 
@@ -82,10 +82,10 @@ container. No daemon features.
 - **Dependencies**: P1-T1 (PlanError)
 - **Size**: S
 - **Acceptance criteria**:
-  - [ ] Given a complete env and an argstat file of `<index>\t<d|f|->\t<abspath>` lines, when parsed, then
+  - [x] Given a complete env and an argstat file of `<index>\t<d|f|->\t<abspath>` lines, when parsed, then
     `HostFacts` carries typed `ArgStat` entries, `dri_gids` as ints and booleans for tty/nvidia/rootless/selinux.
-  - [ ] Given a missing or malformed variable, when parsed, then `PlanError` names that variable.
-  - [ ] Given no `daemon.json`, when parsed, then `daemon_container` is `None`; given one, it is the first inspect
+  - [x] Given a missing or malformed variable, when parsed, then `PlanError` names that variable.
+  - [x] Given no `daemon.json`, when parsed, then `daemon_container` is `None`; given one, it is the first inspect
     object.
 - **Validation**: `python -m pytest tests/test_cli_hostfacts.py -q`
 
@@ -96,15 +96,15 @@ container. No daemon features.
 - **Dependencies**: P1-T2
 - **Size**: M
 - **Acceptance criteria**:
-  - [ ] Given argstat kind `d`, `f` and `-`, when computing required mounts, then `d` mounts the directory, `f`
+  - [x] Given argstat kind `d`, `f` and `-`, when computing required mounts, then `d` mounts the directory, `f`
     mounts its parent, and `-` raises UsageError (exit 2) `sma: <arg>: no such file or directory`.
-  - [ ] Given `/` or a path containing `:`, when computing mounts, then it is refused with exit 2.
-  - [ ] Given a config with `output-directory`, `move-to`, `copy-to`, `recycle-bin` and analyzer dirs, when
+  - [x] Given `/` or a path containing `:`, when computing mounts, then it is refused with exit 2.
+  - [x] Given a config with `output-directory`, `move-to`, `copy-to`, `recycle-bin` and analyzer dirs, when
     collected, then each absolute path becomes an optional mount (the `optmount` line); a `ConfigError` gives exit 2
     with the message.
-  - [ ] Given duplicate and nested paths, when deduped, then exact duplicates and paths nested under another are
+  - [x] Given duplicate and nested paths, when deduped, then exact duplicates and paths nested under another are
     dropped and required wins over optional.
-  - [ ] Given a new path-like `ConverterConfig` field name (dir/directory/path/move/copy/recycle), when the guard
+  - [x] Given a new path-like `ConverterConfig` field name (dir/directory/path/move/copy/recycle), when the guard
     test runs, then it fails until the field is in the collector or an explicit ignore list.
 - **Validation**: `python -m pytest tests/test_cli_mounts.py -q`
 
@@ -115,15 +115,15 @@ container. No daemon features.
 - **Dependencies**: P1-T1, P1-T2, P1-T3
 - **Size**: L
 - **Acceptance criteria**:
-  - [ ] Given `repair /a` with uid 1000, when planned, then the final step is `run --rm --label sma.throwaway=1
+  - [x] Given `repair /a` with uid 1000, when planned, then the final step is `run --rm --label sma.throwaway=1
     -w /app --user 1000:1000 -e HOME=/tmp ... -v /a:/a IMAGE run python repair.py /a` and no `-c` is passed.
-  - [ ] Given rootless Docker or uid 0, when planned, then `--user` is omitted; given SELinux, then required mounts
+  - [x] Given rootless Docker or uid 0, when planned, then `--user` is omitted; given SELinux, then required mounts
     carry `:z`.
-  - [ ] Given DRI gids `44,993` and NVIDIA, when planned, then `--device /dev/dri`, `--group-add 44`,
+  - [x] Given DRI gids `44,993` and NVIDIA, when planned, then `--device /dev/dri`, `--group-add 44`,
     `--group-add 993` and `--gpus all` appear.
-  - [ ] Given logs not writable, when planned, then `--tmpfs /app/logs` replaces the logs bind mount; the config
+  - [x] Given logs not writable, when planned, then `--tmpfs /app/logs` replaces the logs bind mount; the config
     dir is mounted at `/app/config:ro`.
-  - [ ] Given `convert A B`, when planned, then there is one docker step per path with the last exec'd; `-t` is
+  - [x] Given `convert A B`, when planned, then there is one docker step per path with the last exec'd; `-t` is
     present only when `facts.tty`.
 - **Validation**: `python -m pytest tests/test_cli_throwaway.py -q`
 
@@ -135,11 +135,11 @@ container. No daemon features.
 - **Dependencies**: P1-T4
 - **Size**: M
 - **Acceptance criteria**:
-  - [ ] Given `convert preview repair audit rename codecs shell version help` with `--local`, `--mount`, `-q`, when
+  - [x] Given `convert preview repair audit rename codecs shell version help` with `--local`, `--mount`, `-q`, when
     parsed, then each dispatches to the matching plan builder and writes `/plan/plan`.
-  - [ ] Given a Phase 2 or 3 command, when run, then it exits 2 with `not available in this version`.
-  - [ ] Given UsageError, Unreachable, AuthError and PlanError, when raised, then exit codes are 2, 3, 4 and 5.
-  - [ ] Given `sma version`, when run, then it prints the client version and exits 0.
+  - [x] Given a Phase 2 or 3 command, when run, then it exits 2 with `not available in this version`.
+  - [x] Given UsageError, Unreachable, AuthError and PlanError, when raised, then exit codes are 2, 3, 4 and 5.
+  - [x] Given `sma version`, when run, then it prints the client version and exits 0.
 - **Validation**: `python -m pytest tests/test_cli_commands.py -q`
 
 ### P1-T6: Bootstrap shell script
@@ -150,15 +150,15 @@ container. No daemon features.
 - **Dependencies**: P1-T1 (protocol); integration assertions need P1-T5
 - **Size**: L
 - **Acceptance criteria**:
-  - [ ] Given arguments with spaces, `$()`, `;` and `*`, when run, then argstat and the executed docker argv carry
+  - [x] Given arguments with spaces, `$()`, `;` and `*`, when run, then argstat and the executed docker argv carry
     them verbatim (no eval) and the plan dir is removed before steps run.
-  - [ ] Given a plan whose first line is not `sma-plan 1`, when read, then it exits 5 with
+  - [x] Given a plan whose first line is not `sma-plan 1`, when read, then it exits 5 with
     `plan version X unsupported; run sma upgrade`.
-  - [ ] Given `optmount /x` lines, when `/x` exists then `-v /x:/x` (plus `:z` under SELinux) is added, and when
+  - [x] Given `optmount /x` lines, when `/x` exists then `-v /x:/x` (plus `:z` under SELinux) is added, and when
     absent then nothing is added.
-  - [ ] Given multi-step plans, when run, then steps run in order, a non-zero step aborts with its code, and the
+  - [x] Given multi-step plans, when run, then steps run in order, a non-zero step aborts with its code, and the
     last step is `exec`'d; a non-allow-listed docker subcommand is refused.
-  - [ ] Given `sma upgrade [TAG]`, when run, then it pulls the image, copies the bootstrap out via create/cp/rm,
+  - [x] Given `sma upgrade [TAG]`, when run, then it pulls the image, copies the bootstrap out via create/cp/rm,
     replaces `$0` (non-writable gives a `sudo sma upgrade` hint and exit 2) and rewrites `~/.config/sma/image`.
 - **Validation**: `python -m pytest tests/test_sma_host.py -q`; `mise run test:shell`
 
@@ -169,14 +169,14 @@ container. No daemon features.
 - **Dependencies**: P1-T6
 - **Size**: M
 - **Acceptance criteria**:
-  - [ ] Given Docker is missing or `docker info` fails, when run, then it exits non-zero with a one-line reason.
-  - [ ] Given arm64, when no tag is given, then it resolves the latest release tag via the GitHub API; `--tag` or
+  - [x] Given Docker is missing or `docker info` fails, when run, then it exits non-zero with a one-line reason.
+  - [x] Given arm64, when no tag is given, then it resolves the latest release tag via the GitHub API; `--tag` or
     `SMA_IMAGE_TAG` overrides on any arch.
-  - [ ] Given a fresh host, when run (also piped as `sh -s --`), then it pulls the image, installs `sma` to
+  - [x] Given a fresh host, when run (also piped as `sh -s --`), then it pulls the image, installs `sma` to
     `/usr/local/bin` (or `~/.local/bin` with a PATH warning), writes `~/.config/sma/image` for the invoking user
     and seeds `$SMA_HOME/{config,logs,data}` plus a sample `sma-ng.yml` only if missing.
-  - [ ] Given a second run, when repeated, then it is idempotent and does not overwrite existing config.
-  - [ ] Given `--daemon`, when run before Phase 3, then it prints that daemon setup is not yet available.
+  - [x] Given a second run, when repeated, then it is idempotent and does not overwrite existing config.
+  - [x] Given `--daemon`, when run before Phase 3, then it prints that daemon setup is not yet available.
 - **Validation**: `python -m pytest tests/test_install_smang.py -q`; `mise run test:shell`
 
 ### P1-T8: Image smoke coverage
@@ -187,8 +187,8 @@ container. No daemon features.
 - **Size**: S
 - **Acceptance criteria**:
   - [ ] Given the built image, when the smoke task runs, then `python -m resources.cli version` exits 0.
-  - [ ] Given `scripts/docker_smoke_imports.py`, when run, then it imports `resources.cli` successfully.
-  - [ ] Given the Dockerfile, when inspected, then no change is made unless `COPY . .` fails to include the package.
+  - [x] Given `scripts/docker_smoke_imports.py`, when run, then it imports `resources.cli` successfully.
+  - [x] Given the Dockerfile, when inspected, then no change is made unless `COPY . .` fails to include the package.
 - **Validation**: `mise run build:smoke` (ask the operator before running containers); `mise run test:shell`
 
 ### P1-T9: Phase 1 documentation
@@ -198,11 +198,11 @@ container. No daemon features.
 - **Dependencies**: P1-T5, P1-T6, P1-T7 (docs land in those commits)
 - **Size**: M
 - **Acceptance criteria**:
-  - [ ] Given the quickstart, when read, then it documents the curl install, throwaway runs, mount rules, GPU
+  - [x] Given the quickstart, when read, then it documents the curl install, throwaway runs, mount rules, GPU
     flags, exit codes 0-5 and 130, `sma upgrade` and troubleshooting.
-  - [ ] Given the compose quickstart and README, when read, then install steps point to `install-smang.sh`.
-  - [ ] Given the docs, when searched, then no identity-mount wording remains for throwaway runs.
-  - [ ] Given `mise run docs:check`, when run, then it passes with markdownlint clean at 120 columns.
+  - [x] Given the compose quickstart and README, when read, then install steps point to `install-smang.sh`.
+  - [x] Given the docs, when searched, then no identity-mount wording remains for throwaway runs.
+  - [x] Given `mise run docs:check`, when run, then it passes with markdownlint clean at 120 columns.
 - **Validation**: `mise run docs:check`
 
 ### P1-RC: Phase 1 release checkpoint
@@ -211,12 +211,12 @@ container. No daemon features.
 - **Dependencies**: P1-T1 through P1-T9
 - **Size**: S
 - **Acceptance criteria**:
-  - [ ] Given all Phase 1 changes, when the suite runs, then `ruff check`, `mise run test:lint`,
+  - [x] Given all Phase 1 changes, when the suite runs, then `ruff check`, `mise run test:lint`,
     `mise run test:shell`, `python -m pytest tests/test_cli_*.py tests/test_sma_host.py
     tests/test_install_smang.py -q` and `python -m pytest tests/test_docker.py tests/test_entrypoint.py -q` pass.
-  - [ ] Given coverage, when `mise run test:cov` runs, then global >= 90% and every module with >= 100 statements
+  - [x] Given coverage, when `mise run test:cov` runs, then global >= 90% and every module with >= 100 statements
     is >= 70%.
-  - [ ] Given docs, when `mise run docs:check` runs, then it passes; docs were updated in the same commits as the
+  - [x] Given docs, when `mise run docs:check` runs, then it passes; docs were updated in the same commits as the
     behaviour.
   - [ ] Given the commit history, when reviewed, then commits are conventional and split by behaviour (for example
     `feat(cli): plan protocol and client`, `feat(sma-host): bootstrap`, `feat(install): CLI-first installer`),

@@ -154,11 +154,12 @@ mise run setup:docker:target
 
 This creates `/opt/sma/config`, `/opt/sma/logs`, `/opt/sma/cache`, `/opt/sma/data`, and `/transcode/sma`, then seeds
 `/opt/sma/config/sma-ng.yml` and `/opt/sma/config/daemon.env` if they are missing. It also installs the
-`sma` host command to `/usr/local/bin/sma` (override with `SMA_BIN_PATH`); use `sma convert`, `sma preview`,
-`sma repair`, `sma rename`, `sma audit`, `sma codecs`, `sma logs`, and `sma shell` from the host (see
-[docker-compose-quickstart.md](docker-compose-quickstart.md)). `/opt/sma/sma-ng-docker-aliases.sh` is still written
-but is a deprecated shim over `sma` and will be removed in a later release. The `/downloads` compose mount is gone:
-add `path-rewrites: [{from: /downloads, to: /mnt/unionfs/downloads}]` if download clients report `/downloads/...`.
+`sma` host command to `/usr/local/bin/sma` (override with `SMA_BIN_PATH`). Without a checkout, install `sma` with
+`curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.sh | sh`; its commands run in
+throwaway containers (see [sma-cli-quickstart.md](sma-cli-quickstart.md)).
+`/opt/sma/sma-ng-docker-aliases.sh` is still written but is a deprecated shim over `sma` and will be removed in a
+later release. The `/downloads` compose mount is gone: add
+`path-rewrites: [{from: /downloads, to: /mnt/unionfs/downloads}]` if download clients report `/downloads/...`.
 
 Override the default host paths when your compose mounts differ:
 
