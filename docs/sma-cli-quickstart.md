@@ -184,6 +184,9 @@ answer is an error (exit `3`); with no target chosen, `sma` falls back to a thro
 uses a throwaway container, with a warning when a daemon is running, because both would compete for the GPU and the
 same files.
 
+The local daemon reads the same `sma-ng.yml`, so `sma` sends its `daemon.api-key` to the `local` target without a
+`sma target add` step. A key saved for `local` with `sma target add local URL --api-key-stdin` takes precedence.
+
 ```bash
 sma repair -n /mnt/media/TV        # job on the local daemon, output streamed until it finishes
 sma --no-wait convert ~/a.mkv      # print the job id and return
@@ -282,7 +285,7 @@ and recreates it with the compose file's image tag. Mounts and ports then stay i
 | ------- | --- |
 | `sma: cannot talk to Docker` (exit `3`) | Start Docker, or add yourself to the `docker` group |
 | `target ... is not reachable` (exit `3`) | Check the URL with `sma target list`; is the daemon running? |
-| `rejected the API key` (exit `4`) | `sma target add NAME URL --api-key-stdin` with the daemon's `daemon.api-key` |
+| `rejected the API key` (exit `4`) | `sma target add NAME URL --api-key-stdin` with the daemon's `daemon.api-key`; for `local`, check `$SMA_HOME/config/sma-ng.yml` is readable by you |
 | `... is not under any path target X serves` (exit `2`) | Add a mapping: `sma map add X LOCAL REMOTE` |
 | `does not support repair jobs; upgrade all nodes` | A cluster node runs an older release: upgrade every node |
 | `sma: X: no such file or directory` (exit `2`) | Check the path; it is resolved on the host before anything runs |

@@ -246,6 +246,22 @@ class TestRouting:
     with pytest.raises(UsageError, match="unknown target"):
       routing.resolve_target(cfg, flag="nope")
 
+  def test_local_target_uses_daemon_api_key(self, tmp_path, monkeypatch):
+    (tmp_path / "sma-ng.yml").write_text("daemon:\n  api-key: secret\n")
+    monkeypatch.setenv("SMA_CONFIG_DIR", str(tmp_path))
+    assert routing.resolve_target(ClientConfig()).target.api_key == "secret"
+    assert routing.resolve_target(ClientConfig(), flag="local").target.api_key == "secret"
+    saved = ClientConfig(targets={"local": Target("local", "http://127.0.0.1:8585", "mine")})
+    assert routing.resolve_target(saved).target.api_key == "mine"
+    nas = ClientConfig(targets={"nas": Target("nas", "http://nas")})
+    assert routing.resolve_target(nas, flag="nas").target.api_key is None
+
+  def test_local_target_without_daemon_config(self, tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_CONFIG_DIR", str(tmp_path))
+    assert routing.resolve_target(ClientConfig()).target.api_key is None
+    (tmp_path / "sma-ng.yml").write_text("daemon: [not, a, mapping]\n")
+    assert routing.resolve_target(ClientConfig()).target.api_key is None
+
   @pytest.mark.parametrize(
     "url,os_name,expected",
     [
