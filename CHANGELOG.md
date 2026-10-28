@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.2.14](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.13...sma-ng-v3.2.14) (2026-10-28)
+
+
+### Bug Fixes
+
+* **post-process:** submit samples to /webhook/generic; never run helpers as hooks ([f99c705](https://github.com/newdave/sma-ng/commit/f99c7050065512bd315a3fc43a15b9fdb743634b))
+
+
+### Documentation
+
+* **agents:** add repair, audit and host CLI paths and the stream-selection rule ([77769af](https://github.com/newdave/sma-ng/commit/77769af0626477aea215f8c0aafc4113e8582e32))
+* replace INI-era references with the YAML model and document new tooling ([396e368](https://github.com/newdave/sma-ng/commit/396e368879d22fbe4eebdb58a0725dffc0b8cd36))
+
 ## [3.2.13](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.12...sma-ng-v3.2.13) (2026-10-27)
 
 
