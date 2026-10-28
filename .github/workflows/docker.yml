@@ -62,7 +62,7 @@ jobs:
       github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     # Job-level so a call from release.yml does not share the caller's group.
     concurrency:
       group: docker-${{ inputs.version || github.event.pull_request.number || github.ref }}-plan
@@ -135,7 +135,7 @@ jobs:
     name: Build, test & push image (${{ matrix.arch }})
     needs: plan
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 20
     strategy:
       fail-fast: true
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -260,7 +260,7 @@ jobs:
     needs: [plan, build]
     if: needs.plan.outputs.push == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     concurrency:
       group: docker-${{ inputs.version || github.event.pull_request.number || github.ref }}-merge
       cancel-in-progress: false
