@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.2.18](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.17...sma-ng-v3.2.18) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ci:** build release images and gate the main image on CI ([e42134a](https://github.com/newdave/sma-ng/commit/e42134a195aa88f2b853eda9680676151f402a6d))
+
+
+### Documentation
+
+* deployment.md (CI table, release lifecycle, image tags), README tags. ([e42134a](https://github.com/newdave/sma-ng/commit/e42134a195aa88f2b853eda9680676151f402a6d))
+* none beyond the deployment.md CI table (next commit). ([ad33e3f](https://github.com/newdave/sma-ng/commit/ad33e3f4a4f61ca89a36c17a966dfb133bd95787))
+
 ## [3.2.17](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.16...sma-ng-v3.2.17) (2026-10-28)
 
 
