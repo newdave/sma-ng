@@ -285,8 +285,11 @@ class PathConfigManager:
   ``default_args`` was dropped in the four-bucket cutover.
   """
 
-  def __init__(self, config_file=None, logger=None):
+  def __init__(self, config_file=None, logger=None, persist_node_id=True):
     self.log = logger or log
+    # Only the daemon owns a cluster identity; CLI tools that borrow this class
+    # for routing (repair.py, rename.py) must not write one into sma-ng.yml.
+    self._persist_node_id = persist_node_id
     self.path_rewrites = []
     self.default_config = DEFAULT_PROCESS_CONFIG
     self.default_args = []
@@ -454,7 +457,7 @@ class PathConfigManager:
       node_id = self._node_id
     else:
       node_id = str(uuid.uuid4())
-      if config_file:
+      if config_file and self._persist_node_id:
         _write_node_id_to_yaml(config_file, node_id)
     # Keep self._node_id in sync with the resolved identity so the
     # ``node_id`` property and resolve_node_id() agree.
