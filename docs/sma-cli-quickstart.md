@@ -22,8 +22,11 @@ The installer:
   published for linux/amd64 only;
 - installs `sma` to `/usr/local/bin` (using `sudo` if needed), or `~/.local/bin` when it cannot;
 - records the image in `~/.config/sma/image`;
-- creates `/opt/sma/config`, `/opt/sma/logs` and `/opt/sma/data`, owned by you, plus a sample
-  `/opt/sma/config/sma-ng.yml` if none exists.
+- creates the data directory `SMA_HOME` with `config/`, `logs/` and `data/`, owned by you, plus a sample
+  `config/sma-ng.yml` if none exists. `SMA_HOME` is `/opt/sma` on Linux and `~/.local/share/sma` on macOS
+  (`$XDG_DATA_HOME/sma` when that is set); nothing is created under `/opt` on a Mac.
+
+The rest of this guide writes `/opt/sma` for the data directory; on macOS read `~/.local/share/sma`.
 
 Re-running it is safe; existing config is never overwritten.
 
@@ -31,7 +34,7 @@ Re-running it is safe; existing config is never overwritten.
 | ------ | ----------- | ------- | ------- |
 | `--tag TAG` | `SMA_IMAGE_TAG` | `latest` (release on arm64) | Image tag to install |
 | `--bin-dir DIR` | `SMA_BIN_DIR` | `/usr/local/bin` | Where `sma` goes |
-| | `SMA_HOME` | `/opt/sma` | Directory holding `config/`, `logs/`, `data/` |
+| | `SMA_HOME` | `/opt/sma` (macOS: `~/.local/share/sma`) | Directory holding `config/`, `logs/`, `data/` |
 
 Pass options through the pipe with `sh -s --`:
 
@@ -163,7 +166,7 @@ somewhere you cannot write, it tells you to run `sudo sma upgrade`.
 | -------- | ------- | ------- |
 | `SMA_TARGET` | `default-target` | Daemon target for this command |
 | `SMA_IMAGE` | `~/.config/sma/image` | Image to run for this command |
-| `SMA_HOME` | `/opt/sma` | Directory holding `config/`, `logs/`, `data/` |
+| `SMA_HOME` | `/opt/sma` (macOS: `~/.local/share/sma`) | Directory holding `config/`, `logs/`, `data/` |
 | `SMA_CONFIG_HOME` | `~/.config/sma` | Client settings |
 | `DOCKER_BIN` | `docker` | Docker executable |
 

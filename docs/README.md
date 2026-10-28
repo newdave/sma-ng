@@ -383,7 +383,8 @@ sma upgrade                              # update the image and sma together
 ```
 
 - Each command runs in a throwaway container that mounts the paths you name (anywhere on the host), the directories
-  `sma-ng.yml` writes to, and `/opt/sma/config`, then removes itself.
+  `sma-ng.yml` writes to, and the config directory (`/opt/sma/config`; `~/.local/share/sma/config` on macOS),
+  then removes itself.
 - It runs as your user, with `/dev/dri` and NVIDIA GPUs passed through when present.
 - Exit codes: the tool's own code, `2` bad path or usage, `3` Docker unreachable, `5` run `sma upgrade`.
 
