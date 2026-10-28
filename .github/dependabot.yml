@@ -1,22 +1,40 @@
 version: 2
 updates:
+  # Actions are SHA-pinned with a version comment; one grouped PR per week.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
     commit-message:
       prefix: "chore(deps)"
 
+  # Base image digest in docker/Dockerfile (literal FROM lines so Dependabot
+  # can update them; keep all three stages on the same digest).
   - package-ecosystem: docker
     directory: /docker
     schedule:
       interval: weekly
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "chore(deps)"
 
+  # pyproject.toml (/) and setup/requirements*.txt (/setup) must move together:
+  # tests/test_requirements_sync.py fails if they drift. Runtime bumps use
+  # fix(deps) so release-please ships them; dev-only bumps stay chore(deps).
   - package-ecosystem: pip
-    directory: /
+    directories: ["/", "/setup"]
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-runtime:
+        dependency-type: production
+      python-dev:
+        dependency-type: development
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "fix(deps)"
+      prefix-development: "chore(deps)"
