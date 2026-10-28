@@ -119,6 +119,8 @@ class MediaStreamInfo:
     * fps - average frames per second
   Video-specific attributes are:
     * video_width - width of video in pixels
+    * dv_profile - Dolby Vision profile from the container's DOVI
+      configuration record, or None when the container signals none
     * video_height - height of video in pixels
     * sample_aspect_ratio - pixel aspect ratio as reported by ffprobe
       (e.g. "1:1", "135:136"), or None when not reported
@@ -144,6 +146,7 @@ class MediaStreamInfo:
     self.profile = None
     self.audio_channels = None
     self.audio_samplerate = None
+    self.dv_profile = None
     self.attached_pic = None
     self.field_order = None
     self.metadata = {}
@@ -273,6 +276,10 @@ class MediaStreamInfo:
       self.audio_channels = self.parse_int(val)
     elif key == "sample_rate":
       self.audio_samplerate = self.parse_int(val)
+    elif key == "dv_profile":
+      # From the stream's "DOVI configuration record" side data: the container
+      # signals Dolby Vision (MP4 dvcC/dvvC box, Matroska block addition mapping).
+      self.dv_profile = self.parse_int(val)
     elif key == "DISPOSITION:attached_pic":
       self.attached_pic = self.parse_int(val)
     elif key == "profile":

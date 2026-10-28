@@ -86,6 +86,13 @@ class TestStreamParseFfprobe:
     # parse_ffprobe collapses sub-1000 bps reads to None (likely garbage).
     assert s.bitrate is None
 
+  def test_dv_profile_from_dovi_configuration_record(self):
+    s = MediaStreamInfo()
+    assert s.dv_profile is None
+    s.parse_ffprobe("side_data_type", "DOVI configuration record")
+    s.parse_ffprobe("dv_profile", "8")
+    assert s.dv_profile == 8
+
   def test_sample_aspect_ratio_defaults_to_none(self):
     assert MediaStreamInfo().sample_aspect_ratio is None
 
