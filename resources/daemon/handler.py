@@ -19,8 +19,10 @@ from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase
 from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html, doc_file_for_slug
 
 __all__ = ["WebhookHandler", "_inline"]
+from resources.daemon import job_kinds
+from resources.daemon.db import JOB_OUTPUT_COLUMNS
 from resources.daemon.routes import dispatch_get, dispatch_post, dispatch_post_job_action
-from resources.daemon.webhook_parsing import arr_payload_paths, parse_generic_webhook_body, parse_radarr_body, parse_sonarr_body
+from resources.daemon.webhook_parsing import arr_payload_paths, parse_generic_webhook_body, parse_jobs_body, parse_radarr_body, parse_sonarr_body
 
 if TYPE_CHECKING:
   from resources.daemon.server import DaemonServer
@@ -104,6 +106,20 @@ class _NullWriter:
 
   def flush(self):
     pass
+
+
+# Queue priority for preview jobs submitted without one: a plan is quick and someone is waiting for it.
+PREVIEW_PRIORITY = 100
+
+
+def _public_job(job):
+  """Shape a job row for API responses: always a kind, never the stored output."""
+  job.setdefault("kind", job_kinds.DEFAULT_KIND)
+  if not job.get("kind"):
+    job["kind"] = job_kinds.DEFAULT_KIND
+  for column in JOB_OUTPUT_COLUMNS:
+    job.pop(column, None)
+  return job
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
@@ -347,6 +363,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       offset=offset,
     )
     for job in jobs:
+      _public_job(job)
       if job.get("config"):
         job["log_name"] = os.path.splitext(os.path.basename(job["config"]))[0]
     self.send_json_response(200, {"jobs": jobs, "count": len(jobs), "limit": limit, "offset": offset})
@@ -356,6 +373,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
       job_id = int(path.split("/")[-1])
       job = self.server.job_db.get_job(job_id)
       if job:
+        _public_job(job)
         if job.get("status") == STATUS_RUNNING:
           job["progress"] = self.server._job_progress.get(job_id)
         self.send_json_response(200, job)
@@ -395,6 +413,60 @@ class WebhookHandler(BaseHTTPRequestHandler):
     self.send_header("Content-Length", str(len(body)))
     self.end_headers()
     self.wfile.write(body)
+
+  def _get_job_output(self, path, query):
+    """Return a job's captured tool output from a byte offset, as plain text.
+
+    Path: /jobs/<id>/output?offset=N. Offsets count bytes of the job's whole
+    output stream; the daemon keeps only the newest 1 MiB, so an offset older
+    than X-Output-Dropped starts at the oldest byte still stored. Poll with
+    the returned X-Next-Offset to follow a running job.
+    """
+    parts = path.strip("/").split("/")
+    if len(parts) != 3 or parts[0] != "jobs" or parts[2] != "output":
+      self.send_json_response(404, {"error": "Not found"})
+      return
+    try:
+      job_id = int(parts[1])
+    except ValueError:
+      self.send_json_response(400, {"error": "Invalid job ID"})
+      return
+    try:
+      offset = int(query.get("offset", ["0"])[0])
+    except ValueError:
+      offset = -1
+    if offset < 0:
+      self.send_json_response(400, {"error": "offset must be a non-negative integer"})
+      return
+    stored = self.server.job_db.get_job_output(job_id)
+    if stored is None:
+      self.send_json_response(404, {"error": "Job not found"})
+      return
+    text, dropped = stored
+    data = text.encode("utf-8")
+    body = data[max(offset - dropped, 0) :]
+    self.send_response(200)
+    self.send_header("Content-Type", "text/plain; charset=utf-8")
+    self.send_header("Content-Length", str(len(body)))
+    self.send_header("X-Next-Offset", str(dropped + len(data)))
+    self.send_header("X-Output-Dropped", str(dropped))
+    self.end_headers()
+    self.wfile.write(body)
+
+  def _get_paths(self):
+    """Path roots this daemon serves, so clients can reject paths it cannot see."""
+    pcm = self.server.path_config_manager
+    roots = set()
+    getter = getattr(pcm, "routing_match_paths", None)
+    if callable(getter):
+      roots.update(p for p in getter() if isinstance(p, str))
+    for entries, key in ((getattr(pcm, "scan_paths", None), "path"), (getattr(pcm, "audit_paths", None), "path"), (getattr(pcm, "path_rewrites", None), "from")):
+      for entry in entries or []:
+        value = entry.get(key) if isinstance(entry, dict) else None
+        if isinstance(value, str) and value:
+          roots.add(value)
+    cleaned = sorted({r.rstrip("/") or "/" for r in roots if r.startswith("/")})
+    self.send_json_response(200, {"roots": cleaned})
 
   def _get_browse(self, query):
     """List directories and media files under a path, constrained to configured roots."""
@@ -1658,6 +1730,85 @@ class WebhookHandler(BaseHTTPRequestHandler):
     except Exception as e:
       self.server.logger.exception("Error handling Radarr webhook: %s" % e)
       self.send_json_response(500, {"error": str(e)})
+
+  def _post_jobs(self):
+    """Queue a job of any kind: POST /jobs {"kind", "path", "args", "profile", "priority"}.
+
+    ``convert`` behaves exactly like POST /convert (directories expand per
+    file). Other kinds queue one job for the path as given, without the
+    convert-only default args or same-extension skip.
+    """
+    body = self.rfile.read(self._content_length()).decode("utf-8").strip()
+    req = parse_jobs_body(body, self.send_json_response)
+    if req is None:
+      return
+    try:
+      kind = job_kinds.get(req["kind"])
+    except KeyError:
+      self.send_json_response(400, {"error": "Unknown job kind %r" % req["kind"], "kinds": list(job_kinds.SUPPORTED_KINDS)})
+      return
+    bad = job_kinds.forbidden_arg(req["args"])
+    if bad:
+      self.send_json_response(400, {"error": "Argument %s is set by the daemon and cannot be passed" % bad})
+      return
+    override = (self.headers.get("X-SMA-Request-Source") or "").strip().lower()
+    request_source = override if override in metrics_prom.REQUEST_SOURCES else "cli"
+    args = list(req["args"])
+    if kind.name == job_kinds.DEFAULT_KIND:
+      if req["profile"]:
+        args = self._merge_profile_arg(args, req["profile"])
+      self._dispatch_path(req["path"], args, None, 0, request_source=request_source)
+      return
+
+    if getattr(self.server.job_db, "is_distributed", False):
+      missing = self.server.job_db.nodes_missing_capability(job_kinds.CAPABILITY)
+      if missing:
+        self.send_json_response(
+          409,
+          {"error": "cluster node %s does not support %s jobs; upgrade all nodes" % (missing[0], kind.name), "node": missing[0], "nodes": missing},
+        )
+        return
+    pcm = self.server.path_config_manager
+    path = os.path.abspath(req["path"])
+    if not os.path.exists(path):
+      self.send_json_response(400, {"error": "Path does not exist", "path": path})
+      return
+    job_path = pcm.rewrite_path(path)
+    if pcm.is_recycle_bin_path(job_path):
+      self.send_json_response(400, {"error": "Path is inside a recycle-bin directory", "path": path})
+      return
+    if os.path.isdir(path) and not kind.directory_ok:
+      self.send_json_response(400, {"error": "%s needs a file, not a directory" % kind.name, "path": path})
+      return
+    config = self._resolve_config(job_path, None)
+    profile = req["profile"] or self._resolve_profile(job_path, None)
+    if kind.uses_profile:
+      args = self._merge_profile_arg(args, profile)
+    priority = req["priority"] if req["priority"] is not None else (PREVIEW_PRIORITY if kind.name == "preview" else 0)
+    job_id = self.server.job_db.add_job(
+      job_path,
+      config,
+      args,
+      request_source=request_source,
+      request_profile=profile,
+      kind=kind.name,
+      priority=priority,
+    )
+    if job_id is None:
+      existing = self.server.job_db.find_active_job(job_path, kind=kind.name)
+      self.send_json_response(200, {"status": "duplicate", "job_id": existing["id"] if existing else None, "kind": kind.name, "path": job_path})
+      return
+    self.server.notify_workers()
+    metrics_prom.record_job_enqueued(request_source, profile)
+    token = set_job_id(job_id)
+    try:
+      self.server.logger.info(
+        "Queued %s job %d: %s (config: %s)" % (kind.name, job_id, job_path, config),
+        extra={"job_id": job_id, "path": job_path, "config": os.path.basename(config)},
+      )
+    finally:
+      clear_job_id(token)
+    self.send_json_response(202, {"status": "queued", "job_id": job_id, "kind": kind.name, "path": job_path, "config": config, "profile": profile})
 
   def _handle_webhook(self):
     try:

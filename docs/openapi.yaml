@@ -26,11 +26,56 @@ components:
       scheme: bearer
 
   schemas:
+    JobSubmit:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: File or directory as the daemon sees it
+        kind:
+          type: string
+          enum: [convert, preview, repair, audit, rename]
+          default: convert
+        args:
+          description: Extra tool arguments; -c, --config, -i, --input and --job-id are rejected
+          oneOf:
+            - type: array
+              items:
+                type: string
+            - type: string
+        profile:
+          type: string
+          description: Profile for convert and preview; defaults to path routing
+        priority:
+          type: integer
+          description: Queue priority (default 0; preview 100)
+    GenericSubmit:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+        args:
+          oneOf:
+            - type: array
+              items:
+                type: string
+            - type: string
+        config:
+          type: string
+          description: Config override (bypasses path routing)
+        max_retries:
+          type: integer
     Job:
       type: object
       properties:
         id:
           type: integer
+        kind:
+          type: string
+          enum: [convert, preview, repair, audit, rename]
+          description: Which tool the job runs (see POST /jobs)
         path:
           type: string
         config:
@@ -357,6 +402,51 @@ paths:
                     type: integer
                   offset:
                     type: integer
+    post:
+      summary: Submit a job of any kind
+      description: >
+        convert behaves like POST /webhook/generic. Other kinds queue one job for
+        the path without the convert-only default args or same-extension skip;
+        preview needs a file. PostgreSQL clusters return 409 while an online node
+        lacks the job-kinds-v1 capability.
+      operationId: submitJob
+      tags: [jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobSubmit"
+      responses:
+        "200":
+          description: Duplicate (same path already pending or running) or skipped
+          content:
+            application/json:
+              schema:
+                type: object
+        "202":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  job_id:
+                    type: integer
+        "400":
+          description: Invalid request or path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: A cluster node does not support job kinds yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /jobs/{id}:
     get:
@@ -423,6 +513,78 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /jobs/{id}/output:
+    get:
+      summary: Read a job's captured tool output
+      description: >
+        Tool output without FFmpeg progress lines. The daemon keeps the newest
+        1 MiB per job. Offsets are byte positions in the job's whole output;
+        an offset older than X-Output-Dropped starts at the oldest stored byte.
+      operationId: getJobOutput
+      tags: [jobs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Output from the offset onwards
+          headers:
+            X-Next-Offset:
+              description: Offset to request next
+              schema:
+                type: integer
+            X-Output-Dropped:
+              description: Bytes discarded from the start of the output
+              schema:
+                type: integer
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Invalid job ID or offset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /paths:
+    get:
+      summary: Path roots this daemon serves
+      description: >
+        daemon.routing match prefixes, scan-paths, audit.paths and path-rewrites
+        sources. Clients use it to reject paths the daemon cannot see.
+      operationId: getPaths
+      tags: [jobs]
+      responses:
+        "200":
+          description: Path roots
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roots:
+                    type: array
+                    items:
+                      type: string
 
   /jobs/{id}/requeue:
     post:
@@ -634,6 +796,86 @@ paths:
                       type: integer
         "400":
           description: Invalid body or unknown action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /webhook/generic:
+    post:
+      summary: Submit a conversion job (file or directory)
+      description: Plain-text body (the path) or JSON. A directory queues one job per media file.
+      operationId: submitGeneric
+      tags: [jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenericSubmit"
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: Duplicate (same path already pending or running) or skipped
+          content:
+            application/json:
+              schema:
+                type: object
+        "202":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  job_id:
+                    type: integer
+        "400":
+          description: Invalid request or path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /convert:
+    post:
+      summary: Submit a conversion job (file or directory)
+      description: Plain-text body (the path) or JSON. A directory queues one job per media file.
+      operationId: submitConvert
+      tags: [jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenericSubmit"
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: Duplicate (same path already pending or running) or skipped
+          content:
+            application/json:
+              schema:
+                type: object
+        "202":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  job_id:
+                    type: integer
+        "400":
+          description: Invalid request or path
           content:
             application/json:
               schema:

@@ -66,6 +66,7 @@ REQUEST_SOURCES: tuple[str, ...] = (
   "webhook",
   "scan",
   "audit",
+  "cli",
   "unknown",
 )
 JOBS_ENQUEUED_TOTAL = Counter(
