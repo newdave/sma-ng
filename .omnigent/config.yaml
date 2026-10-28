@@ -1,0 +1,6 @@
+# Omnigent project defaults (overrides ~/.omnigent/config.yaml for this repo).
+# Projects may only set the default harness, model and default agent; providers,
+# credentials, harness arguments and the server stay in user config.
+# Start a routed session with `mise run dev:agent` (omni claude --smart-routing).
+harness:
+  default: claude

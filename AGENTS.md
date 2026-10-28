@@ -105,3 +105,8 @@ Say explicitly when the relevant validation could not be run.
 
 Codex treats `.claude/` as active compatibility configuration.
 When workflow rules change, update `CLAUDE.md` first, then sync this file and any Codex mirrors under `.codex/`.
+
+Multi-provider sessions run through omnigent (`omni`). `.omnigent/config.yaml` holds the project default harness
+(`claude`); providers and credentials stay in the user's `~/.omnigent/config.yaml`. `mise run dev:agent` starts
+`omni claude --smart-routing` (model picked from the first prompt, subagents routed to cheaper models, fail-open);
+use `omni codex --smart-routing` for a routed Codex session and `omni usage` for cost across providers.

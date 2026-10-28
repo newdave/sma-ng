@@ -197,6 +197,16 @@ Plugins and skills are scoped to this project:
   publishes the generated wiki after a `git push` of `main` that changed docs; `SMA_HOOK_WIKI_DRY_RUN=1` makes it
   a dry run.
 
+Multi-provider sessions run through omnigent (`omni`):
+
+- `.omnigent/config.yaml` is the project default (harness `claude`). Projects may set only the default harness,
+  `model` and `default_agent`; providers, credentials, harness arguments and the server stay in
+  `~/.omnigent/config.yaml`, which is global and needs the operator's explicit go-ahead to change.
+- `mise run dev:agent` runs `omni claude --smart-routing`: the server picks the model from the first prompt, and
+  native subagent spawns (`Task`) are routed to a cheaper model when the task allows. Routing fails open, so a
+  routing outage only means the inherited model is used.
+- `omni usage` shows usage and cost across providers.
+
 ### Activation Routing
 
 Prefer the installed skills and subagents over ad-hoc reasoning. Route by trigger, not by habit.

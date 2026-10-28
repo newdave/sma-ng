@@ -100,3 +100,7 @@ docker/.env
 # deploy:config staging dir (per-host generated sma-ng.yml before push)
 .deploy-staging/
 .gstack/
+
+# omnigent: keep only the committed project defaults
+.omnigent/*
+!.omnigent/config.yaml
