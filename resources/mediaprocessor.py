@@ -2023,6 +2023,9 @@ class MediaProcessor:
     except Exception:
       burnfilter = None
       self.log.exception("Encountered an error while trying to determine which subtitle stream for subtitle burn [burn-subtitle].")
+    if burnfilter and self.isDolbyVisionProfile5(info.video):
+      self.log.warning("Not burning subtitles into Dolby Vision profile 5 video: burning needs a re-encode, which would ruin its colours [dolby-vision-p5].")
+      burnfilter = None
     if burnfilter:
       self.log.debug("Found valid subtitle stream to burn into video, video cannot be copied [burn-subtitles].")
       video_settings["codec"] = vcodecs[0]
@@ -2049,7 +2052,10 @@ class MediaProcessor:
         self.log.info("Adding -strict experimental for mp4 muxing of %s [adaptive-strict-experimental]." % ", ".join(flagged_codecs))
         postopts.extend(["-strict", "experimental"])
 
-    if self.isDolbyVision(info.video.framedata):
+    # -strict unofficial lets the MP4 muxer write the Dolby Vision
+    # configuration box (dvcC/dvvC); detected from the first frame's RPU or
+    # the container's DOVI configuration record.
+    if self.isDolbyVision(info.video.framedata) or isinstance(getattr(info.video, "dv_profile", None), int):
       postopts.extend(["-strict", "unofficial"])
 
     if vcodec != "copy":
@@ -2136,8 +2142,11 @@ class MediaProcessor:
     postopts.extend(self.settings.postopts)
 
     if info.video.codec in ["x265", "h265", "hevc"] and vcodec == "copy":
-      postopts.extend(["-tag:v", "hvc1"])
-      self.log.info("Tagging copied video stream as hvc1")
+      # Profile 5 has no HEVC-compatible base layer, so it must be signalled
+      # as dvh1; players (Apple in particular) only engage Dolby Vision then.
+      tag = "dvh1" if self.isDolbyVisionProfile5(info.video) else "hvc1"
+      postopts.extend(["-tag:v", tag])
+      self.log.info("Tagging copied video stream as %s" % tag)
 
     return preopts, postopts
 
@@ -2374,6 +2383,20 @@ class MediaProcessor:
       vpreset = analyzer_recommendations.preset
       vdebug = vdebug + ".analyzer-preset"
 
+    # Dolby Vision profile 5 has no HDR10/SDR base layer: the picture is
+    # IPTPQc2 and only looks right once a player applies the RPU. A plain
+    # re-encode drops the RPU and bakes in a green/purple picture, so copy
+    # the stream instead, whatever asked for the re-encode.
+    dv_p5_copy = vcodec != "copy" and self.isDolbyVisionProfile5(info.video)
+    if dv_p5_copy:
+      self.log.warning(
+        "Source is Dolby Vision profile 5, which has no HDR10/SDR fallback layer; copying the video stream instead of re-encoding (%s) so its colours stay correct [dolby-vision-p5]."
+        % vdebug.lstrip(".")
+      )
+      vcodec = "copy"
+      vfilter = None
+      vdebug = vdebug + ".dv-p5-copy"
+
     vframedata = self.normalizeFramedata(info.video.framedata, hdrInput) if self.settings.dynamic_params else None
     if vpix_fmt and vframedata and "pix_fmt" in vframedata and vframedata["pix_fmt"] != vpix_fmt:
       self.log.debug("Pix_fmt is changing, will not preserve framedata")
@@ -2389,6 +2412,10 @@ class MediaProcessor:
     # (common for x265 SDR content) stay 10-bit through the encode
     # and avoid the banding caused by an unnecessary 10->8 downsample.
     hdrOutput = self.isHDROutput(vpix_fmt, bit_depth) and hdrInput
+    if dv_p5_copy:
+      # The copied stream is the source's, not the abandoned re-encode's: keep
+      # its HDR SEI (mastering display / content light) and HDR stream title.
+      hdrOutput = hdrInput
 
     vcolor_primaries, vcolor_transfer, vcolor_space = _resolve_hdr_color_tags(hdrInput, hdrOutput, self.settings.hdr)
 
@@ -3753,6 +3780,13 @@ class MediaProcessor:
       return framedata
     except Exception:
       return framedata
+
+  @staticmethod
+  def isDolbyVisionProfile5(video):
+    """True for an HEVC stream whose container signals Dolby Vision profile 5
+    (``dv_profile`` from the DOVI configuration record). Profile 5 has no
+    HDR10/SDR base layer, so it can be copied but never re-encoded."""
+    return video is not None and getattr(video, "dv_profile", None) == 5 and video.codec == "hevc"
 
   def isDolbyVision(self, framedata):
     """

@@ -230,6 +230,94 @@ class TestDolbyVisionWarning:
     assert any("[dolby-vision]" in w for w in warnings)
 
 
+def _dv_info(make_media_info, profile, codec="hevc"):
+  info = make_media_info(video_codec=codec)
+  info.video.dv_profile = profile
+  return info
+
+
+def _warnings(mp):
+  return [c.args[0] for c in mp.log.warning.call_args_list if c.args]
+
+
+class TestDolbyVisionProfile5:
+  def test_profile_5_is_copied_instead_of_reencoded(self, tmp_yaml, make_media_info):
+    # Source hevc is not in vcodecs [h264], so it would normally be re-encoded.
+    mp = _gen_mp(tmp_yaml)
+    options = _generate(mp, _dv_info(make_media_info, 5))
+    assert options["video"]["codec"] == "copy"
+    assert not options["video"].get("filter")
+    assert any("[dolby-vision-p5]" in w for w in _warnings(mp))
+
+  def test_profile_5_overrides_force_reencode(self, tmp_yaml, make_media_info):
+    mp = _gen_mp(tmp_yaml, force_reencode=True)
+    assert _generate(mp, _dv_info(make_media_info, 5))["video"]["codec"] == "copy"
+
+  @pytest.mark.parametrize("profile", [None, 7, 8])
+  def test_other_profiles_still_reencode(self, tmp_yaml, make_media_info, profile):
+    mp = _gen_mp(tmp_yaml)
+    options = _generate(mp, _dv_info(make_media_info, profile))
+    assert options["video"]["codec"] != "copy"
+    assert not any("[dolby-vision-p5]" in w for w in _warnings(mp))
+
+  def test_profile_5_is_never_burned(self, tmp_yaml, make_media_info):
+    mp = _gen_mp(tmp_yaml)
+    mp.subtitles.burnSubtitleFilter = MagicMock(return_value="subtitles=x.srt")
+    options = _generate(mp, _dv_info(make_media_info, 5))
+    assert options["video"]["codec"] == "copy"
+    assert "subtitles=" not in (options["video"].get("filter") or "")
+    assert any("Not burning subtitles" in w for w in _warnings(mp))
+
+  @pytest.mark.parametrize("profile,expected", [(5, True), (8, False), (None, False)])
+  def test_is_dolby_vision_profile_5(self, make_media_info, profile, expected):
+    assert MediaProcessor.isDolbyVisionProfile5(_dv_info(make_media_info, profile).video) is expected
+
+  def test_non_hevc_profile_5_marker_is_ignored(self, make_media_info):
+    assert MediaProcessor.isDolbyVisionProfile5(_dv_info(make_media_info, 5, codec="av1").video) is False
+
+  @staticmethod
+  def _postopts(mp, info, fmt="mp4"):
+    mp.settings.output_format = fmt
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, _preopts, postopts, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    return options, postopts
+
+  @pytest.mark.parametrize("profile,tag", [(5, "dvh1"), (8, "hvc1")])
+  def test_copied_hevc_tag(self, tmp_yaml, make_media_info, profile, tag):
+    mp = _gen_mp(tmp_yaml)
+    mp.settings.vcodec = ["hevc", "h264"]  # hevc in the pool, so profile 8 is copied too
+    _options, postopts = self._postopts(mp, _dv_info(make_media_info, profile))
+    assert postopts[postopts.index("-tag:v") + 1] == tag
+
+  def test_profile_5_copy_keeps_hdr_sei(self, tmp_yaml, make_media_info):
+    # Pool pix_fmt is 8-bit, so the abandoned re-encode would not be HDR; the
+    # copied source still is, and its HDR SEI must not be filtered out.
+    mp = _gen_mp(tmp_yaml)
+    info = _dv_info(make_media_info, 5)
+    info.video.pix_fmt = "yuv420p10le"
+    info.video.color = {"space": "bt2020nc", "transfer": "smpte2084", "primaries": "bt2020"}
+    options = _generate(mp, info)
+    assert options["video"]["codec"] == "copy"
+    assert "filter_units" not in (options["video"].get("bsf") or "")
+
+  @pytest.mark.parametrize("order", [("experimental", "unofficial"), ("unofficial", "experimental")])
+  def test_strict_flags_collapse_to_most_permissive(self, order):
+    # TrueHD/DTS/Opus in MP4 add -strict experimental and DV adds -strict
+    # unofficial; FFMpeg.minstrict keeps one, the most permissive (-2), which
+    # allows both, whatever order they were added in.
+    from converter.ffmpeg import FFMpeg
+
+    cmds = ["ffmpeg", "-strict", order[0], "-strict", order[1]]
+    FFMpeg.minstrict(None, cmds)
+    assert cmds.count("-strict") == 1 and cmds[cmds.index("-strict") + 1] == "-2"
+
+  def test_container_dv_record_sets_strict_unofficial(self, tmp_yaml, make_media_info):
+    mp = _gen_mp(tmp_yaml)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      _options, _preopts, postopts, *_ = mp.generateOptions("/fake/input.mkv", info=_dv_info(make_media_info, 8))
+    assert postopts[postopts.index("-strict") + 1] == "unofficial"
+
+
 class TestPerJobIsolation:
   def test_original_language_does_not_leak_between_files(self, tmp_yaml, make_media_info):
     mp = _gen_mp(tmp_yaml, audio_original_language=True, subtitle_original_language=True)
