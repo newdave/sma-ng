@@ -5523,6 +5523,53 @@ class TestProcessAudioStream:
       mp._process_audio_stream(a, "/fake/input.mkv", info, [], False, [], [], audio_settings, None, acodecs=["aac"], ua_codecs=[])
     assert audio_settings[0]["codec"] == "copy"
 
+  def test_atmos_extra_copy_is_never_default_and_follows_its_conversion(self):
+    from resources.mediaprocessor import ATMOS_EXTRA_COPY_DEBUG, MediaProcessor
+
+    mp = self._make_mp()
+    mp.settings.audio_atmos_force_copy = True
+    mp.settings.output_format = "mp4"
+    a = self._make_audio_stream("truehd", channels=8)
+    a.profile = "Dolby TrueHD + Dolby Atmos"
+    a.disposition = {"default": True}
+    info = self._make_info([a])
+    audio_settings = []
+    with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
+      mp._process_audio_stream(a, "/fake/input.mkv", info, [], False, [], [], audio_settings, None, acodecs=["eac3"], ua_codecs=[])
+    converted, extra = audio_settings
+    assert extra["debug"] == ATMOS_EXTRA_COPY_DEBUG
+    assert "+default" not in (extra.get("disposition") or "")
+    # A channel-descending sort puts the 8-channel copy first; placement restores it after its conversion.
+    other = {"map": 9, "codec": "aac", "debug": "audio"}
+    placed = MediaProcessor._place_atmos_extra_copies([extra, other, converted])
+    assert placed == [other, converted, extra]
+
+  def test_place_atmos_extra_copies_without_extras_is_identity(self):
+    from resources.mediaprocessor import MediaProcessor
+
+    streams = [{"map": 1, "debug": "audio"}, {"map": 2, "debug": "audio-copy-original"}]
+    assert MediaProcessor._place_atmos_extra_copies(streams) is streams
+
+  @pytest.mark.parametrize(
+    "source_codec,output_format,expected",
+    [
+      ("truehd", "mp4", ["eac3", "copy"]),  # playable conversion first, Atmos kept alongside
+      ("truehd", "mkv", ["copy"]),  # MKV players handle TrueHD: plain force-copy
+      ("eac3", "mp4", ["copy"]),  # EAC3 Atmos (JOC) plays in MP4: plain force-copy
+    ],
+  )
+  def test_atmos_force_copy_by_container(self, source_codec, output_format, expected):
+    mp = self._make_mp()
+    mp.settings.audio_atmos_force_copy = True
+    mp.settings.output_format = output_format
+    a = self._make_audio_stream(source_codec, channels=8)
+    a.profile = "Dolby TrueHD + Dolby Atmos"
+    info = self._make_info([a])
+    audio_settings = []
+    with patch("resources.mediaprocessor.skipStream", None), patch("resources.mediaprocessor.blockAudioCopy", None):
+      mp._process_audio_stream(a, "/fake/input.mkv", info, [], False, [], [], audio_settings, None, acodecs=["eac3"], ua_codecs=[])
+    assert [s["codec"] for s in audio_settings] == expected
+
   def test_aac_adtstoasc_set_for_copy(self):
     mp = self._make_mp()
     mp.settings.aac_adtstoasc = True
