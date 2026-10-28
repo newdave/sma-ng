@@ -28,7 +28,8 @@ Optimize work for:
 - Metadata and integrations: `resources/metadata.py`, `resources/mediamanager.py`, `autoprocess/plex.py`, `triggers/`
 - Stream-copy repair and library audit: `repair.py`, `resources/media_repair.py`, `resources/library_audit/`
 - Docker host CLI and container entrypoint: `setup/sma-host.sh` (shipped as `sma`), `docker/docker-entrypoint.sh`
-- Canonical docs: `docs/`, served help: `resources/docs.html`, wiki copy: `/tmp/sma-wiki/`
+- Canonical docs: `docs/`, served help: `resources/daemon/docs_ui.py` (renders `docs/` live), GitHub wiki:
+  generated from `docs/` by `scripts/wiki_sync.py` (`mise run wiki:build`); never edit the wiki by hand
 - Generated/local files to avoid: `venv/`, `**/__pycache__/`, `*.pyc`, `config/sma-ng.yml`
 
 ## Working Rules
@@ -83,10 +84,13 @@ Other rules:
 - If asked to "commit all changes", commit the whole worktree as multiple logical commits.
 - Use conventional commit prefixes such as `fix:`, `feat:`, `refactor:`, `docs:`.
 - After each requested commit, run `git pull --rebase` and `git push`.
+- After docs changes land on `main`, publish the wiki with `mise run wiki:publish`. A new top-level `docs/*.md`
+  needs an entry in `PAGES` in `scripts/wiki_sync.py`; `mise run docs:check` (also in CI) catches broken links,
+  stale `mise run` references and unmapped docs.
 - Don't author new PRPs / task breakdowns into `docs/prps/` or `docs/tasks/` for *shipped* features.
   Shipped-state planning docs go stale fast and the git history already preserves intent.
   Write the rationale into the commit message and the operator-facing doc instead.
-- Exception: *in-flight* PRPs and task breakdowns generated via `/bp:generate-prp`
+- Exception: *in-flight* PRPs and task breakdowns
   may live in `docs/prps/` and `docs/tasks/` while implementation is active. They MUST
   carry a `STATUS:` banner under the H1 (`IN-FLIGHT`, `COMPLETE`, `SUPERSEDED`).
   Once `STATUS: COMPLETE` lands, prune the doc in a follow-up unless it documents
@@ -112,6 +116,10 @@ mise run media:codecs
 mise run media:repair -- -n /path/to/file-or-dir
 mise run test:cov
 mise run test:shell
+mise run docs:check
+mise run wiki:publish
+mise run release:status
+mise run release:notes
 ```
 
 Direct commands that are often useful:
@@ -138,6 +146,7 @@ Run the smallest meaningful check for the files touched.
 - Repair/audit: `venv/bin/python -m pytest tests/test_media_repair.py tests/test_repair.py tests/test_library_audit_engine.py -q`
 - Docker/compose and host CLI: `venv/bin/python -m pytest tests/test_docker.py tests/test_sma_host.py -q`
 - Shell scripts: `mise run test:shell`
+- Docs and wiki: `mise run docs:check`
 - Broad pass: `mise run test`
 - Coverage policy: global line coverage is at least 90%, and production modules with at least 100 statements need
   at least 70% per-module coverage; `mise run test:cov` (also run in CI) enforces both. Do not lower thresholds or
@@ -154,7 +163,8 @@ Run the smallest meaningful check for the files touched.
 - New downloader/media-manager integration: add script under `triggers/`; keep Python logic in helper modules; add
   schema/sample/docs support as needed.
 - New or changed `mise` task: add an executable script under `.mise/tasks/<group>/` with
-  `#MISE description=...`; keep shared helpers outside `.mise/tasks/`; update wiki `Mise-Tasks.md`.
+  `#MISE description=...`; keep shared helpers outside `.mise/tasks/`; add a row to `docs/deployment.md`
+  (the wiki `Mise-Tasks` page is generated from the descriptions).
 
 ## Configuration Model
 
@@ -170,6 +180,17 @@ See `docs/configuration.md` and `docs/daemon.md` for full reference.
 The `.claude/` directory is active configuration, not legacy metadata.
 Keep slash commands, agents, and skills short and specific to this Python FFmpeg transcoder.
 When workflow rules change, update this file first and sync `AGENTS.md` plus any matching `.codex/` mirrors.
+
+Plugins and skills are scoped to this project:
+
+- `.claude/settings.json` `enabledPlugins` is the required plugin set: `pyright-lsp` and `voltagent-domains`.
+  It declares the `voltagent-subagents` marketplace in `extraKnownMarketplaces`.
+- The same file sets unneeded globally enabled plugins to `false` (`bp`, `codex`, `code-simplifier`,
+  `frontend-design`, `rust-analyzer-lsp`).
+- Project skills are vendored in `.claude/skills/`; `.skillfish.json` records the upstream source.
+- Add new plugins or skills here, never in `~/.claude/`.
+- The skill-reminder hook runs on `UserPromptSubmit`: Claude via `.claude/settings.json` `hooks`
+  (`.claude/hooks/claude-code/`), Codex via `.codex/hooks.json` (`.claude/hooks/codex/`).
 
 ### Activation Routing
 

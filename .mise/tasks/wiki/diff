@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Show what wiki:publish would change in the wiki checkout (run wiki:build first)"
+set -euo pipefail
+
+WIKI_DIR="${SMA_WIKI_DIR:-/tmp/sma-wiki}"
+if [ ! -d "$WIKI_DIR/.git" ]; then
+  echo "no wiki checkout at $WIKI_DIR; run: mise run wiki:build" >&2
+  exit 2
+fi
+git -C "$WIKI_DIR" add --intent-to-add --all
+git -C "$WIKI_DIR" diff --stat
+git -C "$WIKI_DIR" --no-pager diff

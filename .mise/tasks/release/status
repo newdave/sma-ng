@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#MISE description="Show the manifest version, latest GitHub release, open release-please PR and recent CI runs on main"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+command -v gh >/dev/null 2>&1 || {
+  echo "gh (GitHub CLI) is required: https://cli.github.com" >&2
+  exit 2
+}
+
+version="$(sed -n 's/.*"\.": *"\([^"]*\)".*/\1/p' .release-please-manifest.json)"
+echo "Manifest version: ${version:-unknown}"
+
+if ! gh release view --json tagName,publishedAt,url \
+  --jq '"Latest release:   \(.tagName) (\(.publishedAt[:10])) \(.url)"' 2>/dev/null; then
+  echo "Latest release:   none"
+fi
+
+release_prs="$(gh pr list --state open --json number,title,url,headRefName \
+  --jq '.[] | select(.headRefName | startswith("release-please--")) | "Release PR:       #\(.number) \(.title) \(.url)"')"
+echo "${release_prs:-Release PR:       none open}"
+
+echo
+echo "Recent CI on main:"
+gh run list --branch main --limit 6 \
+  --json workflowName,status,conclusion,headSha,createdAt \
+  --jq '.[] | "  \(.createdAt[:16]) \(.headSha[:7]) \(.workflowName): \(.conclusion // .status)"'

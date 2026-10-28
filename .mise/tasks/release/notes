@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+#MISE description="Preview the next release: conventional commits since the latest sma-ng-v* tag, grouped by type (usage: mise run release:notes [-- <ref>], default origin/main)"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+ref="${1:-origin/main}"
+git fetch --quiet --tags origin
+last="$(git describe --tags --abbrev=0 --match 'sma-ng-v*' "$ref" 2>/dev/null || true)"
+if [ -z "$last" ]; then
+  echo "no sma-ng-v* tag found; showing the full history of $ref" >&2
+  range="$ref"
+else
+  range="$last..$ref"
+fi
+
+echo "Changes in $range:"
+git log --no-merges --format='%h %s' "$range" | awk '
+  {
+    subject = $0
+    sub(/^[0-9a-f]+ /, "", subject)
+    type = subject
+    sub(/[(:!].*/, "", type)
+    if (type !~ /^(feat|fix|perf|refactor|docs|ci|build|test|chore)$/) type = "other"
+    if (subject ~ /^chore\(main\): release/) next
+    lines[type] = lines[type] "  - " $0 "\n"
+    count++
+  }
+  END {
+    n = split("feat fix perf refactor docs ci build test chore other", order, " ")
+    for (i = 1; i <= n; i++) if (order[i] in lines) printf "\n%s\n%s", order[i], lines[order[i]]
+    if (!count) print "  (nothing to release)"
+  }'

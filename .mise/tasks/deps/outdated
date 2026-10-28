@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="List outdated Python packages in the project venv (dependencies are declared in pyproject.toml)"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+"$PY" -m pip list --outdated --format=columns
