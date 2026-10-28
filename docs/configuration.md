@@ -963,7 +963,11 @@ corresponding Python config block in `sma-ng.yml`. See
 1. `estimateVideoBitrate()` computes source video bitrate from container total minus audio
 2. `bitrate-ratio` scales the estimate per source codec (e.g., H.264 at 0.65x for HEVC target)
 3. `crf-profiles` selects CRF/maxrate/bufsize tier based on scaled bitrate
-4. `max-bitrate` caps the final result
+4. `max-bitrate` caps the final result. When the source exceeded it (the cap forced the re-encode), the cap
+   becomes the average target and the VBV `maxrate` is 1.5x the cap (`bufsize` 2x that), so complex scenes can
+   peak above it. When the re-encode happened for another reason, `max-bitrate` stays the `maxrate` ceiling.
+   With `max-level` set, an HEVC encode's `maxrate` and `bufsize` are clamped to that level's Main-tier limit
+   (e.g. 60000k at 5.2, 20000k at 4.1), never below the bitrate target (`[video-level-vbv]`).
 5. Rate-control selection: if the re-encode was **not** bitrate-driven (steps 2–4 did not force it) and
    `global-quality` is set, the bitrate target — and the VBV `maxrate`/`bufsize`, which would otherwise
    flip QSV into QVBR with no target — are dropped in favour of ICQ (`[icq-rate-control]`);

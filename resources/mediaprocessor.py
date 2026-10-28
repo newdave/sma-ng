@@ -711,6 +711,10 @@ from resources.postprocess import PostProcessor
 from resources.processor.failures import TAIL_BYTES, AttemptRecord, FfmpegFailureClass, diagnose_ffmpeg_failure, parse_ffmpeg_failure
 from resources.subtitles import SubtitleProcessor
 
+# VBV peak allowed above max-bitrate when the cap is what forced the re-encode
+# (max-bitrate is then the average target, maxrate = target x this).
+VBV_PEAK_RATIO = 1.5
+
 try:
   import cleanit
 except ImportError:
@@ -2275,8 +2279,12 @@ class MediaProcessor:
       vcodec = vcodecs[0]
       self.log.debug("Bitrate profile matched at source %dkbps: target=%dkbps maxrate=%s bufsize=%s [crf-profiles]." % (vbitrate_estimate, vbitrate, vmaxrate, vbufsize))
     elif effective_vmaxbitrate > 0:
-      vmaxrate = "%dk" % effective_vmaxbitrate
-      vbufsize = "%dk" % (effective_vmaxbitrate * 2)
+      # When the cap forced the re-encode, max-bitrate is the average target;
+      # give the VBV room to peak above it so complex scenes (grain, motion,
+      # dark gradients) are not starved. Otherwise max-bitrate is the ceiling.
+      peak = VBV_PEAK_RATIO if ".max-bitrate" in vdebug else 1.0
+      vmaxrate = "%dk" % int(effective_vmaxbitrate * peak)
+      vbufsize = "%dk" % int(effective_vmaxbitrate * peak * 2)
       self.log.debug("Setting VBV maxrate=%s bufsize=%s from max-bitrate [video-max-bitrate]." % (vmaxrate, vbufsize))
 
     if analyzer_max_bitrate:
@@ -2533,6 +2541,8 @@ class MediaProcessor:
             vbufsize = "%dk" % int(vbitrate * 2)
         except ValueError:
           pass
+
+    vmaxrate, vbufsize = self._clamp_vbv_to_level(vcodec, vlevel, vbitrate, vmaxrate, vbufsize)
 
     self.log.info("Creating %s video stream from source stream %d." % (vcodec, info.video.index))
 
@@ -3780,6 +3790,30 @@ class MediaProcessor:
       return framedata
     except Exception:
       return framedata
+
+  # HEVC Main tier limits per level (ITU-T H.265 Table A.8): MaxBR in kbit/s
+  # and MaxCPB in kbit, which are equal for Main tier.
+  _HEVC_MAIN_TIER_MAX_KBPS = {4.0: 12000, 4.1: 20000, 5.0: 25000, 5.1: 40000, 5.2: 60000, 6.0: 60000, 6.1: 120000, 6.2: 240000}
+
+  def _clamp_vbv_to_level(self, vcodec, vlevel, vbitrate, vmaxrate, vbufsize):
+    """Keep an HEVC encode's VBV (maxrate, bufsize) within the configured
+    level's Main-tier limits, so the VBV peak and its 2x buffer never ask the
+    encoder for more than the advertised level allows. Never lowers maxrate
+    below the bitrate target. Returns the (maxrate, bufsize) strings."""
+    if vcodec == "copy" or not vlevel or self._codec_family(vcodec) != "h265":
+      return vmaxrate, vbufsize
+    limit = self._HEVC_MAIN_TIER_MAX_KBPS.get(round(float(vlevel), 1))
+    if not limit:
+      return vmaxrate, vbufsize
+    floor = int(vbitrate) if isinstance(vbitrate, (int, float)) else 0
+    clamped = []
+    for value in (vmaxrate, vbufsize):
+      if isinstance(value, str) and value.endswith("k") and value[:-1].isdigit() and int(value[:-1]) > limit:
+        value = "%dk" % max(limit, floor)
+      clamped.append(value)
+    if clamped != [vmaxrate, vbufsize]:
+      self.log.info("Clamping VBV maxrate/bufsize %s/%s to HEVC level %s Main-tier limit %dk [video-level-vbv]." % (vmaxrate, vbufsize, vlevel, limit))
+    return clamped[0], clamped[1]
 
   @staticmethod
   def isDolbyVisionProfile5(video):
