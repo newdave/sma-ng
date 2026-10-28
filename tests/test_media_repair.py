@@ -143,6 +143,51 @@ class TestDiagnose:
     assert not diagnose(_info([_audio(0)])).needs_repair
 
 
+class TestMuxerNeeds:
+  @pytest.mark.parametrize(
+    "codec,width,height,expected",
+    [
+      ("h264", 1920, 1088, "h264_metadata=sample_aspect_ratio=136/135"),
+      ("hevc", 3840, 2176, "hevc_metadata=sample_aspect_ratio=136/135"),
+      ("hevc", 1920, 1072, "hevc_metadata=sample_aspect_ratio=134/135"),
+      ("mpeg2video", 1920, 1088, "mpeg2_metadata=display_aspect_ratio=16/9"),
+      ("av1", 1920, 1088, None),
+    ],
+  )
+  def test_aspect_bsf_per_codec(self, codec, width, height, expected):
+    plan = diagnose(_info([_video(0, codec, width, height), _audio(1)]))
+    assert plan.dar
+    assert plan.aspect_bsf == expected
+
+  def test_aspect_targets_primary_video_output_number(self):
+    # A second real video stream ahead of the primary in output order is not
+    # possible with index maps; the primary is the first kept video here.
+    plan = diagnose(_info([_video(0, "mjpeg", 600, 900, attached_pic=1), _video(1, "h264", 1920, 1088), _audio(2)]))
+    assert plan.keep == [1, 2] and plan.video_out == 0
+
+  def test_no_aspect_fix_means_no_bsf(self):
+    plan = diagnose(_info([_video(0), _audio(1)]))
+    assert plan.aspect_bsf is None and plan.video_out == 0
+
+  @pytest.mark.parametrize(
+    "path,streams,expected",
+    [
+      ("/m/a.mp4", [_video(0), _audio(1, "truehd", 8)], "experimental"),
+      ("/m/a.mkv", [_video(0), _audio(1, "truehd", 8)], None),
+      ("/m/a.mp4", [{**_video(0, "hevc"), "dv_profile": 5}, _audio(1)], "unofficial"),
+      ("/m/a.mkv", [{**_video(0, "hevc"), "dv_profile": 8}, _audio(1)], "unofficial"),
+      ("/m/a.mp4", [{**_video(0, "hevc"), "dv_profile": 8}, _audio(1, "truehd", 8)], "experimental"),
+      ("/m/a.mp4", [_video(0), _audio(1, "eac3", 6)], None),
+    ],
+  )
+  def test_strict_level(self, path, streams, expected):
+    assert diagnose(_info(streams, path=path)).strict == expected
+
+  def test_dropped_truehd_needs_no_strict(self):
+    plan = diagnose(_info([_video(0), _audio(1), {**_audio(2, "truehd"), "codec_type": "audio", "codec_name": "none"}]))
+    assert plan.strict is None
+
+
 # ---------------------------------------------------------------------------
 # build_opts
 # ---------------------------------------------------------------------------
@@ -172,6 +217,13 @@ class TestBuildOpts:
       "mp4",
     ]
 
+  def test_aspect_bsf_and_strict_follow_the_plan(self):
+    plan = RepairPlan(path="/m/a.mp4", keep=[0, 1, 2], dar="1920:1080", video_out=1, aspect_bsf="h264_metadata=sample_aspect_ratio=136/135", strict="unofficial")
+    opts = build_opts(plan, "/m/a.mp4")
+    assert opts[opts.index("-aspect:v:1") + 1] == "1920:1080"
+    assert opts[opts.index("-bsf:v:1") + 1] == "h264_metadata=sample_aspect_ratio=136/135"
+    assert opts[opts.index("-strict") + 1] == "unofficial"
+
   def test_mkv_opts_skip_mp4_muxer_flags(self):
     plan = RepairPlan(path="/m/a.mkv", keep=[0, 1], drop_artwork=[2])
     assert build_opts(plan, "/m/a.mkv") == ["-i", "/m/a.mkv", "-map", "0:0", "-map", "0:1", "-c", "copy", "-f", "matroska"]
@@ -183,7 +235,8 @@ class TestBuildOpts:
 
 
 class TestVerify:
-  SOURCE = _info([_video(0, "h264", 1920, 1088), _audio(1), CHAPTER_TRACK, _video(3, "mjpeg", 600, 900), _data(4)])
+  SOURCE_STREAMS = [_video(0, "h264", 1920, 1088), _audio(1), CHAPTER_TRACK, _video(3, "mjpeg", 600, 900), _data(4)]
+  SOURCE = _info(SOURCE_STREAMS)
   PLAN = RepairPlan(path="/m/a.mp4", keep=[0, 1], drop_data=[4], drop_artwork=[3], dar="1920:1080")
 
   def _output(self, streams=None, duration="100.0"):
@@ -203,9 +256,54 @@ class TestVerify:
     with pytest.raises(RepairError, match="duration"):
       verify(self.PLAN, self.SOURCE, self._output(duration=duration))
 
-  def test_chapter_track_loss_fails(self):
-    with pytest.raises(RepairError, match="chapter"):
-      verify(self.PLAN, self.SOURCE, self._output([_video(0, "h264", 1920, 1088, "136:135"), _audio(1)]))
+  def test_chapter_loss_fails(self):
+    output = self._output([_video(0, "h264", 1920, 1088, "136:135"), _audio(1)])
+    source = _info(self.SOURCE_STREAMS)
+    source.chapters, output.chapters = 12, 0
+    with pytest.raises(RepairError, match="0 chapters, source has 12"):
+      verify(self.PLAN, source, output)
+
+  def test_new_chapter_track_with_same_chapters_passes(self):
+    # The source kept its chapters outside a QuickTime text track (Nero chpl
+    # or a tx3g track); the muxer writes a text track for the same chapters.
+    source = _info([_video(0, "h264", 1920, 1088), _audio(1), _video(3, "mjpeg", 600, 900, attached_pic=1)])
+    plan = diagnose(source)
+    output = self._output()
+    source.chapters = output.chapters = 8
+    verify(plan, source, output)
+
+  def test_unknown_chapter_count_is_not_compared(self):
+    output = self._output([_video(0, "h264", 1920, 1088, "136:135"), _audio(1)])
+    output.chapters = 3
+    verify(self.PLAN, _info(self.SOURCE_STREAMS), output)
+
+  def test_dolby_vision_loss_fails(self):
+    source = _info([{**_video(0, "hevc", 3840, 2160), "dv_profile": 5}, _audio(1), _data(2)])
+    plan = diagnose(source)
+    output = _info([_video(0, "hevc", 3840, 2160), _audio(1)], path="/m/a.sma")
+    with pytest.raises(RepairError, match=r"expected \[video/hevc 3840x2160 dv5"):
+      verify(plan, source, output)
+
+  def test_long_dropped_stream_does_not_fail_duration(self):
+    source = _info([{**_video(0), "duration": "100.0"}, {**_audio(1), "duration": "100.0"}, {**_data(2), "duration": "160.0"}], duration="160.0")
+    plan = diagnose(source)
+    verify(plan, source, _info([_video(0), _audio(1)], path="/m/a.sma", duration="100.2"))
+
+  def test_truncated_output_fails_size_check(self):
+    source = _info([{**_video(0), "bit_rate": "8000000"}, _audio(1), {**_data(2), "bit_rate": "8000"}])
+    plan = diagnose(source)
+    output = _info([{**_video(0), "bit_rate": "8000000"}, _audio(1)], path="/m/a.sma")
+    source.format.size, output.format.size = 4e9, 2e9
+    with pytest.raises(RepairError, match="the remux lost data"):
+      verify(plan, source, output)
+
+  def test_size_check_allows_dropped_streams(self):
+    # 100 s of a 40 Mb/s unknown stream (500 MB) is expected to go.
+    source = _info([_video(0), _audio(1), {**_video(2, "unknown"), "codec_name": "none", "bit_rate": "40000000"}])
+    plan = diagnose(source)
+    output = _info([_video(0), _audio(1)], path="/m/a.sma")
+    source.format.size, output.format.size = 1.5e9, 1.0e9
+    verify(plan, source, output)
 
   def test_language_change_fails(self):
     source = _info([_video(0), {**_audio(1), "TAG:language": "eng"}, _data(2)])
@@ -246,11 +344,21 @@ class FakeFFMpeg:
   """Stands in for converter.ffmpeg.FFMpeg: probe returns the source or the
   repaired layout depending on the path, convert writes the output file."""
 
-  def __init__(self, source, output=None, convert_error=None):
+  ffprobe_path = "/usr/bin/ffprobe"
+
+  def __init__(self, source, output=None, convert_error=None, chapters=(0, 0)):
     self.source = source
     self.output = output
     self.convert_error = convert_error
+    self.chapters = chapters  # (source, output) chapter counts; an Exception fails the count
     self.calls = []
+
+  def _get_stdout(self, cmds):
+    if isinstance(self.chapters, Exception):
+      raise self.chapters
+    assert cmds[:4] == [self.ffprobe_path, "-v", "error", "-show_chapters"]
+    count = self.chapters[1] if cmds[-1].endswith(".sma") else self.chapters[0]
+    return "[CHAPTER]\nid=0\n[/CHAPTER]\n" * count
 
   def probe(self, path, posters_as_video=True, framedata=True):
     assert posters_as_video is False and framedata is False
@@ -417,6 +525,10 @@ class TestRepairProcessor:
     rp = _processor(FakeFFMpeg(DAMAGED), _settings(temp_extension="tmpx"))
     assert rp.getTempFile(str(media)) == str(tmp_path / "a.2.tmpx")
 
+  def test_relative_path_temp_file_goes_next_to_it(self, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert _processor(FakeFFMpeg(DAMAGED)).getTempFile("a.mp4") == str(tmp_path / "a.sma")
+
   def test_logs_start_command_progress_and_verification(self, media, monkeypatch):
     monkeypatch.setattr(mr, "PROGRESS_INTERVAL", 0)
     log = mock.MagicMock()
@@ -435,6 +547,48 @@ class TestRepairProcessor:
     assert "do not match" in result.detail
     assert media.read_bytes() == b"original"
     assert os.listdir(tmp_path) == ["a.mp4"]
+
+  def test_chapters_counted_on_source_and_output(self, media):
+    result = _processor(FakeFFMpeg(DAMAGED, REPAIRED, chapters=(8, 8))).repair_file(str(media))
+    assert result.status == mr.STATUS_REPAIRED
+
+  def test_chapter_loss_keeps_original(self, media, tmp_path):
+    result = _processor(FakeFFMpeg(DAMAGED, REPAIRED, chapters=(8, 0))).repair_file(str(media))
+    assert result.status == mr.STATUS_FAILED
+    assert result.detail.startswith("repaired file has 0 chapters, source has 8")
+    assert media.read_bytes() == b"original"
+    assert not (tmp_path / "a.sma").exists()
+
+  def test_chapter_count_error_skips_the_comparison(self, media):
+    result = _processor(FakeFFMpeg(DAMAGED, REPAIRED, chapters=RuntimeError("ffprobe died"))).repair_file(str(media))
+    assert result.status == mr.STATUS_REPAIRED
+
+  def test_hardlinked_original_is_rewritten_in_place(self, media, tmp_path):
+    link = tmp_path / "seed.mp4"
+    os.link(media, link)
+    inode = os.stat(media).st_ino
+    result = _processor(FakeFFMpeg(DAMAGED, REPAIRED)).repair_file(str(media))
+    assert result.status == mr.STATUS_REPAIRED
+    assert os.stat(media).st_ino == inode
+    assert link.read_bytes() == b"repaired"
+    assert not (tmp_path / "a.sma").exists()
+
+  def test_failed_in_place_rewrite_keeps_verified_copy(self, media, tmp_path):
+    os.link(media, tmp_path / "seed.mp4")
+    with mock.patch.object(mr.shutil, "copyfile", side_effect=OSError("disk gone")):
+      result = _processor(FakeFFMpeg(DAMAGED, REPAIRED)).repair_file(str(media))
+    assert result.status == mr.STATUS_FAILED
+    assert "original may be damaged, verified copy kept at %s" % (tmp_path / "a.sma") in result.detail
+    assert (tmp_path / "a.sma").read_bytes() == b"repaired"
+
+  def test_in_place_rewrite_size_mismatch_fails(self, media, tmp_path):
+    media.write_bytes(b"original, longer than the copy")
+    os.link(media, tmp_path / "seed.mp4")
+    with mock.patch.object(mr.shutil, "copyfile"):
+      result = _processor(FakeFFMpeg(DAMAGED, REPAIRED)).repair_file(str(media))
+    assert result.status == mr.STATUS_FAILED
+    assert "size after rewrite differs" in result.detail
+    assert (tmp_path / "a.sma").exists()
 
   def test_ffmpeg_failure_keeps_original(self, media, tmp_path):
     result = _processor(FakeFFMpeg(DAMAGED, convert_error=RuntimeError("mux failed"))).repair_file(str(media))
