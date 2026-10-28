@@ -84,16 +84,20 @@ class TestDockerfileStages:
     assert _stages(dockerfile) == ["ffmpeg-builder", "python-builder", "runtime"]
 
   def test_ffmpeg_builder_from_ubuntu(self, dockerfile_raw):
-    assert "FROM ${UBUNTU_IMAGE} AS ffmpeg-builder" in dockerfile_raw
+    assert re.search(r"^FROM ubuntu:24\.04@sha256:[0-9a-f]{64} AS ffmpeg-builder$", dockerfile_raw, re.M)
 
   def test_base_image_pinned_by_digest(self, dockerfile_raw):
-    assert re.search(r"^ARG UBUNTU_IMAGE=ubuntu:24\.04@sha256:[0-9a-f]{64}$", dockerfile_raw, re.M)
+    # Literal digest in every FROM (Dependabot cannot update ARG-substituted bases),
+    # and the same digest in all three stages.
+    digests = re.findall(r"^FROM ubuntu:24\.04@(sha256:[0-9a-f]{64}) AS ", dockerfile_raw, re.M)
+    assert len(digests) == 3 and len(set(digests)) == 1
+    assert "${UBUNTU_IMAGE}" not in dockerfile_raw
 
   def test_python_builder_from_ubuntu(self, dockerfile_raw):
-    assert "FROM ${UBUNTU_IMAGE} AS python-builder" in dockerfile_raw
+    assert re.search(r"^FROM ubuntu:24\.04@sha256:[0-9a-f]{64} AS python-builder$", dockerfile_raw, re.M)
 
   def test_runtime_from_ubuntu(self, dockerfile_raw):
-    assert "FROM ${UBUNTU_IMAGE} AS runtime" in dockerfile_raw
+    assert re.search(r"^FROM ubuntu:24\.04@sha256:[0-9a-f]{64} AS runtime$", dockerfile_raw, re.M)
 
   def test_runtime_copies_ffmpeg_from_builder(self, dockerfile_raw):
     assert "--from=ffmpeg-builder" in dockerfile_raw
@@ -531,15 +535,24 @@ def docker_workflow():
 
 
 class TestDockerWorkflow:
-  def test_triggers_on_push_to_main(self, docker_workflow):
-    # PyYAML parses bare 'on' key as boolean True
+  def test_main_image_waits_for_passing_ci(self, docker_workflow):
+    # PyYAML parses bare 'on' key as boolean True. The main image is built only
+    # after CI completes on main, and the job only runs when CI succeeded on a push.
     triggers = docker_workflow[True]
-    assert "main" in triggers["push"]["branches"]
+    assert "push" not in triggers
+    assert triggers["workflow_run"]["workflows"] == ["CI"]
+    assert triggers["workflow_run"]["branches"] == ["main"]
+    job_if = docker_workflow["jobs"]["build"]["if"]
+    assert "workflow_run.conclusion == 'success'" in job_if
+    assert "workflow_run.event == 'push'" in job_if
 
-  def test_triggers_on_version_tags(self, docker_workflow):
-    triggers = docker_workflow[True]
-    tags = triggers["push"]["tags"]
-    assert any("v*" in str(t) for t in tags)
+  def test_release_images_built_via_workflow_call(self, docker_workflow):
+    # Tags created by release-please (sma-ng-vX.Y.Z, via GITHUB_TOKEN) start no
+    # workflow, so release.yml calls this workflow with the tag and version.
+    call = docker_workflow[True]["workflow_call"]["inputs"]
+    assert call["ref"]["required"] and call["version"]["required"]
+    release = _load_yaml(".github/workflows/release.yml")
+    assert release["jobs"]["docker"]["uses"] == "./.github/workflows/docker.yml"
 
   def test_triggers_on_pull_request(self, docker_workflow):
     triggers = docker_workflow[True]
@@ -568,15 +581,9 @@ class TestDockerWorkflow:
     build_step = next(s for s in steps if "build-push-action" in s.get("uses", ""))
     assert build_step["with"]["target"] == "runtime"
 
-  def test_build_arg_sets_ffmpeg_version(self, docker_workflow):
-    steps = docker_workflow["jobs"]["build"]["steps"]
-    build_step = next(s for s in steps if "build-push-action" in s.get("uses", ""))
-    assert "FFMPEG_VERSION" in build_step["with"]["build-args"]
-
-  def test_ffmpeg_version_is_8(self, docker_workflow):
-    # The version is defined in the workflow-level env block, then
-    # referenced as ${{ env.FFMPEG_VERSION }} in build-args.
-    assert str(docker_workflow["env"]["FFMPEG_VERSION"]).startswith("8")
+  def test_ffmpeg_version_comes_only_from_dockerfile(self, docker_workflow):
+    # Single source of truth: ARG FFMPEG_VERSION in docker/Dockerfile.
+    assert "FFMPEG_VERSION" not in str(docker_workflow)
 
   def test_layer_cache_configured(self, docker_workflow):
     steps = docker_workflow["jobs"]["build"]["steps"]
@@ -584,12 +591,21 @@ class TestDockerWorkflow:
     assert "cache-from" in build_step["with"]
     assert "cache-to" in build_step["with"]
 
-  def test_push_skipped_on_pr(self, docker_workflow):
+  def test_image_is_smoke_tested_before_any_push(self, docker_workflow):
     steps = docker_workflow["jobs"]["build"]["steps"]
-    build_step = next(s for s in steps if "build-push-action" in s.get("uses", ""))
-    # push expression must reference pull_request event
-    push_val = str(build_step["with"]["push"])
-    assert "pull_request" in push_val
+    names = [s.get("name", "") for s in steps]
+    smoke = names.index("Smoke-test image")
+    push = names.index("Push image")
+    assert smoke < push
+    assert "if" not in steps[smoke]  # every event runs the smoke test
+    assert steps[push]["if"] == "steps.plan.outputs.push == 'true'"
+    test_build = steps[names.index("Build image for testing (linux/amd64)")]
+    assert test_build["with"]["load"] is True and "push" not in test_build["with"]
+
+  def test_pull_requests_never_push(self, docker_workflow):
+    plan = next(s for s in docker_workflow["jobs"]["build"]["steps"] if s.get("id") == "plan")
+    script = plan["run"]
+    assert "push=false" in script and "pull_request" not in script
 
   def test_packages_write_permission(self, docker_workflow):
     perms = docker_workflow["jobs"]["build"]["permissions"]

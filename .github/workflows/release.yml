@@ -98,8 +98,11 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    outputs:
+      merged: ${{ steps.merge.outputs.merged }}
     steps:
       - name: Enable auto-merge (squash)
+        id: merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.release-please.outputs.pr_number }}
@@ -108,6 +111,32 @@ jobs:
         run: |
           gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --auto \
             || gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash
+          state=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq .state)
+          echo "merged=$([ "$state" = MERGED ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+  # ── Step 1b': Cut the release right after a direct merge ────────────────────
+  # A merge made with GITHUB_TOKEN starts no workflow, so without this the
+  # release would wait for the next push. Running release-please again sees
+  # the merged Release PR and creates the release + tag now.
+  release-after-merge:
+    name: Create release after merge
+    needs: patch-auto-merge
+    if: needs.patch-auto-merge.outputs.merged == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        id: rp
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
 
   # ── Step 1c: Label and notify minor releases (x.Y.0) ──────────────────────────
   # Minor releases require manual approval. The label is idempotent; the
@@ -138,25 +167,48 @@ jobs:
 
   # Major releases (X.0.0): no automatic action; review and merge the Release PR by hand.
 
-  # ── Step 2: Build & attach dist artifacts to the GitHub Release ─────────────
-  # Runs when release-please created a release in this run, or for the tag
-  # given to a manual workflow_dispatch (rebuilds a release's artifacts).
-  publish:
-    name: Build & publish release artifacts
-    needs: release-please
+  # ── Step 2: Resolve which release (if any) to publish ───────────────────────
+  # A release created by either release-please run, or the tag given to a
+  # manual workflow_dispatch (rebuilds that release's artifacts and image).
+  release-info:
+    name: Resolve release
+    needs: [release-please, release-after-merge]
     if: >-
       always() &&
-      (needs.release-please.outputs.release_created == 'true' || inputs.tag != '')
+      (needs.release-please.outputs.release_created == 'true' ||
+       needs.release-after-merge.outputs.release_created == 'true' ||
+       inputs.tag != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      tag: ${{ steps.info.outputs.tag }}
+      version: ${{ steps.info.outputs.version }}
+    steps:
+      - name: Tag and version
+        id: info
+        env:
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name || needs.release-after-merge.outputs.tag_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^sma-ng-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::not a release tag: $TAG"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+  # ── Step 3a: Build & attach dist artifacts to the GitHub Release ────────────
+  publish:
+    name: Build & publish release artifacts
+    needs: release-info
+    if: always() && needs.release-info.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
-    env:
-      TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ needs.release-info.outputs.tag }}
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
@@ -166,7 +218,7 @@ jobs:
             pyproject.toml
             setup/requirements*.txt
 
-      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
           install: false
 
@@ -179,5 +231,21 @@ jobs:
       - name: Upload dist to GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          tag_name: ${{ env.TAG }}
+          tag_name: ${{ needs.release-info.outputs.tag }}
           files: dist/*
+
+  # ── Step 3b: Release image (multi-arch, semver tags) ────────────────────────
+  # Built here rather than on the tag: tags created with GITHUB_TOKEN start no
+  # workflow, and release-please tags are sma-ng-vX.Y.Z.
+  docker:
+    name: Release image
+    needs: release-info
+    if: always() && needs.release-info.result == 'success'
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    uses: ./.github/workflows/docker.yml
+    with:
+      ref: ${{ needs.release-info.outputs.tag }}
+      version: ${{ needs.release-info.outputs.version }}
