@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.20](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.19...sma-ng-v3.2.20) (2026-10-28)
+
+
+### Bug Fixes
+
+* **docker:** smoke test puts the app root on sys.path so daemon imports ([5f5f5a7](https://github.com/newdave/sma-ng/commit/5f5f5a784ba04b8a6c8255e504d0f2f1f08d435d))
+
 ## [3.2.19](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.18...sma-ng-v3.2.19) (2026-10-28)
 
 
