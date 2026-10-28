@@ -21,8 +21,10 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
 
+  # Keep in step with shellcheck-py in the dev extra (pyproject.toml), which
+  # `mise run test:shell` uses, so local and CI shellcheck agree.
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
+    rev: v0.11.0.1
     hooks:
       - id: shellcheck
         args: [-x, -P, SCRIPTDIR]

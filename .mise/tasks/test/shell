@@ -2,8 +2,12 @@
 #MISE description="Run shellcheck -x over tracked shell scripts and .mise/tasks shell entrypoints"
 set -euo pipefail
 
-command -v shellcheck >/dev/null 2>&1 || {
-  echo "shellcheck is not installed (apt-get install shellcheck / brew install shellcheck)" >&2
+# Prefer the venv's pinned shellcheck-py (same version as the pre-commit hook)
+# so local runs and CI agree; fall back to one on PATH.
+SHELLCHECK="${VIRTUAL_ENV:-venv}/bin/shellcheck"
+[ -x "$SHELLCHECK" ] || SHELLCHECK=$(command -v shellcheck || true)
+[ -n "$SHELLCHECK" ] || {
+  echo "shellcheck is not installed (mise run setup:deps:dev installs the pinned version)" >&2
   exit 2
 }
 
@@ -27,5 +31,5 @@ done < <(git ls-files)
 [ "${#files[@]}" -gt 0 ] || { echo "no shell scripts found" >&2; exit 2; }
 
 # -P SCRIPTDIR resolves `source ../lib/x.sh` relative to each script.
-shellcheck -x -P SCRIPTDIR "${files[@]}"
+"$SHELLCHECK" -x -P SCRIPTDIR "${files[@]}"
 echo "shellcheck: ${#files[@]} files clean"
