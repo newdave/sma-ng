@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.24](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.23...sma-ng-v3.2.24) (2026-10-28)
+
+
+### Documentation
+
+* plan the sma CLI as a container runtime and daemon client ([bdc188a](https://github.com/newdave/sma-ng/commit/bdc188a16254189f11d4af1bbed6509409b59a0f))
+
 ## [3.2.23](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.22...sma-ng-v3.2.23) (2026-10-28)
 
 
