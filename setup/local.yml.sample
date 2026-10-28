@@ -51,7 +51,7 @@ deploy:
   # Remote directory to sync into.
   deploy_dir: /opt/sma
 
-  # Host-side Docker bind-mount root. setup:docker:target and deploy helpers
+  # Host-side Docker bind-mount root. The deploy helpers
   # create config/, logs/, cache/, and data/ below this path. Non-PostgreSQL
   # Docker profiles persist their default SQLite DB in data/sma-ng.db.
   # sma_install_dir: /opt/sma

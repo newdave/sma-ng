@@ -1,6 +1,9 @@
 # Docker Compose Quick Start
 
-This is the fastest way to get the SMA-NG daemon running with Docker Compose.
+This guide runs the SMA-NG daemon with Docker Compose. Compose is optional: on a single host,
+`sma daemon up --media /path/to/media` starts the same daemon without it (see
+[Running the daemon](sma-cli-quickstart.md#11-running-the-daemon)). Use Compose when you want its profiles, override
+files, or the cluster deployment tooling.
 
 The repository ships a compose file at [`docker/docker-compose.yml`](../docker/docker-compose.yml) with six profiles:
 
@@ -27,27 +30,21 @@ For clustered Docker deployments, set `daemon.node_id` in
 
 ## 1. Prepare Host Directories
 
-From a checkout on the deployment target, run the installer:
+Install the `sma` command first; it creates `/opt/sma/config`, `/opt/sma/logs` and `/opt/sma/data` and a sample
+`/opt/sma/config/sma-ng.yml`, and needs no source checkout:
 
 ```bash
-mise run setup:docker:target
+curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.sh | sh
 ```
 
-If `mise` is not installed yet, run the script directly:
+Then fetch the compose file and the container settings file it requires:
 
 ```bash
-bash setup/install-docker-target.sh
-```
-
-By default this creates the persistent directories and seed files the compose file expects:
-
-```bash
-/opt/sma/config/sma-ng.yml
-/opt/sma/config/daemon.env
-/opt/sma/logs/
-/opt/sma/cache/
-/opt/sma/data/
-/transcode/sma/
+sudo mkdir -p /opt/sma/docker /transcode /recycle
+sudo curl -fsSL -o /opt/sma/docker/docker-compose.yml \
+  https://raw.githubusercontent.com/newdave/sma-ng/main/docker/docker-compose.yml
+docker run --rm --entrypoint cat ghcr.io/newdave/sma-ng:latest /app/setup/daemon.env.sample \
+  | sudo tee /opt/sma/config/daemon.env >/dev/null
 ```
 
 The default compose mounts are:
@@ -57,20 +54,16 @@ The default compose mounts are:
 - `/opt/sma/data` → container `/data`
 - `/mnt` → container `/mnt`
 - `/transcode` → container `/transcode`
+- `/recycle` → container `/recycle`
 
-Adjust the compose file if your host uses different media paths.
+Adjust the compose file if your host uses different media paths; keep host and container paths identical so
+webhook paths resolve inside the daemon.
 
-The installer accepts environment overrides:
+## 2. Config Files
 
-```bash
-INSTALL_DIR=/srv/sma TRANSCODE_DIR=/srv/transcode mise run setup:docker:target
-```
-
-## 2. Create Config Files
-
-The installer copies `setup/sma-ng.yml.sample` to `/opt/sma/config/sma-ng.yml` and
-`setup/daemon.env.sample` to `/opt/sma/config/daemon.env` only when those files do not already exist.
-Existing local config is left untouched.
+The installer writes `/opt/sma/config/sma-ng.yml` only when it does not exist, and `daemon.env` above comes from
+the image's sample. Existing local config is never overwritten. Fresh samples are written to
+`/opt/sma/config/defaults/` each time the container starts, so you can diff your config against them.
 
 ## 3. Edit `sma-ng.yml`
 
@@ -147,8 +140,7 @@ daemon container, so keep media under `/mnt` (or add mounts) for Sonarr, Radarr 
 
 ### Migrating from the alias file
 
-- `source /opt/sma/sma-ng-docker-aliases.sh` is no longer needed. The file is now a deprecated shim that forwards the
-  old `sma-*` names to `sma` and will be removed in a later release.
+- The old `sma-*` alias file was removed; delete the `source` line for it from your shell profile and use `sma`.
 - The `/mnt/unionfs/downloads:/downloads` mount was removed from every compose service. Replace `/downloads/...`
   arguments with `/mnt/unionfs/downloads/...`.
 - Webhooks from download clients that still report `/downloads/...` keep working with a path rewrite in `sma-ng.yml`:
@@ -160,8 +152,8 @@ daemon container, so keep media under `/mnt` (or add mounts) for Sonarr, Radarr 
         to: /mnt/unionfs/downloads
   ```
 
-- CLI output is now owned by `ubuntu` instead of `root`. Fix old root-owned output once with
-  `docker exec -u 0 sma-ng chown -R ubuntu:ubuntu <path>` if needed.
+- `sma` runs commands as your own user, so new files are owned by you. Fix old root-owned output once with
+  `sudo chown -R "$USER" <path>` if needed.
 
 ## Stop grace period
 

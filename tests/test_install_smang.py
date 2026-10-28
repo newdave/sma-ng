@@ -18,7 +18,7 @@ case "$1" in
   info) exit "${FAKE_INFO_RC:-0}" ;;
   pull) exit "${FAKE_PULL_RC:-0}" ;;
   create) echo cid42 ;;
-  cp) [ "${FAKE_CP_RC:-0}" = 0 ] || exit "$FAKE_CP_RC"; printf '#!/bin/sh\necho bootstrap\n' > "$3" ;;
+  cp) [ "${FAKE_CP_RC:-0}" = 0 ] || exit "$FAKE_CP_RC"; printf '#!/bin/sh\nprintf "sma %%s\\n" "$*" >> "$FAKE_LOG"\n' > "$3" ;;
   run) printf 'base:\n  converter: {}\n' ;;
 esac
 exit 0
@@ -160,10 +160,23 @@ def test_pull_failure_stops(env):
   assert not os.path.exists(_dest(env, "/usr/local/bin/sma"))
 
 
-def test_daemon_flag_not_available_yet(env):
-  r = _run(env, "--daemon")
+def test_daemon_runs_sma_daemon_up(env):
+  r = _run(env, "--daemon", "--media", "/mnt/media", "--media", "/srv/tv")
   assert r.returncode == 0, r.stderr
-  assert "not available yet" in r.stderr
+  assert "sma daemon up --media /mnt/media --media /srv/tv" in _calls(env)
+
+
+def test_daemon_needs_media_before_installing(env):
+  r = _run(env, "--daemon")
+  assert r.returncode == 1
+  assert "--daemon needs at least one --media PATH" in r.stderr
+  assert _calls(env) == []
+
+
+def test_media_with_spaces_refused(env):
+  r = _run(env, "--daemon", "--media", "/mnt/My Media")
+  assert r.returncode == 1
+  assert "cannot contain spaces" in r.stderr
 
 
 def test_unknown_option(env):

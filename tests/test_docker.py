@@ -684,13 +684,6 @@ class TestHostCommandInImage:
   def test_sma_host_script_ships_in_repo(self):
     assert os.access(os.path.join(PROJECT_ROOT, "setup", "sma-host.sh"), os.X_OK)
 
-  def test_alias_file_is_deprecation_shim(self):
-    text = _read("setup/sma-ng-docker-aliases.sh")
-    assert "deprecated" in text.lower()
-    assert "docker exec" not in text
-    for name in ("sma-convert", "sma-repair", "sma-shell", "sma-logs"):
-      assert "alias %s=" % name in text
-
 
 class TestComposeOnePathPerFile:
   def _mounts(self, compose):
