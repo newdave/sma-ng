@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.2.19](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.18...sma-ng-v3.2.19) (2026-10-28)
+
+
+### Bug Fixes
+
+* **cli:** sma preview never prompts, and manual.py stops instead of looping on closed stdin ([244b1ff](https://github.com/newdave/sma-ng/commit/244b1ff43fd9ef31ec4055bce5771fbb13c77aa7))
+
+
+### Documentation
+
+* add the sma CLI quick start for running SMA-NG commands from the Docker host ([6e02263](https://github.com/newdave/sma-ng/commit/6e022632cddad847cc35c2ef3c84287d3951d077))
+* sma-cli-quickstart.md (next commit) documents both. ([244b1ff](https://github.com/newdave/sma-ng/commit/244b1ff43fd9ef31ec4055bce5771fbb13c77aa7))
+
 ## [3.2.18](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.17...sma-ng-v3.2.18) (2026-10-28)
 
 
