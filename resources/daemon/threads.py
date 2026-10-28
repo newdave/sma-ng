@@ -3,7 +3,7 @@ import os
 import threading
 import time
 
-from resources.daemon import metrics_prom, storage
+from resources.daemon import job_kinds, metrics_prom, storage
 from resources.daemon.log_archiver import LogArchiver
 from resources.library_audit.engine import AuditEngine
 from resources.library_audit.enumerator import enumerate_paths
@@ -57,7 +57,16 @@ class HeartbeatThread(_StoppableThread):
       return  # Heartbeat only meaningful for the shared PG backend
     while self.running:
       try:
-        self.job_db.heartbeat(self.node_id, self.host, self.worker_count, self.started_at, version=self.version, hwaccel=self.hwaccel, node_name=self.node_name)
+        self.job_db.heartbeat(
+          self.node_id,
+          self.host,
+          self.worker_count,
+          self.started_at,
+          version=self.version,
+          hwaccel=self.hwaccel,
+          node_name=self.node_name,
+          capabilities=job_kinds.CAPABILITY,
+        )
         cmd = None
         if self.job_db.is_distributed:
           cmd = self.job_db.poll_node_command(self.node_id)
