@@ -4,7 +4,8 @@ The worker container runs the image's normal entrypoint in ``run`` mode
 (docker/docker-entrypoint.sh) as the caller's uid/gid. It has:
 
 * every named path mounted at the same location;
-* the host config directory mounted at ``/app/config:ro``, where the tools
+* the host config directory mounted at ``/app/config`` (read-write: the tools
+  write their default ``logging.ini`` next to ``sma-ng.yml``), where the tools
   look by default (passing ``-c`` would turn off repair.py's path routing);
 * config-derived directories mounted only if they exist (``optmount``);
 * GPU devices passed through.
@@ -91,7 +92,7 @@ def _base_run(facts, mounts, workdir=WORKDIR):
     step_args += ["--user", "%d:%d" % (facts.uid, facts.gid)]
   step_args += ["-e", "HOME=/tmp"]
   if facts.config_present:
-    step_args += ["-v", "%s/config:/app/config:ro%s" % (facts.sma_home, ",z" if facts.selinux else "")]
+    step_args += ["-v", "%s/config:/app/config%s" % (facts.sma_home, _z(facts))]
   if facts.logs_writable:
     step_args += ["-v", "%s/logs:/app/logs%s" % (facts.sma_home, _z(facts))]
   else:

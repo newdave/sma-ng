@@ -108,7 +108,7 @@ Each run mounts, at the same path inside the container:
   stops `sma` with exit code `2` before anything runs.
 - **directories from `sma-ng.yml`**, but only those that exist on the host: `output-directory`, `move-to`,
   `copy-to`, `recycle-bin` and the analyzer model and cache directories, from the base config and every profile;
-- **`/opt/sma/config`** read-only, where the tools find `sma-ng.yml`;
+- **`/opt/sma/config`**, where the tools find `sma-ng.yml` (they also write their `logging.ini` there);
 - **`/opt/sma/logs`** for the tools' logs, if you can write to it;
 - **`extra-mounts`** from `~/.config/sma/config.yml` and any `--mount PATH`.
 
