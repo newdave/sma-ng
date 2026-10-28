@@ -22,7 +22,7 @@ jobs:
   test:
     name: Test (Python 3.12)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,11 +31,11 @@ jobs:
       # each attempt and retry. The apt archive cache was removed: the runner
       # image deletes downloaded .debs, so it never saved anything.
       - name: Install ffmpeg
-        timeout-minutes: 8
+        timeout-minutes: 5
         run: |
           for attempt in 1 2 3; do
-            if timeout 150 sudo apt-get -o Acquire::Retries=3 update -qq \
-              && timeout 150 sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg; then
+            if timeout 90 sudo apt-get -o Acquire::Retries=3 update -qq \
+              && timeout 90 sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg; then
               exit 0
             fi
             echo "::warning::ffmpeg install attempt $attempt failed; retrying"
@@ -72,7 +72,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,7 +85,7 @@ jobs:
   checks:
     name: OpenAPI, docs, config sample and dependency audit
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -34,7 +34,7 @@ jobs:
     name: Release Please
     if: inputs.tag == ''
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       contents: write
       pull-requests: write
@@ -123,7 +123,7 @@ jobs:
     needs: patch-auto-merge
     if: needs.patch-auto-merge.outputs.merged == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       contents: write
       pull-requests: write
@@ -202,7 +202,7 @@ jobs:
     needs: release-info
     if: always() && needs.release-info.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:
