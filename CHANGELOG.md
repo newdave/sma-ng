@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.2.25](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.24...sma-ng-v3.2.25) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sma:** sma manual, sma smoke, sma logs and sma status are gone, as are SMA_CONTAINER and SMA_COMPOSE_*. Exit 3 now means Docker is unreachable and 5 means sma and the image differ (run sma upgrade).
+
+### Features
+
+* **cli:** in-image sma client that plans throwaway container runs ([4ed051a](https://github.com/newdave/sma-ng/commit/4ed051ada6fbcfa7b85479539d3391a78b1736f1))
+* **install:** one-line installer for the sma command ([168cb04](https://github.com/newdave/sma-ng/commit/168cb0410790e6f212f66ebb6fefc6da342bab29))
+* **sma:** run every sma command in a throwaway container ([368f1e7](https://github.com/newdave/sma-ng/commit/368f1e77c4d421dff04d5d62262acb45db5b0140))
+
 ## [3.2.24](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.23...sma-ng-v3.2.24) (2026-10-28)
 
 
