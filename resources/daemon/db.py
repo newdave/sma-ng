@@ -102,6 +102,36 @@ _METRICS_EXPANSION_COLUMNS: tuple[tuple[str, str, str], ...] = (
   ("request_profile", "TEXT", "TEXT"),
 )
 
+# Job kinds and captured tool output (docs/prps/sma-cli-container-runtime.md).
+# Kept apart from _METRICS_EXPANSION_COLUMNS, whose tests pin its exact list.
+_JOB_KIND_COLUMNS: tuple[tuple[str, str, str], ...] = (
+  # (name,           sqlite_type,              postgres_type)
+  ("kind", "TEXT DEFAULT 'convert'", "TEXT DEFAULT 'convert'"),
+  ("output", "TEXT", "TEXT"),
+  ("output_dropped", "INTEGER DEFAULT 0", "BIGINT DEFAULT 0"),
+)
+
+# Keep the newest 1 MiB of a job's stdout (same budget as ffmpeg_stderr).
+_JOB_OUTPUT_MAX_BYTES = 1024 * 1024
+
+# Never returned by job list/detail responses; read through GET /jobs/{id}/output.
+JOB_OUTPUT_COLUMNS = ("output", "output_dropped")
+
+
+def _append_output_tail(old, text, dropped):
+  """Return (kept_text, dropped_bytes) after appending *text*.
+
+  Offsets are UTF-8 byte positions in the full output stream; when the
+  stored text exceeds _JOB_OUTPUT_MAX_BYTES the head is cut on a character
+  boundary and the cut bytes are added to *dropped*.
+  """
+  data = ((old or "") + text).encode("utf-8", errors="replace")
+  dropped = int(dropped or 0)
+  if len(data) <= _JOB_OUTPUT_MAX_BYTES:
+    return data.decode("utf-8"), dropped
+  kept = data[-_JOB_OUTPUT_MAX_BYTES:].decode("utf-8", errors="ignore")
+  return kept, dropped + len(data) - len(kept.encode("utf-8"))
+
 
 def _utc_now():
   return datetime.now(UTC).replace(microsecond=0).isoformat()
@@ -460,7 +490,7 @@ class SQLiteJobDatabase:
       existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
       if "ffmpeg_stderr" not in existing_cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN ffmpeg_stderr TEXT")
-      for col_name, sqlite_type, _pg_type in _METRICS_EXPANSION_COLUMNS:
+      for col_name, sqlite_type, _pg_type in _METRICS_EXPANSION_COLUMNS + _JOB_KIND_COLUMNS:
         if col_name not in existing_cols:
           conn.execute("ALTER TABLE jobs ADD COLUMN %s %s" % (col_name, sqlite_type))
       conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
@@ -487,6 +517,9 @@ class SQLiteJobDatabase:
           node_name TEXT
         )
       """)
+      node_cols = {row["name"] for row in conn.execute("PRAGMA table_info(cluster_nodes)").fetchall()}
+      if "capabilities" not in node_cols:
+        conn.execute("ALTER TABLE cluster_nodes ADD COLUMN capabilities TEXT")
       _backfill_request_profile(conn, is_sqlite=True, logger=self.log)
     self._reset_running_jobs()
 
@@ -509,27 +542,31 @@ class SQLiteJobDatabase:
       _backfill_request_profile(conn, is_sqlite=True)
       return cur.rowcount
 
-  def add_job(self, path, config, args=None, max_retries=0, *, request_source=None, request_profile=None):
+  def add_job(self, path, config, args=None, max_retries=0, *, request_source=None, request_profile=None, kind="convert", priority=None):
     args_json = json.dumps(args or [])
+    kind = kind or "convert"
     with self._conn() as conn:
       row = conn.execute(
-        "SELECT id FROM jobs WHERE path = ? AND status IN (?, ?) LIMIT 1",
-        (path, STATUS_PENDING, STATUS_RUNNING),
+        "SELECT id FROM jobs WHERE path = ? AND COALESCE(kind, 'convert') = ? AND status IN (?, ?) LIMIT 1",
+        (path, kind, STATUS_PENDING, STATUS_RUNNING),
       ).fetchone()
       if row:
-        self.log.debug("Duplicate job for path: %s (existing job %d)" % (path, row["id"]))
+        self.log.debug("Duplicate %s job for path: %s (existing job %d)" % (kind, path, row["id"]))
         return None
       cur = conn.execute(
-        "INSERT INTO jobs (path, config, args, status, max_retries, request_source, request_profile) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (path, config, args_json, STATUS_PENDING, max_retries, request_source, request_profile),
+        "INSERT INTO jobs (path, config, args, status, max_retries, request_source, request_profile, kind, priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (path, config, args_json, STATUS_PENDING, max_retries, request_source, request_profile, kind, priority or 0),
       )
       job_id = cur.lastrowid
-    self.log.debug("Added job %d: %s" % (job_id, path))
+    self.log.debug("Added %s job %d: %s" % (kind, job_id, path))
     return job_id
 
-  def find_active_job(self, path):
+  def find_active_job(self, path, kind="convert"):
     with self._conn() as conn:
-      row = conn.execute("SELECT * FROM jobs WHERE path = ? AND status IN (?, ?) LIMIT 1", (path, STATUS_PENDING, STATUS_RUNNING)).fetchone()
+      row = conn.execute(
+        "SELECT * FROM jobs WHERE path = ? AND COALESCE(kind, 'convert') = ? AND status IN (?, ?) LIMIT 1",
+        (path, kind or "convert", STATUS_PENDING, STATUS_RUNNING),
+      ).fetchone()
       return dict(row) if row else None
 
   def claim_next_job(
@@ -541,6 +578,7 @@ class SQLiteJobDatabase:
     profile_costs=None,
     profile_weights=None,
     concurrency_budget=None,
+    kinds=None,
   ):
     now = _utc_now()
     with self._conn() as conn:
@@ -561,6 +599,9 @@ class SQLiteJobDatabase:
         placeholders = ", ".join("?" for _ in skip_profiles)
         sql += " AND (request_profile IS NULL OR request_profile NOT IN (%s))" % placeholders
         params.extend(list(skip_profiles))
+      if kinds:
+        sql += " AND COALESCE(kind, 'convert') IN (%s)" % ", ".join("?" for _ in kinds)
+        params.extend(list(kinds))
       sql += " ORDER BY " + priority_expr + " DESC, created_at ASC LIMIT 1"
       params.extend(priority_params)
       row = conn.execute(sql, params).fetchone()
@@ -646,6 +687,29 @@ class SQLiteJobDatabase:
       payload = encoded[-_FFMPEG_STDERR_MAX_BYTES:].decode("utf-8", errors="replace")
     with self._conn() as conn:
       conn.execute("UPDATE jobs SET ffmpeg_stderr = ? WHERE id = ?", (payload, job_id))
+
+  def append_job_output(self, job_id, text):
+    """Append tool stdout for *job_id*, keeping the newest _JOB_OUTPUT_MAX_BYTES."""
+    if not text:
+      return
+    with self._conn() as conn:
+      row = conn.execute("SELECT output, output_dropped FROM jobs WHERE id = ?", (job_id,)).fetchone()
+      if row is None:
+        return
+      kept, dropped = _append_output_tail(row["output"], text, row["output_dropped"])
+      conn.execute("UPDATE jobs SET output = ?, output_dropped = ? WHERE id = ?", (kept, dropped, job_id))
+
+  def get_job_output(self, job_id):
+    """Return (output, dropped_bytes) for *job_id*, or None when the job does not exist."""
+    with self._conn() as conn:
+      row = conn.execute("SELECT output, output_dropped FROM jobs WHERE id = ?", (job_id,)).fetchone()
+      if row is None:
+        return None
+      return row["output"] or "", int(row["output_dropped"] or 0)
+
+  def nodes_missing_capability(self, capability, online_within_seconds=120):
+    """Single-node SQLite deployments have no peers to gate on."""
+    return []
 
   def defer_job(self, job_id, delay_seconds, reason=None):
     """Push a running job back to pending with a delay, without bumping retry_count.
@@ -763,17 +827,17 @@ class SQLiteJobDatabase:
     with self._conn() as conn:
       return conn.execute("SELECT COUNT(*) AS count FROM jobs WHERE status = ? AND config = ?", (STATUS_PENDING, config)).fetchone()["count"]
 
-  def heartbeat(self, node_id, host, workers, started_at, version=None, hwaccel=None, node_name=None):
+  def heartbeat(self, node_id, host, workers, started_at, version=None, hwaccel=None, node_name=None, capabilities=None):
     now = _utc_now()
     started = started_at.isoformat() if hasattr(started_at, "isoformat") else str(started_at)
     with self._conn() as conn:
       conn.execute(
         """
-        INSERT INTO cluster_nodes (node_id, host, workers, last_seen, started_at, status, running_jobs, pending_jobs, version, hwaccel, node_name)
+        INSERT INTO cluster_nodes (node_id, host, workers, last_seen, started_at, status, running_jobs, pending_jobs, version, hwaccel, node_name, capabilities)
         VALUES (?, ?, ?, ?, ?, 'online',
           (SELECT COUNT(*) FROM jobs WHERE status = 'running' AND node_id = ?),
           (SELECT COUNT(*) FROM jobs WHERE status = 'pending'),
-          ?, ?, ?)
+          ?, ?, ?, ?)
         ON CONFLICT(node_id) DO UPDATE SET
           host = excluded.host,
           workers = excluded.workers,
@@ -783,9 +847,10 @@ class SQLiteJobDatabase:
           pending_jobs = excluded.pending_jobs,
           version = COALESCE(excluded.version, cluster_nodes.version),
           hwaccel = COALESCE(excluded.hwaccel, cluster_nodes.hwaccel),
-          node_name = COALESCE(excluded.node_name, cluster_nodes.node_name)
+          node_name = COALESCE(excluded.node_name, cluster_nodes.node_name),
+          capabilities = COALESCE(excluded.capabilities, cluster_nodes.capabilities)
         """,
-        (node_id, host, workers, now, started, node_id, version, hwaccel, node_name or None),
+        (node_id, host, workers, now, started, node_id, version, hwaccel, node_name or None, capabilities),
       )
     return
 
@@ -1191,8 +1256,9 @@ class PostgreSQLJobDatabase:
         cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_size_bytes BIGINT")
         cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS output_size_bytes BIGINT")
         # Metrics-expansion columns (additive, all nullable, all backends).
-        for col_name, _sqlite_type, pg_type in _METRICS_EXPANSION_COLUMNS:
+        for col_name, _sqlite_type, pg_type in _METRICS_EXPANSION_COLUMNS + _JOB_KIND_COLUMNS:
           cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS %s %s" % (col_name, pg_type))
+        cur.execute("ALTER TABLE cluster_nodes ADD COLUMN IF NOT EXISTS capabilities TEXT")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status_completed ON jobs(status, completed_at)")
         # ---- library audit ---------------------------------------------------
         cur.execute("""
@@ -1295,30 +1361,37 @@ class PostgreSQLJobDatabase:
     """
     cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (path,))
 
-  def add_job(self, path, config, args=None, max_retries=0, *, request_source=None, request_profile=None):
-    """Add a job to the queue. Returns job ID, or None if a duplicate is already pending/running."""
+  def add_job(self, path, config, args=None, max_retries=0, *, request_source=None, request_profile=None, kind="convert", priority=None):
+    """Add a job to the queue. Returns job ID, or None if the same kind is already pending/running for the path."""
     args_json = json.dumps(args or [])
+    kind = kind or "convert"
     with self._conn() as conn:
       with conn.cursor() as cur:
         self._lock_job_path(cur, path)
-        cur.execute("SELECT id FROM jobs WHERE path = %s AND status IN (%s, %s) LIMIT 1", (path, STATUS_PENDING, STATUS_RUNNING))
+        cur.execute(
+          "SELECT id FROM jobs WHERE path = %s AND COALESCE(kind, 'convert') = %s AND status IN (%s, %s) LIMIT 1",
+          (path, kind, STATUS_PENDING, STATUS_RUNNING),
+        )
         existing = cur.fetchone()
         if existing:
-          self.log.debug("Duplicate job for path: %s (existing job %d)" % (path, existing["id"]))
+          self.log.debug("Duplicate %s job for path: %s (existing job %d)" % (kind, path, existing["id"]))
           return None
         cur.execute(
-          "INSERT INTO jobs (path, config, args, status, max_retries, request_source, request_profile) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-          (path, config, args_json, STATUS_PENDING, max_retries, request_source, request_profile),
+          "INSERT INTO jobs (path, config, args, status, max_retries, request_source, request_profile, kind, priority) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+          (path, config, args_json, STATUS_PENDING, max_retries, request_source, request_profile, kind, priority or 0),
         )
         job_id = cur.fetchone()["id"]
-    self.log.debug("Added job %d: %s" % (job_id, path))
+    self.log.debug("Added %s job %d: %s" % (kind, job_id, path))
     return job_id
 
-  def find_active_job(self, path):
-    """Find a pending or running job for the given path, if any."""
+  def find_active_job(self, path, kind="convert"):
+    """Find a pending or running job of *kind* for the given path, if any."""
     with self._conn() as conn:
       with conn.cursor() as cur:
-        cur.execute("SELECT * FROM jobs WHERE path = %s AND status IN (%s, %s) LIMIT 1", (path, STATUS_PENDING, STATUS_RUNNING))
+        cur.execute(
+          "SELECT * FROM jobs WHERE path = %s AND COALESCE(kind, 'convert') = %s AND status IN (%s, %s) LIMIT 1",
+          (path, kind or "convert", STATUS_PENDING, STATUS_RUNNING),
+        )
         row = cur.fetchone()
         return dict(row) if row else None
 
@@ -1331,6 +1404,7 @@ class PostgreSQLJobDatabase:
     profile_costs=None,
     profile_weights=None,
     concurrency_budget=None,
+    kinds=None,
   ):
     """Atomically claim the next pending job using SELECT FOR UPDATE SKIP LOCKED.
 
@@ -1404,6 +1478,9 @@ class PostgreSQLJobDatabase:
         if skip_profiles:
           clauses.append("(request_profile IS NULL OR request_profile != ALL(%s))")
           params.append(list(skip_profiles))
+        if kinds:
+          clauses.append("COALESCE(kind, 'convert') = ANY(%s)")
+          params.append(list(kinds))
         sql = "SELECT id, path, config, args FROM jobs WHERE " + " AND ".join(clauses) + " ORDER BY " + priority_expr + " DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
         params.extend(priority_params)
         cur.execute(sql, tuple(params))
@@ -1511,6 +1588,44 @@ class PostgreSQLJobDatabase:
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute("UPDATE jobs SET ffmpeg_stderr = %s WHERE id = %s", (payload, job_id))
+
+  def append_job_output(self, job_id, text):
+    """Append tool stdout for *job_id*, keeping the newest _JOB_OUTPUT_MAX_BYTES."""
+    if not text:
+      return
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("SELECT output, output_dropped FROM jobs WHERE id = %s FOR UPDATE", (job_id,))
+        row = cur.fetchone()
+        if row is None:
+          return
+        kept, dropped = _append_output_tail(row["output"], text, row["output_dropped"])
+        cur.execute("UPDATE jobs SET output = %s, output_dropped = %s WHERE id = %s", (kept, dropped, job_id))
+
+  def get_job_output(self, job_id):
+    """Return (output, dropped_bytes) for *job_id*, or None when the job does not exist."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute("SELECT output, output_dropped FROM jobs WHERE id = %s", (job_id,))
+        row = cur.fetchone()
+        if row is None:
+          return None
+        return row["output"] or "", int(row["output_dropped"] or 0)
+
+  def nodes_missing_capability(self, capability, online_within_seconds=120):
+    """Names of nodes seen recently whose heartbeat does not advertise *capability*."""
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+                    SELECT COALESCE(node_name, node_id) AS name FROM cluster_nodes
+                    WHERE last_seen >= NOW() - make_interval(secs => %s)
+                      AND NOT (%s = ANY(string_to_array(COALESCE(capabilities, ''), ',')))
+                    ORDER BY name
+                """,
+          (online_within_seconds, capability),
+        )
+        return [row["name"] for row in cur.fetchall()]
 
   def defer_job(self, job_id, delay_seconds, reason=None):
     """Push a running job back to pending with a delay, without bumping retry_count.
@@ -1867,7 +1982,7 @@ class PostgreSQLJobDatabase:
         cur.execute("SELECT COUNT(*) AS count FROM jobs WHERE status = %s AND config = %s", (STATUS_PENDING, config))
         return cur.fetchone()["count"]
 
-  def heartbeat(self, node_id, host, workers, started_at, version=None, hwaccel=None, node_name=None):
+  def heartbeat(self, node_id, host, workers, started_at, version=None, hwaccel=None, node_name=None, capabilities=None):
     """Upsert this node's heartbeat row in cluster_nodes.
 
     started_at is set on INSERT and never overwritten on UPDATE, so it
@@ -1884,12 +1999,12 @@ class PostgreSQLJobDatabase:
         cur.execute(
           """
                     INSERT INTO cluster_nodes (node_id, host, workers, last_seen, started_at,
-                        status, running_jobs, pending_jobs, version, hwaccel, node_name)
+                        status, running_jobs, pending_jobs, version, hwaccel, node_name, capabilities)
                     VALUES (
                         %s, %s, %s, NOW(), %s, 'online',
                         (SELECT COUNT(*) FROM jobs WHERE status = 'running' AND node_id = %s),
                         (SELECT COUNT(*) FROM jobs WHERE status = 'pending'),
-                        %s, %s, %s
+                        %s, %s, %s, %s
                     )
                     ON CONFLICT (node_id) DO UPDATE SET
                         host         = EXCLUDED.host,
@@ -1903,9 +2018,10 @@ class PostgreSQLJobDatabase:
                         pending_jobs = EXCLUDED.pending_jobs,
                         version      = COALESCE(EXCLUDED.version, cluster_nodes.version),
                         hwaccel      = COALESCE(EXCLUDED.hwaccel, cluster_nodes.hwaccel),
-                        node_name    = COALESCE(EXCLUDED.node_name, cluster_nodes.node_name)
+                        node_name    = COALESCE(EXCLUDED.node_name, cluster_nodes.node_name),
+                        capabilities = COALESCE(EXCLUDED.capabilities, cluster_nodes.capabilities)
                 """,
-          (node_id, host, workers, started_at, node_id, version, hwaccel, node_name or None),
+          (node_id, host, workers, started_at, node_id, version, hwaccel, node_name or None, capabilities),
         )
     return
 

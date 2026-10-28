@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 
-from resources.daemon import metrics_prom
+from resources.daemon import job_kinds, metrics_prom
 from resources.daemon.constants import FFMPEG_STDERR_DIR, SCRIPT_DIR, resolve_node_id
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.log import getLogger
@@ -104,6 +104,41 @@ def kill_process_tree(process, grace=None, own_group=False):
   except Exception:
     pass
   _send(getattr(signal, "SIGKILL", signal.SIGTERM), process.kill)
+
+
+class _OutputBuffer:
+  """Collect a job's stdout lines and store them via ``append_job_output``.
+
+  Flushes at most every FLUSH_SECONDS while the tool runs, and once more at
+  exit, so ``GET /jobs/{id}/output`` can follow a running job.
+  """
+
+  FLUSH_SECONDS = 2.0
+
+  def __init__(self, job_db, job_id, clock=time.monotonic):
+    self._append = getattr(job_db, "append_job_output", None)
+    self._job_id = job_id
+    self._clock = clock
+    self._lines = []
+    self._last = clock()
+
+  def add(self, line):
+    if self._append is None:
+      return
+    self._lines.append(line)
+    if self._clock() - self._last >= self.FLUSH_SECONDS:
+      self.flush()
+
+  def flush(self):
+    self._last = self._clock()
+    if self._append is None or not self._lines:
+      return
+    text = "\n".join(self._lines) + "\n"
+    self._lines = []
+    try:
+      self._append(self._job_id, text)
+    except Exception:
+      log.warning("Could not store output for job %d" % self._job_id, exc_info=True)
 
 
 class _JobWatchdog(threading.Thread):
@@ -380,6 +415,7 @@ class ConversionWorker(threading.Thread):
         profile_costs=profile_costs or None,
         profile_weights=profile_weights or None,
         concurrency_budget=budget or None,
+        kinds=job_kinds.SUPPORTED_KINDS,
       )
       if job:
         # Chain-wake: notify the next idle worker before starting heavy
@@ -404,6 +440,10 @@ class ConversionWorker(threading.Thread):
     self._last_encoder_backend: str | None = None
     path = job["path"]
     config_file = job["config"]
+    try:
+      kind = job_kinds.get(job.get("kind"))
+    except KeyError:
+      kind = None
 
     job_started_at = time.monotonic()
     in_flight = metrics_prom.in_flight_counter(self.node_id)
@@ -419,6 +459,17 @@ class ConversionWorker(threading.Thread):
       in_flight.dec()
       self.current_job_id = None
       return
+
+    if kind is None:
+      self.log.error("Job %d has unsupported kind %r" % (job_id, job.get("kind")))
+      cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
+      self.job_db.fail_job(job_id, "Unsupported job kind %r" % job.get("kind"), failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, node_id=self.node_id)
+      metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
+      metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
+      in_flight.dec()
+      self.current_job_id = None
+      return
+    is_convert = kind.name == job_kinds.DEFAULT_KIND
 
     if not os.path.exists(path):
       self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
@@ -457,20 +508,23 @@ class ConversionWorker(threading.Thread):
 
     try:
       profile = job.get("profile")
-      if profile and "--profile" not in args and "-p" not in args:
+      if kind.uses_profile and profile and "--profile" not in args and "-p" not in args:
         args = ["--profile", profile] + args
       input_size = None
-      try:
-        input_size = os.path.getsize(path)
-      except OSError:
-        self.log.warning("Could not stat input file for job %d: %s" % (job_id, path))
-      # Pre-flight output-filesystem capacity gate. Refuses to start ffmpeg
-      # when the configured output_dir cannot hold input_size * ratio,
-      # deferring instead so the slot isn't burnt on a guaranteed ENOSPC.
-      if self._preflight_disk_pressure(job_id, path, config_file, profile):
-        metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
-        return
-      success, final_output, source_duration_secs = self._run_conversion(job_id, path, config_file, args)
+      if is_convert:
+        try:
+          input_size = os.path.getsize(path)
+        except OSError:
+          self.log.warning("Could not stat input file for job %d: %s" % (job_id, path))
+        # Pre-flight output-filesystem capacity gate. Refuses to start ffmpeg
+        # when the configured output_dir cannot hold input_size * ratio,
+        # deferring instead so the slot isn't burnt on a guaranteed ENOSPC.
+        if self._preflight_disk_pressure(job_id, path, config_file, profile):
+          metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
+          return
+      # Conversions keep their original call shape; other kinds name themselves.
+      kind_kwargs = {} if is_convert else {"kind": kind.name}
+      success, final_output, source_duration_secs = self._run_conversion(job_id, path, config_file, args, **kind_kwargs)
       elapsed = time.monotonic() - job_started_at
       output_size = None
       # A conversion that exited 0 before the kill landed is still a
@@ -503,10 +557,11 @@ class ConversionWorker(threading.Thread):
         # `final_output` is the SMA-tagged terminal path written into the
         # log; fall back to the input path for in-place transcodes.
         stat_target = final_output or path
-        try:
-          output_size = os.path.getsize(stat_target)
-        except OSError:
-          self.log.warning("Could not stat output file for job %d: %s" % (job_id, stat_target))
+        if is_convert:
+          try:
+            output_size = os.path.getsize(stat_target)
+          except OSError:
+            self.log.warning("Could not stat output file for job %d: %s" % (job_id, stat_target))
         updated = self.job_db.complete_job(
           job_id,
           input_size=input_size,
@@ -539,7 +594,8 @@ class ConversionWorker(threading.Thread):
           # without emitting the structured line.
           cause = self._last_attempt_failure_class or WORKER_SENTINEL_PROCESS_FAILED
           cat = categorize_failure(cause).value
-          updated = self.job_db.fail_job(job_id, "Conversion process failed", failure_category=cat, failure_cause=cause, node_id=self.node_id)
+          message = "Conversion process failed" if is_convert else "%s process failed" % kind.name.capitalize()
+          updated = self.job_db.fail_job(job_id, message, failure_category=cat, failure_cause=cause, node_id=self.node_id)
           self._log_discarded(job_id, updated, "failure")
           self._ingest_ffmpeg_stderr_sidecars(job_id)
           metrics_prom.record_job_terminal("failed", elapsed)
@@ -658,7 +714,7 @@ class ConversionWorker(threading.Thread):
     except Exception:
       self.log.exception("Failed to ingest ffmpeg stderr sidecars for job %d" % job_id)
 
-  def _run_conversion(self, job_id, path, config_file, extra_args):
+  def _run_conversion(self, job_id, path, config_file, extra_args, kind=job_kinds.DEFAULT_KIND):
     """Run the conversion process.
 
     Returns a ``(success: bool, final_output: str | None,
@@ -667,11 +723,11 @@ class ConversionWorker(threading.Thread):
     """
     token = set_job_id(job_id)
     try:
-      return self._run_conversion_inner(job_id, path, config_file, extra_args)
+      return self._run_conversion_inner(job_id, path, config_file, extra_args, kind=kind)
     finally:
       clear_job_id(token)
 
-  def _run_conversion_inner(self, job_id, path, config_file, extra_args):
+  def _run_conversion_inner(self, job_id, path, config_file, extra_args, kind=job_kinds.DEFAULT_KIND):
     """Inner conversion logic — job_id context is already set by _run_conversion."""
     config_logger = self.config_log_manager.get_logger(config_file)
     log_file = self.config_log_manager.get_log_file(config_file)
@@ -692,7 +748,17 @@ class ConversionWorker(threading.Thread):
     # names its ffmpeg-stderr sidecar "ffmpeg.job-.*", which the
     # _ingest_ffmpeg_stderr_sidecars glob ("ffmpeg.job<id>.*") never
     # matches — so jobs.ffmpeg_stderr stayed empty for every failure.
-    cmd = [sys.executable, self.script_path, "-a", "-i", path, "-c", config_file, "--job-id", str(job_id)] + extra_args
+    job_kind = job_kinds.get(kind)
+    cmd = job_kind.argv(
+      os.path.dirname(self.script_path),
+      path,
+      config_file,
+      job_id,
+      extra_args,
+      python=sys.executable,
+      script_path=self.script_path if job_kind.script == "manual.py" else None,
+    )
+    output = _OutputBuffer(self.job_db, job_id)
 
     env = os.environ.copy()
     if self.ffmpeg_dir:
@@ -756,6 +822,7 @@ class ConversionWorker(threading.Thread):
             _last_progress_log = now
         else:
           config_logger.info(line)
+          output.add(line)
         # Capture MediaProcessor's structured ffmpeg.attempts event so the
         # daemon's /health fallback counters reflect work done in worker
         # subprocesses. The event is single-line JSON per the logging
@@ -777,7 +844,7 @@ class ConversionWorker(threading.Thread):
       if reason in (ABORT_CANCELLED, ABORT_REASSIGNED, ABORT_SHUTDOWN) and process.returncode != 0:
         config_logger.warning("Job %d conversion killed (%s): %s" % (job_id, reason, path))
         return False, final_output, total_duration_secs
-      if process.returncode == 0:
+      if job_kind.succeeded(process.returncode):
         config_logger.info("Job %d completed successfully: %s" % (job_id, report_path))
         return True, final_output, total_duration_secs
       else:
@@ -788,6 +855,7 @@ class ConversionWorker(threading.Thread):
       config_logger.exception("Job %d failed: %s" % (job_id, e))
       return False, final_output, total_duration_secs
     finally:
+      output.flush()
       if watchdog is not None:
         watchdog.finish()
       self._job_processes.pop(job_id, None)
