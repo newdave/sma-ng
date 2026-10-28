@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.23](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.22...sma-ng-v3.2.23) (2026-10-28)
+
+
+### Bug Fixes
+
+* **docker:** intel-pg maps the whole /dev/dri tree like intel ([296c8e7](https://github.com/newdave/sma-ng/commit/296c8e769c4de9eec68321549c3737e4b7d18dd4))
+
 ## [3.2.22](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.21...sma-ng-v3.2.22) (2026-10-28)
 
 
