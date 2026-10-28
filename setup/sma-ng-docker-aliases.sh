@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # DEPRECATED: thin shim over the `sma` host command. Removed in a later release.
 # Install `sma` instead (no sourcing needed):
-#   docker run --rm --entrypoint cat ghcr.io/newdave/sma-ng:latest /usr/local/bin/sma-host > /usr/local/bin/sma
+#   docker cp sma-ng:/usr/local/bin/sma-host /usr/local/bin/sma   (see docs/sma-cli-quickstart.md)
 #   chmod 755 /usr/local/bin/sma
 
 printf '%s\n' "sma-ng-docker-aliases.sh is deprecated: use the 'sma' command (sma convert, sma repair, ...)" >&2
@@ -10,7 +10,7 @@ _sma_cmd() {
   if command -v sma >/dev/null 2>&1; then
     command sma "$@"
   else
-    echo "sma: host command not installed; see docs/docker-compose-quickstart.md" >&2
+    echo "sma: host command not installed; see docs/sma-cli-quickstart.md" >&2
     return 3
   fi
 }

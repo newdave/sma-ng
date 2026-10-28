@@ -19,6 +19,7 @@ DOC_PAGES = [
   ("index", "Overview"),
   ("getting-started", "Getting Started"),
   ("docker-compose-quickstart", "Docker Quick Start"),
+  ("sma-cli-quickstart", "sma CLI Quick Start"),
   ("configuration", "Configuration"),
   ("daemon", "Daemon Mode"),
   ("integrations", "Integrations"),

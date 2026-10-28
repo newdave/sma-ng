@@ -309,7 +309,7 @@ COPY docker/docker-entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Host CLI: operators install it with
-#   docker run --rm --entrypoint cat IMAGE /usr/local/bin/sma-host > /usr/local/bin/sma
+#   docker cp sma-ng:/usr/local/bin/sma-host /usr/local/bin/sma   (see docs/sma-cli-quickstart.md)
 # The build SHA is substituted so `sma version` can detect a stale host copy.
 COPY setup/sma-host.sh /usr/local/bin/sma-host
 RUN sed "s|@SMA_GIT_SHA@|${SMA_GIT_SHA}|" /usr/local/bin/sma-host > /tmp/sma-host \
