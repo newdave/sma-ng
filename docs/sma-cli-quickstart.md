@@ -78,6 +78,7 @@ to the tool, for example `sma convert Film.mkv -tmdb 603`.
 | `sma codecs` | List supported codecs (always a throwaway container) |
 | `sma shell [ARGS]` | `bash` in a throwaway container with the current directory mounted |
 | `sma jobs [list\|show ID\|logs ID [-f]\|cancel ID]` | Daemon jobs (see [Daemon targets](#10-daemon-targets)) |
+| `sma daemon up\|down\|restart\|status\|logs\|upgrade` | The long-running daemon (see [Running the daemon](#11-running-the-daemon)) |
 | `sma target add\|list\|use\|rm ...` | Daemons `sma` can send work to |
 | `sma map add\|list\|rm ...` | Translate local paths to a daemon's paths |
 | `sma upgrade [TAG]` | Pull the image (or switch to `TAG`) and replace `sma` from it |
@@ -242,11 +243,35 @@ sma --json repair -n /mnt/media/TV
 {"job_id": 42, "kind": "repair", "path": "/mnt/media/TV", "status": "completed", "error": null}
 ```
 
-The long-running daemon itself (webhooks from Sonarr and Radarr, the queue, the dashboard) is still set up with
-Docker Compose; see [Docker Compose Quick Start](docker-compose-quickstart.md).
-
 Coming from the old `docker exec` version of `sma` or the alias file: `sma manual`, `sma smoke`, `sma logs`,
 `sma status` and the `SMA_CONTAINER` / `SMA_COMPOSE_*` variables are gone. Use `docker logs -f sma-ng` for daemon logs.
+
+## 11. Running the daemon
+
+The daemon receives webhooks from Sonarr and Radarr, keeps the job queue and serves the dashboard. `sma` can run it
+for you, no Compose needed:
+
+```bash
+sma daemon up --media /mnt/media             # start sma-ng (or replace it with the current image)
+sma daemon status                            # container state and whether /health answers
+sma daemon logs                              # follow its log (also: sma logs)
+sma daemon restart
+sma daemon upgrade                           # pull the pinned image and recreate the container
+sma daemon down                              # stop and remove it
+```
+
+`sma daemon up` creates a container named `sma-ng` with `--restart unless-stopped`, publishes port 8585 (change
+it with `--port N`), and mounts `/opt/sma/config`, `/opt/sma/logs` and `/opt/sma/data` plus each `--media`
+directory at the same path, and `/transcode` and `/recycle` when they exist. GPUs are passed through as for
+throwaway runs. It then waits up to 60 seconds for the daemon to answer. `--media` and `--port` are remembered in
+`~/.config/sma/config.yml`, so later `up` and `upgrade` need no options; `up` without any media root stops with
+exit code `2`. Webhook paths must be under one of the media roots.
+
+If the `sma-ng` container was started by Docker Compose, `sma daemon` drives that compose project instead:
+`up` is `docker compose up -d`, `down` stops the service (the rest of the project is left alone), `upgrade` pulls
+and recreates it with the compose file's image tag. Mounts and ports then stay in the compose file. Set
+`SMA_DAEMON_NAME` when the container has another name. Clusters keep their own deployment tooling (see
+[Cluster Operations](cluster-operations.md)); to `sma` each node is a target.
 
 ## Troubleshooting
 

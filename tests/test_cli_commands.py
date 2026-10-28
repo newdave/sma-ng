@@ -75,12 +75,6 @@ def test_pathless_commands_dispatch(env, command):
   assert _plan(env)[0] == "sma-plan 1"
 
 
-@pytest.mark.parametrize("command", ["daemon", "logs"])
-def test_later_phase_commands(env, command, capsys):
-  assert commands.main([command, "list"], env=env) == 2
-  assert "not available in this version" in capsys.readouterr().err
-
-
 def test_upgrade_reaching_client_is_usage(env, capsys):
   assert commands.main(["upgrade"], env=env) == 2
 

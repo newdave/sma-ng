@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import sys
 
-from resources.cli import clientconfig, hostfacts, manage, mounts, remote, routing, throwaway
+from resources.cli import clientconfig, daemonctl, hostfacts, manage, mounts, remote, routing, throwaway
 from resources.cli.errors import CliError, UsageError
 from resources.version import get_commit, get_version
 
@@ -29,6 +29,8 @@ container that mounts the paths you name):
   shell [ARGS]             bash in a throwaway container, current directory mounted
 
 Daemon jobs and settings:
+  daemon up [--media PATH]... [--port N] | down | restart | status | logs | upgrade
+  logs                     same as daemon logs
   jobs [list|show ID|logs ID [-f]|cancel ID]
   target add NAME URL [--api-key-stdin] | list | use NAME | rm NAME
   map add TARGET LOCAL REMOTE | list [TARGET] | rm TARGET LOCAL
@@ -46,7 +48,7 @@ Options:
   -q, --quiet              fewer messages from sma itself
 """
 
-LATER = {"daemon", "logs"}
+MANAGE_COMMANDS = ("jobs", "target", "map", "daemon", "logs")
 DAEMON_COMMANDS = set(remote.KINDS)
 
 
@@ -107,9 +109,14 @@ def run(argv, env=None, out=None, err=None, stdin=None, client=None):
     return 0
   if command == "upgrade":
     raise UsageError("sma: upgrade is handled by the host command; update it with the installer")
-  if command in LATER:
-    raise UsageError("sma: %s is not available in this version" % command)
-  if command not in throwaway.COMMANDS and command not in ("jobs", "target", "map"):
+  if command == "_wait-health":
+    # Runs inside the daemon container as the last step of `sma daemon up`.
+    if len(args) != 2:
+      raise UsageError("sma: _wait-health URL SECONDS")
+    return daemonctl.wait_health(args[0], int(args[1]))
+  if command == "logs":
+    command, args, idx = "daemon", ["logs", *args], idx - 1
+  if command not in throwaway.COMMANDS and command not in MANAGE_COMMANDS:
     raise UsageError("sma: unknown command %r (see 'sma help')" % command)
 
   cfg = clientconfig.load(env)
@@ -122,6 +129,13 @@ def run(argv, env=None, out=None, err=None, stdin=None, client=None):
   opts["env_target"] = env.get("SMA_TARGET")
   if command == "jobs":
     return manage.jobs(args, cfg, facts, opts, out, err)
+  if command == "daemon":
+    verb = args[0] if args else "status"
+    if verb == "status":
+      return daemonctl.status(facts, cfg, env, out, as_json=opts["json"])
+    plan = daemonctl.build(verb, args[1:], idx + 2, facts, cfg, env)
+    write_plan(plan, env.get("SMA_PLAN_DIR") or hostfacts.DEFAULT_PLAN_DIR)
+    return 0
 
   if command in DAEMON_COMMANDS:
     resolved = routing.resolve_target(cfg, opts["target"], opts["env_target"])
