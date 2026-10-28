@@ -47,7 +47,7 @@ submit_file() {
         -H "Content-Type: application/json" \
         ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
         -d "$payload" \
-        "${DAEMON_BASE}/webhook" > /dev/null
+        "${DAEMON_BASE}/webhook/generic" > /dev/null
 }
 
 is_bypassed() {

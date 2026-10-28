@@ -93,6 +93,10 @@ STAMP_RULES = {
 
 for src in sorted(glob.glob(os.path.join(src_dir, "*.py"))):
   name = os.path.basename(src)
+  if name.startswith("_"):
+    # Private helpers (e.g. _json_helper.py for the *_post_process.sh samples)
+    # are not hooks; post_process/ would run them after every conversion.
+    continue
   dst = os.path.join(dst_dir, name)
   with open(src) as f:
     content = f.read()
