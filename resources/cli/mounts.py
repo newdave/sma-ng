@@ -89,6 +89,18 @@ def config_paths(config_dir=None):
   return found
 
 
+def daemon_api_key(config_dir=None):
+  """The local daemon's ``daemon.api-key`` from sma-ng.yml, or None when unset or unreadable."""
+  config_dir = config_dir or os.environ.get("SMA_CONFIG_DIR") or DEFAULT_CONFIG_DIR
+  path = os.path.join(config_dir, CONFIG_FILENAME)
+  if not os.path.isfile(path):
+    return None
+  try:
+    return ConfigLoader().load(path).daemon.api_key or None
+  except (ConfigError, OSError):
+    return None
+
+
 def _under(path, parent):
   return path == parent or path.startswith(parent.rstrip("/") + "/")
 
