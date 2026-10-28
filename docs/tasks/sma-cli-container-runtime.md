@@ -186,7 +186,7 @@ container. No daemon features.
 - **Dependencies**: P1-T5
 - **Size**: S
 - **Acceptance criteria**:
-  - [ ] Given the built image, when the smoke task runs, then `python -m resources.cli version` exits 0.
+  - [x] Given the built image, when the smoke task runs, then `python -m resources.cli version` exits 0.
   - [x] Given `scripts/docker_smoke_imports.py`, when run, then it imports `resources.cli` successfully.
   - [x] Given the Dockerfile, when inspected, then no change is made unless `COPY . .` fails to include the package.
 - **Validation**: `mise run build:smoke` (ask the operator before running containers); `mise run test:shell`
@@ -218,10 +218,10 @@ container. No daemon features.
     is >= 70%.
   - [x] Given docs, when `mise run docs:check` runs, then it passes; docs were updated in the same commits as the
     behaviour.
-  - [ ] Given the commit history, when reviewed, then commits are conventional and split by behaviour (for example
+  - [x] Given the commit history, when reviewed, then commits are conventional and split by behaviour (for example
     `feat(cli): plan protocol and client`, `feat(sma-host): bootstrap`, `feat(install): CLI-first installer`),
     each with its tests and docs, no AI attribution.
-  - [ ] Given a pushed docs change, when `git push` of `main` completes, then `mise run wiki:publish` has run.
+  - [x] Given a pushed docs change, when `git push` of `main` completes, then `mise run wiki:publish` has run.
 - **Validation**: `mise run test:cov`; `mise run docs:check`; `mise run test`
 
 ---
