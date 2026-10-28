@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.2.29](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.28...sma-ng-v3.2.29) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* mise run setup:docker:target and the sma-* alias file no longer exist; use install-smang.sh and the sma command.
+
+### Features
+
+* **cli:** sma daemon manages the long-running daemon container ([3caff49](https://github.com/newdave/sma-ng/commit/3caff4911976e2e56d34b6ea553adad4a188eb60))
+
+
+### Bug Fixes
+
+* **sma:** keep sma data in the user's home on macOS, never /opt ([213cc01](https://github.com/newdave/sma-ng/commit/213cc012e23833c442b254a9056ceb02ae8f2ccb))
+
+
+### Documentation
+
+* CLI quick start and docs index state the per-OS default. ([213cc01](https://github.com/newdave/sma-ng/commit/213cc012e23833c442b254a9056ceb02ae8f2ccb))
+* CLI quick start gains Running the daemon and the command row. ([3caff49](https://github.com/newdave/sma-ng/commit/3caff4911976e2e56d34b6ea553adad4a188eb60))
+
+
+### Code Refactoring
+
+* retire the checkout-based Docker installer and alias shim ([09747f9](https://github.com/newdave/sma-ng/commit/09747f9019083e06330efb0629c0c578752b4b86))
+
 ## [3.2.28](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.27...sma-ng-v3.2.28) (2026-10-28)
 
 
