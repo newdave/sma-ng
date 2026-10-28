@@ -545,3 +545,9 @@ semver + `latest` image builds. The version reported by the daemon's `/health` e
 the image from the latest tag at build time, so a running daemon shows the new version only after the
 tagged image is built **and** `mise run deploy:remote` re-pulls it; the `commit` field in `/health`
 always identifies the exact code running regardless of the version label.
+
+To rebuild a release's wheel and sdist (for example after a failed run), dispatch the Release workflow with the
+tag: `gh workflow run release.yml -f tag=sma-ng-vX.Y.Z`. Events created with the default `GITHUB_TOKEN` never
+start other workflows, so the Release PR gets no CI checks and a merged Release PR is only released by the next
+push to `main`. Adding a `RELEASE_PLEASE_TOKEN` repository secret (a GitHub App or fine-grained token with
+contents and pull-requests write) lets release-please's PRs and tags trigger CI normally.

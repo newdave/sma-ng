@@ -1,39 +1,47 @@
 name: Release
 
+# Runs on every push to main (no path filter: a release PR merged by a bot does
+# not trigger workflows, so the next push of any kind must be able to cut the
+# release). workflow_dispatch with a tag rebuilds that release's artifacts.
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "tests/**"
-      - "**/*.md"
-      - "resources/docs.html"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing sma-ng-vX.Y.Z tag to rebuild release artifacts for (empty: run release-please)"
+        type: string
+        default: ""
 
+# Never cancel a release run: a newer push must not interrupt publishing.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 # Least privilege: nothing at workflow level; each job declares what it needs.
 permissions: {}
 
 jobs:
   # ── Step 1: Run release-please on every push to main ────────────────────────
-  # Creates or updates a "Release PR" that bumps pyproject.toml and the
-  # release-please manifest. Grouping via group-pull-request-title-pattern
-  # batches commits by release type. When the Release PR is merged (automated
-  # for patches, manual for minor/major), release-please creates the GitHub
-  # Release and v* tag, then sets release_created=true for publish jobs.
+  # Creates or updates the Release PR (bumps pyproject.toml and the manifest).
+  # When that PR is merged, the next run creates the GitHub Release and the
+  # sma-ng-vX.Y.Z tag and sets release_created=true for the publish jobs.
+  #
+  # RELEASE_PLEASE_TOKEN (optional, a GitHub App or fine-grained token with
+  # contents + pull-requests write) makes the Release PR and tag trigger CI;
+  # events created with the default GITHUB_TOKEN never start other workflows.
   release-please:
     name: Release Please
+    if: inputs.tag == ''
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
-      pr: ${{ steps.rp.outputs.pr }}
-      version: ${{ steps.rp.outputs.version }}
+      pr_number: ${{ steps.detect.outputs.pr_number }}
       patch: ${{ steps.detect.outputs.patch }}
       minor: ${{ steps.detect.outputs.minor }}
       major: ${{ steps.detect.outputs.major }}
@@ -41,25 +49,27 @@ jobs:
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         id: rp
         with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Detect release type from the version in the Release PR title.
-      # steps.rp.outputs.version is only populated on release-creation runs
-      # (after the Release PR merges), never on PR create/update runs, so
-      # gating on it meant the detect steps — and therefore auto-merge —
-      # never fired while the PR was open. The PR title
-      # ("chore(main): release sma-ng X.Y.Z") is available on every run.
-      # Patch: x.y.Z with Z > 0 (the default under always-bump-patch)
-      # Minor: x.Y.0 with Y > 0 (explicit release-as override)
-      # Major: X.0.0 (explicit release-as override)
+      # Detect release type from the version in the Release PR title
+      # ("chore(main): release sma-ng X.Y.Z"), available on every run while
+      # the PR is open. The PR JSON is passed as a plain string and parsed
+      # with jq: fromJSON() in env: is evaluated even when the step is
+      # skipped, and aborts the whole job on the run that creates a release
+      # (no PR open then).
+      #   patch: x.y.Z with Z > 0 (the default under always-bump-patch)
+      #   minor: x.Y.0 with Y > 0 (explicit release-as override)
+      #   major: X.0.0            (explicit release-as override)
       - name: Detect release type from PR title
         id: detect
-        if: steps.rp.outputs.pr
+        if: steps.rp.outputs.pr != ''
         env:
-          PR_TITLE: ${{ fromJSON(steps.rp.outputs.pr).title }}
+          PR_JSON: ${{ steps.rp.outputs.pr }}
         run: |
-          pr_title="$PR_TITLE"
+          pr_title=$(jq -r '.title // ""' <<<"$PR_JSON")
+          pr_number=$(jq -r '.number // ""' <<<"$PR_JSON")
           patch=false; minor=false; major=false
           if [[ "$pr_title" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
             y="${BASH_REMATCH[2]}"; z="${BASH_REMATCH[3]}"
@@ -72,18 +82,19 @@ jobs:
             fi
           fi
           {
+            echo "pr_number=$pr_number"
             echo "patch=$patch"
             echo "minor=$minor"
             echo "major=$major"
           } >> "$GITHUB_OUTPUT"
 
   # ── Step 1b: Auto-merge patch releases (x.y.Z) ──────────────────────────────
-  # Patch releases auto-merge immediately after checks pass.
   patch-auto-merge:
     name: Auto-merge patch release (x.y.Z)
     needs: release-please
-    if: needs.release-please.outputs.pr != '' && needs.release-please.outputs.patch == 'true'
+    if: needs.release-please.outputs.pr_number != '' && needs.release-please.outputs.patch == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
       pull-requests: write
@@ -91,49 +102,61 @@ jobs:
       - name: Enable auto-merge (squash)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ fromJSON(needs.release-please.outputs.pr).number }}
+          PR_NUMBER: ${{ needs.release-please.outputs.pr_number }}
         # --auto requires branch protection with required checks; fall back
         # to a direct squash merge when auto-merge cannot be enabled.
         run: |
           gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --auto \
             || gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash
 
-  # ── Step 1c: Label and notify minor releases (x.Y.z) ──────────────────────────
-  # Minor releases require manual approval—label PR and post notification.
+  # ── Step 1c: Label and notify minor releases (x.Y.0) ──────────────────────────
+  # Minor releases require manual approval. The label is idempotent; the
+  # comment is posted once per PR (marker below), not on every push.
   minor-approval-gate:
-    name: Gate minor release (x.Y.z) for approval
+    name: Gate minor release (x.Y.0) for approval
     needs: release-please
-    if: needs.release-please.outputs.pr != '' && needs.release-please.outputs.minor == 'true'
+    if: needs.release-please.outputs.pr_number != '' && needs.release-please.outputs.minor == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       pull-requests: write
     steps:
       - name: Add label and request approval
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ fromJSON(needs.release-please.outputs.pr).number }}
+          PR_NUMBER: ${{ needs.release-please.outputs.pr_number }}
         run: |
           gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "type: minor-release"
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body \
-            "🟡 **Minor release (x.Y.z) detected.** This requires manual approval before merge. Review the changelog and approve when ready."
+          marker="<!-- sma-minor-release-gate -->"
+          if gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json comments --jq '.comments[].body' | grep -qF "$marker"; then
+            echo "approval comment already posted"
+          else
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body \
+              "$marker
+          🟡 **Minor release (x.Y.0) detected.** This requires manual approval before merge. Review the changelog and approve when ready."
+          fi
 
-  # ── Step 1d: Major releases (X.y.z) require manual workflow_dispatch ──────────
-  # No automatic action for major releases; they must be triggered explicitly.
+  # Major releases (X.0.0): no automatic action; review and merge the Release PR by hand.
 
-  # ── Step 2a: Build & attach dist artifacts to the GitHub Release ─────────────
-  # Runs only when release-please actually created a release (when the Release
-  # PR was merged). The version in pyproject.toml is the single source of truth.
+  # ── Step 2: Build & attach dist artifacts to the GitHub Release ─────────────
+  # Runs when release-please created a release in this run, or for the tag
+  # given to a manual workflow_dispatch (rebuilds a release's artifacts).
   publish:
     name: Build & publish release artifacts
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: >-
+      always() &&
+      (needs.release-please.outputs.release_created == 'true' || inputs.tag != '')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
+    env:
+      TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ env.TAG }}
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
@@ -156,10 +179,5 @@ jobs:
       - name: Upload dist to GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          tag_name: ${{ env.TAG }}
           files: dist/*
-
-  # ── Step 2b: Docker image ───────────────────────────────────────────────────
-  # docker.yml triggers automatically on the v* tag that release-please creates.
-  # It handles QEMU, multi-arch (amd64 + arm64), semver tags, and latest.
-  # Nothing to do here — no duplication needed.
