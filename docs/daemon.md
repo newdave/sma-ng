@@ -225,8 +225,11 @@ curl -H "Authorization: Bearer SECRET" ...
 Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/metrics`, `/health`, `/status`, `/docs`, `/favicon.png`
 
 The dashboard, admin, and metrics pages are only HTML shells. The API key is never written into the page: when the
-daemon has an API key configured, the browser prompts for it on the first `401`, keeps it in `sessionStorage` for the
-tab, and sends it as `X-API-Key` on every request. When no key is configured the pages work without a prompt.
+daemon has an API key configured, the first `401` opens one in-page dialog asking for it (`daemon.api-key` in
+`sma-ng.yml`). The key is kept in the browser's `localStorage` for this daemon's address, so reloads and other pages
+do not ask again, and is sent as `X-API-Key` on every request. A rejected key is forgotten and the dialog asks once
+more. **Cancel** stops asking; an "API key required" button in the corner reopens the dialog. When no key is
+configured the pages work without a dialog. To forget a stored key, clear the site data for the daemon's address.
 
 `/status` is public but minimal for unauthenticated callers (`status`, `version`, and aggregate `jobs` counts). Node
 ids, hosts, active jobs, and paths are only returned when a valid API key (or Basic credentials) is supplied.

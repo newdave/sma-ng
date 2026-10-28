@@ -489,8 +489,8 @@ disabled. Send it as `X-API-Key: SECRET` or `Authorization: Bearer SECRET`.
 
 - Public endpoints: `/`, `/dashboard`, `/admin`, `/metrics`, `/health`, `/status`, `/docs`, `/favicon.png`.
 - The dashboard, admin, and metrics pages are HTML shells; the API key is never embedded in the page. When a key is
-  configured the browser prompts once on the first `401`, keeps the key in `sessionStorage` for that tab, and sends it
-  as `X-API-Key` on every request.
+  configured, the first `401` opens one in-page dialog; the key is kept in `localStorage` for the daemon's address
+  and sent as `X-API-Key` on every request. Cancel stops asking (an "API key required" button reopens the dialog).
 - `/status` is minimal without credentials (`status`, `version`, aggregate `jobs` counts). Node ids, hosts, active
   jobs, and paths require a valid key.
 - `/browse` is limited to the configured routing and scan roots. Request bodies over 1 MiB are rejected with `413`.
