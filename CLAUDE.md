@@ -84,9 +84,11 @@ Other rules:
 - If asked to "commit all changes", commit the whole worktree as multiple logical commits.
 - Use conventional commit prefixes such as `fix:`, `feat:`, `refactor:`, `docs:`.
 - After each requested commit, run `git pull --rebase` and `git push`.
-- After docs changes land on `main`, publish the wiki with `mise run wiki:publish`. A new top-level `docs/*.md`
-  needs an entry in `PAGES` in `scripts/wiki_sync.py`; `mise run docs:check` (also in CI) catches broken links,
-  stale `mise run` references and unmapped docs.
+- After every push to GitHub whose commits changed `docs/` (including `docs/openapi.yaml`) or `.mise/tasks/`,
+  run `mise run wiki:publish`. The PostToolUse hook `.claude/hooks/wiki-publish-after-push.sh` does this
+  automatically after a `git push` of `main` (Claude and Codex); run it by hand when pushing another way, and
+  report the hook's result. A new top-level `docs/*.md` needs an entry in `PAGES` in `scripts/wiki_sync.py`;
+  `mise run docs:check` (also in CI) catches broken links, stale `mise run` references and unmapped docs.
 - Don't author new PRPs / task breakdowns into `docs/prps/` or `docs/tasks/` for *shipped* features.
   Shipped-state planning docs go stale fast and the git history already preserves intent.
   Write the rationale into the commit message and the operator-facing doc instead.
@@ -191,6 +193,9 @@ Plugins and skills are scoped to this project:
 - Add new plugins or skills here, never in `~/.claude/`.
 - The skill-reminder hook runs on `UserPromptSubmit`: Claude via `.claude/settings.json` `hooks`
   (`.claude/hooks/claude-code/`), Codex via `.codex/hooks.json` (`.claude/hooks/codex/`).
+- The wiki-publish hook runs on `PostToolUse` (`Bash`) from both files: `.claude/hooks/wiki-publish-after-push.sh`
+  publishes the generated wiki after a `git push` of `main` that changed docs; `SMA_HOOK_WIKI_DRY_RUN=1` makes it
+  a dry run.
 
 ### Activation Routing
 
