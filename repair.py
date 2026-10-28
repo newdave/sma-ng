@@ -42,7 +42,7 @@ def _load_path_config_manager():
   try:
     from resources.daemon.config import PathConfigManager
 
-    return PathConfigManager(logger=log)
+    return PathConfigManager(logger=log, persist_node_id=False)
   except Exception:
     log.debug("sma-ng.yml routing not available; using a single config for all paths")
     return None

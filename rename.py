@@ -50,7 +50,7 @@ def _load_path_config_manager():
   try:
     from resources.daemon.config import PathConfigManager
 
-    pcm = PathConfigManager()
+    pcm = PathConfigManager(persist_node_id=False)
     routing = getattr(pcm, "path_configs", None) or getattr(pcm, "scan_paths", None)
     if routing:
       log.debug("Loaded sma-ng.yml path routing (%d path(s))" % len(routing))
