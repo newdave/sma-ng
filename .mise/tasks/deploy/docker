@@ -80,7 +80,7 @@ for host in $DEPLOY_HOSTS; do
   # opt back into a full recreate (e.g. to clear in-container state).
   fast_path="no"
   if [ "${FORCE_RECREATE:-0}" != "1" ]; then
-    if image_ref=$(resolve_image_ref 2>/dev/null) && [ -n "$image_ref" ]; then
+    if image_ref=$(resolve_image_ref "" 2>/dev/null) && [ -n "$image_ref" ]; then
       image_repo="${image_ref%:*}"
       registry_digest=$(registry_manifest_digest "$image_ref" || true)
       running_digest=$(running_container_image_digest "$host" "sma-ng" "$image_repo" || true)
@@ -178,7 +178,7 @@ for host in $DEPLOY_HOSTS; do
   # (2) the compose recreate kept the previous container, (3) a newer
   # CI build landed between our pull and our verification. Non-fatal so
   # an opaque registry hiccup doesn't fail an otherwise-good deploy.
-  if image_ref=$(resolve_image_ref 2>/dev/null) && [ -n "$image_ref" ]; then
+  if image_ref=$(resolve_image_ref "" 2>/dev/null) && [ -n "$image_ref" ]; then
     echo "==> [$host] verifying image freshness against $image_ref"
     verify_remote_image_current "$host" "sma-ng" "$image_ref" || true
   else
