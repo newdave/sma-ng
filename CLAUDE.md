@@ -186,8 +186,9 @@ When workflow rules change, update this file first and sync `AGENTS.md` plus any
 Plugins and skills are scoped to this project:
 
 - `.claude/settings.json` `enabledPlugins` and `.codex/config.toml` `[plugins.*]` hold the required plugin set:
-  `pyright-lsp`.
-- The same file sets unneeded globally enabled plugins to `false` (`bp`, `codex`, `code-simplifier`,
+  `pyright-lsp` and `bp` (cc-blueprint-toolkit: `/bp:brainstorm`, `/bp:generate-prp`, `/bp:execute-prp`,
+  `/bp:execute-task`). Plans `bp` writes into `docs/prps/` or `docs/tasks/` follow the in-flight PRP rules above.
+- The same file sets unneeded globally enabled plugins to `false` (`codex`, `code-simplifier`,
   `frontend-design`, `rust-analyzer-lsp`).
 - Project skills are vendored in `.claude/skills/`; `.skillfish.json` records the upstream source.
 - Add new plugins or skills here, never in `~/.claude/`.

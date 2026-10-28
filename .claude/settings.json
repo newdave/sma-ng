@@ -26,7 +26,7 @@
   ],
   "enabledPlugins": {
     "pyright-lsp@claude-plugins-official": true,
-    "bp@cc-blueprint-toolkit": false,
+    "bp@cc-blueprint-toolkit": true,
     "codex@openai-codex": false,
     "code-simplifier@claude-plugins-official": false,
     "frontend-design@claude-plugins-official": false,
