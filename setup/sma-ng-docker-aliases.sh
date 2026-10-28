@@ -1,8 +1,7 @@
 # shellcheck shell=bash
 # DEPRECATED: thin shim over the `sma` host command. Removed in a later release.
-# Install `sma` instead (no sourcing needed):
-#   docker cp sma-ng:/usr/local/bin/sma-host /usr/local/bin/sma   (see docs/sma-cli-quickstart.md)
-#   chmod 755 /usr/local/bin/sma
+# Install `sma` instead (no sourcing needed; see docs/sma-cli-quickstart.md):
+#   curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.sh | sh
 
 printf '%s\n' "sma-ng-docker-aliases.sh is deprecated: use the 'sma' command (sma convert, sma repair, ...)" >&2
 
@@ -15,14 +14,19 @@ _sma_cmd() {
   fi
 }
 
-sma_manual() { _sma_cmd manual "$@"; }
+_sma_gone() {
+  echo "sma: '$1' was removed; $2" >&2
+  return 2
+}
+
+sma_manual() { _sma_gone sma-manual "use sma convert, sma preview or sma audit"; }
 sma_convert() { _sma_cmd convert "$@"; }
 sma_preview() { _sma_cmd preview "$@"; }
 sma_codecs() { _sma_cmd codecs "$@"; }
-sma_daemon_smoke() { _sma_cmd smoke "$@"; }
+sma_daemon_smoke() { _sma_gone sma-smoke "run daemon.py --smoke-test inside the daemon container"; }
 sma_rename() { _sma_cmd rename "$@"; }
 sma_repair() { _sma_cmd repair "$@"; }
-sma_logs() { _sma_cmd logs "$@"; }
+sma_logs() { _sma_gone sma-logs "use docker logs -f sma-ng"; }
 sma_shell() { _sma_cmd shell "$@"; }
 
 alias sma-shell='sma_shell'

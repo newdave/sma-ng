@@ -367,38 +367,27 @@ The library audit reports the same damage as `stream_damage` findings and can fi
 
 ## Running from the Docker host
 
-The image ships a POSIX `sh` script, `sma`, that runs CLI commands inside the running container from the Docker host.
-Copy it out of the running container so it always matches the image version:
+`sma` runs SMA-NG's tools on a Docker host without a checkout, Compose or Python; Docker is the only requirement:
 
 ```bash
-sudo docker cp sma-ng:/usr/local/bin/sma-host /usr/local/bin/sma
+curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.sh | sh
 ```
-
-The [`sma` CLI Quick Start](sma-cli-quickstart.md) covers installing without a running container, every command,
-path rules, scripting and troubleshooting.
-
-`mise run setup:docker:target` also installs it from a repo checkout. Then:
 
 ```bash
-sma convert /mnt/unionfs/Media/Movies/film.mkv   # python manual.py -i <file> -a
-sma preview /mnt/unionfs/Media/Movies/film.mkv   # python manual.py -i <file> -oo
-sma repair -n /mnt/unionfs/Media/TV              # python repair.py ...
-sma audit /mnt/unionfs/Media/Movies              # python manual.py --audit -i <path>
-sma shell                                        # bash as the daemon user
-sma status                                       # container state
+sma convert /mnt/media/Movies/film.mkv   # manual.py -a -i <file>
+sma preview ~/Downloads/film.mkv         # manual.py -a -i <file> -oo
+sma repair -n /mnt/media/TV              # repair.py ...
+sma audit /mnt/media/Movies              # manual.py --audit -i <path>
+sma shell                                # bash with the current directory mounted
+sma upgrade                              # update the image and sma together
 ```
 
-- Commands run through the entrypoint's `run` mode, so they execute as the daemon user: output files are owned by
-  `ubuntu` and the GPU groups and VAAPI environment match the daemon.
-- One path per file: pass the same path you see on the host. `/mnt`, `/transcode`, and `/recycle` are mounted at
-  identical paths; the compose files no longer mount `/downloads`. `sma` rejects a host path that is not under an
-  identity mount with exit code `2`. Use a `daemon.path-rewrites` entry for download clients that still report
-  `/downloads/...`.
-- Container selection: `SMA_CONTAINER`, otherwise the first running service in `SMA_COMPOSE_DIR`
-  (default `/opt/sma/docker`), otherwise the container named `sma-ng`. Exit code `3` means no running container.
+- Each command runs in a throwaway container that mounts the paths you name (anywhere on the host), the directories
+  `sma-ng.yml` writes to, and `/opt/sma/config`, then removes itself.
+- It runs as your user, with `/dev/dri` and NVIDIA GPUs passed through when present.
+- Exit codes: the tool's own code, `2` bad path or usage, `3` Docker unreachable, `5` run `sma upgrade`.
 
-The full command table and migration notes from the old alias file are in
-[Docker Compose Quick Start](docker-compose-quickstart.md#6-install-the-sma-host-command).
+The [`sma` CLI Quick Start](sma-cli-quickstart.md) covers options, mounts, scripting, upgrading and troubleshooting.
 
 ---
 

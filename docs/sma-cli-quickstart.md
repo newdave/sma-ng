@@ -1,148 +1,176 @@
 # `sma` CLI Quick Start
 
-`sma` is a small command you install on the Docker host. It runs SMA-NG's tools (convert, preview, repair, rename,
-audit, …) inside the running SMA-NG container, so you never type `docker exec`. It is one POSIX `sh` script that
-ships inside the image, which keeps it in step with the image version.
+`sma` runs SMA-NG's tools (convert, preview, repair, audit, rename) on a Docker host without a source checkout,
+Compose, or Python. Each command starts a throwaway container from the SMA-NG image, mounts exactly the paths you
+name, runs the tool as your own user, and removes the container when it finishes.
 
-This guide assumes the container is already running from [Docker Compose Quick Start](docker-compose-quickstart.md).
+`sma` itself is a small POSIX `sh` launcher. The logic lives in the image, so `sma` and the image are always upgraded
+together.
 
 ## 1. Install
 
-Copy the script out of the running container (works on any CPU architecture, and always matches the image that is
-actually running):
+Docker is the only requirement:
 
 ```bash
-sudo docker cp sma-ng:/usr/local/bin/sma-host /usr/local/bin/sma
-sudo chmod 755 /usr/local/bin/sma
+curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.sh | sh
 ```
 
-Other ways to get it:
+The installer:
+
+- pulls `ghcr.io/newdave/sma-ng:latest`; on arm64 hosts it picks the latest release instead, because `latest` is
+  published for linux/amd64 only;
+- installs `sma` to `/usr/local/bin` (using `sudo` if needed), or `~/.local/bin` when it cannot;
+- records the image in `~/.config/sma/image`;
+- creates `/opt/sma/config`, `/opt/sma/logs` and `/opt/sma/data`, owned by you, plus a sample
+  `/opt/sma/config/sma-ng.yml` if none exists.
+
+Re-running it is safe; existing config is never overwritten.
+
+| Option | Environment | Default | Meaning |
+| ------ | ----------- | ------- | ------- |
+| `--tag TAG` | `SMA_IMAGE_TAG` | `latest` (release on arm64) | Image tag to install |
+| `--bin-dir DIR` | `SMA_BIN_DIR` | `/usr/local/bin` | Where `sma` goes |
+| | `SMA_HOME` | `/opt/sma` | Directory holding `config/`, `logs/`, `data/` |
+
+Pass options through the pipe with `sh -s --`:
 
 ```bash
-# From an image without running it. `latest` is published for linux/amd64 only; on an arm64 host either add
-# --platform linux/amd64 (the script itself is architecture-independent) or use a release tag (amd64 + arm64).
-id=$(docker create --platform linux/amd64 ghcr.io/newdave/sma-ng:latest)
-sudo docker cp "$id":/usr/local/bin/sma-host /usr/local/bin/sma
-docker rm "$id"
-
-# From a repository checkout (also creates the /opt/sma directories):
-mise run setup:docker:target
+curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.sh | sh -s -- --tag 3.2.23
 ```
 
-Your user needs permission to run `docker` (membership of the `docker` group, or prefix `sma` with `sudo`).
+Edit `/opt/sma/config/sma-ng.yml` before converting (see [Configuration](configuration.md)). Every `sma` command
+reads it.
 
-## 2. Check it can see the container
+## 2. Check it works
 
 ```bash
-sma version   # host script and image commits; warns if they differ
-sma status    # container=/sma-ng state=running started=...
+sma version
 ```
 
 ```text
-sma host script: c5ae7fc03410f519ddda34edd2af1e2ab008c25d
-container image: c5ae7fc03410f519ddda34edd2af1e2ab008c25d
+sma host command: 6807857c...
+sma image: 3.2.23 (commit 6807857c...)
 ```
 
-## 3. Convert something
-
-Use the same paths you see on the host:
+## 3. Run something
 
 ```bash
-sma preview /mnt/unionfs/Media/Movies/Film.mkv   # print the conversion plan, change nothing
-sma convert /mnt/unionfs/Media/Movies/Film.mkv   # convert, tag and file it like the daemon would
-sma convert /mnt/unionfs/Media/TV/Show            # a whole directory
+sma preview /mnt/media/Movies/Film.mkv        # print the conversion plan, change nothing
+sma convert /mnt/media/Movies/Film.mkv        # convert, tag and file it
+sma convert ~/Downloads/a.mkv ~/Downloads/b.mkv
+sma repair -n /mnt/media/TV                   # dry-run repair report for a whole directory
+sma audit /mnt/media/Movies                   # library audit report
 ```
 
-`preview` and `convert` run in automatic mode (`-a`) and never stop to ask questions. Extra arguments after the path
-are passed to `manual.py`, for example `sma convert FILE -tmdb 603` or `sma convert FILE -p rq` for a profile.
+Paths can be anywhere on the host, absolute or relative to the current directory. Arguments after the path are passed
+to the tool, for example `sma convert Film.mkv -tmdb 603`.
 
-## 4. Everyday commands
+## 4. Commands
 
-| Command                    | What it does                                                     |
-| -------------------------- | ---------------------------------------------------------------- |
-| `sma preview PATH [ARGS]`  | Conversion plan only (`manual.py -i PATH -oo -a`)                |
-| `sma convert PATH [ARGS]`  | Convert a file or directory (`manual.py -i PATH -a`)             |
-| `sma repair PATH... [-n]`  | Stream-copy repair, never transcodes; `-n` is a dry run          |
-| `sma rename PATH [ARGS]`   | Rename with SMA naming templates (`--dry-run` to preview)        |
-| `sma audit PATH`           | Library audit report (`manual.py --audit -i PATH`)               |
-| `sma manual ARGS...`       | `manual.py` with your own arguments                              |
-| `sma codecs`               | List supported codecs                                            |
-| `sma smoke`                | Daemon config smoke test                                         |
-| `sma shell`                | Bash inside the container as the daemon user                     |
-| `sma logs`                 | Follow the container logs (`docker logs -f`)                     |
-| `sma status` / `version`   | Container state / script and image versions                      |
-| `sma help`                 | The command list                                                 |
+| Command | Runs |
+| ------- | ---- |
+| `sma convert PATH... [ARGS]` | `manual.py -a -i PATH`, one container per path; stops at the first failure |
+| `sma preview PATH [ARGS]` | `manual.py -a -i PATH -oo` (plan only) |
+| `sma repair PATH... [-n] [ARGS]` | `repair.py PATH...`: stream-copy repair, never transcodes; `-n` is a dry run |
+| `sma audit PATH [ARGS]` | `manual.py --audit -i PATH` |
+| `sma rename PATH [ARGS]` | `rename.py PATH` (`--dry-run` to preview) |
+| `sma codecs` | List supported codecs |
+| `sma shell [ARGS]` | `bash` in a throwaway container with the current directory mounted |
+| `sma upgrade [TAG]` | Pull the image (or switch to `TAG`) and replace `sma` from it |
+| `sma version` / `sma help` | Versions / command list |
 
-Everything runs as the daemon's user (`ubuntu`) with the daemon's GPU groups and VA-API driver setting, so files
-`sma` writes are owned like the daemon's and hardware encoding behaves the same. For a root shell use
-`docker exec -u 0 -it sma-ng bash`.
+Options placed before the command:
 
-## 5. Paths: one path per file
+| Option | Meaning |
+| ------ | ------- |
+| `--mount PATH` | Also mount `PATH` (repeatable), for example a scratch directory a post-process script writes to |
+| `--local` | Always use a throwaway container |
+| `-q` | Fewer messages from `sma` itself |
 
-`sma` passes paths through unchanged, so a path only works if the container sees it at the same location. The
-compose file mounts `/mnt`, `/transcode` and `/recycle` at identical paths. `sma` checks every path against the
-container's mounts before running anything:
+`sma` sets the tool's config, input and job id itself, so `-c`, `-i` and `--job-id` are rejected as tool arguments.
 
-```text
-$ sma preview /etc/hosts
-sma: /etc/hosts is not visible at the same path inside the container (mounted: /mnt /transcode /recycle)
+## 5. What gets mounted
+
+Each run mounts, at the same path inside the container:
+
+- **every path you name**: a directory itself, or a file through its parent directory. A path that does not exist
+  stops `sma` with exit code `2` before anything runs.
+- **directories from `sma-ng.yml`**, but only those that exist on the host: `output-directory`, `move-to`,
+  `copy-to`, `recycle-bin` and the analyzer model and cache directories, from the base config and every profile;
+- **`/opt/sma/config`** read-only, where the tools find `sma-ng.yml`;
+- **`/opt/sma/logs`** for the tools' logs, if you can write to it;
+- **`extra-mounts`** from `~/.config/sma/config.yml` and any `--mount PATH`.
+
+```yaml
+# ~/.config/sma/config.yml
+extra-mounts:
+  - /srv/scratch
 ```
 
-Relative paths work too and are expanded on the host (`cd /mnt/unionfs/Media/Movies && sma preview Film.mkv`).
-`/config`, `/logs` and `/data` are container-only paths; look at them with `sma shell`.
+Paths containing `:` cannot be mounted, and `/` is never mounted.
 
-## 6. Scripts and cron
+## 6. Users and hardware
 
-`sma` only asks Docker for a terminal when you are at one, so it works from cron, scripts and
-`ssh host sma ...`. Exit codes:
+The container runs as your user and group, so new files are owned by you. Under rootless Docker, `sma` leaves the
+user to Docker's own mapping. On SELinux hosts the mounts get the `:z` label.
 
-| Code  | Meaning                                                          |
-| ----- | ---------------------------------------------------------------- |
-| `0`   | Success (or the command's own exit code otherwise)               |
-| `2`   | Usage error, or a path the container cannot see                  |
-| `3`   | No running SMA-NG container found                                |
+GPU access is detected on the host for every run:
+
+- `/dev/dri` (Intel, AMD): `--device /dev/dri` plus the device nodes' groups, so VA-API and QSV work as your user;
+- a working `nvidia-smi`: `--gpus all` (needs the NVIDIA container toolkit).
+
+## 7. Scripts and cron
+
+`sma` asks Docker for a terminal only when you are at one, so it works from cron, scripts and `ssh host sma ...`.
+
+| Code | Meaning |
+| ---- | ------- |
+| `0` | Success |
+| other | The tool's own exit code (for example `1` failed, `75` not enough output space) |
+| `2` | Usage error or a path that does not exist |
+| `3` | Docker is not reachable |
+| `5` | `sma` and the image do not match; run `sma upgrade` |
 
 ```cron
 # Nightly dry-run repair report of the TV library
-0 3 * * * sma repair -n /mnt/unionfs/Media/TV >> /var/log/sma-repair.log 2>&1
+0 3 * * * sma repair -n /mnt/media/TV >> /var/log/sma-repair.log 2>&1
 ```
 
-`sma manual` without `-a` may ask interactive questions; with no terminal attached it exits with code `2` and tells
-you to re-run with `-a` instead of waiting forever.
-
-## 7. More than one container
-
-`sma` picks the container in this order:
-
-1. `SMA_CONTAINER` (or `CONTAINER`) if set.
-2. The first running service of the compose project in `SMA_COMPOSE_DIR` (default `/opt/sma/docker`), narrowed to
-   `SMA_COMPOSE_SERVICE` if set.
-3. The container named `sma-ng`.
+## 8. Upgrading
 
 ```bash
-SMA_CONTAINER=sma-ng-4k sma convert /mnt/unionfs/Media/Movies-4K/Film.mkv
+sma upgrade            # pull the current tag again (latest moves; a version tag does not)
+sma upgrade 3.2.23     # switch to a specific release
 ```
 
-`DOCKER_BIN` overrides the `docker` executable (for example a wrapper script).
+`sma upgrade` replaces the `sma` script from the new image and updates `~/.config/sma/image`. If `sma` is installed
+somewhere you cannot write, it tells you to run `sudo sma upgrade`.
 
-## 8. Updating and removing
+## 9. Settings
 
-After `mise run deploy:remote` or `docker compose pull && docker compose up -d`, `sma version` warns when the
-host script and the new image differ. Reinstall with the same `docker cp` command from step 1.
-
-To remove it: `sudo rm /usr/local/bin/sma`.
-
-Coming from the old alias file (`source /opt/sma/sma-ng-docker-aliases.sh`)? It is now a deprecated shim that
-forwards the `sma-*` names to `sma`; see
-[Migrating from the alias file](docker-compose-quickstart.md#migrating-from-the-alias-file).
+| Variable | Default | Meaning |
+| -------- | ------- | ------- |
+| `SMA_IMAGE` | `~/.config/sma/image` | Image to run for this command |
+| `SMA_HOME` | `/opt/sma` | Directory holding `config/`, `logs/`, `data/` |
+| `SMA_CONFIG_HOME` | `~/.config/sma` | Client settings |
+| `DOCKER_BIN` | `docker` | Docker executable |
 
 ## Troubleshooting
 
-| Symptom                                               | Fix                                                                                 |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `sma: no running sma-ng container` (exit `3`)         | Start the stack, or set `SMA_CONTAINER` / `SMA_COMPOSE_DIR` to point at yours       |
-| `... is not visible at the same path` (exit `2`)      | Use a path under an identity mount (`/mnt`, `/transcode`, `/recycle`) or add a mount |
-| `permission denied ... docker.sock`                   | Add your user to the `docker` group (`sudo usermod -aG docker $USER`) or use `sudo`  |
-| `no matching manifest for linux/arm64` while installing | Use the `docker cp` install from the running container, or add `--platform linux/amd64` |
-| `sma version` warns the versions differ               | Reinstall `sma` from the running container                                          |
-| A command waits for input in a script                 | Add `-a` to `sma manual` (automatic mode)                                            |
+| Symptom | Fix |
+| ------- | --- |
+| `sma: cannot talk to Docker` (exit `3`) | Start Docker, or add yourself to the `docker` group |
+| `sma: X: no such file or directory` (exit `2`) | Check the path; it is resolved on the host before anything runs |
+| `plan version ... unsupported; run sma upgrade` (exit `5`) | `sma` and the image are from different releases: `sma upgrade` |
+| A tool cannot find or write a directory | It is not one `sma` mounts; add it with `--mount PATH` or `extra-mounts` |
+| Output files owned by root | Older `sma` versions ran as root: `sudo chown -R "$USER" <path>` once |
+| `no matching manifest for linux/arm64` | Install or upgrade with a release tag: `sma upgrade 3.2.23` |
+
+## Daemon mode
+
+The long-running daemon (webhooks from Sonarr and Radarr, the job queue, the dashboard) is still set up with Docker
+Compose; see [Docker Compose Quick Start](docker-compose-quickstart.md). `sma` does not talk to the daemon yet. Its
+commands always run in their own container, alongside a running daemon if there is one.
+
+Coming from the old `docker exec` version of `sma` or the alias file: `sma manual`, `sma smoke`, `sma logs`,
+`sma status` and the `SMA_CONTAINER` / `SMA_COMPOSE_*` variables are gone. Use `docker logs -f sma-ng` for daemon logs.

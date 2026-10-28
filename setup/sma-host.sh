@@ -1,75 +1,56 @@
 #!/bin/sh
-# sma - run SMA-NG commands in the Docker container from the Docker host.
+# sma - run SMA-NG commands on this Docker host.
 #
-# Shipped in the image as /usr/local/bin/sma-host. Install on the host with:
-#   docker cp sma-ng:/usr/local/bin/sma-host /usr/local/bin/sma   (see docs/sma-cli-quickstart.md)
-#   chmod 755 /usr/local/bin/sma
-#
-# Every command runs through the image entrypoint's `run` mode so it gets the
-# daemon's identity (ubuntu, same supplementary groups, same VAAPI env).
+# Installed as /usr/local/bin/sma by install-smang.sh (the image ships it as
+# /usr/local/bin/sma-host). This script is only a launcher: it collects host
+# facts, runs the SMA-NG client inside the image, and executes the plan the
+# client writes. The plan is a list of docker commands, for example a
+# throwaway `docker run --rm` that mounts exactly the paths you named.
+# Plan lines become docker arguments through `set --`; nothing is eval'd.
+# See docs/sma-cli-quickstart.md.
 #
 # Environment:
-#   SMA_CONTAINER / CONTAINER  container name or id (skips discovery)
-#   SMA_COMPOSE_SERVICE        compose service to resolve (default: first running)
-#   SMA_COMPOSE_DIR            compose project directory (default: /opt/sma/docker)
-#   DOCKER_BIN                 docker executable (default: docker)
+#   SMA_IMAGE        image to run (default: ~/.config/sma/image, else ghcr.io/newdave/sma-ng:latest)
+#   SMA_HOME         host data directory with config/, logs/, data/ (default: /opt/sma)
+#   SMA_CONFIG_HOME  client settings directory (default: ~/.config/sma)
+#   DOCKER_BIN       docker executable (default: docker)
 #
-# Exit codes: the container command's code; 2 usage error or path not visible
-# in the container; 3 no running container.
+# Exit codes: the tool's own code for a run; 2 usage error or bad path;
+# 3 Docker or target unreachable; 4 authentication failed; 5 plan error or
+# version mismatch (run `sma upgrade`).
 
 SMA_HOST_VERSION="@SMA_GIT_SHA@"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
-SMA_ENTRYPOINT="/usr/local/bin/entrypoint.sh"
-SMA_CONTAINER_ID=""
-SMA_MOUNTS=""
-SMA_P=""
-
-usage() {
-    cat <<'EOF'
-usage: sma <command> [args...]
-
-  convert PATH [ARGS]   convert a file or directory (manual.py -i PATH -a)
-  preview PATH [ARGS]   show the conversion plan only (manual.py -i PATH -oo -a)
-  manual [ARGS]         run manual.py with raw arguments
-  repair PATH... [ARGS] repair damaged media (repair.py)
-  rename PATH [ARGS]    rename media (rename.py)
-  audit PATH [ARGS]     library audit (manual.py --audit -i PATH)
-  codecs                list supported codecs (manual.py -cl)
-  smoke                 run the daemon smoke test
-  shell [ARGS]          interactive bash as the daemon user
-  logs [ARGS]           follow container logs (docker logs -f)
-  status                container state
-  version               host script and container image versions
-
-Paths must be the same on the host and in the container (identity mounts).
-EOF
-}
+SMA_HOME="${SMA_HOME:-/opt/sma}"
+DEFAULT_IMAGE="ghcr.io/newdave/sma-ng:latest"
+PLAN_HEADER="sma-plan 1"
+# Keep in sync with ALLOWED_SUBCOMMANDS in resources/cli/plan.py.
+PLAN_ALLOWED=" run pull rm stop restart logs compose exec create cp inspect "
+NL='
+'
+TAB="$(printf '\t')"
 
 err() { printf 'sma: %s\n' "$*" >&2; }
 
-# Resolve the container id/name into SMA_CONTAINER_ID or exit 3.
-resolve_container() {
-    [ -n "$SMA_CONTAINER_ID" ] && return 0
-    _c="${SMA_CONTAINER:-${CONTAINER:-}}"
-    if [ -z "$_c" ]; then
-        _dir="${SMA_COMPOSE_DIR:-/opt/sma/docker}"
-        if [ -d "$_dir" ]; then
-            if [ -n "${SMA_COMPOSE_SERVICE:-}" ]; then
-                _c="$("$DOCKER_BIN" compose --project-directory "$_dir" ps -q "$SMA_COMPOSE_SERVICE" 2>/dev/null | head -n 1)"
-            else
-                _c="$("$DOCKER_BIN" compose --project-directory "$_dir" ps -q 2>/dev/null | head -n 1)"
-            fi
-        fi
+# The invoking user's home, also under sudo (for ~/.config/sma).
+user_home() {
+    if [ -n "${SUDO_USER:-}" ] && [ "$(id -u)" = "0" ]; then
+        _h="$( (getent passwd "$SUDO_USER" || true) | cut -d: -f6)"
+        [ -n "$_h" ] && { printf '%s\n' "$_h"; return 0; }
     fi
-    if [ -z "$_c" ]; then
-        _c="sma-ng"
+    printf '%s\n' "${HOME:-/tmp}"
+}
+
+SMA_CONFIG_HOME="${SMA_CONFIG_HOME:-$(user_home)/.config/sma}"
+
+image_ref() {
+    if [ -n "${SMA_IMAGE:-}" ]; then
+        printf '%s\n' "$SMA_IMAGE"
+    elif [ -r "$SMA_CONFIG_HOME/image" ] && read -r _img <"$SMA_CONFIG_HOME/image" && [ -n "$_img" ]; then
+        printf '%s\n' "$_img"
+    else
+        printf '%s\n' "$DEFAULT_IMAGE"
     fi
-    _running="$("$DOCKER_BIN" inspect -f '{{.State.Running}}' "$_c" 2>/dev/null)" || _running=""
-    if [ "$_running" != "true" ]; then
-        err "no running sma-ng container (set SMA_CONTAINER)"
-        exit 3
-    fi
-    SMA_CONTAINER_ID="$_c"
 }
 
 # Lexically normalise absolute path $1 (collapse //, ., ..).
@@ -90,226 +71,216 @@ normalize() {
     printf '%s\n' "${_out:-/}"
 }
 
-# Set SMA_P to the absolute host path for $1 (target need not exist).
-abs_path() {
-    case "$1" in
-        /*) _p="$1" ;;
-        *) _p="$PWD/$1" ;;
+# ── upgrade (handled here: it replaces this script) ─────────────────────────
+
+cmd_upgrade() {
+    _cur="$(image_ref)"
+    case "${_cur##*/}" in
+        *@*) _repo="${_cur%@*}" ;;
+        *:*) _repo="${_cur%:*}" ;;
+        *) _repo="$_cur" ;;
     esac
-    _p="$(normalize "$_p")"
-    _d="$(dirname "$_p")"
-    if [ -d "$_d" ] && _real="$(cd "$_d" 2>/dev/null && pwd -P)"; then
-        if [ "$_p" = "/" ]; then
-            SMA_P="/"
-        elif [ "$_real" = "/" ]; then
-            SMA_P="/$(basename "$_p")"
-        else
-            SMA_P="$_real/$(basename "$_p")"
-        fi
-    else
-        SMA_P="$_p"
-    fi
-}
-
-load_mounts() {
-    [ -n "$SMA_MOUNTS" ] && return 0
-    resolve_container
-    _raw="$("$DOCKER_BIN" inspect -f '{{range .Mounts}}{{.Source}}|{{.Destination}}{{"\n"}}{{end}}' "$SMA_CONTAINER_ID" 2>/dev/null)" || _raw=""
-    # Keep only identity mounts (Source == Destination), one path per line.
-    SMA_MOUNTS=""
-    _nl='
-'
-    _oldifs="$IFS"
-    IFS="$_nl"
-    for _line in $_raw; do
-        _src="${_line%%|*}"
-        _dst="${_line#*|}"
-        if [ -n "$_src" ] && [ "$_src" = "$_dst" ]; then
-            SMA_MOUNTS="${SMA_MOUNTS}${_src}${_nl}"
-        fi
-    done
-    IFS="$_oldifs"
-    [ -n "$SMA_MOUNTS" ] || SMA_MOUNTS="-"
-}
-
-# Validate $1 against the identity mounts; set SMA_P to the absolute path.
-check_path() {
-    abs_path "$1"
-    load_mounts
-    _nl='
-'
-    _oldifs="$IFS"
-    IFS="$_nl"
-    _ok=1
-    _list=""
-    for _m in $SMA_MOUNTS; do
-        [ "$_m" = "-" ] && continue
-        _list="${_list:+$_list }$_m"
-        if [ "$_m" = "/" ] || [ "$SMA_P" = "$_m" ]; then
-            _ok=0
-        else
-            case "$SMA_P" in
-                "$_m"/*) _ok=0 ;;
-            esac
-        fi
-    done
-    IFS="$_oldifs"
-    if [ "$_ok" -ne 0 ]; then
-        err "$1 is not visible at the same path inside the container (mounted: ${_list:-none})"
+    _new="${1:+$_repo:$1}"
+    _new="${_new:-$_cur}"
+    case "$0" in
+        */*) _self="$0" ;;
+        *) _self="$(command -v -- "$0")" ;;
+    esac
+    _dir="$(dirname -- "$_self")"
+    if [ ! -w "$_dir" ] || { [ -e "$_self" ] && [ ! -w "$_self" ]; }; then
+        err "cannot replace $_self; run: sudo sma upgrade${1:+ $1}"
         exit 2
     fi
+    "$DOCKER_BIN" pull "$_new" || exit $?
+    _cid="$("$DOCKER_BIN" create "$_new")" || exit $?
+    _tmp="$_self.new.$$"
+    if ! "$DOCKER_BIN" cp "$_cid:/usr/local/bin/sma-host" "$_tmp"; then
+        "$DOCKER_BIN" rm "$_cid" >/dev/null 2>&1
+        rm -f "$_tmp"
+        exit 1
+    fi
+    "$DOCKER_BIN" rm "$_cid" >/dev/null 2>&1
+    if ! { chmod 755 "$_tmp" && mv -f "$_tmp" "$_self"; }; then
+        rm -f "$_tmp"
+        exit 1
+    fi
+    mkdir -p "$SMA_CONFIG_HOME" && printf '%s\n' "$_new" >"$SMA_CONFIG_HOME/image"
+    if [ -n "${SUDO_USER:-}" ] && [ "$(id -u)" = "0" ]; then
+        chown -R "$SUDO_USER" "$SMA_CONFIG_HOME" 2>/dev/null || true
+    fi
+    printf 'sma: upgraded to %s\n' "$_new"
+    exit 0
 }
 
-# Run "$@" in the container through the entrypoint's run mode.
-run_in() {
-    resolve_container
-    _flags=""
-    if [ -t 0 ] || [ -p /dev/stdin ] || [ -f /dev/stdin ]; then
-        _flags="-i"
-    fi
-    if [ -t 0 ] && [ -t 1 ]; then
-        _flags="-it"
-    fi
-    # shellcheck disable=SC2086
-    exec "$DOCKER_BIN" exec $_flags "$SMA_CONTAINER_ID" "$SMA_ENTRYPOINT" run "$@"
-}
+# ── host facts ───────────────────────────────────────────────────────────────
 
-# run_checked MODE PREFIX ARGS...
-#   MODE positional: check every non-option argument that looks like a path
-#   MODE input:      check the value of -i / --input
-# Relative paths are passed to the container as absolute host paths.
-run_checked() {
-    _mode="$1"
-    _prefix="$2"
-    shift 2
-    _n=$#
-    _want=0
-    while [ "$_n" -gt 0 ]; do
-        _a="$1"
-        shift
-        _chk=0
-        if [ "$_want" -eq 1 ]; then
-            _chk=1
-            _want=0
+# Write <index>\t<d|f|->\t<abspath> for every argument (index 0 = first word).
+write_argstat() {
+    _cwd="$(pwd -P)"
+    _i=0
+    for _a in "$@"; do
+        case "$_a" in
+            *"$NL"*)
+                err "arguments cannot contain newlines"
+                exit 2
+                ;;
+        esac
+        case "$_a" in
+            /*) _p="$_a" ;;
+            *) _p="$_cwd/$_a" ;;
+        esac
+        _p="$(normalize "$_p")"
+        if [ -d "$_a" ]; then
+            _t=d
+        elif [ -e "$_a" ]; then
+            _t=f
         else
-            case "$_a" in
-                -c | --config) _want=2 ;;
-                -i | --input) [ "$_mode" = "input" ] && _want=1 ;;
-                -*) ;;
-                *)
-                    if [ "$_mode" = "positional" ]; then
-                        case "$_a" in
-                            */*) _chk=1 ;;
-                            *) [ -e "$_a" ] && _chk=1 ;;
-                        esac
-                    fi
-                    ;;
-            esac
+            _t=-
         fi
-        if [ "$_want" -eq 2 ]; then
-            _want=0
-            set -- "$@" "$_a"
-            _n=$((_n - 1))
-            [ "$_n" -gt 0 ] || break
-            _a="$1"
-            shift
-            _n=$((_n - 1))
-            set -- "$@" "$_a"
-            continue
-        fi
-        if [ "$_chk" -eq 1 ]; then
-            check_path "$_a"
-            case "$_a" in
-                /*) ;;
-                *) _a="$SMA_P" ;;
-            esac
-        fi
-        set -- "$@" "$_a"
-        _n=$((_n - 1))
+        printf '%s%s%s%s%s\n' "$_i" "$TAB" "$_t" "$TAB" "$_p"
+        _i=$((_i + 1))
     done
-    # shellcheck disable=SC2086
-    run_in $_prefix "$@"
 }
 
-need_path() {
-    if [ "$1" -lt 1 ]; then
-        err "$2 needs a PATH (see 'sma help')"
-        exit 2
+collect_facts() {
+    _sec="$("$DOCKER_BIN" info --format '{{.SecurityOptions}}' 2>/dev/null)" || {
+        err "cannot talk to Docker; is it running, and can this user use it?"
+        exit 3
+    }
+    SMA_HOST_PWD="$(pwd -P)"
+    SMA_HOST_UID="$(id -u)"
+    SMA_HOST_GID="$(id -g)"
+    SMA_HOST_OS="$(uname -s)"
+    SMA_HOST_HOME="$(user_home)"
+    SMA_HOST_TTY=0
+    if [ -t 0 ] && [ -t 1 ]; then SMA_HOST_TTY=1; fi
+    SMA_HOST_STDIN=0
+    if [ -t 0 ] || [ -p /dev/stdin ] || [ -f /dev/stdin ]; then SMA_HOST_STDIN=1; fi
+    _dri="${SMA_DEV_DRI:-/dev/dri}"
+    SMA_HOST_DRI_GIDS=""
+    if [ -d "$_dri" ]; then
+        # shellcheck disable=SC2012  # only the numeric group column of device nodes is read, never names
+        SMA_HOST_DRI_GIDS="$(ls -ln "$_dri" 2>/dev/null | awk '$1 ~ /^c/ {print $4}' | sort -un | paste -s -d, -)"
     fi
+    SMA_HOST_NVIDIA=0
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then SMA_HOST_NVIDIA=1; fi
+    SMA_HOST_ROOTLESS=0
+    SMA_HOST_SELINUX=0
+    case "$_sec" in *name=rootless*) SMA_HOST_ROOTLESS=1 ;; esac
+    case "$_sec" in *name=selinux*) SMA_HOST_SELINUX=1 ;; esac
+    SMA_HOST_LOGS_WRITABLE=0
+    if [ -d "$SMA_HOME/logs" ] && [ -w "$SMA_HOME/logs" ]; then SMA_HOST_LOGS_WRITABLE=1; fi
+    SMA_HOST_CONFIG=0
+    if [ -d "$SMA_HOME/config" ]; then SMA_HOST_CONFIG=1; fi
+    SMA_IMAGE="$(image_ref)"
+    export SMA_HOST_PWD SMA_HOST_UID SMA_HOST_GID SMA_HOST_OS SMA_HOST_HOME SMA_HOST_TTY SMA_HOST_STDIN \
+        SMA_HOST_DRI_GIDS SMA_HOST_NVIDIA SMA_HOST_ROOTLESS SMA_HOST_SELINUX SMA_HOST_LOGS_WRITABLE \
+        SMA_HOST_CONFIG SMA_HOST_VERSION SMA_HOME SMA_IMAGE
 }
 
-cmd_version() {
-    case "$SMA_HOST_VERSION" in
-        "@SMA_"*) _host="dev" ;;
-        *) _host="$SMA_HOST_VERSION" ;;
-    esac
-    printf 'sma host script: %s\n' "$_host"
-    resolve_container
-    _img="$("$DOCKER_BIN" exec "$SMA_CONTAINER_ID" printenv SMA_GIT_SHA 2>/dev/null)" || _img="unknown"
-    printf 'container image: %s\n' "$_img"
-    if [ "$_host" != "dev" ] && [ "$_host" != "$_img" ]; then
-        err "warning: host script and container image versions differ; reinstall sma from the image"
+# ── plan execution ───────────────────────────────────────────────────────────
+
+# Run the docker steps in $plan_text: all but the last in order (a failure
+# aborts with its code), then exec the last. The plan is read on fd 3 so
+# docker keeps the terminal on stdin.
+run_plan() {
+    _first="${plan_text%%"$NL"*}"
+    if [ "$_first" != "$PLAN_HEADER" ]; then
+        err "plan version '$_first' unsupported; run sma upgrade"
+        exit 5
     fi
-}
-
-cmd_status() {
-    resolve_container
-    "$DOCKER_BIN" inspect -f 'container={{.Name}} state={{.State.Status}} started={{.State.StartedAt}}' "$SMA_CONTAINER_ID"
+    _total="$(printf '%s\n' "$plan_text" | grep -c '^end$')"
+    [ "$_total" -gt 0 ] || exit 0
+    _n=0
+    _z=""
+    [ "$SMA_HOST_SELINUX" = "1" ] && _z=":z"
+    while IFS= read -r _line <&3; do
+        case "$_line" in
+            "$PLAN_HEADER") ;;
+            "step docker") set -- ;;
+            "arg "*) set -- "$@" "${_line#arg }" ;;
+            "optmount "*)
+                _p="${_line#optmount }"
+                if [ -d "$_p" ]; then set -- "$@" -v "$_p:$_p$_z"; fi
+                ;;
+            end)
+                if [ "$#" -eq 0 ]; then
+                    err "empty plan step"
+                    exit 5
+                fi
+                case "$PLAN_ALLOWED" in
+                    *" $1 "*) ;;
+                    *)
+                        err "plan uses docker $1, which is not allowed"
+                        exit 5
+                        ;;
+                esac
+                _n=$((_n + 1))
+                if [ "$_n" -eq "$_total" ]; then
+                    exec "$DOCKER_BIN" "$@" 3<&-
+                fi
+                "$DOCKER_BIN" "$@" 3<&- || exit $?
+                ;;
+            *)
+                err "unknown plan line: $_line"
+                exit 5
+                ;;
+        esac
+    done 3<<EOF
+$plan_text
+EOF
 }
 
 main() {
-    if [ "$#" -lt 1 ]; then
-        usage >&2
-        exit 2
-    fi
-    _sub="$1"
-    shift
-    case "$_sub" in
-        help | -h | --help) usage ;;
-        version) cmd_version ;;
-        status) cmd_status ;;
-        logs)
-            resolve_container
-            exec "$DOCKER_BIN" logs -f "$SMA_CONTAINER_ID" "$@"
-            ;;
-        shell) run_in bash "$@" ;;
-        codecs) run_in python manual.py -cl "$@" ;;
-        smoke) run_in python daemon.py --smoke-test "$@" ;;
-        manual) run_checked input "python manual.py" "$@" ;;
-        convert)
-            need_path "$#" convert
-            _first="$1"
+    case "${1:-}" in
+        upgrade)
             shift
-            check_path "$_first"
-            run_in python manual.py -i "$SMA_P" -a "$@"
+            cmd_upgrade "$@"
             ;;
-        preview)
-            need_path "$#" preview
-            _first="$1"
-            shift
-            check_path "$_first"
-            run_in python manual.py -i "$SMA_P" -oo -a "$@"
-            ;;
-        audit)
-            need_path "$#" audit
-            _first="$1"
-            shift
-            check_path "$_first"
-            run_in python manual.py --audit -i "$SMA_P" "$@"
-            ;;
-        repair)
-            need_path "$#" repair
-            run_checked positional "python repair.py" "$@"
-            ;;
-        rename)
-            need_path "$#" rename
-            run_checked positional "python rename.py" "$@"
-            ;;
-        *)
-            err "unknown command: $_sub (see 'sma help')"
-            exit 2
+        version)
+            case "$SMA_HOST_VERSION" in
+                "@SMA_"*) printf 'sma host command: dev\n' ;;
+                *) printf 'sma host command: %s\n' "$SMA_HOST_VERSION" ;;
+            esac
             ;;
     esac
+    collect_facts
+    plan_dir="$(mktemp -d "${TMPDIR:-/tmp}/sma-plan.XXXXXX")" || exit 1
+    chmod 700 "$plan_dir"
+    write_argstat "$@" >"$plan_dir/argstat" || {
+        rm -rf "$plan_dir"
+        exit 2
+    }
+    "$DOCKER_BIN" inspect "${SMA_DAEMON_NAME:-sma-ng}" >"$plan_dir/daemon.json" 2>/dev/null ||
+        rm -f "$plan_dir/daemon.json"
+    mkdir -p "$SMA_CONFIG_HOME" 2>/dev/null
+    _z=""
+    [ "$SMA_HOST_SELINUX" = "1" ] && _z=":z"
+
+    # Client container options are prepended to the user's arguments.
+    set -- --entrypoint python -w /app "$SMA_IMAGE" -m resources.cli "$@"
+    if [ "$SMA_HOST_CONFIG" = "1" ]; then set -- -v "$SMA_HOME/config:/app/config:ro${_z:+,z}" "$@"; fi
+    if [ -d "$SMA_CONFIG_HOME" ]; then set -- -v "$SMA_CONFIG_HOME:/home-config$_z" "$@"; fi
+    set -- -v "$plan_dir:/plan$_z" -e HOME=/tmp "$@"
+    if [ "$SMA_HOST_ROOTLESS" != "1" ] && [ "$SMA_HOST_UID" != "0" ]; then
+        set -- --user "$SMA_HOST_UID:$SMA_HOST_GID" "$@"
+    fi
+    for _v in SMA_HOST_PWD SMA_HOST_UID SMA_HOST_GID SMA_HOST_OS SMA_HOST_HOME SMA_HOST_TTY SMA_HOST_STDIN \
+        SMA_HOST_DRI_GIDS SMA_HOST_NVIDIA SMA_HOST_ROOTLESS SMA_HOST_SELINUX SMA_HOST_LOGS_WRITABLE \
+        SMA_HOST_CONFIG SMA_HOST_VERSION SMA_HOME SMA_IMAGE; do
+        set -- -e "$_v" "$@"
+    done
+    "$DOCKER_BIN" run --rm "$@"
+    _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+        rm -rf "$plan_dir"
+        exit "$_rc"
+    fi
+    plan_text=""
+    if [ -f "$plan_dir/plan" ]; then plan_text="$(cat "$plan_dir/plan")"; fi
+    rm -rf "$plan_dir"
+    [ -n "$plan_text" ] || exit 0
+    run_plan
 }
 
 main "$@"
