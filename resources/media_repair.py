@@ -12,8 +12,9 @@ Probes each file and fixes only four kinds of damage, all by remuxing with
   the same definition the conversion and tagging remuxes use.
 - **aspect ratio**: outputs stretched by the former QSV alignment bug (e.g.
   3840x2176 with square pixels) get a corrective display aspect ratio on the
-  primary video stream. The resampled rows stay in the bitstream; removing
-  them needs a re-encode, which this module never does.
+  primary video stream, in the container and (H.264, HEVC, MPEG-2) in the
+  bitstream itself. The resampled rows stay in the bitstream; removing them
+  needs a re-encode, which this module never does.
 
 Files with none of these problems are reported as ``normal`` and left alone.
 Every probed file also gets a one-line FFprobe summary (:func:`summarize`).
@@ -21,9 +22,10 @@ The repaired copy is written like any conversion output: into the configured
 ``output-directory`` (next to the original when unset, subject to
 ``output-directory-space-ratio``) with the ``temp-extension`` (``.sma`` when
 unset, as the storage janitor assumes). It is re-probed, and only moved back
-over the original
-when its streams match the source and it diagnoses as normal; any failure
-leaves the original untouched.
+over the original when its streams (including Dolby Vision signalling),
+chapters, duration and size match the source and it diagnoses as normal; any
+failure leaves the original untouched. A hardlinked original is rewritten in
+place so every link sees the repair.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ import os
 import shutil
 import time
 from dataclasses import dataclass, field
+from fractions import Fraction
 
 from converter.ffmpeg import FFMpeg, is_unknown_stream
 
@@ -69,6 +72,26 @@ PROGRESS_INTERVAL = 30.0
 # Duration drift tolerated between source and repaired output (seconds).
 DURATION_TOLERANCE = 1.0
 
+# The repaired file may be this much smaller than the source minus the
+# estimated size of the dropped streams (a fraction, plus fixed slack for
+# container overhead and streams whose size cannot be estimated) before the
+# remux is judged to have lost packets.
+SIZE_TOLERANCE = 0.9
+SIZE_SLACK_BYTES = 16 * 1024 * 1024
+
+# Bitstream filters that write the corrected aspect into the video bitstream
+# (VUI / sequence header): codec -> (filter, option, "sar" or "dar" value).
+# -aspect alone only sets the container PAR (MP4 pasp, Matroska display
+# size), which players that read the bitstream ignore.
+_ASPECT_BSF = {
+  "h264": ("h264_metadata", "sample_aspect_ratio", "sar"),
+  "hevc": ("hevc_metadata", "sample_aspect_ratio", "sar"),
+  "mpeg2video": ("mpeg2_metadata", "display_aspect_ratio", "dar"),
+}
+
+# Audio codecs the MP4 muxer only writes with -strict experimental.
+_MP4_EXPERIMENTAL_AUDIO = frozenset({"truehd"})
+
 STATUS_NORMAL = "normal"
 STATUS_REPAIRED = "repaired"
 STATUS_WOULD_REPAIR = "would_repair"
@@ -89,6 +112,12 @@ class RepairPlan:
   drop_unknown: list[int] = field(default_factory=list)
   drop_artwork: list[int] = field(default_factory=list)
   dar: str | None = None
+  # Output video stream number of the primary video (the -aspect target).
+  video_out: int = 0
+  # -bsf value that writes the corrected aspect into the bitstream, or None.
+  aspect_bsf: str | None = None
+  # -strict level the muxer needs to write the kept streams, or None.
+  strict: str | None = None
 
   @property
   def needs_repair(self) -> bool:
@@ -135,6 +164,32 @@ def _hybrid_dar(stream) -> str | None:
   return "%d:%d" % (stream.video_width, true_height)
 
 
+def _aspect_bsf(stream, dar: str) -> str | None:
+  """-bsf value that writes *dar* into the bitstream of *stream*, or None when
+  its codec has no metadata filter for it (the container PAR still applies)."""
+  spec = _ASPECT_BSF.get(stream.codec)
+  if not spec:
+    return None
+  name, option, kind = spec
+  dar_w, dar_h = (int(x) for x in dar.split(":"))
+  ratio = Fraction(dar_w, dar_h)
+  if kind == "sar":
+    ratio *= Fraction(stream.video_height, stream.video_width)
+  return "%s=%s=%d/%d" % (name, option, ratio.numerator, ratio.denominator)
+
+
+def _strict(info, keep: list[int], mp4_family: bool) -> str | None:
+  """-strict level needed to mux the kept streams, as the conversion pipeline
+  sets it: experimental for TrueHD in MP4, unofficial so the muxer keeps a
+  Dolby Vision configuration record (MP4 dvcC/dvvC)."""
+  kept = [s for s in info.streams if s.index in keep]
+  if mp4_family and any(s.type == "audio" and s.codec in _MP4_EXPERIMENTAL_AUDIO for s in kept):
+    return "experimental"
+  if any(s.type == "video" and getattr(s, "dv_profile", None) is not None for s in kept):
+    return "unofficial"
+  return None
+
+
 def diagnose(info, path: str | None = None) -> RepairPlan:
   """Classify every stream of *info* (a probed :class:`MediaInfo`) as kept or
   dropped. *path* names the container when *info* was probed from an
@@ -153,7 +208,13 @@ def diagnose(info, path: str | None = None) -> RepairPlan:
     elif not _is_chapter_track(s, mp4_family):
       # The chapter track is never mapped either, but it is not damage.
       plan.drop_data.append(s.index)
-  plan.dar = _hybrid_dar(info.video)
+  video = info.video
+  plan.dar = _hybrid_dar(video)
+  if plan.dar:
+    kept_videos = [s.index for s in info.streams if s.index in plan.keep and s.type == "video"]
+    plan.video_out = kept_videos.index(video.index) if video.index in kept_videos else 0
+    plan.aspect_bsf = _aspect_bsf(video, plan.dar)
+  plan.strict = _strict(info, plan.keep, mp4_family)
   return plan
 
 
@@ -164,7 +225,11 @@ def build_opts(plan: RepairPlan, source: str) -> list[str]:
     opts.extend(["-map", "0:%d" % index])
   opts.extend(["-c", "copy"])
   if plan.dar:
-    opts.extend(["-aspect:v:0", plan.dar])
+    opts.extend(["-aspect:v:%d" % plan.video_out, plan.dar])
+    if plan.aspect_bsf:
+      opts.extend(["-bsf:v:%d" % plan.video_out, plan.aspect_bsf])
+  if plan.strict:
+    opts.extend(["-strict", plan.strict])
   if _ext(plan.path) in MP4_FAMILY_EXTS:
     # Without -write_tmcd 0 the muxer rebuilds a dropped tmcd track from the
     # video's timecode tag; +faststart keeps moov at the front like SMA output.
@@ -180,13 +245,26 @@ def _signature(info, indexes: list[int] | None = None) -> list[tuple]:
     streams = [by_index[i] for i in indexes if i in by_index]
   else:
     streams = [s for s in streams if s.type in KEPT_STREAM_TYPES]
-  return [(s.type, s.codec, s.video_width, s.video_height, s.audio_channels, s.metadata.get("language"), bool(getattr(s, "default", False)), bool(getattr(s, "forced", False))) for s in streams]
+  return [
+    (
+      s.type,
+      s.codec,
+      s.video_width,
+      s.video_height,
+      s.audio_channels,
+      s.metadata.get("language"),
+      bool(getattr(s, "default", False)),
+      bool(getattr(s, "forced", False)),
+      getattr(s, "dv_profile", None),
+    )
+    for s in streams
+  ]
 
 
 def _describe_signature(signature: list[tuple]) -> str:
   """Compact one-line view of a stream signature, e.g. ``[video/hevc 3840x2160, audio/eac3 6ch eng default]``."""
   parts = []
-  for kind, codec, width, height, channels, language, default, forced in signature:
+  for kind, codec, width, height, channels, language, default, forced, dv_profile in signature:
     item = "%s/%s" % (kind, codec)
     if width and height:
       item += " %sx%s" % (width, height)
@@ -198,6 +276,8 @@ def _describe_signature(signature: list[tuple]) -> str:
       item += " default"
     if forced:
       item += " forced"
+    if dv_profile is not None:
+      item += " dv%s" % dv_profile
     parts.append(item)
   return "[%s]" % ", ".join(parts)
 
@@ -270,24 +350,46 @@ def summarize(info) -> str:
   return " | ".join([" ".join(head)] + [_describe_stream(s) for s in info.streams])
 
 
-def _chapter_tracks(info, path: str) -> int:
-  mp4_family = _ext(path) in MP4_FAMILY_EXTS
-  return sum(1 for s in info.streams if _is_chapter_track(s, mp4_family))
+def _duration_of(info, indexes: list[int] | None = None) -> float | None:
+  """Longest duration among *indexes* (all streams when None); the container
+  duration when no stream reports one (Matroska streams usually do not)."""
+  durations = [s.duration for s in info.streams if s.duration and (indexes is None or s.index in indexes)]
+  return max(durations) if durations else info.format.duration
+
+
+def _dropped_bytes(source, keep: list[int]) -> float:
+  """Estimated size of the streams the repair drops (bitrate x duration)."""
+  total = 0.0
+  for s in source.streams:
+    if s.index not in keep and s.bitrate:
+      total += s.bitrate * (s.duration or source.format.duration or 0) / 8
+  return total
 
 
 def verify(plan: RepairPlan, source, output) -> None:
   """Raise RepairError unless *output* is the expected stream-copy of *source*.
 
   *output* is judged as the source's container (``plan.path``), not by its
-  in-transit temp extension."""
+  in-transit temp extension. Durations compare the kept streams, so dropping a
+  data or artwork stream longer than the programme is not a mismatch.
+  Chapters compare by count (``chapters``, set by :meth:`RepairProcessor.probe`),
+  not by chapter tracks: the MP4 muxer writes a fresh chapter text track from
+  the chapter list, also when the source kept its chapters elsewhere (a Nero
+  ``chpl`` atom, or a ``tx3g`` track FFprobe reports as a subtitle)."""
   expected, actual = _signature(source, plan.keep), _signature(output)
   if actual != expected:
     raise RepairError("repaired streams do not match the source: expected %s, got %s" % (_describe_signature(expected), _describe_signature(actual)))
-  src_dur, out_dur = source.format.duration, output.format.duration
+  src_dur, out_dur = _duration_of(source, plan.keep), _duration_of(output)
   if src_dur and (out_dur is None or abs(src_dur - out_dur) > DURATION_TOLERANCE):
     raise RepairError("repaired duration %s differs from source %s" % (out_dur, src_dur))
-  if _chapter_tracks(output, plan.path) != _chapter_tracks(source, plan.path):
-    raise RepairError("repaired chapter track count differs from source")
+  src_chapters, out_chapters = getattr(source, "chapters", None), getattr(output, "chapters", None)
+  if src_chapters is not None and out_chapters is not None and src_chapters != out_chapters:
+    raise RepairError("repaired file has %d chapters, source has %d" % (out_chapters, src_chapters))
+  src_size, out_size = getattr(source.format, "size", None), getattr(output.format, "size", None)
+  if src_size and out_size:
+    minimum = (src_size - _dropped_bytes(source, plan.keep)) * SIZE_TOLERANCE - SIZE_SLACK_BYTES
+    if out_size < minimum:
+      raise RepairError("repaired file is %d bytes, expected at least %d; the remux lost data" % (out_size, minimum))
   leftover = diagnose(output, plan.path)
   if leftover.needs_repair:
     raise RepairError("repaired file still needs repair: %s" % leftover.describe())
@@ -311,13 +413,32 @@ class RepairProcessor:
     info = self.ffmpeg.probe(path, posters_as_video=False, framedata=False)
     if info is None or not info.streams:
       raise RepairError("ffprobe found no streams")
+    info.chapters = self.count_chapters(path)
     return info
+
+  def count_chapters(self, path: str) -> int | None:
+    """Chapters FFprobe reads from *path*, or None when it cannot tell."""
+    try:
+      out = self.ffmpeg._get_stdout([self.ffmpeg.ffprobe_path, "-v", "error", "-show_chapters", path])
+    except Exception:
+      self.log.debug("Unable to count chapters of %s." % path, exc_info=True)
+      return None
+    return out.count("[CHAPTER]")
+
+  def _rewrite_in_place(self, tmp: str, path: str) -> None:
+    """Copy *tmp* over the contents of *path*, keeping its inode so every
+    hardlink to it sees the repair. Not atomic: a failure part-way leaves
+    *path* damaged, so *tmp* is kept for recovery."""
+    shutil.copyfile(tmp, path)
+    if os.path.getsize(path) != os.path.getsize(tmp):
+      raise OSError("size after rewrite differs from %s" % tmp)
+    os.remove(tmp)
 
   def getTempFile(self, path: str) -> str:
     """In-transit output path for *path*, following MediaProcessor.getOutputFile:
     ``<output-directory>/<name>.<temp-extension>``, or next to *path* when no
     output directory is configured. A ``.N`` counter avoids collisions."""
-    output_dir = self.settings.output_dir or os.path.dirname(path)
+    output_dir = self.settings.output_dir or os.path.dirname(os.path.abspath(path))
     os.makedirs(output_dir, exist_ok=True)
     base = os.path.join(output_dir, os.path.splitext(os.path.basename(path))[0])
     temp_extension = self.settings.temp_extension or DEFAULT_TEMP_EXTENSION
@@ -394,6 +515,7 @@ class RepairProcessor:
       return RepairResult(path, STATUS_FAILED, "insufficient free space in output directory %s (%s)" % (self.settings.output_dir, detail), probe)
 
     tmp = None
+    rewriting = False
     try:
       tmp = self.getTempFile(path)
       self.log.info("Repairing %s: %s." % (path, detail))
@@ -406,16 +528,26 @@ class RepairProcessor:
           self.log.debug("Remuxing %s: %ss copied." % (path, timecode))
           last_report = time.monotonic()
       verify(plan, source, self.probe(tmp))
-      self.log.debug("Verified %s against source, replacing original." % tmp)
-      self.setPermissions(tmp)
-      self._atomic_move(tmp, path)
+      links = os.stat(path).st_nlink
+      if links > 1:
+        # Replacing the file would split it from its other hardlinks (e.g. a
+        # seeding copy), which would keep the damage and double the disk use.
+        self.log.info("%s has %d hardlinks, rewriting it in place." % (path, links))
+        rewriting = True
+        self._rewrite_in_place(tmp, path)
+      else:
+        self.log.debug("Verified %s against source, replacing original." % tmp)
+        self.setPermissions(tmp)
+        self._atomic_move(tmp, path)
     except Exception as exc:
+      self.log.debug("Repair of %s failed." % path, exc_info=True)
+      if rewriting and tmp and os.path.exists(tmp):
+        return RepairResult(path, STATUS_FAILED, "%s; in-place rewrite failed, original may be damaged, verified copy kept at %s (%s)" % (exc, tmp, detail), probe)
       try:
         if tmp and os.path.exists(tmp):
           os.remove(tmp)
       except OSError:
         pass
-      self.log.debug("Repair of %s failed." % path, exc_info=True)
       return RepairResult(path, STATUS_FAILED, "%s (%s)" % (exc, detail), probe)
     return RepairResult(path, STATUS_REPAIRED, detail, probe)
 

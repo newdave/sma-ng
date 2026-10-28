@@ -181,9 +181,12 @@ Two repair paths exist:
   Re-downloading and re-encoding from the original source is better still.
 - **Lossless (display-only):** `python manual.py --repair-hybrid -i /path`
   sweeps a file or directory and remuxes each detected MP4 with a corrective
-  display aspect ratio on the primary video stream (`-c copy -aspect:v:0 W:H`).
+  display aspect ratio on the primary video stream (`-c copy -aspect:v:0 W:H`),
+  also written into the H.264/HEVC/MPEG-2 bitstream with the `h264_metadata`,
+  `hevc_metadata` or `mpeg2_metadata` bitstream filter so players that read
+  the codec's aspect ratio rather than the container's get it too.
   It is instant but does not remove the resampled rows: players that ignore
-  the sample aspect ratio for HEVC-in-MP4 (some TVs and Plex clients) still
+  the sample aspect ratio altogether (some TVs and Plex clients) still
   show a slightly tall picture, and non-square pixels make a Plex transcode
   more likely. This is the `repair.py` repair (below), so cover art, data and
   unknown streams are dropped too. The library audit can do the same
@@ -237,12 +240,17 @@ What it fixes:
 | Data streams | `tmcd` timecode tracks, stray `bin_data`                                                        | Dropped (`-write_tmcd 0` on MP4)       |
 | Unknown      | Streams FFprobe cannot classify or identify a codec for (`unknown`/`none`)                      | Dropped                                |
 | Artwork      | Attached pictures, cover art demoted to a real `mp4v` video track, image attachments in MKV     | Dropped; font attachments are kept     |
-| Aspect ratio | Stretched hybrid dims (see above) with square pixels                                            | `-aspect:v:0` corrective display ratio |
+| Aspect ratio | Stretched hybrid dims (see above) with square pixels                                            | Corrective display ratio (container and bitstream) |
 
 The MP4 chapter text track (`bin_data` tagged `text`, written whenever a file has chapters) is not damage and is
 kept. The
 aspect fix is display-only, as described above; use `manual.py --repair-hybrid reencode` to remove the
 resampled rows.
+
+The remux uses the same `-strict` levels as a conversion: `-strict experimental` when an MP4 keeps TrueHD audio,
+and `-strict unofficial` when the video carries a Dolby Vision configuration record, so the MP4 muxer keeps the
+`dvcC`/`dvvC` box. Without it, Dolby Vision players lose the signalling and profile 5 files show green/purple
+colours.
 
 FFmpeg/FFprobe paths, in-transit output settings and output permissions (`chmod`, `uid`, `gid`) come from
 `sma-ng.yml`, exactly as for a conversion: without `-c`, each file is routed to the profile the daemon would
@@ -252,8 +260,25 @@ original when no output directory is set. When
 `output-directory-space-ratio` is set and the output directory is short of space, the file fails with
 `insufficient free space in output directory` rather than falling back to the source directory. The copy is
 re-probed and only moved back over the original (a rename, or a copy via `<name>.smatmp` across filesystems) when
-the kept streams (codec, dimensions, channels, language and default/forced flags), duration (within 1 second) and
-chapter track match and the copy probes as normal. Otherwise the copy is deleted and the original is untouched.
+all of these hold:
+
+- the kept streams match: codec, dimensions, channels, language, default/forced flags and Dolby Vision profile
+- the duration of the kept streams matches within 1 second, so a dropped data track that runs longer is ignored
+- the number of chapters (`ffprobe -show_chapters`) matches
+- the copy is no smaller than the source, less the estimated size of the dropped streams, minus 10% and 16 MiB
+- the copy probes as normal
+
+Otherwise the copy is deleted and the original is untouched. Chapters are compared by count, not by chapter
+track: the MP4 muxer writes a fresh chapter text track from the chapter list, also when the source stored its
+chapters elsewhere (a Nero `chpl` atom, or a `tx3g` track FFprobe reports as a subtitle). Releases before this
+change failed such files with `repaired chapter track count differs from source`.
+
+A hardlinked original (for example a Sonarr/Radarr import that is still seeding) is not replaced, because that would
+split it from its other links: they would keep the damage and the file would use twice the space. Once the copy
+is verified, it is written back into the original file instead, so every link sees the repair (logged as
+`has N hardlinks, rewriting it in place`). That write is not atomic. If it fails part-way, the result says
+`in-place rewrite failed, original may be damaged, verified copy kept at PATH`; copy that file over the original
+by hand.
 A leftover from an interrupted run is safe to delete; the library audit reports it as `leftover_tmp` once it is
 older than `storage-janitor-max-age-seconds`. MP4 output gets
 `+faststart`. After the run, each directory with a repaired file gets one Plex refresh when Plex refresh is
