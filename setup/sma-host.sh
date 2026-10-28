@@ -2,7 +2,7 @@
 # sma - run SMA-NG commands in the Docker container from the Docker host.
 #
 # Shipped in the image as /usr/local/bin/sma-host. Install on the host with:
-#   docker run --rm --entrypoint cat IMAGE /usr/local/bin/sma-host > /usr/local/bin/sma
+#   docker cp sma-ng:/usr/local/bin/sma-host /usr/local/bin/sma   (see docs/sma-cli-quickstart.md)
 #   chmod 755 /usr/local/bin/sma
 #
 # Every command runs through the image entrypoint's `run` mode so it gets the
@@ -29,7 +29,7 @@ usage() {
 usage: sma <command> [args...]
 
   convert PATH [ARGS]   convert a file or directory (manual.py -i PATH -a)
-  preview PATH [ARGS]   show the conversion plan only (manual.py -i PATH -oo)
+  preview PATH [ARGS]   show the conversion plan only (manual.py -i PATH -oo -a)
   manual [ARGS]         run manual.py with raw arguments
   repair PATH... [ARGS] repair damaged media (repair.py)
   rename PATH [ARGS]    rename media (rename.py)
@@ -288,7 +288,7 @@ main() {
             _first="$1"
             shift
             check_path "$_first"
-            run_in python manual.py -i "$SMA_P" -oo "$@"
+            run_in python manual.py -i "$SMA_P" -oo -a "$@"
             ;;
         audit)
             need_path "$#" audit

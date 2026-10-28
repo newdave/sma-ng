@@ -92,8 +92,16 @@ def mediatype():
       return MediaTypes(int(result))
     except KeyboardInterrupt:
       raise
-    except (EOFError, ValueError):
+    except EOFError:
+      _no_interactive_input()
+    except ValueError:
       print("Invalid selection")
+
+
+def _no_interactive_input():
+  """Stop instead of re-prompting forever when stdin is closed (cron, scripts, `sma` without a TTY)."""
+  log.error("No interactive input available (stdin closed); re-run with -a for automatic mode or pass IDs on the command line.")
+  sys.exit(2)
 
 
 def getValue(prompt, num=False):
@@ -118,7 +126,7 @@ def getValue(prompt, num=False):
         continue
       return value
     except EOFError:
-      print("Must be a numerical value")
+      _no_interactive_input()
 
 
 def getYesNo():
@@ -139,7 +147,7 @@ def getYesNo():
       else:
         print("Invalid selection")
     except EOFError:
-      print("Invalid selection")
+      _no_interactive_input()
 
 
 class SkipFileException(Exception):
