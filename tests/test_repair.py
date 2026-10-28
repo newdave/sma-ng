@@ -113,6 +113,24 @@ class TestMain:
       root.setLevel(old_level)
       repair.log.setLevel(logging.NOTSET)
 
+  def test_probe_summary_logged_for_every_file(self, tmp_path):
+    files = [str(tmp_path / n) for n in ("a.mp4", "b.mp4", "c.mp4")]
+    self.processor.repair_file.side_effect = [
+      RepairResult(files[0], "normal", probe="mov,mp4 | #0 video/h264"),
+      RepairResult(files[1], "would_repair", "data streams 1", "mov,mp4 | #0 video/h264 | #1 data/bin_data tag=tmcd"),
+      RepairResult(files[2], "failed", "ffprobe found no streams"),
+    ]
+    with patch.object(repair, "iter_targets", return_value=iter(files)), patch.object(repair, "log") as log:
+      assert _run(["-n", str(tmp_path)]) == 1
+    lines = [c.args[0] for c in log.info.call_args_list]
+    assert lines[:4] == [
+      "Probed %s: mov,mp4 | #0 video/h264" % files[0],
+      "Normal, skipped: %s" % files[0],
+      "Probed %s: mov,mp4 | #0 video/h264 | #1 data/bin_data tag=tmcd" % files[1],
+      "Would repair %s: data streams 1 [dry-run]" % files[1],
+    ]
+    assert not any(line.startswith("Probed %s" % files[2]) for line in lines)
+
   def test_clean_run_exits_0(self, tmp_path):
     self.processor.repair_file.return_value = RepairResult("a.mp4", "normal")
     with patch.object(repair, "iter_targets", return_value=iter([str(tmp_path / "a.mp4")])):

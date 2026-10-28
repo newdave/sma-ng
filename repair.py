@@ -120,8 +120,10 @@ def main(argv=None):
       rp = _get_rp(target)
       result = rp.repair_file(target, dry_run=args.dry_run)
       counts[result.status] += 1
+      if result.probe:
+        log.info("Probed %s: %s" % (target, result.probe))
       if result.status == STATUS_NORMAL:
-        log.debug("Normal, skipped: %s" % target)
+        log.info("Normal, skipped: %s" % target)
       elif result.status == STATUS_WOULD_REPAIR:
         log.info("Would repair %s: %s [dry-run]" % (target, result.detail))
       elif result.status == STATUS_REPAIRED:

@@ -218,6 +218,18 @@ mise run media:repair -- /path/to/file-or-dir       # same via mise; `sma repair
 | `--no-plex`       | Skip the Plex refresh after repairs                            |
 | `-v`, `--verbose` | Debug logging                                                  |
 
+Each file scanned gets one log line with its FFprobe summary, followed by its result (`Normal, skipped`,
+`Would repair`, `Repaired` or `Repair failed`). The summary shows the container, duration, size and overall
+bitrate, and then every stream by index. For video, it shows dimensions, a non-square SAR, frame rate, pixel format,
+HDR transfer (`HDR10/PQ`, `HLG`) and `attached_pic`. For audio, it shows channels. For data and attachment streams,
+it shows the codec tag, filename and MIME type. Audio and subtitle streams show their language and `default`/`forced`
+flags. A file that fails to probe gets no summary line:
+
+```text
+Probed /mnt/media/TV/Show/S01E01.mkv: matroska,webm 0:42:10 3.1 GiB 10.4 Mb/s | #0 video/hevc 3840x2160 23.976fps yuv420p10le HDR10/PQ | #1 audio/eac3 6ch eng default | #2 subtitle/subrip eng
+Normal, skipped: /mnt/media/TV/Show/S01E01.mkv
+```
+
 What it fixes:
 
 | Damage       | Detected as                                                                                     | Fix                                    |
