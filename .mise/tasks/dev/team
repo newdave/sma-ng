@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Start the omnigent SMA-NG team (manager, architect, two Claude engineers); changes land as PRs"
+set -euo pipefail
+
+if ! command -v omni >/dev/null 2>&1; then
+  echo "dev:team: omni not found; install omnigent (uv tool install omnigent) and run 'omni setup'" >&2
+  exit 1
+fi
+
+exec omni run .omnigent/agents/team "$@"

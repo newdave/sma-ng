@@ -104,3 +104,6 @@ docker/.env
 # omnigent: keep only the committed project defaults
 .omnigent/*
 !.omnigent/config.yaml
+!.omnigent/agents/
+# omnigent team task worktrees and saved review diffs
+.worktrees/

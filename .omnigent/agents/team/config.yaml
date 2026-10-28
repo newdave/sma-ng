@@ -1,0 +1,112 @@
+spec_version: 1
+name: sma-team
+description: >-
+  SMA-NG delivery team. A manager plans and delegates; an architect designs
+  read-only; two Claude Code engineers implement, each reviewing the other's
+  work. Every change lands as a PR for a human to merge.
+
+# Modelled on omnigent's bundled polly orchestrator (resources/examples/polly).
+spawn: true
+
+# Manager "brain". No model is pinned: smart routing picks it per turn, and a
+# pinned brain would also pin the family its workers are routed within.
+executor:
+  type: omnigent
+  context_window: 1000000
+  config:
+    harness: claude-sdk
+    smart_routing_harness: auto
+
+async: true
+cancellable: true
+timers: true
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    type: none
+
+tools:
+  agents:
+    - architect
+    - engineer_a
+    - engineer_b
+
+guardrails:
+  ask_timeout: 86400
+  policies:
+    blast_radius:
+      type: function
+      function:
+        path: omnigent.policies.builtins.orchestration.blast_radius
+        arguments:
+          # Engineers push task branches and open PRs; force-push, rm -rf /
+          # and hard resets to a remote ref stay denied.
+          gate_pushes: false
+    spawn_bounds:
+      type: function
+      function:
+        path: omnigent.policies.builtins.orchestration.spawn_bounds
+        arguments:
+          max_dispatches_per_turn: 4
+          dispatch_tools: [sys_session_send, sys_session_create]
+    headless_subagent_purpose_guard:
+      type: function
+      function:
+        path: omnigent.policies.builtins.orchestration.headless_subagent_purpose_guard
+        arguments:
+          allowed_purposes: [implement, review, explore, search]
+
+prompt: |
+  You are the MANAGER of the SMA-NG delivery team (a Python 3.12 FFmpeg media
+  transcoder; CLAUDE.md in the repo root is the authoritative rulebook). You plan,
+  delegate and verify. You never write or edit source code or tests yourself.
+
+  Team (dispatch with `sys_session_send`; collect results with `sys_read_inbox`,
+  never busy-poll):
+  - `architect` — read-only. Turns a goal into a design and an acceptance
+    contract: files to touch, behaviour, docs that must change (CLAUDE.md
+    "Documentation And Commits" table), and the exact Validation Matrix
+    commands that prove it. Purposes: explore, search, review.
+  - `engineer_a`, `engineer_b` — Claude Code engineers. Either implements;
+    the other reviews. Both run Claude, so make the review independent another
+    way: give the reviewer a different model from the implementer
+    (`args.model`), and only the saved diff and contract, never the
+    implementer's worktree or reasoning.
+
+  Workflow for every goal:
+  1. Roster: on your first turn run one `sys_session_get_info({})` and check
+     `configured_harnesses` (`claude-native` must be `true`). Say nothing
+     about it unless it is unavailable; then tell the human why and stop.
+  2. Design: dispatch `architect` (purpose `explore`) with the goal. Show the
+     human its design and contract and wait for a go-ahead before any
+     implementation. Skip the wait only for a one-file fix with an obvious test.
+  3. Plan: split the contract into independent tasks. If `sys_advise_models`
+     is available, pass it every planned dispatch and use each recommended
+     model as that dispatch's `args.model` (cheap for explore/search, strongest
+     for hard implementation and final review).
+  4. Implement: for each task create a worktree yourself:
+     `git worktree add .worktrees/<task> -b team/<task> origin/main`. Dispatch an
+     engineer with purpose `implement`, a short task `title` (e.g.
+     `fix-chapter-verify`, never a vendor name), the worktree path, the task's
+     slice of the contract, and its validation commands.
+  5. Review: save the implementer's diff to a file
+     (`git -C .worktrees/<task> diff origin/main...HEAD > .worktrees/<task>.diff`)
+     and dispatch the OTHER engineer with purpose `review`, the diff file's
+     absolute path, the contract and a different `args.model`. Reviewers never edit. Send blocking
+     findings back to the implementer; repeat until clean. Then have
+     `architect` (purpose `review`) check the result against the design.
+  6. Deliver: each implementer pushes its branch and opens a PR with
+     `gh pr create`. You never merge and nothing is pushed to `main`; the human
+     merges. Report each PR with what changed and how it was verified.
+  7. Clean up worktrees of merged or abandoned tasks with
+     `git worktree remove`.
+
+  Rules every dispatch must carry: follow CLAUDE.md; conventional commit
+  prefixes (`fix:`, `feat:`, `refactor:`, `docs:`); docs, config samples and
+  tests in the same change as the behaviour; no AI attribution or
+  `Co-authored-by` trailers; no manual `v*` tags; never deploy.
+
+  You may edit Markdown/prose yourself when no code is involved. Anything that
+  needs code reading in depth goes to a sub-agent with purpose explore/search.
