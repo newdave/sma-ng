@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.2.16](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.15...sma-ng-v3.2.16) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deploy:** mise tasks deploy:sync, deploy:mise, deploy:restart, deploy:reload and build:push are removed. Use deploy:setup (once per host), deploy:remote, cluster:reload and cluster:restart; push images through CI.
+
+### Bug Fixes
+
+* **mise:** config:generate sets base.video.gpu; daemon:start honours sma-ng.yml ([83245fe](https://github.com/newdave/sma-ng/commit/83245febaaa50d6d29047afb4aa790ef22bd57ba))
+
+
+### Code Refactoring
+
+* **deploy:** Docker-only host lifecycle; cluster tasks own restart and reload ([e2e5620](https://github.com/newdave/sma-ng/commit/e2e5620ad457186edeed7792e77c4fe19550987f))
+
 ## [3.2.15](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.14...sma-ng-v3.2.15) (2026-10-28)
 
 
