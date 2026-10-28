@@ -8,6 +8,8 @@ source "${MISE_PROJECT_ROOT}/.mise/shared/docker/env.sh"
 echo "--- import checks ---"
 docker run --rm --entrypoint python3 "$TAG" \
     scripts/docker_smoke_imports.py
+echo "--- sma client ---"
+docker run --rm --entrypoint python -w /app "$TAG" -m resources.cli version
 echo "--- ffmpeg version ---"
 docker run --rm --entrypoint ffmpeg "$TAG" -version | head -2
 echo "--- ffprobe version ---"

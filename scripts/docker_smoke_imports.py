@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import converter  # noqa: E402
 import daemon  # noqa: E402
+import resources.cli  # noqa: E402
 import resources.readsettings  # noqa: E402
 
 print("imports OK")
