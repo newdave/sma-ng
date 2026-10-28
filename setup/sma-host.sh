@@ -11,7 +11,8 @@
 #
 # Environment:
 #   SMA_IMAGE        image to run (default: ~/.config/sma/image, else ghcr.io/newdave/sma-ng:latest)
-#   SMA_HOME         host data directory with config/, logs/, data/ (default: /opt/sma)
+#   SMA_HOME         host data directory with config/, logs/, data/ (default: /opt/sma on Linux,
+#                    ~/.local/share/sma on macOS)
 #   SMA_CONFIG_HOME  client settings directory (default: ~/.config/sma)
 #   SMA_DAEMON_NAME  name of the daemon container (default: sma-ng)
 #   DOCKER_BIN       docker executable (default: docker)
@@ -22,7 +23,6 @@
 
 SMA_HOST_VERSION="@SMA_GIT_SHA@"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
-SMA_HOME="${SMA_HOME:-/opt/sma}"
 DEFAULT_IMAGE="ghcr.io/newdave/sma-ng:latest"
 PLAN_HEADER="sma-plan 1"
 # Keep in sync with ALLOWED_SUBCOMMANDS in resources/cli/plan.py.
@@ -43,6 +43,17 @@ user_home() {
 }
 
 SMA_CONFIG_HOME="${SMA_CONFIG_HOME:-$(user_home)/.config/sma}"
+
+# Linux servers use /opt/sma (the compose file and cluster tooling expect it);
+# on macOS the data lives in the user's home, never in /opt.
+default_sma_home() {
+    case "$(uname -s)" in
+        Darwin) printf '%s\n' "${XDG_DATA_HOME:-$(user_home)/.local/share}/sma" ;;
+        *) printf '%s\n' /opt/sma ;;
+    esac
+}
+
+SMA_HOME="${SMA_HOME:-$(default_sma_home)}"
 
 image_ref() {
     if [ -n "${SMA_IMAGE:-}" ]; then

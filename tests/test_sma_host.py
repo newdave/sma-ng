@@ -386,6 +386,20 @@ def test_stdin_only_attached_for_api_key(env):
   assert "-i" in call[: call.index("--entrypoint")]
 
 
+@pytest.mark.parametrize("os_name,xdg,expected", [("Darwin", None, "{home}/.local/share/sma"), ("Darwin", "/x/data", "/x/data/sma"), ("Linux", None, "/opt/sma")])
+def test_default_sma_home_per_os(env, tmp_path, os_name, xdg, expected):
+  _exe(tmp_path / "bin" / "uname", "#!/bin/sh\necho %s\n" % os_name)
+  e = {k: v for k, v in env.items() if k != "SMA_HOME"}
+  if xdg:
+    e["XDG_DATA_HOME"] = xdg
+  else:
+    e.pop("XDG_DATA_HOME", None)
+  r = _run(e, "codecs")
+  assert r.returncode == 0, r.stderr
+  facts = dict(line.split("=", 1) for line in _read(tmp_path, "env.copy").splitlines())
+  assert facts["SMA_HOME"] == expected.format(home=env["HOME"])
+
+
 def test_script_is_executable_and_posix():
   assert os.access(SMA, os.X_OK)
   with open(SMA) as f:

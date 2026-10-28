@@ -14,7 +14,8 @@
 #   --bin-dir DIR   where to install sma (SMA_BIN_DIR; default /usr/local/bin,
 #                   or ~/.local/bin without root or sudo)
 #   --daemon        also set up the long-running daemon (not available yet)
-#   SMA_HOME        data directory (default /opt/sma)
+#   SMA_HOME        data directory (default /opt/sma on Linux, ~/.local/share/sma
+#                   on macOS)
 #   DESTDIR         prefix for every host path (testing/staging only)
 
 set -eu
@@ -24,7 +25,7 @@ IMAGE_REPO="ghcr.io/$REPO"
 API_URL="${SMA_API_URL:-https://api.github.com/repos/$REPO}"
 SMA_IMAGE_TAG="${SMA_IMAGE_TAG:-}"
 SMA_BIN_DIR="${SMA_BIN_DIR:-}"
-SMA_HOME="${SMA_HOME:-/opt/sma}"
+SMA_HOME="${SMA_HOME:-}"
 DESTDIR="${DESTDIR:-}"
 WANT_DAEMON=0
 
@@ -82,6 +83,15 @@ else
     OWNER_HOME="$HOME"
 fi
 OWNER_GROUP="$(id -gn "$OWNER" 2>/dev/null || id -gn)"
+
+# Linux servers use /opt/sma (the compose file and cluster tooling expect it);
+# on macOS the data lives in the user's home, never in /opt.
+if [ -z "$SMA_HOME" ]; then
+    case "$(uname -s)" in
+        Darwin) SMA_HOME="${XDG_DATA_HOME:-$OWNER_HOME/.local/share}/sma" ;;
+        *) SMA_HOME=/opt/sma ;;
+    esac
+fi
 
 # ── preflight ────────────────────────────────────────────────────────────────
 command -v docker >/dev/null 2>&1 || die "Docker is required: https://docs.docker.com/engine/install/"

@@ -41,7 +41,7 @@ def env(tmp_path):
   bindir.mkdir()
   _exe(bindir / "docker", FAKE_DOCKER)
   _exe(bindir / "curl", FAKE_CURL)
-  _exe(bindir / "uname", '#!/bin/sh\necho "${FAKE_ARCH:-x86_64}"\n')
+  _exe(bindir / "uname", '#!/bin/sh\nif [ "$1" = "-s" ]; then echo "${FAKE_OS:-Linux}"; else echo "${FAKE_ARCH:-x86_64}"; fi\n')
   (tmp_path / "home").mkdir()
   (tmp_path / "calls.log").write_text("")
   e = {k: v for k, v in os.environ.items() if not k.startswith(("SMA_", "SUDO_"))}
@@ -170,6 +170,21 @@ def test_unknown_option(env):
   r = _run(env, "--bogus")
   assert r.returncode == 1
   assert "unknown option" in r.stderr
+
+
+def test_macos_uses_home_not_opt(env):
+  e = {k: v for k, v in env.items() if k != "XDG_DATA_HOME"}
+  r = _run(e, FAKE_OS="Darwin")
+  assert r.returncode == 0, r.stderr
+  assert os.path.isfile(_dest(env, env["HOME"], ".local/share/sma/config/sma-ng.yml"))
+  assert not os.path.exists(_dest(env, "/opt/sma"))
+  assert "Settings: %s/.local/share/sma/config/sma-ng.yml" % env["HOME"] in r.stdout
+
+
+def test_sma_home_override(env):
+  r = _run(env, SMA_HOME="/srv/sma")
+  assert r.returncode == 0, r.stderr
+  assert os.path.isdir(_dest(env, "/srv/sma/logs"))
 
 
 def test_installer_is_posix_and_executable():
