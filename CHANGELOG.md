@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.27](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.26...sma-ng-v3.2.27) (2026-10-28)
+
+
+### Features
+
+* **daemon:** job kinds, captured output and node capabilities ([e6daa5b](https://github.com/newdave/sma-ng/commit/e6daa5b260eb45720ed1b063da6d9421220a6a69))
+* **daemon:** POST /jobs, job output and /paths endpoints ([ff31765](https://github.com/newdave/sma-ng/commit/ff317657cba20791185e1f2854a61c97911a4b88))
+
 ## [3.2.26](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.25...sma-ng-v3.2.26) (2026-10-28)
 
 
