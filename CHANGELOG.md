@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.2.33](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.32...sma-ng-v3.2.33) (2026-10-28)
+
+
+### Features
+
+* **ffmpeg:** parse the Dolby Vision profile from stream side data ([9bd1e88](https://github.com/newdave/sma-ng/commit/9bd1e88d45d8b5a0950a0befd7020b26f6ab7b47))
+* **repair:** log an ffprobe summary for every file scanned ([711ea80](https://github.com/newdave/sma-ng/commit/711ea805ed0ab9426fa249d6b6c3a2836b09cf26))
+
+
+### Bug Fixes
+
+* **repair:** keep chapters, DV, hardlinks and the aspect fix intact ([b00feca](https://github.com/newdave/sma-ng/commit/b00feca67fc43eeff8e3727f5508043b4efcd693))
+
 ## [3.2.32](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.31...sma-ng-v3.2.32) (2026-10-28)
 
 
