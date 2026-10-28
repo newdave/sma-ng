@@ -46,6 +46,17 @@ Full documentation is in [docs/](docs/) and served at `http://localhost:8585/doc
 
 ## Docker
 
+Run the tools from any Docker host with the `sma` command (Docker is the only requirement):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.sh | sh
+sma preview /path/to/file.mkv
+```
+
+Each `sma` command runs in a throwaway container that mounts the paths you name; see the
+[`sma` CLI Quick Start](docs/sma-cli-quickstart.md). To run the daemon (webhooks, job queue, dashboard), use
+[Docker Compose](docs/docker-compose-quickstart.md) or:
+
 ```bash
 docker run --rm -p 8585:8585 \
   -v /your/config:/config \
