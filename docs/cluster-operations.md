@@ -16,7 +16,7 @@ For the underlying *reference* material see:
 
 ```mermaid
 graph LR
-    O[Operator workstation<br/>mise run …] -->|ssh| M[sma-master<br/>sma daemon + sma-pgsql]
+    O[Operator workstation<br/>mise run …] -->|ssh| M[sma-master<br/>sma daemon]
     O -->|ssh| S0[sma-slave0<br/>sma daemon]
     O -->|ssh| S1[sma-slave1<br/>sma daemon]
     M -->|SQL| P[(PostgreSQL<br/>jobs, cluster_nodes,<br/>node_commands, …)]
@@ -27,9 +27,9 @@ graph LR
     S1 -->|webhook| EXT
 ```
 
-- One node carries the bundled PostgreSQL (`*-pg` Docker profile). All other
-  nodes connect to it as clients (their compose profile is the non-`-pg`
-  variant).
+- One node uses the `*-pg` Docker profile against an external PostgreSQL server
+  (`daemon.db-url`); compose does not bundle PostgreSQL. All other nodes connect
+  to the same database.
 - Every node runs an identical `sma` container reading `config/sma-ng.yml` and
   `config/daemon.env`. Both are stamped per-host by `mise run deploy:config`.
 - Cluster identity comes from `SMA_NODE_NAME` (stamped into `daemon.env`,
@@ -118,7 +118,7 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
 
    ```bash
    mise run cluster:start
-   mise run cluster:status   # confirm sma + sma-pgsql healthy on master, sma on slaves
+   mise run cluster:status   # confirm sma healthy on every node
    ```
 
 5. **Approve every pending node** in the master's `/admin` UI (or via
@@ -308,14 +308,14 @@ registers a fresh row; re-approve them via `/admin`.
 
 ## Docker compose profile reference
 
-| Profile | GPU stack | Bundled Postgres? | Use on |
+| Profile | GPU stack | Database | Use on |
 |---|---|---|---|
 | `software` | none (CPU only) | no — uses `daemon.db_url` from `sma-ng.yml` | a node without GPU + with an external DB |
-| `software-pg` | none (CPU only) | yes (`sma-pgsql` service) | a single-node deployment with no GPU |
+| `software-pg` | none (CPU only) | external PostgreSQL (`daemon.db-url`) | a single-node deployment with no GPU |
 | `intel` | Intel QSV / VAAPI | no | a slave with Intel GPU |
-| `intel-pg` | Intel QSV / VAAPI | yes | the master in an Intel-GPU cluster |
+| `intel-pg` | Intel QSV / VAAPI | external PostgreSQL (`daemon.db-url`) | the master in an Intel-GPU cluster |
 | `nvidia` | NVIDIA NVENC | no | a slave with NVIDIA GPU |
-| `nvidia-pg` | NVIDIA NVENC | yes | the master in an NVIDIA-GPU cluster |
+| `nvidia-pg` | NVIDIA NVENC | external PostgreSQL (`daemon.db-url`) | the master in an NVIDIA-GPU cluster |
 
 Only one node should run a `*-pg` profile. Set it in
 `hosts.<that-host>.docker_profile`; leave the cluster-wide `deploy.docker_profile`

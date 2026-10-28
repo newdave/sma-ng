@@ -174,7 +174,7 @@ check the following:
 
 ```bash
 docker compose --profile intel up -d
-# or, with bundled PostgreSQL:
+# or, with an external PostgreSQL (daemon.db-url):
 docker compose --profile intel-pg up -d
 ```
 

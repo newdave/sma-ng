@@ -193,14 +193,14 @@ node should run a `*-pg` profile — that's the host that carries the bundled
 PostgreSQL the rest of the cluster connects to. Non-`*-pg` profiles default
 to a local SQLite database at `/opt/sma/data/sma-ng.db` for single-node use.
 
-| Profile       | GPU stack         | Bundled Postgres?         | Use on                                        |
-| ------------- | ----------------- | ------------------------- | --------------------------------------------- |
-| `software`    | none (CPU only)   | no                        | single-node CPU deployment with SQLite        |
-| `software-pg` | none (CPU only)   | yes (`sma-pgsql` service) | single-node deployment, no GPU                |
-| `intel`       | Intel QSV / VAAPI | no                        | single-node Intel GPU deployment with SQLite  |
-| `intel-pg`    | Intel QSV / VAAPI | yes                       | the master in an Intel-GPU cluster            |
-| `nvidia`      | NVIDIA NVENC      | no                        | single-node NVIDIA GPU deployment with SQLite |
-| `nvidia-pg`   | NVIDIA NVENC      | yes                       | the master in an NVIDIA-GPU cluster           |
+| Profile       | GPU stack         | Database                                   | Use on                                        |
+| ------------- | ----------------- | ------------------------------------------ | --------------------------------------------- |
+| `software`    | none (CPU only)   | SQLite                                     | single-node CPU deployment with SQLite        |
+| `software-pg` | none (CPU only)   | external PostgreSQL (`daemon.db-url`)      | single-node deployment, no GPU                |
+| `intel`       | Intel QSV / VAAPI | SQLite                                     | single-node Intel GPU deployment with SQLite  |
+| `intel-pg`    | Intel QSV / VAAPI | external PostgreSQL (`daemon.db-url`)      | the master in an Intel-GPU cluster            |
+| `nvidia`      | NVIDIA NVENC      | SQLite                                     | single-node NVIDIA GPU deployment with SQLite |
+| `nvidia-pg`   | NVIDIA NVENC      | external PostgreSQL (`daemon.db-url`)      | the master in an NVIDIA-GPU cluster           |
 
 ### Configuration
 
@@ -491,8 +491,8 @@ mise run build:run
 per release `X.Y.Z`, `X.Y`, `X` (linux/amd64 + linux/arm64).
 
 For hardware acceleration diagnostics in containers, the runtime image includes `vainfo` and VAAPI userspace drivers.
-For Intel/QSV setups, use either the Intel profile (`docker compose --profile intel up`) or the bundled-PostgreSQL Intel profile (`docker compose --profile intel-pg up`) so `/dev/dri` is mapped into the container. This is important on SR-IOV guests where the Intel VF may appear as `card1` while still using `renderD128`.
-The bundled PostgreSQL compose service publishes `5432` on the Docker host by default using `PGSQL_BIND_IP`/`PGSQL_PORT` from `docker/.env` (defaults: `0.0.0.0` and `5432`). That makes the database reachable via the Docker host IP unless you intentionally restrict it to `127.0.0.1` or a more specific interface.
+For Intel/QSV setups, use the Intel profile (`docker compose --profile intel up`) or the `intel-pg` profile (external PostgreSQL) so `/dev/dri` is mapped into the container. This is important on SR-IOV guests where the Intel VF may appear as `card1` while still using `renderD128`.
+The `-pg` profiles run only the `sma-ng` container and use an external PostgreSQL server configured with `daemon.db-url` in `sma-ng.yml`; compose does not bundle or publish PostgreSQL.
 
 Docker runtime settings live in `/config/sma-ng.yml`; the daemon no longer reads `SMA_*` environment variables.
 

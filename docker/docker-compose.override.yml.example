@@ -1,6 +1,5 @@
 # docker-compose.override.yml.example
 #
-# The base compose file already publishes PostgreSQL on the Docker host.
-# Prefer setting PGSQL_BIND_IP and PGSQL_PORT in docker/.env instead of using
-# an override file. This example is intentionally empty so copying it has no
+# Put local changes to the base compose file in docker-compose.override.yml
+# next to it. This example is intentionally empty so copying it has no
 # effect beyond documenting that behavior.

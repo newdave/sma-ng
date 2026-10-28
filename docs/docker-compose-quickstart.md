@@ -12,19 +12,18 @@ The repository ships a compose file at [`docker/docker-compose.yml`](../docker/d
 - `nvidia-pg`
 
 The non-`-pg` profiles are single-node profiles and default to SQLite at `/data/sma-ng.db`, persisted on the
-Docker host under `/opt/sma/data/sma-ng.db`. The `-pg` profiles include a bundled PostgreSQL container for
-clustered deployments or operators who explicitly want PostgreSQL.
+Docker host under `/opt/sma/data/sma-ng.db`. The `-pg` profiles run the same container for nodes that use an
+external PostgreSQL server, such as cluster members; compose does not bundle PostgreSQL, and the database is
+chosen only by `daemon.db_url` in `sma-ng.yml`.
 
 With the current compose layout, use config files for different jobs:
 
 - `/opt/sma/config/sma-ng.yml` → daemon runtime settings
 - `/opt/sma/config/daemon.env` → container-only settings (`POSTGRES_*`, `LIBVA_DRIVER_NAME`, `NVIDIA_*`)
-- `docker/.env` → Compose interpolation (`IMAGE_TAG`, `PORT`, `PGSQL_BIND_IP`, `PGSQL_PORT`)
+- `docker/.env` → Compose interpolation (`IMAGE_TAG`, `PORT`, `STOP_GRACE_PERIOD`)
 
 For clustered Docker deployments, set `daemon.node_id` in
 `/opt/sma/config/sma-ng.yml`.
-
-Bundled PostgreSQL is published on the Docker host by default, so other machines on your network can reach it via the Docker host IP and `PGSQL_PORT` (subject to host firewall rules).
 
 ## 1. Prepare Host Directories
 
@@ -116,8 +115,6 @@ From the repo root:
 cat > docker/.env <<'EOF'
 IMAGE_TAG=latest
 PORT=8585
-PGSQL_BIND_IP=0.0.0.0
-PGSQL_PORT=5432
 EOF
 ```
 
@@ -125,8 +122,7 @@ Use `docker/.env` only for values that Docker Compose itself expands from `docke
 
 - `IMAGE_TAG`
 - `PORT`
-- `PGSQL_BIND_IP`
-- `PGSQL_PORT`
+- `STOP_GRACE_PERIOD`
 
 GPU device permissions (`/dev/dri/*`) are reconciled automatically by the container entrypoint — no `RENDER_GID`/`VIDEO_GID` configuration is required.
 
@@ -201,24 +197,7 @@ daemon:
   api_key: change-me-too
 ```
 
-For bundled PostgreSQL profiles (`software-pg`, `intel-pg`, `nvidia-pg`), set matching `POSTGRES_*` values in `daemon.env` and set the daemon database URL in `sma-ng.yml`:
-
-```bash
-POSTGRES_USER=sma
-POSTGRES_DB=sma
-POSTGRES_PASSWORD=change-me-now
-```
-
-```yaml
-daemon:
-  node_id: media-node-a
-  api_key: change-me-too
-  db_url: postgresql://sma:change-me-now@sma-pgsql:5432/sma
-```
-
-Because the bundled PostgreSQL service publishes `5432` on the Docker host by default, external tools can usually connect with a URL like `postgresql://sma:change-me-now@<docker-host-ip>:5432/sma` while compose-managed SMA containers continue using the internal `sma-pgsql` hostname.
-
-For non-`-pg` profiles that should use external PostgreSQL instead of SQLite, point the daemon at that database:
+For the `-pg` profiles (`software-pg`, `intel-pg`, `nvidia-pg`), point the daemon at your PostgreSQL server:
 
 ```yaml
 daemon:
@@ -231,40 +210,17 @@ daemon:
 
 From the repo root:
 
-### Software encode with bundled PostgreSQL
-
-```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml --profile software-pg up -d
-```
-
-### Software encode without bundled PostgreSQL
-
-```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml --profile software up -d
-```
-
-### Intel QSV with bundled PostgreSQL
-
-```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml --profile intel-pg up -d
-```
-
-### Intel QSV without bundled PostgreSQL
+| Profile       | Hardware          | Database                            |
+| ------------- | ----------------- | ----------------------------------- |
+| `software`    | CPU only          | SQLite (`/opt/sma/data/sma-ng.db`)  |
+| `software-pg` | CPU only          | external PostgreSQL (`db_url`)      |
+| `intel`       | Intel QSV / VAAPI | SQLite                              |
+| `intel-pg`    | Intel QSV / VAAPI | external PostgreSQL (`db_url`)      |
+| `nvidia`      | NVIDIA NVENC      | SQLite                              |
+| `nvidia-pg`   | NVIDIA NVENC      | external PostgreSQL (`db_url`)      |
 
 ```bash
 docker compose --env-file docker/.env -f docker/docker-compose.yml --profile intel up -d
-```
-
-### NVIDIA with bundled PostgreSQL
-
-```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml --profile nvidia-pg up -d
-```
-
-### NVIDIA without bundled PostgreSQL
-
-```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml --profile nvidia up -d
 ```
 
 ## 9. Verify
@@ -306,11 +262,7 @@ Quick check:
 docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-intel vainfo
 ```
 
-Or for the bundled-PostgreSQL profile:
-
-```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-intel-pg vainfo
-```
+Use `sma-intel-pg` as the service name with the `intel-pg` profile.
 
 ### NVIDIA
 
@@ -360,20 +312,9 @@ In `docker/.env`:
 PORT=8686
 ```
 
-### Change or restrict the published PostgreSQL address
-
-In `docker/.env`:
-
-```bash
-PGSQL_BIND_IP=127.0.0.1
-PGSQL_PORT=5433
-```
-
-Use `127.0.0.1` if you want PostgreSQL reachable only from the Docker host. Leave the default `0.0.0.0` binding if you want it reachable via the Docker host IP on your network.
-
 ### Use an external PostgreSQL instance
 
-Use a non-`-pg` profile and set `daemon.db_url` in `sma-ng.yml`:
+Use the matching `-pg` profile and set `daemon.db_url` in `sma-ng.yml`:
 
 ```yaml
 daemon:
