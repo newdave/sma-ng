@@ -11,17 +11,12 @@ Works on Windows, macOS, and Linux.
 
 ## Quick Start
 
+Tasks run through [mise](https://mise.jdx.dev/) (`make install-mise` installs it):
+
 ```bash
 git clone https://github.com/newdave/sma-ng.git && cd sma-ng
-make config    # auto-detect GPU, generate config
-make install   # create venv, install dependencies
-python manual.py -i "/path/to/file.mkv" -a
-```
-
-Or with mise:
-
-```bash
-mise install && mise run setup:deps && mise run config:generate
+mise install && mise run setup:deps   # pinned Python, venv, dependencies
+mise run config:generate              # config/sma-ng.yml with the GPU auto-detected
 mise run media:convert -- /path/to/file.mkv
 ```
 

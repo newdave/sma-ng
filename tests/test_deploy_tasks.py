@@ -150,35 +150,19 @@ class TestMiseTaskLayout:
     assert result.returncode == 0, result.stderr or result.stdout
     tasks = {task["name"]: set(task["aliases"]) for task in json.loads(result.stdout)}
 
-    assert "test:run" in tasks
-    assert "dev:test:run" not in tasks
-    assert {"test", "dev:test:run"} <= tasks["test:run"]
+    # Only the widely used aliases remain; legacy dev:*/media:daemon:* aliases were removed.
+    assert tasks["test:run"] == {"test"}
+    assert tasks["setup:deps:base"] == {"setup:deps"}
+    aliases = set().union(*tasks.values())
+    for legacy in ("dev:test:run", "media:daemon:start", "dev:openapi", "dev:lint:check", "dev:lint:fix", "deploy:docker:upgrade"):
+      assert legacy not in tasks and legacy not in aliases, legacy
 
-    assert "daemon:start" in tasks
-    assert "media:daemon:start" not in tasks
-    assert "media:daemon:start" in tasks["daemon:start"]
-
-    assert "test:openapi" in tasks
-    assert "dev:openapi" not in tasks
-    assert "dev:openapi" in tasks["test:openapi"]
-
-    assert "test:lint" in tasks
-    assert "dev:lint:check" not in tasks
-    assert "dev:lint:check" in tasks["test:lint"]
-
-    assert "dev:lint" in tasks
-    assert "dev:lint:fix" not in tasks
-    assert "dev:lint:fix" in tasks["dev:lint"]
-
-    assert "deploy:docker" in tasks
-    assert "deploy:docker:upgrade" not in tasks
-    assert "deploy:docker:upgrade" in tasks["deploy:docker"]
-
-    # deploy:redeploy (local image build competing with CI) and deploy:login
-    # (unused; deploy:docker uses the host's existing ghcr creds) were removed
-    # in favour of the CI-build + deploy:remote flow.
-    assert "deploy:redeploy" not in tasks
-    assert "deploy:prod" not in tasks
+    # Docker-era cleanup: hosts run the image, so code/venv/.mise sync tasks are
+    # gone, restart/reload live under cluster:, and image pushes happen in CI.
+    for removed in ("deploy:redeploy", "deploy:prod", "deploy:sync", "deploy:mise", "deploy:restart", "deploy:reload", "build:push", "docker:run"):
+      assert removed not in tasks, removed
+    for present in ("cluster:reload", "cluster:restart", "build:run", "deploy:remote", "deploy:setup"):
+      assert present in tasks, present
     assert "deploy:login" not in tasks
 
     assert "cluster:stop" in tasks
@@ -372,7 +356,7 @@ class TestDockerTargetInstaller:
     lib = _read(".mise/shared/deploy/lib.sh")
     setup = _read(".mise/tasks/deploy/setup")
     assert "${install_dir}/data" in lib
-    assert '"${install_dir}/data"' in setup
+    assert "${install_dir}/data" in setup
 
   def test_deprecated_alias_shim_forwards_to_sma_command(self, tmp_path):
     # The alias file is now a deprecated shim over the `sma` host command.
@@ -871,19 +855,34 @@ class TestDeployLibHelpers:
 
 
 class TestDeployMiseTask:
-  def test_deploy_mise_task_syncs_repo_control_plane(self):
-    text = _read(".mise/tasks/deploy/mise")
-    assert '#MISE depends=["deploy:check"]' in text
-    assert "mkdir -p $dir/.mise" in text
-    assert '.mise/ "$ssh_target:$dir/.mise/"' in text
+  def test_cluster_tasks_share_compose_helper_without_remote_sync(self):
+    for verb, name in (("start", "start"), ("stop", "stop"), ("restart", "restart"), ("ps", "status")):
+      text = _read(".mise/tasks/cluster/%s" % name)
+      assert "cluster_compose.sh" in text, name
+      assert "cluster_compose %s " % verb in text, name
+    for name in ("drain", "pause", "resume", "upgrade", "reload", "start", "stop", "restart", "status"):
+      assert "deploy:mise" not in _read(".mise/tasks/cluster/%s" % name), name
 
-  def test_deploy_mise_does_not_use_quoted_cfg_variable(self):
-    text = _read(".mise/tasks/deploy/mise")
-    assert '"$CFG"' not in text
+  def test_cluster_reload_scopes_hosts(self):
+    text = _read(".mise/tasks/cluster/reload")
+    assert "select_cluster_hosts" in text
+    assert "/reload" in text
 
-  def test_deploy_restart_sources_shared_lib(self):
-    text = _read(".mise/tasks/deploy/restart")
-    assert 'source "$(dirname "$0")/../../shared/deploy/lib.sh"' in text
+  def test_compose_gives_daemon_time_to_drain(self):
+    compose = _read("docker/docker-compose.yml")
+    assert compose.count("stop_grace_period: ${STOP_GRACE_PERIOD:-2m}") == compose.count("restart: unless-stopped")
+
+  def test_lib_has_no_remote_mise_or_venv_helpers(self):
+    lib = _read(".mise/shared/deploy/lib.sh")
+    for gone in ("run_remote_mise_task", "ensure_remote_mise", "sync_codebase_to_host", "ensure_venv_ready", "install_remote_base_deps", "venv_dir"):
+      assert gone not in lib, gone
+
+  def test_deploy_setup_seeds_docker_host_without_code_sync(self):
+    setup = _read(".mise/tasks/deploy/setup")
+    assert "ensure_remote_docker" in setup
+    assert "daemon.env" in setup
+    assert "rsync" not in setup
+    assert "ensure_remote_mise" not in setup
 
   def test_deploy_docker_can_override_compose_image_and_tag(self):
     lib = _read(".mise/shared/deploy/lib.sh")
@@ -896,11 +895,6 @@ class TestDeployMiseTask:
     assert "_append_env SMA_DAEMON_DB_URL" not in lib
     assert "image: ${IMAGE:-ghcr.io/newdave/sma-ng}:${IMAGE_TAG:-latest}" in compose
 
-  def test_build_push_platform_is_overridable(self):
-    text = _read(".mise/tasks/build/push")
-    assert 'PLATFORM="${PLATFORM:-linux/amd64,linux/arm64}"' in text
-    assert '--platform "${PLATFORM}"' in text
-
   def test_no_task_uses_quoted_cfg_variable(self):
     task_root = os.path.join(PROJECT_ROOT, ".mise/tasks")
     offenders = []
@@ -912,22 +906,6 @@ class TestDeployMiseTask:
         if '"$CFG"' in text:
           offenders.append(rel_path)
     assert offenders == [], f"Tasks still use quoted $CFG: {offenders}"
-
-  def test_remote_deploy_tasks_depend_on_deploy_mise(self):
-    # deploy:config and deploy:docker run their helpers locally now (lib.sh
-    # is sourced from .mise/shared/ on the developer machine), so they no
-    # longer require the remote control-plane sync. Tasks that still
-    # invoke remote helper scripts or remote mise commands keep the
-    # deploy:mise dependency.
-    for rel_path in (
-      ".mise/tasks/deploy/sync",
-      ".mise/tasks/cluster/stop",
-      ".mise/tasks/cluster/start",
-      ".mise/tasks/cluster/restart",
-      ".mise/tasks/deploy/restart",
-    ):
-      text = _read(rel_path)
-      assert '#MISE depends=["deploy:mise"]' in text, rel_path
 
 
 # ── Shared test fixture ───────────────────────────────────────────────────────
@@ -1207,3 +1185,30 @@ class TestDeployCheck:
   def test_deploy_check_does_not_use_quoted_cfg(self):
     text = _read(".mise/tasks/deploy/check")
     assert '"$CFG"' not in text
+
+
+class TestLifecycleTaskFixes:
+  @pytest.mark.parametrize("gpu,expected", [("qsv", "gpu: qsv"), ("nvenc", "gpu: nvenc"), ("software", "gpu: ''"), ("", "gpu: ''")])
+  def test_generate_configs_sets_base_video_gpu(self, tmp_path, gpu, expected):
+    result = subprocess.run(
+      ["./scripts/generate-configs.sh"],
+      cwd=PROJECT_ROOT,
+      capture_output=True,
+      text=True,
+      check=False,
+      env={**os.environ, "GPU": gpu, "CONFIG_DIR": str(tmp_path)},
+    )
+    assert result.returncode == 0, result.stderr
+    text = (tmp_path / "sma-ng.yml").read_text()
+    assert "  video:\n    %s\n" % expected in text
+
+  def test_daemon_start_defers_bind_settings_to_config(self):
+    commands = [line for line in _read(".mise/tasks/daemon/start").splitlines() if not line.startswith("#")]
+    assert '"$PY" daemon.py "$@"' in commands
+    assert not any("--host" in line or "--port" in line for line in commands)
+
+  @pytest.mark.parametrize("target", ["config", "detect-gpu", "test"])
+  def test_old_make_targets_point_to_mise(self, target):
+    result = subprocess.run(["make", target], cwd=PROJECT_ROOT, capture_output=True, text=True, check=False)
+    assert result.returncode == 2
+    assert "tasks run through mise" in result.stderr

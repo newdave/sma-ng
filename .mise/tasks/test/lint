@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 #MISE description="Run the ruff linter (and bandit security scan) and report issues"
-#MISE aliases=["dev:lint:check"]
 set -euo pipefail
 
 "$PY" -m ruff check .
