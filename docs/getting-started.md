@@ -84,14 +84,14 @@ If you do not know the answers yet, start with:
 | `rq`    | Explicit regular-quality override      | EAC3/AAC          |
 | `lq`    | Lower bitrate, stereo-focused override | AAC, stereo       |
 
-Use the `lq` profile for bandwidth-limited destinations. Route files to it via `Daemon.path_configs` in `sma-ng.yml`:
+Use the `lq` profile for bandwidth-limited destinations. Route files to it via `daemon.routing` in `sma-ng.yml`:
 
 ```yaml
-Daemon:
-  path_configs:
-    - path: /mnt/unionfs/Media/TV
+daemon:
+  routing:
+    - match: /mnt/unionfs/Media/TV
       profile: rq
-    - path: /mnt/unionfs/Media/Mobile
+    - match: /mnt/unionfs/Media/Mobile
       profile: lq
 ```
 
@@ -210,7 +210,7 @@ This is the safest first functional test because it exercises:
 - source probing
 - stream selection logic
 - encoder selection
-- optional analyzer recommendations (when `[Analyzer]` is enabled)
+- optional analyzer recommendations (when `base.analyzer.enabled` is true)
 
 without writing output.
 
@@ -238,7 +238,7 @@ or:
 mise run config:gpu
 ```
 
-Both commands use the same detection script. Then compare the result with your chosen `gpu =` and codec settings. If GPU detection or encoder availability is uncertain, switch to software first and get a clean baseline run before troubleshooting hardware acceleration.
+Both commands use the same detection script. Then compare the result with your chosen `base.video.gpu` and `base.video.codec` settings. If GPU detection or encoder availability is uncertain, switch to software first and get a clean baseline run before troubleshooting hardware acceleration.
 
 ---
 
@@ -255,13 +255,17 @@ You can operate successfully with only:
 
 - `config/sma-ng.yml`
 
-Use the `Daemon:` section in `config/sma-ng.yml` when routing different paths, enabling PostgreSQL-backed clustered mode, using path rewrites, or scheduling directory scans.
+Use the `daemon:` block in `config/sma-ng.yml` when routing different paths (`daemon.routing`), enabling
+PostgreSQL-backed clustered mode (`daemon.db-url`), rewriting paths (`daemon.path-rewrites`), or scheduling
+directory scans (`daemon.scan-paths`).
 
 ## Minimum Config to Review
 
-Even if you auto-generate the config, review these sections before production use.
+`sma-ng.yml` has four top-level buckets: `daemon:`, `base:` (defaults for every conversion), `profiles:` (named
+overlays that deep-merge onto `base:`), and `services:` (named Sonarr/Radarr/Plex/... instances). Keys are
+kebab-case. Even if you auto-generate the config, review these `base:` blocks before production use.
 
-### `[Converter]`
+### `base.converter`
 
 Check:
 
@@ -275,7 +279,7 @@ Check:
 
 This section determines where the file goes and whether the original is retained.
 
-### `[Video]`
+### `base.video`
 
 Check:
 
@@ -287,7 +291,7 @@ Check:
 
 This section determines whether you are doing software encode, QSV, VAAPI, or NVENC, and what quality/bitrate model is used.
 
-### `[Analyzer]`
+### `base.analyzer`
 
 Review this section only after the baseline conversion path already works.
 
@@ -300,9 +304,9 @@ Check:
 - `target-width`
 - the `allow-*` toggles
 
-Start with `enabled = false`, get a clean preview/conversion first, then enable it once the rest of the pipeline is stable.
+Start with `enabled: false`, get a clean preview/conversion first, then enable it once the rest of the pipeline is stable.
 
-### `[Audio]`
+### `base.audio`
 
 Check:
 
@@ -313,7 +317,7 @@ Check:
 
 This section determines which tracks are kept and how they are transcoded.
 
-### `[Subtitle]`
+### `base.subtitle`
 
 Check:
 
@@ -323,16 +327,17 @@ Check:
 - `embed-subs`
 - subtitle download settings if you use Subliminal
 
-### `[Metadata]`
+### `base.metadata`
 
 Check:
 
 - tagging enabled/disabled
 - language for metadata
 
-### `[Sonarr]`, `[Radarr]`, `[Plex]`
+### `services.sonarr`, `services.radarr`, `services.plex`
 
-Only configure these once the core conversion path already works.
+These are named instances (for example `services.sonarr.main` with `url` and `apikey`).
+Only configure them once the core conversion path already works.
 
 Do not debug media-manager callbacks and FFmpeg problems at the same time if you can avoid it.
 
@@ -544,7 +549,7 @@ That ordering narrows failures much faster.
 Fix:
 
 - install them on `PATH`, or
-- set explicit paths in `[Converter]`
+- set explicit `ffmpeg` / `ffprobe` paths in `base.converter` (or `daemon.ffmpeg-dir`)
 
 ### GPU encoder selected but unavailable
 
@@ -571,9 +576,8 @@ Disable those integrations until the standalone conversion path is proven.
 
 Check:
 
-- `default_config`
-- `path_configs`
-- `path_rewrites`
+- `daemon.routing` rules (`match` / `profile` / `services`; longest matching prefix wins)
+- `daemon.path-rewrites`
 - actual container/host-visible path values
 
 ## What to Read Next
@@ -588,16 +592,20 @@ After you have a first successful run:
 
 ## Post-Process Scripts
 
-Place executable scripts in `post_process/`. They receive:
+Set `post-process: true` under `base.converter`, then place executable hook scripts in `post_process/`. Files whose
+names start with `_`, files with excluded extensions, and directories are skipped. Hooks receive:
 
-| Variable      | Description                     |
-| ------------- | ------------------------------- |
-| `SMA_FILES`   | JSON array of output file paths |
-| `SMA_TMDBID`  | TMDB ID                         |
-| `SMA_SEASON`  | Season number (TV only)         |
-| `SMA_EPISODE` | Episode number (TV only)        |
+| Variable       | Description                                                |
+| -------------- | ---------------------------------------------------------- |
+| `SMA_FILES`    | JSON array of output file paths                            |
+| `SMA_TMDBID`   | TMDB ID                                                    |
+| `SMA_SEASON`   | Season number (TV only)                                    |
+| `SMA_EPISODE`  | Episode number (TV only; first episode of a multi-episode) |
+| `SMA_EPISODES` | Comma-separated episode list (TV only, multi-episode files) |
 
-See `setup/post_process/` for examples (Plex, Emby, Jellyfin, iTunes).
+See `post_process/post_process.md` for details. `setup/post_process/` is different: it holds sample download-client
+and media-manager submitter scripts (`*_post_process.sh`) that POST `{path, args}` to the daemon's
+`/webhook/generic` endpoint. They are not conversion hooks. See [Integrations](integrations.md).
 
 ---
 

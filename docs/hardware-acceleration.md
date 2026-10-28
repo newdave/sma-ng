@@ -1,6 +1,13 @@
 # Hardware Acceleration
 
-SMA-NG supports hardware-accelerated video encoding via FFmpeg. The `gpu` setting under `base.converter` selects the encoder backend.
+SMA-NG supports hardware-accelerated video encoding via FFmpeg. The `gpu` setting under `base.video` selects the encoder backend. Device and decoder settings (`hwaccels`,
+`hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`) live under `base.converter`; encoder tuning
+(`codec`, `codec-parameters`, and the `qsv:` / `vaapi:` subblocks) lives under `base.video`.
+
+When a hardware encode fails, the default `fallback-policy: aggressive` ends in a full-software tier: every
+hardware encoder is swapped for its software equivalent (AV1 becomes `libsvtav1`). See
+[Full-software fallback](configuration.md#full-software-fallback) and
+[`fallback-policy`](#fallback-policy-replaces-the-deprecated-boolean-software-fallback) below.
 
 ## GPU Auto-Detection
 
@@ -94,10 +101,11 @@ base:
 
 ## Intel / AMD VAAPI
 
-```ini
-[Video]
-gpu = vaapi
-codec = h265vaapi, h265
+```yaml
+base:
+  video:
+    gpu: vaapi
+    codec: [h265vaapi, h265]
 ```
 
 Supported VAAPI codecs: `h264vaapi`, `h265vaapi`, `av1vaapi`
@@ -106,10 +114,11 @@ Supported VAAPI codecs: `h264vaapi`, `h265vaapi`, `av1vaapi`
 
 ## NVIDIA NVENC
 
-```ini
-[Video]
-gpu = nvenc
-codec = h265_nvenc, h265
+```yaml
+base:
+  video:
+    gpu: nvenc
+    codec: [h265_nvenc, h265]
 ```
 
 Supported NVENC codecs: `h264_nvenc`, `h265_nvenc`, `av1_nvenc`
@@ -118,10 +127,11 @@ Supported NVENC codecs: `h264_nvenc`, `h265_nvenc`, `av1_nvenc`
 
 ## Apple VideoToolbox
 
-```ini
-[Video]
-gpu = videotoolbox
-codec = h265_videotoolbox, h265
+```yaml
+base:
+  video:
+    gpu: videotoolbox
+    codec: [h265_videotoolbox, h265]
 ```
 
 No `hwaccels` or `hwdevices` needed — VideoToolbox is built into macOS.
@@ -183,8 +193,8 @@ environment:
 
 1. Confirm your config/backend alignment:
 
-- `gpu = qsv` should use QSV codecs (`h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`)
-- `gpu = vaapi` should use VAAPI codecs (`h264vaapi`, `h265vaapi`, `av1vaapi`)
+- `base.video.gpu: qsv` should use QSV codecs (`h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`)
+- `base.video.gpu: vaapi` should use VAAPI codecs (`h264vaapi`, `h265vaapi`, `av1vaapi`)
 
 1. On KVM or Proxmox guests using Intel SR-IOV, verify the guest-visible DRI topology.
 

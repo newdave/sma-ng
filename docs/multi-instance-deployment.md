@@ -108,7 +108,7 @@ If that is not possible, normalize incoming paths with `path_rewrites`:
 ```
 
 The shipped compose file no longer mounts `/downloads`. Download clients in other containers that report
-`/downloads/...` need `{"from": "/downloads", "to": "/mnt/unionfs/downloads"}` in `path_rewrites`.
+`/downloads/...` need a `daemon.path-rewrites` entry with `from: /downloads` and `to: /mnt/unionfs/downloads`.
 
 This is especially important when:
 

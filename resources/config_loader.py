@@ -88,7 +88,7 @@ class RoutingResolution:
           downstream notification. Empty when no rule matched or the
           matched rule explicitly omitted ``services``.
       base: the resolved ``BaseConfig`` — base alone if profile is
-          ``None``, otherwise base shallow-merged with the named profile.
+          ``None``, otherwise base deep-merged with the named profile.
       matched: True iff a ``daemon.routing`` rule actually matched the
           input path. False means every caller is silently running on
           bare base — distinct from ``profile is None`` (a rule may
