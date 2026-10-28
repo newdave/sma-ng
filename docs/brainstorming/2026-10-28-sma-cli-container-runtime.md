@@ -1,6 +1,6 @@
 # Feature Brainstorming Session: `sma` CLI as a Container Runtime and Daemon Client
 
-STATUS: IN-FLIGHT
+STATUS: COMPLETE
 
 **Date:** 2026-10-28
 **Session Type:** Product and architecture design (redesign of the Docker host CLI and installer)
@@ -250,24 +250,24 @@ sma (sh bootstrap)
 
 ### MVP Scope (Phase 1: throwaway runtime)
 
-- [ ] Plan protocol spec plus the bootstrap rewrite, with fake-docker tests (the `tests/test_sma_host.py`
+- [x] Plan protocol spec plus the bootstrap rewrite, with fake-docker tests (the `tests/test_sma_host.py`
   style).
-- [ ] `resources/cli/` client: argument parsing, host facts, throwaway plan builder, config-derived mounts.
-- [ ] Throwaway `convert/repair/audit/preview/rename/codecs/shell`.
-- [ ] `sma upgrade`, `sma version`.
-- [ ] Installer rewrite: CLI-first, `--daemon` optional.
-- [ ] Docs: `docs/sma-cli-quickstart.md`, `docs/docker-compose-quickstart.md`, README.
+- [x] `resources/cli/` client: argument parsing, host facts, throwaway plan builder, config-derived mounts.
+- [x] Throwaway `convert/repair/audit/preview/rename/codecs/shell`.
+- [x] `sma upgrade`, `sma version`.
+- [x] Installer rewrite: CLI-first, `--daemon` optional.
+- [x] Docs: `docs/sma-cli-quickstart.md`, `docs/docker-compose-quickstart.md`, README.
 
 ### Phase 2: daemon targets
 
-- [ ] Daemon job kinds, `POST /jobs`, `GET /jobs/{id}/output`, `GET /paths`, DB migrations, OpenAPI.
-- [ ] Client HTTP routing, targets, mappings, auth, progress, `--json`, `sma jobs …`.
-- [ ] Auto-submit to the local daemon when reachable; `--local` override.
+- [x] Daemon job kinds, `POST /jobs`, `GET /jobs/{id}/output`, `GET /paths`, DB migrations, OpenAPI.
+- [x] Client HTTP routing, targets, mappings, auth, progress, `--json`, `sma jobs …`.
+- [x] Auto-submit to the local daemon when reachable; `--local` override.
 
 ### Phase 3: daemon lifecycle
 
-- [ ] `sma daemon up/down/restart/status/logs/upgrade` (adopt compose, or plain `docker run`).
-- [ ] Retire `setup/install-docker-target.sh`, the alias shim and the identity-mount docs once replaced.
+- [x] `sma daemon up/down/restart/status/logs/upgrade` (adopt compose, or plain `docker run`).
+- [x] Retire `setup/install-docker-target.sh`, the alias shim and the identity-mount docs once replaced.
 
 ### Future Enhancements
 
@@ -279,20 +279,20 @@ sma (sh bootstrap)
 
 ### Immediate Actions
 
-- [ ] **Land the standalone fixes from the paused work** in separate commits:
+- [x] **Land the standalone fixes from the paused work** in separate commits:
   - `docker/.env.example` uses the variables compose actually reads;
   - remove the false "bundled PostgreSQL" / `PGSQL_*` claims from the docs.
-- [ ] **Park the draft `install-smang.sh`:** it is daemon-first and will be rewritten in Phase 1.
-- [ ] **Tighten workflow timeouts** (independent of this feature). Measured: CI test 2 min, CodeQL 2 min,
+- [x] **Park the draft `install-smang.sh`:** it is daemon-first and will be rewritten in Phase 1.
+- [x] **Tighten workflow timeouts** (independent of this feature). Measured: CI test 2 min, CodeQL 2 min,
   image amd64 2–3 min, arm64 6.6 min cold. Proposed limits:
   - CI test 10, lint/checks 5, CodeQL 10;
   - image build 20, plan/merge 5, release jobs 10.
-- [ ] **Write a PRP** from this document (`/bp:generate-prp`) and break it into tasks.
+- [x] **Write a PRP** from this document (`/bp:generate-prp`) and break it into tasks.
 
 ### Short-term Actions
 
-- [ ] Phase 1 implementation and release; dogfood `sma repair` on the operator's host.
-- [ ] Phase 2 daemon API design review (job kinds, output storage size limits, migrations).
+- [x] Phase 1 implementation and release; dogfood `sma repair` on the operator's host.
+- [x] Phase 2 daemon API design review (job kinds, output storage size limits, migrations).
 
 ## 6. Risks & Dependencies
 

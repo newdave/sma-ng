@@ -1,6 +1,6 @@
 # Tasks: sma CLI as a Container Runtime and Daemon Client
 
-STATUS: IN-FLIGHT
+STATUS: COMPLETE
 
 Source PRP: [sma-cli-container-runtime](../prps/sma-cli-container-runtime.md)
 
@@ -433,12 +433,12 @@ installers retired.
 - **Acceptance criteria**:
   - [x] Given all changes, when the final checklist runs, then `mise run test`, `mise run test:cov`,
     `mise run test:lint`, `mise run test:shell`, `mise run test:openapi` and `mise run docs:check` pass.
-  - [ ] Given the image, when `mise run build:smoke` runs (with operator consent), then it passes, and a manual
+  - [x] Given the image, when `mise run build:smoke` runs (with operator consent), then it passes, and a manual
     throwaway run leaves no container (`docker ps -a --filter label=sma.throwaway=1` empty).
   - [x] Given the error cases, when exercised, then unreachable target gives 3, auth failure 4, plan version skew 5
     and Ctrl-C detach 130, and no API key is ever printed or logged.
   - [x] Given the commit history, when reviewed, then retirement of legacy files is a separate commit from the
     `daemon` lifecycle feature, each with tests and docs, no AI attribution, no manual `v*` tags.
-  - [ ] Given the PRP and this file, when the work is done, then both banners are set to `STATUS: COMPLETE` and
+  - [x] Given the PRP and this file, when the work is done, then both banners are set to `STATUS: COMPLETE` and
     the PRP checklist boxes are ticked, then pruned in a follow-up per repository policy.
 - **Validation**: `mise run test`; `mise run test:cov`; `mise run docs:check`; `mise run build:smoke`
