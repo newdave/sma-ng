@@ -15,7 +15,7 @@ substantially re-architected. This guide covers the differences you will encount
 | Sonarr/Radarr hook      | Custom Script (`postSonarr.py`, `postRadarr.py`) | Native webhook endpoint or bash trigger               |
 | Downloader hooks        | Python scripts (`SABPostProcess.py`, etc.)       | Bash scripts (`triggers/*.sh`) posting to daemon      |
 | Sickbeard/Sickrage      | Supported (`[Sickbeard]`, `[Sickrage]` sections) | **Removed**                                           |
-| Hardware acceleration   | Manual hwaccels/hwdevices config only            | Auto-detection (`make detect-gpu`) + `gpu` key        |
+| Hardware acceleration   | Manual hwaccels/hwdevices config only            | Auto-detection (`mise run config:gpu`) + `gpu` key        |
 | Multi-instance managers | Single `[Sonarr]` / `[Radarr]` section           | Multiple sections (`[Sonarr-4K]`, `[Radarr-Kids]`, …) |
 | Multi-quality profiles  | Single config file                               | Three bundled quality profiles; path-based routing    |
 | Job tracking            | None                                             | REST API: `/jobs`, `/health`, `/status`               |
@@ -375,7 +375,7 @@ The container image is published at `ghcr.io/newdave/sma-ng:latest`.
 
 | Feature                              | Description                                                                                            |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| Hardware acceleration auto-detection | `make detect-gpu` or `mise run config:gpu` identifies available GPU encoders                           |
+| Hardware acceleration auto-detection | `mise run config:gpu` identifies available GPU encoders                           |
 | Multi-quality config profiles        | Three bundled profiles: `sma-ng.yml`, `sma-ng.yml profile rq`, `sma-ng.yml profile lq`                 |
 | OpenVINO Analyzer                    | Optional `[Analyzer]` section for content-aware encoding decisions                                     |
 | File renaming templates              | `[Naming]` section with Sonarr/Radarr-style `{token}` templates                                        |
@@ -402,7 +402,7 @@ Work through these steps in order.
    - Migrate `crf` to `crf-profiles` format.
    - Replace deprecated `prefer-more-channels` / `default-more-channels` with `[Audio.Sorting]` entries.
    - Add `enabled = True` to `[Universal Audio]` if you used universal audio previously.
-5. **Detect your GPU**: `make detect-gpu` and set `gpu =` in `[Video]` if hardware acceleration is available.
+5. **Detect your GPU**: `mise run config:gpu`, then set `base.video.gpu` in `sma-ng.yml` (or let `mise run config:generate` set it) if hardware acceleration is available.
 6. **Copy the daemon config sample**: `cp setup/sma-ng.yml.sample config/sma-ng.yml` and configure paths.
 7. **Start the daemon**: `python daemon.py --host 0.0.0.0 --port 8585 --workers 2`.
 8. **Update Sonarr / Radarr**:

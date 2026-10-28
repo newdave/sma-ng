@@ -76,7 +76,7 @@ If you do not know the answers yet, start with:
 
 ## Quality Profiles
 
-`mise run config:generate` and `make config` create one base YAML config with named quality profiles:
+`mise run config:generate` creates one base YAML config with named quality profiles:
 
 | Profile | Video                                  | Audio             |
 | ------- | -------------------------------------- | ----------------- |
@@ -123,7 +123,7 @@ mise run config:generate
 # Test a conversion
 mise run media:convert -- /path/to/file.mkv
 
-# Start the daemon
+# Start the daemon (bind address, port and workers come from daemon: in sma-ng.yml)
 mise run daemon:start
 ```
 
@@ -152,8 +152,8 @@ git clone https://github.com/newdave/sma-ng && cd sma-ng
 python3 -m venv venv && source venv/bin/activate
 pip install -r setup/requirements.txt
 
-# Generate the same config set as `mise run config:generate`
-make config
+# Generate config with GPU auto-detection
+mise run config:generate
 
 # Or copy sample and edit manually
 cp setup/sma-ng.yml.sample config/sma-ng.yml
@@ -229,16 +229,10 @@ Start with a small file so failures are cheap to diagnose.
 Run:
 
 ```bash
-make detect-gpu
-```
-
-or:
-
-```bash
 mise run config:gpu
 ```
 
-Both commands use the same detection script. Then compare the result with your chosen `base.video.gpu` and `base.video.codec` settings. If GPU detection or encoder availability is uncertain, switch to software first and get a clean baseline run before troubleshooting hardware acceleration.
+This runs the detection script. Compare the result with your chosen `base.video.gpu` and `base.video.codec` settings. If GPU detection or encoder availability is uncertain, switch to software first and get a clean baseline run before troubleshooting hardware acceleration.
 
 ---
 

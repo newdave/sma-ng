@@ -11,7 +11,7 @@ hardware encoder is swapped for its software equivalent (AV1 becomes `libsvtav1`
 
 ## GPU Auto-Detection
 
-`make config` and `mise run config:generate` call the same generator, auto-detect the GPU the same way, and write the correct value to the generated `sma-ng.yml`:
+`mise run config:generate` auto-detects the GPU (via `scripts/detect-gpu.sh`) and writes the result to `base.video.gpu` in the generated `sma-ng.yml`:
 
 - macOS → `videotoolbox`
 - NVIDIA GPU (detected via `nvidia-smi`) → `nvenc`
@@ -20,11 +20,11 @@ hardware encoder is swapped for its software equivalent (AV1 becomes `libsvtav1`
 - Fallback → software
 
 ```bash
-make config           # auto-detect and generate config
-make config GPU=nvenc  # force NVIDIA
-make config GPU=vaapi  # force VA-API
-make config GPU=       # force software encoding
-make detect-gpu        # show detection result without writing config
+mise run config:generate              # auto-detect and generate config
+GPU=nvenc mise run config:generate    # force NVIDIA
+GPU=vaapi mise run config:generate    # force VA-API
+GPU=software mise run config:generate # force software encoding
+mise run config:gpu                   # show detection result without writing config
 ```
 
 ## Supported Backends

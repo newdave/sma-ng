@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Create config with GPU auto-detection (set GPU=nvidia|intel|amd|apple|none to override)"
+#MISE description="Create config/sma-ng.yml from the sample with base.video.gpu auto-detected (override with GPU=qsv|vaapi|nvenc|videotoolbox|software)"
 set -euo pipefail
 
 ./scripts/generate-configs.sh
