@@ -16,6 +16,7 @@ Probes each file and fixes only four kinds of damage, all by remuxing with
   them needs a re-encode, which this module never does.
 
 Files with none of these problems are reported as ``normal`` and left alone.
+Every probed file also gets a one-line FFprobe summary (:func:`summarize`).
 The repaired copy is written like any conversion output: into the configured
 ``output-directory`` (next to the original when unset, subject to
 ``output-directory-space-ratio``) with the ``temp-extension`` (``.sma`` when
@@ -111,6 +112,7 @@ class RepairResult:
   path: str
   status: str
   detail: str = ""
+  probe: str = ""  # one-line FFprobe summary (summarize); empty when the probe failed
 
 
 def _ext(path: str) -> str:
@@ -198,6 +200,74 @@ def _describe_signature(signature: list[tuple]) -> str:
       item += " forced"
     parts.append(item)
   return "[%s]" % ", ".join(parts)
+
+
+# Transfer characteristics that mark a video stream as HDR.
+_HDR_TRANSFERS = {"smpte2084": "HDR10/PQ", "arib-std-b67": "HLG"}
+
+
+def _duration(seconds) -> str:
+  seconds = int(round(seconds))
+  return "%d:%02d:%02d" % (seconds // 3600, seconds // 60 % 60, seconds % 60)
+
+
+def _size(size) -> str:
+  unit = "B"
+  for unit in ("B", "KiB", "MiB", "GiB"):
+    if size < 1024 or unit == "GiB":
+      break
+    size /= 1024.0
+  return "%d B" % size if unit == "B" else "%.1f %s" % (size, unit)
+
+
+def _describe_stream(s) -> str:
+  item = "#%s %s/%s" % (s.index, s.type, s.codec)
+  if s.type == "video":
+    if s.video_width and s.video_height:
+      item += " %sx%s" % (s.video_width, s.video_height)
+    if s.sample_aspect_ratio not in (None, "1:1", "0:1"):
+      item += " SAR %s" % s.sample_aspect_ratio
+    if s.fps and not s.attached_pic:  # a still image reports the 90k timebase as its rate
+      item += " %sfps" % ("%.3f" % s.fps).rstrip("0").rstrip(".")
+    if s.pix_fmt:
+      item += " %s" % s.pix_fmt
+    hdr = _HDR_TRANSFERS.get(s.color.get("transfer"))
+    if hdr:
+      item += " %s" % hdr
+    if s.attached_pic:
+      item += " attached_pic"
+  elif s.type == "audio" and s.audio_channels:
+    item += " %sch" % s.audio_channels
+  elif s.type in ("data", "attachment"):
+    if s.codec_tag and s.codec_tag != "[0][0][0][0]":
+      item += " tag=%s" % s.codec_tag
+    for key in ("filename", "mimetype"):
+      if s.metadata.get(key):
+        item += " %s" % s.metadata[key]
+  if s.bitrate:
+    item += " %d kb/s" % (s.bitrate / 1000)
+  if s.type in ("audio", "subtitle"):
+    if s.metadata.get("language"):
+      item += " %s" % s.metadata["language"]
+    for flag in ("default", "forced"):
+      if s.disposition.get(flag):
+        item += " %s" % flag
+  return item
+
+
+def summarize(info) -> str:
+  """One-line FFprobe summary of *info*: container, duration, size, overall
+  bitrate, then every stream, e.g.
+  ``matroska,webm 0:42:10 3.1 GiB 10.4 Mb/s | #0 video/hevc 3840x2160 23.976fps yuv420p10le HDR10/PQ | #1 audio/eac3 6ch eng default``."""
+  fmt = info.format
+  head = [getattr(fmt, "format", None) or "unknown"]
+  if getattr(fmt, "duration", None):
+    head.append(_duration(fmt.duration))
+  if getattr(fmt, "size", None):
+    head.append(_size(fmt.size))
+  if getattr(fmt, "bitrate", None):
+    head.append("%.1f Mb/s" % (fmt.bitrate / 1e6))
+  return " | ".join([" ".join(head)] + [_describe_stream(s) for s in info.streams])
 
 
 def _chapter_tracks(info, path: str) -> int:
@@ -310,17 +380,18 @@ class RepairProcessor:
     except Exception as exc:
       return RepairResult(path, STATUS_FAILED, str(exc))
     plan = diagnose(source)
-    self.log.debug("Probed %s: streams %s; keep %s." % (path, _describe_signature(_signature(source, [s.index for s in source.streams])), ",".join(str(i) for i in plan.keep)))
+    probe = summarize(source)
+    self.log.debug("Probed %s: keep streams %s." % (path, ",".join(str(i) for i in plan.keep)))
     if not plan.needs_repair:
-      return RepairResult(path, STATUS_NORMAL)
+      return RepairResult(path, STATUS_NORMAL, probe=probe)
     detail = plan.describe()
     if dry_run:
-      return RepairResult(path, STATUS_WOULD_REPAIR, detail)
+      return RepairResult(path, STATUS_WOULD_REPAIR, detail, probe)
     if not any(s.index in plan.keep and s.type in ("video", "audio") for s in source.streams):
-      return RepairResult(path, STATUS_FAILED, "no audio or video stream would survive the repair")
+      return RepairResult(path, STATUS_FAILED, "no audio or video stream would survive the repair", probe)
     if not self.outputDirHasFreeSpace(path):
       # Like the conversion pipeline, never fall back to writing beside the source.
-      return RepairResult(path, STATUS_FAILED, "insufficient free space in output directory %s (%s)" % (self.settings.output_dir, detail))
+      return RepairResult(path, STATUS_FAILED, "insufficient free space in output directory %s (%s)" % (self.settings.output_dir, detail), probe)
 
     tmp = None
     try:
@@ -345,8 +416,8 @@ class RepairProcessor:
       except OSError:
         pass
       self.log.debug("Repair of %s failed." % path, exc_info=True)
-      return RepairResult(path, STATUS_FAILED, "%s (%s)" % (exc, detail))
-    return RepairResult(path, STATUS_REPAIRED, detail)
+      return RepairResult(path, STATUS_FAILED, "%s (%s)" % (exc, detail), probe)
+    return RepairResult(path, STATUS_REPAIRED, detail, probe)
 
 
 def iter_targets(paths: list[str]):
@@ -374,5 +445,6 @@ __all__ = [
   "build_opts",
   "diagnose",
   "iter_targets",
+  "summarize",
   "verify",
 ]

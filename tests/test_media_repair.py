@@ -8,7 +8,7 @@ import pytest
 
 from converter.ffmpeg import MediaInfo
 from resources import media_repair as mr
-from resources.media_repair import RepairError, RepairPlan, RepairProcessor, build_opts, diagnose, iter_targets, verify
+from resources.media_repair import RepairError, RepairPlan, RepairProcessor, build_opts, diagnose, iter_targets, summarize, verify
 
 
 def _video(index, codec="h264", width=1920, height=1080, sar="1:1", attached_pic=0, tag="avc1"):
@@ -292,6 +292,34 @@ def media(tmp_path):
   return p
 
 
+class TestSummarize:
+  def test_format_and_every_stream(self):
+    video = dict(_video(0, "hevc", 3840, 2160), r_frame_rate="24000/1001", pix_fmt="yuv420p10le", color_transfer="smpte2084", bit_rate="15000000")
+    audio = dict(_audio(1, "eac3", 6), **{"TAG:language": "eng", "DISPOSITION:default": 1})
+    sub = dict(_sub(2, "subrip"), **{"TAG:language": "eng", "DISPOSITION:forced": 1})
+    font = _attachment(4, mimetype="font/ttf", filename="a.ttf")
+    info = _info([video, audio, sub, _data(3), font], duration="2530.4")
+    info.format.format, info.format.size, info.format.bitrate = "matroska,webm", 3.3e9, 10.4e6
+    assert summarize(info) == (
+      "matroska,webm 0:42:10 3.1 GiB 10.4 Mb/s"
+      " | #0 video/hevc 3840x2160 23.976fps yuv420p10le HDR10/PQ 15000 kb/s"
+      " | #1 audio/eac3 6ch eng default"
+      " | #2 subtitle/subrip eng forced"
+      " | #3 data/bin_data tag=tmcd"
+      " | #4 attachment/ttf a.ttf font/ttf"
+    )
+
+  def test_anamorphic_hlg_and_artwork(self):
+    hlg = dict(_video(0, sar="4:3"), r_frame_rate="25/1", color_transfer="arib-std-b67")
+    info = _info([hlg, _video(1, "mjpeg", attached_pic=1)], duration="59.6")
+    info.format.size = 512
+    assert summarize(info) == "unknown 0:01:00 512 B | #0 video/h264 1920x1080 SAR 4:3 25fps HLG | #1 video/mjpeg 1920x1080 attached_pic"
+
+  @pytest.mark.parametrize("size,expected", [(2048, "2.0 KiB"), (5 * 1024**2, "5.0 MiB"), (3 * 1024**4, "3072.0 GiB")])
+  def test_size_units(self, size, expected):
+    assert mr._size(size) == expected
+
+
 class TestRepairProcessor:
   def test_uses_ffmpeg_paths_from_settings(self):
     with mock.patch.object(mr, "FFMpeg") as ff:
@@ -300,7 +328,9 @@ class TestRepairProcessor:
 
   def test_normal_file_untouched(self, media):
     ff = FakeFFMpeg([_video(0), _audio(1)])
-    assert _processor(ff).repair_file(str(media)).status == mr.STATUS_NORMAL
+    result = _processor(ff).repair_file(str(media))
+    assert result.status == mr.STATUS_NORMAL
+    assert result.probe == "unknown 0:01:40 | #0 video/h264 1920x1080 | #1 audio/aac 2ch"
     assert ff.calls == []
     assert media.read_bytes() == b"original"
 
@@ -318,6 +348,7 @@ class TestRepairProcessor:
     result = _processor(ff).repair_file(str(media))
     assert result.status == mr.STATUS_FAILED
     assert message in result.detail
+    assert result.probe == ""
 
   def test_successful_repair_uses_temp_extension_and_settings_permissions(self, media, tmp_path):
     ff = FakeFFMpeg(DAMAGED, REPAIRED)
