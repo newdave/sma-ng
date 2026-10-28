@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.28](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.27...sma-ng-v3.2.28) (2026-10-28)
+
+
+### Features
+
+* **cli:** send sma commands to local or remote daemons ([e2e8e7c](https://github.com/newdave/sma-ng/commit/e2e8e7c7c602e993f9c06db45665e06a38284c34))
+
 ## [3.2.27](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.26...sma-ng-v3.2.27) (2026-10-28)
 
 
