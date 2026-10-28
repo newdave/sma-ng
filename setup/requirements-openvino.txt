@@ -1,5 +1,5 @@
-openvino>=2025.0,<2027
-numpy>=1.26
+openvino>=2026.4.1,<2027
+numpy>=2.5.4
 
 # Build-time extras for scripts/prepare_models.py (not required at runtime):
 # torch>=2.2; torchvision>=0.17
