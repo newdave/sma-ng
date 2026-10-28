@@ -238,10 +238,10 @@ progress, `--json` and `sma jobs`.
 - **Dependencies**: none (can start during Phase 1)
 - **Size**: S
 - **Acceptance criteria**:
-  - [ ] Given each kind (convert, repair, preview, audit, rename), when `argv()` is called, then it returns the
+  - [x] Given each kind (convert, repair, preview, audit, rename), when `argv()` is called, then it returns the
     PRP argv; convert is byte-identical to today's worker argv and repair/rename pass no `-c`.
-  - [ ] Given audit, when rc is 1, then it is in `success_codes`; for the others only 0 is.
-  - [ ] Given args containing `-c`, `--config`, `-i`, `--input` or `--job-id`, when validated, then they are
+  - [x] Given audit, when rc is 1, then it is in `success_codes`; for the others only 0 is.
+  - [x] Given args containing `-c`, `--config`, `-i`, `--input` or `--job-id`, when validated, then they are
     rejected.
 - **Validation**: `python -m pytest tests/test_job_kinds.py -q`
 
@@ -253,15 +253,15 @@ progress, `--json` and `sma jobs`.
 - **Dependencies**: none (can start during Phase 1)
 - **Size**: L
 - **Acceptance criteria**:
-  - [ ] Given a legacy database, when the daemon starts twice, then the new columns are added once (SQLite
+  - [x] Given a legacy database, when the daemon starts twice, then the new columns are added once (SQLite
     PRAGMA-guarded; PostgreSQL `ADD COLUMN IF NOT EXISTS`, asserted on the mocked SQL) and
     `_METRICS_EXPANSION_COLUMNS` is untouched.
-  - [ ] Given the same path with two kinds, when `add_job` runs, then both are accepted; the same path and kind is
+  - [x] Given the same path with two kinds, when `add_job` runs, then both are accepted; the same path and kind is
     a duplicate (`find_active_job` filters on kind).
-  - [ ] Given `claim_next_job(kinds=[...])`, when jobs of other kinds are queued, then they are not claimed.
-  - [ ] Given output beyond 1 MiB, when `append_job_output` runs, then only the tail is kept and `output_dropped`
+  - [x] Given `claim_next_job(kinds=[...])`, when jobs of other kinds are queued, then they are not claimed.
+  - [x] Given output beyond 1 MiB, when `append_job_output` runs, then only the tail is kept and `output_dropped`
     counts the dropped bytes; `cleanup_old_jobs` purges output with the row.
-  - [ ] Given `heartbeat(capabilities=...)`, when called, then it is stored; `nodes_missing_capability` returns
+  - [x] Given `heartbeat(capabilities=...)`, when called, then it is stored; `nodes_missing_capability` returns
     names on PostgreSQL and `[]` on SQLite.
 - **Validation**: `python -m pytest tests/test_sqlite_db.py tests/test_daemon.py -q`
 
@@ -273,14 +273,14 @@ progress, `--json` and `sma jobs`.
 - **Dependencies**: P2-T10, P2-T11
 - **Size**: L
 - **Acceptance criteria**:
-  - [ ] Given a non-convert job, when processed, then `_preflight_disk_pressure`, directory size bookkeeping and
+  - [x] Given a non-convert job, when processed, then `_preflight_disk_pressure`, directory size bookkeeping and
     the same-extension skip are bypassed and a missing path fails the job.
-  - [ ] Given an audit job exiting 1, when it finishes, then it completes; given a repair job exiting 1, then it
+  - [x] Given an audit job exiting 1, when it finishes, then it completes; given a repair job exiting 1, then it
     fails.
-  - [ ] Given any job producing stdout, when it runs, then output is flushed through `append_job_output` every 2 s
+  - [x] Given any job producing stdout, when it runs, then output is flushed through `append_job_output` every 2 s
     and at exit.
-  - [ ] Given a convert job, when run, then its argv is byte-identical to the previous implementation.
-  - [ ] Given the worker, when it claims and heartbeats, then it claims `SUPPORTED_KINDS` and reports
+  - [x] Given a convert job, when run, then its argv is byte-identical to the previous implementation.
+  - [x] Given the worker, when it claims and heartbeats, then it claims `SUPPORTED_KINDS` and reports
     `job-kinds-v1`.
 - **Validation**: `python -m pytest tests/test_worker.py tests/test_worker_reliability.py -q`
 
@@ -292,16 +292,16 @@ progress, `--json` and `sma jobs`.
 - **Dependencies**: P2-T10, P2-T11, P2-T12
 - **Size**: L
 - **Acceptance criteria**:
-  - [ ] Given `POST /jobs {"kind":"repair","path":...}` with auth, when valid, then it returns 202 with `job_id`
+  - [x] Given `POST /jobs {"kind":"repair","path":...}` with auth, when valid, then it returns 202 with `job_id`
     and `kind`; a duplicate returns 200 `duplicate`; no key returns 401.
-  - [ ] Given an unknown kind, forbidden arg, missing path, recycle-bin path, or a directory for preview, when
+  - [x] Given an unknown kind, forbidden arg, missing path, recycle-bin path, or a directory for preview, when
     posted, then it returns 400 with an error; convert keeps the existing `_dispatch_path` behaviour.
-  - [ ] Given a PostgreSQL cluster with an online node lacking `job-kinds-v1`, when a non-convert job is posted,
+  - [x] Given a PostgreSQL cluster with an online node lacking `job-kinds-v1`, when a non-convert job is posted,
     then it returns 409 naming the node.
-  - [ ] Given `GET /jobs/{id}/output?offset=N`, when called, then the body is `text/plain` with `X-Next-Offset`
+  - [x] Given `GET /jobs/{id}/output?offset=N`, when called, then the body is `text/plain` with `X-Next-Offset`
     and `X-Output-Dropped`; an offset below dropped starts at the oldest retained byte; unknown id 404; bad
     id/offset 400.
-  - [ ] Given `GET /jobs` and `GET /jobs/{id}`, when called, then `kind` is present and `output`/`output_dropped`
+  - [x] Given `GET /jobs` and `GET /jobs/{id}`, when called, then `kind` is present and `output`/`output_dropped`
     never are; `GET /paths` returns routing, scan, audit and path-rewrite roots and requires auth.
 - **Validation**: `python -m pytest tests/test_handler.py tests/test_daemon.py -q`
 
@@ -313,11 +313,11 @@ progress, `--json` and `sma jobs`.
 - **Dependencies**: P2-T13
 - **Size**: M
 - **Acceptance criteria**:
-  - [ ] Given `docs/openapi.yaml`, when validated, then `Job.kind`, `JobSubmit`, `POST /jobs`,
+  - [x] Given `docs/openapi.yaml`, when validated, then `Job.kind`, `JobSubmit`, `POST /jobs`,
     `GET /jobs/{id}/output` and `GET /paths` are present and `mise run test:openapi` passes.
-  - [ ] Given `docs/daemon.md`, when read, then the endpoints, kinds, per-kind exit semantics, 1 MiB output cap
+  - [x] Given `docs/daemon.md`, when read, then the endpoints, kinds, per-kind exit semantics, 1 MiB output cap
     and the 409 gate are described.
-  - [ ] Given `mise run docs:check`, when run, then it passes.
+  - [x] Given `mise run docs:check`, when run, then it passes.
 - **Validation**: `mise run test:openapi`; `mise run docs:check`
 
 ### P2-T15: Client HTTP routing, targets and commands
@@ -330,17 +330,17 @@ progress, `--json` and `sma jobs`.
 - **Dependencies**: P1-T5, P2-T13 (contract)
 - **Size**: L
 - **Acceptance criteria**:
-  - [ ] Given `--target`, `SMA_TARGET`, `default-target` or none, when resolved, then precedence holds and a
+  - [x] Given `--target`, `SMA_TARGET`, `default-target` or none, when resolved, then precedence holds and a
     Darwin loopback URL is rewritten to `host.docker.internal`.
-  - [ ] Given a reachable `/health` (1 s) and no `--local`, when a command runs, then it is submitted via
+  - [x] Given a reachable `/health` (1 s) and no `--local`, when a command runs, then it is submitted via
     `POST /jobs` with `X-API-Key`; unreachable implicit target falls back to throwaway; unreachable explicit target
     exits 3; 401 exits 4; `--local` with a live daemon prints a one-line contention warning.
-  - [ ] Given a remote target with mappings, when a path is submitted, then the longest matching `local` prefix is
+  - [x] Given a remote target with mappings, when a path is submitted, then the longest matching `local` prefix is
     rewritten and the result is validated against `GET /paths` (exit 2 naming the target on mismatch).
-  - [ ] Given a submitted job without `--no-wait`, when it runs, then output streams from `/output`, the exit code
+  - [x] Given a submitted job without `--no-wait`, when it runs, then output streams from `/output`, the exit code
     follows the status (completed 0, failed 1, cancelled 1), and Ctrl-C prints
     `detached: job <id> (sma jobs show <id>)` and exits 130.
-  - [ ] Given `target add NAME URL --api-key-stdin`, when run, then the key is read from stdin only, the config is
+  - [x] Given `target add NAME URL --api-key-stdin`, when run, then the key is read from stdin only, the config is
     written 0600, and a group/world-readable config holding keys is refused with exit 2; no key is ever printed.
 - **Validation**: `python -m pytest tests/test_cli_*.py -q`
 
@@ -351,9 +351,9 @@ progress, `--json` and `sma jobs`.
 - **Dependencies**: P2-T15
 - **Size**: S
 - **Acceptance criteria**:
-  - [ ] Given the quickstart, when read, then targets, mappings, `sma jobs`, `--no-wait`, `--json` and exit codes
+  - [x] Given the quickstart, when read, then targets, mappings, `sma jobs`, `--no-wait`, `--json` and exit codes
     3, 4 and 130 are documented with examples.
-  - [ ] Given `mise run docs:check`, when run, then it passes.
+  - [x] Given `mise run docs:check`, when run, then it passes.
 - **Validation**: `mise run docs:check`
 
 ### P2-RC: Phase 2 release checkpoint
@@ -362,17 +362,17 @@ progress, `--json` and `sma jobs`.
 - **Dependencies**: P2-T10 through P2-T16
 - **Size**: S
 - **Acceptance criteria**:
-  - [ ] Given all Phase 2 changes, when the suite runs, then `mise run test:lint`, `mise run test:openapi` and
+  - [x] Given all Phase 2 changes, when the suite runs, then `mise run test:lint`, `mise run test:openapi` and
     `python -m pytest tests/test_job_kinds.py tests/test_sqlite_db.py tests/test_daemon.py tests/test_handler.py
     tests/test_worker.py tests/test_worker_reliability.py tests/test_cli_*.py -q` pass.
-  - [ ] Given coverage, when `mise run test:cov` runs, then global >= 90% and every module with >= 100 statements
+  - [x] Given coverage, when `mise run test:cov` runs, then global >= 90% and every module with >= 100 statements
     is >= 70%.
-  - [ ] Given docs and OpenAPI, when `mise run docs:check` runs, then it passes; docs were updated in the same
+  - [x] Given docs and OpenAPI, when `mise run docs:check` runs, then it passes; docs were updated in the same
     commits as the behaviour.
-  - [ ] Given the commit history, when reviewed, then commits are split by behaviour (for example
+  - [x] Given the commit history, when reviewed, then commits are split by behaviour (for example
     `feat(daemon): job kinds and output storage`, `feat(daemon): POST /jobs and /paths`,
     `feat(cli): daemon targets`), each with tests and docs, no AI attribution.
-  - [ ] Given a mixed-version cluster scenario, when reviewed in the release notes, then the 409 capability gate
+  - [x] Given a mixed-version cluster scenario, when reviewed in the release notes, then the 409 capability gate
     and "upgrade all nodes" guidance are documented.
 - **Validation**: `mise run test:cov`; `mise run docs:check`; `mise run test`
 

@@ -364,6 +364,28 @@ def test_end_to_end_missing_path(env, tmp_path):
   assert _steps(env) == []
 
 
+def test_linux_client_uses_host_network(env, tmp_path):
+  _exe(tmp_path / "bin" / "uname", "#!/bin/sh\necho Linux\n")
+  _run(env, "repair", "x")
+  call = _client_call(env)
+  assert call[call.index("--network") + 1] == "host"
+
+
+def test_darwin_client_keeps_default_network(env, tmp_path):
+  _exe(tmp_path / "bin" / "uname", "#!/bin/sh\necho Darwin\n")
+  _run(env, "repair", "x")
+  assert "--network" not in _client_call(env)
+
+
+def test_stdin_only_attached_for_api_key(env):
+  _run(env, "repair", "x")
+  assert "-i" not in _client_call(env)[: _client_call(env).index("--entrypoint")]
+  open(env["FAKE_LOG"], "w").close()
+  _run(env, "target", "add", "nas", "http://nas:8585", "--api-key-stdin")
+  call = _client_call(env)
+  assert "-i" in call[: call.index("--entrypoint")]
+
+
 def test_script_is_executable_and_posix():
   assert os.access(SMA, os.X_OK)
   with open(SMA) as f:

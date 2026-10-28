@@ -8,6 +8,12 @@ from resources.cli import commands
 from resources.cli.errors import AuthError, PlanError, Unreachable, UsageError
 
 
+@pytest.fixture(autouse=True)
+def no_daemon(monkeypatch):
+  # Never probe a real daemon on this machine: these tests cover throwaway runs.
+  monkeypatch.setattr("resources.cli.http.DaemonClient.healthy", lambda self, timeout=1.0: False)
+
+
 @pytest.fixture
 def env(tmp_path):
   plan_dir = tmp_path / "plan"
@@ -69,7 +75,7 @@ def test_pathless_commands_dispatch(env, command):
   assert _plan(env)[0] == "sma-plan 1"
 
 
-@pytest.mark.parametrize("command", ["jobs", "daemon", "logs", "target", "map"])
+@pytest.mark.parametrize("command", ["daemon", "logs"])
 def test_later_phase_commands(env, command, capsys):
   assert commands.main([command, "list"], env=env) == 2
   assert "not available in this version" in capsys.readouterr().err
@@ -93,7 +99,7 @@ def test_help_and_usage(env):
   assert commands.run(["--local"], env=env, out=io.StringIO()) == 2
 
 
-@pytest.mark.parametrize("argv,match", [(["--bogus", "repair"], "unknown option"), (["--mount"], "needs a PATH"), (["nope"], "unknown command")])
+@pytest.mark.parametrize("argv,match", [(["--bogus", "repair"], "unknown option"), (["--mount"], "needs a value"), (["nope"], "unknown command")])
 def test_parse_errors(env, capsys, argv, match):
   assert commands.main(argv, env=env) == 2
   assert match in capsys.readouterr().err
