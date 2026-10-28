@@ -183,8 +183,8 @@ When workflow rules change, update this file first and sync `AGENTS.md` plus any
 
 Plugins and skills are scoped to this project:
 
-- `.claude/settings.json` `enabledPlugins` is the required plugin set: `pyright-lsp` and `voltagent-domains`.
-  It declares the `voltagent-subagents` marketplace in `extraKnownMarketplaces`.
+- `.claude/settings.json` `enabledPlugins` and `.codex/config.toml` `[plugins.*]` hold the required plugin set:
+  `pyright-lsp`.
 - The same file sets unneeded globally enabled plugins to `false` (`bp`, `codex`, `code-simplifier`,
   `frontend-design`, `rust-analyzer-lsp`).
 - Project skills are vendored in `.claude/skills/`; `.skillfish.json` records the upstream source.
