@@ -715,6 +715,9 @@ from resources.subtitles import SubtitleProcessor
 # (max-bitrate is then the average target, maxrate = target x this).
 VBV_PEAK_RATIO = 1.5
 
+# Debug tag of the Atmos stream copied beside its MP4-playable conversion.
+ATMOS_EXTRA_COPY_DEBUG = "audio-atmos-extra-copy"
+
 try:
   import cleanit
 except ImportError:
@@ -1944,9 +1947,11 @@ class MediaProcessor:
       audio_settings = self.sortStreams(audio_settings, self.settings.audio_sorting, awl, self.settings.audio_sorting_codecs or acodecs, info, acombinations, tagdata)
     except Exception:
       self.log.exception("Error sorting output stream options [audio.sorting-default-sorting].")
+    audio_settings = self._place_atmos_extra_copies(audio_settings)
 
     try:
-      self.setDefaultAudioStream(self.sortStreams(audio_settings, self.settings.audio_sorting_default, awl, self.settings.audio_sorting_codecs or acodecs, info, acombinations, tagdata))
+      default_candidates = [x for x in audio_settings if x.get("debug") != ATMOS_EXTRA_COPY_DEBUG]
+      self.setDefaultAudioStream(self.sortStreams(default_candidates, self.settings.audio_sorting_default, awl, self.settings.audio_sorting_codecs or acodecs, info, acombinations, tagdata))
     except Exception:
       self.log.exception("Unable to set the default audio stream.")
 
@@ -2783,10 +2788,17 @@ class MediaProcessor:
         self.log.warning("Output audio bitrate %dk exceeds source bitrate %dk for same-codec %s re-encode; clamping to source [audio-same-codec-bitrate-clamp]." % (abitrate, source_kbps, acodec))
         abitrate = source_kbps
 
-    # Force copy if Atmos
+    # Force copy if Atmos. TrueHD in MP4 is unplayable on most clients (Plex
+    # transcodes it), so in MP4 output a TrueHD Atmos stream keeps its
+    # converted stream first and the TrueHD Atmos is copied alongside it.
+    atmos_extra_copy = False
     if self.settings.audio_atmos_force_copy and self.isAudioStreamAtmos(a):
-      self.log.debug("Source audio stream contains Atmos data, forcing codec copy to preserve [audio-atmos-force-copy].")
-      acodec = "copy"
+      if acodec != "copy" and self.settings.output_format == "mp4" and a.codec in self._MP4_UNPLAYABLE_ATMOS_CODECS:
+        self.log.info("Source audio stream %d is %s Atmos; converting it to %s for MP4 playback and copying the Atmos stream alongside [audio-atmos-force-copy]." % (a.index, a.codec, acodec))
+        atmos_extra_copy = True
+      else:
+        self.log.debug("Source audio stream contains Atmos data, forcing codec copy to preserve [audio-atmos-force-copy].")
+        acodec = "copy"
 
     self.log.debug("Audio codec: %s." % acodec)
     self.log.debug("Channels: %s." % audio_channels)
@@ -2839,8 +2851,8 @@ class MediaProcessor:
       self.log.info("Creating %s audio stream from source audio stream %d [universal-audio]." % (uadata.get("codec"), a.index))
       audio_settings.append(uadata)
 
-    # Copy the original stream
-    if self.settings.audio_copyoriginal and acodec != "copy":
+    # Copy the original stream (also the Atmos stream kept beside its MP4-playable conversion)
+    if (self.settings.audio_copyoriginal or atmos_extra_copy) and acodec != "copy":
       self.log.info("Copying audio stream from source stream %d format %s [audio-copy-original]." % (a.index, a.codec))
       audio_setting = {
         "map": a.index,
@@ -2851,6 +2863,11 @@ class MediaProcessor:
         "disposition": adisposition,
         "debug": "audio-copy-original",
       }
+      if atmos_extra_copy:
+        # Never the default track: its MP4-playable conversion is.
+        audio_setting["debug"] = ATMOS_EXTRA_COPY_DEBUG
+        if adisposition:
+          audio_setting["disposition"] = adisposition.replace("+default", "-default")
       audio_setting["title"] = self.audioStreamTitle(a, audio_setting, tagdata=tagdata)
       audio_settings.append(audio_setting)
 
@@ -2860,6 +2877,25 @@ class MediaProcessor:
       self.log.debug("Blocking further %s audio streams to prevent multiple streams of the same language [audio-first-stream-of-language]." % a.metadata["language"])
 
     return allowua
+
+  # Atmos carriers that MP4 can hold but most players cannot decode there
+  # (EAC3 Atmos, i.e. JOC, plays fine and is copied as-is).
+  _MP4_UNPLAYABLE_ATMOS_CODECS = frozenset({"truehd"})
+
+  @staticmethod
+  def _place_atmos_extra_copies(audio_settings):
+    """Move each Atmos copy kept beside its MP4-playable conversion directly
+    after that conversion, whatever the configured sort keys did (a channel
+    sort would otherwise put the 8-channel TrueHD ahead of the 6-channel
+    EAC3 and make it the first and default track)."""
+    extras = [x for x in audio_settings if x.get("debug") == ATMOS_EXTRA_COPY_DEBUG]
+    if not extras:
+      return audio_settings
+    ordered = [x for x in audio_settings if x.get("debug") != ATMOS_EXTRA_COPY_DEBUG]
+    for extra in extras:
+      siblings = [i for i, x in enumerate(ordered) if x.get("map") == extra.get("map")]
+      ordered.insert(siblings[-1] + 1 if siblings else len(ordered), extra)
+    return ordered
 
   # Subtitle codecs that only carry text. Pairing one of these as the output
   # of an image-based source (PGS, VOBSUB, DVB) is impossible without OCR —
