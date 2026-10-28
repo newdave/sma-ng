@@ -10,12 +10,12 @@
 # available in Ubuntu's main repository. FFmpeg's native AAC encoder is used
 # instead (--enable-encoder=aac is on by default).
 # ──────────────────────────────────────────────────────────────────────────────
-# Base image pinned by digest (ubuntu:24.04 multi-arch index, resolved 2026-10-28).
-# The tag is kept for readability; the digest is what Docker resolves. Refresh
-# both together (Dependabot's docker ecosystem does this automatically).
-ARG UBUNTU_IMAGE=ubuntu:24.04@sha256:24737cef17f4e22b1977df7d9a05e77c4e28b7da5b8911f8d8ccda136bf3573c
+# Base image pinned by digest (ubuntu:24.04 multi-arch index, resolved 2026-10-28)
+# and written literally in each FROM line: Dependabot's docker ecosystem only
+# updates literal FROM references, not ARG-substituted ones. Keep the three
+# FROM lines on the same digest.
 
-FROM ${UBUNTU_IMAGE} AS ffmpeg-builder
+FROM ubuntu:24.04@sha256:24737cef17f4e22b1977df7d9a05e77c4e28b7da5b8911f8d8ccda136bf3573c AS ffmpeg-builder
 
 ARG FFMPEG_VERSION=8.1.2
 # nv-codec-headers must match the NVENC API that FFMPEG_VERSION compiles
@@ -135,7 +135,7 @@ RUN VPL_FLAG=$([ "$TARGETARCH" = "amd64" ] && echo "--enable-libvpl" || true); \
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 2: Python dependency builder
 # ──────────────────────────────────────────────────────────────────────────────
-FROM ${UBUNTU_IMAGE} AS python-builder
+FROM ubuntu:24.04@sha256:24737cef17f4e22b1977df7d9a05e77c4e28b7da5b8911f8d8ccda136bf3573c AS python-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -157,7 +157,7 @@ RUN python3 -m venv /venv \
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 3: Runtime image
 # ──────────────────────────────────────────────────────────────────────────────
-FROM ${UBUNTU_IMAGE} AS runtime
+FROM ubuntu:24.04@sha256:24737cef17f4e22b1977df7d9a05e77c4e28b7da5b8911f8d8ccda136bf3573c AS runtime
 
 # Injected automatically by Docker Buildx for multi-arch builds
 ARG TARGETARCH
