@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.2.22](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.21...sma-ng-v3.2.22) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ci:** build each image platform on a native runner and merge by digest ([c8d2a58](https://github.com/newdave/sma-ng/commit/c8d2a5856016121f8b4c45c0fb6221c139bfd75e))
+* **docker:** .env.example sets the variables compose actually reads ([0862caa](https://github.com/newdave/sma-ng/commit/0862caaefbee3be1313723c277446ae4863805bb))
+
+
+### Documentation
+
+* compose bundles no PostgreSQL; daemon.db_url picks the database ([56f14f6](https://github.com/newdave/sma-ng/commit/56f14f654570cbf66ae4f51104654d5d11d5c6f7))
+
 ## [3.2.21](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.20...sma-ng-v3.2.21) (2026-10-28)
 
 
