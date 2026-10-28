@@ -67,7 +67,10 @@ every docs page shows the running version.
 | `GET`  | `/status`                        | Partly | Public: minimal status. With a key: cluster-wide node and job detail    |
 | `GET`  | `/docs`                          | No     | Rendered documentation (`/docs/<page>`; includes `/docs/changelog`)     |
 | `GET`  | `/jobs`                          | Yes    | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
-| `GET`  | `/jobs/<id>`                     | Yes    | Get specific job (includes `progress` when running)                     |
+| `GET`  | `/jobs/<id>`                     | Yes    | Get specific job (includes `kind`, and `progress` when running)         |
+| `GET`  | `/jobs/<id>/output`              | Yes    | Captured tool output as text. Query: `?offset=<bytes>` (see Job Kinds)  |
+| `GET`  | `/jobs/<id>/ffmpeg-stderr`       | Yes    | Stored ffmpeg stderr of a failed conversion, as text                    |
+| `GET`  | `/paths`                         | Yes    | Path roots this daemon serves (routing, scan, audit, path-rewrite from) |
 | `GET`  | `/configs`                       | Yes    | Config mappings and status                                              |
 | `GET`  | `/metrics`                       | No     | Cluster metrics web page (PostgreSQL required)                          |
 | `GET`  | `/api/metrics`                   | Yes    | Metrics JSON. Query: `?window=24h\|7d\|30d\|all` (PostgreSQL required)  |
@@ -77,7 +80,9 @@ every docs page shows the running version.
 | `GET`  | `/logs`                          | Yes    | List all log files with metadata                                        |
 | `GET`  | `/logs/<name>`                   | Yes    | Get log content. Query: `?lines=200&level=ERROR&job_id=42&offset=0`     |
 | `GET`  | `/logs/<name>/tail`              | Yes    | Poll for new entries after byte offset. Query: `?offset=<bytes>`        |
+| `POST` | `/jobs`                          | Yes    | Submit a job of any kind (convert, preview, repair, audit, rename)      |
 | `POST` | `/webhook/generic`               | Yes    | Submit conversion job (file or directory path)                          |
+| `POST` | `/convert`, `/`                  | Yes    | Aliases of `/webhook/generic`                                           |
 | `POST` | `/webhook/sonarr`                | Yes    | Native Sonarr webhook; Download queues, other events go to Autoscan     |
 | `POST` | `/webhook/radarr`                | Yes    | Native Radarr webhook; Download queues, other events go to Autoscan     |
 | `POST` | `/cleanup`                       | Yes    | Remove old jobs. Query: `?days=30`                                      |
@@ -134,6 +139,61 @@ curl -X POST http://localhost:8585/webhook/generic \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "config": "/custom/sma-ng.yml"}'
 ```
+
+---
+
+## Job Kinds
+
+`POST /jobs` queues any of SMA-NG's tools, not only conversions. The `sma` command uses it when it talks to a
+daemon (see [`sma` CLI Quick Start](sma-cli-quickstart.md)).
+
+```bash
+curl -X POST http://localhost:8585/jobs \
+  -H "X-API-Key: SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"kind": "repair", "path": "/mnt/media/TV/Show", "args": ["-n"]}'
+```
+
+| Field | Default | Meaning |
+| ----- | ------- | ------- |
+| `path` | required | File or directory, as the daemon sees it |
+| `kind` | `convert` | `convert`, `preview`, `repair`, `audit` or `rename` |
+| `args` | `[]` | Extra tool arguments (list, or one string split like a shell) |
+| `profile` | routing | Profile for `convert` and `preview`; otherwise chosen by path routing |
+| `priority` | `0` (`preview`: `100`) | Queue priority |
+
+| Kind | Runs | Directory | Success |
+| ---- | ---- | --------- | ------- |
+| `convert` | `manual.py -a -i PATH` | Expanded to one job per file | exit `0` |
+| `preview` | `manual.py -a -i PATH -oo` | Refused (file only) | exit `0` |
+| `repair` | `repair.py PATH` | One job for the directory | exit `0` |
+| `audit` | `manual.py --audit -i PATH` | One job for the directory | exit `0` or `1` (`1` = problems found) |
+| `rename` | `rename.py PATH` | One job for the directory | exit `0` |
+
+Every kind runs with the daemon's config (`-c`), chosen by path routing when the job is queued. `-c`, `--config`,
+`-i`, `--input` and `--job-id` are set by the daemon and rejected in `args` (400). `convert` behaves exactly like
+`POST /webhook/generic`: default args, the same-extension skip and per-file expansion apply only to it. A path and
+kind that are already pending or running return `200 {"status": "duplicate"}`; a new job returns
+`202 {"status": "queued", "job_id": ..., "kind": ...}`. Jobs on the same config still run one at a time, so a queued
+preview waits for the running job on its config, then goes first.
+
+**Output.** The daemon stores each job's tool output (without FFmpeg progress lines), keeping the newest 1 MiB, and
+deletes it with the job. Read it while the job runs:
+
+```bash
+curl -H "X-API-Key: SECRET" "http://localhost:8585/jobs/42/output?offset=0"
+```
+
+The body is `text/plain`. `X-Next-Offset` is the byte offset to pass next time; `X-Output-Dropped` is how many bytes
+were discarded from the start. An offset older than that starts at the oldest byte still stored. `GET /jobs` and
+`GET /jobs/<id>` never include the output.
+
+**Clusters.** Every node must run a version that knows job kinds; an older node would run a repair as a conversion.
+Nodes advertise the `job-kinds-v1` capability in their heartbeat. While any node seen in the last two minutes lacks
+it, `POST /jobs` with a kind other than `convert` returns `409` naming the node: upgrade all nodes first.
+
+**Path roots.** `GET /paths` returns `{"roots": [...]}`: the `daemon.routing` match prefixes, `scan-paths`,
+`audit.paths` and `path-rewrites` sources. Clients use it to reject paths the daemon cannot see.
 
 ---
 

@@ -186,7 +186,7 @@ def test_record_job_enqueued_uses_documented_sources():
 
 
 def test_request_sources_is_bounded():
-  assert metrics_prom.REQUEST_SOURCES == ("sonarr", "radarr", "webhook", "scan", "audit", "unknown")
+  assert metrics_prom.REQUEST_SOURCES == ("sonarr", "radarr", "webhook", "scan", "audit", "cli", "unknown")
 
 
 def test_record_failure_uses_provided_labels():

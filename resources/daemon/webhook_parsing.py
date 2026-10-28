@@ -236,3 +236,38 @@ def arr_payload_paths(data):
         _append_path(paths, entry.get("path"))
         _append_path(paths, entry.get("previousPath"))
   return list(dict.fromkeys(paths))
+
+
+def parse_jobs_body(body_text, send_json_response):
+  """Parse a ``POST /jobs`` JSON body into a dict, or None with a 400 already sent.
+
+  Fields: ``path`` (required), ``kind`` (default ``convert``), ``args`` (list
+  of strings, or one string split like a shell), ``profile`` and ``priority``.
+  """
+  try:
+    data = json.loads(body_text) if body_text else None
+  except json.JSONDecodeError:
+    data = None
+  if not isinstance(data, dict):
+    send_json_response(400, {"error": "Body must be a JSON object"})
+    return None
+  path = data.get("path")
+  if not isinstance(path, str) or not path:
+    send_json_response(400, {"error": "No path provided"})
+    return None
+  kind = data.get("kind") or "convert"
+  args = data.get("args") or []
+  if isinstance(args, str):
+    args = shlex.split(args)
+  if not isinstance(kind, str) or not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+    send_json_response(400, {"error": "kind must be a string and args a list of strings"})
+    return None
+  profile = data.get("profile")
+  if profile is not None and not isinstance(profile, str):
+    send_json_response(400, {"error": "profile must be a string"})
+    return None
+  priority = data.get("priority")
+  if priority is not None and (isinstance(priority, bool) or not isinstance(priority, int)):
+    send_json_response(400, {"error": "priority must be an integer"})
+    return None
+  return {"path": path, "kind": kind, "args": args, "profile": profile or None, "priority": priority}

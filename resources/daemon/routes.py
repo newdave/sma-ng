@@ -52,10 +52,12 @@ def dispatch_post_job_action(handler, path):
     handler.send_json_response(404, {"error": "Not found"})
 
 
-def _dispatch_get_job(handler, path):
-  """Route GET /jobs/<id> vs GET /jobs/<id>/ffmpeg-stderr."""
+def _dispatch_get_job(handler, path, query=None):
+  """Route GET /jobs/<id>, /jobs/<id>/ffmpeg-stderr and /jobs/<id>/output."""
   if path.endswith("/ffmpeg-stderr"):
     handler._get_job_ffmpeg_stderr(path)
+  elif path.endswith("/output"):
+    handler._get_job_output(path, query or {})
   else:
     handler._get_job(path)
 
@@ -93,13 +95,14 @@ def _get_routes():
     "/api/metrics": lambda handler, path, query: handler._get_metrics_api(path, query),
     "/library/audit": lambda handler, path, query: handler._get_library_audit(query),
     "/library/findings": lambda handler, path, query: handler._get_library_findings(query),
+    "/paths": lambda handler, path, query: handler._get_paths(),
   }
 
 
 def _get_prefix_routes():
   return [
     ("/docs/", lambda handler, path, query: handler._get_docs(path, query)),
-    ("/jobs/", lambda handler, path, query: _dispatch_get_job(handler, path)),
+    ("/jobs/", lambda handler, path, query: _dispatch_get_job(handler, path, query)),
     ("/logs/", lambda handler, path, query: handler._get_log_content(path, query)),
     ("/library/audit/", lambda handler, path, query: handler._get_library_audit_run(path)),
     ("/library/findings/", lambda handler, path, query: handler._get_library_finding(path)),
@@ -113,6 +116,7 @@ def _post_routes():
     "/webhook/sonarr": lambda handler, path, query: handler._handle_sonarr_webhook(),
     "/webhook/radarr": lambda handler, path, query: handler._handle_radarr_webhook(),
     "/convert": lambda handler, path, query: handler._handle_webhook(),
+    "/jobs": lambda handler, path, query: handler._post_jobs(),
     "/admin/delete-failed": lambda handler, path, query: handler._post_admin_delete_failed(),
     "/admin/delete-offline-nodes": lambda handler, path, query: handler._post_admin_delete_offline_nodes(),
     "/admin/delete-all-jobs": lambda handler, path, query: handler._post_admin_delete_all_jobs(),
