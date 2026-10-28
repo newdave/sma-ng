@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Start the daemon server (requires SQLite/PostgreSQL daemon.db-url in sma-ng.yml)"
-#MISE aliases=["media:daemon:start"]
+#MISE description="Start the daemon; bind address, port and workers come from daemon: in sma-ng.yml (pass flags after -- to override, e.g. -- --port 9000)"
 set -euo pipefail
 
-"$PY" daemon.py --host 0.0.0.0 --port 8585
+"$PY" daemon.py "$@"

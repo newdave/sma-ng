@@ -20,8 +20,13 @@ create_yaml() {
   fi
 
   cp "$sample" "$dest"
-  if [ "$GPU" != "software" ]; then
-    sed -i.bak "s/^  gpu:.*/  gpu: $GPU/" "$dest" && rm -f "${dest}.bak"
+  if [ -n "$GPU" ] && [ "$GPU" != "software" ]; then
+    # base.video.gpu (indented under base: video:); keep the sample's indentation.
+    sed -i.bak "s/^\([[:space:]]*\)gpu:.*/\1gpu: $GPU/" "$dest" && rm -f "${dest}.bak"
+    if ! grep -q "^[[:space:]]*gpu: $GPU\$" "$dest"; then
+      echo "ERROR: could not set gpu: $GPU in $dest (no gpu: key in $sample?)" >&2
+      exit 1
+    fi
     echo "Created $dest ($label, gpu: $GPU)"
   else
     echo "Created $dest ($label, software encoding)"

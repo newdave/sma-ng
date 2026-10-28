@@ -1,7 +1,7 @@
 # Configuration Reference
 
 Configuration lives in `config/sma-ng.yml` (YAML). Copy from
-`setup/sma-ng.yml.sample` or generate it with `make config` /
+`setup/sma-ng.yml.sample` or generate it with
 `mise run config:generate`. Use command-specific `-c/--config` flags where
 available to load a different file.
 
