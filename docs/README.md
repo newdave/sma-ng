@@ -2,7 +2,13 @@
 
 ![SMA-NG](../logo.png)
 
-Automated media conversion, tagging, and integration pipeline. Converts media files to MP4/MKV using FFmpeg with hardware acceleration, tags them with TMDB metadata, and integrates with media managers and download clients.
+Automated media conversion, tagging, and integration pipeline. Converts media files to MP4/MKV using FFmpeg with
+hardware acceleration, tags them with TMDB metadata, and integrates with media managers and download clients.
+
+This page is a short, all-in-one overview. The per-topic pages are canonical; where this page and a topic page
+disagree, the topic page wins:
+[Getting Started](getting-started.md), [Configuration](configuration.md), [Daemon Mode](daemon.md),
+[Integrations](integrations.md), [Deployment](deployment.md), [Troubleshooting](troubleshooting.md).
 
 ## Table of Contents
 
@@ -11,6 +17,8 @@ Automated media conversion, tagging, and integration pipeline. Converts media fi
 - [Architecture](#architecture)
 - [Configuration Reference](#configuration-reference)
 - [CLI Usage (manual.py)](#cli-usage)
+- [Repairing media without transcoding](#repairing-media-without-transcoding)
+- [Running from the Docker host](#running-from-the-docker-host)
 - [Daemon Mode](#daemon-mode)
   - [Starting](#starting)
   - [Concurrency](#concurrency)
@@ -22,6 +30,7 @@ Automated media conversion, tagging, and integration pipeline. Converts media fi
   - [Per-Config Logging](#per-config-logging)
   - [Scheduled Directory Scanning](#scheduled-directory-scanning)
   - [Job Persistence (SQLite or PostgreSQL)](#job-persistence-sqlite-or-postgresql)
+  - [Job Timeout](#job-timeout)
   - [Graceful Shutdown](#graceful-shutdown)
 - [Media Manager Integration](#media-manager-integration)
 - [Download Client Integration](#download-client-integration)
@@ -32,6 +41,7 @@ Automated media conversion, tagging, and integration pipeline. Converts media fi
 - [Library Audit](library-audit.md)
 - [Processing Pipeline](#processing-pipeline)
 - [Module Reference](#module-reference)
+- [Supported Codecs](#supported-codecs)
 - [Post-Process Scripts](#post-process-scripts)
 - [Deployment (mise)](#deployment-mise)
 - [Troubleshooting](#troubleshooting)
@@ -42,13 +52,22 @@ Automated media conversion, tagging, and integration pipeline. Converts media fi
 ## Requirements
 
 - Python 3.12+
-- FFmpeg (system install or custom path)
-- Python packages: `pip install -r setup/requirements.txt`
+- FFmpeg and FFprobe (system install, or set `daemon.ffmpeg-dir` / `base.converter.ffmpeg`)
+- Python packages: declared in `pyproject.toml` (the source of truth). `mise run setup:deps` installs them into
+  `venv/`; without mise run `pip install .`.
 
-Optional:
+Optional extras (`pip install ".[extra]"`, or `mise run setup:deps:all` for everything):
 
-- qBittorrent integration: `pip install -r setup/requirements-qbittorrent.txt`
-- Deluge integration: `pip install -r setup/requirements-deluge.txt`
+| Extra         | Adds                                                                       |
+| ------------- | -------------------------------------------------------------------------- |
+| `postgres`    | `psycopg2-binary` for PostgreSQL job persistence and cluster mode          |
+| `qbittorrent` | qBittorrent client library                                                 |
+| `deluge`      | Deluge client library                                                      |
+| `openvino`    | OpenVINO runtime for the analyzer                                          |
+| `dev`         | pytest, ruff, pre-commit, and other lint/test tooling (`setup:deps:dev`)   |
+
+`setup/requirements*.txt` still exist for `pip install -r` workflows; `setup/requirements.txt` mirrors the base
+dependencies plus the `postgres` extra and is kept in sync by a test.
 
 ## Quick Start
 
@@ -79,7 +98,7 @@ mise run daemon:start
 ```bash
 git clone <repo> && cd sma
 python3 -m venv venv && source venv/bin/activate
-pip install -r setup/requirements.txt
+pip install ".[postgres]"
 
 # Generate config with auto GPU detection
 make config
@@ -179,214 +198,50 @@ flowchart TD
 
 ## Configuration Reference
 
-Configuration lives in `config/sma-ng.yml` (YAML format). Copy from `setup/sma-ng.yml.sample`.
+All configuration lives in one YAML file, `config/sma-ng.yml`. Copy it from `setup/sma-ng.yml.sample` or generate it
+with `mise run config:generate` (auto-detects the GPU). Pass `-c/--config` to commands that support an alternate path.
+INI configs and flat-shape YAML (top-level `converter:`, `video:`) are not supported.
 
-Pass `-c/--config` to commands that support an alternate config path.
+The file has four top-level buckets, written in kebab-case:
 
-### [Converter]
+```yaml
+daemon:    # daemon-only runtime settings: host, port, db-url, routing, scan-paths, ...
+base:      # default conversion settings: converter, video, audio, subtitle, metadata, ...
+profiles:  # named overlays applied on top of base (for example rq, lq)
+services:  # Sonarr / Radarr / Plex / Emby / Jellyfin / Autoscan instances, keyed <type>.<instance>
+```
 
-| Option                    | Type    | Default         | Description                                                             |
-| ------------------------- | ------- | --------------- | ----------------------------------------------------------------------- |
-| `ffmpeg`                  | path    | `ffmpeg`        | Path to FFmpeg binary                                                   |
-| `ffprobe`                 | path    | `ffprobe`       | Path to FFprobe binary                                                  |
-| `threads`                 | int     | `0`             | FFmpeg threads (0 = auto)                                               |
-| `hwaccels`                | list    |                 | Hardware acceleration platforms: `qsv`, `vaapi`, `cuda`, `videotoolbox` |
-| `hwaccel-decoders`        | list    |                 | HW decoders to use: `hevc_qsv`, `h264_qsv`, `h264_vaapi`, etc.          |
-| `hwdevices`               | dict    |                 | Device mapping, e.g. `qsv:/dev/dri/renderD128`                          |
-| `hwaccel-output-format`   | dict    |                 | Output format per hwaccel: `qsv:qsv`, `vaapi:vaapi`                     |
-| `output-directory`        | path    |                 | Temporary output location (files moved back after)                      |
-| `output-format`           | string  | `mp4`           | Container format: `mp4`, `mkv`, `mov`                                   |
-| `output-extension`        | string  | `mp4`           | Output file extension                                                   |
-| `temp-extension`          | string  |                 | Temporary file extension during conversion                              |
-| `temp-output`             | bool    | `true`          | Use temporary output file during conversion                             |
-| `minimum-size`            | int     | `0`             | Minimum source file size in MB (0 = disabled)                           |
-| `ignored-extensions`      | list    | `nfo, ds_store` | Extensions to skip                                                      |
-| `copy-to`                 | path(s) |                 | Copy output to additional directories (pipe-separated)                  |
-| `move-to`                 | path    |                 | Move output to final destination                                        |
-| `delete-original`         | bool    | `true`          | Delete source file after successful conversion                          |
-| `recycle-bin`             | path    |                 | Copy original here before deleting (only when `delete-original = True`) |
-| `process-same-extensions` | bool    | `false`         | Reprocess files already in output format                                |
-| `bypass-if-copying-all`   | bool    | `false`         | Skip conversion if all streams can be copied                            |
-| `force-convert`           | bool    | `false`         | Force conversion even if codec matches                                  |
-| `post-process`            | bool    | `false`         | Run post-process scripts                                                |
-| `wait-post-process`       | bool    | `false`         | Wait for post-process scripts to finish                                 |
-| `preopts`                 | list    |                 | Extra FFmpeg options before input                                       |
-| `postopts`                | list    |                 | Extra FFmpeg options after codec options                                |
-| `opts-separator`          | string  | `,`             | Separator for preopts/postopts lists                                    |
+- `manual.py` reads `base`, `profiles`, and `services`; the daemon also reads `daemon`.
+- A profile is deep-merged onto `base`: nested blocks merge key by key, while scalars and lists replace the base
+  value wholesale. Sections a profile omits inherit from `base`.
+- Daemon settings resolve as CLI flag, then `sma-ng.yml`, then the built-in default. The daemon reads no `SMA_*`
+  environment variables for runtime configuration.
+- The pydantic schema in `resources/config_schema.py` is the source of truth for defaults and types. Unknown keys log
+  a `WARNING Unknown config key: <dotted.path>`.
 
-### [Video]
+Inspect and validate the effective config without converting anything:
 
-| Option                      | Type   | Default | Description                                                                                                                   |
-| --------------------------- | ------ | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `codec`                     | list   | `h264`  | Video codecs in priority order. First is used for encoding, rest are copy-eligible. See [Supported Codecs](#supported-codecs) |
-| `max-bitrate`               | int    | `0`     | Maximum video bitrate in kbps (0 = unlimited). Source exceeding this is re-encoded                                            |
-| `bitrate-ratio`             | dict   |         | Scale source bitrate per codec: `hevc:1.0, h264:0.65, mpeg2video:0.45`                                                        |
-| `crf`                       | int    | `24`    | Constant Rate Factor (quality). Lower = better quality, larger files                                                          |
-| `crf-profiles`              | list   |         | Tiered CRF by source bitrate: `20000:20:5000k:10000k, 10000:22:5000k:10000k` (format: `source_kbps:crf:maxrate:bufsize`)      |
-| `preset`                    | string |         | Encoder preset: `ultrafast` to `veryslow` (speed vs compression)                                                              |
-| `profile`                   | list   |         | Video profile: `main`, `high`, `main10`                                                                                       |
-| `max-level`                 | float  |         | Maximum H.264/H.265 level (e.g., `5.2`)                                                                                       |
-| `max-width`                 | int    | `0`     | Maximum output width (0 = no limit). Triggers downscale                                                                       |
-| `pix-fmt`                   | list   |         | Pixel format whitelist. Non-matching sources are re-encoded                                                                   |
-| `dynamic-parameters`        | bool   | `false` | Pass HDR/color metadata to encoder                                                                                            |
-| `prioritize-source-pix-fmt` | bool   | `true`  | Keep source pix_fmt if in whitelist                                                                                           |
-| `filter`                    | string |         | Custom FFmpeg video filter                                                                                                    |
-| `force-filter`              | bool   | `false` | Force re-encode when filter is set                                                                                            |
-| `codec-parameters`          | string |         | Extra codec params (e.g., x265-params)                                                                                        |
+```bash
+mise run config:validate                          # schema, unknown keys, routing refs, service completeness
+mise run config:show -- --profile rq              # effective resolved config for a profile
+mise run config:show -- --input /path/to/file.mkv # print the FFmpeg command that would run
+```
 
-### [HDR]
+Where to find each section:
 
-Override video settings for HDR content (detected automatically).
-
-| Option             | Type   | Description                           |
-| ------------------ | ------ | ------------------------------------- |
-| `codec`            | list   | Video codec for HDR content           |
-| `pix-fmt`          | list   | Pixel format for HDR (e.g., `p010le`) |
-| `space`            | list   | Color space: `bt2020nc`               |
-| `transfer`         | list   | Transfer function: `smpte2084`        |
-| `primaries`        | list   | Color primaries: `bt2020`             |
-| `preset`           | string | Encoder preset override for HDR       |
-| `profile`          | string | Profile override for HDR              |
-| `codec-parameters` | string | Extra params for HDR encoding         |
-| `filter`           | string | Video filter for HDR content          |
-| `force-filter`     | bool   | Force re-encode for HDR filter        |
-
-### [Audio]
-
-| Option                      | Type   | Default | Description                                                                                 |
-| --------------------------- | ------ | ------- | ------------------------------------------------------------------------------------------- |
-| `codec`                     | list   | `aac`   | Audio codecs in priority order. Streams matching any are copied; others re-encoded to first |
-| `languages`                 | list   |         | Language whitelist (ISO 639-3, e.g., `eng`). Empty = all languages                          |
-| `default-language`          | string | `eng`   | Default language for unlabeled streams                                                      |
-| `first-stream-of-language`  | bool   | `false` | Keep only first stream per language                                                         |
-| `allow-language-relax`      | bool   | `true`  | If no whitelisted language found, keep all audio                                            |
-| `include-original-language` | bool   | `false` | Include original media language even if not in whitelist                                    |
-| `channel-bitrate`           | int    | `128`   | Bitrate per channel in kbps (0 = auto)                                                      |
-| `variable-bitrate`          | int    | `0`     | VBR quality level (0 = disabled/CBR)                                                        |
-| `max-bitrate`               | int    | `0`     | Maximum audio bitrate in kbps                                                               |
-| `max-channels`              | int    | `0`     | Maximum audio channels (0 = unlimited, 6 = 5.1)                                             |
-| `copy-original`             | bool   | `false` | Copy original audio stream in addition to transcoded                                        |
-| `aac-adtstoasc`             | bool   | `true`  | Apply AAC ADTS to ASC bitstream filter                                                      |
-| `ignored-dispositions`      | list   |         | Skip streams with these dispositions: `comment`, `hearing_impaired`                         |
-| `unique-dispositions`       | bool   | `false` | One stream per disposition per language                                                     |
-| `stream-codec-combinations` | list   |         | Identify duplicate streams by codec combo                                                   |
-| `ignore-trudhd`             | bool   | `true`  | Ignore TrueHD streams                                                                       |
-| `atmos-force-copy`          | bool   | `false` | Always copy Atmos tracks                                                                    |
-| `force-default`             | bool   | `false` | Override source default stream                                                              |
-| `relax-to-default`          | bool   | `false` | If preferred language absent, default to any                                                |
-
-### [Audio.Sorting]
-
-| Option            | Type | Description                                                          |
-| ----------------- | ---- | -------------------------------------------------------------------- |
-| `sorting`         | list | Sort order for audio streams: `language, channels.d, map, d.comment` |
-| `default-sorting` | list | Sort order for default stream selection                              |
-| `codecs`          | list | Codec priority for sorting                                           |
-
-### [Universal Audio]
-
-Generates an additional audio stream (usually stereo AAC) for maximum device compatibility.
-
-| Option              | Type | Default | Description                              |
-| ------------------- | ---- | ------- | ---------------------------------------- |
-| `codec`             | list |         | UA codec (e.g., `aac`). Empty = disabled |
-| `channel-bitrate`   | int  | `128`   | Bitrate per channel                      |
-| `first-stream-only` | bool | `true`  | Only add UA for first audio stream       |
-
-### [Subtitle]
-
-| Option                      | Type   | Default    | Description                                     |
-| --------------------------- | ------ | ---------- | ----------------------------------------------- |
-| `codec`                     | list   | `mov_text` | Subtitle codec for text-based subs              |
-| `codec-image-based`         | list   |            | Codec for image-based subs (PGS, VobSub)        |
-| `languages`                 | list   |            | Language whitelist (ISO 639-3)                  |
-| `default-language`          | string | `eng`      | Default for unlabeled subs                      |
-| `first-stream-of-language`  | bool   | `false`    | One subtitle per language                       |
-| `burn-subtitles`            | bool   | `false`    | Burn subtitles into video                       |
-| `burn-dispositions`         | list   | `forced`   | Only burn subs with these dispositions          |
-| `embed-subs`                | bool   | `true`     | Embed subtitle streams in output                |
-| `embed-image-subs`          | bool   | `false`    | Embed image-based subs                          |
-| `embed-only-internal-subs`  | bool   | `false`    | Only embed subs from source (no external files) |
-| `ignored-dispositions`      | list   |            | Skip subs with these dispositions               |
-| `remove-bitstream-subs`     | list   | `true`     | Remove bitstream subtitle formats               |
-| `include-original-language` | bool   | `false`    | Include original language subs                  |
-
-### [Subtitle.CleanIt]
-
-| Option        | Type | Description                                  |
-| ------------- | ---- | -------------------------------------------- |
-| `enabled`     | bool | Enable subtitle cleaning via cleanit library |
-| `config-path` | path | Custom cleanit config                        |
-| `tags`        | list | Cleanit tag sets: `default, no-style`        |
-
-### [Subtitle.FFSubsync]
-
-| Option    | Type | Description                        |
-| --------- | ---- | ---------------------------------- |
-| `enabled` | bool | Enable subtitle sync via ffsubsync |
-
-### [Subtitle.Subliminal]
-
-| Option                           | Type | Description                         |
-| -------------------------------- | ---- | ----------------------------------- |
-| `download-subs`                  | bool | Download missing subtitles          |
-| `providers`                      | list | Subtitle providers: `opensubtitles` |
-| `download-forced-subs`           | bool | Download forced subtitle variants   |
-| `download-hearing-impaired-subs` | bool | Include HI subs in downloads        |
-
-### [Metadata]
-
-| Option             | Type   | Default | Description                                           |
-| ------------------ | ------ | ------- | ----------------------------------------------------- |
-| `relocate-moov`    | bool   | `true`  | Move moov atom to file start (streaming optimization) |
-| `full-path-guess`  | bool   | `true`  | Use full file path for guessit metadata matching      |
-| `tag`              | bool   | `true`  | Enable TMDB metadata tagging                          |
-| `tag-language`     | string | `eng`   | Language for TMDB metadata                            |
-| `strip-metadata`   | bool   | `true`  | Remove existing metadata before tagging               |
-| `keep-titles`      | bool   | `false` | Preserve original stream titles                       |
-
-### [Permissions]
-
-| Option  | Type  | Default | Description                 |
-| ------- | ----- | ------- | --------------------------- |
-| `chmod` | octal | `0664`  | File permissions for output |
-| `uid`   | int   | `-1`    | Owner UID (-1 = no change)  |
-| `gid`   | int   | `-1`    | Group GID (-1 = no change)  |
-
-### [Sonarr] / [Sonarr-Kids] / [Radarr] / [Radarr-4K] / [Radarr-Kids]
-
-Multiple instances supported. Any section starting with `Sonarr` or `Radarr` is loaded.
-
-| Option              | Type   | Default       | Description                                               |
-| ------------------- | ------ | ------------- | --------------------------------------------------------- |
-| `host`              | string | `localhost`   | API hostname                                              |
-| `port`              | int    | `8989`/`7878` | API port                                                  |
-| `apikey`            | string |               | API key                                                   |
-| `ssl`               | bool   | `false`       | Use HTTPS                                                 |
-| `webroot`           | string |               | URL base path                                             |
-| `path`              | string |               | Media root path for directory matching (manual.py rescan) |
-| `force-rename`      | bool   | `false`       | Trigger rename after processing                           |
-| `rescan`            | bool   | `true`        | Trigger library rescan after processing                   |
-| `block-reprocess`   | bool   | `false`       | Prevent reprocessing same-extension files                 |
-| `in-progress-check` | bool   | `true`        | Wait for in-progress scans before rescanning              |
-
-Instances are matched by `path` using longest-prefix matching. When `manual.py` processes a file, it finds the matching instance and triggers a rescan via the API.
-
-### [Plex]
-
-| Option         | Type   | Description                                                             |
-| -------------- | ------ | ----------------------------------------------------------------------- |
-| `host`         | string | Plex server hostname                                                    |
-| `port`         | int    | Plex server port (default 32400)                                        |
-| `refresh`      | bool   | Trigger library refresh after processing                                |
-| `token`        | string | Plex authentication token                                               |
-| `ssl`          | bool   | Use HTTPS                                                               |
-| `ignore-certs` | bool   | Skip SSL certificate verification                                       |
-| `path-mapping` | dict   | Map SMA-NG paths to Plex library paths (comma-separated, `=` delimited) |
-
-### [SABNZBD] / [Deluge] / [qBittorrent] / [uTorrent]
-
-Download client integration settings. Each has category/label mappings for routing downloads to the correct media manager.
+| Topic                                       | Reference                                                                     |
+| ------------------------------------------- | ----------------------------------------------------------------------------- |
+| Layout, schema rules, validation            | [configuration.md](configuration.md#four-bucket-layout)                       |
+| `base.converter` (paths, output, naming)    | [configuration.md](configuration.md#baseconverter)                            |
+| Output collisions and overwrite safety      | [configuration.md](configuration.md#output-naming-and-overwrite-safety)       |
+| Full-software fallback ladder               | [configuration.md](configuration.md#full-software-fallback)                   |
+| `base.video`, `base.hdr`, QSV/VAAPI blocks  | [configuration.md](configuration.md#basevideo)                                |
+| `base.audio`, sorting, universal audio      | [configuration.md](configuration.md#baseaudio)                                |
+| `base.subtitle`                             | [configuration.md](configuration.md#basesubtitle)                             |
+| `base.metadata`, `base.naming`, permissions | [configuration.md](configuration.md#basemetadata)                             |
+| Profiles, concurrency caps, priority        | [configuration.md](configuration.md#profiles)                                 |
+| `services` (Sonarr, Radarr, Plex, ...)      | [configuration.md](configuration.md#services)                                 |
+| `daemon` keys and routing                   | [daemon.md](daemon.md#top-level-daemon-keys)                                  |
 
 ---
 
@@ -430,48 +285,131 @@ python manual.py -i /path/to/file.mkv -a -nm -nc -nd
 
 # Batch with processed archive (skip already-done files)
 python manual.py -i /path/to/directory/ -a -pa archive.json
+
+# Audit a library path for damaged or stale files (exits non-zero when findings exist)
+python manual.py -i /path/to/library --audit
 ```
 
-After conversion, `manual.py` automatically triggers a rescan on the matching Sonarr/Radarr instance based on the output file's directory path.
+After conversion, `manual.py` triggers a rescan on the Sonarr/Radarr instance whose `path` matches the output file.
+Input paths are routed through `daemon.routing` like daemon jobs, so the matching profile is applied automatically;
+`--profile` overrides it.
 
 ### All Options
 
-| Flag    | Long                      | Description                                |
-| ------- | ------------------------- | ------------------------------------------ |
-| `-i`    | `--input`                 | Input file or directory                    |
-| `-c`    | `--config`                | Alternate config file                      |
-| `-a`    | `--auto`                  | Auto mode (no prompts, guesses metadata)   |
-| `-s`    | `--season`                | Season number                              |
-| `-e`    | `--episode`               | Episode number                             |
-| `-tvdb` | `--tvdbid`                | TVDB ID                                    |
-| `-imdb` | `--imdbid`                | IMDB ID                                    |
-| `-tmdb` | `--tmdbid`                | TMDB ID                                    |
-| `-nm`   | `--nomove`                | Disable move-to and output-directory       |
-| `-nc`   | `--nocopy`                | Disable copy-to                            |
-| `-nd`   | `--nodelete`              | Disable original file deletion             |
-| `-nt`   | `--notag`                 | Disable metadata tagging                   |
-| `-to`   | `--tagonly`               | Tag only, no conversion                    |
-| `-np`   | `--nopost`                | Disable post-process scripts               |
-| `-pr`   | `--preserverelative`      | Preserve relative directory structure      |
-| `-pse`  | `--processsameextensions` | Reprocess files already in target format   |
-| `-fc`   | `--forceconvert`          | Force conversion + process-same-extensions |
-| `-m`    | `--moveto`                | Override move-to path                      |
-| `-oo`   | `--optionsonly`           | Show conversion options, don't convert     |
-| `-cl`   | `--codeclist`             | List all supported codecs                  |
-| `-o`    | `--original`              | Specify original filename for guessing     |
-| `-ms`   | `--minsize`               | Minimum file size in MB                    |
-| `-pa`   | `--processedarchive`      | Path to processed files archive JSON       |
+| Flag    | Long                      | Description                                                                |
+| ------- | ------------------------- | -------------------------------------------------------------------------- |
+| `-i`    | `--input`                 | Input file or directory                                                    |
+| `-c`    | `--config`                | Alternate config file                                                      |
+| `-p`    | `--profile`               | Apply a named profile (overrides the routed profile)                       |
+| `-a`    | `--auto`                  | Auto mode (no prompts, guesses metadata with guessit)                      |
+| `-s`    | `--season`                | Season number                                                              |
+| `-e`    | `--episode`               | Episode number (repeat for multi-episode: `-e 1 -e 2`)                     |
+| `-tvdb` | `--tvdbid`                | TVDB ID                                                                    |
+| `-imdb` | `--imdbid`                | IMDB ID                                                                    |
+| `-tmdb` | `--tmdbid`                | TMDB ID                                                                    |
+|         | `--tv` / `--movie`        | Force guessit to treat the input as a TV episode / a movie                 |
+| `-nm`   | `--nomove`                | Disable move-to and output-directory                                       |
+| `-m`    | `--moveto`                | Override move-to path (mutually exclusive with `-nm`)                      |
+| `-nc`   | `--nocopy`                | Disable copy-to                                                            |
+| `-nd`   | `--nodelete`              | Disable original file deletion                                             |
+| `-nt`   | `--notag`                 | Disable metadata tagging                                                   |
+| `-to`   | `--tagonly`               | Tag only, no conversion                                                    |
+| `-np`   | `--nopost`                | Disable post-process scripts                                               |
+| `-pr`   | `--preserverelative`      | Preserve relative directory structure                                      |
+| `-pse`  | `--processsameextensions` | Reprocess files already in the target format                               |
+| `-fc`   | `--forceconvert`          | Force conversion + process-same-extensions                                 |
+| `-fr`   | `--forcereencode`         | Force the video stream to be re-encoded even when its codec is accepted    |
+| `-oo`   | `--optionsonly`           | Show conversion options, don't convert                                     |
+| `-cl`   | `--codeclist`             | List all supported codecs                                                  |
+| `-o`    | `--original`              | Original source/release filename, used for guessing                        |
+| `-ms`   | `--minsize`               | Minimum file size                                                          |
+| `-pa`   | `--processedarchive`      | Processed-files archive; already processed files are skipped               |
+|         | `--audit`                 | Run a library audit on the input path (see [Library Audit](library-audit.md)) |
+|         | `--repair-hybrid`         | Repair stretched hybrid-aspect MP4s: `remux` (default) or `reencode`       |
+|         | `--recycle-failed`        | With `--audit`: move media that fails ffprobe to the recycle-bin           |
+|         | `--job-id`                | Daemon job id for log correlation; set by the daemon worker                |
+|         | `--version`               | Print the version and exit                                                 |
+
+Run `python manual.py --help` for the authoritative list.
+
+---
+
+## Repairing media without transcoding
+
+`repair.py` fixes stream-level damage by remuxing with `-c copy`. It never re-encodes. It drops data streams
+(`tmcd` timecode, stray `bin_data`), streams FFprobe cannot identify, and artwork (attached pictures, cover art
+demoted to an `mp4v` video track, MKV image attachments), and it stamps a corrective display aspect ratio on
+stretched hybrid-aspect files. Files that already probe as normal are left alone.
+
+```bash
+python repair.py -n /mnt/unionfs/Media/TV        # dry run: report what would change
+python repair.py /path/to/file.mp4 /path/to/dir   # repair in place
+mise run media:repair -- -n /path/to/file-or-dir  # same via mise
+```
+
+| Flag              | Effect                                                  |
+| ----------------- | ------------------------------------------------------- |
+| `-n`, `--dry-run` | Report what would be repaired; change nothing           |
+| `-c`, `--config`  | Alternate `sma-ng.yml` path (disables per-path routing) |
+| `--no-plex`       | Skip the Plex refresh after repairs                     |
+| `-v`, `--verbose` | Debug logging                                           |
+
+Without `-c`, each file is routed to the profile the daemon would convert it with, so `output-directory`,
+`temp-extension`, and output permissions (`chmod`, `uid`, `gid`) apply as they do for a conversion. The repaired copy
+is written to the temp file, re-probed, and only moved over the original when the kept streams, duration, and
+chapters match; otherwise the original is untouched. The exit code is 1 when a path is missing or any repair fails.
+
+The library audit reports the same damage as `stream_damage` findings and can fix them automatically with
+`daemon.audit.auto-fix.stream-damage: true`. See [Library Audit](library-audit.md) and
+[Repairing damaged media without transcoding](troubleshooting.md#repairing-damaged-media-without-transcoding).
+
+---
+
+## Running from the Docker host
+
+The image ships a POSIX `sh` script, `sma`, that runs CLI commands inside the running container from the Docker host.
+Install it from the image so it always matches the image version:
+
+```bash
+docker run --rm --entrypoint cat ghcr.io/newdave/sma-ng:latest /usr/local/bin/sma-host | sudo tee /usr/local/bin/sma >/dev/null
+sudo chmod 755 /usr/local/bin/sma
+```
+
+`mise run setup:docker:target` also installs it from a repo checkout. Then:
+
+```bash
+sma convert /mnt/unionfs/Media/Movies/film.mkv   # python manual.py -i <file> -a
+sma preview /mnt/unionfs/Media/Movies/film.mkv   # python manual.py -i <file> -oo
+sma repair -n /mnt/unionfs/Media/TV              # python repair.py ...
+sma audit /mnt/unionfs/Media/Movies              # python manual.py --audit -i <path>
+sma shell                                        # bash as the daemon user
+sma status                                       # container state
+```
+
+- Commands run through the entrypoint's `run` mode, so they execute as the daemon user: output files are owned by
+  `ubuntu` and the GPU groups and VAAPI environment match the daemon.
+- One path per file: pass the same path you see on the host. `/mnt`, `/transcode`, and `/recycle` are mounted at
+  identical paths; the compose files no longer mount `/downloads`. `sma` rejects a host path that is not under an
+  identity mount with exit code `2`. Use a `daemon.path-rewrites` entry for download clients that still report
+  `/downloads/...`.
+- Container selection: `SMA_CONTAINER`, otherwise the first running service in `SMA_COMPOSE_DIR`
+  (default `/opt/sma/docker`), otherwise the container named `sma-ng`. Exit code `3` means no running container.
+
+The full command table and migration notes from the old alias file are in
+[Docker Compose Quick Start](docker-compose-quickstart.md#6-install-the-sma-host-command).
 
 ---
 
 ## Daemon Mode
 
-The daemon runs an HTTP server that accepts webhook requests to queue conversions.
+The daemon runs an HTTP server that accepts webhook requests to queue conversions. Jobs are persisted to SQLite or
+PostgreSQL, workers process them in the background, and a web dashboard shows live status. The full reference is
+[daemon.md](daemon.md); the sections below are a summary.
 
 ### Starting
 
 ```bash
-# Basic (binds to 127.0.0.1:8585, 1 worker)
+# Basic (binds to 127.0.0.1:8585)
 python daemon.py
 
 # Production: listen on all interfaces, multiple workers
@@ -483,15 +421,19 @@ python daemon.py \
   --daemon-config config/sma-ng.yml \
   --logs-dir logs/ \
   --ffmpeg-dir /usr/local/bin
+
+# Validate configs and option generation, then exit
+python daemon.py --smoke-test
 ```
+
+Each setting resolves as CLI flag, then the `daemon:` block of `sma-ng.yml`, then the built-in default. An explicit
+flag always wins. See [daemon.md](daemon.md#starting) for the additional flags (`--job-timeout`,
+`--heartbeat-interval`, `--stale-seconds`, `--version`).
 
 ### Concurrency
 
-`--workers` controls how many conversions run at the same time. The daemon also enforces per-config concurrency: up to `--workers` jobs can run against the same config simultaneously, preventing hardware encoder contention.
-
-- Jobs run up to `--workers` at a time; excess jobs queue
-
-Example with `--workers 2`:
+`--workers` (or `daemon.workers`) controls how many conversions run at the same time; excess jobs queue. Profiles can
+cap their own concurrency and weight their cost against a shared budget so one slow profile cannot starve the rest.
 
 ```text
 Job 1: /TV/show.mkv      -> sma-ng.yml profile rq [starts immediately]
@@ -499,67 +441,50 @@ Job 2: /Movies/film.mkv  -> sma-ng.yml profile lq [starts immediately]
 Job 3: /TV/other.mkv     -> sma-ng.yml profile rq [waits for an available worker]
 ```
 
-Check active/waiting jobs:
-
 ```bash
 curl http://localhost:8585/health
 ```
 
+See [daemon.md](daemon.md#concurrency) and [profile concurrency caps](configuration.md#profiles).
+
 ### Web Dashboard
 
-Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features:
-
-- Real-time job statistics and status
-- Active/waiting job panels
-- Config mapping overview
-- Filterable job history table
-- Submit Job form for triggering conversions via the web, with path autocomplete (config prefixes, recent jobs, and live filesystem browsing)
+Open `http://localhost:8585/` (redirects to `/dashboard`). It shows job statistics, active and waiting jobs with
+progress, cluster nodes (PostgreSQL mode), config mappings, a filterable job history with requeue/cancel actions, a
+Submit Job form with path autocomplete, a log viewer, and admin node controls at `/admin`. Metrics are at `/metrics`.
 
 ### API Endpoints
 
-| Method | Path                 | Auth | Description                                                             |
-| ------ | -------------------- | ---- | ----------------------------------------------------------------------- |
-| `GET`  | `/`                  | No   | Redirects to `/dashboard`                                               |
-| `GET`  | `/dashboard`         | No   | Web dashboard                                                           |
-| `GET`  | `/health`            | No   | Health check with job stats (local node)                                |
-| `GET`  | `/status`            | No   | Cluster-wide status across all nodes                                    |
-| `GET`  | `/docs`              | No   | Rendered documentation                                                  |
-| `GET`  | `/jobs`              | Yes  | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
-| `GET`  | `/jobs/<id>`         | Yes  | Get specific job                                                        |
-| `GET`  | `/configs`           | Yes  | Config mappings and status                                              |
-| `GET`  | `/stats`             | Yes  | Job statistics by status                                                |
-| `GET`  | `/scan`              | Yes  | Filter paths not yet scanned. Query: `?path=/a.mkv&path=/b.mkv`         |
-| `GET`  | `/browse`            | Yes  | List filesystem dirs/files within configured paths. Query: `?path=/dir` |
-| `POST` | `/webhook`           | Yes  | Submit conversion job (file or directory path)                          |
-| `POST` | `/cleanup`           | Yes  | Remove old jobs. Query: `?days=30`                                      |
-| `POST` | `/shutdown`          | Yes  | Graceful shutdown (drains in-progress jobs)                             |
-| `POST` | `/jobs/<id>/requeue` | Yes  | Requeue a specific failed job                                           |
-| `POST` | `/jobs/requeue`      | Yes  | Requeue all failed jobs. Query: `?config=...` to filter                 |
-| `POST` | `/scan/filter`       | Yes  | Filter unscanned paths. Body: `{"paths": [...]}`                        |
-| `POST` | `/scan/record`       | Yes  | Mark paths as scanned. Body: `{"paths": [...]}`                         |
+The route table (including `/jobs`, `/logs`, `/library/*`, `/reload`, `/restart`, and `/shutdown`) is in
+[daemon.md](daemon.md#api-endpoints), and the machine-readable spec is `docs/openapi.yaml`. Common calls:
+
+| Method | Path                | Auth   | Description                                                   |
+| ------ | ------------------- | ------ | ------------------------------------------------------------- |
+| `GET`  | `/health`           | No     | Health check with job stats                                   |
+| `GET`  | `/status`           | Partly | Minimal without credentials; cluster detail with a valid key  |
+| `GET`  | `/jobs`             | Yes    | List jobs. Query: `?status=pending&limit=50&offset=0`         |
+| `POST` | `/webhook/generic`  | Yes    | Submit a conversion job (file or directory path)              |
+| `POST` | `/webhook/sonarr`   | Yes    | Native Sonarr webhook                                         |
+| `POST` | `/webhook/radarr`   | Yes    | Native Radarr webhook                                         |
+| `POST` | `/reload`           | Yes    | Reload the `daemon:` block without restarting                 |
+| `POST` | `/shutdown`         | Yes    | Graceful, bounded shutdown                                    |
 
 ### Webhook Request Formats
 
 ```bash
 # Plain text body
-curl -X POST http://localhost:8585/webhook \
+curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -d "/path/to/movie.mkv"
 
-# JSON body
-curl -X POST http://localhost:8585/webhook \
-  -H "X-API-Key: SECRET" \
-  -H "Content-Type: application/json" \
-  -d '{"path": "/path/to/movie.mkv"}'
-
-# JSON with extra arguments
-curl -X POST http://localhost:8585/webhook \
+# JSON body with extra manual.py arguments
+curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "args": ["-tmdb", "603"]}'
 
-# JSON with config override
-curl -X POST http://localhost:8585/webhook \
+# JSON with config override (bypasses path matching)
+curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "config": "/custom/sma-ng.yml"}'
@@ -567,357 +492,204 @@ curl -X POST http://localhost:8585/webhook \
 
 ### Authentication
 
-API key can be set via (priority order):
+The API key resolves as `--api-key`, then `daemon.api-key` in `sma-ng.yml`; with neither set, authentication is
+disabled. Send it as `X-API-Key: SECRET` or `Authorization: Bearer SECRET`.
 
-1. `--api-key` CLI argument
-2. `Daemon.api_key` in `sma-ng.yml`
-
-Send via header: `X-API-Key: SECRET` or `Authorization: Bearer SECRET`
-
-Public endpoints (no auth): `/`, `/dashboard`, `/health`, `/status`, `/docs`, `/favicon.png`
+- Public endpoints: `/`, `/dashboard`, `/admin`, `/metrics`, `/health`, `/status`, `/docs`, `/favicon.png`.
+- The dashboard, admin, and metrics pages are HTML shells; the API key is never embedded in the page. When a key is
+  configured the browser prompts once on the first `401`, keeps the key in `sessionStorage` for that tab, and sends it
+  as `X-API-Key` on every request.
+- `/status` is minimal without credentials (`status`, `version`, aggregate `jobs` counts). Node ids, hosts, active
+  jobs, and paths require a valid key.
+- `/browse` is limited to the configured routing and scan roots. Request bodies over 1 MiB are rejected with `413`.
 
 ### Path-Based Configuration
 
+Each inbound path is matched against `daemon.routing` (longest prefix wins) to pick a profile and the services to
+notify after conversion. `path-rewrites` normalise the path first.
+
 ```yaml
-Daemon:
-  default_config: config/sma-ng.yml
-  api_key: your_secret_key
-  db_url:
-  ffmpeg_dir:
-  media_extensions: [.mkv, .m4v, .avi, .mov, .ts]
-  scan_paths:
-    - path: /mnt/local/Media
-      interval: 3600
-      rewrite_from: /mnt/local/Media
-      rewrite_to: /mnt/unionfs/Media
-  path_configs:
-    - path: /mnt/unionfs/Media/TV
+daemon:
+  path-rewrites:
+    - from: /mnt/local/Media
+      to: /mnt/unionfs/Media
+  routing:
+    - match: /mnt/unionfs/Media/TV
       profile: rq
-    - path: /mnt/unionfs/Media/Movies/4K
+      services: [sonarr.main]
+    - match: /mnt/unionfs/Media/Movies/4K
       profile: rq
-    - path: /mnt/unionfs/Media/Movies
+      services: [radarr.main, plex.main]
+    - match: /mnt/unionfs/Media/Movies
       profile: lq
+      services: [radarr.main]
 ```
 
-**Top-level keys:**
-
-| Key                | Description                                                                                                                      |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `default_config`   | Config file used when no `path_configs` prefix matches                                                                           |
-| `api_key`          | API authentication key (overridable via `--api-key`)                                                                             |
-| `db_url`           | SQLite or PostgreSQL URL for daemon job persistence. This value is loaded only from `sma-ng.yml`.                                |
-| `ffmpeg_dir`       | Directory containing `ffmpeg`/`ffprobe` binaries. Prepended to PATH for each conversion. Overridable via `--ffmpeg-dir`          |
-| `media_extensions` | File extensions considered media files for directory scanning and `/browse` (default: `.mkv .m4v .avi .mov .wmv .ts .flv .webm`) |
-| `path_rewrites`    | Prefix substitutions applied before config matching; overlapping rewrites are matched longest-prefix-first                       |
-| `scan_paths`       | Directories for scheduled background scanning. See [Scheduled Directory Scanning](#scheduled-directory-scanning)                 |
-| `path_configs`     | Array of `{"path": "...", "config": "..."}` entries for per-directory config selection                                           |
-
-Matching is longest-prefix-first. `/mnt/unionfs/Media/Movies/4K/film.mkv` matches `Movies/4K`, not `Movies`. If `path_rewrites` overlap, the most specific rewrite is applied before config matching.
+`/mnt/unionfs/Media/Movies/4K/film.mkv` matches the `Movies/4K` rule, not `Movies`. With `daemon.strict-routing: true`
+an unmatched path is refused (HTTP 400 `no_routing_match`); otherwise it converts with bare `base` and logs a
+`[routing-miss]` warning. See
+[daemon.md](daemon.md#path-routing) and [Top-Level `daemon` Keys](daemon.md#top-level-daemon-keys).
 
 ### Per-Config Logging
 
-Each config gets a separate log file in `logs/`. The log filename is derived from the config file stem (filename without extension):
-
-| Config              | Log File          |
-| ------------------- | ----------------- |
-| `config/sma-ng.yml` | `logs/sma-ng.log` |
-
-Log rotation: 10MB max, 5 backups.
+Each config gets its own rotating log file in `logs/`, named after the config file stem
+(`config/sma-ng.yml` writes `logs/sma-ng.log`; 10 MB, 5 backups). The daemon also exposes `/logs` for browsing and
+live-tailing, and writes FFmpeg failure sidecars. See [daemon.md](daemon.md#per-config-logging).
 
 ### Scheduled Directory Scanning
 
-The daemon can periodically scan directories for new media files and queue them automatically. Configure `scan_paths` in `Daemon:` section in `sma-ng.yml`:
+The daemon can periodically scan directories and queue new media automatically:
 
-```json
-{
-  "scan_paths": [
-    {
-      "path": "/mnt/local/Media",
-      "interval": 3600,
-      "rewrite_from": "/mnt/local/Media",
-      "rewrite_to": "/mnt/unionfs/Media"
-    }
-  ]
-}
+```yaml
+daemon:
+  scan-paths:
+    - path: /mnt/local/Media
+      interval: 3600
+      rewrite-from: /mnt/local/Media
+      rewrite-to: /mnt/unionfs/Media
+      enabled: true
 ```
 
-| Field          | Description                                                                                                  |
-| -------------- | ------------------------------------------------------------------------------------------------------------ |
-| `path`         | Directory to scan for media files                                                                            |
-| `interval`     | Scan interval in seconds (e.g., `3600` = every hour)                                                         |
-| `rewrite_from` | Path prefix to replace before submitting the job (optional)                                                  |
-| `rewrite_to`   | Replacement prefix (optional; use when the scanner sees files at a different mount point than the converter) |
-
-The daemon tracks which files have been submitted in the `scanned_files` database table. Files already in that table are skipped on subsequent scans. Any file whose extension matches `media_extensions` is eligible for submission. `.mp4` is excluded from the default list to avoid re-processing already-converted output; add it explicitly if you want scanning to pick it up.
-
-**Manual batch scan (script):** Use `scripts/sma-scan.sh` to walk a directory and submit each media file via webhook, with the same deduplication logic:
+Files already recorded in the `scanned_files` table are skipped on later scans. Only extensions listed in
+`daemon.media-extensions` are eligible; `.mp4` is excluded by default so converted output is not reprocessed.
+For a manual batch submission use `scripts/sma-scan.sh`:
 
 ```bash
-# Submit all unscanned media files in a directory
-bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies
-
-# Force resubmit everything (ignore scan history)
-bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --reset
-
-# Dry-run: show what would be submitted
-bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --dry-run
-
-# Use a specific config for all files
-bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --config config/sma-ng.yml
+bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies             # submit unscanned files
+bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --dry-run   # show what would be submitted
+bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --reset     # ignore scan history
 ```
 
-**Scan API endpoints:**
-
-```bash
-# Check which paths have NOT been scanned yet (small list)
-curl "http://localhost:8585/scan?path=/mnt/unionfs/Media/film1.mkv&path=/mnt/unionfs/Media/film2.mkv"
-# Returns: {"unscanned": ["/mnt/unionfs/Media/film2.mkv"], "total": 2, "already_scanned": 1}
-
-# Same check for large lists (POST)
-curl -X POST http://localhost:8585/scan/filter \
-  -H 'Content-Type: application/json' \
-  -d '{"paths": ["/mnt/unionfs/Media/film1.mkv", "/mnt/unionfs/Media/film2.mkv"]}'
-
-# Record paths as scanned (mark without submitting a job)
-curl -X POST http://localhost:8585/scan/record \
-  -H 'Content-Type: application/json' \
-  -d '{"paths": ["/mnt/unionfs/Media/film1.mkv"]}'
-```
+The `/scan`, `/scan/filter`, and `/scan/record` endpoints are described in
+[daemon.md](daemon.md#scheduled-directory-scanning).
 
 ### Job Persistence (SQLite or PostgreSQL)
 
-The daemon supports two database modes:
+Set `daemon.db-url` in `sma-ng.yml`; there is no `--db-url` flag and the connection is not read from the
+environment. An empty `db-url` makes startup fail fast.
 
-- SQLite for single-node deployments. Docker non-`-pg` profiles default to `sqlite:////data/sma-ng.db`, which is
-  persisted on the host at `/opt/sma/data/sma-ng.db`.
-- PostgreSQL for clustered deployments, shared job queues, cluster logs, metrics, and cluster administration.
-
-Configure the connection in `sma-ng.yml`:
-
-```yaml
-# config/sma-ng.yml
-daemon:
-  db_url: sqlite:////data/sma-ng.db
-```
-
-There is no `--db-url` CLI flag, and database connection details are not read from environment variables. If `daemon.db_url` is empty, startup fails fast with an error.
-
-Common queries (all hit the same Postgres instance):
+- SQLite (`sqlite:////data/sma-ng.db`) for single-node deployments. Non-`-pg` Docker profiles default to it.
+- PostgreSQL (needs the `postgres` extra) for clusters: shared job queue, node heartbeats and approval, cluster logs,
+  metrics, and the library audit.
 
 ```bash
-# View statistics
 curl http://localhost:8585/stats
-
-# List pending jobs
 curl "http://localhost:8585/jobs?status=pending"
-
-# Cleanup old jobs (default: 30 days)
 curl -X POST "http://localhost:8585/cleanup?days=7"
 ```
 
-**Schema (managed by the daemon on startup):**
+See [daemon.md](daemon.md#job-persistence), [daemon.md](daemon.md#cluster-mode), and
+[Cluster Operations](cluster-operations.md).
 
-```sql
-jobs(id, path, config, args, status, worker_id, node_id, error, created_at, started_at, completed_at, ...)
-scanned_files(path, scanned_at)
-cluster_nodes(node_id, host, workers, last_seen, started_at, status, approval_status, ...)
-node_commands(id, node_id, command, status, ...)
-logs(id, config, node_id, level, message, timestamp)
-```
+### Job Timeout
 
-The `scanned_files` table prevents duplicate submissions across scanner restarts. `cluster_nodes` is the source of truth for the dashboard's node list and the heartbeat/approval flow. `node_commands` is the durable channel daemons use to broadcast control operations (reload, restart, drain) across the cluster.
+Each conversion runs `manual.py` (and the `ffmpeg` it spawns) in its own process group under a per-job watchdog.
+When `daemon.job-timeout-seconds` (default `7200`, or `--job-timeout`) elapses, the watchdog sends `SIGTERM` to the
+whole process tree, then `SIGKILL` after 5 seconds, and the job fails with `Job timed out after Ns`. Cancelling a
+running job kills its tree the same way, and a cancel or requeue from another node is noticed within about 10
+seconds. `0` disables the timeout. See [daemon.md](daemon.md#job-timeout).
 
 ### Graceful Shutdown
 
-Send `POST /shutdown` to drain in-progress conversions before stopping:
+`POST /shutdown` (or SIGTERM, which the Docker entrypoint forwards) stops accepting new jobs and drains active
+conversions. The drain is bounded: it waits up to the job timeout plus 5 minutes (24 hours when the timeout is `0`),
+then kills whatever is still running and leaves those jobs `running` so they are requeued (by node-offline recovery in
+cluster mode, or on the next start for SQLite). `POST /restart` and SIGHUP drain the same way and re-exec with the
+same arguments.
 
 ```bash
 curl -X POST http://localhost:8585/shutdown -H "X-API-Key: SECRET"
 ```
 
-The daemon stops accepting new jobs immediately, waits for all active conversions to finish, then exits. The Docker entrypoint forwards SIGTERM to the daemon, so `docker compose stop` triggers the same graceful drain.
-
 ---
 
 ## Media Manager Integration
 
-### Sonarr
-
-1. Configure `[Sonarr]` section in `sma-ng.yml` with host, port, API key
-2. In Sonarr: Settings → Connect → Add Custom Script
-   - On Download/Import: Yes, On Upgrade: Yes
-   - Path: `/bin/bash`
-   - Arguments: Full path to `triggers/media_managers/sonarr.sh`
-3. Multiple instances: Add `[Sonarr-Kids]` etc. sections with unique `path` values
-
-**Per-instance profile routing:** Set `Daemon.path_configs` entries in `sma-ng.yml` to choose `rq` or `lq` based on the imported path:
+Sonarr and Radarr can post to the daemon directly (`/webhook/sonarr`, `/webhook/radarr`, recommended) or run the
+scripts in `triggers/media_managers/`. Define instances under `services:` and reference them from `daemon.routing`
+rules by `<type>.<instance>`; the longest matching `match` prefix selects the profile and the services to notify:
 
 ```yaml
-Daemon:
-  path_configs:
-    - path: /mnt/unionfs/Media/TV
+services:
+  sonarr:
+    main:
+      url: https://sonarr.example.com
+      apikey: abc123
+  radarr:
+    main:
+      url: https://radarr.example.com
+      apikey: def456
+  plex:
+    main:
+      url: http://plex.example.com:32400
+      token: your-plex-token
+
+daemon:
+  routing:
+    - match: /mnt/unionfs/Media/TV
       profile: rq
+      services: [sonarr.main, plex.main]
+    - match: /mnt/unionfs/Media/Movies
+      profile: rq
+      services: [radarr.main, plex.main]
 ```
 
-This is useful when Sonarr imports files to a staging/download path that doesn't match the `path_configs` prefixes in `Daemon:` section in `sma-ng.yml`.
+When deploying with `mise run deploy:config`, declare `path`/`profile` (or `routes`) on each instance in
+`setup/local.yml` and the routing rules are generated for you.
 
-### Radarr
-
-1. Configure `[Radarr]` section in `sma-ng.yml`
-2. In Radarr: Settings → Connect → Add Custom Script
-   - On Download/Import: Yes, On Upgrade: Yes
-   - Path: `/bin/bash`
-   - Arguments: Full path to `triggers/media_managers/radarr.sh`
-3. Multiple instances: Add `[Radarr-4K]`, `[Radarr-Kids]` etc.
-
-**Per-instance routing:** Same as Sonarr; choose instances with `daemon.routing` rules in `sma-ng.yml`.
-
-### Multiple Instance Support
-
-Any config section starting with `Sonarr` or `Radarr` is automatically discovered. Each instance requires a `path` field for directory-based matching:
-
-```ini
-[Sonarr]
-path = /mnt/unionfs/Media/TV
-host = sonarr.example.com
-apikey = abc123...
-
-[Sonarr-Kids]
-path = /mnt/unionfs/Media/TV-Kids
-host = sonarr-kids.example.com
-apikey = def456...
-
-[Radarr]
-path = /mnt/unionfs/Media/Movies
-host = radarr.example.com
-apikey = ghi789...
-
-[Radarr-4K]
-path = /mnt/unionfs/Media/Movies/4K
-host = radarr-4k.example.com
-apikey = jkl012...
-```
-
-When `manual.py` processes `/mnt/unionfs/Media/Movies/4K/film.mp4`, it matches `Radarr-4K` (longest prefix) and triggers a rescan on that instance.
-
-### Plex
-
-Configure `[Plex]` section. SMA-NG refreshes the matching library section after conversion. Use `path-mapping` if Plex sees files at different mount points.
-
-Connect directly to the Plex server using its local hostname or IP on port `32400` (or your custom port), and set the Plex `token` in `[Plex]`.
+After an in-place conversion SMA-NG rescans the matching series or movie and imports the converted file so
+Sonarr/Radarr do not show it as missing; Plex gets a library refresh, with path mapping available when Plex sees
+different mount points. Emby, Jellyfin, and Autoscan are supported too. Setup steps, multiple instances, and
+troubleshooting are in [integrations.md](integrations.md); service keys are in
+[configuration.md](configuration.md#services).
 
 ---
 
 ## Download Client Integration
 
-All download client integrations use bash scripts in `triggers/` that submit jobs to the daemon via webhook.
+Download clients call bash scripts in `triggers/`, which submit jobs to the daemon via `/webhook/generic`:
 
-### NZBGet
+| Client      | Script                                                                  |
+| ----------- | ----------------------------------------------------------------------- |
+| NZBGet      | `triggers/usenet/nzbget.sh` (Settings, Extension Scripts)               |
+| SABnzbd     | `triggers/usenet/sabnzbd.sh` (category script in the Scripts folder)    |
+| qBittorrent | `triggers/torrents/qbittorrent.sh "%L" "%T" "%R" "%F" "%N" "%I"`        |
+| Deluge      | `triggers/torrents/deluge.sh` (Execute plugin, Torrent Complete)        |
+| uTorrent    | `triggers/torrents/utorrent.sh %L %T %D %K %F %I %N`                    |
 
-In Settings → Extension Scripts, add `triggers/usenet/nzbget.sh`. Configure categories under the script settings. The script requires the daemon to be running.
-
-### SABnzbd
-
-In Settings → Folders → Scripts Folder, point to the `triggers/usenet/` directory. Set `sabnzbd.sh` as the category script. Configure `[SABNZBD]` section in `sma-ng.yml`.
-
-### qBittorrent
-
-In Tools → Options → Downloads → Run external program on torrent completion:
-
-```bash
-bash /path/to/triggers/torrents/qbittorrent.sh "%L" "%T" "%R" "%F" "%N" "%I"
-```
-
-Configure `[qBittorrent]` section with host, credentials, and label mappings.
-
-### Deluge
-
-Enable Execute plugin in Deluge WebUI. Set `triggers/torrents/deluge.sh` as the Torrent Complete handler. Configure `[Deluge]` section with daemon host and credentials.
-
-### uTorrent
-
-In Options → Preferences → Advanced → Run Program, set:
-
-```bash
-bash /path/to/triggers/torrents/utorrent.sh %L %T %D %K %F %I %N
-```
+The scripts submit only media files and exit non-zero when a submission fails. Exit codes, timeouts, and per-client
+setup are in [integrations.md](integrations.md#download-clients).
 
 ---
 
 ## Hardware Acceleration
 
-The `gpu` key under `base.converter` sets the hardware acceleration profile used at runtime. You can also set each hwaccel option manually.
+Set `base.video.gpu` to pick the backend. It drives the derived hardware settings (`hwaccels`, decoders, devices,
+output formats, and the default `base.video.codec`).
 
-### GPU Config Option
+| `gpu` value    | Platform                | Codec examples                           |
+| -------------- | ----------------------- | ---------------------------------------- |
+| `qsv`          | Intel Quick Sync        | `h265qsv`, `h264qsv`, `av1qsv`           |
+| `vaapi`        | Intel / AMD VA-API      | `h265vaapi`, `h264vaapi`, `av1vaapi`     |
+| `nvenc`        | NVIDIA                  | `h265_nvenc`, `h264_nvenc`, `av1_nvenc`  |
+| `videotoolbox` | Apple Silicon / macOS   | `h265_videotoolbox`, `h264_videotoolbox` |
+| empty          | Software (CPU)          | `h265`, `h264`, `av1`                    |
 
-The `gpu` key is a runtime setting in `sma-ng.yml` that selects which hardware acceleration backend SMA-NG uses during conversion. `make config` and `mise run config:generate` call the same generator, auto-detect the GPU the same way, and write the correct value into the generated `sma-ng.yml`, but you can also set or change it manually at any time. The runtime settings driven by `gpu` are `hwaccels`, `hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`, and `base.video.codec`.
-
-Valid values for `gpu`:
-
-| Value          | Platform               | Notes                                                                                           |
-| -------------- | ---------------------- | ----------------------------------------------------------------------------------------------- |
-| `qsv`          | Intel Quick Sync Video | Requires an accessible DRI render node such as `/dev/dri/renderD128` and the i915 kernel module |
-| `vaapi`        | Intel/AMD VAAPI        | Requires an accessible DRI render node such as `/dev/dri/renderD128` and `vainfo`               |
-| `nvenc`        | NVIDIA NVENC           | Requires NVIDIA driver and `nvidia-smi`                                                         |
-| `videotoolbox` | Apple Silicon / macOS  | Built into macOS; no device path needed                                                         |
-| `software`     | CPU only               | No hardware acceleration                                                                        |
-
-Auto-detection runs the same shared script behind `mise run config:gpu` and `make detect-gpu`, checking each platform in order: NVIDIA → Intel QSV → VAAPI → VideoToolbox → software.
-
-### Intel QSV
-
-```ini
-[Converter]
-hwaccels = qsv
-hwaccel-decoders = hevc_qsv, h264_qsv, vp9_qsv, av1_qsv
-hwdevices = qsv:/dev/dri/renderD128
-hwaccel-output-format = qsv:qsv
-
-[Video]
-codec = h265qsv, h265
+```yaml
+base:
+  video:
+    gpu: qsv
+    codec: [h265qsv, h265]
 ```
 
-Supported QSV codecs: `h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`
+- The first codec in the list is used for encoding; the rest are copy-eligible.
+- `mise run config:generate` auto-detects the GPU (override with `GPU=nvidia|intel|amd|apple|none`);
+  `mise run config:gpu` only reports the detection result.
+- If a hardware encode fails, the fallback ladder (`fallback-policy`) retries with adjusted options and, under
+  `aggressive`, finishes on the CPU. See [configuration.md](configuration.md#full-software-fallback).
 
-### Intel VAAPI
-
-```ini
-[Converter]
-hwaccels = vaapi
-hwaccel-decoders = hevc_vaapi, h264_vaapi
-hwdevices = vaapi:/dev/dri/renderD128
-hwaccel-output-format = vaapi:vaapi
-
-[Video]
-codec = h265vaapi, h265
-```
-
-Supported VAAPI codecs: `h264vaapi`, `h265vaapi`, `av1vaapi`
-
-### NVIDIA NVENC
-
-```ini
-[Converter]
-hwaccels = cuda
-hwaccel-decoders = hevc_cuvid, h264_cuvid
-
-[Video]
-codec = h265_nvenc, h265
-```
-
-### Apple VideoToolbox
-
-```ini
-[Video]
-codec = h264_videotoolbox, h264
-```
-
-### Key Configuration Rules
-
-- `hwdevices` format is `type:device_path` where `type` must be a substring of the encoder codec name
-- `hwaccel-output-format` format is `hwaccel_name:output_format` (dict format, not bare value)
-- The codec list's first entry is used for encoding; subsequent entries allow stream copying
-- CRF is mapped to `-global_quality` for QSV and `-qp` for VAAPI automatically
+Backend setup, startup validation, and Docker device troubleshooting are in
+[hardware-acceleration.md](hardware-acceleration.md).
 
 ---
 
@@ -946,7 +718,7 @@ codec = h264_videotoolbox, h264
 2. Filter by `ignored-dispositions`
 3. Source codec in allowed list → **copy**; otherwise → **re-encode** to first codec
 4. Apply channel limits (`max-channels`), bitrate limits (`max-bitrate`)
-5. Sort by `[Audio.Sorting]` rules
+5. Sort by `base.audio.sorting` rules
 6. Select default stream
 7. Optionally generate Universal Audio stream (stereo compatibility)
 
@@ -956,9 +728,11 @@ codec = h264_videotoolbox, h264
 
 ### converter/avcodecs.py
 
-Codec definitions mapping SMA-NG names to FFmpeg encoders. Each codec class handles its own option parsing and FFmpeg flag generation.
+Codec definitions mapping SMA-NG names to FFmpeg encoders. Each codec class handles its own option parsing and FFmpeg
+flag generation.
 
-**Video codecs**: H264, H265, AV1, VP9, MPEG-1/2, H263, FLV, Theora + hardware variants (QSV, VAAPI, NVENC, VideoToolbox, V4L2M2M, OMX)
+**Video codecs**: H264, H265, AV1, VP9, MPEG-1/2, H263, FLV, Theora + hardware variants (QSV, VAAPI, NVENC,
+VideoToolbox, V4L2M2M, OMX)
 
 **Audio codecs**: AAC, AC3, EAC3, DTS, FLAC, MP3, Vorbis, Opus, PCM variants, TrueHD, ALAC
 
@@ -968,8 +742,11 @@ Codec definitions mapping SMA-NG names to FFmpeg encoders. Each codec class hand
 
 FFmpeg/FFprobe wrapper. Key classes:
 
-- **MediaInfo** / **MediaStreamInfo** / **MediaFormatInfo**: Parsed probe results
-- **FFMpeg**: Binary wrapper with `probe()`, `convert()`, `thumbnail()`, codec/hwaccel queries
+- **MediaInfo** / **MediaStreamInfo** / **MediaFormatInfo**: Parsed probe results. `MediaInfo.cover_art` lists
+  artwork streams (attached pictures, cover art demoted to an `mp4v` video track, image attachments) and
+  `is_unknown_stream()` flags streams FFprobe could not classify; both feed stream selection and the repair tool.
+- **FFMpeg**: Binary wrapper with `probe(fname, posters_as_video=True, framedata=True)` (`framedata=False` skips the
+  per-frame probe), `convert()`, `thumbnail()`, codec/hwaccel queries
 
 ### converter/formats.py
 
@@ -977,23 +754,54 @@ Container format definitions (MP4, MKV, AVI, WebM, etc.) mapping to FFmpeg muxer
 
 ### converter/\_\_init\_\_.py
 
-**Converter** class: Orchestrates codec/format selection, builds FFmpeg commands, manages conversion with progress tracking.
+**Converter** class: Orchestrates codec/format selection, builds FFmpeg commands, manages conversion with progress
+tracking.
 
 ### resources/mediaprocessor.py
 
 **MediaProcessor**: Core pipeline orchestrator. Key methods:
 
 - `isValidSource()`: FFprobe validation
-- `generateOptions()`: Stream analysis → FFmpeg option dict (~800 lines)
-- `convert()`: Execute FFmpeg with collision handling
-- `fullprocess()`: Complete pipeline (validate → convert → tag → relocate → replicate → notify)
+- `generateOptions()`: Stream analysis to FFmpeg option dict
+- `convert()`: Execute FFmpeg; collision-safe (numbers outputs such as `name.2.mp4`, never overwrites), with a
+  hardware-to-software fallback ladder whose last tier is a full-software re-encode (`fallback-policy: aggressive`)
+- `fullprocess()`: Complete pipeline (validate, convert, tag, relocate, replicate, notify)
 - `setAcceleration()`: Hardware accel configuration with bit-depth checks
 - `estimateVideoBitrate()`: Source bitrate estimation
 - `replicate()`: copy-to / move-to file operations
 
+### resources/media_repair.py
+
+**RepairProcessor**: stream-copy repair used by `repair.py`. `diagnose()` builds a `RepairPlan` (data, unknown, and
+artwork streams to drop; corrective aspect ratio), `build_opts()` produces the `-c copy` options, and `verify()`
+re-probes the copy before it atomically replaces the original.
+
+### resources/library_audit/
+
+Library auditor. `engine.py` (`AuditEngine`) probes one queue unit, upserts findings, and runs optional auto-fix, and
+`run_audit_inline()` backs `manual.py --audit`. `probes.py` holds the per-file checks, including `repair_check()` for
+`stream_damage` and `hybrid_aspect`. `enumerator.py`, `kinds.py`, and `recycler.py` walk roots, define finding kinds,
+and move files to the recycle-bin. See [Library Audit](library-audit.md).
+
+### resources/naming.py and resources/rename_util.py
+
+`naming.py` is the template-based naming engine (data from Sonarr/Radarr, else FFprobe + guessit + TMDB).
+`rename_util.py` backs `rename.py`: it renames already-converted files with those templates, updates `.plexmatch`
+sidecars, and triggers a Plex refresh.
+
+### resources/daemon/
+
+- `server.py`: `DaemonServer`, the HTTP server and process lifecycle
+- `handler.py`, `routes.py`: request handling and route tables (webhooks, jobs, logs, admin, library)
+- `worker.py`: worker pool, job execution, and the timeout watchdog
+- `threads.py`: heartbeat, scanner, and library-audit worker threads
+- `db.py`: SQLite/PostgreSQL job store, cluster tables, and findings
+- `config.py`: `daemon:` settings resolution (CLI flag, then `sma-ng.yml`, then default)
+
 ### resources/readsettings.py
 
-**ReadSettings**: Parses `sma-ng.yml` into typed attributes. Handles defaults, type coercion, multi-instance Sonarr/Radarr discovery.
+**ReadSettings**: Parses `sma-ng.yml` (via `config_loader.py` and the pydantic schema in `config_schema.py`) into
+typed attributes, applies profiles, and resolves service instances.
 
 ### resources/metadata.py
 
@@ -1001,11 +809,13 @@ Container format definitions (MP4, MKV, AVI, WebM, etc.) mapping to FFmpeg muxer
 
 ### resources/postprocess.py
 
-**PostProcessor**: Discovers and runs scripts in `post_process/` directory with SMA-NG environment variables.
+**PostProcessor**: Discovers and runs the scripts in `post_process/` with the SMA-NG environment variables. See
+[Post-Process Scripts](#post-process-scripts).
 
 ### resources/log.py
 
-Logging setup with INI-based configuration. All output goes to stdout/stderr — no log files are written by the core library. The daemon writes per-config log files in `logs/` using rotating file handlers.
+Logging setup with optional INI-based configuration. Core library output goes to stdout/stderr. The daemon writes
+per-config rotating log files in `logs/`.
 
 ### resources/lang.py
 
@@ -1013,7 +823,8 @@ Language code conversion (ISO 639 alpha2/alpha3) via babelfish.
 
 ### resources/custom.py
 
-Optional hook points loaded from `config/custom.py`: `validation()`, `blockVideoCopy()`, `blockAudioCopy()`, `skipStream()`, `streamTitle()`.
+Optional hook points loaded from `config/custom.py`: `validation()`, `blockVideoCopy()`, `blockAudioCopy()`,
+`skipStream()`, `streamTitle()`.
 
 ### autoprocess/plex.py
 
@@ -1021,10 +832,14 @@ Plex library refresh via PlexAPI with path mapping support.
 
 ### resources/mediamanager.py
 
-Shared Sonarr/Radarr API helpers. After in-place conversion the daemon issues a two-step chain keyed on the series/movie ID resolved via `/api/v3/parse`:
+Shared Sonarr/Radarr API helpers. After in-place conversion the daemon issues a two-step chain keyed on the
+series/movie ID resolved via `/api/v3/parse`:
 
-1. `RescanSeries` (Sonarr) / `RescanMovie` (Radarr) — re-evaluates known episodefile/moviefile records and unlinks the now-missing original path (extension and/or basename changed during conversion).
-2. `DownloadedEpisodesScan` (Sonarr) / `DownloadedMoviesScan` (Radarr) with the converted *file* path and `importMode: Move` — imports the new file and links it to the existing series/movie. Without this second step Sonarr/Radarr leave the file orphaned and the episode/movie shows as missing/deleted. Passing a single file path (rather than a directory) lets these commands operate on library paths in Sonarr v3+/Radarr v4+.
+1. `RescanSeries` (Sonarr) / `RescanMovie` (Radarr) — re-evaluates known file records and unlinks the now-missing
+   original path (extension and/or basename changed during conversion).
+2. `DownloadedEpisodesScan` (Sonarr) / `DownloadedMoviesScan` (Radarr) with the converted *file* path and
+   `importMode: Move` — imports the new file and links it to the existing series/movie. Without this second step the
+   file is orphaned and the episode/movie shows as missing.
 
 When the instance has `force-rename: true`, a `RenameFiles` command is chained after the import completes.
 
@@ -1068,16 +883,50 @@ Run `python manual.py -cl` for the full list. Key codecs:
 
 ## Post-Process Scripts
 
-Place executable scripts in the `post_process/` directory. They receive environment variables:
+There are two different things with similar names.
 
-| Variable      | Description                     |
-| ------------- | ------------------------------- |
-| `SMA_FILES`   | JSON array of output file paths |
-| `SMA_TMDBID`  | TMDB ID                         |
-| `SMA_SEASON`  | Season number (TV only)         |
-| `SMA_EPISODE` | Episode number (TV only)        |
+### Hook scripts (`post_process/`)
 
-See `setup/post_process/` for examples (Plex, Emby, Jellyfin, iTunes).
+After each conversion, SMA-NG can run every script in the repository's `post_process/` directory. Enable it with
+`base.converter.post-process: true`; set `wait-post-process: true` to wait for each script to exit, and pass `-np` to
+`manual.py` to skip them for one run.
+
+- Scripts run in sorted filename order, each as its own process with the daemon's environment plus the variables
+  below. A script that fails is logged and does not stop the rest.
+- Subdirectories, files starting with `_` (private helpers), files ending in `.txt`, `.log`, `.pyc`, or `.md`, and
+  `resources` and `.DS_Store` are skipped. Make scripts executable and give them a shebang.
+
+| Variable       | Description                                                                         |
+| -------------- | ----------------------------------------------------------------------------------- |
+| `SMA_FILES`    | JSON array of output file paths. The first is the primary file; the rest are copies |
+| `SMA_TMDBID`   | TMDB ID (movies and TV)                                                             |
+| `SMA_SEASON`   | Season number (TV only)                                                             |
+| `SMA_EPISODE`  | First episode number (TV only)                                                      |
+| `SMA_EPISODES` | Comma-separated episode numbers (TV only)                                           |
+
+```bash
+#!/usr/bin/env bash
+# post_process/log_outputs.sh
+echo "converted: ${SMA_FILES} (tmdb ${SMA_TMDBID:-n/a})" >> /tmp/sma-post.log
+```
+
+The repository no longer ships Plex, Emby, Jellyfin, or iTunes hook examples; use the `services.*` integrations for
+library refreshes. `mise run deploy:config` copies `setup/post_process/*.py` into each host's `post_process/`,
+except `_`-prefixed helpers such as `_json_helper.py`.
+
+### Download-client and manager scripts (`setup/post_process/`)
+
+`setup/post_process/` holds `sonarr_post_process.sh`, `radarr_post_process.sh`, `nzbget_post_process.sh`,
+`sabnzbd_post_process.sh`, `qbittorrent_post_process.sh`, `deluge_post_process.sh`, and `utorrent_post_process.sh`.
+They are not hooks: each is a sample script you install into the download client or Sonarr/Radarr, and it submits
+the imported file to the daemon's `/webhook/generic` endpoint as `{"path": ..., "args": [...]}` and polls the job
+until it finishes. (Releases before this fix posted to a non-existent `/webhook` route and failed.) `_json_helper.py` is their shared,
+standard-library-only JSON helper (`get`, `payload`, `sonarr-args`, `radarr-args`) so no inline Python lives in the
+shell scripts.
+
+Configure them with environment variables: `DAEMON_HOST` (default `127.0.0.1`), `DAEMON_PORT` (`8585`),
+`DAEMON_API_KEY`, `POLL_INTERVAL` (`5` seconds), and `TIMEOUT` (`0`, unlimited). The maintained trigger scripts are in
+`triggers/` (see [Download Client Integration](#download-client-integration)); prefer those for new setups.
 
 ---
 
@@ -1089,24 +938,29 @@ Runnable tasks are executable scripts under `.mise/tasks/`; `mise.toml` only def
 ### Local Development Tasks
 
 ```bash
-mise run setup:deps          # Create venv and install dependencies
-mise run setup:deps:dev      # Install dev + test dependencies
-mise run test             # Run test suite
-mise run test:daemon      # Run focused daemon/API worker tests
-mise run test:deploy      # Run focused deploy/config task tests
-mise run dev:precommit        # Run pre-commit checks against all files
-mise run test:lint             # Run ruff linter
-mise run dev:lint         # Auto-fix lint issues
-mise run dev:format           # Format Python code
-mise run test:openapi          # Validate docs/openapi.yaml
-mise run config:gpu       # Detect available GPU acceleration
-mise run config:generate           # Generate config with auto-detected GPU
-mise run config:validate  # Validate the effective config
-mise run daemon:smoke     # Validate daemon config and exit
-mise run daemon:start           # Start daemon on 0.0.0.0:8585
-mise run media:convert -- /path/to/file.mkv  # Convert a file
-mise run media:preview -- /path/to/file.mkv  # Preview options only
-mise run media:codecs           # List supported codecs
+mise run setup:deps              # Create venv and install base dependencies
+mise run setup:deps:dev          # Install dev + test dependencies
+mise run test                    # Run the test suite (alias of test:run)
+mise run test:cov                # Tests with coverage and the per-module floor
+mise run test:daemon             # Focused daemon/API worker tests
+mise run test:deploy             # Focused deploy/config task tests
+mise run test:lint               # Ruff linter and bandit scan
+mise run test:openapi            # Validate docs/openapi.yaml
+mise run dev:lint                # Auto-fix lint issues
+mise run dev:format              # Format Python code
+mise run dev:precommit           # Run pre-commit checks against all files
+mise run config:gpu              # Detect available GPU acceleration
+mise run config:generate         # Generate config with auto-detected GPU
+mise run config:sample           # Regenerate setup/sma-ng.yml.sample from the schema
+mise run config:validate         # Validate the effective config
+mise run config:show -- --profile rq   # Show the effective config for a profile
+mise run daemon:smoke            # Validate daemon config and exit
+mise run daemon:start            # Start daemon on 0.0.0.0:8585
+mise run media:convert -- /path/to/file.mkv   # Convert a file
+mise run media:preview -- /path/to/file.mkv   # Preview options only
+mise run media:rename -- /path/to/file-or-dir # Rename using naming templates
+mise run media:repair -- -n /path/to/file-or-dir  # Stream-copy repair (dry run)
+mise run media:codecs            # List supported codecs
 ```
 
 #### Docker tasks
@@ -1234,8 +1088,7 @@ For each host it:
 - **Stamps `daemon.api-key` / `daemon.db-url` / `daemon.ffmpeg-dir` / `daemon.node-id`**
   (kebab-case) into `daemon:`
 - **Stamps `base.converter.{ffmpeg,ffprobe}`** from the host's resolved `ffmpeg_dir`
-- **Deploys post-process scripts** from `setup/post_process/` to `post_process/`,
-  stamping in Plex/Jellyfin/Emby credentials and updating shebangs to the venv Python
+- **Copies `setup/post_process/*.py`** to `post_process/` and updates shebangs to the venv Python
 
 #### Per-host overrides
 
@@ -1280,64 +1133,43 @@ Cluster lifecycle: `cluster:start`, `cluster:stop`, `cluster:restart`, `cluster:
 
 ## Troubleshooting
 
+The full guide, including FFmpeg failure classes and their fixes, is [troubleshooting.md](troubleshooting.md).
+
 ### Logs
 
-All SMA-NG output goes to stdout/stderr. For Docker deployments, follow the container logs:
+All SMA-NG output goes to stdout/stderr. For Docker deployments follow the container logs:
 
 ```bash
-journalctl -u sma-daemon -f
+sma logs                      # from the Docker host (see "Running from the Docker host")
+docker logs -f sma-ng         # equivalent
 ```
 
-The daemon also writes per-config rotating log files in `logs/`:
-
-| Config                 | Log File             |
-| ---------------------- | -------------------- |
-| `config/sma-ng.yml`    | `logs/sma-ng.log`    |
-| `config/sma-ng-tv.yml` | `logs/sma-ng-tv.log` |
+The daemon also writes per-config rotating log files in `logs/` (`config/sma-ng.yml` writes `logs/sma-ng.log`) and
+serves them at `/logs`. See [FFmpeg Failure Sidecars](daemon.md#ffmpeg-failure-sidecars) for per-job FFmpeg stderr.
 
 ### Common Issues
 
-#### "Invalid source, no video stream detected"
-
-- File may be corrupt or not a media file
-- Check FFprobe path in config
-
-#### Hardware acceleration not working
-
-- Verify `hwdevices` key matches encoder codec name (e.g., `qsv` for `h265qsv`)
-- Verify `hwaccel-output-format` uses dict format: `qsv:qsv` not just `qsv`
-- Check FFmpeg build supports the hwaccel: `ffmpeg -hwaccels`
-- Check the selected render device exists: `ls /dev/dri/renderD128`
-- On Intel SR-IOV guests, verify the Intel VF appears as a matching `card*` and `renderD*` pair under `/dev/dri`
-- If using Docker Compose, ensure the container joins both the host `render` and `video` groups
-- On Linux, ensure the service user is in the `render` or `video` group
-
-#### Conversion produces larger file
-
-- Lower `crf` value or add `max-bitrate` cap
-- Use `bitrate-ratio` to scale based on source codec
-- Use `crf-profiles` for tiered quality
-
-#### Subtitles show as "English (MOV_TEXT)" in Plex
-
-- This is Plex reading the raw codec name. SMA-NG sets a title on subtitle streams to improve display.
-
-#### Sonarr/Radarr not rescanning after `manual.py`
-
-- Verify `path` field is set in the `[Sonarr]`/`[Radarr]` config section
-- Verify `apikey` is set and `rescan = true`
-- Check the file path starts with the configured `path` prefix
-
-#### Docker: "Read-only file system" errors
-
-- Verify every path FFmpeg writes to (output dir, temp dir, media mounts) is bind-mounted
-  read-write into the `sma` service in `docker/docker-compose.yml`
-- The bundled compose file mounts `/opt/sma/config`, `/opt/sma/logs`, and `/transcode` by
-  default — extend `volumes:` for any additional paths your setup needs
+- **"Invalid source, no video stream detected"**: the file may be corrupt or not media; check the FFprobe path.
+  Run `python manual.py --audit -i <dir>` to list unreadable files.
+- **Hardware acceleration not working**: check `base.video.gpu`, that the FFmpeg build supports the hwaccel
+  (`ffmpeg -hwaccels`), that the render device exists (`ls /dev/dri/renderD128`), and in Docker that the container
+  joins the host `render` and `video` groups. See [hardware-acceleration.md](hardware-acceleration.md).
+- **Output written as `name.2.mp4`**: an output with that name already existed; SMA-NG numbers outputs instead of
+  overwriting. See [configuration.md](configuration.md#output-naming-and-overwrite-safety).
+- **Job failed with "Job timed out after Ns"**: the watchdog killed a conversion that exceeded
+  `daemon.job-timeout-seconds`; raise it for long encodes. See [Job Timeout](#job-timeout).
+- **Conversion produces a larger file**: lower `crf`, set `max-bitrate`, or use `bitrate-ratio` and `crf-profiles`.
+- **Sonarr/Radarr not rescanning**: confirm the `services.sonarr.<name>` `url` and `apikey`, `rescan: true`, and that
+  a `daemon.routing` rule lists the instance for the file's path.
+- **Damaged streams or stretched output**: see [Repairing media without transcoding](#repairing-media-without-transcoding).
+- **Docker "Read-only file system"**: every path FFmpeg writes to (output dir, temp dir, media mounts) must be
+  bind-mounted read-write into the `sma` service in `docker/docker-compose.yml`.
 
 ### Environment Variables
 
-The daemon no longer reads `SMA_*` environment variables for runtime configuration. Use CLI flags for process-level options and `sma-ng.yml` for persistent daemon settings.
+The daemon does not read `SMA_*` environment variables for runtime configuration. Use CLI flags for process-level
+options and `sma-ng.yml` for persistent settings. The Docker image's CMD shim is the one exception: it translates
+`SMA_WORKERS` into `--workers`.
 
 ---
 

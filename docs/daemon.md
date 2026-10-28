@@ -5,7 +5,7 @@ The daemon runs an HTTP server that accepts webhook requests to queue media conv
 ## Starting
 
 ```bash
-# Basic (binds to 127.0.0.1:8585, 1 worker)
+# Basic (default host/port/workers from sma-ng.yml or schema: 0.0.0.0:8585, 4 workers)
 python daemon.py
 
 # Production: all interfaces, multiple workers, API key
@@ -225,7 +225,7 @@ daemon:
 2. `routing` rules are scanned **longest-match-first** against the
    normalised path. The first matching rule wins —
    `/mnt/unionfs/Media/TV/Kids/show.mkv` picks the `TV/Kids` rule, not `TV`.
-3. The matched rule's `profile` is shallow-merged onto `base` (per the
+3. The matched rule's `profile` is deep-merged onto `base` (per the
    profile semantics in [configuration.md](configuration.md#profiles)).
 4. The matched rule's `services` list is parsed as
    `<type>.<instance>` references and the corresponding instances under

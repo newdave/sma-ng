@@ -20,19 +20,40 @@ forward them to Autoscan — see [Forwarding other Sonarr/Radarr events](#forwar
 
 **Custom script:** Suitable when SMA-NG runs locally alongside Sonarr (not in a container).
 
-1. Set API credentials in `[Sonarr]` section of `sma-ng.yml`
+1. Define a Sonarr instance (`url`, `apikey`) under `services.sonarr.<name>` in `sma-ng.yml`
 2. In Sonarr: **Settings → Connect → Add Custom Script**
    - On Download/Import: Yes, On Upgrade: Yes
    - Path: `/bin/bash`
    - Arguments: full path to `triggers/media_managers/sonarr.sh`
+3. Export `DAEMON_HOST`, `DAEMON_PORT`, and `DAEMON_API_KEY` for the script if the daemon is not on
+   `127.0.0.1:8585` or requires an API key
 
-**Per-instance profile routing:** Set `Daemon.path_configs` entries in `sma-ng.yml`, useful when Sonarr imports to a staging path that should use a specific profile:
+**Per-instance profile routing:** Add `daemon.routing` rules to `sma-ng.yml`. Each rule has a `match` path prefix,
+an optional `profile`, and a `services` list of instances to notify after conversion. This is useful when Sonarr
+imports to a path that should use a specific profile:
 
 ```yaml
-Daemon:
-  path_configs:
-    - path: /mnt/unionfs/Media/TV
+services:
+  sonarr:
+    main:
+      url: http://sonarr.example.com:8989
+      apikey: YOUR_SONARR_KEY
+
+daemon:
+  routing:
+    - match: /mnt/unionfs/Media/TV
       profile: rq
+      services: [sonarr.main]
+```
+
+**Path rewrites:** When Sonarr reports paths that differ from what SMA-NG sees (for example Sonarr in a container),
+translate them with `daemon.path-rewrites` before routing:
+
+```yaml
+daemon:
+  path-rewrites:
+    - from: /tv
+      to: /mnt/unionfs/Media/TV
 ```
 
 ### Radarr
@@ -53,13 +74,14 @@ Other notification types (On Rename, On Movie File Delete, On Movie Delete, ...)
 
 **Custom script:** Suitable when SMA-NG runs locally alongside Radarr.
 
-1. Set API credentials in `[Radarr]` section of `sma-ng.yml`
+1. Define a Radarr instance (`url`, `apikey`) under `services.radarr.<name>` in `sma-ng.yml`
 2. In Radarr: **Settings → Connect → Add Custom Script**
    - On Download/Import: Yes, On Upgrade: Yes
    - Path: `/bin/bash`
    - Arguments: full path to `triggers/media_managers/radarr.sh`
 
-**Per-instance routing:** Same as Sonarr; choose instances with `daemon.routing` rules in `sma-ng.yml`.
+**Per-instance routing:** Same as Sonarr; choose instances and profiles with `daemon.routing` rules and translate
+paths with `daemon.path-rewrites` in `sma-ng.yml`.
 
 ### Multiple Instances
 
@@ -69,17 +91,17 @@ Sonarr and Radarr each support arbitrary named instances under `services.sonarr.
 services:
   sonarr:
     main:
-      host: sonarr.example.com
+      url: http://sonarr.example.com:8989
       apikey: abc123
     kids:
-      host: sonarr-kids.example.com
+      url: http://sonarr-kids.example.com:8989
       apikey: def456
   radarr:
     main:
-      host: radarr.example.com
+      url: http://radarr.example.com:7878
       apikey: ghi789
     4k:
-      host: radarr-4k.example.com
+      url: http://radarr-4k.example.com:7878
       apikey: jkl012
 
 daemon:
@@ -107,7 +129,17 @@ The deploy tooling stamps these rules automatically: list each instance with `pa
 Configure `services.plex.<name>` in `sma-ng.yml`. SMA-NG refreshes the matching library section after conversion. Use `base.path-mapping` if Plex sees files at different mount points.
 
 1. Disable automatic library scanning in Plex to prevent Plex from scanning files mid-conversion
-2. Connect directly to the Plex server using its local hostname or IP on port `32400` (or your custom port) and set `token` plus `refresh = true` in `[Plex]`
+2. Connect directly to the Plex server using its local hostname or IP on port `32400` (or your custom port) and set `url`, `token`, and `refresh: true` on the `services.plex.<name>` instance:
+
+```yaml
+services:
+  plex:
+    main:
+      url: http://plex.local:32400
+      token: YOUR_PLEX_TOKEN
+      refresh: true
+      path-mapping: ''   # from=to[,from=to] when Plex sees different mount points
+```
 
 #### Optimized versions for 4K content
 
@@ -272,7 +304,7 @@ mount points (e.g. `/library/Media` here, `/data/Media` there). Use the same
 (`/triggers/<sonarr-trigger>` or `/triggers/<radarr-trigger>`), so SMA-NG can sit in front of Autoscan as the only webhook target.
 
 - **Target selection.** SMA-NG collects every path in the payload (series/movie folder, `episodeFile`/`movieFile`,
-  `deletedFiles`, `renamed*Files`), applies `daemon.path_rewrites`, and forwards to each `autoscan.<name>`
+  `deletedFiles`, `renamed*Files`), applies `daemon.path-rewrites`, and forwards to each `autoscan.<name>`
   referenced by a matching routing rule. Payloads with no paths (Health, ApplicationUpdate) go to every enabled
   Autoscan instance.
 - **Path mapping.** The payload is not rewritten; SMA-NG's `path-mapping` only applies to post-conversion
@@ -324,8 +356,8 @@ sequenceDiagram
 
 ### Path matching and request timeouts
 
-- Instance routing (`path` on Sonarr, Radarr, Plex, Emby, Jellyfin and Autoscan instances) matches on whole path
-  components: `/media/TV` matches `/media/TV` and `/media/TV/Show`, but no longer `/media/TV-Anime`. Plex refreshes
+- Instance routing (each Sonarr, Radarr, Plex, Emby, Jellyfin and Autoscan instance takes its paths from the
+  `daemon.routing` rules whose `services` reference it) matches on whole path components: `/media/TV` matches `/media/TV` and `/media/TV/Show`, but no longer `/media/TV-Anime`. Plex refreshes
   use the same rule when comparing a file against library section locations.
 - Sonarr/Radarr API calls time out after 30 seconds (`REQUEST_TIMEOUT` in `resources/mediamanager.py`).
 - `rename.py --arr-rename` finds the Sonarr/Radarr file record by exact path, then by the path rewritten through
@@ -346,7 +378,24 @@ sequenceDiagram
 
 ## Download Clients
 
-All download client integrations use bash scripts in `triggers/` that submit jobs to the daemon via webhook. These are not required if you are using Completed Download Handling with Sonarr/Radarr.
+All download client integrations use bash scripts in `triggers/` that submit jobs to the daemon via
+`POST /webhook/generic`. They are not required if you are using Completed Download Handling with Sonarr/Radarr.
+
+The scripts read no `sma-ng.yml` sections. They take daemon connection settings from environment variables
+(set them in the download client's script environment):
+
+| Variable                           | Default     | Description                                   |
+| ---------------------------------- | ----------- | --------------------------------------------- |
+| `DAEMON_HOST`                      | `127.0.0.1` | Daemon hostname or IP                         |
+| `DAEMON_PORT`                      | `8585`      | Daemon port                                   |
+| `DAEMON_API_KEY`                   | none        | Sent as `X-API-Key` when authentication is on |
+| `DAEMON_USERNAME` / `DAEMON_PASSWORD` | none     | HTTP Basic auth alternative to the API key    |
+
+Which profile a download uses is decided on the daemon by `daemon.routing` rules matching the file path (see
+[Multiple Instances](#multiple-instances)); translate client-side paths with `daemon.path-rewrites`. Per-script
+options such as `BYPASS_CATS` / `BYPASS_LABELS` are documented in [triggers/README.md](../triggers/README.md).
+`setup/post_process/*_post_process.sh` are alternative standalone submitters that POST `{path, args}` to
+`/webhook/generic` and use the same `DAEMON_*` variables.
 
 ### Trigger script behaviour
 
@@ -366,7 +415,7 @@ In **Settings → Extension Scripts**, add `triggers/usenet/nzbget.sh`. Configur
 
 ### SABnzbd
 
-In **Settings → Folders → Scripts Folder**, point to `triggers/usenet/`. Set `sabnzbd.sh` as the category script. Configure `[SABNZBD]` section in `sma-ng.yml`.
+In **Settings → Folders → Scripts Folder**, point to `triggers/usenet/`. Set `sabnzbd.sh` as the category script. Set the `DAEMON_*` variables in SABnzbd's environment.
 
 ### qBittorrent
 
@@ -376,11 +425,11 @@ In **Tools → Options → Downloads → Run external program on torrent complet
 bash /path/to/triggers/torrents/qbittorrent.sh "%L" "%T" "%R" "%F" "%N" "%I"
 ```
 
-Configure `[qBittorrent]` section with host, credentials, and label mappings.
+Set the `DAEMON_*` variables for the qBittorrent process; skip labels with `BYPASS_LABELS`.
 
 ### Deluge
 
-Enable the **Execute** plugin in Deluge WebUI. Set `triggers/torrents/deluge.sh` as the Torrent Complete handler. Configure `[Deluge]` section with daemon host and credentials.
+Enable the **Execute** plugin in Deluge WebUI. Set `triggers/torrents/deluge.sh` as the Torrent Complete handler. Set the `DAEMON_*` variables for the Deluge process; skip labels with `BYPASS_LABELS`.
 
 ### uTorrent
 
