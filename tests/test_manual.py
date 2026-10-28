@@ -923,3 +923,26 @@ class TestRepairHybrid:
       with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 2
+
+
+class TestPromptsWithoutInput:
+  """Closed stdin (cron, scripts, `sma` without a TTY) must stop, not re-prompt forever."""
+
+  @pytest.mark.parametrize(
+    "call",
+    [lambda m: m.getYesNo(), lambda m: m.getValue("TMDB ID", num=True), lambda m: m.mediatype()],
+    ids=["getYesNo", "getValue", "mediatype"],
+  )
+  def test_eof_exits_with_hint(self, call):
+    import manual
+
+    with patch("builtins.input", side_effect=EOFError), patch.object(manual, "log") as log, pytest.raises(SystemExit) as exc:
+      call(manual)
+    assert exc.value.code == 2
+    assert "re-run with -a" in log.error.call_args.args[0]
+
+  def test_invalid_answer_still_reprompts(self):
+    import manual
+
+    with patch("builtins.input", side_effect=["maybe", "y"]):
+      assert manual.getYesNo() is True

@@ -77,7 +77,7 @@ def _exec_call(env):
   [
     (("convert", "/mnt/tv/a.mkv"), "python manual.py -i /mnt/tv/a.mkv -a"),
     (("convert", "/mnt/tv/a.mkv", "-p"), "python manual.py -i /mnt/tv/a.mkv -a -p"),
-    (("preview", "/mnt/tv/a.mkv"), "python manual.py -i /mnt/tv/a.mkv -oo"),
+    (("preview", "/mnt/tv/a.mkv"), "python manual.py -i /mnt/tv/a.mkv -oo -a"),
     (("audit", "/mnt/tv"), "python manual.py --audit -i /mnt/tv"),
     (("repair", "-n", "/mnt/tv", "/transcode/x.mp4"), "python repair.py -n /mnt/tv /transcode/x.mp4"),
     (("rename", "/mnt/tv/a.mkv", "--dry-run"), "python rename.py /mnt/tv/a.mkv --dry-run"),
