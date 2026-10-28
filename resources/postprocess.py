@@ -47,7 +47,8 @@ class PostProcessor:
   def gather_scripts(self):
     """Collect executable scripts from the ``post_process/`` directory.
 
-    Skips files with extensions in ``bad_post_extensions``, subdirectories,
+    Skips "_"-prefixed helper files, files with extensions in
+    ``bad_post_extensions``, subdirectories,
     and filenames listed in ``bad_post_files``.
 
     Returns:
@@ -58,7 +59,8 @@ class PostProcessor:
     post_process_directory = os.path.join(current_directory, "../post_process")
     scripts = []
     for script in sorted(os.listdir(post_process_directory)):
-      if os.path.splitext(script)[1] in bad_post_extensions or os.path.isdir(os.path.join(post_process_directory, script)) or script in bad_post_files:
+      # "_"-prefixed files are private helpers, never hooks.
+      if script.startswith("_") or os.path.splitext(script)[1] in bad_post_extensions or os.path.isdir(os.path.join(post_process_directory, script)) or script in bad_post_files:
         self.log.debug("Skipping %s." % script)
         continue
       self.log.debug("Script added: %s." % script)

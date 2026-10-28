@@ -129,9 +129,9 @@ PAYLOAD=$(python3 "$HELPER" payload "$INPUTFILE" "$ARGS")
 
 # ── submit job ─────────────────────────────────────────────────────────────────
 
-log "Submitting job to ${DAEMON_BASE}/webhook..."
+log "Submitting job to ${DAEMON_BASE}/webhook/generic..."
 
-RESPONSE=$(curl_post_json "${DAEMON_BASE}/webhook" "$PAYLOAD") || {
+RESPONSE=$(curl_post_json "${DAEMON_BASE}/webhook/generic" "$PAYLOAD") || {
     log "ERROR: Failed to connect to SMA-NG daemon at ${DAEMON_BASE}. Is the daemon running?"
     exit 1
 }
