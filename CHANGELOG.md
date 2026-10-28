@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.32](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.31...sma-ng-v3.2.32) (2026-10-28)
+
+
+### Bug Fixes
+
+* **cli:** send the local daemon's api-key to the local target ([92cda5b](https://github.com/newdave/sma-ng/commit/92cda5b8c25363fe0adf757aa5bf48f4af8b679a))
+
 ## [3.2.31](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.30...sma-ng-v3.2.31) (2026-10-28)
 
 
