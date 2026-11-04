@@ -251,16 +251,22 @@ class TestRouting:
     monkeypatch.setenv("SMA_CONFIG_DIR", str(tmp_path))
     assert routing.resolve_target(ClientConfig()).target.api_key == "secret"
     assert routing.resolve_target(ClientConfig(), flag="local").target.api_key == "secret"
-    saved = ClientConfig(targets={"local": Target("local", "http://127.0.0.1:8585", "mine")})
-    assert routing.resolve_target(saved).target.api_key == "mine"
-    nas = ClientConfig(targets={"nas": Target("nas", "http://nas")})
-    assert routing.resolve_target(nas, flag="nas").target.api_key is None
+    # A saved local key goes stale when the daemon's key changes; sma-ng.yml wins.
+    saved = ClientConfig(targets={"local": Target("local", "http://127.0.0.1:8585", "stale")})
+    assert routing.resolve_target(saved).target.api_key == "secret"
+    assert routing.resolve_target(saved, flag="local").target.api_key == "secret"
+    assert routing.resolve_target(saved).target.url == "http://127.0.0.1:8585"
+    nas = ClientConfig(targets={"nas": Target("nas", "http://nas", "nas-key")})
+    assert routing.resolve_target(nas, flag="nas").target.api_key == "nas-key"
 
   def test_local_target_without_daemon_config(self, tmp_path, monkeypatch):
     monkeypatch.setenv("SMA_CONFIG_DIR", str(tmp_path))
     assert routing.resolve_target(ClientConfig()).target.api_key is None
     (tmp_path / "sma-ng.yml").write_text("daemon: [not, a, mapping]\n")
     assert routing.resolve_target(ClientConfig()).target.api_key is None
+    # No usable daemon key: a key saved for local is the fallback.
+    saved = ClientConfig(targets={"local": Target("local", "http://127.0.0.1:8585", "mine")})
+    assert routing.resolve_target(saved).target.api_key == "mine"
 
   @pytest.mark.parametrize(
     "url,os_name,expected",

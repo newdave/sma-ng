@@ -38,8 +38,10 @@ def _local_url(cfg):
 
 
 def _with_local_key(target):
-  """The local daemon shares this host's sma-ng.yml: use its api-key when the target has none."""
-  if target.name != LOCAL_TARGET or target.api_key:
+  """The local daemon shares this host's sma-ng.yml, so its api-key is authoritative for the local
+  target: it wins over a saved key, which goes stale when the daemon's key changes. A saved key is
+  only used when sma-ng.yml sets none or cannot be read."""
+  if target.name != LOCAL_TARGET:
     return target
   key = mounts.daemon_api_key()
   return replace(target, api_key=key) if key else target
