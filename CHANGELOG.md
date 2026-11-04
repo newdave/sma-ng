@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.2.36](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.35...sma-ng-v3.2.36) (2026-11-04)
+
+
+### Features
+
+* **cli:** add sma status and a latest-release check to sma version ([777814e](https://github.com/newdave/sma-ng/commit/777814e4acbb4601ff7084841a35c8841c1e2656))
+* **video:** add video.max-fps to cap the output frame rate ([5f2899f](https://github.com/newdave/sma-ng/commit/5f2899fd4c12db4e7ccc4d97c104da6e721036f6))
+
+
+### Bug Fixes
+
+* **cli:** use the daemon's api-key for the local target over a saved one ([c5bd502](https://github.com/newdave/sma-ng/commit/c5bd502f9ed0b7c288812acc48c27b80f8507e3b))
+* **video:** pass qsv.extbrc 1 through on ICQ encodes ([e6e000e](https://github.com/newdave/sma-ng/commit/e6e000e22a80d4ed950c1b9e8abdf846c2a70d2a))
+
 ## [3.2.35](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.34...sma-ng-v3.2.35) (2026-10-28)
 
 
