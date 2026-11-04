@@ -1220,6 +1220,15 @@ def _tokenise_params(params_str: str) -> list[str]:
   return params_str.split()
 
 
+def _flag_value(params, flag):
+  """Value following *flag* in a codec-parameters string, or None when absent."""
+  tokens = _tokenise_params(params or "")
+  for i, token in enumerate(tokens[:-1]):
+    if token == flag:
+      return tokens[i + 1]
+  return None
+
+
 def _drop_flag_pairs(tokens: list[str], flags: frozenset[str]) -> list[str]:
   """Silently drop each ``flag value`` pair where ``flag`` is in ``flags``.
 
@@ -1414,7 +1423,11 @@ class HWAccelVideoCodec:
           optlist.extend(["-maxrate:v", str(safe["maxrate"])])
         if "bufsize" in safe:
           optlist.extend(["-bufsize", str(safe["bufsize"])])
-    if self.hw_extbrc and "bitrate" in safe:
+    # extbrc (Intel EncTools BRC) is what makes -look_ahead_depth work on
+    # hevc_qsv. Always on for bitrate targets; on the ICQ path it follows the
+    # configured qsv.extbrc, which would otherwise be stripped from params as
+    # a dedicated-path flag and never reach ffmpeg.
+    if self.hw_extbrc and ("bitrate" in safe or _flag_value(safe.get("params"), "-extbrc") == "1"):
       optlist.extend(["-extbrc", "1"])
     return optlist
 
