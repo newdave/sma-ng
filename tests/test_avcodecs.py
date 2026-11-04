@@ -1868,6 +1868,29 @@ class TestHWAccelHelpers:
     opts = codec.parse_options({"codec": "h264qsv", "bitrate": 5000})
     assert "-extbrc" in opts
 
+  @pytest.mark.parametrize(
+    "params,expected",
+    [
+      ("-extbrc 1 -low_power 0", 1),  # configured qsv.extbrc reaches the ICQ command, once
+      ("-low_power 0", 0),  # not configured: ICQ stays without extbrc
+      ("-extbrc 0", 0),
+      (None, 0),
+    ],
+  )
+  def test_hw_extbrc_on_icq_follows_config(self, params, expected):
+    safe = {"codec": "h265qsv", "global_quality": 25}
+    if params:
+      safe["params"] = params
+    opts = H265QSVCodec().parse_options(safe)
+    assert opts.count("-extbrc") == expected
+    assert opts[opts.index("-global_quality") + 1] == "25"
+    if expected:
+      assert opts[opts.index("-extbrc") + 1] == "1"
+
+  def test_hw_extbrc_with_bitrate_emitted_once_even_when_configured(self):
+    opts = H265QSVCodec().parse_options({"codec": "h265qsv", "bitrate": 3500, "params": "-extbrc 1"})
+    assert opts.count("-extbrc") == 1
+
   def test_hw_scale_opts_wonly(self):
     codec = H264QSVCodec()
     safe = {"qsv_wscale": 1280}

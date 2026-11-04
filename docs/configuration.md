@@ -237,7 +237,7 @@ values inherit from `base.video.*` at runtime.
 | `codec-parameters` | string | `''`    | Free-form QSV-only flag string appended to the assembled command line. Use for flags not exposed as typed fields below.        |
 | `low-power`        | int    | `-1`    | `-low_power` flag value (`0` = VDENC quality path, `1` = fixed-function low-power). `-1` = don't emit (encoder default fires). |
 | `async-depth`      | int    | `0`     | `-async_depth` pipeline depth. `0` = don't emit. VDENC sweet spot is `4`; higher values can starve look-ahead.                 |
-| `extbrc`           | int    | `-1`    | `-extbrc` extended BRC toggle (`0`/`1`). `-1` = don't emit.                                                                    |
+| `extbrc`           | int    | `-1`    | `-extbrc` extended BRC toggle (`0`/`1`). `-1` = don't emit. `1` also applies to ICQ encodes (`global-quality`, no bitrate target); it is what makes `look-ahead-depth` work on `hevc_qsv`. Bitrate-target encodes always get `-extbrc 1`. |
 | `b-strategy`       | int    | `-1`    | `-b_strategy` adaptive B-frame strategy (`0`/`1`). `-1` = don't emit.                                                          |
 | `adaptive-i`       | int    | `-1`    | `-adaptive_i` (`0`/`1`). `-1` = don't emit.                                                                                    |
 | `adaptive-b`       | int    | `-1`    | `-adaptive_b` (`0`/`1`). `-1` = don't emit.                                                                                    |
