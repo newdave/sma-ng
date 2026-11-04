@@ -185,7 +185,8 @@ uses a throwaway container, with a warning when a daemon is running, because bot
 same files.
 
 The local daemon reads the same `sma-ng.yml`, so `sma` sends its `daemon.api-key` to the `local` target without a
-`sma target add` step. A key saved for `local` with `sma target add local URL --api-key-stdin` takes precedence.
+`sma target add` step. That key always wins for `local`, so a key saved with `sma target add local URL
+--api-key-stdin` is only used when `sma-ng.yml` sets no key or the invoking user cannot read it.
 
 ```bash
 sma repair -n /mnt/media/TV        # job on the local daemon, output streamed until it finishes
