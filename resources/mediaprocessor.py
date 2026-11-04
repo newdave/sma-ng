@@ -715,6 +715,13 @@ from resources.subtitles import SubtitleProcessor
 # (max-bitrate is then the average target, maxrate = target x this).
 VBV_PEAK_RATIO = 1.5
 
+# Exact rationals for the NTSC frame rates a max-fps setting names approximately.
+NTSC_FPS = {23.976: 24000 / 1001, 29.97: 30000 / 1001, 59.94: 60000 / 1001}
+
+# Standard output rates a max-fps cap may pick from, slowest first.
+FILM_FPS = 24000 / 1001
+STANDARD_FPS = (FILM_FPS, 24.0, 25.0, 30000 / 1001, 30.0, 50.0, 60000 / 1001, 60.0)
+
 # Debug tag of the Atmos stream copied beside its MP4-playable conversion.
 ATMOS_EXTRA_COPY_DEBUG = "audio-atmos-extra-copy"
 
@@ -2142,13 +2149,16 @@ class MediaProcessor:
     # are preserved. We do this only for mp4 outputs, and only when the
     # source looks like it might be VFR (unknown field order, or an unusual
     # non-integer fps).
-    if options.get("format") == "mp4" and self._source_likely_vfr(info):
+    # A max-fps cap needs ffmpeg to drop frames (-r:v); passthrough would keep them all.
+    if options.get("format") == "mp4" and self._source_likely_vfr(info) and not options["video"].get("fps"):
       if "-fps_mode" not in postopts and "-vsync" not in postopts:
         self.log.info("Source looks VFR; passing -fps_mode passthrough to preserve PTS/DTS [adaptive-vfr-passthrough].")
         postopts.extend(["-fps_mode", "passthrough"])
 
     preopts.extend(self.settings.preopts)
     postopts.extend(self.settings.postopts)
+    if options["video"].get("fps"):
+      postopts = self._drop_non_cfr_fps_mode(postopts)
 
     if info.video.codec in ["x265", "h265", "hevc"] and vcodec == "copy":
       # Profile 5 has no HEVC-compatible base layer, so it must be signalled
@@ -2396,6 +2406,18 @@ class MediaProcessor:
       vpreset = analyzer_recommendations.preset
       vdebug = vdebug + ".analyzer-preset"
 
+    # Frame-rate cap: a source faster than video.max-fps is re-encoded at
+    # that rate (-r:v drops frames evenly). 0.2 % slack so rounding and true
+    # 24p (24.000 vs 23.976) never cost a re-encode to drop 1 frame in 1000.
+    vfps = None
+    max_fps = self.settings.video_max_fps
+    if max_fps and info.video.fps and info.video.fps > max_fps * 1.002:
+      vfps = self._capped_fps(info.video.fps, max_fps)
+      if vcodec == "copy":
+        vcodec = vcodecs[0]
+      vdebug = vdebug + ".max-fps"
+      self.log.info("Source frame rate %.3f fps exceeds max-fps %s; re-encoding at %.3f fps [video-max-fps]." % (info.video.fps, max_fps, vfps))
+
     # Dolby Vision profile 5 has no HDR10/SDR base layer: the picture is
     # IPTPQc2 and only looks right once a player applies the RPU. A plain
     # re-encode drops the RPU and bakes in a green/purple picture, so copy
@@ -2408,6 +2430,7 @@ class MediaProcessor:
       )
       vcodec = "copy"
       vfilter = None
+      vfps = None
       vdebug = vdebug + ".dv-p5-copy"
 
     vframedata = self.normalizeFramedata(info.video.framedata, hdrInput) if self.settings.dynamic_params else None
@@ -2576,6 +2599,8 @@ class MediaProcessor:
       "color_transfer": vcolor_transfer,
       "color_space": vcolor_space,
     }
+    if vfps:
+      video_settings["fps"] = vfps
     if dims_override:
       # The override dims ARE the corrected geometry (e.g. undoing a hybrid
       # 1920x1088 stretch): scale exactly to them. The default pad mode
@@ -3850,6 +3875,46 @@ class MediaProcessor:
     if clamped != [vmaxrate, vbufsize]:
       self.log.info("Clamping VBV maxrate/bufsize %s/%s to HEVC level %s Main-tier limit %dk [video-level-vbv]." % (vmaxrate, vbufsize, vlevel, limit))
     return clamped[0], clamped[1]
+
+  @staticmethod
+  def _capped_fps(src_fps, max_fps):
+    """Output rate for a source faster than *max_fps*: the standard rate of the
+    source's own family that fits under the cap. PAL multiples (50) halve to
+    25; NTSC rates (29.97, 47.95, 59.94) go to 23.976; integer rates (30, 48,
+    60) go to 24. Outside the family, the fastest standard rate not above the
+    cap; a cap below every standard rate is used as given (23.976 / 29.97 /
+    59.94 as their exact NTSC rationals)."""
+    limit = max_fps * 1.002
+    ntsc = abs(src_fps * 1001 / 1000 - round(src_fps * 1001 / 1000)) < 0.01 and abs(src_fps - round(src_fps)) > 0.01
+    if ntsc:
+      family = [r for r in STANDARD_FPS if r != round(r)]
+    elif round(src_fps) % 25 == 0:
+      family = [25.0, 50.0]
+    else:
+      family = [24.0, 30.0, 60.0]
+    fitting = [r for r in family if r <= limit]
+    if fitting:
+      return max(fitting)
+    # Outside the source's family: the fastest standard rate not above the cap
+    # itself (no slack here, so a 23.976 cap never yields 24.000).
+    cap = next((exact for named, exact in NTSC_FPS.items() if abs(max_fps - named) < 0.01), max_fps)
+    fitting = [r for r in STANDARD_FPS if r <= cap + 1e-6]
+    return max(fitting) if fitting else cap
+
+  def _drop_non_cfr_fps_mode(self, postopts):
+    """Remove ``-fps_mode``/``-vsync`` pairs other than ``cfr`` when a max-fps
+    cap emits ``-r:v``: ffmpeg aborts on -r with a non-CFR fps mode."""
+    kept = []
+    i = 0
+    while i < len(postopts):
+      flag = postopts[i]
+      if (flag in ("-vsync", "-fps_mode") or flag.startswith("-fps_mode:")) and i + 1 < len(postopts) and str(postopts[i + 1]).lower() not in ("cfr", "1"):
+        self.log.warning("Dropping %s %s: it contradicts the max-fps cap (-r:v) and ffmpeg would refuse the command [video-max-fps]." % (flag, postopts[i + 1]))
+        i += 2
+        continue
+      kept.append(flag)
+      i += 1
+    return kept
 
   @staticmethod
   def isDolbyVisionProfile5(video):
