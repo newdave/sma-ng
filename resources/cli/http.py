@@ -68,6 +68,20 @@ class DaemonClient:
       return False
     return status == 200
 
+  def health(self, timeout=2.0):
+    """The daemon's /health document (version, commit, workers, jobs), or None when it does not answer."""
+    try:
+      status, _h, payload = self._request("GET", "/health", timeout=timeout)
+    except Unreachable:
+      return None
+    if status != 200:
+      return None
+    try:
+      data = json.loads(payload.decode("utf-8"))
+    except ValueError:
+      return None
+    return data if isinstance(data, dict) else None
+
   def submit(self, kind, path, args):
     _status, data = self._json("POST", "/jobs", {"kind": kind, "path": path, "args": list(args)}, ok=(200, 202))
     return data

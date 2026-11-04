@@ -162,8 +162,9 @@ class TestPlain:
 
 
 class TestStatus:
-  def _status(self, monkeypatch, env, container, healthy, as_json=False):
+  def _status(self, monkeypatch, env, container, healthy, as_json=False, health=None):
     monkeypatch.setattr("resources.cli.http.DaemonClient.healthy", lambda self, timeout=1.0: healthy)
+    monkeypatch.setattr("resources.cli.http.DaemonClient.health", lambda self, timeout=2.0: health)
     out = io.StringIO()
     rc = daemonctl.status(_facts(container), ClientConfig(), env, out, as_json=as_json)
     return rc, out.getvalue()
@@ -172,6 +173,17 @@ class TestStatus:
     rc, out = self._status(monkeypatch, env, COMPOSE, True)
     assert rc == 0
     assert "sma-ng running (compose project docker, service sma-intel)" in out and "answering at http://127.0.0.1:8585" in out
+
+  def test_health_details(self, monkeypatch, env):
+    health = {"version": "3.2.35", "commit": "a9c347adb19f", "node": "sma-master", "workers": 6, "selected_backend": "qsv", "active": {"1": {}}, "waiting": {}, "jobs": {"completed": 10, "failed": 2}}
+    rc, out = self._status(monkeypatch, env, COMPOSE, True, health=health)
+    assert rc == 0
+    assert "version:   3.2.35 (commit a9c347a)" in out
+    assert "node:      sma-master, 6 workers, gpu qsv" in out
+    assert "jobs:      1 running, 0 waiting; 10 completed, 2 failed" in out
+    rc, out = self._status(monkeypatch, env, COMPOSE, True, as_json=True, health=health)
+    data = json.loads(out)
+    assert data["version"] == "3.2.35" and data["active_jobs"] == 1 and data["gpu"] == "qsv"
 
   def test_none_and_json(self, monkeypatch, env):
     rc, out = self._status(monkeypatch, env, None, False)

@@ -8,10 +8,11 @@ stdout; a throwaway run's plan goes to ``<plan dir>/plan``.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
-from resources.cli import clientconfig, daemonctl, hostfacts, manage, mounts, remote, routing, throwaway
+from resources.cli import clientconfig, daemonctl, hostfacts, manage, mounts, releases, remote, routing, throwaway
 from resources.cli.errors import CliError, UsageError
 from resources.version import get_commit, get_version
 
@@ -35,8 +36,9 @@ Daemon jobs and settings:
   target add NAME URL [--api-key-stdin] | list | use NAME | rm NAME
   map add TARGET LOCAL REMOTE | list [TARGET] | rm TARGET LOCAL
 
+  status                   same as daemon status: container, health, version, jobs
   upgrade [TAG]            update the image and this command
-  version                  host command and image versions
+  version                  host command, image and daemon versions; flags a newer GitHub release
   help                     this text
 
 Options:
@@ -84,6 +86,63 @@ def _parse_globals(argv):
   return opts, None
 
 
+def _daemon_health(env, opts):
+  """(target, /health document) of the daemon `sma` would use, or (None, None) when none answers."""
+  try:
+    cfg = clientconfig.load(env)
+    facts = hostfacts.load(env)
+    resolved = routing.resolve_target(cfg, opts.get("target"), env.get("SMA_TARGET"))
+    return resolved.target, routing.client_for(resolved.target, facts, timeout=2.0).health(timeout=2.0)
+  except CliError:
+    return None, None
+
+
+def version(env, opts, out, check=None):
+  """Image and daemon versions, and whether either is older than the latest GitHub release."""
+  image_version, image_commit = get_version(), get_commit()
+  target, health = _daemon_health(env, opts)
+  latest, latest_error = None, None
+  if env.get("SMA_NO_UPDATE_CHECK"):
+    latest_error = "skipped (SMA_NO_UPDATE_CHECK)"
+  else:
+    try:
+      latest = (check or releases.latest_release)(env.get("SMA_RELEASE_REPO"))
+    except releases.ReleaseCheckError as exc:
+      latest_error = "unknown (%s)" % exc
+  latest_version = latest["version"] if latest else None
+  daemon_version = (health or {}).get("version")
+  image_outdated = releases.is_outdated(image_version, latest_version)
+  daemon_outdated = releases.is_outdated(daemon_version, latest_version)
+  if opts.get("json"):
+    out.write(
+      json.dumps(
+        {
+          "image": {"version": image_version, "commit": image_commit, "outdated": image_outdated},
+          "daemon": {"url": target.url, "version": daemon_version, "commit": (health or {}).get("commit"), "outdated": daemon_outdated} if health and target else None,
+          "latest": latest,
+          "latest_error": latest_error,
+        }
+      )
+      + "\n"
+    )
+    return 0
+  out.write("sma image: %s (commit %s)%s\n" % (image_version, image_commit, " - out of date" if image_outdated else ""))
+  if health and target:
+    commit = ((health.get("commit") or "")[:7]) or "unknown"
+    out.write("daemon:    %s (commit %s) at %s%s\n" % (daemon_version or "unknown", commit, target.url, " - out of date" if daemon_outdated else ""))
+  if latest:
+    out.write("latest:    %s%s\n" % (latest_version, " (released %s)" % latest["published"] if latest.get("published") else ""))
+  else:
+    out.write("latest:    %s\n" % latest_error)
+  if image_outdated:
+    out.write("sma: a newer release (%s) is available: run sma upgrade\n" % latest_version)
+  if daemon_outdated:
+    out.write("sma: the daemon runs %s; %s is available: run sma daemon upgrade\n" % (daemon_version, latest_version))
+  if latest and image_outdated is False and daemon_outdated is not True:
+    out.write("sma: up to date\n")
+  return 0
+
+
 def write_plan(plan, plan_dir):
   path = os.path.join(plan_dir, "plan")
   tmp = path + ".tmp"
@@ -105,8 +164,7 @@ def run(argv, env=None, out=None, err=None, stdin=None, client=None):
     out.write(USAGE)
     return 0
   if command == "version":
-    out.write("sma image: %s (commit %s)\n" % (get_version(), get_commit()))
-    return 0
+    return version(env, opts, out)
   if command == "upgrade":
     raise UsageError("sma: upgrade is handled by the host command; update it with the installer")
   if command == "_wait-health":
@@ -116,6 +174,8 @@ def run(argv, env=None, out=None, err=None, stdin=None, client=None):
     return daemonctl.wait_health(args[0], int(args[1]))
   if command == "logs":
     command, args, idx = "daemon", ["logs", *args], idx - 1
+  if command == "status":
+    command, args, idx = "daemon", ["status", *args], idx - 1
   if command not in throwaway.COMMANDS and command not in MANAGE_COMMANDS:
     raise UsageError("sma: unknown command %r (see 'sma help')" % command)
 

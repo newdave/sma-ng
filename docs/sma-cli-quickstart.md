@@ -85,7 +85,9 @@ to the tool, for example `sma convert Film.mkv -tmdb 603`.
 | `sma target add\|list\|use\|rm ...` | Daemons `sma` can send work to |
 | `sma map add\|list\|rm ...` | Translate local paths to a daemon's paths |
 | `sma upgrade [TAG]` | Pull the image (or switch to `TAG`) and replace `sma` from it |
-| `sma version` / `sma help` | Versions / command list |
+| `sma status` | Same as `sma daemon status`: container, health, daemon version and commit, workers, GPU, job counts |
+| `sma version` | Host command, image and daemon versions; checks the latest GitHub release and says what is out of date |
+| `sma help` | Command list |
 
 Options placed before the command:
 
@@ -159,6 +161,12 @@ sma upgrade 3.2.23     # switch to a specific release
 
 `sma upgrade` replaces the `sma` script from the new image and updates `~/.config/sma/image`. If `sma` is installed
 somewhere you cannot write, it tells you to run `sudo sma upgrade`.
+
+`sma version` shows when an upgrade is due. It asks GitHub for the latest release (`newdave/sma-ng`, or
+`SMA_RELEASE_REPO`) and marks the image, and the daemon if one answers, `out of date` when they are older, with the
+command to run (`sma upgrade` or `sma daemon upgrade`). The check gives up after 3 seconds and never fails the
+command: offline it prints `latest: unknown (...)`. Set `SMA_NO_UPDATE_CHECK=1` to skip it. `--json` prints the
+same as a JSON object.
 
 ## 9. Settings
 
@@ -260,7 +268,7 @@ for you, no Compose needed:
 
 ```bash
 sma daemon up --media /mnt/media             # start sma-ng (or replace it with the current image)
-sma daemon status                            # container state and whether /health answers
+sma status                                   # container state, /health, version, workers, jobs (= sma daemon status)
 sma daemon logs                              # follow its log (also: sma logs)
 sma daemon restart
 sma daemon upgrade                           # pull the pinned image and recreate the container
