@@ -80,8 +80,76 @@ def test_upgrade_reaching_client_is_usage(env, capsys):
 
 
 def test_version(env, capsys):
+  env["SMA_NO_UPDATE_CHECK"] = "1"
   assert commands.main(["version"], env=env) == 0
-  assert capsys.readouterr().out.startswith("sma image: ")
+  out = capsys.readouterr().out
+  assert out.startswith("sma image: ")
+  assert "latest:    skipped" in out
+
+
+def _release(version="3.2.35"):
+  return {"version": version, "tag": "sma-ng-v" + version, "url": "https://x", "published": "2026-10-28"}
+
+
+@pytest.mark.parametrize(
+  "image,daemon,latest,expect,absent",
+  [
+    ("3.2.34", None, "3.2.35", ["sma image: 3.2.34 (commit c) - out of date", "latest:    3.2.35 (released 2026-10-28)", "run sma upgrade"], ["up to date"]),
+    ("3.2.35", None, "3.2.35", ["sma: up to date"], ["out of date"]),
+    ("3.2.35", "3.2.34", "3.2.35", ["daemon:    3.2.34 (commit abcdef0) at http://127.0.0.1:8585 - out of date", "run sma daemon upgrade"], ["up to date"]),
+    ("dev", None, "3.2.35", ["sma image: dev (commit c)\n"], ["out of date", "up to date"]),
+  ],
+)
+def test_version_against_latest_release(env, monkeypatch, image, daemon, latest, expect, absent):
+  monkeypatch.setattr(commands, "get_version", lambda: image)
+  monkeypatch.setattr(commands, "get_commit", lambda: "c")
+  health = {"version": daemon, "commit": "abcdef0123"} if daemon else None
+  monkeypatch.setattr("resources.cli.http.DaemonClient.health", lambda self, timeout=2.0: health)
+  monkeypatch.setattr("resources.cli.releases.latest_release", lambda repo=None: _release(latest))
+  out = io.StringIO()
+  assert commands.run(["version"], env=env, out=out, err=io.StringIO()) == 0
+  text = out.getvalue()
+  for line in expect:
+    assert line in text
+  for line in absent:
+    assert line not in text
+
+
+def test_version_release_check_failure_is_not_fatal(env, monkeypatch):
+  from resources.cli import releases
+
+  def boom(repo=None):
+    raise releases.ReleaseCheckError("timed out")
+
+  monkeypatch.setattr("resources.cli.releases.latest_release", boom)
+  monkeypatch.setattr("resources.cli.http.DaemonClient.health", lambda self, timeout=2.0: None)
+  out = io.StringIO()
+  assert commands.run(["version"], env=env, out=out, err=io.StringIO()) == 0
+  assert "latest:    unknown (timed out)" in out.getvalue()
+
+
+def test_version_json(env, monkeypatch):
+  import json
+
+  monkeypatch.setattr(commands, "get_version", lambda: "3.2.34")
+  monkeypatch.setattr("resources.cli.http.DaemonClient.health", lambda self, timeout=2.0: {"version": "3.2.35", "commit": "abc"})
+  monkeypatch.setattr("resources.cli.releases.latest_release", lambda repo=None: _release())
+  out = io.StringIO()
+  assert commands.run(["--json", "version"], env=env, out=out, err=io.StringIO()) == 0
+  data = json.loads(out.getvalue())
+  assert data["image"]["outdated"] is True and data["daemon"]["outdated"] is False and data["latest"]["version"] == "3.2.35"
+
+
+def test_status_is_daemon_status(env, monkeypatch):
+  seen = {}
+
+  def fake_status(facts, cfg, e, out, as_json=False):
+    seen["json"] = as_json
+    return 0
+
+  monkeypatch.setattr("resources.cli.daemonctl.status", fake_status)
+  assert commands.run(["--json", "status"], env=env, out=io.StringIO(), err=io.StringIO()) == 0
+  assert seen == {"json": True}
 
 
 def test_help_and_usage(env):
@@ -139,6 +207,7 @@ def test_python_dash_m_entrypoint():
   import sys
 
   root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-  r = subprocess.run([sys.executable, "-m", "resources.cli", "version"], cwd=root, capture_output=True, text=True, check=False)
+  env = {**os.environ, "SMA_NO_UPDATE_CHECK": "1"}  # no live GitHub call from the test suite
+  r = subprocess.run([sys.executable, "-m", "resources.cli", "version"], cwd=root, env=env, capture_output=True, text=True, check=False)
   assert r.returncode == 0, r.stderr
   assert r.stdout.startswith("sma image: ")

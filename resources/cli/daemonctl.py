@@ -160,6 +160,9 @@ def status(facts, cfg, env, out, as_json=False):
   local = routing.resolve_target(cfg, clientconfig.LOCAL_TARGET).target
   client = routing.client_for(local, facts, timeout=2.0)
   healthy = client.healthy(timeout=2.0)
+  health = (client.health(timeout=2.0) or {}) if healthy else {}
+  jobs_raw = health.get("jobs")
+  jobs: dict = jobs_raw if isinstance(jobs_raw, dict) else {}
   result = {
     "container": name if container else None,
     "state": state,
@@ -168,6 +171,14 @@ def status(facts, cfg, env, out, as_json=False):
     "compose_service": info[3] if info else None,
     "url": local.url,
     "healthy": healthy,
+    "version": health.get("version"),
+    "commit": health.get("commit"),
+    "node": health.get("node"),
+    "workers": health.get("workers"),
+    "active_jobs": len(health.get("active") or {}),
+    "waiting_jobs": len(health.get("waiting") or {}),
+    "jobs": jobs,
+    "gpu": health.get("selected_backend"),
   }
   if as_json:
     out.write(json.dumps(result) + "\n")
@@ -178,6 +189,13 @@ def status(facts, cfg, env, out, as_json=False):
     else:
       out.write("container: none (sma daemon up --media PATH)\n")
     out.write("daemon:    %s at %s\n" % ("answering" if healthy else "not answering", local.url))
+    if health:
+      commit = (health.get("commit") or "")[:7]
+      out.write("version:   %s%s\n" % (health.get("version") or "unknown", " (commit %s)" % commit if commit else ""))
+      out.write(
+        "node:      %s, %s workers, gpu %s\n" % (health.get("node") or "unknown", health.get("workers") if health.get("workers") is not None else "?", health.get("selected_backend") or "none")
+      )
+      out.write("jobs:      %d running, %d waiting; %s completed, %s failed\n" % (result["active_jobs"], result["waiting_jobs"], jobs.get("completed", 0), jobs.get("failed", 0)))
   return 0 if healthy else 3
 
 
