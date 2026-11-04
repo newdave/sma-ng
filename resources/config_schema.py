@@ -414,6 +414,11 @@ class VideoSettings(_Base):
   codec_parameters: CodecParameters = ""
   dynamic_parameters: bool = False
   max_width: int = 0
+  # Highest output frame rate (fps). A faster source is re-encoded at the
+  # standard rate of its own family that fits under the cap (25 -> 50 fps
+  # halves to 25, 29.97/59.94 go to 23.976, 30/60 to 24); frames are dropped
+  # evenly by ffmpeg -r. 0 = keep the source rate.
+  max_fps: float = Field(default=0.0, ge=0.0)
   profile: list[str] = Field(default_factory=list)
   max_level: float = 0.0
   pix_fmt: list[str] = Field(default_factory=list)

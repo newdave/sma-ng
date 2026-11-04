@@ -649,3 +649,117 @@ class TestPostDeletedPath:
       self._mp().post([str(out)], "movie", input_path=str(out))
     assert all(c.kwargs["deleted_path"] is None for c in emby.call_args_list)
     assert all(c.kwargs["deleted_path"] is None for c in jf.call_args_list)
+
+
+class TestMaxFps:
+  @pytest.mark.parametrize(
+    "src_fps,max_fps,expected",
+    [
+      (47.952, 23.976, 24000 / 1001),  # double-rate source halved
+      (29.97, 23.976, 24000 / 1001),
+      (59.94, 29.97, 30000 / 1001),  # NTSC rationals, not the rounded values
+      (50.0, 25.0, 25.0),
+      (29.97, 23.98, 24000 / 1001),  # near-NTSC value snapped to the exact rate
+      # Cap 25: nothing above the standard 24/25 fps, each source to its own family.
+      (50.0, 25.0, 25.0),
+      (29.97, 25.0, 24000 / 1001),
+      (59.94, 25.0, 24000 / 1001),
+      (47.952, 25.0, 24000 / 1001),
+      (30.0, 25.0, 24.0),
+      (60.0, 25.0, 24.0),
+      (25.0, 23.976, 24000 / 1001),  # PAL under a film cap: never 24.000 above the cap
+    ],
+  )
+  def test_faster_source_is_reencoded_at_the_cap(self, tmp_yaml, make_media_info, src_fps, max_fps, expected):
+    mp = _gen_mp(tmp_yaml, video_max_fps=max_fps)
+    info = make_media_info(video_codec="h264")  # h264 is in the pool, so it would otherwise be copied
+    info.video.fps = src_fps
+    video = _generate(mp, info)["video"]
+    assert video["codec"] != "copy"
+    assert video["fps"] == pytest.approx(expected)
+    assert ".max-fps" in video["debug"]
+
+  @pytest.mark.parametrize("src_fps,max_fps", [(23.976, 23.976), (23.976023976, 23.976), (24.0, 23.976), (25.0, 0), (25.0, 30.0), (23.976, 25.0), (24.0, 25.0), (25.0, 25.0)])
+  def test_source_at_or_under_the_cap_is_untouched(self, tmp_yaml, make_media_info, src_fps, max_fps):
+    # 24.0 vs 23.976 is within the 0.2 % slack: not worth dropping one frame in a thousand.
+    mp = _gen_mp(tmp_yaml, video_max_fps=max_fps)
+    info = make_media_info(video_codec="h264")
+    info.video.fps = src_fps
+    video = _generate(mp, info)["video"]
+    assert video["codec"] == "copy"
+    assert "fps" not in video
+
+  def test_dolby_vision_profile_5_keeps_its_rate(self, tmp_yaml, make_media_info):
+    mp = _gen_mp(tmp_yaml, video_max_fps=23.976)
+    info = _dv_info(make_media_info, 5)
+    info.video.fps = 59.94
+    video = _generate(mp, info)["video"]
+    assert video["codec"] == "copy" and "fps" not in video
+
+  def test_cap_reaches_the_ffmpeg_command_and_skips_vfr_passthrough(self, tmp_yaml, make_media_info):
+    mp = _gen_mp(tmp_yaml, video_max_fps=23.976)
+    mp.settings.output_format = "mp4"
+    mp._source_likely_vfr = MagicMock(return_value=True)
+    info = make_media_info(video_codec="h264")
+    info.video.fps = 29.97
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, _pre, postopts, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    argv = _video_argv(options["video"])
+    assert float(argv[argv.index("-r:v") + 1]) == pytest.approx(24000 / 1001)
+    assert "-fps_mode" not in postopts
+
+
+class TestMaxFpsConfig:
+  def _settings(self, tmp_yaml, overrides, profile=None):
+    with patch("resources.readsettings.ReadSettings._validate_binaries"):
+      from resources.readsettings import ReadSettings
+
+      return ReadSettings(tmp_yaml(overrides), profile=profile)
+
+  def test_kebab_key_and_profile_overlay(self, tmp_yaml):
+    overrides = {"base": {"video": {"max-fps": 23.976}}, "profiles": {"preserve": {"video": {"max-fps": 0}}}}
+    assert self._settings(tmp_yaml, overrides).video_max_fps == 23.976
+    assert self._settings(tmp_yaml, overrides, profile="preserve").video_max_fps == 0
+
+  def test_default_is_off(self, tmp_yaml):
+    assert self._settings(tmp_yaml, {}).video_max_fps == 0
+
+  def test_negative_is_rejected(self, tmp_yaml):
+    from resources.config_loader import ConfigError
+
+    with pytest.raises((ConfigError, ValueError, SystemExit)):
+      self._settings(tmp_yaml, {"base": {"video": {"max-fps": -1}}})
+
+
+class TestMaxFpsPostopts:
+  @pytest.mark.parametrize(
+    "user_postopts,kept",
+    [
+      (["-fps_mode", "passthrough"], []),
+      (["-vsync", "vfr", "-movflags", "+faststart"], ["-movflags", "+faststart"]),
+      (["-fps_mode:v", "passthrough"], []),
+      (["-fps_mode", "cfr"], ["-fps_mode", "cfr"]),
+    ],
+  )
+  def test_non_cfr_fps_mode_is_dropped_under_the_cap(self, tmp_yaml, make_media_info, user_postopts, kept):
+    mp = _gen_mp(tmp_yaml, video_max_fps=23.976)
+    mp.settings.postopts = list(user_postopts)
+    info = make_media_info(video_codec="h264")
+    info.video.fps = 29.97
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      _options, _pre, postopts, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    tail = [x for x in postopts if x in ("-fps_mode", "-fps_mode:v", "-vsync", "passthrough", "vfr", "cfr", "-movflags", "+faststart")]
+    assert tail == kept
+
+  def test_user_fps_mode_untouched_without_the_cap(self, tmp_yaml, make_media_info):
+    mp = _gen_mp(tmp_yaml)
+    mp.settings.postopts = ["-fps_mode", "passthrough"]
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      _options, _pre, postopts, *_ = mp.generateOptions("/fake/input.mkv", info=make_media_info(video_codec="h264"))
+    assert postopts[-2:] == ["-fps_mode", "passthrough"]
+
+  def test_qsv_codec_emits_the_rate(self):
+    from converter.avcodecs import H265QSVCodec
+
+    argv = H265QSVCodec().parse_options({"codec": "h265qsv", "map": 0, "fps": 24000 / 1001})
+    assert float(argv[argv.index("-r:v") + 1]) == pytest.approx(24000 / 1001)

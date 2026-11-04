@@ -144,6 +144,7 @@ base:
     codec-parameters: ''
     dynamic-parameters: false
     max-width: 0
+    max-fps: 0.0
     profile: []
     max-level: 0.0
     pix-fmt: []
