@@ -218,7 +218,7 @@ jobs:
             pyproject.toml
             setup/requirements*.txt
 
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install: false
 
@@ -229,7 +229,7 @@ jobs:
         run: mise run build:dist
 
       - name: Upload dist to GitHub Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ needs.release-info.outputs.tag }}
           files: dist/*
