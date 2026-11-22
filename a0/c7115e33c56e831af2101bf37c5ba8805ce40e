@@ -1,0 +1,29 @@
+resources/processor/failures.py
+  s_d73ac5e457a585::t_e0c6e9c26a4f91 579-585,587-592,594-603,606,610-614,625-634,653
+  s_d73ac5e457a585::t_16f96e7f67ecd9 593
+tests/test_attempt_ladder.py
+  s_d73ac5e457a585::t_d1a1fb1841168c 464-466,529-638
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_e0c6e9c26a4f91 4757-4759,4764-4767,4769,4829-4831,4871-4873,4927-4929
+tests/test_failures.py
+  s_d73ac5e457a585::t_c3b869c4b598a0 339-345,358-390,392-396,398-410
+  s_d73ac5e457a585::t_28972170fc3d83 391,397
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_628a8fed9f619b 111-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "a0c7115e33c56e831af2101bf37c5ba8805ce40e",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
