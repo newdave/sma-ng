@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.42](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.41...sma-ng-v3.2.42) (2026-11-22)
+
+
+### Bug Fixes
+
+* **ci:** bump bandit so its plugins load on the CI Python ([#232](https://github.com/newdave/sma-ng/issues/232)) ([5675355](https://github.com/newdave/sma-ng/commit/567535529c4594eda0313b9c9f877b769a738537))
+
 ## [3.2.41](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.40...sma-ng-v3.2.41) (2026-11-22)
 
 
