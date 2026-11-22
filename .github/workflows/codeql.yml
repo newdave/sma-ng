@@ -2,15 +2,16 @@ name: CodeQL
 
 # Static analysis (SAST) for the Python code; results go to code scanning
 # (Security tab). Bandit (pre-commit) covers a narrower rule set on PRs too.
+#
+# Weekly cron plus PRs that touch Python or this workflow; no push-to-main run
+# (the PR already analysed the same code, and the cron catches new rules).
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "*.md"
-      - "tests/**"
+    paths:
+      - "**/*.py"
+      - "pyproject.toml"
+      - ".github/workflows/codeql.yml"
   schedule:
     - cron: "23 4 * * 1"
 
