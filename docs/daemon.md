@@ -406,6 +406,15 @@ Each config gets a separate rotating log file in `logs/` named after the config 
 
 Rotation: 10MB max, 5 backups. Use `--logs-dir` to change the directory.
 
+### Child log levels
+
+When the daemon runs a conversion, `manual.py --job-id` prefixes each child log record with the token
+`SMA_LEVEL=<LEVEL>` and a space (for example `SMA_LEVEL=WARNING`). The worker strips the token and writes the line
+to the per-config log at that level. Traceback continuation lines (starting with a pipe and a space) inherit the
+level of the record before them. Raw FFmpeg output has no token and stays at `INFO`. As a result,
+`GET /logs/<name>?level=WARNING` and `?level=ERROR` return conversion warnings and errors instead of only
+daemon-level records. The token is only added with `--job-id`; manual runs print unchanged output.
+
 ### FFmpeg Failure Sidecars
 
 When a transcode fails, SMA writes the **complete** ffmpeg stderr (the multi-KB

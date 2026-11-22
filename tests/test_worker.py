@@ -1066,6 +1066,15 @@ class TestPreflightDiskPressureIntegration:
     worker._run_conversion.assert_not_called()
 
 
+class _Capture(logging.Handler):
+  def __init__(self):
+    super().__init__(logging.DEBUG)
+    self.records = []
+
+  def emit(self, record):
+    self.records.append(record)
+
+
 class TestChildLogLevels:
   """Child records carry SMA_LEVEL=<LEVEL>; the worker re-logs at that level (SMANG-13)."""
 
@@ -1073,15 +1082,22 @@ class TestChildLogLevels:
     media = tmp_path / "movie.mkv"
     media.write_bytes(b"")
     worker = _make_worker()
-    config_logger = mock.MagicMock()
-    worker.config_log_manager.get_logger.return_value = config_logger
+    logger = logging.getLogger("test.childlevels")
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    cap = _Capture()
+    logger.addHandler(cap)
+    worker.config_log_manager.get_logger.return_value = logger
     proc = _make_fake_process(lines, returncode=0)
-    with mock.patch("subprocess.Popen", return_value=proc):
-      worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
-    return config_logger
+    try:
+      with mock.patch("subprocess.Popen", return_value=proc):
+        worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    finally:
+      logger.removeHandler(cap)
+    return worker, cap.records
 
   def test_levels_preserved_and_token_stripped(self, tmp_path):
-    cl = self._run(
+    _, recs = self._run(
       tmp_path,
       [
         "SMA_LEVEL=WARNING [t job:1] careful",
@@ -1091,13 +1107,46 @@ class TestChildLogLevels:
         "raw ffmpeg line",
       ],
     )
-    calls = [c.args for c in cl.log.call_args_list]
-    assert (logging.WARNING, "[t job:1] careful") in calls
-    assert (logging.ERROR, "[t job:1] boom") in calls
-    assert (logging.ERROR, "| ValueError: x") in calls
-    assert (logging.INFO, "raw ffmpeg line") in calls
-    assert not any("SMA_LEVEL" in str(c) for c in cl.method_calls)
+    got = [(r.levelno, r.getMessage()) for r in recs]
+    assert (logging.WARNING, "[t job:1] careful") in got
+    assert (logging.ERROR, "[t job:1] boom") in got
+    assert (logging.ERROR, "| ValueError: x") in got
+    assert (logging.INFO, "raw ffmpeg line") in got
+    assert not any("SMA_LEVEL" in m for _, m in got)
 
   def test_no_empty_separator_record(self, tmp_path):
-    cl = self._run(tmp_path, ["hello"])
-    assert not [c for c in cl.method_calls if c.args and c.args[-1] == ""]
+    _, recs = self._run(tmp_path, ["hello"])
+    assert not [r for r in recs if r.getMessage() == ""]
+
+  def test_attempts_line_with_level_token_still_parsed(self, tmp_path):
+    line = 'SMA_LEVEL=INFO {"attempts":[{"tier":"hw","failure_class":"encoder_init_failed","duration_ms":5}],"event":"ffmpeg.attempts","result":"failed"}'
+    worker, recs = self._run(tmp_path, [line])
+    assert worker._last_attempt_failure_class == "encoder_init_failed"
+    assert any(r.getMessage().startswith('{"attempts"') for r in recs)
+
+  def test_warning_reaches_logs_level_filter(self, tmp_path):
+    from resources.daemon.config import ConfigLogManager
+    from tests.test_handler import _get_response_body, _make_handler
+
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    mgr = ConfigLogManager(logs_dir=str(tmp_path / "logs"))
+    worker = _make_worker()
+    worker.config_log_manager = mgr
+    proc = _make_fake_process(["SMA_LEVEL=INFO [t job:1] fine", "SMA_LEVEL=WARNING [t job:1] careful"], returncode=0)
+    logger = mgr.get_logger("/cfg/test-lvl.yml")
+    try:
+      with mock.patch("subprocess.Popen", return_value=proc):
+        worker._run_conversion_inner(1, str(media), "/cfg/test-lvl.yml", [])
+      for h in logger.handlers:
+        h.flush()
+      handler = _make_handler()
+      handler.server.config_log_manager.get_all_log_files.return_value = [{"name": "test-lvl", "path": mgr.get_log_file("/cfg/test-lvl.yml")}]
+      handler._get_log_content("/logs/test-lvl", {"level": ["WARNING"]})
+      msgs = [e["message"] for e in _get_response_body(handler)["entries"]]
+    finally:
+      for h in list(logger.handlers):
+        logger.removeHandler(h)
+        h.close()
+    assert any("careful" in m for m in msgs)
+    assert not any("fine" in m for m in msgs)
