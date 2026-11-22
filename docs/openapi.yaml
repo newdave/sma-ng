@@ -260,8 +260,13 @@ paths:
   /health:
     get:
       summary: Daemon health check
-      description: Returns node status, uptime, worker count, and job statistics. No authentication required.
-      security: []
+      description: >-
+        Without credentials returns a minimal liveness view (status, version, uptime_seconds, jobs). With a
+        valid API key returns the full detail (node, commit, workers, active and waiting jobs, hardware).
+      security:
+        - {}
+        - apiKey: []
+        - bearerToken: []
       operationId: getHealth
       tags: [monitoring]
       responses:
@@ -277,6 +282,7 @@ paths:
                     example: ok
                   node:
                     type: string
+                    description: Authenticated callers only
                   version:
                     type: string
                     description: SMA-NG release version of this node (from package metadata)
@@ -303,6 +309,25 @@ paths:
                   waiting:
                     type: object
                     description: Map of config path → waiting job count
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: Prometheus text exposition. Requires credentials (series carry the node id).
+      security:
+        - apiKey: []
+        - bearerToken: []
+      operationId: getPrometheusMetrics
+      tags: [monitoring]
+      responses:
+        "200":
+          description: Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          description: Missing or invalid credentials
 
   /status:
     get:

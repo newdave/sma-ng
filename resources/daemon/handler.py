@@ -238,7 +238,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     server: "DaemonServer"
 
   # Endpoints that don't require authentication (prefix-matched for /docs/*)
-  PUBLIC_ENDPOINTS = ["/", "/dashboard", "/admin", "/metrics", "/health", "/status", "/docs", "/favicon.png"]
+  PUBLIC_ENDPOINTS = ["/", "/dashboard", "/admin", "/health", "/status", "/docs", "/favicon.png"]
 
   def log_message(self, format, *args):
     self.server.logger.debug("%s - %s" % (self.address_string(), format % args))
@@ -383,6 +383,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
   # ------------------------------------------------------------------
 
   def _get_health(self):
+    if not self._is_authenticated():
+      # Unauthenticated callers get a minimal liveness view only: no node id,
+      # job ids or media paths (those live in the active/waiting lists).
+      now = _local_now()
+      self.send_json_response(
+        200,
+        {
+          "status": "ok",
+          "version": self.server.version,
+          "uptime_seconds": int((now - self.server.started_at).total_seconds()),
+          "jobs": self.server.job_db.get_stats(),
+        },
+      )
+      return
     lock_status = self.server.config_lock_manager.get_status()
     stats = self.server.job_db.get_stats()
     now = _local_now()

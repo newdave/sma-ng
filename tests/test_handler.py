@@ -3023,6 +3023,44 @@ class TestSecurityHardening:
     assert "n1" not in json.dumps(body)
     assert body["status"] == "ok"
 
+  def test_health_public_view_hides_paths_and_node(self):
+    h = _make_handler(api_key="k", headers={})
+    h.server.config_lock_manager.get_status.return_value = {
+      "active": [{"path": "/media/secret.mkv", "job_id": 7}],
+      "waiting": [{"path": "/media/other.mkv"}],
+    }
+    h._get_health()
+    body = _get_response_body(h)
+    text = json.dumps(body)
+    assert h._response_code == 200
+    assert body["status"] == "ok"
+    assert "/media" not in text
+    assert "test-node-1" not in text
+    for key in ("node", "active", "waiting"):
+      assert key not in body
+
+  def test_health_authenticated_has_full_detail(self):
+    h = _make_handler(api_key="k", headers={"X-API-Key": "k"})
+    h.server.config_lock_manager.get_status.return_value = {"active": [{"path": "/media/a.mkv"}], "waiting": []}
+    h._get_health()
+    body = _get_response_body(h)
+    assert body["node"] == "test-node-1"
+    assert body["active"][0]["path"] == "/media/a.mkv"
+
+  def test_prometheus_metrics_not_public(self):
+    h = _make_handler()
+    assert h.is_public_endpoint("/metrics") is False
+
+  def test_prometheus_metrics_requires_auth(self):
+    h = _make_handler(path="/metrics", api_key="k", headers={})
+    h.do_GET()
+    assert h._response_code == 401
+
+  def test_prometheus_metrics_accepts_bearer(self):
+    h = _make_handler(path="/metrics", api_key="k", headers={"Authorization": "Bearer k"})
+    h.do_GET()
+    assert h._response_code == 200
+
   def test_status_authenticated_has_full_detail(self):
     h = _make_handler(api_key="k", headers={"X-API-Key": "k"})
     h.server.job_db.get_cluster_nodes.return_value = [{"node_id": "n1", "host": "10.0.0.5"}]

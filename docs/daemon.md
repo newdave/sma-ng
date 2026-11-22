@@ -63,7 +63,7 @@ every docs page shows the running version.
 | `GET`  | `/`                              | No     | Redirects to `/dashboard`                                               |
 | `GET`  | `/dashboard`                     | No     | Web dashboard (HTML shell; prompts for the API key)                     |
 | `GET`  | `/admin`                         | No     | Admin panel (destructive actions)                                       |
-| `GET`  | `/health`                        | No     | Health check with job stats + GPU capabilities + fallback counters      |
+| `GET`  | `/health`                        | Partly | Public: minimal liveness. With a key: jobs, GPU capabilities, fallbacks |
 | `GET`  | `/status`                        | Partly | Public: minimal status. With a key: cluster-wide node and job detail    |
 | `GET`  | `/docs`                          | No     | Rendered documentation (`/docs/<page>`; includes `/docs/changelog`)     |
 | `GET`  | `/jobs`                          | Yes    | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
@@ -72,7 +72,7 @@ every docs page shows the running version.
 | `GET`  | `/jobs/<id>/ffmpeg-stderr`       | Yes    | Stored ffmpeg stderr of a failed conversion, as text                    |
 | `GET`  | `/paths`                         | Yes    | Path roots this daemon serves (routing, scan, audit, path-rewrite from) |
 | `GET`  | `/configs`                       | Yes    | Config mappings and status                                              |
-| `GET`  | `/metrics`                       | No     | Cluster metrics web page (PostgreSQL required)                          |
+| `GET`  | `/metrics`                       | Yes    | Prometheus text exposition (key via `X-API-Key`, Bearer or Basic auth)  |
 | `GET`  | `/api/metrics`                   | Yes    | Metrics JSON. Query: `?window=24h\|7d\|30d\|all` (PostgreSQL required)  |
 | `GET`  | `/stats`                         | Yes    | Job statistics by status                                                |
 | `GET`  | `/scan`                          | Yes    | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv`               |
@@ -222,7 +222,7 @@ curl -H "X-API-Key: SECRET" ...
 curl -H "Authorization: Bearer SECRET" ...
 ```
 
-Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/metrics`, `/health`, `/status`, `/docs`, `/favicon.png`
+Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`, `/favicon.png`
 
 The dashboard, admin, and metrics pages are only HTML shells. The API key is never written into the page: when the
 daemon has an API key configured, the first `401` opens one in-page dialog asking for it (`daemon.api-key` in
@@ -375,9 +375,15 @@ Job 2: /Movies/film1.mkv -> sma-ng.yml profile lq [starts immediately]
 Job 3: /TV/show2.mkv     -> sma-ng.yml profile rq [waits for an available worker]
 ```
 
-Check active/waiting jobs: `curl http://localhost:8585/health`
+Check active/waiting jobs: `curl -H "X-API-Key: SECRET" http://localhost:8585/health`
 
-Both `/health` and `/status` report the running build in two top-level fields:
+Without credentials, `/health` returns only a minimal liveness view: `status`, `version`, `uptime_seconds` and
+`jobs` (counts by status). The node id, `commit`, `active`/`waiting` job lists (media paths and job ids), worker
+count and hardware fields need a valid key. When no API key or basic auth is configured every caller is
+authenticated and gets the full view. `/metrics` requires the same credentials because its series carry the node
+id; point Prometheus at it with `authorization` (Bearer) or `basic_auth` in the scrape config.
+
+Both `/health` (with a key) and `/status` report the running build in two top-level fields:
 
 - `version` — the SMA-NG release version (from package metadata, e.g. `3.1.0`).
 - `commit` — the git commit the running image was built from, baked in at
