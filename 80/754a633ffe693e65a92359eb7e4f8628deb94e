@@ -1,0 +1,50 @@
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_2b25a1ea41c9ed 185-209,4429-4434,4481,4492,4530,4582,4624,4665,4669-4670
+  s_d73ac5e457a585::t_ff07a6b4430a3e 4428
+resources/daemon/db.py
+  s_d73ac5e457a585::t_b836b7dece6354 105-133,669,675,685-687,698,768,1579,1587,1598-1600,1610,1697
+  s_d73ac5e457a585::t_b2bd6cb9b70eea 1738-1744
+  s_d73ac5e457a585::t_580cbb3267db42 807-813
+tests/test_mediaprocessor.py
+  s_d73ac5e457a585::t_645d8ebdcf8120 4866-4925
+tests/test_daemon.py
+  s_d73ac5e457a585::t_fd11fa9e697fe2 4191-4231
+tests/test_worker.py
+  s_d73ac5e457a585::t_fd11fa9e697fe2 189,366,1153-1154,1156-1246
+  s_d73ac5e457a585::t_7a116b883a7ec8 1155
+resources/daemon/worker.py
+  s_d73ac5e457a585::t_79b7ec06283677 291
+  s_d73ac5e457a585::t_daaa93616f61bb 16
+  s_d73ac5e457a585::t_69aec2b9178b0e 444,577,603-611,863-870,902-929
+  s_d73ac5e457a585::t_f7a8a2994f9ecd 930
+docs/daemon.md
+  s_d73ac5e457a585::t_3f50242710d660 180-186
+tests/test_manual.py
+  s_d73ac5e457a585::t_fd11fa9e697fe2 981-1049
+  s_d73ac5e457a585::t_f85ea4ee38f628 475-506
+docs/openapi.yaml
+  s_d73ac5e457a585::t_7a116b883a7ec8 134,166,190
+  s_d73ac5e457a585::t_3f50242710d660 131-133,135-165,167-189
+manual.py
+  s_d73ac5e457a585::t_f0326645f521e5 485-515,532-533,613-615,649-652
+  s_d73ac5e457a585::t_4ac8127241f09e 516-531
+tests/test_sqlite_db.py
+  s_d73ac5e457a585::t_fd11fa9e697fe2 545-600,603-607
+  s_d73ac5e457a585::t_9886b5d2ecebd3 601-602
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "80754a633ffe693e65a92359eb7e4f8628deb94e",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
