@@ -1,0 +1,21 @@
+scripts/wiki_sync.py
+  s_d73ac5e457a585::t_dfe5a4080e6a04 161-164
+tests/test_wiki_sync.py
+  s_d73ac5e457a585::t_746612455cbadb 81-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "d5a8a0074acfce0c7e67f7cf08f4a23898279dfc",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
