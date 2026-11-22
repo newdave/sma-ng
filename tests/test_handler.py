@@ -1038,6 +1038,14 @@ class TestParseWebhookBody:
     assert h._response_code == 400
     assert "set by the daemon" in _get_response_body(h)["error"]
 
+  def test_json_body_manual_nc_allowed(self):
+    """The generic webhook always runs manual.py, where -nc is its own option, not -n -c."""
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": ["-nc", "-cl"]}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    path, args, config, retries = h._parse_webhook_body()
+    assert path == "/mnt/movie.mkv"
+    assert args == ["-nc", "-cl"]
+
   @pytest.mark.parametrize("bad_path", [5, ["x"], {}, {"a": 1}, True])
   def test_json_body_non_string_path_rejected(self, bad_path):
     data = json.dumps({"path": bad_path}).encode()

@@ -85,16 +85,69 @@ def test_legitimate_args_still_allowed(args):
   assert job_kinds.forbidden_arg(args) is None
 
 
-def test_every_manual_option_is_allowed_unless_protected():
+def _tool_options(script):
+  """(option strings, single-letter short flags that take no value) from the tool's add_argument calls."""
   import ast
   import pathlib
 
-  tree = ast.parse(pathlib.Path(job_kinds.__file__).resolve().parents[2].joinpath("manual.py").read_text())
-  opts = [a.value for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "add_argument" for a in n.args if isinstance(a, ast.Constant) and str(a.value).startswith("-")]
+  tree = ast.parse(pathlib.Path(job_kinds.__file__).resolve().parents[2].joinpath(script).read_text())
+  opts, bool_short = [], {"h"}  # argparse adds -h/--help
+  for node in ast.walk(tree):
+    if not (isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "add_argument"):
+      continue
+    names = [a.value for a in node.args if isinstance(a, ast.Constant) and str(a.value).startswith("-")]
+    opts += names
+    action = next((k.value.value for k in node.keywords if k.arg == "action" and isinstance(k.value, ast.Constant)), None)
+    if action in ("store_true", "store_false", "store_const", "append_const", "count", "help", "version"):
+      bool_short |= {n[1] for n in names if len(n) == 2}
+  return opts, bool_short
+
+
+def test_every_manual_option_is_allowed_unless_protected():
+  opts, _ = _tool_options("manual.py")
   assert "-cl" in opts and "--config" in opts
   for opt in opts:
     expected = opt in job_kinds.FORBIDDEN_ARGS
     assert (job_kinds.forbidden_arg([opt]) is not None) == expected, opt
+
+
+@pytest.mark.parametrize("kind", job_kinds.SUPPORTED_KINDS)
+def test_every_tool_option_is_allowed_unless_protected(kind):
+  """A new flag in any tool fails here until job_kinds knows whether it bundles or is protected."""
+  opts, bool_short = _tool_options(job_kinds.get(kind).script)
+  assert "--config" in opts
+  for opt in opts:
+    expected = opt in FORBIDDEN_ARGS_ALL
+    assert (job_kinds.forbidden_arg([opt], kind) is not None) == expected, (kind, opt)
+  # Every value-less short flag must be known, or "-<flag>c/evil" smuggles in -c.
+  assert set(job_kinds.bool_short_flags(kind)) == bool_short, kind
+  for flag in bool_short:
+    assert job_kinds.forbidden_arg(["-%sc/evil" % flag], kind) is not None, (kind, flag)
+
+
+FORBIDDEN_ARGS_ALL = {"-c", "--config", "-i", "--input", "--job-id"}
+
+# repair.py has store_true -n/-v and rename.py has -v: "-nc/evil" there is "-n -c /evil".
+TOOL_BUNDLE_BYPASSES = {
+  "repair": [["-nc/evil"], ["-vc/evil"], ["-nvc", "/evil"], ["-nc", "/evil"], ["-vnc=/evil"], ["-hc/evil"], ["--conf=/evil"]],
+  "rename": [["-vc/evil"], ["-vc", "/evil"], ["-vvc/evil"], ["-hc/evil"], ["--co=/evil"]],
+}
+
+
+@pytest.mark.parametrize("kind,args", [(k, a) for k, cases in TOOL_BUNDLE_BYPASSES.items() for a in cases])
+def test_bool_flag_bundles_rejected_per_kind(kind, args):
+  assert job_kinds.forbidden_arg(args, kind) is not None
+
+
+@pytest.mark.parametrize("kind", ["convert", "preview", "audit"])
+def test_manual_nc_still_allowed_for_manual_kinds(kind):
+  assert job_kinds.forbidden_arg(["-nc", "-cl", "-imdb", "tt1"], kind) is None
+  assert job_kinds.forbidden_arg(["-ac/evil"], kind) == "-ac/evil"
+
+
+def test_forbidden_arg_accepts_job_kind_object():
+  assert job_kinds.forbidden_arg(["-nc/evil"], job_kinds.get("repair")) == "-nc/evil"
+  assert job_kinds.forbidden_arg(["-nc"], job_kinds.get("convert")) is None
 
 
 def test_script_path_override():

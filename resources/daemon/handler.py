@@ -1882,7 +1882,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     except KeyError:
       self.send_json_response(400, {"error": "Unknown job kind %r" % req["kind"], "kinds": list(job_kinds.SUPPORTED_KINDS)})
       return
-    bad = job_kinds.forbidden_arg(req["args"])
+    bad = job_kinds.forbidden_arg(req["args"], kind)
     if bad:
       self.send_json_response(400, {"error": "Argument %s is set by the daemon and cannot be passed" % bad})
       return
