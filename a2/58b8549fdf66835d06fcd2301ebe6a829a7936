@@ -1,0 +1,32 @@
+tests/test_mediaprocessor.py
+  s_d73ac5e457a585::t_099679a889b3ef 3763-3820,3822-3837
+  s_d73ac5e457a585::t_0fd1fd2c1faa91 3821
+  s_d73ac5e457a585::t_c99856e7076d22 4
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_ef7e96ab2458d4 995,1004-1008,1067-1084
+  s_d73ac5e457a585::t_159fbffc9a7f8b 1085
+resources/daemon/worker.py
+  s_d73ac5e457a585::t_0375ba3c234280 833-837,839
+  s_d73ac5e457a585::t_211362929ac76b 906
+tests/test_worker.py
+  s_d73ac5e457a585::t_8c020d95aeb869 889-938,940-942
+  s_d73ac5e457a585::t_612530a428a141 939
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_4c22b52bf67aa5 344-347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "a258b8549fdf66835d06fcd2301ebe6a829a7936",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
