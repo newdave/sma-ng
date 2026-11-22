@@ -365,10 +365,21 @@ or a network partition. A cancelled job's output may still exist on disk if ffmp
 
 ### Conversion produces larger output file
 
-When a video re-encode comes out larger than its source, SMA-NG logs
-`[output-larger-than-input]`, discards the larger file and re-runs the job with the video stream copied (audio and
-subtitle handling are unchanged). If that copy run fails, the larger re-encode is kept so the job still produces
-an output. Same-family re-encodes (for example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
+When a video re-encode comes out larger than its source, SMA-NG logs `[output-larger-than-input]` with both sizes.
+If the re-encode was optional, it re-runs the job with the video stream copied (audio and subtitle handling are
+unchanged) and keeps whichever of the copy and the re-encode is smaller, under the same output name. A re-encode is
+optional when it was only chasing bitrate (`max-bitrate`, `crf-profiles`), the source codec is in `video-codec`, and
+the bit depth does not change.
+
+The fallback does not fire, and the larger re-encode is kept, when:
+
+- the re-encode is required: a burned-in subtitle, `max-width` downscale, forced filter or HDR filter, `max-fps`,
+  profile, level or pix-fmt limit, `force-reencode`, or an analyzer filter;
+- the source codec is not in `video-codec` (for example XviD or AV1 converted to H.264);
+- the source codec cannot be stream-copied into MP4 (VC-1/WMV, MS-MPEG4, RealVideo, Theora, FLV, or any AVI source).
+
+If the copy run fails, the larger re-encode is kept so the job still produces an output. Same-family re-encodes (for
+example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
 
 - Lower the `crf` value (lower CRF = higher quality = larger file; raise it to reduce size)
 - Add a `max-bitrate` cap in `[Video]`

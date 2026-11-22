@@ -981,9 +981,7 @@ class MediaProcessor:
       outputfile, inputfile, ripped_subs = self._run_ffmpeg(inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput)
       if outputfile is None:
         return None
-      outputfile, inputfile, ripped_subs = self._fallback_to_copy_if_larger(
-        outputfile, inputfile, ripped_subs, info, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput
-      )
+      outputfile, inputfile, ripped_subs = self._fallback_to_copy_if_larger(outputfile, inputfile, ripped_subs, info, options, preopts, postopts, downloaded_subs, reportProgress, progressOutput)
 
     self.log.debug("%s created from %s successfully." % (outputfile, inputfile))
 
@@ -1021,12 +1019,19 @@ class MediaProcessor:
       "cues_to_front": self.settings.output_format in ["mkv"] and self.settings.relocate_moov,
     }
 
-  def _fallback_to_copy_if_larger(self, outputfile, inputfile, ripped_subs, info, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput):
-    """Re-run as a video stream copy when a video re-encode came out larger than its source.
+  # video.debug markers for re-encodes that only chase a lower or capped
+  # bitrate. Any other marker (filter, scale, fps, profile, level, pix-fmt,
+  # burn-in, operator force) means a copy would ignore the configuration.
+  _OPTIONAL_REENCODE_REASONS = frozenset({"video", "hdrInput", "max-bitrate", "crf-profile", "icq", "min-bitrate", "analyzer-preset"})
+  # Video codecs that stream-copy cleanly into MP4.
+  _MP4_COPYABLE_VIDEO_CODECS = frozenset({"h264", "hevc", "av1", "vp9"})
+
+  def _fallback_to_copy_if_larger(self, outputfile, inputfile, ripped_subs, info, options, preopts, postopts, downloaded_subs, reportProgress, progressOutput):
+    """Re-run as a video stream copy when an optional video re-encode came out larger than its source.
 
     Audio and subtitle plans are kept. The larger output is moved aside (never
-    overwritten) while the copy runs, deleted if the copy succeeds, and put
-    back if it fails, so a usable output always exists.
+    overwritten) while the copy runs; the smaller of copy and re-encode is
+    kept under the re-encode's name, so a usable output always exists.
     Returns (outputfile, inputfile, ripped_subs).
     """
     video = options.get("video") or {}
@@ -1042,48 +1047,116 @@ class MediaProcessor:
     if out_size <= in_size:
       return outputfile, inputfile, ripped_subs
 
+    blocker = self._copy_fallback_blocker(info, video, options.get("format"))
+    if blocker:
+      self.log.warning("Re-encoded output %d bytes is larger than input %d bytes; keeping it because %s [output-larger-than-input]." % (out_size, in_size, blocker))
+      return outputfile, inputfile, ripped_subs
     self.log.warning("Re-encoded output %d bytes is larger than input %d bytes; falling back to video stream copy [output-larger-than-input]." % (out_size, in_size))
-    aside = outputfile + ".larger"
-    n = 2
-    while os.path.exists(aside):
-      aside = "%s.larger.%d" % (outputfile, n)
-      n += 1
-    try:
-      os.rename(outputfile, aside)
-    except OSError:
-      self.log.warning("Unable to move aside the larger output %s; keeping it [output-larger-than-input]." % outputfile)
+    aside = self._move_aside(outputfile)
+    if not aside:
       return outputfile, inputfile, ripped_subs
 
-    copy_options = copy.deepcopy(options)
-    copy_options["source"][0] = inputfile
-    copy_video = {"codec": "copy", "map": video["map"]}
-    for key in ("bsf", "title"):
-      if video.get(key):
-        copy_video[key] = video[key]
-    copy_options["video"] = copy_video
-    copy_postopts = list(postopts)
-    if getattr(info.video, "codec", None) in ["x265", "h265", "hevc"] and "-tag:v" not in copy_postopts:
-      copy_postopts.extend(["-tag:v", "dvh1" if self.isDolbyVisionProfile5(info.video) else "hvc1"])
-
+    copy_options, copy_preopts, copy_postopts = self._copy_fallback_options(info, options, postopts, inputfile)
+    copy_output = None
+    restored = outputfile
     try:
-      new_output, new_input, _ = self._run_ffmpeg(inputfile, copy_options, preopts, copy_postopts, [], downloaded_subs, reportProgress, progressOutput)
-    except KeyboardInterrupt:
-      raise
+      copy_output, inputfile, _ = self._run_ffmpeg(inputfile, copy_options, copy_preopts, copy_postopts, [], downloaded_subs, reportProgress, progressOutput)
     except Exception:
       self.log.exception("Video copy fallback failed [output-larger-than-input].")
-      new_output, new_input = None, inputfile
-
-    if not new_output:
+    finally:
+      if not copy_output:  # also on KeyboardInterrupt: never leave the result at <out>.larger
+        restored = self._restore_aside(aside, outputfile)
+    if not copy_output:
       self.log.warning("Video copy fallback produced no output; keeping the larger re-encode [output-larger-than-input].")
-      if not os.path.exists(outputfile):
-        os.rename(aside, outputfile)
-      return outputfile, new_input or inputfile, ripped_subs
+      return restored, inputfile, ripped_subs
 
-    self.removeFile(aside)
+    try:
+      copy_size = os.path.getsize(copy_output)
+    except OSError:
+      copy_size = out_size + 1
+    if copy_size > out_size:
+      self.log.warning("Video copy %d bytes and re-encode %d bytes are both larger than input %d bytes; keeping the smaller re-encode [output-larger-than-input]." % (copy_size, out_size, in_size))
+      self.removeFile(copy_output)
+      return self._restore_aside(aside, outputfile), inputfile, ripped_subs
+    if copy_size > in_size:
+      self.log.warning("Video copy %d bytes and re-encode %d bytes are both larger than input %d bytes; keeping the smaller video copy [output-larger-than-input]." % (copy_size, out_size, in_size))
+    if not self.removeFile(aside):
+      self.log.warning("Unable to remove the larger re-encode %s [output-larger-than-input]." % aside)
+    # The copy run reads the renamed input (x.mp4.original for an in-place
+    # mp4) and so names its output differently; give it the re-encode's name.
+    if os.path.abspath(copy_output) != os.path.abspath(outputfile) and not os.path.exists(outputfile):
+      try:
+        os.rename(copy_output, outputfile)
+        copy_output = outputfile
+        copy_options["filename"] = os.path.basename(outputfile)
+      except OSError:
+        self.log.warning("Unable to rename video copy %s to %s; keeping its name [output-larger-than-input]." % (copy_output, outputfile))
     options.clear()
     options.update(copy_options)
+    preopts[:] = copy_preopts
     postopts[:] = copy_postopts
-    return new_output, new_input, ripped_subs
+    return copy_output, inputfile, ripped_subs
+
+  def _copy_fallback_blocker(self, info, video, output_format):
+    """Why the video must stay re-encoded, or None when a stream copy honours the configuration."""
+    required = [r for r in (video.get("debug") or "").split(".") if r and r not in self._OPTIONAL_REENCODE_REASONS]
+    if required:
+      return "the re-encode is required (%s)" % ", ".join(required)
+    source = info.video.codec
+    if source not in self._video_codec_pool(self.isHDRInput(info.video)):
+      return "source codec %s is not in video-codec" % source
+    container = (getattr(info.format, "format", None) or "").split(",")
+    if output_format == "mp4" and (source not in self._MP4_COPYABLE_VIDEO_CODECS or "avi" in container):
+      return "source codec %s from %s cannot be stream-copied into mp4" % (source, ",".join(container))
+    depths = self.converter.ffmpeg.pix_fmts
+    if video.get("pix_fmt") and depths.get(video["pix_fmt"]) != depths.get(info.video.pix_fmt):
+      return "the re-encode changes bit depth"
+    return None
+
+  def _copy_fallback_options(self, info, options, postopts, inputfile):
+    """(options, preopts, postopts) re-running ``options`` with the video copied, as the copy path builds them."""
+    copy_video = {"codec": "copy", "map": options["video"]["map"]}
+    bsf = self._video_bsf(info.video, info.video.codec)  # source family; HDR SEI is kept on a copy
+    if bsf:
+      copy_video["bsf"] = bsf
+    if options["video"].get("title"):
+      copy_video["title"] = options["video"]["title"]
+    copy_options = copy.deepcopy(options)
+    copy_options["source"][0] = inputfile
+    copy_options["video"] = copy_video
+    # Encode preopts carry hwaccel decode and device setup; a copy needs only the operator's.
+    copy_preopts = list(self.settings.preopts)
+    copy_postopts = list(postopts)
+    tag = self._copy_video_tag(info.video)
+    if tag and not any(str(o).startswith("-tag:v") or o == "-vtag" for o in copy_postopts):
+      copy_postopts.extend(["-tag:v", tag])
+    return copy_options, copy_preopts, copy_postopts
+
+  def _move_aside(self, path):
+    """Rename path to a free <path>.larger[.N]; return the new path, or None on failure."""
+    aside = path + ".larger"
+    n = 2
+    while os.path.exists(aside):
+      aside = "%s.larger.%d" % (path, n)
+      n += 1
+    try:
+      os.rename(path, aside)
+    except OSError:
+      self.log.warning("Unable to move aside the larger output %s; keeping it [output-larger-than-input]." % path)
+      return None
+    return aside
+
+  def _restore_aside(self, aside, outputfile):
+    """Move the larger re-encode back to outputfile without overwriting; return where it now lives."""
+    if os.path.exists(outputfile):
+      self.log.warning("Cannot restore the larger re-encode: %s exists; it stays at %s [output-larger-than-input]." % (outputfile, aside))
+      return aside
+    try:
+      os.rename(aside, outputfile)
+    except OSError:
+      self.log.warning("Unable to restore the larger re-encode %s to %s [output-larger-than-input]." % (aside, outputfile))
+      return aside
+    return outputfile
 
   def _run_ffmpeg(self, inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput):
     """Log options, rip external subs, run FFmpeg conversion.
@@ -2227,14 +2300,49 @@ class MediaProcessor:
     if options["video"].get("fps"):
       postopts = self._drop_non_cfr_fps_mode(postopts)
 
-    if info.video.codec in ["x265", "h265", "hevc"] and vcodec == "copy":
-      # Profile 5 has no HEVC-compatible base layer, so it must be signalled
-      # as dvh1; players (Apple in particular) only engage Dolby Vision then.
-      tag = "dvh1" if self.isDolbyVisionProfile5(info.video) else "hvc1"
+    tag = self._copy_video_tag(info.video) if vcodec == "copy" else None
+    if tag:
       postopts.extend(["-tag:v", tag])
       self.log.info("Tagging copied video stream as %s" % tag)
 
     return preopts, postopts
+
+  def _copy_video_tag(self, video):
+    """Container tag for a copied HEVC stream, or None for other codecs."""
+    if video.codec not in ["x265", "h265", "hevc"]:
+      return None
+    # Profile 5 has no HEVC-compatible base layer, so it must be signalled
+    # as dvh1; players (Apple in particular) only engage Dolby Vision then.
+    return "dvh1" if self.isDolbyVisionProfile5(video) else "hvc1"
+
+  def _video_codec_pool(self, hdr_input):
+    """Allowed video codecs (video-codec, or hdr.codec for HDR input), with ffprobe names added."""
+    vcodecs = self.settings.hdr.get("codec", []) if hdr_input and len(self.settings.hdr.get("codec", [])) > 0 else self.settings.vcodec
+    return self.ffprobeSafeCodecs(vcodecs)
+
+  def _video_bsf(self, video, output_codec, strip_hdr_sei=False):
+    """filter_units bsf for the bitstream that lands in the output, or None.
+
+    NAL types are codec-specific: SEI is type 6 in H.264 but 39/40
+    (prefix/suffix SEI) in HEVC, where type 6 is RADL_R, so pass the codec
+    that is actually written (the source codec when copying).
+    """
+    bsf_family = self._codec_family(output_codec)
+    sei_types = {"h264": ["6"], "h265": ["39", "40"]}.get(bsf_family or "")
+    remove_types: list[str] = []
+    if self.settings.removebvs and self.hasBitstreamVideoSubs(video.framedata):
+      if sei_types:
+        self.log.debug("Found side data type with closed captioning [remove-bitstream-subs]")
+        remove_types.extend(sei_types)
+      else:
+        self.log.debug("Closed captioning side data found but output codec %s has no SEI NAL filter; leaving bitstream untouched [remove-bitstream-subs]." % bsf_family)
+    if strip_hdr_sei and bsf_family == "h265":
+      # Drop HDR SEI (mastering display / content light) from an HEVC stream
+      # that is no longer HDR. Prefix SEI only, as before.
+      remove_types.append("39")
+    if remove_types:
+      return "filter_units=remove_types=%s" % "|".join(dict.fromkeys(remove_types))
+    return None
 
   def _select_video_codec(self, inputfile, info, codecs, pix_fmts, tagdata, analyzer_recommendations=None):
     """
@@ -2252,8 +2360,7 @@ class MediaProcessor:
     if hdrInput:
       vdebug = vdebug + ".hdrInput"
 
-    vcodecs = self.settings.hdr.get("codec", []) if hdrInput and len(self.settings.hdr.get("codec", [])) > 0 else self.settings.vcodec
-    vcodecs = self.ffprobeSafeCodecs(vcodecs)
+    vcodecs = self._video_codec_pool(hdrInput)
     analyzer_recommendations = analyzer_recommendations or AnalyzerRecommendations()
     vcodecs = self._reorder_codec_pool(vcodecs, analyzer_recommendations.codec_order)
     self.log.debug("Pool of video codecs is %s." % (vcodecs))
@@ -2362,6 +2469,7 @@ class MediaProcessor:
       vmaxrate = "%dk" % profile_match["maxrate"]
       vbufsize = "%dk" % (profile_match["maxrate"] * 2)
       vcodec = vcodecs[0]
+      vdebug = vdebug + ".crf-profile"
       self.log.debug("Bitrate profile matched at source %dkbps: target=%dkbps maxrate=%s bufsize=%s [crf-profiles]." % (vbitrate_estimate, vbitrate, vmaxrate, vbufsize))
     elif effective_vmaxbitrate > 0:
       # When the cap forced the re-encode, max-bitrate is the average target;
@@ -2529,22 +2637,7 @@ class MediaProcessor:
     # 39/40 (prefix/suffix SEI) in HEVC, where type 6 is RADL_R — removing
     # it would delete real pictures. Pick SEI types for the codec that
     # actually lands in the output bitstream (source codec when copying).
-    vbsf = None
-    bsf_family = self._codec_family(info.video.codec if vcodec == "copy" else vcodec)
-    sei_types = {"h264": ["6"], "h265": ["39", "40"]}.get(bsf_family or "")
-    remove_types: list[str] = []
-    if self.settings.removebvs and self.hasBitstreamVideoSubs(info.video.framedata):
-      if sei_types:
-        self.log.debug("Found side data type with closed captioning [remove-bitstream-subs]")
-        remove_types.extend(sei_types)
-      else:
-        self.log.debug("Closed captioning side data found but output codec %s has no SEI NAL filter; leaving bitstream untouched [remove-bitstream-subs]." % bsf_family)
-    if hdrInput and not hdrOutput and bsf_family == "h265":
-      # Drop HDR SEI (mastering display / content light) from an HEVC stream
-      # that is no longer HDR. Prefix SEI only, as before.
-      remove_types.append("39")
-    if remove_types:
-      vbsf = "filter_units=remove_types=%s" % "|".join(dict.fromkeys(remove_types))
+    vbsf = self._video_bsf(info.video, info.video.codec if vcodec == "copy" else vcodec, strip_hdr_sei=hdrInput and not hdrOutput)
 
     if vcodec != "copy" and self.isDolbyVision(info.video.framedata):
       self.log.warning(

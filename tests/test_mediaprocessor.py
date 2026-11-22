@@ -1340,24 +1340,26 @@ class TestSameFamilyVideoBitrateClamp:
     return mp
 
   def test_same_family_high_target_clamped_to_source_estimate(self, tmp_yaml, make_media_info):
-    # h264 source @ 10 Mbps, ratio 1.5 -> vbitrate 15000k. Soft cap = 12000k.
+    # h264 source @ 10 Mbps, ratio 1.5 -> vbitrate above the source estimate; cap = 1.0x estimate.
     mp = self._make_mp(tmp_yaml, vbitrateratio={"h264": 1.5})
     info = make_media_info(video_codec="h264", video_bitrate=10_000_000, total_bitrate=10_128_000, audio_bitrate=128_000)
     with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
       options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
     assert options is not None
+    assert options["video"]["codec"] == "h264"  # re-encode (profile mismatch), not copy
     # vbitrate_estimate = 10000 * 0.95 (tolerance) = 9500; cap = estimate
     assert options["video"]["bitrate"] == pytest.approx(9500.0, rel=0.01)
     warnings = [c.args[0] for c in mp.log.warning.call_args_list if c.args]
     assert any("video-same-family-bitrate-clamp" in w for w in warnings)
 
-  def test_same_family_below_soft_cap_not_changed(self, tmp_yaml, make_media_info):
-    # Ratio 1.0 -> vbitrate equals source (10000k) which is < 12000k soft cap.
+  def test_same_family_at_cap_not_changed(self, tmp_yaml, make_media_info):
+    # Ratio 1.0 -> vbitrate equals the source estimate, so the 1.0x cap does not fire.
     mp = self._make_mp(tmp_yaml)
     info = make_media_info(video_codec="h264", video_bitrate=10_000_000, total_bitrate=10_128_000, audio_bitrate=128_000)
     with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
       options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
     assert options is not None
+    assert options["video"]["codec"] == "h264"  # re-encode (profile mismatch), not copy
     warnings = [c.args[0] for c in mp.log.warning.call_args_list if c.args]
     assert not any("video-same-family-bitrate-clamp" in w for w in warnings)
 
@@ -9244,92 +9246,289 @@ class TestProfileTargetAboveEstimate:
       options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
     assert options["video"]["codec"] == "copy"
 
+  def test_profile_forced_reencode_marked_in_debug(self, tmp_yaml, make_media_info):
+    # The marker lets the larger-output fallback tell a bitrate-driven re-encode from a required one.
+    mp = TestBitrateProfileIntegration()._make_mp(tmp_yaml, vbitrate_profiles=[{"source_kbps": 0, "target": 2000, "maxrate": 3000}])
+    mp.settings.vprofile = []
+    info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options["video"]["codec"] != "copy"
+    assert ".crf-profile" in options["video"]["debug"]
+
 
 class TestOutputLargerThanInput:
   """Re-encode larger than the source falls back to video copy [output-larger-than-input]."""
 
-  def _mp(self):
+  def _mp(self, vcodec=("hevc_qsv", "hevc", "h264"), postopts=()):
     mp = TestProcess()._make_mp()
     mp.generateOptions = MagicMock()
     mp.canBypassConvert = MagicMock(return_value=False)
     mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
     mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    mp.settings.vcodec = list(vcodec)
+    mp.settings.hdr = {"codec": [], "space": [], "transfer": [], "primaries": []}
+    mp.settings.preopts = ["-fflags", "+genpts"]
+    mp.settings.postopts = list(postopts)
+    mp.settings.removebvs = False
+    mp.converter.ffmpeg.pix_fmts = {"yuv420p": 8, "yuv420p10le": 10, "p010le": 10}
     return mp
 
-  def _options(self, src, codec="hevc_qsv"):
+  def _info(self, codec="hevc", pix_fmt="yuv420p10le", container="matroska,webm"):
+    video = SimpleNamespace(codec=codec, pix_fmt=pix_fmt, framedata={}, dv_profile=None, color={})
+    return SimpleNamespace(video=video, format=SimpleNamespace(format=container))
+
+  def _options(self, src, codec="hevc_qsv", debug="video.max-bitrate", bsf=None, pix_fmt=None):
     return {
       "source": [src],
-      "video": {"codec": codec, "map": 0, "bitrate": 5000, "filter": "scale=1280:-1", "fps": 24, "bsf": None, "title": "t"},
+      "format": "mp4",
+      "video": {"codec": codec, "map": 0, "bitrate": 5000, "fps": 24, "bsf": bsf, "title": "t", "debug": debug, "pix_fmt": pix_fmt},
       "audio": [{"map": 1, "codec": "aac"}],
       "subtitle": [{"map": 2, "codec": "mov_text"}],
     }
 
-  def test_larger_output_reruns_as_video_copy_keeping_audio_and_subs(self, tmp_path):
-    mp = self._mp()
-    src = tmp_path / "in.mkv"
-    src.write_bytes(b"x" * 100)
-    big = tmp_path / "in.mp4"
-    big.write_bytes(b"y" * 120)
-    small = tmp_path / "in.copy.mp4"
-    info = MagicMock()
-    info.video.codec = "hevc"
-    options = self._options(str(src))
-    mp.generateOptions.return_value = (options, ["-pre"], ["-post"], [], [])
-    calls = []
-
-    def fake_run(inputfile, opts, preopts, postopts, *a):
-      calls.append((opts, list(postopts)))
-      if len(calls) == 1:
-        return str(big), str(src), []
-      assert not big.exists()  # larger output moved aside, never overwritten
-      small.write_bytes(b"z" * 80)
-      return str(small), str(src), []
-
-    mp._run_ffmpeg = fake_run
-    result = mp.process(str(src), info=info)
-    assert result["output"] == str(small)
-    assert not big.exists()
-    assert len(calls) == 2
-    v = calls[1][0]["video"]
-    assert v["codec"] == "copy" and v["map"] == 0
-    assert "filter" not in v and "bitrate" not in v and "fps" not in v
-    assert calls[1][0]["audio"] == options["audio"]
-    assert calls[1][0]["subtitle"] == options["subtitle"]
-    assert calls[1][1][-2:] == ["-tag:v", "hvc1"]
-    assert any("[output-larger-than-input]" in c.args[0] for c in mp.log.warning.call_args_list)
-    assert "\n" not in mp.log.warning.call_args_list[-1].args[0]
-
-  def test_smaller_output_not_retried(self, tmp_path):
-    mp = self._mp()
+  def _files(self, tmp_path, out_size=120):
     src = tmp_path / "in.mkv"
     src.write_bytes(b"x" * 100)
     out = tmp_path / "in.mp4"
-    out.write_bytes(b"y" * 60)
-    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
-    mp._run_ffmpeg = MagicMock(return_value=(str(out), str(src), []))
-    result = mp.process(str(src), info=MagicMock())
+    out.write_bytes(b"y" * out_size)
+    return src, out
+
+  def _run(self, mp, src, big, info, options, copy_size=80, copy_name="in.mp4", first_input=None, postopts=("-post",)):
+    """Run process(); the first _run_ffmpeg returns the re-encode, the second writes the copy."""
+    mp.generateOptions.return_value = (options, ["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], list(postopts), [], [])
+    calls = []
+
+    def fake_run(inputfile, opts, preopts, post, *a):
+      calls.append((inputfile, opts, list(preopts), list(post)))
+      if len(calls) == 1:
+        return str(big), str(first_input or src), []
+      assert not big.exists()  # larger output moved aside, never overwritten
+      out = big.parent / copy_name
+      out.write_bytes(b"z" * copy_size)
+      return str(out), inputfile, []
+
+    mp._run_ffmpeg = fake_run
+    return mp.process(str(src), info=info), calls
+
+  def _single_run(self, mp, src, big, info, options):
+    mp.generateOptions.return_value = (options, [], [], [], [])
+    mp._run_ffmpeg = MagicMock(return_value=(str(big), str(src), []))
+    return mp.process(str(src), info=info)
+
+  def _warnings(self, mp):
+    return [c.args[0] for c in mp.log.warning.call_args_list if c.args]
+
+  def test_larger_output_reruns_as_video_copy_keeping_audio_and_subs(self, tmp_path):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    options = self._options(str(src))
+    result, calls = self._run(mp, src, big, self._info(), options)
+    assert result["output"] == str(big)
+    assert big.read_bytes() == b"z" * 80
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["in.mkv", "in.mp4"]
+    assert len(calls) == 2
+    assert calls[1][1]["video"] == {"codec": "copy", "map": 0, "title": "t"}
+    assert calls[1][1]["audio"] == options["audio"]
+    assert calls[1][1]["subtitle"] == options["subtitle"]
+    # hw decode/device preopts belong to the encode; the copy gets settings.preopts only
+    assert calls[1][2] == ["-fflags", "+genpts"]
+    assert calls[1][3] == ["-post", "-tag:v", "hvc1"]
+    warnings = self._warnings(mp)
+    assert any("[output-larger-than-input]" in w for w in warnings)
+    assert all("\n" not in w for w in warnings)
+
+  def test_in_place_mp4_copy_keeps_first_output_name(self, tmp_path):
+    # x.mp4 -> x.mp4: convert() renamed the input to x.mp4.original, so a plain
+    # copy run would name its output x.mp4.mp4.
+    mp = self._mp()
+    src = tmp_path / "x.mp4"
+    original = tmp_path / "x.mp4.original"
+    original.write_bytes(b"x" * 100)
+    big = tmp_path / "x.mp4"
+    big.write_bytes(b"y" * 120)
+    result, calls = self._run(mp, original, big, self._info(), self._options(str(src)), copy_name="x.mp4.mp4")
+    assert calls[1][0] == str(original)
+    assert result["output"] == str(big)
+    assert big.read_bytes() == b"z" * 80
+    assert not (tmp_path / "x.mp4.mp4").exists()
+    assert result["input"] == str(original)
+    assert result["options"]["filename"] == "x.mp4"
+
+  def test_cross_family_copy_rebuilds_bsf_from_source_family(self, tmp_path):
+    # hevc source re-encoded to h264: the encode bsf strips H.264 SEI type 6,
+    # which in HEVC is RADL_R (real pictures). The copy must strip HEVC SEI 39/40.
+    mp = self._mp()
+    mp.settings.removebvs = True
+    mp.hasBitstreamVideoSubs = MagicMock(return_value=True)
+    src, big = self._files(tmp_path)
+    options = self._options(str(src), codec="h264_qsv", bsf="filter_units=remove_types=6")
+    _, calls = self._run(mp, src, big, self._info(), options)
+    assert calls[1][1]["video"]["bsf"] == "filter_units=remove_types=39|40"
+
+  def test_copy_keeps_hdr_sei(self, tmp_path):
+    # HDR hevc -> SDR hevc encode strips HDR SEI (39); the copy is still PQ and must keep it.
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    options = self._options(str(src), bsf="filter_units=remove_types=39")
+    _, calls = self._run(mp, src, big, self._info(), options)
+    assert "bsf" not in calls[1][1]["video"]
+
+  def test_dolby_vision_p5_copy_tagged_dvh1(self, tmp_path):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    info = self._info()
+    info.video.dv_profile = 5
+    _, calls = self._run(mp, src, big, info, self._options(str(src)))
+    assert calls[1][3][-2:] == ["-tag:v", "dvh1"]
+
+  @pytest.mark.parametrize("operator_tag", [["-tag:v:0", "hev1"], ["-vtag", "hev1"], ["-tag:v", "hev1"]])
+  def test_operator_video_tag_not_overridden(self, tmp_path, operator_tag):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    _, calls = self._run(mp, src, big, self._info(), self._options(str(src)), postopts=["-post"] + operator_tag)
+    assert calls[1][3] == ["-post"] + operator_tag
+
+  def test_copy_larger_than_reencode_keeps_reencode(self, tmp_path):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    result, calls = self._run(mp, src, big, self._info(), self._options(str(src)), copy_size=150)
+    assert len(calls) == 2
+    assert result["output"] == str(big)
+    assert big.read_bytes() == b"y" * 120
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["in.mkv", "in.mp4"]
+    assert result["options"]["video"]["codec"] == "hevc_qsv"
+    both = [w for w in self._warnings(mp) if "[output-larger-than-input]" in w and "120" in w and "150" in w and "100" in w]
+    assert len(both) == 1
+
+  def test_copy_smaller_than_reencode_but_larger_than_input_kept(self, tmp_path):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    result, _ = self._run(mp, src, big, self._info(), self._options(str(src)), copy_size=110)
+    assert result["output"] == str(big)
+    assert big.read_bytes() == b"z" * 110
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["in.mkv", "in.mp4"]
+    both = [w for w in self._warnings(mp) if "[output-larger-than-input]" in w and "110" in w and "120" in w and "100" in w]
+    assert len(both) == 1
+
+  @pytest.mark.parametrize(
+    "codec,container",
+    [("vc1", "matroska,webm"), ("wmv3", "asf"), ("msmpeg4v3", "avi"), ("rv40", "rm"), ("theora", "ogg"), ("flv1", "flv"), ("h264", "avi")],
+  )
+  def test_source_not_copyable_into_mp4_skips_fallback(self, tmp_path, codec, container):
+    mp = self._mp(vcodec=("h264", codec))
+    src, big = self._files(tmp_path)
+    result = self._single_run(mp, src, big, self._info(codec=codec, container=container), self._options(str(src), codec="h264"))
+    assert mp._run_ffmpeg.call_count == 1
+    assert result["output"] == str(big)
+    assert big.read_bytes() == b"y" * 120
+    assert any("[output-larger-than-input]" in w and "mp4" in w for w in self._warnings(mp))
+
+  @pytest.mark.parametrize(
+    "debug",
+    [
+      "video.burn-subtitles",
+      "video.max-width",
+      "video.hdrInput.hdr-force-filter",
+      "video.force-filter",
+      "video.max-fps",
+      "video.profile",
+      "video.max-level",
+      "video.pix_fmt",
+      "video.force-reencode",
+      "video.custom",
+      "video.analyzer-filter",
+    ],
+  )
+  def test_required_reencode_skips_fallback(self, tmp_path, debug):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    result = self._single_run(mp, src, big, self._info(), self._options(str(src), debug=debug))
+    assert mp._run_ffmpeg.call_count == 1
+    assert result["output"] == str(big)
+    assert any("[output-larger-than-input]" in w and debug.split(".")[-1] in w for w in self._warnings(mp))
+
+  @pytest.mark.parametrize("source_codec", ["mpeg4", "av1", "vp9"])
+  def test_source_codec_outside_video_codec_skips_fallback(self, tmp_path, source_codec):
+    mp = self._mp(vcodec=("h264",))
+    src, big = self._files(tmp_path)
+    self._single_run(mp, src, big, self._info(codec=source_codec), self._options(str(src), codec="h264", debug="video"))
+    assert mp._run_ffmpeg.call_count == 1
+    assert any("[output-larger-than-input]" in w and "video-codec" in w for w in self._warnings(mp))
+
+  def test_bit_depth_change_skips_fallback(self, tmp_path):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    self._single_run(mp, src, big, self._info(pix_fmt="yuv420p10le"), self._options(str(src), pix_fmt="yuv420p"))
+    assert mp._run_ffmpeg.call_count == 1
+
+  def test_same_depth_pix_fmt_allows_fallback(self, tmp_path):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    _, calls = self._run(mp, src, big, self._info(pix_fmt="yuv420p10le"), self._options(str(src), pix_fmt="p010le"))
+    assert len(calls) == 2
+
+  @pytest.mark.parametrize("debug", ["video", "video.max-bitrate", "video.crf-profile", "video.hdrInput.max-bitrate.icq", "video.max-bitrate.min-bitrate.analyzer-preset"])
+  def test_optional_reencode_falls_back(self, tmp_path, debug):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    _, calls = self._run(mp, src, big, self._info(), self._options(str(src), debug=debug))
+    assert len(calls) == 2
+
+  def test_smaller_output_not_retried(self, tmp_path):
+    mp = self._mp()
+    src, out = self._files(tmp_path, out_size=60)
+    result = self._single_run(mp, src, out, self._info(), self._options(str(src)))
     assert mp._run_ffmpeg.call_count == 1
     assert result["output"] == str(out)
 
   def test_video_copy_output_not_retried(self, tmp_path):
     mp = self._mp()
-    src = tmp_path / "in.mkv"
-    src.write_bytes(b"x" * 100)
-    out = tmp_path / "in.mp4"
-    out.write_bytes(b"y" * 120)
-    mp.generateOptions.return_value = (self._options(str(src), codec="copy"), [], [], [], [])
-    mp._run_ffmpeg = MagicMock(return_value=(str(out), str(src), []))
-    mp.process(str(src), info=MagicMock())
+    src, out = self._files(tmp_path)
+    self._single_run(mp, src, out, self._info(), self._options(str(src), codec="copy"))
     assert mp._run_ffmpeg.call_count == 1
 
   def test_failed_copy_fallback_keeps_larger_output(self, tmp_path):
     mp = self._mp()
-    src = tmp_path / "in.mkv"
-    src.write_bytes(b"x" * 100)
-    big = tmp_path / "in.mp4"
-    big.write_bytes(b"y" * 120)
+    src, big = self._files(tmp_path)
     mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
     mp._run_ffmpeg = MagicMock(side_effect=[(str(big), str(src), []), (None, str(src), [])])
-    result = mp.process(str(src), info=MagicMock())
+    result = mp.process(str(src), info=self._info())
     assert result["output"] == str(big)
     assert big.read_bytes() == b"y" * 120
+    assert result["options"]["video"]["codec"] == "hevc_qsv"
+
+  def test_interrupted_copy_restores_larger_output(self, tmp_path):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+    mp._run_ffmpeg = MagicMock(side_effect=[(str(big), str(src), []), KeyboardInterrupt()])
+    with pytest.raises(KeyboardInterrupt):
+      mp.process(str(src), info=self._info())
+    assert big.read_bytes() == b"y" * 120
+    assert not list(tmp_path.glob("*.larger*"))
+
+  def test_restore_blocked_by_existing_file_is_logged_not_overwritten(self, tmp_path):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+
+    def run(*a):
+      if not list(tmp_path.glob("*.larger*")):
+        return str(big), str(src), []
+      big.write_bytes(b"q")  # a partial file now occupies the output path
+      return None, str(src), []
+
+    mp._run_ffmpeg = run
+    result = mp.process(str(src), info=self._info())
+    assert result["output"] == str(tmp_path / "in.mp4.larger")  # the real re-encode, not the squatter
+    assert big.read_bytes() == b"q"
+    assert (tmp_path / "in.mp4.larger").read_bytes() == b"y" * 120
+    assert any("[output-larger-than-input]" in w and "in.mp4.larger" in w for w in self._warnings(mp))
+
+  def test_aside_remove_failure_logged(self, tmp_path):
+    mp = self._mp()
+    mp.removeFile = MagicMock(return_value=False)
+    src, big = self._files(tmp_path)
+    self._run(mp, src, big, self._info(), self._options(str(src)))
+    assert any("[output-larger-than-input]" in w and "in.mp4.larger" in w for w in self._warnings(mp))
