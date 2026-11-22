@@ -1,0 +1,24 @@
+tests/test_custom_hooks.py
+  s_d73ac5e457a585::t_10de2929fb9642 1,4-5,7,12-29
+  s_d73ac5e457a585::t_52031e9b811992 30
+.gitignore
+  s_d73ac5e457a585::t_10de2929fb9642 53
+docs/README.md
+  s_d73ac5e457a585::t_ddb9c574a932c9 821-822
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "5f8b464f8d5406f7b3e35c248cb0b05f4b2ee702",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
