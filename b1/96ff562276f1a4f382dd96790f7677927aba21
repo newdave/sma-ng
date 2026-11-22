@@ -1,0 +1,22 @@
+tests/test_mediamanager.py
+  s_d73ac5e457a585::t_6c589229761fe2 307-345
+resources/mediamanager.py
+  s_d73ac5e457a585::t_90ddadba33ba32 228-235
+  s_d73ac5e457a585::t_88bbaf2e718811 246-247,249-288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "b196ff562276f1a4f382dd96790f7677927aba21",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
