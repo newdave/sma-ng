@@ -1,0 +1,32 @@
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_f504801020c8aa 728,4757-4761,4763-4771,4830-4831,4870-4871,4924-4925
+  s_d73ac5e457a585::t_02d9deb972cb4c 4762
+tests/test_attempt_ladder.py
+  s_d73ac5e457a585::t_7d10e7591dbfb0 441-526
+converter/ffmpeg.py
+  s_d73ac5e457a585::t_3428b8e1443c6f 31,52,932
+tests/test_failures.py
+  s_d73ac5e457a585::t_7d10e7591dbfb0 328-354
+resources/processor/failures.py
+  s_d73ac5e457a585::t_f504801020c8aa 18
+  s_d73ac5e457a585::t_d6db8a2d817ed6 611
+  s_d73ac5e457a585::t_3428b8e1443c6f 226-227,380-389,549-550,577-610,612-616,618
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_af2109d7f0714b 109-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "fa52f87676beca00e6712affe7a3176d7f1d5a00",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
