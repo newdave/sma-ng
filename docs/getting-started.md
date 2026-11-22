@@ -17,8 +17,6 @@ It focuses on the minimum you need to understand to get a successful first run. 
 
 Optional:
 
-- qBittorrent integration: `pip install -r setup/requirements-qbittorrent.txt`
-- Deluge integration: `pip install -r setup/requirements-deluge.txt`
 - OpenVINO analyzer runtime: `pip install -r setup/requirements-openvino.txt`
 
 ## What SMA-NG Does

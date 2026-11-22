@@ -61,8 +61,6 @@ Optional extras (`pip install ".[extra]"`, or `mise run setup:deps:all` for ever
 | Extra         | Adds                                                                       |
 | ------------- | -------------------------------------------------------------------------- |
 | `postgres`    | `psycopg2-binary` for PostgreSQL job persistence and cluster mode          |
-| `qbittorrent` | qBittorrent client library                                                 |
-| `deluge`      | Deluge client library                                                      |
 | `openvino`    | OpenVINO runtime for the analyzer                                          |
 | `dev`         | pytest, ruff, pre-commit, and other lint/test tooling (`setup:deps:dev`)   |
 
@@ -1066,7 +1064,7 @@ For each host it:
 
 - **Creates missing configs** from `setup/sma-ng.yml.sample` (auto-detects GPU on first creation)
 - **Backs up** `config/` to `.backup/<timestamp>/` before any mutation
-- **Merges new keys** from the sample via `yaml_merge.py` (non-destructive)
+- **Merges new keys** from the sample (non-destructive)
 - **Deep-merges `base:` and `profiles:`** from `setup/local.yml` into the same blocks of
   `sma-ng.yml`. Dicts recurse, lists/scalars overwrite, anything you omit inherits from
   the sample.

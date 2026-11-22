@@ -34,15 +34,11 @@ classifiers = [
 
 dependencies = [
   "requests>=2.34.2,<3",
-  "idna>=3.20,<4",
-  "requests-cache>=1.3.3,<2",
   "babelfish>=0.6.1,<1",
   "tmdbsimple>=2.9.8,<3",
   "mutagen>=1.48.1,<2",
   "guessit>=4.5.1,<5",
   "subliminal>=2.8.0,<3",
-  "python-dateutil>=4.0.0,<5",
-  "stevedore>=5.10.0,<6",
   "qtfaststart>=1.8,<2",
   "cleanit>=0.5.1,<1",
   "plexapi>=4.18.3,<5",
@@ -56,8 +52,6 @@ dependencies = [
 [project.optional-dependencies]
 openvino = ["openvino>=2026.4.1,<2027", "numpy>=2.5.4"]
 postgres = ["psycopg2-binary>=2.9.13,<3"]
-qbittorrent = ["python-qbittorrent>=0.4.3,<1"]
-deluge = ["deluge-client>=1.10.2,<2", "gevent>=26.9.0,<27"]
 dev = [
   "pytest>=9.2.0",
   "pytest-cov>=7.1.0",
@@ -192,7 +186,7 @@ ignore = [
   "RET502", # implicit None return on def with -> X | None — readable
   "RET503", # missing explicit return on annotated function — readable
   "B007",   # already ignored above; kept for clarity
-  "B023",   # function captures loop variable — narrow, audited in yaml_merge
+  "B023",   # function captures loop variable — narrow, audited per use
   "LOG015", # logger.exception outside except — used in audit logging
   # ── Remaining PTH bulk (pathlib migration deferred to a dedicated PR) ──
   "PTH101", "PTH104", "PTH105", "PTH106", "PTH108", "PTH202", "PTH204", "PTH206",
