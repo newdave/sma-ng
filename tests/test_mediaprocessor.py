@@ -3632,6 +3632,78 @@ class TestProcess:
     result = mp.process("/fake/input.mkv", info=info)
     assert result is None
 
+  def _media(self, make_stream, make_format, duration, videos=1, cover=0, unknown=0):
+    info = MediaInfo()
+    info.format = make_format(duration=duration)
+    index = 0
+    for _ in range(videos):
+      info.streams.append(make_stream(type="video", codec="h264", index=index))
+      index += 1
+    info.streams.append(make_stream(type="audio", codec="aac", index=index))
+    index += 1
+    for _ in range(cover):
+      info.streams.append(make_stream(type="video", codec="mjpeg", index=index, attached_pic=True))
+      index += 1
+    for _ in range(unknown):
+      info.streams.append(make_stream(type="data", codec="", index=index))
+      index += 1
+    return info
+
+  def _convert_mp(self, tmp_path, src_info, out_info):
+    mp = self._make_mp()
+    mp.settings.delete = True
+    src = tmp_path / "movie.mkv"
+    src.write_bytes(b"source")
+    out = tmp_path / "movie.mp4"
+    out.write_bytes(b"output")
+    mp.isValidSource = MagicMock(return_value=src_info)
+    mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    mp.generateOptions = MagicMock(return_value=({"video": {}, "audio": [{"map": 1, "codec": "aac"}]}, [], [], [], []))
+    mp.canBypassConvert = MagicMock(return_value=False)
+    mp._run_ffmpeg = MagicMock(return_value=(str(out), str(src), []))
+    mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
+    mp.removeFile = MagicMock()
+    mp.converter.probe = MagicMock(return_value=out_info)
+    return mp, src, out
+
+  def test_truncated_output_fails_keeps_source_and_output(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    assert mp.process(str(src), info=src_info) is None
+    assert src.exists() and out.exists()
+    mp.removeFile.assert_not_called()
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list]
+    assert any("[output-verify]" in w and "duration" in w and "\n" not in w for w in warnings)
+
+  def test_missing_video_stream_fails(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 100.0)
+    out_info = self._media(make_stream, make_format, 100.0, videos=0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    assert mp.process(str(src), info=src_info) is None
+    assert src.exists() and out.exists()
+
+  def test_unprobeable_output_fails(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 100.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, None)
+    assert mp.process(str(src), info=src_info) is None
+    assert out.exists()
+
+  def test_correct_output_passes_within_tolerance(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0, cover=1, unknown=1)
+    out_info = self._media(make_stream, make_format, 7200.0 * 0.985)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    result = mp.process(str(src), info=src_info)
+    assert result is not None
+    assert result["output"] == str(out)
+    assert result["delete"] is True
+
+  def test_missing_source_duration_skips_duration_check(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, None)
+    out_info = self._media(make_stream, make_format, 50.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    assert mp.process(str(src), info=src_info) is not None
+
   def test_bypass_with_output_dir_copies_file(self, tmp_path):
     mp = self._make_mp()
     output_dir = tmp_path / "output"

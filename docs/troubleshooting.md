@@ -331,6 +331,18 @@ usually the FFmpeg build lacks the decoder, or the source is damaged and needs r
   `move-to` and `getOutputFile` is not covered. Existing `name.2.mp4` duplicates from before this behavior are
   not cleaned up automatically; remove them by hand.
 
+### Job failed with `[output-verify]` (output does not match the source)
+
+- FFmpeg exited 0, but the output failed the post-conversion check, so SMA-NG treated the job as failed
+  (exit code 1). The warning names the cause: `output duration Xs differs from source Ys by more than Zs`,
+  `output has N video streams, expected 1`, or `output could not be probed`.
+- The source is kept (not deleted or recycled) and the output stays where it was written, so you can inspect it.
+  Nothing is tagged, moved or sent to Sonarr/Radarr/Plex for that job.
+- The duration may differ by 2% (at least 1 second). Cover art and unknown or data streams are not counted, and a
+  duration is only compared when both files report one.
+- Usual causes are a full output disk, a damaged source or a killed encoder. Fix that, delete the bad output and
+  re-run. If the output plays correctly, report the file; the check is not configurable.
+
 ### `[dolby-vision]` warning on re-encode
 
 - The source carries Dolby Vision metadata, but the video stream is being re-encoded. The encoders can't

@@ -702,8 +702,15 @@ from mutagen.mp4 import MP4
 
 from converter import Converter, FFMpegConvertError
 from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments
+from converter.ffmpeg import is_unknown_stream
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
+
+# Post-conversion output verification (see MediaProcessor._verify_output): the output duration may
+# differ from the source by 2% (never less than 1 second), and conversion writes one video stream.
+OUTPUT_DURATION_TOLERANCE = 0.02
+OUTPUT_DURATION_MIN_SLACK = 1.0
+OUTPUT_EXPECTED_VIDEO_STREAMS = 1
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
 from resources.config_schema import FallbackPolicy
 from resources.extensions import bad_sub_extensions, subtitle_codec_extensions
@@ -986,6 +993,12 @@ class MediaProcessor:
       outputfile, inputfile, ripped_subs = self._run_ffmpeg(inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput)
       if outputfile is None:
         return None
+      # ffmpeg exit 0 is not proof of a complete file: refuse to hand a truncated or
+      # stream-less output to the caller, which would then delete or recycle the source.
+      problem = self._verify_output(info, outputfile)
+      if problem:
+        self.log.warning("Output verification failed for %s, keeping source %s and the output for inspection: %s [output-verify]." % (outputfile, inputfile, problem))
+        return None
 
     self.log.debug("%s created from %s successfully." % (outputfile, inputfile))
 
@@ -1039,6 +1052,40 @@ class MediaProcessor:
       "y": dim["y"],
       "cues_to_front": self.settings.output_format in ["mkv"] and self.settings.relocate_moov,
     }
+
+  def _verify_output(self, source_info, outputfile):
+    """Probe a converted output and compare it with the source.
+
+    Returns None when the output looks complete, otherwise a single-line
+    description of the mismatch. The checks are the output duration (within
+    OUTPUT_DURATION_TOLERANCE, at least OUTPUT_DURATION_MIN_SLACK seconds) and
+    the number of picture video streams. Conversion maps exactly one video
+    stream and drops cover art and unknown/data streams on purpose, so the
+    expected count is 1 and only real video streams are counted. A duration is
+    only compared when both the source and the output report a numeric one.
+    """
+    try:
+      out_info = self.converter.probe(outputfile, posters_as_video=False)
+    except KeyboardInterrupt:
+      raise
+    except Exception as e:
+      return "output could not be probed: %s" % " ".join(str(e).split())
+    if not out_info:
+      return "output could not be probed"
+
+    out_videos = [s for s in out_info.streams if s.type == "video" and not is_unknown_stream(s) and s not in out_info.cover_art and not s.attached_pic]
+    if len(out_videos) != OUTPUT_EXPECTED_VIDEO_STREAMS:
+      return "output has %d video streams, expected %d" % (len(out_videos), OUTPUT_EXPECTED_VIDEO_STREAMS)
+
+    src_duration = getattr(getattr(source_info, "format", None), "duration", None)
+    out_duration = getattr(getattr(out_info, "format", None), "duration", None)
+    if isinstance(src_duration, (int, float)) and src_duration > 0:
+      if not isinstance(out_duration, (int, float)) or out_duration <= 0:
+        return "output reports no duration, source is %.1fs" % src_duration
+      slack = max(src_duration * OUTPUT_DURATION_TOLERANCE, OUTPUT_DURATION_MIN_SLACK)
+      if abs(out_duration - src_duration) > slack:
+        return "output duration %.1fs differs from source %.1fs by more than %.1fs" % (out_duration, src_duration, slack)
+    return None
 
   def _run_ffmpeg(self, inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput):
     """Log options, rip external subs, run FFmpeg conversion.
