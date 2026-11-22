@@ -93,6 +93,22 @@ class TestSQLiteClaimToken:
     assert any("AND status = ?" in s for s in seen)
     assert real.execute("SELECT node_id FROM jobs WHERE id = ?", (jid,)).fetchone()["node_id"] == "n1"
 
+  def test_claim_returns_the_generated_token_not_the_reread(self, tmp_path):
+    db = _sqlite(tmp_path)
+    jid = db.add_job("/m/a.mkv", "/c.yml")
+    real_get = db.get_job
+
+    def reread_after_reclaim(job_id):
+      # The row was requeued and re-claimed between the claim commit and this re-read.
+      row = real_get(job_id)
+      row["claim_token"] = "someone-else"
+      return row
+
+    db.get_job = reread_after_reclaim
+    job = db.claim_next_job(worker_id=1, node_id="n1")
+    written = real_get(jid)["claim_token"]
+    assert written and job["claim_token"] == written
+
 
 class TestPostgresClaimToken:
   def _claim(self, rowcount):
@@ -111,8 +127,17 @@ class TestPostgresClaimToken:
     assert update.args[1][-1] == STATUS_PENDING
     token = update.args[1][3]
     assert isinstance(token, str) and len(token) == 32
-    assert result == {"id": 7}
+    assert result == {"id": 7, "claim_token": token}
     get_job.assert_called_once_with(7)
+
+  def test_claim_returns_the_generated_token_not_the_reread(self):
+    cur, modules = _pg(fetchone={"id": 7, "my_running": 0, "idle_peer": False})
+    cur.rowcount = 1
+    db = _pg_db(cur, modules)
+    with mock.patch.object(db, "get_job", return_value={"id": 7, "claim_token": "someone-else"}):
+      result = db.claim_next_job(worker_id=1, node_id="n1")
+    update = next(c for c in cur.execute.call_args_list if c.args and "UPDATE jobs" in c.args[0])
+    assert result["claim_token"] == update.args[1][3]
 
   def test_lost_claim_returns_none(self):
     _cur, result, get_job = self._claim(rowcount=0)

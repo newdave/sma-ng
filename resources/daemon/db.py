@@ -328,6 +328,17 @@ def _budget_exhausted_profiles(conn, profile_costs, budget, *, is_sqlite):
   return {name for name, cost in profile_costs.items() if int(cost) > remaining}
 
 
+def _with_claim_token(job, claim_token):
+  """Stamp the token this claim wrote onto the re-read row.
+
+  The re-read happens after the claim commits, so a requeue plus re-claim in
+  between would hand this worker the other claim's token.
+  """
+  if job is not None:
+    job["claim_token"] = claim_token
+  return job
+
+
 def _priority_weight_sql_clause(profile_weights, *, is_sqlite):
   """Return ``(sql_expression, [bound_params])`` for the additive
   priority-weight expression used in the ``claim_next_job`` ORDER BY.
@@ -667,7 +678,7 @@ class SQLiteJobDatabase:
       )
       if cur.rowcount == 0:
         return None
-    return self.get_job(job_id)
+    return _with_claim_token(self.get_job(job_id), claim_token)
 
   def get_pending_jobs(self):
     with self._conn() as conn:
@@ -1620,7 +1631,7 @@ class PostgreSQLJobDatabase:
         if cur.rowcount == 0:
           return None
     # Fetch the full job row outside the transaction for the caller
-    return self.get_job(job_id)
+    return _with_claim_token(self.get_job(job_id), claim_token)
 
   def get_pending_jobs(self):
     """Get all pending jobs ordered by creation time."""
