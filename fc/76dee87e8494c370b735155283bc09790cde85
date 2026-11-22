@@ -1,0 +1,34 @@
+docs/daemon.md
+  s_d73ac5e457a585::t_654cd1280429e9 351,821-825
+resources/daemon/worker.py
+  s_d73ac5e457a585::t_654cd1280429e9 644
+  s_d73ac5e457a585::t_e6d8df1f3a428f 560-565,643,645,680-687,692
+docs/deployment.md
+  s_d73ac5e457a585::t_654cd1280429e9 425-427
+docs/cluster-operations.md
+  s_d73ac5e457a585::t_654cd1280429e9 176-178
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_442b864bd0e35c 362-363,365-368
+docs/docker-compose-quickstart.md
+  s_d73ac5e457a585::t_654cd1280429e9 164-165
+tests/test_interrupted_requeue.py
+  s_d73ac5e457a585::t_3af5fe9643daba 62-79,327-343
+docs/configuration.md
+  s_d73ac5e457a585::t_654cd1280429e9 76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "fc76dee87e8494c370b735155283bc09790cde85",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
