@@ -48,6 +48,7 @@ sys.modules["show_config"] = show_config
 _show_spec.loader.exec_module(show_config)
 
 
+from converter.avcodecs import QSV_ONLY_HW_FLAGS, VAAPI_ONLY_HW_FLAGS  # noqa: E402
 from resources.config_loader import ConfigError, ConfigLoader  # noqa: E402
 from resources.config_schema import SmaConfig  # noqa: E402
 
@@ -74,19 +75,8 @@ class Finding:
 # ---------------------------------------------------------------------------
 
 
-_QSV_ONLY_TOKENS = {
-  "-low_power",
-  "-async_depth",
-  "-extbrc",
-  "-b_strategy",
-  "-look_ahead",
-  "-look_ahead_depth",
-  "-adaptive_i",
-  "-adaptive_b",
-  "-p_strategy",
-  "-rdo",
-}
-_VAAPI_ONLY_TOKENS = {"-rc_mode", "-compression_level", "-qp"}
+_QSV_ONLY_TOKENS = QSV_ONLY_HW_FLAGS
+_VAAPI_ONLY_TOKENS = VAAPI_ONLY_HW_FLAGS
 
 
 def _check_encoder_flag_leaks(cfg: SmaConfig, findings: list[Finding]) -> None:

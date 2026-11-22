@@ -9351,6 +9351,23 @@ class TestStripQsvOnlyFlags:
     parts.extend(["-preset", "slow"])
     assert _strip_qsv_only_flags(" ".join(parts)) == "-preset slow"
 
+  def test_strips_rdo(self):
+    # Behaviour change (SMANG-32): the hw_alt strip list had drifted from
+    # converter.avcodecs and let the QSV-only typed field `rdo` reach hevc_vaapi.
+    from resources.mediaprocessor import _strip_qsv_only_flags as f
+
+    assert f("-rdo 1 -preset slow") == "-preset slow"
+
+  def test_strip_list_is_the_shared_qsv_set_plus_global_quality(self):
+    # -global_quality is valid on av1_vaapi, so it is not in the shared
+    # QSV-only set; the hw_alt swap strips it because it re-maps quality itself.
+    from converter.avcodecs import QSV_ONLY_HW_FLAGS
+    from resources.mediaprocessor import _QSV_ONLY_CODEC_FLAGS
+
+    assert QSV_ONLY_HW_FLAGS == _QSV_ONLY_CODEC_FLAGS - {"-global_quality"}
+    assert "-global_quality" in _QSV_ONLY_CODEC_FLAGS
+    assert "-global_quality" not in QSV_ONLY_HW_FLAGS
+
 
 class TestSwapQsvCodecToVaapi:
   def test_basic_codec_swap(self):

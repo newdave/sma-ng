@@ -1171,7 +1171,12 @@ import logging as _logging
 # (config_schema migration shim, config:validate) catch most leaks
 # earlier, but a defence-in-depth filter here closes the runtime hole
 # for unknown / custom flags that the schema layer doesn't recognise.
-_QSV_ONLY_HW_FLAGS = frozenset(
+#
+# Single source of truth: config_schema's migration shim, the hw_alt
+# QSV->VAAPI swap in resources/mediaprocessor.py and scripts/validate-config.py
+# all import these sets. -global_quality is deliberately absent: av1_vaapi
+# takes its quality from it (AV1VAAPICodec.hw_quality_flag).
+QSV_ONLY_HW_FLAGS = frozenset(
   {
     "-low_power",
     "-async_depth",
@@ -1186,13 +1191,16 @@ _QSV_ONLY_HW_FLAGS = frozenset(
   }
 )
 
-_VAAPI_ONLY_HW_FLAGS = frozenset(
+VAAPI_ONLY_HW_FLAGS = frozenset(
   {
     "-rc_mode",
     "-compression_level",
     "-qp",
   }
 )
+
+_QSV_ONLY_HW_FLAGS = QSV_ONLY_HW_FLAGS
+_VAAPI_ONLY_HW_FLAGS = VAAPI_ONLY_HW_FLAGS
 
 _HW_FILTER_LOG = _logging.getLogger("converter.avcodecs.hw-filter")
 

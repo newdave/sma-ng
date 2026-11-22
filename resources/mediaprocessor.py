@@ -378,18 +378,10 @@ _QSV_TO_VAAPI_CODEC_MAP = {
 }
 
 
-_QSV_ONLY_CODEC_FLAGS = {
-  "-low_power",
-  "-async_depth",
-  "-extbrc",
-  "-b_strategy",
-  "-look_ahead",
-  "-look_ahead_depth",
-  "-adaptive_i",
-  "-adaptive_b",
-  "-p_strategy",
-  "-global_quality",
-}
+# QSV-only flags stripped from the parent params before the hw_alt VAAPI swap:
+# ``_QSV_ONLY_CODEC_FLAGS`` is ``converter.avcodecs.QSV_ONLY_HW_FLAGS`` plus
+# ``-global_quality``, assigned below the converter import. -global_quality is
+# valid on VAAPI, but the swap re-maps the QSV ICQ value itself.
 
 
 # Name of the VAAPI hardware device context shared between the hw_alt tier's
@@ -750,10 +742,11 @@ from collections.abc import Callable
 from mutagen.mp4 import MP4
 
 from converter import Converter, FFMpegConvertError
-from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments, video_codec_list
+from converter.avcodecs import QSV_ONLY_HW_FLAGS, QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments, video_codec_list
 from converter.ffmpeg import TerminatedBySignal, is_unknown_stream
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
+_QSV_ONLY_CODEC_FLAGS = QSV_ONLY_HW_FLAGS | {"-global_quality"}
 
 # Post-conversion output verification (see MediaProcessor._verify_output): the output duration may
 # differ from the source by 2% (never less than 1 second), and conversion writes one video stream.
