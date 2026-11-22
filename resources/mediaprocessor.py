@@ -1208,8 +1208,9 @@ class MediaProcessor:
   def _cleanup_input(self, inputfile, delete):
     """Copy inputfile to the recycle bin then unlink it and any staged subtitle files.
 
-    Returns True if the input file was deleted. The original is kept when a
-    recycle bin is configured and copying to it failed.
+    Returns True if the input file was deleted. The original, and its staged
+    subtitle sidecars, are kept when a recycle bin is configured and copying
+    to it failed, or when the original could not be deleted.
     Call this only after the output file has been successfully placed at its
     final destination so the original is never removed before the output is safe.
     """
@@ -1227,12 +1228,15 @@ class MediaProcessor:
         else:
           self.log.error("Couldn't delete %s." % inputfile)
 
-      for subfile in self.deletesubs:
-        self.log.debug("Attempting to remove subtitle %s." % subfile)
-        if self.removeFile(subfile):
-          self.log.debug("Subtitle %s deleted." % subfile)
-        else:
-          self.log.debug("Unable to delete subtitle %s." % subfile)
+      # The source's subtitle sidecars go only with the source: when the
+      # original is kept (recycle copy failed, delete failed) keep them too.
+      if deleted:
+        for subfile in self.deletesubs:
+          self.log.debug("Attempting to remove subtitle %s." % subfile)
+          if self.removeFile(subfile):
+            self.log.debug("Subtitle %s deleted." % subfile)
+          else:
+            self.log.debug("Unable to delete subtitle %s." % subfile)
       self.deletesubs = set()
 
     return deleted

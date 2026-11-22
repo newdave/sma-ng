@@ -4939,6 +4939,30 @@ class TestCleanupInput:
     mp.log.exception.assert_not_called()
     assert "\n" not in mp.log.warning.call_args[0][0]
 
+  def test_recycle_failure_keeps_subtitle_sidecars(self, tmp_path):
+    mp = self._make_mp()
+    recycle = tmp_path / "recycle"
+    recycle.mkdir()
+    mp.settings.recycle_bin = str(recycle)
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"data")
+    sub = tmp_path / "input.eng.srt"
+    sub.write_bytes(b"subtitle")
+    mp.deletesubs = {str(sub)}
+    with patch.object(mp, "_atomic_copy", side_effect=Exception("disk full")):
+      assert mp._cleanup_input(str(src), delete=True) is False
+    assert src.exists() and sub.exists()
+
+  def test_delete_off_keeps_subtitle_sidecars(self, tmp_path):
+    mp = self._make_mp()
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"data")
+    sub = tmp_path / "input.eng.srt"
+    sub.write_bytes(b"subtitle")
+    mp.deletesubs = {str(sub)}
+    assert mp._cleanup_input(str(src), delete=False) is False
+    assert src.exists() and sub.exists()
+
   def test_recycle_to_bin_returns_bool(self, tmp_path):
     mp = self._make_mp()
     src = tmp_path / "input.mkv"
