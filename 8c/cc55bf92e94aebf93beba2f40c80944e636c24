@@ -1,0 +1,31 @@
+resources/config_schema.py
+  s_d73ac5e457a585::t_151c3b5527c1a6 229-231
+  s_d73ac5e457a585::t_8aba8eb7fb4677 27-28
+scripts/validate-config.py
+  s_d73ac5e457a585::t_d07c86d33c6d6d 78-79
+  s_d73ac5e457a585::t_ff936290fd8e8f 51
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_f751e53b440ca7 381-384
+  s_d73ac5e457a585::t_7becc26e10a3a1 745,749
+tests/test_mediaprocessor.py
+  s_d73ac5e457a585::t_1b0699fd93b0c8 9354-9370
+converter/avcodecs.py
+  s_d73ac5e457a585::t_0531568c21b10c 1174-1179,1194,1202-1203
+  s_d73ac5e457a585::t_74fe3b0bfa76b0 1204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "8ccc55bf92e94aebf93beba2f40c80944e636c24",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
