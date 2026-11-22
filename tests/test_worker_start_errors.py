@@ -454,8 +454,8 @@ class TestOrphanSweepSQLite:
     for job_id in (fresh, held, other):
       assert db.get_job(job_id)["status"] == STATUS_RUNNING
     assert db.get_job(other)["node_id"] == "node-b"
-    swept = [r.getMessage() for r in caplog.records if "orphan" in r.getMessage().lower()]
-    assert len(swept) == 1 and "\n" not in swept[0] and str(orphan) in swept[0]
+    swept = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO and "orphan sweep requeued it" in r.getMessage()]
+    assert len(swept) == 1 and "\n" not in swept[0] and "Job %d " % orphan in swept[0]
     server.notify_workers.assert_called_once()
 
   def test_sweep_skips_row_reclaimed_after_select(self, tmp_path):
