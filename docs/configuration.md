@@ -601,7 +601,9 @@ cover art, and their other tags are left unchanged.
 
 Naming data comes from the matching Sonarr/Radarr instance's parse API when
 the file path falls under a configured `services.*` path, with FFprobe,
-guessit, and TMDB as fallbacks.
+guessit, and TMDB as fallbacks. When the arr API does not supply them, the release source and release group come
+from the input (or original) filename via guessit, and the video codec token written in that name (for example
+`h264`) is kept only when the video stream is copied; a re-encode is named `x264`/`x265`.
 
 `tv-airdate-template` is used instead of `tv-template` when the episode is
 air-date based: the episode number is 0, Sonarr reports the series type as

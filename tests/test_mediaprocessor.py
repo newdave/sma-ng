@@ -3396,6 +3396,27 @@ class TestFullProcess:
     assert result == ["/fake/file.mp4"]
     mp.post.assert_called_once()
 
+  @pytest.mark.parametrize("action,original,expected_guess,expected_copy", [("copy", "Orig.2020.WEBRip.mkv", "Orig.2020.WEBRip.mkv", True), ("transcode", None, "file.mkv", False)])
+  def test_rename_passes_guessit_and_copy_flag(self, action, original, expected_guess, expected_copy):
+    mp = self._make_mp()
+    mp.settings.naming_enabled = True
+    info = MagicMock()
+    mp.isValidSource = MagicMock(return_value=info)
+    output = {"output": "/fake/file.mp4", "external_subs": [], "options": {"video": {"action": action}}, "x": 1, "y": 1, "cues_to_front": False}
+    mp.process = MagicMock(return_value=output)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
+    mp.setPermissions = MagicMock()
+    mp.getDefaultAudioLanguage = MagicMock(return_value="eng")
+    with (
+      patch("guessit.guessit", return_value={"source": "Web"}) as g,
+      patch("resources.naming.generate_name", return_value=None) as gn,
+    ):
+      mp.fullprocess("/fake/file.mkv", "movie", tagdata=MagicMock(), original=original, post=False)
+    g.assert_called_once_with(expected_guess)
+    assert gn.call_args.kwargs["guess_data"] == {"source": "Web"}
+    assert gn.call_args.kwargs["video_copied"] is expected_copy
+
   def test_post_false_skips_post(self):
     mp = self._make_mp()
     info = MagicMock()
@@ -6485,6 +6506,27 @@ class TestFullProcessDup:
     result = mp.fullprocess("/fake/file.mkv", "movie", tagdata=MagicMock(), post=True)
     assert result == ["/fake/file.mp4"]
     mp.post.assert_called_once()
+
+  @pytest.mark.parametrize("action,original,expected_guess,expected_copy", [("copy", "Orig.2020.WEBRip.mkv", "Orig.2020.WEBRip.mkv", True), ("transcode", None, "file.mkv", False)])
+  def test_rename_passes_guessit_and_copy_flag(self, action, original, expected_guess, expected_copy):
+    mp = self._make_mp()
+    mp.settings.naming_enabled = True
+    info = MagicMock()
+    mp.isValidSource = MagicMock(return_value=info)
+    output = {"output": "/fake/file.mp4", "external_subs": [], "options": {"video": {"action": action}}, "x": 1, "y": 1, "cues_to_front": False}
+    mp.process = MagicMock(return_value=output)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
+    mp.setPermissions = MagicMock()
+    mp.getDefaultAudioLanguage = MagicMock(return_value="eng")
+    with (
+      patch("guessit.guessit", return_value={"source": "Web"}) as g,
+      patch("resources.naming.generate_name", return_value=None) as gn,
+    ):
+      mp.fullprocess("/fake/file.mkv", "movie", tagdata=MagicMock(), original=original, post=False)
+    g.assert_called_once_with(expected_guess)
+    assert gn.call_args.kwargs["guess_data"] == {"source": "Web"}
+    assert gn.call_args.kwargs["video_copied"] is expected_copy
 
   def test_post_false_skips_post(self):
     mp = self._make_mp()

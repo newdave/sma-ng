@@ -1397,3 +1397,63 @@ class TestReleaseSourceAndCodecTags:
     data.from_mediainfo(make_media_info(video_codec=src_codec))
     data.keep_source_codec(name)
     assert data.video_codec == expected
+
+
+class TestCodecTagFollowsCopyDecision:
+  """SMANG-16 review: the source codec token is kept only on a real video copy."""
+
+  def _generate(self, make_media_info, codec, source_name, video_copied=None):
+    from resources.naming import generate_name
+
+    settings = MagicMock()
+    settings.naming_enabled = True
+    settings.naming_movie_template = "{Movie CleanTitle} [{VideoCodec}]"
+    settings.radarr_instances = []
+    settings.sonarr_instances = []
+    info = make_media_info(video_codec=codec)
+    tagdata = MagicMock()
+    tagdata.mediatype = MediaType.Movie
+    tagdata.title = "Movie"
+    tagdata.date = "2020-01-01"
+    kwargs = {} if video_copied is None else {"video_copied": video_copied}
+    return generate_name("/tmp/out.mp4", info, tagdata, settings, lookup_path=source_name, **kwargs)
+
+  @pytest.mark.parametrize("codec,name,expected", [("h264", "Movie.2020.h264-G.mkv", "x264"), ("hevc", "Movie.2020.H.265-G.mkv", "x265")])
+  def test_same_family_transcode_uses_encoded_token(self, make_media_info, codec, name, expected):
+    out = self._generate(make_media_info, codec, "/in/" + name, video_copied=False)
+    assert out is not None and "[%s]" % expected in out
+
+  def test_default_does_not_keep(self, make_media_info):
+    out = self._generate(make_media_info, "h264", "/in/Movie.2020.h264-G.mkv")
+    assert out is not None and "[x264]" in out
+
+  @pytest.mark.parametrize("codec,name,expected", [("h264", "Movie.2020.h264-G.mkv", "h264"), ("hevc", "Movie.2020.H.265-G.mkv", "H.265")])
+  def test_copy_keeps_source_token(self, make_media_info, codec, name, expected):
+    out = self._generate(make_media_info, codec, "/in/" + name, video_copied=True)
+    assert out is not None and "[%s]" % expected in out
+
+  @pytest.mark.parametrize("codec,name,expected", [("av1", "Movie.2020.av1-G.mkv", "AV1"), ("h264", "Movie.2020.AVC-G.mkv", "AVC")])
+  def test_kept_token_normalisation(self, make_media_info, codec, name, expected):
+    data = NamingData()
+    data.from_mediainfo(make_media_info(video_codec=codec))
+    data.keep_source_codec(name)
+    assert data.video_codec == expected
+
+  def test_video_is_copy_helper(self):
+    from resources.naming import video_is_copy
+
+    assert video_is_copy({"video": {"action": "copy"}}) is True
+    assert video_is_copy({"video": {"action": "transcode"}}) is False
+    assert video_is_copy({"video": {"codec": "copy"}}) is True
+    assert video_is_copy({"video": None}) is False
+    assert video_is_copy(None) is False
+
+
+class TestOtherFlagShapes:
+  def test_other_list_and_str(self):
+    from resources.naming import _get_source
+
+    assert _get_source({"source": "Web", "other": ["Rip"]}) == "WEBRip"
+    assert _get_source({"source": "Web", "other": "Rip"}) == "WEBRip"
+    assert _get_source({"source": "Blu-ray", "other": ["Rip"]}) == "BluRay"
+    assert _get_source({"source": "Blu-ray", "other": "Rip"}) == "BluRay"

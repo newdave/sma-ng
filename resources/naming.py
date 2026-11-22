@@ -293,17 +293,20 @@ class NamingData:
     self.quality_full = ("%s-%s" % (self.source, self.quality)) if self.source else self.quality
 
   def keep_source_codec(self, source_name):
-    """Keep the codec token written in the source name when the output codec family matches it.
+    """Keep the codec token written in the source name when it names the output codec family.
 
-    The probed codec only says h264/hevc, so a stream copy would otherwise be
-    renamed [h264] -> [x264]. A differing family (a real transcode) keeps the probed token.
+    Call this only when the video stream is copied (see ``video_is_copy``): the
+    probed codec only says h264/hevc, so a stream copy would otherwise be
+    renamed [h264] -> [x264]. A real re-encode must keep the probed token.
+    A source token the display map spells specially (AV1) is normalised through it.
     """
     if not self.video_codec:
       return
     for m in _SOURCE_CODEC_RE.finditer(os.path.basename(source_name or "")):
       token = m.group(1)
-      if VIDEO_CODEC_DISPLAY.get(token.lower().replace(".", "").replace(" ", "")) == self.video_codec:
-        self.video_codec = token
+      display = VIDEO_CODEC_DISPLAY.get(token.lower().replace(".", "").replace(" ", ""))
+      if display == self.video_codec:
+        self.video_codec = display if token.lower() == "av1" else token
         return
 
   def from_tagdata(self, tagdata):
@@ -637,7 +640,15 @@ def _rename_sidecars(old_path, new_path, log):
       log.exception("Failed to rename sidecar %s" % name)
 
 
-def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, lookup_path=None):
+def video_is_copy(options):
+  """Return True when the conversion options copy the video stream."""
+  video = (options or {}).get("video")
+  if not isinstance(video, dict):
+    return False
+  return (video.get("action") or ("copy" if video.get("codec") == "copy" else "")) == "copy"
+
+
+def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, lookup_path=None, video_copied=False):
   """
   Generate a new filename using the naming template.
 
@@ -654,6 +665,8 @@ def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, 
           the output file is in a temp directory (e.g. output-directory), pass
           the original *input* path here so the configured instance path
           prefixes resolve correctly.
+      video_copied: True when the video stream is copied; only then is the codec
+          token written in the source name kept (h264 stays h264, not x264).
 
   Returns:
       New filename (without extension), or None if naming disabled
@@ -673,7 +686,8 @@ def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, 
   # Populate from local sources
   data.from_mediainfo(info, guess_data)
   data.from_tagdata(tagdata)
-  data.keep_source_codec(lookup_path or filepath)
+  if video_copied:
+    data.keep_source_codec(lookup_path or filepath)
 
   # Use lookup_path for API matching when the output file is in a temp dir
   api_path = lookup_path or filepath
