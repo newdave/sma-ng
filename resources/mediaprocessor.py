@@ -2507,13 +2507,14 @@ class MediaProcessor:
           vprofile = info.video.profile
         elif info.video.profile in self.settings.vprofile:
           # Same profile name, different codec family (H.264 "Main" is not HEVC "main"): the stream is being
-          # re-encoded anyway, so take the first listed profile and let the bit-depth step pick the match.
-          vprofile = self.settings.vprofile[0]
+          # re-encoded anyway, so take the first listed profile the target encoder accepts (none fits: no
+          # profile) and let the bit-depth step pick the depth match.
+          vprofile = self._first_listed_profile(target_family)
         else:
-          vprofile = self.settings.vprofile[0] if len(self.settings.vprofile) > 0 else None
           self.log.debug("Video profile is not supported. Video stream can no longer be copied [video-profile].")
           vdebug = vdebug + ".profile"
           vcodec = vcodecs[0]
+          vprofile = self._first_listed_profile(self._codec_family(vcodec))
 
     vfieldorder = info.video.field_order
 
@@ -4230,21 +4231,53 @@ class MediaProcessor:
     "high": "high10",
   }
 
-  # Profile names by bit-depth class and codec family, used to pick the first listed profile that matches the
-  # output depth. "main" is shared by H.264 and HEVC, so it fits either family.
-  _TEN_BIT_PROFILES = frozenset(["main10", "main 10", "high10", "high 10"])
-  _EIGHT_BIT_PROFILES = frozenset(["main", "high", "baseline", "constrained baseline", "constrained high"])
-  _H264_ONLY_PROFILES = frozenset(["baseline", "constrained baseline", "constrained high", "high", "high10", "high 10", "extended"])
-  _HEVC_ONLY_PROFILES = frozenset(["main10", "main 10", "main444", "main 4:4:4"])
+  # Profile names (encoder spelling: lowercase, no spaces) by bit-depth class and codec family, used to pick the
+  # first listed profile that matches the output depth. "main" is shared by H.264 and HEVC, so it fits either
+  # family. Only the H.264 and HEVC families are filtered; other families keep the profile as written.
+  _TEN_BIT_PROFILES = frozenset(["main10", "high10"])
+  _EIGHT_BIT_PROFILES = frozenset(["main", "high", "baseline"])
+  _H264_ONLY_PROFILES = frozenset(["baseline", "constrainedbaseline", "constrainedhigh", "high", "high10", "extended"])
+  _HEVC_ONLY_PROFILES = frozenset(["main10", "main444", "main4:4:4"])
+  # ffprobe-only names no encoder accepts as -profile:v (libx264 aborts with "Error setting profile").
+  _UNENCODABLE_PROFILES = frozenset(["constrainedbaseline", "constrainedhigh"])
+  # The 10-bit profile each family derives when no listed profile matches a 10-bit output.
+  _TEN_BIT_PROFILE_BY_FAMILY = {"h264": "high10", "h265": "main10"}
+  _PROFILE_FAMILIES = ("h264", "h265")
+
+  @staticmethod
+  def _profile_token(profile):
+    """Return *profile* in encoder spelling: lowercase without spaces ("Main 10" -> "main10")."""
+    return "".join(profile.split()).lower()
 
   @classmethod
   def _profile_fits_family(cls, candidate, family):
-    """True when profile name *candidate* is valid for codec *family* (shared names such as main fit both)."""
+    """True when profile token *candidate* is valid for codec *family* (shared names such as main fit both)."""
+    if candidate in cls._UNENCODABLE_PROFILES:
+      return False
     if family == "h264":
       return candidate not in cls._HEVC_ONLY_PROFILES
     if family == "h265":
       return candidate not in cls._H264_ONLY_PROFILES
     return True
+
+  def _first_listed_profile(self, family, wanted=None):
+    """First ``video.profile`` entry valid for codec *family* (and in *wanted*, when given), or None.
+
+    H.264 / HEVC entries come back in encoder spelling; other families get the first entry as written.
+    """
+    for candidate in self.settings.vprofile or []:
+      if not isinstance(candidate, str) or not candidate.strip():
+        continue
+      if family not in self._PROFILE_FAMILIES:
+        return candidate
+      token = self._profile_token(candidate)
+      if self._profile_fits_family(token, family) and (wanted is None or token in wanted):
+        return token
+    return None
+
+  def _listed_profile_tokens(self):
+    """Return every ``video.profile`` entry in encoder spelling."""
+    return {self._profile_token(p) for p in self.settings.vprofile or [] if isinstance(p, str)}
 
   # Encoders with a native max sample rate. Sources above the cap need to be
   # downsampled on the encode pass or the encoder refuses to initialise.
@@ -4377,35 +4410,52 @@ class MediaProcessor:
     upgrade direction is safe because the pix_fmt bit-depth safety check that
     runs before this only leaves a 10-bit output when the encoder supports it.
 
-    Prefers the operator's own spelling of the target profile when it appears
-    in ``video.profile`` (so ``profile: [main10, main]`` reuses their exact
-    ``main`` / ``main10``), falling back to the derived sibling otherwise.
-    Returns *vprofile* unchanged for copy streams, absent profiles, unknown
-    profile names, an unknown (0) output depth, or an already-matching depth.
+    This runs on the final codec, so it also repairs a profile that does not
+    fit the codec family (a copy-time H.264 ``high`` left on a later HEVC
+    re-encode): it takes the first listed profile that fits the family and
+    output depth, or drops the profile when none fits. The downgrade prefers
+    the direct sibling (``high10`` -> ``high``) when listed, then the first
+    listed encodable 8-bit profile; the upgrade takes the first listed 10-bit
+    profile. Otherwise the family's sibling is derived (``high10`` for H.264,
+    ``main10`` for HEVC). H.264 / HEVC profiles come back in encoder spelling
+    (``Main 10`` -> ``main10``). Returns *vprofile* unchanged for copy streams,
+    absent profiles, and codec families other than H.264 / HEVC.
     """
-    if vcodec == "copy" or not vprofile or not output_bit_depth:
+    if vcodec == "copy" or not vprofile:
       return vprofile
-    key = vprofile.strip().lower()
+    family = self._codec_family(vcodec)
+    if family not in self._PROFILE_FAMILIES:
+      return vprofile
+    key = self._profile_token(vprofile)
+    if not self._profile_fits_family(key, family):
+      wanted = None
+      if output_bit_depth:
+        wanted = self._EIGHT_BIT_PROFILES if output_bit_depth <= 8 else self._TEN_BIT_PROFILES
+      replacement = (wanted and self._first_listed_profile(family, wanted)) or self._first_listed_profile(family)
+      self.log.info("Profile %s is not valid for the %s encoder; using %s instead [adaptive-profile-family]." % (vprofile, family, replacement or "no profile"))
+      if not replacement:
+        return None
+      key = replacement
+    if not output_bit_depth:
+      return key
     if output_bit_depth <= 8:
       target = self._TEN_BIT_PROFILE_TO_EIGHT_BIT.get(key)
-      wanted = self._EIGHT_BIT_PROFILES
       reason = "requires 10-bit input but output is %d-bit" % output_bit_depth
       verb = "downgrading"
+      # The direct sibling keeps the operator's quality tier (high10 -> high, not main).
+      listed = target if target and target in self._listed_profile_tokens() else None
+      listed = listed or self._first_listed_profile(family, self._EIGHT_BIT_PROFILES)
     else:
-      target = self._EIGHT_BIT_PROFILE_TO_TEN_BIT.get(key)
-      wanted = self._TEN_BIT_PROFILES
+      target = self._TEN_BIT_PROFILE_BY_FAMILY[family] if key in self._EIGHT_BIT_PROFILE_TO_TEN_BIT else None
       reason = "caps at 8-bit but output is %d-bit" % output_bit_depth
       verb = "upgrading"
+      listed = self._first_listed_profile(family, self._TEN_BIT_PROFILES)
     if not target:
-      return vprofile
-    for candidate in self.settings.vprofile or []:
-      if not isinstance(candidate, str):
-        continue
-      ckey = candidate.strip().lower()
-      if ckey in wanted and self._profile_fits_family(ckey, self._codec_family(vcodec)):
-        # A listed profile already matches the output depth: pick it, nothing to repair.
-        self.log.debug("Profile %s %s; using listed profile %s for %d-bit output." % (vprofile, reason, candidate, output_bit_depth))
-        return candidate
+      return key
+    if listed:
+      # A listed profile already matches the output depth: pick it, nothing to repair.
+      self.log.debug("Profile %s %s; using listed profile %s for %d-bit output." % (vprofile, reason, listed, output_bit_depth))
+      return listed
     replacement = target
     self.log.info("Profile %s %s; %s to %s to avoid encoder_init_failed [adaptive-profile-bit-depth]." % (vprofile, reason, verb, replacement))
     return replacement

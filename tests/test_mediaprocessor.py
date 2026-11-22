@@ -4515,11 +4515,11 @@ class TestReconcileProfileToBitDepth:
     mp.settings.vprofile = ["main10", "main"]
     assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main10", 8) == "main"
 
-  def test_prefers_operator_spelling_from_profile_list(self):
-    # Operator wrote "Main" — reuse their exact spelling rather than "main".
+  def test_listed_profile_returned_in_encoder_spelling(self):
+    # Operator wrote "Main": the listed profile is used, spelled as the encoder expects it.
     mp = _make_mp()
     mp.settings.vprofile = ["main10", "Main"]
-    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main10", 8) == "Main"
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main10", 8) == "main"
 
   def test_derives_sibling_when_not_in_profile_list(self):
     mp = _make_mp()
@@ -4539,10 +4539,10 @@ class TestReconcileProfileToBitDepth:
     mp.settings.vprofile = ["main", "main10"]
     assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 10) == "main10"
 
-  def test_upgrade_prefers_operator_spelling(self):
+  def test_upgrade_returns_listed_profile_in_encoder_spelling(self):
     mp = _make_mp()
     mp.settings.vprofile = ["main", "Main10"]
-    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 10) == "Main10"
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 10) == "main10"
 
   def test_upgrade_derives_sibling_when_not_in_profile_list(self):
     mp = _make_mp()
@@ -9986,3 +9986,115 @@ class TestProfileMatchesBitDepth:
     mp = _make_mp()
     mp.settings.vprofile = ["main10", "main", "Main 10"]
     assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 10) == "main10"
+
+
+class TestProfileFitsTargetFamily:
+  """Never emit a profile the final encoder rejects: the chosen profile must fit the final codec family."""
+
+  def _make_mp(self, tmp_yaml, vcodec, vprofile):
+    with patch("resources.readsettings.ReadSettings._validate_binaries"):
+      from resources.mediaprocessor import MediaProcessor
+      from resources.readsettings import ReadSettings
+
+      settings = ReadSettings(tmp_yaml())
+      settings.vcodec = vcodec
+      settings.vprofile = vprofile
+      settings.vmaxbitrate = 0
+
+    mock_converter = MagicMock()
+    mock_converter.ffmpeg.codecs = {
+      "h264": {"encoders": ["libx264"]},
+      "hevc": {"encoders": ["libx265"]},
+      "aac": {"encoders": ["aac"]},
+    }
+    mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8}
+    names = {"h264": "libx264", "h265": "libx265", "aac": "aac"}
+    mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: names.get(c, c)
+
+    mp = MediaProcessor.__new__(MediaProcessor)
+    mp.settings = settings
+    mp.converter = mock_converter
+    mp.log = MagicMock()
+    mp.deletesubs = set()
+    from resources.subtitles import SubtitleProcessor
+
+    mp.subtitles = SubtitleProcessor(mp)
+    return mp
+
+  def _video(self, mp, info):
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    return options["video"]
+
+  def test_cross_family_listed_name_takes_first_profile_fitting_target(self, tmp_yaml, make_media_info):
+    # H.264 Main source, HEVC target: "high" is H.264-only and libx265 rejects it.
+    mp = self._make_mp(tmp_yaml, ["h265"], ["high", "main"])
+    video = self._video(mp, make_media_info(video_codec="h264"))
+    assert video["codec"] == "h265"
+    assert video["profile"] == "main"
+
+  def test_unlisted_source_profile_takes_first_profile_fitting_target(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, ["h265"], ["high", "main10", "main"])
+    info = make_media_info(video_codec="h264")
+    info.video.profile = "constrained baseline"
+    video = self._video(mp, info)
+    assert video["codec"] == "h265"
+    assert video["profile"] == "main"
+
+  def test_no_listed_profile_fits_target_emits_none(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, ["h265"], ["high"])
+    video = self._video(mp, make_media_info(video_codec="h264"))
+    assert video["codec"] == "h265"
+    assert video["profile"] is None
+
+  def test_copy_profile_refit_after_forced_reencode(self, tmp_yaml, make_media_info):
+    # Copy-time profile "high" (H.264 source) survives into a later max-fps re-encode to HEVC.
+    mp = self._make_mp(tmp_yaml, ["h265", "h264"], ["high", "main"])
+    mp.settings.video_max_fps = 20
+    info = make_media_info(video_codec="h264")
+    info.video.profile = "high"
+    video = self._video(mp, info)
+    assert ".max-fps" in video["debug"]
+    assert video["codec"] == "h265"
+    assert video["profile"] == "main"
+
+  def test_reconcile_replaces_wrong_family_profile(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["high", "main"]
+    assert mp._reconcile_profile_to_bit_depth("h265", "high", 8) == "main"
+
+  def test_reconcile_wrong_family_picks_depth_match(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["high10", "main", "main10"]
+    assert mp._reconcile_profile_to_bit_depth("h265nvenc", "high10", 10) == "main10"
+
+  def test_reconcile_drops_profile_when_none_fits_family(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["high", "high10"]
+    assert mp._reconcile_profile_to_bit_depth("h265qsv", "high", 8) is None
+
+  def test_h264_downgrade_prefers_direct_sibling(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["high10", "main", "high"]
+    assert mp._reconcile_profile_to_bit_depth("h264", "high10", 8) == "high"
+
+  def test_h264_downgrade_skips_constrained_profiles(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main10", "constrained high", "main"]
+    assert mp._reconcile_profile_to_bit_depth("h264vaapi", "high10", 8) == "main"
+
+  def test_h264_main_on_10bit_derives_high10(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main"]
+    assert mp._reconcile_profile_to_bit_depth("h264", "main", 10) == "high10"
+
+  def test_vp9_profile_left_unchanged(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main"]
+    assert mp._reconcile_profile_to_bit_depth("vp9", "main", 10) == "main"
+
+  def test_returned_profile_uses_encoder_spelling(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["Main", "Main 10"]
+    assert mp._reconcile_profile_to_bit_depth("h265qsv", "Main", 10) == "main10"
+    assert mp._reconcile_profile_to_bit_depth("h265qsv", "Main 10", 10) == "main10"
