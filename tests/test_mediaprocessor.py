@@ -3387,7 +3387,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -3409,7 +3409,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -3434,7 +3434,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -3455,7 +3455,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -3491,7 +3491,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -3516,7 +3516,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -6492,7 +6492,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -6514,7 +6514,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -6539,7 +6539,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -6560,7 +6560,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -6596,7 +6596,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -6621,7 +6621,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()

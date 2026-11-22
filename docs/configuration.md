@@ -150,10 +150,15 @@ SMA-NG never overwrites an existing file that is not the input it is replacing:
   `true` (after copying it to `recycle-bin`, if set). With `delete-original: false` the original is kept
   and the output is restored as `movie.2.mp4`.
 - With `output-directory` set, `delete-original: true` and an existing file at the restore name that is not the
-  source, that file is replaced only when it is provably an earlier SMA-NG output of the same source: an MP4
-  whose encoder tag (`©too`) reads `SMA-NG:<source file name>`. It is copied to `recycle-bin` first (if set);
-  when that copy fails it is kept and the new output is numbered. Files without that tag, or tagged for another
-  source, are never replaced.
+  source, that file is replaced only when it is provably an earlier SMA-NG output of the same episode or movie:
+  an MP4 whose encoder tag (`©too`) starts with `SMA-NG:` and whose TMDB (or TVDB/IMDB) id atom matches the new
+  output, plus season and episode for TV. The source file name does not matter, so a re-grab with a different
+  release name replaces the earlier output. The old file is copied to `recycle-bin` first (if set); when that
+  copy fails it is kept and the new output is numbered. Otherwise the new output is numbered and an INFO line
+  `[output-collision-reason]` says why (`no SMA marker`, `identity not comparable`, `different episode`).
+- Replacement needs tagging on (`tagfile`) and metadata found for the new output; without them the identity
+  cannot be compared and outputs are numbered. Numbering done by `move-to` and by output-name generation
+  (`getOutputFile`) is not covered by this replacement.
 
 ### Full-software fallback
 

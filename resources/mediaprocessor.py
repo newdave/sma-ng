@@ -707,7 +707,7 @@ from resources.analyzer import AnalyzerRecommendations, build_recommendations
 from resources.config_schema import FallbackPolicy
 from resources.extensions import bad_sub_extensions, subtitle_codec_extensions
 from resources.lang import getAlpha3TCode
-from resources.metadata import Metadata
+from resources.metadata import MediaType, Metadata
 from resources.openvino_analyzer import OpenVINOAnalyzerBackend, OpenVINOAnalyzerError
 from resources.postprocess import PostProcessor
 from resources.processor.failures import TAIL_BYTES, AttemptRecord, FfmpegFailureClass, diagnose_ffmpeg_failure, parse_ffmpeg_failure
@@ -830,7 +830,7 @@ class MediaProcessor:
               self.log.exception("Error during file rename")
 
           # Reverse Ouput
-          output["output"] = self.restoreFromOutput(inputfile, output["output"])
+          output["output"] = self.restoreFromOutput(inputfile, output["output"], tagdata=tagdata)
           for i, sub in enumerate(output["external_subs"]):
             output["external_subs"][i] = self.restoreFromOutput(inputfile, sub)
 
@@ -3588,7 +3588,7 @@ class MediaProcessor:
       self.log.exception("Unable to set new file permissions.")
 
   # Undo output dir
-  def restoreFromOutput(self, inputfile, outputfile):
+  def restoreFromOutput(self, inputfile, outputfile, tagdata=None):
     """
     Move outputfile back from output_dir to the original input directory.
 
@@ -3605,7 +3605,7 @@ class MediaProcessor:
       # sidecars keep their language-coded names and replace older copies.
       is_media = self.parseFile(outputfile)[2] == str(self.settings.output_extension or "").lower()
       if is_media and os.path.isfile(newoutputfile) and os.path.abspath(newoutputfile) != os.path.abspath(outputfile):
-        resolved = self._resolve_restore_collision(inputfile, outputfile, newoutputfile)
+        resolved = self._resolve_restore_collision(inputfile, outputfile, newoutputfile, tagdata)
         if resolved is None:
           # Identical bytes already in place (bypass copy): nothing to move.
           return newoutputfile
@@ -3628,24 +3628,57 @@ class MediaProcessor:
       return newoutputfile
     return outputfile
 
-  def _is_earlier_sma_output(self, target, inputfile):
-    """True only when *target* carries the SMA-NG encoder tag for this exact source.
+  def _earlier_sma_output_verdict(self, target, tagdata):
+    """Classify *target* against the new job's *tagdata*; return ``(replace, reason)``.
 
-    ``Metadata.writeTags`` stamps MP4 outputs with ``\xa9too`` =
-    ``SMA-NG:<source basename>``. A match on both the prefix and the basename
-    of *inputfile* proves the file is an earlier SMA output of the same
-    source. Anything unreadable or untagged is not SMA output.
+    ``Metadata.writeTags`` stamps MP4 outputs with ``\xa9too`` = ``SMA-NG:<source>``
+    plus the ``TMDB``/``TVDB``/``IMDB`` atoms and, for TV, ``tvsn``/``tves``. A
+    target is replaceable only when it carries the SMA marker (any source name) and
+    the first id both sides have, plus season and episode for TV, are equal.
+    Reasons for refusing: ``no SMA marker``, ``identity not comparable``,
+    ``different episode``.
     """
     try:
       tags = MP4(target).tags
-      values = tags.get("\xa9too") if tags is not None else None
     except KeyboardInterrupt:
       raise
     except Exception:
-      return False
-    return bool(values) and str(values[0]) == "SMA-NG:" + os.path.basename(inputfile)
+      tags = None
+    if not tags:
+      return False, "no SMA marker"
+    marker = tags.get("\xa9too")
+    if not marker or not str(marker[0]).startswith("SMA-NG:"):
+      return False, "no SMA marker"
+    if tagdata is None:
+      return False, "identity not comparable"
 
-  def _resolve_restore_collision(self, inputfile, outputfile, target):
+    def atom(key):
+      values = tags.get(key)
+      if not values:
+        return None
+      return bytes(values[0]).decode("utf-8", errors="ignore") if isinstance(values[0], (bytes, bytearray)) else str(values[0])
+
+    is_tv = getattr(tagdata, "mediatype", None) == MediaType.TV
+    id_keys = (("TMDB", "tmdbid"), ("TVDB", "tvdbid")) if is_tv else (("TMDB", "tmdbid"), ("IMDB", "imdbid"))
+    for atom_name, attr in id_keys:
+      new_id = getattr(tagdata, attr, None)
+      old_id = atom("----:com.apple.iTunes:" + atom_name)
+      if new_id and old_id:
+        if str(new_id) != old_id:
+          return False, "different episode"
+        break
+    else:
+      return False, "identity not comparable"
+    if is_tv:
+      new_sn, new_ep = getattr(tagdata, "season", None), getattr(tagdata, "episode", None)
+      old_sn, old_ep = tags.get("tvsn"), tags.get("tves")
+      if new_sn is None or new_ep is None or not old_sn or not old_ep:
+        return False, "identity not comparable"
+      if str(old_sn[0]) != str(new_sn) or str(old_ep[0]) != str(new_ep):
+        return False, "different episode"
+    return True, ""
+
+  def _resolve_restore_collision(self, inputfile, outputfile, target, tagdata=None):
     """Pick a safe destination when moving *outputfile* back onto an existing *target*.
 
     - *target* is the input and ``delete`` is enabled: replace it by design
@@ -3653,8 +3686,9 @@ class MediaProcessor:
     - *target* holds the same bytes as *outputfile* (a bypass copy of the
       input): drop the redundant copy and return ``None`` (nothing to move).
     - ``delete`` is enabled and *target* is provably an earlier SMA output of
-      this same source (``_is_earlier_sma_output``): recycle it and replace it,
-      so a re-grab leaves one file. A failed recycle keeps it and numbers.
+      the same episode/movie (``_earlier_sma_output_verdict``, matched on
+      tagged ids, any source name): recycle it and replace it, so a re-grab
+      leaves one file. A failed recycle keeps it and numbers.
     - Otherwise (``delete`` is off, or *target* is an unrelated file): keep
       the existing file and return a numbered path (``name.2.mp4``).
     """
@@ -3670,11 +3704,15 @@ class MediaProcessor:
         return None
     except OSError:
       pass
-    if not is_input and self.settings.delete and self._is_earlier_sma_output(target, inputfile):
-      if self._recycle_to_bin(target):
-        self.log.info("%s is an earlier SMA-NG output of %s; replacing it [output-replace-stale]." % (target, os.path.basename(inputfile)))
-        return target
-      self.log.warning("Not replacing earlier SMA-NG output %s: recycle bin copy failed." % target)
+    if not is_input and self.settings.delete:
+      replace, reason = self._earlier_sma_output_verdict(target, tagdata)
+      if replace:
+        if self._recycle_to_bin(target):
+          self.log.info("%s is an earlier SMA-NG output of the same title; replacing it [output-replace-stale]." % target)
+          return target
+        self.log.warning("Not replacing earlier SMA-NG output %s: recycle bin copy failed." % target)
+      else:
+        self.log.info("Not replacing existing %s: %s [output-collision-reason]." % (target, reason))
     base, ext = os.path.splitext(target)
     i = 2
     candidate = "%s.%d%s" % (base, i, ext)

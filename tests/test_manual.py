@@ -616,7 +616,7 @@ class TestProcessFile:
     mp._recycle_to_bin.return_value = False
     seen = {}
 
-    def _restore(inp, out):
+    def _restore(inp, out, **kw):
       seen["delete"] = mp.settings.delete
       return str(out_in_input_dir)
 

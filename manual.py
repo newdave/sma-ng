@@ -653,7 +653,7 @@ def processFile(
 
     # Reverse Output
     try:
-      output["output"] = mp.restoreFromOutput(inputfile, output["output"])
+      output["output"] = mp.restoreFromOutput(inputfile, output["output"], tagdata=tagdata)
     finally:
       mp.settings.delete = _saved_delete
     for i, sub in enumerate(output["external_subs"]):
