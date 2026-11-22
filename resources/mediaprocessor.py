@@ -443,7 +443,7 @@ def _swap_qsv_codec_to_vaapi(options, vaapi_overlay):
   ov_gq = overlay.get("global_quality", 0) or 0
   src_gq = video.pop("global_quality", 0) or 0
   effective_q = ov_gq if ov_gq > 0 else src_gq
-  if effective_q > 0 and "bitrate" not in video and "-rc_mode" not in cleaned:
+  if effective_q > 0 and not video.get("bitrate") and "-rc_mode" not in cleaned:
     cleaned = ((cleaned.rstrip() + " ") if cleaned else "") + "-rc_mode CQP -qp %d" % effective_q
 
   video["params"] = cleaned or None
@@ -698,7 +698,7 @@ def _resolve_hdr_color_tags(hdr_input, hdr_output, hdr_settings):
 from collections.abc import Callable
 
 from converter import Converter, FFMpegConvertError
-from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments
+from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, HWAccelVideoCodec, _default_vaapi_render_node, parse_filter_segments, video_codec_list
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
@@ -714,6 +714,11 @@ from resources.subtitles import SubtitleProcessor
 # VBV peak allowed above max-bitrate when the cap is what forced the re-encode
 # (max-bitrate is then the average target, maxrate = target x this).
 VBV_PEAK_RATIO = 1.5
+
+# Conservative H.264-class targets (kbps) by output height, used only when the
+# source bitrate is unknown and the encoder has no constant-quality mode
+# (V4L2 M2M, OMX); without a target FFmpeg would fall to its 200 kb/s default.
+UNKNOWN_BITRATE_FALLBACK_KBPS = ((2160, 20000), (1440, 10000), (1080, 6000), (720, 3000), (0, 1500))
 
 # Exact rationals for the NTSC frame rates a max-fps setting names approximately.
 NTSC_FPS = {23.976: 24000 / 1001, 29.97: 30000 / 1001, 59.94: 60000 / 1001}
@@ -1022,7 +1027,7 @@ class MediaProcessor:
   # video.debug markers for re-encodes that only chase a lower or capped
   # bitrate. Any other marker (filter, scale, fps, profile, level, pix-fmt,
   # burn-in, operator force) means a copy would ignore the configuration.
-  _OPTIONAL_REENCODE_REASONS = frozenset({"video", "hdrInput", "max-bitrate", "crf-profile", "icq", "min-bitrate", "analyzer-preset"})
+  _OPTIONAL_REENCODE_REASONS = frozenset({"video", "hdrInput", "max-bitrate", "crf-profile", "icq", "min-bitrate", "analyzer-preset", "bitrate-unknown"})
   # Video codecs that stream-copy cleanly into MP4.
   _MP4_COPYABLE_VIDEO_CODECS = frozenset({"h264", "hevc", "av1", "vp9"})
 
@@ -2433,9 +2438,10 @@ class MediaProcessor:
 
     vbitrate_estimate = self.estimateVideoBitrate(info)
     vbitrate_ratio = self.settings.vbitrateratio.get(info.video.codec, self.settings.vbitrateratio.get("*", 1.0))
-    # Unknown source bitrate (estimate None): no ratio/max-bitrate/clamp maths is
+    # Unknown source bitrate (estimate None, or negative when assumed audio
+    # exceeds the container bitrate): no ratio/max-bitrate/clamp maths is
     # possible, so leave the target unset and let ICQ/CRF drive the encode.
-    vbitrate_unknown = not vbitrate_estimate
+    vbitrate_unknown = not vbitrate_estimate or vbitrate_estimate <= 0
     vbitrate = None if vbitrate_unknown else vbitrate_estimate * vbitrate_ratio
     if vbitrate and analyzer_recommendations.bitrate_ratio_multiplier:
       vbitrate = vbitrate * analyzer_recommendations.bitrate_ratio_multiplier
@@ -2511,7 +2517,7 @@ class MediaProcessor:
     src_height = info.video.video_height
     is_uhd = src_height is not None and src_height > 1080
     is_hd = src_height is not None and 720 <= src_height <= 1080
-    profile_match = self._match_bitrate_profile(vbitrate_estimate, hd=is_hd, uhd=is_uhd)
+    profile_match = None if vbitrate_unknown else self._match_bitrate_profile(vbitrate_estimate, hd=is_hd, uhd=is_uhd)
     if profile_match and profile_match["target"] >= vbitrate_estimate:
       self.log.debug("Bitrate profile target %dkbps is not below source %dkbps; not forcing a re-encode [crf-profiles]." % (profile_match["target"], vbitrate_estimate))
       profile_match = None
@@ -2770,12 +2776,25 @@ class MediaProcessor:
       vmaxrate = None
       vbufsize = None
       vdebug = vdebug + ".icq"
-    elif vcodec != "copy" and vbitrate_unknown and not vbitrate and (vmaxrate or vbufsize):
-      # No bitrate target means ICQ/CRF; a lone maxrate makes QSV pick QVBR
-      # with a zero target, which fails encoder init.
-      self.log.info("Source bitrate is unknown; encoding at constant quality and dropping VBV maxrate/bufsize [icq-rate-control].")
-      vmaxrate = None
-      vbufsize = None
+    elif vcodec != "copy" and vbitrate_unknown and not vbitrate:
+      vdebug = vdebug + ".bitrate-unknown"
+      encoder = next((c for c in video_codec_list if c.codec_name == vcodec), None)
+      if getattr(encoder, "needs_bitrate_target", False):
+        # No constant-quality mode: a conservative resolution-based target
+        # beats FFmpeg's silent 200 kb/s default.
+        vbitrate = self._unknown_bitrate_fallback_kbps(info.video, vwidth, vheight, effective_vmaxbitrate)
+        self.log.info("Source bitrate is unknown and %s has no constant-quality mode; using fallback bitrate %dk [video-bitrate-fallback]." % (vcodec, vbitrate))
+      elif encoder is not None and issubclass(encoder, HWAccelVideoCodec) and (vmaxrate or vbufsize):
+        # Hardware quality modes take no VBV: QSV picks QVBR with a zero
+        # target when -maxrate rides along with -global_quality and fails
+        # encoder init; NVENC/VAAPI CQP ignore it.
+        self.log.info("Source bitrate is unknown; encoding at constant quality and dropping VBV maxrate/bufsize [icq-rate-control].")
+        vmaxrate = None
+        vbufsize = None
+      elif vmaxrate:
+        # Software CRF and VideoToolbox constant quality honour VBV, so the
+        # max-bitrate / HDR / analyzer ceiling stays as a capped CRF.
+        self.log.info("Source bitrate is unknown; encoding at constant quality capped by maxrate %s bufsize %s [icq-rate-control]." % (vmaxrate, vbufsize))
     elif vcodec != "copy" and vbitrate and self.settings.vminbitrate and vbitrate < self.settings.vminbitrate:
       self.log.info("Video bitrate target %dk is below the configured floor; raising to %dk [video-min-bitrate]." % (vbitrate, self.settings.vminbitrate))
       vbitrate = self.settings.vminbitrate
@@ -4075,6 +4094,18 @@ class MediaProcessor:
   # HEVC Main tier limits per level (ITU-T H.265 Table A.8): MaxBR in kbit/s
   # and MaxCPB in kbit, which are equal for Main tier.
   _HEVC_MAIN_TIER_MAX_KBPS = {4.0: 12000, 4.1: 20000, 5.0: 25000, 5.1: 40000, 5.2: 60000, 6.0: 60000, 6.1: 120000, 6.2: 240000}
+
+  @staticmethod
+  def _unknown_bitrate_fallback_kbps(video, vwidth, vheight, max_kbps):
+    """Fallback target (kbps) by output height for encoders with no
+    constant-quality mode when the source bitrate is unknown, never above
+    a positive *max_kbps* ceiling."""
+    src_w, src_h = video.video_width, video.video_height
+    height = vheight or (int(src_h * vwidth / src_w) if vwidth and src_w and src_h else src_h) or 0
+    kbps = next(rate for floor, rate in UNKNOWN_BITRATE_FALLBACK_KBPS if height >= floor)
+    if max_kbps and max_kbps > 0:
+      kbps = min(kbps, int(max_kbps))
+    return kbps
 
   def _clamp_vbv_to_level(self, vcodec, vlevel, vbitrate, vmaxrate, vbufsize):
     """Keep an HEVC encode's VBV (maxrate, bufsize) within the configured

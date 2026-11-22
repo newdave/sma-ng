@@ -977,10 +977,19 @@ corresponding Python config block in `sma-ng.yml`. See
    otherwise `min-bitrate` (if set) raises any remaining VBR target to the floor, lifting `maxrate`/
    `bufsize` with it (`[video-min-bitrate]`). On the software-encoder tier (libx264/libx265) the ICQ
    path falls back to the encoder's default CRF since `global-quality` is a hardware-encoder option.
-6. Unknown source bitrate: when neither the container nor the video stream reports a bitrate, steps 1-4 and the
-   same-family clamp are skipped (no ratio, `max-bitrate` override or clamp), no bitrate target is set and the
-   VBV `maxrate`/`bufsize` are dropped. The encode runs at constant quality (ICQ/CQP via `global-quality`, or the
-   encoder's default CRF/CQ) instead of failing (`[video-bitrate-unknown]`, `[icq-rate-control]`).
+6. Unknown source bitrate: when neither the container nor the video stream reports a usable bitrate (missing, or
+   negative after subtracting assumed audio), steps 1-4, `crf-profiles` and the same-family clamp are skipped. No
+   bitrate target is set and the encode runs at constant quality instead of failing. `video.debug` gains
+   `.bitrate-unknown` (`[video-bitrate-unknown]`); the marker never blocks the copy fallback. Per encoder family:
+   - Software (libx264, libx265, SVT-AV1): the encoder's default CRF. `max-bitrate`, `hdr.max-bitrate` and the
+     analyzer ceiling still apply as VBV `maxrate`/`bufsize`, so the encode is a capped CRF.
+   - QSV (`-global_quality`): ICQ at `global-quality` (or the encoder default). VBV is dropped: `-maxrate` without a
+     target makes QSV pick QVBR, which fails encoder init. These caps do **not** apply.
+   - NVENC and VAAPI: constant QP (`-qp`, default 23). VBV is dropped because CQP ignores it.
+   - VideoToolbox: constant quality `-q:v 65` (Apple Silicon only); `max-bitrate` still applies as a data-rate limit.
+   - Encoders with no quality mode (`h264_v4l2m2m`, `hevc_v4l2m2m`, `h264_omx`): a fallback bitrate by output
+     height (2160p 20000k, 1440p 10000k, 1080p 6000k, 720p 3000k, smaller 1500k). The fallback never exceeds
+     `max-bitrate` (`[video-bitrate-fallback]`).
 
 When `[Analyzer]` is enabled, the analyzer may additionally:
 

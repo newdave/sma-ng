@@ -16,10 +16,13 @@ from converter.avcodecs import (
   H265QSVCodec,
   H265VAAPICodec,
   MOVTextCodec,
+  NVEncAV1Codec,
   NVEncH264Codec,
   NVEncH265Codec,
   OpusCodec,
   SrtCodec,
+  VideotoolboxEncH264,
+  VideotoolboxEncH265,
   Vp9QSVCodec,
   audio_codec_list,
   subtitle_codec_list,
@@ -576,6 +579,36 @@ class TestNVEncCodecs:
     opts = codec.parse_options({"codec": "h265_nvenc", "bitrate": 5000})
     assert "-vcodec" in opts
     assert "hevc_nvenc" in opts
+
+  def test_nvenc_av1_constant_qp_without_bitrate(self):
+    opts = NVEncAV1Codec().parse_options({"codec": "av1nvenc"})
+    assert opts[opts.index("-qp") + 1] == "23"
+    assert "-vb" not in opts
+
+  def test_nvenc_av1_bitrate_target_has_no_qp(self):
+    opts = NVEncAV1Codec().parse_options({"codec": "av1nvenc", "bitrate": 5000})
+    assert "-qp" not in opts
+    assert opts[opts.index("-vb") + 1] == "5000k"
+
+
+class TestVideotoolboxAndNoQualityModeCodecs:
+  """VideoToolbox gets -q:v without a target; V4L2 M2M / OMX need a bitrate target."""
+
+  @pytest.mark.parametrize("cls, name", [(VideotoolboxEncH264, "h264_videotoolbox"), (VideotoolboxEncH265, "h265_videotoolbox")])
+  def test_constant_quality_without_bitrate(self, cls, name):
+    opts = cls().parse_options({"codec": name})
+    assert opts[opts.index("-q:v") + 1] == "65"
+    assert "-vb" not in opts
+
+  @pytest.mark.parametrize("cls, name", [(VideotoolboxEncH264, "h264_videotoolbox"), (VideotoolboxEncH265, "h265_videotoolbox")])
+  def test_bitrate_target_has_no_quality(self, cls, name):
+    opts = cls().parse_options({"codec": name, "bitrate": 4000})
+    assert "-q:v" not in opts
+    assert opts[opts.index("-vb") + 1] == "4000k"
+
+  def test_needs_bitrate_target_flags(self):
+    flagged = {c.codec_name for c in video_codec_list if getattr(c, "needs_bitrate_target", False)}
+    assert flagged == {"h264_omx", "h264_v4l2m2m", "hevc_v4l2m2m"}
 
 
 class TestCopyCodecs:

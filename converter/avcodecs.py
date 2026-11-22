@@ -452,6 +452,11 @@ class VideoCodec(BaseCodec):
     "color_space": str,
   }
 
+  # True for encoders with no constant-quality mode (V4L2 M2M, OMX): without
+  # a bitrate target they silently fall to FFmpeg's 200 kb/s default, so the
+  # planner must always give them one.
+  needs_bitrate_target = False
+
   def _aspect_corrections(self, sw, sh, w, h, mode):
     # If we don't have source info, we don't try to calculate
     # aspect corrections
@@ -1547,7 +1552,24 @@ class NVEncH264CodecCuda(NVEncH264Codec):
   scale_filter = "scale_cuda"
 
 
-class VideotoolboxEncH264(H264Codec):
+# VideoToolbox constant-quality level (-q:v, 1-100, higher is better) used
+# when no bitrate target is set; without it FFmpeg's 200 kb/s default applies.
+VIDEOTOOLBOX_QUALITY_DEFAULT = 65
+
+
+class VideotoolboxVideoCodec:
+  """VideoToolbox mixin: constant quality (-q:v) when no bitrate target is set."""
+
+  vt_quality_default = VIDEOTOOLBOX_QUALITY_DEFAULT
+
+  def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
+    optlist = super()._codec_specific_produce_ffmpeg_list(safe, stream)
+    if "bitrate" not in safe:
+      optlist.extend(["-q:v", str(self.vt_quality_default)])
+    return optlist
+
+
+class VideotoolboxEncH264(VideotoolboxVideoCodec, H264Codec):
   """
   Videotoolbox H.264/AVC video codec.
   """
@@ -1564,6 +1586,7 @@ class OMXH264Codec(H264Codec):
 
   codec_name = "h264_omx"
   ffmpeg_codec_name = "h264_omx"
+  needs_bitrate_target = True
 
 
 class VAAPIVideoCodec(HWAccelVideoCodec):
@@ -1730,6 +1753,7 @@ class H264V4l2m2mCodec(H264Codec):
 
   codec_name = "h264_v4l2m2m"
   ffmpeg_codec_name = "h264_v4l2m2m"
+  needs_bitrate_target = True
 
   def _codec_specific_parse_options(self, safe, stream=0):
     safe["pix_fmt"] = "yuv420p"
@@ -2052,6 +2076,7 @@ class H265V4l2m2mCodec(H265Codec):
 
   codec_name = "hevc_v4l2m2m"
   ffmpeg_codec_name = "hevc_v4l2m2m"
+  needs_bitrate_target = True
 
 
 class H265V4l2m2mDecoder(BaseDecoder):
@@ -2197,7 +2222,7 @@ class H265CuvidDecoder(BaseDecoder):
   max_depth = 10
 
 
-class VideotoolboxEncH265(H265Codec):
+class VideotoolboxEncH265(VideotoolboxVideoCodec, H265Codec):
   """
   Videotoolbox H.265/HEVC video codec.
   """
@@ -2421,13 +2446,28 @@ class AV1VAAPICodec(VAAPIVideoCodec, AV1Codec):
     return optlist
 
 
-class NVEncAV1Codec(AV1Codec):
+class NVEncAV1Codec(HWAccelVideoCodec, AV1Codec):
   """
   NVEnc AV1 Codec
   """
 
   codec_name = "av1nvenc"
   ffmpeg_codec_name = "av1_nvenc"
+  hw_prefix = "nvenc"
+  # Same AV1 constant-QP scale and default as AV1VAAPICodec; without it a
+  # target-less encode falls to av1_nvenc's built-in 2 Mb/s VBR.
+  hw_quality_range = (0, 255)
+  hw_quality_default = 23
+
+  def _codec_specific_parse_options(self, safe, stream=0):
+    safe = super()._codec_specific_parse_options(safe, stream)
+    self._hw_parse_quality(safe)
+    return safe
+
+  def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
+    optlist = super()._codec_specific_produce_ffmpeg_list(safe, stream)
+    optlist.extend(self._hw_quality_opts(safe))
+    return optlist
 
 
 class Vp9QSVCodec(QSVVideoCodec, Vp9Codec):

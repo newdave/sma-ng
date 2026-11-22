@@ -1528,10 +1528,12 @@ class TestReencodeRateControlSelection:
     assert options is not None
     assert options["video"]["codec"] != "copy"
     assert options["video"]["bitrate"] is None
-    assert options["video"]["maxrate"] is None
-    assert options["video"]["bufsize"] is None
+    # libx264 keeps the operator's max-bitrate as a capped CRF (VBV without a target).
+    assert options["video"]["maxrate"] == "2000k"
+    assert options["video"]["bufsize"] == "4000k"
     assert options["video"]["global_quality"] == 22
     assert ".max-bitrate" not in options["video"]["debug"]
+    assert ".bitrate-unknown" in options["video"]["debug"]
 
   def test_unknown_source_bitrate_without_global_quality(self, tmp_yaml, make_media_info):
     mp = self._make_mp(tmp_yaml, global_quality=0, vmaxbitrate=0)
@@ -1539,6 +1541,11 @@ class TestReencodeRateControlSelection:
     options = self._generate(mp, info)
     assert options is not None
     assert options["video"]["bitrate"] is None
+    assert options["video"]["maxrate"] is None
+    assert options["video"]["bufsize"] is None
+    assert "global_quality" not in options["video"]
+    debugs = [c.args[0] for c in mp.log.debug.call_args_list if c.args]
+    assert any("[video-bitrate-unknown]" in m for m in debugs)
 
   def test_bitrate_driven_reencode_keeps_vbr_target(self, tmp_yaml, make_media_info):
     # Source over max-bitrate: the re-encode is bitrate-driven so the explicit
@@ -1658,6 +1665,168 @@ class TestForceReencode:
     assert options["video"]["codec"] != "copy"
     assert options["video"]["codec"] == "hevc"
     assert ".force-reencode" in options["video"]["debug"]
+
+
+class TestUnknownSourceBitrateEncoderFamilies:
+  """Unknown source bitrate: each encoder family gets a quality mode it supports, never FFmpeg's 200k default."""
+
+  def _make_mp(self, tmp_yaml, vcodec, global_quality=22, vmaxbitrate=8000, hdr_max_bitrate=None):
+    with patch("resources.readsettings.ReadSettings._validate_binaries"):
+      from resources.mediaprocessor import MediaProcessor
+      from resources.readsettings import ReadSettings
+
+      settings = ReadSettings(tmp_yaml())
+      settings.vcodec = [vcodec]
+      settings.vmaxbitrate = vmaxbitrate
+      settings.global_quality = global_quality
+      if hdr_max_bitrate is not None:
+        settings.hdr["codec"] = [vcodec]
+        settings.hdr["space"] = ["bt2020nc"]
+        settings.hdr["transfer"] = ["smpte2084"]
+        settings.hdr["primaries"] = ["bt2020"]
+        settings.hdr["max_bitrate"] = hdr_max_bitrate
+
+    mock_converter = MagicMock()
+    mock_converter.ffmpeg.codecs = {"aac": {"encoders": ["aac"]}}
+    mock_converter.ffmpeg.pix_fmts = {"yuv420p": 8, "yuv420p10le": 10}
+    mock_converter.codec_name_to_ffmpeg_codec_name.side_effect = lambda c: c
+
+    mp = MediaProcessor.__new__(MediaProcessor)
+    mp.settings = settings
+    mp.converter = mock_converter
+    mp.log = MagicMock()
+    mp.deletesubs = set()
+    from resources.subtitles import SubtitleProcessor
+
+    mp.subtitles = SubtitleProcessor(mp)
+    return mp
+
+  @staticmethod
+  def _unknown_info(make_media_info, height=1080):
+    width = {2160: 3840, 1080: 1920, 720: 1280}[height]
+    info = make_media_info(video_codec="mpeg2video", video_bitrate=None, total_bitrate=None, audio_bitrate=128_000, video_width=width, video_height=height)
+    info.video.color = {"space": "bt709", "transfer": "bt709", "primaries": "bt709"}
+    return info
+
+  @staticmethod
+  def _ffmpeg_args(mp, info, analyzer_recommendations=None):
+    from converter.avcodecs import video_codec_list
+
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info, analyzer_recommendations=analyzer_recommendations)
+    assert options is not None
+    video = options["video"]
+    encoder = next(c for c in video_codec_list if c.codec_name == video["codec"])()
+    return video, encoder.parse_options(dict(video))
+
+  @staticmethod
+  def _value(args, flag):
+    return args[args.index(flag) + 1] if flag in args else None
+
+  @pytest.mark.parametrize(
+    "vcodec, quality_flag, quality_value, keeps_vbv",
+    [
+      ("hevc_qsv", "-global_quality", "22", False),
+      ("h264qsv", "-global_quality", "22", False),
+      ("av1qsv", "-global_quality", "22", False),
+      # VAAPI/NVENC take no global-quality; their CQP default (hw_quality_default) applies.
+      ("hevc_vaapi", "-qp", "23", False),
+      ("hevc_nvenc", "-qp", "23", False),
+      ("av1nvenc", "-qp", "23", False),
+      ("h264", None, None, True),
+      ("h265", None, None, True),
+      ("h264_videotoolbox", "-q:v", "65", True),
+      ("h265_videotoolbox", "-q:v", "65", True),
+    ],
+  )
+  def test_quality_mode_per_family(self, tmp_yaml, make_media_info, vcodec, quality_flag, quality_value, keeps_vbv):
+    mp = self._make_mp(tmp_yaml, vcodec)
+    video, args = self._ffmpeg_args(mp, self._unknown_info(make_media_info))
+    assert video["codec"] == vcodec
+    assert video["bitrate"] is None
+    assert "-vb" not in args
+    assert "-b:v" not in args
+    assert ".bitrate-unknown" in video["debug"]
+    if quality_flag:
+      assert self._value(args, quality_flag) == quality_value
+    else:
+      assert "-global_quality" not in args and "-qp" not in args
+    if keeps_vbv:
+      # Software capped CRF / VideoToolbox data-rate limit keep the operator's max-bitrate.
+      assert self._value(args, "-maxrate:v") == "8000k"
+      assert self._value(args, "-bufsize") == "16000k"
+    else:
+      assert "-maxrate:v" not in args
+      assert "-bufsize" not in args
+
+  @pytest.mark.parametrize("vcodec", ["h264_v4l2m2m", "h264_omx", "hevc_v4l2m2m"])
+  @pytest.mark.parametrize("height, expected_kbps", [(2160, 20000), (1080, 6000), (720, 3000)])
+  def test_no_quality_mode_encoder_uses_resolution_fallback(self, tmp_yaml, make_media_info, vcodec, height, expected_kbps):
+    mp = self._make_mp(tmp_yaml, vcodec, global_quality=0, vmaxbitrate=0)
+    video, args = self._ffmpeg_args(mp, self._unknown_info(make_media_info, height=height))
+    assert video["bitrate"] == expected_kbps
+    assert self._value(args, "-vb") == "%dk" % expected_kbps
+    assert ".bitrate-unknown" in video["debug"]
+    infos = [c.args[0] for c in mp.log.info.call_args_list if c.args]
+    assert any("video-bitrate-fallback" in m for m in infos)
+
+  def test_fallback_bitrate_respects_max_bitrate(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, "h264_v4l2m2m", global_quality=0, vmaxbitrate=4000)
+    video, args = self._ffmpeg_args(mp, self._unknown_info(make_media_info, height=2160))
+    assert video["bitrate"] == 4000
+    assert self._value(args, "-maxrate:v") == "4000k"
+
+  @pytest.mark.parametrize("vcodec, keeps_vbv", [("h264", True), ("hevc_qsv", False)])
+  def test_analyzer_ceiling_with_unknown_bitrate(self, tmp_yaml, make_media_info, vcodec, keeps_vbv):
+    from resources.analyzer import AnalyzerRecommendations
+
+    mp = self._make_mp(tmp_yaml, vcodec, vmaxbitrate=0)
+    recs = AnalyzerRecommendations(max_bitrate_ceiling=5000)
+    video, args = self._ffmpeg_args(mp, self._unknown_info(make_media_info), analyzer_recommendations=recs)
+    assert video["bitrate"] is None
+    assert "-vb" not in args
+    if keeps_vbv:
+      assert self._value(args, "-maxrate:v") == "5000k"
+      assert self._value(args, "-bufsize") == "10000k"
+    else:
+      assert "-maxrate:v" not in args and "-bufsize" not in args
+      assert self._value(args, "-global_quality") == "22"
+
+  @pytest.mark.parametrize("vcodec, keeps_vbv", [("h265", True), ("hevc_qsv", False)])
+  def test_hdr_max_bitrate_with_unknown_bitrate(self, tmp_yaml, make_media_info, vcodec, keeps_vbv):
+    mp = self._make_mp(tmp_yaml, vcodec, vmaxbitrate=0, hdr_max_bitrate=12000)
+    info = self._unknown_info(make_media_info, height=2160)
+    info.video.color = {"space": "bt2020nc", "transfer": "smpte2084", "primaries": "bt2020"}
+    info.video.pix_fmt = "yuv420p10le"
+    video, args = self._ffmpeg_args(mp, info)
+    assert ".hdrInput" in video["debug"]
+    assert video["bitrate"] is None
+    assert "-vb" not in args
+    if keeps_vbv:
+      assert self._value(args, "-maxrate:v") == "12000k"
+    else:
+      assert "-maxrate:v" not in args and "-bufsize" not in args
+
+  @pytest.mark.parametrize("vcodec, keeps_vbv", [("h264", True), ("hevc_qsv", False)])
+  def test_negative_estimate_is_unknown(self, tmp_yaml, make_media_info, vcodec, keeps_vbv):
+    # Assumed audio exceeds the container bitrate, so the estimate goes negative.
+    mp = self._make_mp(tmp_yaml, vcodec)
+    info = make_media_info(video_codec="mpeg2video", video_bitrate=None, total_bitrate=100_000, audio_bitrate=128_000)
+    assert mp.estimateVideoBitrate(info) < 0
+    video, args = self._ffmpeg_args(mp, info)
+    assert video["bitrate"] is None
+    assert "-vb" not in args
+    assert ".bitrate-unknown" in video["debug"]
+    if keeps_vbv:
+      assert self._value(args, "-maxrate:v") == "8000k"
+    else:
+      assert "-maxrate:v" not in args
+      assert self._value(args, "-global_quality") == "22"
+
+  def test_bitrate_unknown_marker_is_optional_for_copy_fallback(self):
+    from resources.mediaprocessor import MediaProcessor
+
+    assert "bitrate-unknown" in MediaProcessor._OPTIONAL_REENCODE_REASONS
 
 
 class TestHDRMaxBitrateOverride:
@@ -8736,6 +8905,15 @@ class TestSwapQsvCodecToVaapi:
     assert "global_quality" not in opts["video"]
     assert "-rc_mode CQP" in opts["video"]["params"]
     assert "-qp 23" in opts["video"]["params"]
+
+  def test_global_quality_maps_when_bitrate_is_none(self):
+    # generateOptions always sets video["bitrate"]; None (ICQ / unknown source
+    # bitrate) must still map the operator's global-quality onto CQP.
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv", "global_quality": 21, "bitrate": None}}
+    f(opts, {})
+    assert "-rc_mode CQP -qp 21" in opts["video"]["params"]
 
   def test_global_quality_skipped_when_bitrate_set(self):
     from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
