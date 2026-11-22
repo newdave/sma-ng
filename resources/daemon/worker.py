@@ -53,6 +53,12 @@ KILL_GRACE_SECONDS = 5.0
 LOOP_ERROR_BACKOFF_SECONDS = 5.0
 # Delays between retries of a terminal job write (fail/requeue) after a DB error.
 TERMINAL_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
+# After stop() the stop event no longer waits; keep a short real pause so the
+# retries still space out without delaying shutdown past its grace.
+SHUTDOWN_RETRY_BACKOFF_CAP_SECONDS = 0.25
+# Consecutive pre-start errors (claim, then DB/lock error before the conversion
+# starts) that requeue a job; the next one fails it so a poison job cannot loop.
+MAX_PRE_START_REQUEUES = 3
 
 # Reasons a running conversion can be aborted by the daemon.
 ABORT_TIMEOUT = "timeout"
@@ -321,7 +327,12 @@ class ConversionWorker(threading.Thread):
     self._abort_lock = threading.Lock()
     self._abort_reason = None
     self._watchdog = None
-    self._pending_release = None
+    # Terminal writes parked after a DB outage, keyed by job id: (what, write).
+    self._pending_releases = {}
+    self._pending_lock = threading.Lock()
+    # Consecutive pre-start errors per job id, shared across the pool's workers.
+    shared = getattr(pool, "_pre_start_failures", None)
+    self._pre_start_failures = shared if isinstance(shared, dict) else {}
 
   def stop(self):
     """Signal worker to stop."""
@@ -403,6 +414,9 @@ class ConversionWorker(threading.Thread):
     self.job_event.wait(timeout=5.0 + (self.worker_id - 1) * 0.05)
     self.job_event.clear()
 
+    # Before the pause/drain/approval gates, so a paused or draining worker still releases rows.
+    self._flush_pending_release()
+
     if not self.running:
       return
 
@@ -430,7 +444,6 @@ class ConversionWorker(threading.Thread):
       if self.pool is not None and self.pool._drain_mode.is_set():
         break
 
-      self._flush_pending_release()
       locked = self.config_lock_manager.get_locked_configs()
       profile_caps = None
       profile_costs = None
@@ -555,6 +568,7 @@ class ConversionWorker(threading.Thread):
       # Conversions keep their original call shape; other kinds name themselves.
       kind_kwargs = {} if is_convert else {"kind": kind.name}
       started = True
+      self._pre_start_failures.pop(job_id, None)
       success, final_output, source_duration_secs = self._run_conversion(job_id, path, config_file, args, **kind_kwargs)
       elapsed = time.monotonic() - job_started_at
       output_size = None
@@ -666,21 +680,25 @@ class ConversionWorker(threading.Thread):
       self.log.exception("Job %d failed: %s" % (job_id, e))
       self._handle_job_error(job_id, e, started, job_started_at)
     finally:
-      if lock_held:
-        self.config_lock_manager.release(config_file, job_id)
-      in_flight.dec()
-      with self._abort_lock:
-        self.current_job_id = None
-        self._watchdog = None
-        self._claim_token = None
+      try:
+        if lock_held:
+          self.config_lock_manager.release(config_file, job_id)
+      finally:
+        in_flight.dec()
+        with self._abort_lock:
+          self.current_job_id = None
+          self._watchdog = None
+          self._claim_token = None
 
   def _handle_job_error(self, job_id, error, started, job_started_at):
     """Release the claim after an exception in process_job; never raises.
 
     Before the conversion starts (a DB error after the claim) the job goes
-    back to pending without burning a retry; afterwards it is failed. Writes
-    are owner-guarded and retried with backoff; if the DB still refuses, the
-    write is parked for the worker loop and node recovery is the backstop.
+    back to pending without burning a retry, up to MAX_PRE_START_REQUEUES in a
+    row; the next pre-start error fails it through fail_job. After the start
+    it is failed. Writes are owner-guarded and retried with backoff; if the DB
+    still refuses, the write is parked for the worker loop and the orphan
+    sweep / node recovery is the backstop.
     """
     elapsed = time.monotonic() - job_started_at
     owner = self._owner_kwargs()
@@ -689,12 +707,25 @@ class ConversionWorker(threading.Thread):
     except Exception:
       current = None
     if current and current.get("status") == "cancelled":
+      self._pre_start_failures.pop(job_id, None)
       metrics_prom.record_job_terminal("cancelled", elapsed)
       return
+    failed = started
     if not started:
-      reason = "Interrupted by %s before the job started; requeued" % type(error).__name__
-      write = lambda: self.job_db.requeue_interrupted_job(job_id, reason, **owner)  # noqa: E731
-      terminal = "requeue"
+      count = self._pre_start_failures.get(job_id, 0) + 1
+      if count > MAX_PRE_START_REQUEUES:
+        self._pre_start_failures.pop(job_id, None)
+        failed = True
+        cat = categorize_failure(WORKER_SENTINEL_EXCEPTION).value
+        reason = "Job start failed %d times in a row (%s: %s); giving up" % (count, type(error).__name__, " ".join(str(error).split()))
+        self.log.error("Job %d start failed %d times in a row (%s); failing it instead of requeuing" % (job_id, count, type(error).__name__))
+        write = lambda: self.job_db.fail_job(job_id, reason, failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION, **owner)  # noqa: E731
+        terminal = "failure"
+      else:
+        self._pre_start_failures[job_id] = count
+        reason = "Interrupted by %s before the job started; requeued" % type(error).__name__
+        write = lambda: self.job_db.requeue_interrupted_job(job_id, reason, **owner)  # noqa: E731
+        terminal = "requeue"
     else:
       cat = categorize_failure(WORKER_SENTINEL_EXCEPTION).value
       write = lambda: self.job_db.fail_job(job_id, str(error), failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION, **owner)  # noqa: E731
@@ -702,15 +733,16 @@ class ConversionWorker(threading.Thread):
     try:
       updated = self._retry_terminal(terminal, write, job_id)
     except Exception:
-      self._pending_release = (job_id, terminal, write)
+      with self._pending_lock:
+        self._pending_releases[job_id] = (terminal, write)
       return
     self._log_discarded(job_id, updated, terminal)
-    if started:
-      self._ingest_ffmpeg_stderr_sidecars(job_id)
+    if failed:
+      if started:
+        self._ingest_ffmpeg_stderr_sidecars(job_id)
       metrics_prom.record_job_terminal("failed", elapsed)
       metrics_prom.record_failure(cat, WORKER_SENTINEL_EXCEPTION)
-    else:
-      metrics_prom.record_job_terminal("cancelled", elapsed)
+    # A pre-start requeue is not terminal: the job runs again, so sma_jobs_total is left alone.
 
   def _retry_terminal(self, what, write, job_id):
     """Call *write*, retrying with backoff; re-raise the last error when every attempt fails."""
@@ -722,21 +754,37 @@ class ConversionWorker(threading.Thread):
         if attempt == len(delays):
           self.log.error("Job %d %s write failed after %d attempts (%s); leaving it for retry or node recovery" % (job_id, what, attempt + 1, type(e).__name__))
           raise
-        self._stop_event.wait(timeout=delays[attempt])
+        if self._stop_event.is_set():
+          # stop() makes the event wait return at once; keep a short bounded pause instead.
+          time.sleep(min(delays[attempt], SHUTDOWN_RETRY_BACKOFF_CAP_SECONDS))
+        else:
+          self._stop_event.wait(timeout=delays[attempt])
 
   def _flush_pending_release(self):
-    """Retry a parked terminal write from an earlier DB outage (single attempt per loop pass)."""
-    pending = self._pending_release
-    if pending is None:
-      return
-    job_id, what, write = pending
-    try:
-      updated = write()
-    except Exception as e:
-      self.log.warning("Job %d pending %s still failing (%s); will retry" % (job_id, what, type(e).__name__))
-      return
-    self._pending_release = None
-    self._log_discarded(job_id, updated, what)
+    """Retry every parked terminal write from an earlier DB outage (one attempt each per loop pass)."""
+    with self._pending_lock:
+      pending = list(self._pending_releases.items())
+    for job_id, (what, write) in pending:
+      try:
+        updated = write()
+      except Exception as e:
+        self.log.warning("Job %d pending %s still failing (%s); will retry" % (job_id, what, type(e).__name__))
+        continue
+      with self._pending_lock:
+        if self._pending_releases.get(job_id, (None, None))[1] is write:
+          del self._pending_releases[job_id]
+      self._log_discarded(job_id, updated, what)
+
+  def held_job_ids(self):
+    """Job ids this worker still owns: the running job plus rows with a parked terminal write."""
+    # Read current_job_id first: process_job parks a write before it clears current_job_id,
+    # so a job moving from one to the other is always seen in at least one of them.
+    current = self.current_job_id
+    with self._pending_lock:
+      held = set(self._pending_releases)
+    if current is not None:
+      held.add(current)
+    return held
 
   @staticmethod
   def _signal_name(returncode):
@@ -1192,6 +1240,8 @@ class WorkerPool:
     self._notify_cursor = 0
     self._notify_lock = threading.Lock()
     self._stopped = False
+    # Consecutive pre-start errors per job id, shared so a poison job cannot hop between workers.
+    self._pre_start_failures = {}
     self._start_workers()
 
   def _make_worker(self, worker_id, template=None):
@@ -1247,6 +1297,13 @@ class WorkerPool:
       if worker.abort_job(job_id, reason):
         return True
     return False
+
+  def held_job_ids(self):
+    """Job ids a live local worker or ffmpeg process still owns; the orphan sweep never touches them."""
+    held = set(self._job_processes)
+    for worker in list(self._workers):
+      held |= worker.held_job_ids()
+    return held
 
   def abort_all(self, reason):
     """Kill every in-flight conversion (used at the shutdown deadline)."""

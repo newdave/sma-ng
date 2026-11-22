@@ -4,12 +4,18 @@ import threading
 import time
 
 from resources.daemon import job_kinds, metrics_prom, storage
+from resources.daemon.db import NO_CLAIM_TOKEN
 from resources.daemon.log_archiver import LogArchiver
 from resources.library_audit.engine import AuditEngine
 from resources.library_audit.enumerator import enumerate_paths
 from resources.log import getLogger
 
 log = getLogger("DAEMON")
+
+# A running row on this node is only swept once it is this old, so a job that was
+# just claimed (before the worker records it as current) is never touched.
+ORPHAN_SWEEP_GRACE_SECONDS = 120
+ORPHAN_SWEEP_REASON = "Running on this node with no live worker; requeued by orphan sweep"
 
 _MEDIA_EXTENSIONS = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts", ".m4v", ".m2ts", ".wmv", ".flv", ".webm"])
 
@@ -30,6 +36,9 @@ class _StoppableThread(threading.Thread):
 class HeartbeatThread(_StoppableThread):
   """Periodically updates this node's heartbeat in the cluster_nodes table
   and recovers jobs from nodes that have gone stale.
+
+  On every backend it also sweeps this node's orphaned running rows (no local
+  worker holds them, e.g. a lost terminal write) back to pending.
   """
 
   # Housekeeping (log TTL, offline-node expiry, log archival) cadence.
@@ -54,7 +63,11 @@ class HeartbeatThread(_StoppableThread):
 
   def run(self):
     if not self.job_db.is_distributed:
-      return  # Heartbeat only meaningful for the shared PG backend
+      # No cluster heartbeat on SQLite; only the local orphan sweep runs.
+      while self.running:
+        self.sweep_orphaned_jobs()
+        self._stop_event.wait(timeout=self.interval)
+      return
     while self.running:
       try:
         self.job_db.heartbeat(
@@ -82,8 +95,35 @@ class HeartbeatThread(_StoppableThread):
           self.server.notify_workers()  # Wake workers to pick up requeued jobs
       except Exception:
         self.log.exception("Heartbeat error")
+      self.sweep_orphaned_jobs()
       self._maybe_run_maintenance()
       self._stop_event.wait(timeout=self.interval)
+
+  def sweep_orphaned_jobs(self):
+    """Requeue this node's running rows that no live local worker holds; return the count.
+
+    Only rows with node_id == this node, not held by any local worker, ffmpeg
+    process or parked terminal write, and started more than
+    ORPHAN_SWEEP_GRACE_SECONDS ago are touched. Each requeue is guarded by the
+    row's claim token, so a row re-claimed after the select is left alone.
+    """
+    pool = getattr(self.server, "worker_pool", None)
+    if pool is None:
+      return 0
+    swept = 0
+    try:
+      held = pool.held_job_ids()
+      for row in self.job_db.find_orphaned_running_jobs(self.node_id, held, ORPHAN_SWEEP_GRACE_SECONDS):
+        job_id = row["id"]
+        token = row.get("claim_token") or NO_CLAIM_TOKEN
+        if self.job_db.requeue_interrupted_job(job_id, ORPHAN_SWEEP_REASON, node_id=self.node_id, claim_token=token):
+          swept += 1
+          self.log.info("Job %d was running on this node with no live worker; orphan sweep requeued it" % job_id)
+    except Exception:
+      self.log.exception("Orphaned job sweep error")
+    if swept:
+      self.server.notify_workers()
+    return swept
 
   def _maybe_run_maintenance(self):
     """Run log TTL cleanup, offline-node expiry and log archival at most hourly.

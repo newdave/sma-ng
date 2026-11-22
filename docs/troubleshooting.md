@@ -377,9 +377,23 @@ or a network partition. A cancelled job's output may still exist on disk if ffmp
 
 The database failed between claiming the job and starting the conversion, so the worker freed its slot and put the
 job back to pending without burning a retry. The write is retried with backoff. If it still fails, the log shows
-`Job N requeue write failed after 4 attempts` and the worker retries it on every loop pass
-(`Job N pending requeue still failing`); if the node dies first, stale-node recovery requeues the row. Fix the
-database connection (see the surrounding error) rather than the job.
+`Job N requeue write failed after 4 attempts` and the worker retries it on every loop pass, even while the node
+is paused or draining (`Job N pending requeue still failing`). Fix the database connection (see the surrounding
+error) rather than the job.
+
+A job is requeued this way at most 3 times in a row. If its start fails a fourth time, the log shows
+`Job N start failed 4 times in a row (ErrorName); failing it instead of requeuing` and the job goes through the
+normal failure path (it fails, or retries with backoff if it has retries left). Its error reads
+`Job start failed 4 times in a row (ErrorName: detail); giving up`. A successful start resets the count.
+
+### Job returned to pending with "Running on this node with no live worker; requeued by orphan sweep"
+
+Every heartbeat interval each node (SQLite and PostgreSQL) checks its own running rows. A row is requeued when it
+has been running for more than 120 seconds and no local worker, ffmpeg process or parked write holds it, for
+example after a lost write during a database outage. The log shows
+`Job N was running on this node with no live worker; orphan sweep requeued it`. The sweep never touches another
+node's rows (stale-node recovery handles those) or a row re-claimed since it was checked. One such line after a
+database outage is expected; repeated lines without an outage point to a worker bug worth reporting.
 
 ### Conversion produces larger output file
 

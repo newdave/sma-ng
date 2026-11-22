@@ -826,6 +826,23 @@ class SQLiteJobDatabase:
       self.log.info("Job %d requeued after interruption: %s" % (job_id, reason))
     return requeued
 
+  def find_orphaned_running_jobs(self, node_id, exclude_ids, older_than_seconds):
+    """Running rows claimed by *node_id* that no local worker holds, started over *older_than_seconds* ago.
+
+    Returns ``[{"id", "claim_token"}]``. Rows of other nodes, rows in *exclude_ids*
+    and rows with no started_at are never returned.
+    """
+    cutoff = (datetime.now(UTC) - timedelta(seconds=older_than_seconds)).replace(microsecond=0).isoformat()
+    sql = "SELECT id, claim_token FROM jobs WHERE status = ? AND node_id = ? AND started_at IS NOT NULL AND started_at < ?"
+    params = [STATUS_RUNNING, node_id, cutoff]
+    exclude = sorted(exclude_ids or ())
+    if exclude:
+      sql += " AND id NOT IN (%s)" % ", ".join("?" for _ in exclude)
+      params.extend(exclude)
+    with self._conn() as conn:
+      rows = conn.execute(sql, params).fetchall()
+    return [{"id": r["id"], "claim_token": r["claim_token"]} for r in rows]
+
   def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None, telemetry=None, source_duration_seconds=None, claim_token=None):
     """Fail (or requeue with backoff) a running job.
 
@@ -1794,6 +1811,26 @@ class PostgreSQLJobDatabase:
     if requeued:
       self.log.info("Job %d requeued after interruption: %s" % (job_id, reason))
     return requeued
+
+  def find_orphaned_running_jobs(self, node_id, exclude_ids, older_than_seconds):
+    """Running rows claimed by *node_id* that no local worker holds, started over *older_than_seconds* ago.
+
+    Returns ``[{"id", "claim_token"}]``. Rows of other nodes, rows in *exclude_ids*
+    and rows with no started_at are never returned.
+    """
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+          SELECT id, claim_token FROM jobs
+          WHERE status = %s AND node_id = %s
+            AND started_at IS NOT NULL AND started_at < NOW() - make_interval(secs => %s)
+            AND id != ALL(%s)
+          """,
+          (STATUS_RUNNING, node_id, older_than_seconds, sorted(exclude_ids or ())),
+        )
+        rows = cur.fetchall()
+    return [{"id": r["id"], "claim_token": r["claim_token"]} for r in rows]
 
   def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None, telemetry=None, source_duration_seconds=None, claim_token=None):
     """Mark a running job as failed, or requeue with exponential backoff if retries remain.
