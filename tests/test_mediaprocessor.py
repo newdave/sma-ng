@@ -1,6 +1,7 @@
 """Tests for resources/mediaprocessor.py - core processing logic."""
 
 import json
+import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -3758,6 +3759,81 @@ class TestProcess:
     out_info = self._media(make_stream, make_format, 50.0)
     mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
     assert mp.process(str(src), info=src_info) is not None
+
+  def _same_name_mp(self, tmp_path, src_info, out_info):
+    """Drive process() through the real _run_ffmpeg and convert() for an
+    mp4 -> mp4 conversion with no output-directory, so convert() renames the
+    source to ``movie.mp4.original``. Only the FFmpeg generator is faked."""
+    mp = self._make_mp()
+    mp.settings.delete = True
+    mp.settings.temp_extension = None
+    mp.settings.burn_subtitles = False
+    mp.settings.strip_metadata = False
+    mp.settings.embedsubs = True
+    mp.settings.downloadsubs = False
+    mp.settings.permissions = {"chmod": 0o664, "uid": -1, "gid": -1}
+    src = tmp_path / "movie.mp4"
+    src.write_bytes(b"source")
+    mp.isValidSource = MagicMock(return_value=src_info)
+    mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    mp.generateOptions = MagicMock(return_value=({"source": [str(src)], "video": {}, "audio": [{"map": 1, "codec": "aac"}], "subtitle": []}, [], [], [], []))
+    mp.canBypassConvert = MagicMock(return_value=False)
+    mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
+    mp.setPermissions = MagicMock()
+    mp.subtitles.ripSubs = MagicMock(return_value=[])
+    mp.converter.probe = MagicMock(return_value=out_info)
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      with open(outputfile, "wb") as f:
+        f.write(b"truncated")
+      yield None, ["ffmpeg"]
+      yield 100, ""
+
+    mp.converter.convert = fake_convert
+    mp._attempt_ladder = lambda preopts, options, outputfile, run_convert: run_convert(preopts)
+    return mp, src
+
+  def test_same_name_verify_failure_restores_source_name(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src = self._same_name_mp(tmp_path, src_info, out_info)
+    assert mp.process(str(src), info=src_info) is None
+    assert src.read_bytes() == b"source"
+    assert not (tmp_path / "movie.mp4.original").exists()
+    assert (tmp_path / "movie.mp4.failed").read_bytes() == b"truncated"
+
+  def test_same_name_verify_failure_keeps_original_when_name_taken(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src = self._same_name_mp(tmp_path, src_info, out_info)
+    real_quarantine = mp._quarantine_failed_output
+
+    def quarantine_then_occupy(outputfile):
+      failed = real_quarantine(outputfile)
+      src.write_bytes(b"someone else")
+      return failed
+
+    mp._quarantine_failed_output = quarantine_then_occupy
+    assert mp.process(str(src), info=src_info) is None
+    assert src.read_bytes() == b"someone else"
+    assert (tmp_path / "movie.mp4.original").read_bytes() == b"source"
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list]
+    assert any("Cannot restore source name" in w and "movie.mp4.original" in w and "\n" not in w for w in warnings)
+
+  def test_verify_failure_removes_subs_this_job_ripped(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    ripped = tmp_path / "movie.eng.srt"
+    ripped.write_text("1")
+    existing = tmp_path / "movie.fra.srt"
+    existing.write_text("2")
+    mp._run_ffmpeg = MagicMock(return_value=(str(out), str(src), [str(ripped)]))
+    mp.removeFile = MagicMock(side_effect=lambda p, *a, **k: os.remove(p) or True)
+    assert mp.process(str(src), info=src_info) is None
+    assert not ripped.exists()
+    assert existing.exists() and src.exists()
+    mp.removeFile.assert_called_once_with(str(ripped))
 
   def test_bypass_with_output_dir_copies_file(self, tmp_path):
     mp = self._make_mp()

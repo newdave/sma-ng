@@ -992,6 +992,7 @@ class MediaProcessor:
       if not options:
         self.log.error("Error converting, inputfile %s had a valid extension but returned no data. Either the file does not exist, was unreadable, or was an incorrect format." % inputfile)
         return None
+      source_path = inputfile
       outputfile, inputfile, ripped_subs = self._run_ffmpeg(inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput)
       if outputfile is None:
         return None
@@ -1000,6 +1001,11 @@ class MediaProcessor:
       problem = self._verify_output(info, outputfile)
       if problem:
         failed = self._quarantine_failed_output(outputfile)
+        # A same-name conversion renamed the source to name.original: put it back.
+        inputfile = self._restore_source_name(inputfile, source_path)
+        # Subtitle files this job ripped have no output to go with: remove them.
+        for rs in ripped_subs:
+          self.removeFile(rs)
         self.log.warning("Output verification failed (%s), keeping source %s, moved the output to %s [output-verify]." % (problem, inputfile, failed))
         # One structured line so the daemon worker records the failure class and reason.
         self.log.info(json.dumps({"event": "output.verify", "failure_class": OUTPUT_VERIFY_FAILED, "reason": problem}, sort_keys=True))
@@ -1057,6 +1063,25 @@ class MediaProcessor:
       "y": dim["y"],
       "cues_to_front": self.settings.output_format in ["mkv"] and self.settings.relocate_moov,
     }
+
+  def _restore_source_name(self, inputfile, source_path):
+    """Rename the source back to *source_path* after a failed conversion.
+
+    convert() renames the source to ``name.original`` when the output has the
+    same name. Never overwrites: when *source_path* is taken the source stays
+    at its current name and one warning says where. Returns the source path.
+    """
+    if not source_path or inputfile == source_path:
+      return inputfile
+    if os.path.lexists(source_path):
+      self.log.warning("Cannot restore source name %s, the path is taken; the source stays at %s [output-verify]." % (source_path, inputfile))
+      return inputfile
+    try:
+      os.rename(inputfile, source_path)
+    except OSError as e:
+      self.log.warning("Could not restore source %s to %s: %s [output-verify]." % (inputfile, source_path, " ".join(str(e).split())))
+      return inputfile
+    return source_path
 
   def _quarantine_failed_output(self, outputfile):
     """Rename a bad output to ``<name>.failed`` (``.failed.2``, ... when taken).

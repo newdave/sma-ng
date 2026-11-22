@@ -341,6 +341,10 @@ usually the FFmpeg build lacks the decoder, or the source is damaged and needs r
   (for example `movie.mp4.failed`, or `movie.mp4.failed.2` when that name exists), so Plex, Sonarr and Radarr
   do not scan it. Nothing is tagged, moved or sent to Sonarr/Radarr/Plex for that job. The warning names the
   `.failed` path; keep it for inspection and delete it yourself when done.
+- When the output has the source's own name (`movie.mp4` to `movie.mp4`), the source was renamed to
+  `movie.mp4.original` for the encode; it is renamed back. If something now holds `movie.mp4`, the source stays at
+  `movie.mp4.original` and a warning names both paths. Subtitle files ripped for that job are removed; existing
+  subtitle files are kept.
 - The duration may differ by 2% (at least 1 second). Cover art and unknown or data streams are not counted, and a
   duration is only compared when the source reports one.
 - Usual causes are a full output disk, a damaged source or a killed encoder. Fix that and re-run. If the output

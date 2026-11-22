@@ -830,11 +830,13 @@ class ConversionWorker(threading.Thread):
         # Capture MediaProcessor's structured ffmpeg.attempts event so the
         # daemon's /health fallback counters reflect work done in worker
         # subprocesses. The event is single-line JSON per the logging
-        # contract; we look for the event marker substring first to keep
-        # the hot path cheap.
-        if self._fallback_counter_callback is not None and '"event": "ffmpeg.attempts"' in line:
+        # contract; we look for the quoted event name first to keep the hot
+        # path cheap. Match the name alone, not '"event": "..."': manual.py's
+        # SingleLineFormatter compacts the JSON (no space after the colon),
+        # and the record methods parse the JSON and check the event field.
+        if self._fallback_counter_callback is not None and '"ffmpeg.attempts"' in line:
           self._record_fallback_event(line)
-        if '"event": "output.verify"' in line:
+        if '"output.verify"' in line:
           self._record_output_verify_event(line)
 
       # EOF reached; the watchdog still guards this wait.
@@ -901,7 +903,7 @@ class ConversionWorker(threading.Thread):
       payload = json.loads(line[start:])
     except (ValueError, json.JSONDecodeError):
       return
-    if payload.get("event") != "ffmpeg.attempts":
+    if not isinstance(payload, dict) or payload.get("event") != "ffmpeg.attempts":
       return
     attempts = payload.get("attempts") or []
     if not isinstance(attempts, list):
