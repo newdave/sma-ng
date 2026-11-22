@@ -1,0 +1,30 @@
+tests/test_handler.py
+  s_d73ac5e457a585::t_389f86f47242ef 1004,1006,1008-1031,1039-1049
+  s_d73ac5e457a585::t_da06537c616cf0 1032-1038
+resources/daemon/handler.py
+  s_d73ac5e457a585::t_7af4fb40773646 1458
+  s_d73ac5e457a585::t_f056a551ccbd88 1459-1470
+docs/daemon.md
+  s_d73ac5e457a585::t_da06537c616cf0 136,140,143-152
+  s_d73ac5e457a585::t_571eba7971c23f 153
+docs/openapi.yaml
+  s_d73ac5e457a585::t_da06537c616cf0 67-69,865-867
+resources/daemon/webhook_parsing.py
+  s_d73ac5e457a585::t_f056a551ccbd88 5-6,72-74,79-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "7afc8542de4505ae16c590a28111dfd4a77d7ca4",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
