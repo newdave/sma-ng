@@ -1,0 +1,26 @@
+tests/test_docker.py
+  s_d73ac5e457a585::t_bb5873569194f7 90
+.github/workflows/docker.yml
+  s_d73ac5e457a585::t_f56d89720b88c3 23
+docker/Dockerfile
+  s_d73ac5e457a585::t_7195c55231b91d 14
+renovate.json
+  s_d73ac5e457a585::t_924f867aacdfe6 4-25,27,29-51
+  s_d73ac5e457a585::t_f656993bafb893 26,28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "a5283bc72b7f37deff5e4b9f049cf9a1b69138cf",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
