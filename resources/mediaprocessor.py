@@ -2433,8 +2433,11 @@ class MediaProcessor:
 
     vbitrate_estimate = self.estimateVideoBitrate(info)
     vbitrate_ratio = self.settings.vbitrateratio.get(info.video.codec, self.settings.vbitrateratio.get("*", 1.0))
-    vbitrate = vbitrate_estimate * vbitrate_ratio
-    if analyzer_recommendations.bitrate_ratio_multiplier:
+    # Unknown source bitrate (estimate None): no ratio/max-bitrate/clamp maths is
+    # possible, so leave the target unset and let ICQ/CRF drive the encode.
+    vbitrate_unknown = not vbitrate_estimate
+    vbitrate = None if vbitrate_unknown else vbitrate_estimate * vbitrate_ratio
+    if vbitrate and analyzer_recommendations.bitrate_ratio_multiplier:
       vbitrate = vbitrate * analyzer_recommendations.bitrate_ratio_multiplier
     analyzer_max_bitrate = analyzer_recommendations.max_bitrate_ceiling
     effective_vmaxbitrate = self.settings.vmaxbitrate
@@ -2446,8 +2449,11 @@ class MediaProcessor:
         hdr_unlimited = hdr_max_bitrate == 0
     if analyzer_max_bitrate and not hdr_unlimited:
       effective_vmaxbitrate = min(effective_vmaxbitrate, analyzer_max_bitrate) if effective_vmaxbitrate else analyzer_max_bitrate
-    self.log.debug("Using video bitrate ratio of %f, which results in %f changing to %f." % (vbitrate_ratio, vbitrate_estimate, vbitrate))
-    if effective_vmaxbitrate and vbitrate > effective_vmaxbitrate:
+    if vbitrate_unknown:
+      self.log.debug("Source video bitrate is unknown; skipping bitrate ratio and max-bitrate checks [video-bitrate-unknown].")
+    else:
+      self.log.debug("Using video bitrate ratio of %f, which results in %f changing to %f." % (vbitrate_ratio, vbitrate_estimate, vbitrate))
+    if effective_vmaxbitrate and vbitrate and vbitrate > effective_vmaxbitrate:
       self.log.debug("Overriding video bitrate. Codec cannot be copied because video bitrate is too high [video-max-bitrate].")
       vdebug = vdebug + ".max-bitrate"
       vcodec = vcodecs[0]
@@ -2764,6 +2770,12 @@ class MediaProcessor:
       vmaxrate = None
       vbufsize = None
       vdebug = vdebug + ".icq"
+    elif vcodec != "copy" and vbitrate_unknown and not vbitrate and (vmaxrate or vbufsize):
+      # No bitrate target means ICQ/CRF; a lone maxrate makes QSV pick QVBR
+      # with a zero target, which fails encoder init.
+      self.log.info("Source bitrate is unknown; encoding at constant quality and dropping VBV maxrate/bufsize [icq-rate-control].")
+      vmaxrate = None
+      vbufsize = None
     elif vcodec != "copy" and vbitrate and self.settings.vminbitrate and vbitrate < self.settings.vminbitrate:
       self.log.info("Video bitrate target %dk is below the configured floor; raising to %dk [video-min-bitrate]." % (vbitrate, self.settings.vminbitrate))
       vbitrate = self.settings.vminbitrate

@@ -977,6 +977,10 @@ corresponding Python config block in `sma-ng.yml`. See
    otherwise `min-bitrate` (if set) raises any remaining VBR target to the floor, lifting `maxrate`/
    `bufsize` with it (`[video-min-bitrate]`). On the software-encoder tier (libx264/libx265) the ICQ
    path falls back to the encoder's default CRF since `global-quality` is a hardware-encoder option.
+6. Unknown source bitrate: when neither the container nor the video stream reports a bitrate, steps 1-4 and the
+   same-family clamp are skipped (no ratio, `max-bitrate` override or clamp), no bitrate target is set and the
+   VBV `maxrate`/`bufsize` are dropped. The encode runs at constant quality (ICQ/CQP via `global-quality`, or the
+   encoder's default CRF/CQ) instead of failing (`[video-bitrate-unknown]`, `[icq-rate-control]`).
 
 When `[Analyzer]` is enabled, the analyzer may additionally:
 

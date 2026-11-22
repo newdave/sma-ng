@@ -1518,6 +1518,28 @@ class TestReencodeRateControlSelection:
     infos = [c.args[0] for c in mp.log.info.call_args_list if c.args]
     assert any("icq-rate-control" in m for m in infos)
 
+  def test_unknown_source_bitrate_converts_with_icq(self, tmp_yaml, make_media_info):
+    # Source with no bitrate at all: estimate is None. Must not raise, must not
+    # carry a VBR target or VBV caps, and must fall to global-quality (ICQ).
+    mp = self._make_mp(tmp_yaml, global_quality=22, vmaxbitrate=2000)
+    info = make_media_info(video_codec="h264", video_bitrate=None, total_bitrate=None, audio_bitrate=128_000)
+    assert mp.estimateVideoBitrate(info) is None
+    options = self._generate(mp, info)
+    assert options is not None
+    assert options["video"]["codec"] != "copy"
+    assert options["video"]["bitrate"] is None
+    assert options["video"]["maxrate"] is None
+    assert options["video"]["bufsize"] is None
+    assert options["video"]["global_quality"] == 22
+    assert ".max-bitrate" not in options["video"]["debug"]
+
+  def test_unknown_source_bitrate_without_global_quality(self, tmp_yaml, make_media_info):
+    mp = self._make_mp(tmp_yaml, global_quality=0, vmaxbitrate=0)
+    info = make_media_info(video_codec="h264", video_bitrate=None, total_bitrate=None, audio_bitrate=128_000)
+    options = self._generate(mp, info)
+    assert options is not None
+    assert options["video"]["bitrate"] is None
+
   def test_bitrate_driven_reencode_keeps_vbr_target(self, tmp_yaml, make_media_info):
     # Source over max-bitrate: the re-encode is bitrate-driven so the explicit
     # VBR target wins and global-quality stays out of the command.
