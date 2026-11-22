@@ -1,0 +1,24 @@
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_93dfdcb2616c8c 381-383
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_95eec3a5dfeecc 1068-1071,1081,1084-1086,1155-1167,1169,1171,1173
+tests/test_mediaprocessor.py
+  s_d73ac5e457a585::t_51f50711e071d6 9512-9513,9521-9556,9561-9563,9565-9588
+  s_d73ac5e457a585::t_403f345e05273a 4,9596-9636
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "47c7310ced61eea5db8f5eac5086d038a75c5593",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
