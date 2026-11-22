@@ -322,7 +322,9 @@ usually the FFmpeg build lacks the decoder, or the source is damaged and needs r
   (`movie.mp4` to `movie.mp4`) is kept and the new file is restored as `movie.2.mp4`. Set
   `delete-original: true` to replace the source instead.
 - When a file needs no conversion and `output-directory` is set, it is copied there. If that name is taken, the copy
-  is numbered (`movie.2.mp4`, `[output-collision]` warning) instead of overwriting the existing file.
+  is numbered (`movie.2.mp4`, `[output-collision]` warning) instead of overwriting the existing file. A stale
+  `movie.mkv` left in `output-directory` from an earlier run therefore makes the bypassed file come back as
+  `movie.2.mkv`, so the tracked path changes; remove the stale file and re-run to keep the plain name.
 - With `delete-original: true`, an earlier SMA-NG output of the same episode or movie (encoder tag `SMA-NG:`
   and matching TMDB/TVDB/IMDB id, plus season and episode for TV) at that name is recycled and replaced instead
   of numbered, even when the source file name differs. When it is numbered anyway, the INFO line

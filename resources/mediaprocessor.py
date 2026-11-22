@@ -1017,8 +1017,10 @@ class MediaProcessor:
       if self.settings.output_dir:
         try:
           # Never overwrite a file already in output_dir: number the copy instead
-          # (name.2.ext), keeping the input's own extension.
-          _dir, bypass_name, bypass_ext = self.parseFile(inputfile)
+          # (name.2.ext), keeping the input's own extension and its case
+          # (parseFile lowercases it, so Movie.MKV would target Movie.mkv).
+          _dir, bypass_name, _ext = self.parseFile(inputfile)
+          bypass_ext = os.path.splitext(inputfile)[1][1:]
           target, _ = self.getOutputFile(os.path.dirname(inputfile), bypass_name, bypass_ext, temp_extension=bypass_ext)
           if target is None:
             raise OSError("Unable to determine output path in %s" % self.settings.output_dir)

@@ -3835,6 +3835,25 @@ class TestProcess:
     assert existing.exists() and src.exists()
     mp.removeFile.assert_called_once_with(str(ripped))
 
+  def test_bypass_keeps_uppercase_extension_without_collision(self, tmp_path):
+    mp = self._make_mp()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    mp.settings.output_dir = str(output_dir)
+    mp.settings.permissions = {"chmod": 0o664}
+    src = tmp_path / "Movie.MKV"
+    src.write_bytes(b"new")
+    mp.isValidSource = MagicMock(return_value=MagicMock())
+    mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    mp.generateOptions = MagicMock(return_value=({"video": {}, "audio": []}, [], [], [], []))
+    mp.canBypassConvert = MagicMock(return_value=True)
+    mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
+    result = mp.process(str(src))
+    assert result["output"] == str(output_dir / "Movie.MKV")
+    assert (output_dir / "Movie.MKV").read_bytes() == b"new"
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list]
+    assert not any("[output-collision]" in w for w in warnings)
+
   def test_bypass_with_output_dir_copies_file(self, tmp_path):
     mp = self._make_mp()
     output_dir = tmp_path / "output"
