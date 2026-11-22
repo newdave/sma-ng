@@ -1,0 +1,22 @@
+docs/configuration.md
+  s_d73ac5e457a585::t_17f355470dd0ea 303-306
+docs/daemon.md
+  s_d73ac5e457a585::t_79da74b9cda7f3 641-645
+  s_d73ac5e457a585::t_816d14bad877bf 600-601
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "4056ad3d4240326b61f9f3a4d09ca009efe59219",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
