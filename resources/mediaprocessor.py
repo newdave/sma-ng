@@ -15,6 +15,7 @@ import shlex
 import shutil
 import sys
 import time
+from pathlib import Path
 
 from autoprocess import autoscan, plex
 from autoprocess import emby as emby_refresh
@@ -997,18 +998,20 @@ class MediaProcessor:
           target, _ = self.getOutputFile(os.path.dirname(inputfile), bypass_name, bypass_ext, temp_extension=bypass_ext)
           if target is None:
             raise OSError("Unable to determine output path in %s" % self.settings.output_dir)
-          i = 2
-          while os.path.exists(target):
-            target, _ = self.getOutputFile(os.path.dirname(inputfile), bypass_name, bypass_ext, temp_extension=bypass_ext, number=i)
-            i += 1
-          if target != os.path.join(self.settings.output_dir, os.path.split(inputfile)[1]):
-            self.log.warning(
-              "%s already exists in the output directory; copying the bypassed file to %s instead of replacing it [output-collision]."
-              % (os.path.join(self.settings.output_dir, os.path.split(inputfile)[1]), target)
-            )
-          outputfile = target
-          self.log.debug("Outputfile set to %s." % outputfile)
-          self._atomic_copy(inputfile, outputfile)
+          if Path(target).exists() and Path(target).samefile(inputfile):
+            # Input already sits in output_dir: nothing to copy, keep it as the output.
+            delete = False
+          else:
+            preferred = os.path.join(self.settings.output_dir, os.path.split(inputfile)[1])
+            i = 2
+            while os.path.exists(target):
+              target, _ = self.getOutputFile(os.path.dirname(inputfile), bypass_name, bypass_ext, temp_extension=bypass_ext, number=i)
+              i += 1
+            if target != preferred:
+              self.log.warning("%s already exists in the output directory; copying the bypassed file to %s instead of replacing it [output-collision]." % (preferred, target))
+            outputfile = target
+            self.log.debug("Outputfile set to %s." % outputfile)
+            self._atomic_copy(inputfile, outputfile)
         except KeyboardInterrupt:
           raise
         except Exception:

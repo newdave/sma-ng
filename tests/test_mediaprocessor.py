@@ -3671,6 +3671,51 @@ class TestProcess:
     assert result["output"] == str(output_dir / "movie.2.mp4")
     assert (output_dir / "movie.2.mp4").read_bytes() == b"new"
 
+  def _bypass_mp(self, output_dir):
+    mp = self._make_mp()
+    mp.settings.output_dir = str(output_dir)
+    mp.settings.permissions = {"chmod": 0o664}
+    mp.isValidSource = MagicMock(return_value=MagicMock())
+    mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    mp.generateOptions = MagicMock(return_value=({"video": {}, "audio": []}, [], [], [], []))
+    mp.canBypassConvert = MagicMock(return_value=True)
+    mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
+    mp._cleanup_input = MagicMock(return_value=False)
+    return mp
+
+  def test_bypass_input_already_in_output_dir_is_not_duplicated(self, tmp_path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    mp = self._bypass_mp(output_dir)
+    src = output_dir / "movie.mp4"
+    src.write_bytes(b"data")
+    result = mp.process(str(src))
+    assert result["output"] == str(src)
+    assert result["delete"] is False
+    assert sorted(p.name for p in output_dir.iterdir()) == ["movie.mp4"]
+
+  @pytest.mark.parametrize(
+    "ext,taken,expected",
+    [
+      ("mkv", ["movie.mkv"], "movie.2.mkv"),
+      ("mp4", ["movie.mp4", "movie.2.mp4"], "movie.3.mp4"),
+      ("mkv", ["movie.mkv", "movie.2.mkv", "movie.3.mkv"], "movie.4.mkv"),
+    ],
+  )
+  def test_bypass_numbering_keeps_extension_and_skips_taken(self, tmp_path, ext, taken, expected):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    mp = self._bypass_mp(output_dir)
+    src = tmp_path / ("movie." + ext)
+    src.write_bytes(b"new")
+    for name in taken:
+      (output_dir / name).write_bytes(b"precious")
+    result = mp.process(str(src))
+    assert result["output"] == str(output_dir / expected)
+    assert (output_dir / expected).read_bytes() == b"new"
+    for name in taken:
+      assert (output_dir / name).read_bytes() == b"precious"
+
   def test_options_empty_returns_none(self):
     mp = self._make_mp()
     info = MagicMock()
