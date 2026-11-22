@@ -304,6 +304,45 @@ class TestRenameViaArr:
     result = rename_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log)
     assert result is None
 
+  @pytest.mark.parametrize(
+    ("arr_type", "parse_body", "files_endpoint", "id_field", "media_id"),
+    [
+      ("sonarr", {"series": {"id": 10}}, "episodefile", "seriesId", 10),
+      ("radarr", {"movie": {"id": 20}}, "moviefile", "movieId", 20),
+    ],
+  )
+  @patch("resources.mediamanager.wait_for_command", return_value=True)
+  @patch("resources.mediamanager.requests.post")
+  @patch("resources.mediamanager.requests.get")
+  def test_requests_per_arr_type(self, mock_get, mock_post, mock_wait, arr_type, parse_body, files_endpoint, id_field, media_id):
+    mock_get.side_effect = [
+      _make_response(parse_body),
+      _make_response([{"id": 5, "path": "/m/a.mp4"}]),
+      _make_response({"id": 5, "path": "/m/b.mp4"}),
+    ]
+    mock_post.return_value = _make_response({"id": 9})
+    assert rename_via_arr("http://h", {"X": "1"}, arr_type, "/m/a.mp4", MagicMock()) == "/m/b.mp4"
+    urls = [c.args[0] for c in mock_get.call_args_list]
+    assert urls == ["http://h/api/v3/parse", "http://h/api/v3/" + files_endpoint, "http://h/api/v3/%s/5" % files_endpoint]
+    assert mock_get.call_args_list[0].kwargs["params"] == {"title": "a.mp4"}
+    assert mock_get.call_args_list[1].kwargs["params"] == {id_field: media_id}
+    assert mock_post.call_args.kwargs["json"] == {"name": "RenameFiles", id_field: media_id, "files": [5]}
+
+  @patch("resources.mediamanager.wait_for_command", return_value=True)
+  @patch("resources.mediamanager.requests.post")
+  @patch("resources.mediamanager.requests.get")
+  def test_sonarr_episodefile_as_dict(self, mock_get, mock_post, mock_wait):
+    """Behaviour change (SMANG-32): a single-record dict is accepted for Sonarr too, as it was for Radarr."""
+    mock_get.side_effect = [
+      _make_response({"series": {"id": 10}}),
+      _make_response({"id": 55, "path": "/tv/Show/S01E01.mp4"}),
+      _make_response({"id": 55, "path": "/tv/Show/Show - S01E01.mp4"}),
+    ]
+    mock_post.return_value = _make_response({"id": 99})
+    log = MagicMock()
+    assert rename_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log) == "/tv/Show/Show - S01E01.mp4"
+    log.exception.assert_not_called()
+
 
 class TestRescanViaArr:
   @patch("resources.mediamanager.requests.post")
