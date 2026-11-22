@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.44](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.43...sma-ng-v3.2.44) (2026-11-22)
+
+
+### Bug Fixes
+
+* **deps:** bump the python-runtime group across 1 directory with 4 updates ([#221](https://github.com/newdave/sma-ng/issues/221)) ([512cb7d](https://github.com/newdave/sma-ng/commit/512cb7dd7e9d2b80224ae9e039f1a5b0fb279297))
+
 ## [3.2.43](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.42...sma-ng-v3.2.43) (2026-11-22)
 
 
