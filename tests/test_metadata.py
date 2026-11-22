@@ -1709,6 +1709,35 @@ class TestMetadataFailureLevels:
     assert 1 in m._missing_seasons
     assert not [r for r in caplog.records if r.levelname in ("ERROR", "WARNING")]
 
+  def test_http_error_never_logs_api_key(self, caplog):
+    import requests
+
+    resp = requests.Response()
+    resp.status_code = 500
+    resp.reason = "Server Error"
+    exc = requests.HTTPError("500 Server Error: Server Error for url: https://api.themoviedb.org/3/tv/1/season/1?api_key=SECRET&language=en", response=resp)
+    m, _ = self._tv(exc, caplog)
+    assert [r for r in caplog.records if r.levelname == "WARNING" and "season 1" in r.getMessage()]
+    assert "SECRET" not in caplog.text
+
+  @pytest.mark.parametrize("text", ["fail https://x/y?api_key=SECRET", "fail https://x/y?language=en&api_key=SECRET&z=1", "API_KEY=SECRET fail"])
+  def test_one_line_redacts_api_key_in_plain_errors(self, text):
+    from resources.metadata import _one_line
+
+    out = _one_line(RuntimeError(text))
+    assert "SECRET" not in out and "fail" in out
+
+  def test_one_line_http_error_logs_status_and_reason_only(self):
+    import requests
+
+    from resources.metadata import _one_line
+
+    resp = requests.Response()
+    resp.status_code = 429
+    resp.reason = "Too Many Requests"
+    exc = requests.HTTPError("429 for url: https://x?api_key=SECRET", response=resp)
+    assert _one_line(exc) == "HTTP 429 Too Many Requests"
+
   @pytest.mark.parametrize("exc,cached", [(_http_error(404), True), (_http_error(503), False), (ConnectionError("x"), False)])
   def test_air_date_lookup_caches_only_404(self, exc, cached, caplog):
     m, seasons = self._tv(_http_error(404), caplog)

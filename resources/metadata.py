@@ -9,6 +9,7 @@ using mutagen. Also handles .plexmatch sidecar file generation.
 import enum
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 from xml.sax.saxutils import escape as xml_escape
@@ -27,10 +28,23 @@ def _is_not_found(exc):
   return getattr(getattr(exc, "response", None), "status_code", None) == 404
 
 
+_API_KEY_RE = re.compile(r"(api_key=)[^&\s'\"]*", re.IGNORECASE)
+
+
 def _one_line(exc):
-  """First line of an exception message with whitespace collapsed, safe for single-line log records."""
+  """Single-line, secret-free summary of an exception for log records.
+
+  An HTTP error (it carries ``.response``) is reduced to its status and reason because tmdbsimple's message holds
+  the request URL including ``api_key=``; any other text has ``api_key=`` values redacted.
+  """
+  response = getattr(exc, "response", None)
+  status = getattr(response, "status_code", None)
+  if status is not None:
+    reason = " ".join(str(getattr(response, "reason", "") or "").split())
+    return ("HTTP %s %s" % (status, reason)).strip()
   lines = str(exc).strip().splitlines()
-  return " ".join(lines[0].split()) if lines else type(exc).__name__
+  text = " ".join(lines[0].split()) if lines else type(exc).__name__
+  return _API_KEY_RE.sub(r"\1***", text)
 
 
 class TMDBIDError(Exception):
@@ -221,7 +235,7 @@ class Metadata:
           self.episodedata_list.append(ep_info)
           credit_list.append(ep_credits)
         except Exception as e:
-          self.log.warning("Unable to retrieve episode S%sE%s data from TMDB (tmdbid %s): %s", season, ep, self.tmdbid, e)
+          self.log.warning("Unable to retrieve episode S%sE%s data from TMDB (tmdbid %s): %s", season, ep, self.tmdbid, _one_line(e))
           # Try to resolve via air date → season episode list.
           matched = _by_air_date.get(_filename_date) if _filename_date else None
           matched_season = self.season
