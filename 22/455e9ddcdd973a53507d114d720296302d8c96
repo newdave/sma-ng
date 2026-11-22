@@ -1,0 +1,25 @@
+tests/test_attempt_ladder.py
+  s_d73ac5e457a585::t_bb0084fe0d66d2 482-502
+resources/processor/failures.py
+  s_d73ac5e457a585::t_69eb9a26f6e202 577-582,613-615,619,622-623,628-631
+tests/test_failures.py
+  s_d73ac5e457a585::t_867aae898b59ff 352-373
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_b96177321cc76a 110-112,121-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "22455e9ddcdd973a53507d114d720296302d8c96",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
