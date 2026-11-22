@@ -2,6 +2,8 @@
 
 import json
 import logging
+import threading
+import time
 import unittest.mock as mock
 
 import pytest
@@ -509,10 +511,20 @@ class TestRunConversionInner:
     progress_line = "frame=  100 fps= 25 speed=1.50x time=00:01:00 size=  5000kB"
     proc = _make_fake_process([duration_line, progress_line], returncode=0)
 
-    # The watchdog thread also reads time.monotonic; stub it out so the
-    # patched clock is consumed only by the progress loop.
+    # time.monotonic is process-global, so watchdog or other background threads
+    # (including ones leaked by earlier tests) read it too. Script the values
+    # for this thread only and defer every other caller to the real clock.
+    real_monotonic = time.monotonic
+    test_thread = threading.get_ident()
+    scripted = iter([0.0, 10.0])
+
+    def fake_monotonic():
+      if threading.get_ident() != test_thread:
+        return real_monotonic()
+      return next(scripted, 10.0)
+
     with mock.patch("subprocess.Popen", return_value=proc), mock.patch("resources.daemon.worker._JobWatchdog"):
-      with mock.patch("resources.daemon.worker.time.monotonic", side_effect=[0.0, 10.0]):
+      with mock.patch("resources.daemon.worker.time.monotonic", side_effect=fake_monotonic):
         result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
 
     assert result[0] is True
