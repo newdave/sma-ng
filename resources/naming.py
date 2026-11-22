@@ -736,14 +736,14 @@ def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, 
 
   # Try Sonarr/Radarr API for richer naming data
   api_success = False
-  arr_key = "sonarr_instances" if is_tv else "radarr_instances"
+  from resources.mediamanager import matching_arr_instances
+
+  arr_kind = "sonarr" if is_tv else "radarr"
   arr_method = data.from_sonarr if is_tv else data.from_radarr
-  for instance in getattr(settings, arr_key, []):
-    ipath = instance.get("path", "")
-    if ipath and api_path.startswith(ipath):
-      api_success = arr_method(instance, api_path, log)
-      if api_success:
-        break
+  for instance, _kind in matching_arr_instances(api_path, settings, kinds=(arr_kind,)):
+    api_success = arr_method(instance, api_path, log)
+    if api_success:
+      break
 
   if not api_success:
     log.debug("Using local data for naming (no API match)")

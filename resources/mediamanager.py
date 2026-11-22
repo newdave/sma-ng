@@ -5,10 +5,40 @@ import time
 
 import requests
 
-from autoprocess._media_server import apply_path_mapping
+from autoprocess._media_server import apply_path_mapping, path_under
 
 # Seconds before any Sonarr/Radarr HTTP call is abandoned.
 REQUEST_TIMEOUT = 30
+
+ARR_KINDS = ("sonarr", "radarr")
+
+
+def matching_arr_instances(filepath, settings, kinds=ARR_KINDS):
+  """Return every ``(instance, kind)`` whose routing path holds *filepath*, best match first.
+
+  An instance is usable only when it has both a ``path`` and an ``apikey``.
+  Both paths are normalised and matched on directory boundaries (``/TV`` does not
+  claim ``/TV-Anime``). The longest instance path wins across all *kinds*; ties keep
+  the order of *kinds* and then the settings order.
+  """
+  dirpath = os.path.normpath(os.path.dirname(filepath))
+  found = []
+  for kind in kinds:
+    for instance in getattr(settings, kind + "_instances", None) or []:
+      ipath = instance.get("path") or ""
+      if not ipath or not instance.get("apikey"):
+        continue
+      ipath = os.path.normpath(ipath)
+      if path_under(dirpath, ipath):
+        found.append((len(ipath), instance, kind))
+  found.sort(key=lambda item: item[0], reverse=True)
+  return [(instance, kind) for _, instance, kind in found]
+
+
+def find_arr_instance(filepath, settings, kinds=ARR_KINDS):
+  """Return ``(instance, kind)`` for the best Sonarr/Radarr match of *filepath*, or ``(None, None)``."""
+  matches = matching_arr_instances(filepath, settings, kinds)
+  return matches[0] if matches else (None, None)
 
 
 def build_api(settings_section, user_agent):

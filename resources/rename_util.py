@@ -14,7 +14,6 @@ import guessit
 
 os.environ["REGEX_DISABLED"] = "1"  # Fixes Toilal/rebulk#20
 
-from autoprocess._media_server import path_under
 from autoprocess.plex import refreshPlex
 from resources.mediaprocessor import MediaProcessor
 from resources.metadata import MediaType, Metadata, update_plexmatch
@@ -431,23 +430,9 @@ class RenameProcessor:
 
   def _rename_file_via_arr(self, filepath, result):
     """Delegate rename to the matching Sonarr/Radarr instance."""
-    from resources.mediamanager import build_api, rename_via_arr
+    from resources.mediamanager import build_api, find_arr_instance, rename_via_arr
 
-    dirpath = os.path.dirname(filepath)
-    instance = None
-    arr_type = None
-    for inst in getattr(self.settings, "sonarr_instances", []):
-      ipath = inst.get("path", "")
-      if ipath and path_under(dirpath, ipath) and inst.get("apikey"):
-        instance, arr_type = inst, "sonarr"
-        break
-    if instance is None:
-      for inst in getattr(self.settings, "radarr_instances", []):
-        ipath = inst.get("path", "")
-        if ipath and path_under(dirpath, ipath) and inst.get("apikey"):
-          instance, arr_type = inst, "radarr"
-          break
-
+    instance, arr_type = find_arr_instance(filepath, self.settings)
     if instance is None:
       self.log.warning("--arr-rename: no matching Sonarr/Radarr instance for %s" % filepath)
       return result

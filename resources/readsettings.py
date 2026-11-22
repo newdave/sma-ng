@@ -21,8 +21,8 @@ fields in the schema. The legacy per-instance ``path`` is derived from
 ``daemon.routing`` rules — every routing rule that
 references an instance contributes one ``sonarr_instances``/
 ``radarr_instances`` entry with that rule's ``match`` as the path.
-``manual.py``'s longest-prefix path-match logic
-(``manual.py:_find_arr_instance``) keeps working unchanged.
+The shared longest-prefix path match
+(``resources.mediamanager.find_arr_instance``) consumes these entries.
 """
 
 from __future__ import annotations

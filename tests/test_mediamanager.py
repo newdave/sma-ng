@@ -12,6 +12,8 @@ from resources.mediamanager import (
   api_put,
   build_api,
   downloaded_scan_via_arr,
+  find_arr_instance,
+  matching_arr_instances,
   rename,
   rename_via_arr,
   rescan,
@@ -371,3 +373,69 @@ class TestDownloadedScanViaArr:
     mock_post.side_effect = Exception("network error")
     log = MagicMock()
     assert downloaded_scan_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log) is None
+
+
+class TestFindArrInstance:
+  """One lookup for every Sonarr/Radarr path match (manual, rename, naming)."""
+
+  @staticmethod
+  def _settings(sonarr=None, radarr=None):
+    s = MagicMock()
+    s.sonarr_instances = sonarr or []
+    s.radarr_instances = radarr or []
+    return s
+
+  def test_no_instances(self):
+    assert find_arr_instance("/media/TV/Show/e.mkv", self._settings()) == (None, None)
+
+  def test_sonarr_and_radarr_prefix_match(self):
+    tv = {"path": "/media/TV", "apikey": "a"}
+    mv = {"path": "/media/Movies", "apikey": "b"}
+    s = self._settings(sonarr=[tv], radarr=[mv])
+    assert find_arr_instance("/media/TV/Show/e.mkv", s) == (tv, "sonarr")
+    assert find_arr_instance("/media/Movies/F/f.mkv", s) == (mv, "radarr")
+
+  def test_separator_aware(self):
+    s = self._settings(sonarr=[{"path": "/media/TV", "apikey": "a"}])
+    assert find_arr_instance("/media/TV-Anime/S/e.mkv", s) == (None, None)
+
+  def test_longest_prefix_wins_across_kinds(self):
+    broad = {"path": "/media", "apikey": "a"}
+    narrow = {"path": "/media/Movies", "apikey": "b"}
+    s = self._settings(sonarr=[broad], radarr=[narrow])
+    assert find_arr_instance("/media/Movies/F/f.mkv", s) == (narrow, "radarr")
+
+  def test_longest_prefix_wins_within_kind_regardless_of_order(self):
+    broad = {"path": "/media/TV", "apikey": "a"}
+    narrow = {"path": "/media/TV/Kids", "apikey": "b"}
+    s = self._settings(sonarr=[broad, narrow])
+    assert find_arr_instance("/media/TV/Kids/S/e.mkv", s) == (narrow, "sonarr")
+
+  def test_equal_length_tie_prefers_sonarr(self):
+    tv = {"path": "/media", "apikey": "a"}
+    mv = {"path": "/media", "apikey": "b"}
+    s = self._settings(sonarr=[tv], radarr=[mv])
+    assert find_arr_instance("/media/x/e.mkv", s) == (tv, "sonarr")
+
+  def test_paths_are_normalised(self):
+    tv = {"path": "/media/TV/", "apikey": "a"}
+    s = self._settings(sonarr=[tv])
+    assert find_arr_instance("/media//TV/./Show/e.mkv", s) == (tv, "sonarr")
+
+  def test_instances_without_path_or_apikey_are_skipped(self):
+    s = self._settings(sonarr=[{"path": "", "apikey": "a"}, {"path": "/media/TV"}])
+    assert find_arr_instance("/media/TV/S/e.mkv", s) == (None, None)
+
+  def test_kinds_filter(self):
+    s = self._settings(sonarr=[{"path": "/media", "apikey": "a"}])
+    assert find_arr_instance("/media/F/f.mkv", s, kinds=("radarr",)) == (None, None)
+
+  def test_matching_arr_instances_lists_all_matches_longest_first(self):
+    broad = {"path": "/media", "apikey": "a"}
+    narrow = {"path": "/media/TV", "apikey": "b"}
+    other = {"path": "/other", "apikey": "c"}
+    s = self._settings(sonarr=[broad, other, narrow])
+    assert matching_arr_instances("/media/TV/S/e.mkv", s) == [(narrow, "sonarr"), (broad, "sonarr")]
+
+  def test_settings_without_instance_lists(self):
+    assert find_arr_instance("/media/TV/e.mkv", object()) == (None, None)

@@ -28,6 +28,7 @@ from resources.daemon.context import set_job_id
 from resources.extensions import tmdb_api_key
 from resources.log import enable_level_token, getLogger
 from resources.media_repair import STATUS_REPAIRED, RepairProcessor
+from resources.mediamanager import find_arr_instance
 from resources.mediaprocessor import InsufficientOutputSpace, MediaProcessor
 from resources.metadata import MediaType, Metadata
 from resources.naming import classify_hdr
@@ -367,21 +368,6 @@ def tvInfo(guessData, tmdbid=None, tvdbid=None, imdbid=None, season=None, episod
   return metadata
 
 
-def _find_arr_instance(filepath, settings):
-  """Return (instance, arr_type) for the first Sonarr/Radarr instance whose
-  path prefix matches *filepath*, or (None, None) if none matches."""
-  dirpath = os.path.dirname(filepath)
-  for instance in settings.sonarr_instances:
-    ipath = instance.get("path", "")
-    if ipath and dirpath.startswith(ipath) and instance.get("apikey"):
-      return instance, "sonarr"
-  for instance in settings.radarr_instances:
-    ipath = instance.get("path", "")
-    if ipath and dirpath.startswith(ipath) and instance.get("apikey"):
-      return instance, "radarr"
-  return None, None
-
-
 def triggerRescan(filepath, settings):
   """Trigger a rescan + import on the matching Sonarr/Radarr instance.
 
@@ -406,7 +392,7 @@ def triggerRescan(filepath, settings):
     log.warning("Python module 'requests' not installed, skipping media manager rescan.")
     return None
 
-  instance, arr_type = _find_arr_instance(filepath, settings)
+  instance, arr_type = find_arr_instance(filepath, settings)
   if not instance or not arr_type:
     log.debug("No matching Sonarr/Radarr instance found for path %s, skipping rescan." % os.path.dirname(filepath))
     return None
@@ -683,7 +669,7 @@ def processFile(
       mp.QTFS(output["output"])
 
     # File renaming — skip when arr will rename via force-rename
-    _arr_instance, _ = _find_arr_instance(output["output"], mp.settings)
+    _arr_instance, _ = find_arr_instance(output["output"], mp.settings)
     _arr_will_rename = bool(_arr_instance and _arr_instance.get("rename") and _arr_instance.get("rescan", True))
     if mp.settings.naming_enabled and tagdata and not _arr_will_rename:
       try:
