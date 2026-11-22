@@ -1,0 +1,30 @@
+tests/test_mediaprocessor_pipeline_fixes.py
+  s_d73ac5e457a585::t_f02c84ce6108f4 510-524,526-537,543-548,554-555,558-559,561-562,564-569,571,575-577,580-582,584,586-588,591-614
+  s_d73ac5e457a585::t_1a521257cd2a4a 14,570,572-574,578-579
+  s_d73ac5e457a585::t_152fc985dd64d0 25
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_7cb732477c14e0 324-330
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_e068f053bf658e 833,3591,3608,3631-3632,3634-3639,3646-3681,3689-3691,3707-3715
+  s_d73ac5e457a585::t_7cb732477c14e0 710
+manual.py
+  s_d73ac5e457a585::t_e068f053bf658e 656
+docs/configuration.md
+  s_d73ac5e457a585::t_7cb732477c14e0 153-161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "cdf79a518b609fb13713d4bf1a90c0a75980ef73",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
