@@ -882,7 +882,7 @@ There are two different things with similar names.
 
 ### Hook scripts (`post_process/`)
 
-After each conversion, SMA-NG can run every script in the repository's `post_process/` directory. Enable it with
+After each conversion, SMA-NG can run every script in the `post_process/` directory next to `manual.py` (create it; it is not shipped). Enable it with
 `base.converter.post-process: true`; set `wait-post-process: true` to wait for each script to exit, and pass `-np` to
 `manual.py` to skip them for one run.
 

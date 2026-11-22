@@ -132,6 +132,15 @@ class TestPostProcessorSetTVMultiEpisode:
       assert not any("subdir" in s for s in scripts)
 
 
+class TestPostProcessorMissingDir:
+  def test_gather_scripts_returns_empty_when_dir_missing(self, tmp_path):
+    """No post_process/ directory (not shipped in the repo) means no hooks, not a crash."""
+    pp = PostProcessor.__new__(PostProcessor)
+    pp.log = MagicMock()
+    with patch("resources.postprocess.os.path.dirname", return_value=str(tmp_path / "resources")):
+      assert pp.gather_scripts() == []
+
+
 class TestPostProcessorRunScriptCommand:
   def test_returns_popen(self):
     pp = PostProcessor(["/file.mp4"])
