@@ -710,6 +710,8 @@ _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
 # differ from the source by 2% (never less than 1 second), and conversion writes one video stream.
 OUTPUT_DURATION_TOLERANCE = 0.02
 OUTPUT_DURATION_MIN_SLACK = 1.0
+# Conversion maps exactly one video stream (the single options["video"] dict) and isValidSource
+# rejects sources without a video stream, so a good output always has exactly one.
 OUTPUT_EXPECTED_VIDEO_STREAMS = 1
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
 from resources.config_schema import FallbackPolicy
@@ -718,7 +720,7 @@ from resources.lang import getAlpha3TCode
 from resources.metadata import MediaType, Metadata
 from resources.openvino_analyzer import OpenVINOAnalyzerBackend, OpenVINOAnalyzerError
 from resources.postprocess import PostProcessor
-from resources.processor.failures import TAIL_BYTES, AttemptRecord, FfmpegFailureClass, diagnose_ffmpeg_failure, parse_ffmpeg_failure
+from resources.processor.failures import OUTPUT_VERIFY_FAILED, TAIL_BYTES, AttemptRecord, FfmpegFailureClass, diagnose_ffmpeg_failure, parse_ffmpeg_failure
 from resources.subtitles import SubtitleProcessor
 
 # VBV peak allowed above max-bitrate when the cap is what forced the re-encode
@@ -997,7 +999,10 @@ class MediaProcessor:
       # stream-less output to the caller, which would then delete or recycle the source.
       problem = self._verify_output(info, outputfile)
       if problem:
-        self.log.warning("Output verification failed for %s, keeping source %s and the output for inspection: %s [output-verify]." % (outputfile, inputfile, problem))
+        failed = self._quarantine_failed_output(outputfile)
+        self.log.warning("Output verification failed (%s), keeping source %s, moved the output to %s [output-verify]." % (problem, inputfile, failed))
+        # One structured line so the daemon worker records the failure class and reason.
+        self.log.info(json.dumps({"event": "output.verify", "failure_class": OUTPUT_VERIFY_FAILED, "reason": problem}, sort_keys=True))
         return None
 
     self.log.debug("%s created from %s successfully." % (outputfile, inputfile))
@@ -1053,6 +1058,25 @@ class MediaProcessor:
       "cues_to_front": self.settings.output_format in ["mkv"] and self.settings.relocate_moov,
     }
 
+  def _quarantine_failed_output(self, outputfile):
+    """Rename a bad output to ``<name>.failed`` (``.failed.2``, ... when taken).
+
+    Never deletes or overwrites: the file is kept for inspection under a name
+    media scanners ignore. Returns the new path, or the original one if the
+    rename failed.
+    """
+    target = outputfile + ".failed"
+    n = 2
+    while os.path.lexists(target):
+      target = "%s.failed.%d" % (outputfile, n)
+      n += 1
+    try:
+      os.rename(outputfile, target)
+    except OSError as e:
+      self.log.warning("Could not rename failed output %s: %s" % (outputfile, " ".join(str(e).split())))
+      return outputfile
+    return target
+
   def _verify_output(self, source_info, outputfile):
     """Probe a converted output and compare it with the source.
 
@@ -1069,22 +1093,22 @@ class MediaProcessor:
     except KeyboardInterrupt:
       raise
     except Exception as e:
-      return "output could not be probed: %s" % " ".join(str(e).split())
+      return "output could not be probed"
     if not out_info:
       return "output could not be probed"
 
     out_videos = [s for s in out_info.streams if s.type == "video" and not is_unknown_stream(s) and s not in out_info.cover_art and not s.attached_pic]
     if len(out_videos) != OUTPUT_EXPECTED_VIDEO_STREAMS:
-      return "output has %d video streams, expected %d" % (len(out_videos), OUTPUT_EXPECTED_VIDEO_STREAMS)
+      return "video streams %d vs %d" % (len(out_videos), OUTPUT_EXPECTED_VIDEO_STREAMS)
 
     src_duration = getattr(getattr(source_info, "format", None), "duration", None)
     out_duration = getattr(getattr(out_info, "format", None), "duration", None)
     if isinstance(src_duration, (int, float)) and src_duration > 0:
       if not isinstance(out_duration, (int, float)) or out_duration <= 0:
-        return "output reports no duration, source is %.1fs" % src_duration
+        return "no output duration vs %.0fs" % src_duration
       slack = max(src_duration * OUTPUT_DURATION_TOLERANCE, OUTPUT_DURATION_MIN_SLACK)
       if abs(out_duration - src_duration) > slack:
-        return "output duration %.1fs differs from source %.1fs by more than %.1fs" % (out_duration, src_duration, slack)
+        return "duration %.0fs vs %.0fs" % (out_duration, src_duration)
     return None
 
   def _run_ffmpeg(self, inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput):

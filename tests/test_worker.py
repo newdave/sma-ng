@@ -859,6 +859,33 @@ class TestFallbackEventParsing:
     worker._record_fallback_event('{"event": "ffmpeg.attempts", "attempts": [], "result": "ok"}')  # must not raise
 
 
+class TestOutputVerifyEvent:
+  def test_event_sets_failure_class_and_reason(self):
+    worker = _make_worker()
+    worker._record_output_verify_event('INFO x: {"event": "output.verify", "failure_class": "output_verify_failed", "reason": "duration 3600s vs 7200s"}')
+    assert worker._last_attempt_failure_class == "output_verify_failed"
+    assert worker._last_verify_reason == "duration 3600s vs 7200s"
+
+  def test_job_failure_carries_category_cause_and_reason(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+    worker.job_timeout_seconds = 0
+    line = '{"event": "output.verify", "failure_class": "output_verify_failed", "reason": "video streams 0 vs 1"}'
+    proc = _make_fake_process([line], returncode=1)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker.process_job({"id": 9, "path": str(media), "config": "/cfg.ini", "args": None})
+    db.fail_job.assert_called_once_with(
+      9,
+      "Conversion process failed: output verification failed (video streams 0 vs 1)",
+      failure_category="system",
+      failure_cause="output_verify_failed",
+      node_id=worker.node_id,
+    )
+
+
 # ---------------------------------------------------------------------------
 # preflight_output_capacity helper + ConversionWorker._preflight_disk_pressure
 # ---------------------------------------------------------------------------

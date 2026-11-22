@@ -14,6 +14,7 @@ from resources.daemon.constants import FFMPEG_STDERR_DIR, SCRIPT_DIR, resolve_no
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.log import getLogger
 from resources.processor.failures import (
+  OUTPUT_VERIFY_FAILED,
   WORKER_SENTINEL_DISK_PRESSURE,
   WORKER_SENTINEL_EXCEPTION,
   WORKER_SENTINEL_INVALID_ARGS,
@@ -436,6 +437,7 @@ class ConversionWorker(threading.Thread):
     # Reset per-job state captured from the ffmpeg.attempts JSON line so
     # one job's classification doesn't leak into the next.
     self._last_attempt_failure_class: str | None = None
+    self._last_verify_reason: str | None = None
     self._last_encoder_name: str | None = None
     self._last_encoder_backend: str | None = None
     path = job["path"]
@@ -595,6 +597,8 @@ class ConversionWorker(threading.Thread):
           cause = self._last_attempt_failure_class or WORKER_SENTINEL_PROCESS_FAILED
           cat = categorize_failure(cause).value
           message = "Conversion process failed" if is_convert else "%s process failed" % kind.name.capitalize()
+          if cause == OUTPUT_VERIFY_FAILED and self._last_verify_reason:
+            message += ": output verification failed (%s)" % self._last_verify_reason
           updated = self.job_db.fail_job(job_id, message, failure_category=cat, failure_cause=cause, node_id=self.node_id)
           self._log_discarded(job_id, updated, "failure")
           self._ingest_ffmpeg_stderr_sidecars(job_id)
@@ -830,6 +834,8 @@ class ConversionWorker(threading.Thread):
         # the hot path cheap.
         if self._fallback_counter_callback is not None and '"event": "ffmpeg.attempts"' in line:
           self._record_fallback_event(line)
+        if '"event": "output.verify"' in line:
+          self._record_output_verify_event(line)
 
       # EOF reached; the watchdog still guards this wait.
       process.wait()
@@ -861,6 +867,24 @@ class ConversionWorker(threading.Thread):
       self._job_processes.pop(job_id, None)
       self._job_progress.pop(job_id, None)
       config_logger.info("")  # blank line separates jobs in the per-config log
+
+  def _record_output_verify_event(self, line: str) -> None:
+    """Record the output.verify JSON line the subprocess logs when a finished
+    conversion fails the duration / video-stream check, so the job fails with
+    the output_verify_failed cause and the short reason."""
+    start = line.find("{")
+    if start < 0:
+      return
+    try:
+      payload = json.loads(line[start:])
+    except (ValueError, json.JSONDecodeError):
+      return
+    if not isinstance(payload, dict) or payload.get("event") != "output.verify":
+      return
+    self._last_attempt_failure_class = OUTPUT_VERIFY_FAILED
+    reason = payload.get("reason")
+    if isinstance(reason, str) and reason:
+      self._last_verify_reason = reason
 
   def _record_fallback_event(self, line: str) -> None:
     """Parse a single-line ffmpeg.attempts JSON record and bump daemon counters.

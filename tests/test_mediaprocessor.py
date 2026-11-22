@@ -3666,28 +3666,83 @@ class TestProcess:
     mp.converter.probe = MagicMock(return_value=out_info)
     return mp, src, out
 
-  def test_truncated_output_fails_keeps_source_and_output(self, tmp_path, make_stream, make_format):
+  def _verify_events(self, mp):
+    return [json.loads(c.args[0]) for c in mp.log.info.call_args_list if c.args and isinstance(c.args[0], str) and c.args[0].startswith("{") and "output.verify" in c.args[0]]
+
+  def test_truncated_output_fails_keeps_source_and_renames_output(self, tmp_path, make_stream, make_format):
     src_info = self._media(make_stream, make_format, 7200.0)
     out_info = self._media(make_stream, make_format, 3600.0)
     mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
     assert mp.process(str(src), info=src_info) is None
-    assert src.exists() and out.exists()
+    failed = tmp_path / "movie.mp4.failed"
+    assert src.exists() and not out.exists()
+    assert failed.read_bytes() == b"output"
     mp.removeFile.assert_not_called()
     warnings = [c.args[0] for c in mp.log.warning.call_args_list]
-    assert any("[output-verify]" in w and "duration" in w and "\n" not in w for w in warnings)
+    assert any("[output-verify]" in w and "duration" in w and str(failed) in w and "\n" not in w for w in warnings)
+
+  def test_failed_name_is_numbered_never_overwritten(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    (tmp_path / "movie.mp4.failed").write_bytes(b"older")
+    (tmp_path / "movie.mp4.failed.2").write_bytes(b"older2")
+    assert mp.process(str(src), info=src_info) is None
+    assert (tmp_path / "movie.mp4.failed").read_bytes() == b"older"
+    assert (tmp_path / "movie.mp4.failed.2").read_bytes() == b"older2"
+    assert (tmp_path / "movie.mp4.failed.3").read_bytes() == b"output"
+    assert src.exists() and not out.exists()
+
+  def test_verify_failure_emits_structured_event(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    mp.process(str(src), info=src_info)
+    events = self._verify_events(mp)
+    assert len(events) == 1
+    assert events[0]["failure_class"] == "output_verify_failed"
+    assert events[0]["reason"] == "duration 3600s vs 7200s"
+    assert str(tmp_path) not in events[0]["reason"]
 
   def test_missing_video_stream_fails(self, tmp_path, make_stream, make_format):
     src_info = self._media(make_stream, make_format, 100.0)
     out_info = self._media(make_stream, make_format, 100.0, videos=0)
     mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
     assert mp.process(str(src), info=src_info) is None
-    assert src.exists() and out.exists()
+    assert src.exists() and (tmp_path / "movie.mp4.failed").exists()
+    assert self._verify_events(mp)[0]["reason"] == "video streams 0 vs 1"
 
   def test_unprobeable_output_fails(self, tmp_path, make_stream, make_format):
     src_info = self._media(make_stream, make_format, 100.0)
     mp, src, out = self._convert_mp(tmp_path, src_info, None)
     assert mp.process(str(src), info=src_info) is None
-    assert out.exists()
+    assert (tmp_path / "movie.mp4.failed").exists()
+
+  def test_output_without_duration_fails(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 100.0)
+    out_info = self._media(make_stream, make_format, None)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    assert mp.process(str(src), info=src_info) is None
+    assert self._verify_events(mp)[0]["reason"].startswith("no output duration")
+
+  @pytest.mark.parametrize(
+    ("src_dur", "out_dur", "ok"),
+    [
+      (1000.0, 980.0, True),  # exactly 2%
+      (1000.0, 979.0, False),
+      (1000.0, 1020.0, True),
+      (1000.0, 1021.0, False),
+      (10.0, 9.0, True),  # 2% is 0.2s, the 1 s floor applies
+      (10.0, 8.9, False),
+      (10.0, 11.0, True),
+      (10.0, 11.1, False),
+    ],
+  )
+  def test_duration_boundaries(self, tmp_path, make_stream, make_format, src_dur, out_dur, ok):
+    src_info = self._media(make_stream, make_format, src_dur)
+    out_info = self._media(make_stream, make_format, out_dur)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    assert (mp.process(str(src), info=src_info) is not None) is ok
 
   def test_correct_output_passes_within_tolerance(self, tmp_path, make_stream, make_format):
     src_info = self._media(make_stream, make_format, 7200.0, cover=1, unknown=1)

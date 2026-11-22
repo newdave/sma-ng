@@ -334,14 +334,17 @@ usually the FFmpeg build lacks the decoder, or the source is damaged and needs r
 ### Job failed with `[output-verify]` (output does not match the source)
 
 - FFmpeg exited 0, but the output failed the post-conversion check, so SMA-NG treated the job as failed
-  (exit code 1). The warning names the cause: `output duration Xs differs from source Ys by more than Zs`,
-  `output has N video streams, expected 1`, or `output could not be probed`.
-- The source is kept (not deleted or recycled) and the output stays where it was written, so you can inspect it.
-  Nothing is tagged, moved or sent to Sonarr/Radarr/Plex for that job.
+  (exit code 1). In the daemon the job fails with category `system`, cause `output_verify_failed` and the reason in
+  its error text: `duration Xs vs Ys`, `video streams N vs 1`, `no output duration vs Ys` or
+  `output could not be probed`.
+- The source is kept (not deleted or recycled). The bad output is renamed to `<output name>.failed`
+  (for example `movie.mp4.failed`, or `movie.mp4.failed.2` when that name exists), so Plex, Sonarr and Radarr
+  do not scan it. Nothing is tagged, moved or sent to Sonarr/Radarr/Plex for that job. The warning names the
+  `.failed` path; keep it for inspection and delete it yourself when done.
 - The duration may differ by 2% (at least 1 second). Cover art and unknown or data streams are not counted, and a
-  duration is only compared when both files report one.
-- Usual causes are a full output disk, a damaged source or a killed encoder. Fix that, delete the bad output and
-  re-run. If the output plays correctly, report the file; the check is not configurable.
+  duration is only compared when the source reports one.
+- Usual causes are a full output disk, a damaged source or a killed encoder. Fix that and re-run. If the output
+  plays correctly, report the file; the check is not configurable.
 
 ### `[dolby-vision]` warning on re-encode
 
