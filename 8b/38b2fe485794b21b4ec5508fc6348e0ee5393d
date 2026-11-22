@@ -1,0 +1,21 @@
+tests/test_local_config_cascade.py
+  s_d73ac5e457a585::t_c2d4398aa22b43 45,53,60,74,86,91
+docs/cluster-operations.md
+  s_d73ac5e457a585::t_c2d4398aa22b43 81,89,282
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "8b38b2fe485794b21b4ec5508fc6348e0ee5393d",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
