@@ -1,0 +1,28 @@
+docs/daemon.md
+  s_d73ac5e457a585::t_390c5b886a35c1 401-402
+  s_d73ac5e457a585::t_6ed55fe78b4b0b 76
+docs/README.md
+  s_d73ac5e457a585::t_851c9d9212a6a5 446-447
+  s_d73ac5e457a585::t_c6a1a7c5be4576 491-493
+  s_d73ac5e457a585::t_b3e6943e5b3692 456
+docs/openapi.yaml
+  s_d73ac5e457a585::t_65428cd4b3cdc6 318
+docs/metrics.md
+  s_d73ac5e457a585::t_5c218964c8c5b4 23-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "53e5c5133796967920be59c97e0203b176a55cdb",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
