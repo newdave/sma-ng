@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, PropertyMock, patch
 
+import pytest
+
 from resources.metadata import (
   MediaType,
   Metadata,
@@ -1597,3 +1599,182 @@ class TestResolveTmdbIDEdgeCases:
     log = MagicMock()
     result = Metadata.resolveTmdbID(MediaType.Movie, log)
     assert result is None
+
+
+class TestExpectedMetadataMisses:
+  """Missing US rating and missing TMDB season are expected, handled cases: info, no traceback."""
+
+  _MOVIE = {"original_language": "en", "title": "T", "genres": [], "tagline": "", "overview": "", "release_date": "2020-01-01"}
+
+  def _movie(self, releases, caplog):
+    with (
+      patch("resources.metadata.Metadata.resolveTmdbID", return_value=5),
+      patch("resources.metadata.tmdb.Movies") as movies,
+      caplog.at_level("DEBUG"),
+    ):
+      movies.return_value.info.return_value = self._MOVIE
+      movies.return_value.external_ids.return_value = {}
+      movies.return_value.credits.return_value = {"cast": [], "crew": []}
+      movies.return_value.release_dates.return_value = releases
+      return Metadata(MediaType.Movie, tmdbid=5)
+
+  def test_movie_picks_first_nonempty_us_certification(self, caplog):
+    releases = {"results": [{"iso_3166_1": "US", "release_dates": [{"certification": ""}, {"certification": "PG-13"}]}]}
+    with patch("resources.metadata.Metadata.getRating", return_value="r") as gr:
+      m = self._movie(releases, caplog)
+    gr.assert_called_once_with("PG-13")
+    assert m.rating == "r"
+
+  def test_movie_missing_rating_logs_info_only(self, caplog):
+    m = self._movie({"results": [{"iso_3166_1": "US", "release_dates": [{"certification": ""}]}]}, caplog)
+    assert m.rating is None
+    msgs = [r for r in caplog.records if "rating" in r.getMessage().lower()]
+    assert len(msgs) == 1 and msgs[0].levelname == "INFO" and msgs[0].exc_info is None
+    assert not [r for r in caplog.records if r.levelname in ("ERROR", "WARNING")]
+
+  @patch("resources.metadata.tmdb.TV_Episodes")
+  @patch("resources.metadata.tmdb.TV_Seasons")
+  @patch("resources.metadata.tmdb.TV")
+  @patch("resources.metadata.Metadata.resolveTmdbID", return_value=1396)
+  def test_tv_missing_rating_and_season_are_info_and_cached(self, mock_resolve, mock_tv, mock_seasons, mock_eps, caplog):
+    mock_tv.return_value.info.return_value = {
+      "name": "S",
+      "genres": [],
+      "networks": [],
+      "original_language": "en",
+      "seasons": [{"season_number": 1, "air_date": "2020-01-01"}, {"season_number": 2, "air_date": "2021-01-01"}],
+    }
+    mock_tv.return_value.external_ids.return_value = {}
+    mock_tv.return_value.content_ratings.return_value = {"results": []}
+    mock_seasons.return_value.info.side_effect = _http_error(404)
+    mock_eps.return_value.info.return_value = {"name": "E", "overview": "", "air_date": "2021-02-02", "episode_number": 1}
+    mock_eps.return_value.credits.return_value = {"cast": [], "crew": []}
+    with caplog.at_level("DEBUG"):
+      m = Metadata(MediaType.TV, tmdbid=1396, season=1, episode=1)
+    assert m.rating is None
+    assert 1 in m._missing_seasons
+    assert not [r for r in caplog.records if r.levelname in ("ERROR", "WARNING")]
+    assert not [r for r in caplog.records if r.exc_info]
+    fake_tmdb = MagicMock(TV_Seasons=mock_seasons)
+    calls = mock_seasons.call_count
+    assert m._find_episode_by_air_date(fake_tmdb, "2021-02-02") is None
+    assert m._find_episode_by_air_date(fake_tmdb, "2021-02-02") is None
+    assert mock_seasons.call_count == calls + 1  # season 2 fetched once, then negative-cached
+
+
+def _http_error(status):
+  import requests
+
+  resp = requests.Response()
+  resp.status_code = status
+  return requests.HTTPError(f"{status} Error", response=resp)
+
+
+class TestMetadataFailureLevels:
+  """Only a real TMDB 404 is an expected miss; other failures stay at warning and are not cached."""
+
+  _TV = {
+    "name": "S",
+    "genres": [],
+    "networks": [],
+    "original_language": "en",
+    "seasons": [{"season_number": 1, "air_date": "2020-01-01"}, {"season_number": 2, "air_date": "2021-01-01"}],
+  }
+
+  def _tv(self, season_exc, caplog):
+    with (
+      patch("resources.metadata.tmdb.TV_Episodes") as eps,
+      patch("resources.metadata.tmdb.TV_Seasons") as seasons,
+      patch("resources.metadata.tmdb.TV") as tv,
+      patch("resources.metadata.Metadata.resolveTmdbID", return_value=1396),
+      caplog.at_level("DEBUG"),
+    ):
+      tv.return_value.info.return_value = self._TV
+      tv.return_value.external_ids.return_value = {}
+      tv.return_value.content_ratings.return_value = {"results": []}
+      seasons.return_value.info.side_effect = season_exc
+      eps.return_value.info.return_value = {"name": "E", "overview": "", "air_date": "2021-02-02", "episode_number": 1}
+      eps.return_value.credits.return_value = {"cast": [], "crew": []}
+      m = Metadata(MediaType.TV, tmdbid=1396, season=1, episode=1)
+    return m, seasons
+
+  @pytest.mark.parametrize("exc", [_http_error(500), _http_error(401), ConnectionError("boom"), ValueError("bad json")])
+  def test_season_non_404_warns_and_not_cached(self, exc, caplog):
+    m, _ = self._tv(exc, caplog)
+    assert 1 not in m._missing_seasons
+    assert [r for r in caplog.records if r.levelname == "WARNING" and "season 1" in r.getMessage()]
+
+  def test_season_404_is_info_and_cached(self, caplog):
+    m, _ = self._tv(_http_error(404), caplog)
+    assert 1 in m._missing_seasons
+    assert not [r for r in caplog.records if r.levelname in ("ERROR", "WARNING")]
+
+  def test_http_error_never_logs_api_key(self, caplog):
+    import requests
+
+    resp = requests.Response()
+    resp.status_code = 500
+    resp.reason = "Server Error"
+    exc = requests.HTTPError("500 Server Error: Server Error for url: https://api.themoviedb.org/3/tv/1/season/1?api_key=SECRET&language=en", response=resp)
+    m, _ = self._tv(exc, caplog)
+    assert [r for r in caplog.records if r.levelname == "WARNING" and "season 1" in r.getMessage()]
+    assert "SECRET" not in caplog.text
+
+  @pytest.mark.parametrize("text", ["fail https://x/y?api_key=SECRET", "fail https://x/y?language=en&api_key=SECRET&z=1", "API_KEY=SECRET fail"])
+  def test_one_line_redacts_api_key_in_plain_errors(self, text):
+    from resources.metadata import _one_line
+
+    out = _one_line(RuntimeError(text))
+    assert "SECRET" not in out and "fail" in out
+
+  def test_one_line_http_error_logs_status_and_reason_only(self):
+    import requests
+
+    from resources.metadata import _one_line
+
+    resp = requests.Response()
+    resp.status_code = 429
+    resp.reason = "Too Many Requests"
+    exc = requests.HTTPError("429 for url: https://x?api_key=SECRET", response=resp)
+    assert _one_line(exc) == "HTTP 429 Too Many Requests"
+
+  @pytest.mark.parametrize("exc,cached", [(_http_error(404), True), (_http_error(503), False), (ConnectionError("x"), False)])
+  def test_air_date_lookup_caches_only_404(self, exc, cached, caplog):
+    m, seasons = self._tv(_http_error(404), caplog)
+    seasons.return_value.info.side_effect = exc
+    fake_tmdb = MagicMock(TV_Seasons=seasons)
+    assert m._find_episode_by_air_date(fake_tmdb, "2021-02-02") is None
+    assert (2 in m._missing_seasons) is cached
+
+  def test_movie_rating_request_failure_warns_single_line(self, caplog):
+    with (
+      patch("resources.metadata.Metadata.resolveTmdbID", return_value=5),
+      patch("resources.metadata.tmdb.Movies") as movies,
+      caplog.at_level("DEBUG"),
+    ):
+      movies.return_value.info.return_value = TestExpectedMetadataMisses._MOVIE
+      movies.return_value.external_ids.return_value = {}
+      movies.return_value.credits.return_value = {"cast": [], "crew": []}
+      movies.return_value.release_dates.side_effect = RuntimeError("line one\nline  two")
+      Metadata(MediaType.Movie, tmdbid=5)
+    recs = [r for r in caplog.records if r.levelname == "WARNING" and "release dates" in r.getMessage()]
+    assert len(recs) == 1
+    assert "\n" not in recs[0].getMessage() and "line two" not in recs[0].getMessage()
+
+  def test_tv_content_ratings_failure_warns_single_line(self, caplog):
+    with (
+      patch("resources.metadata.tmdb.TV_Episodes") as eps,
+      patch("resources.metadata.tmdb.TV_Seasons") as seasons,
+      patch("resources.metadata.tmdb.TV") as tv,
+      patch("resources.metadata.Metadata.resolveTmdbID", return_value=1396),
+      caplog.at_level("DEBUG"),
+    ):
+      tv.return_value.info.return_value = self._TV
+      tv.return_value.external_ids.return_value = {}
+      tv.return_value.content_ratings.side_effect = RuntimeError("a\nb")
+      seasons.return_value.info.return_value = {"episodes": []}
+      eps.return_value.info.return_value = {"name": "E", "overview": "", "air_date": "2021-02-02", "episode_number": 1}
+      eps.return_value.credits.return_value = {"cast": [], "crew": []}
+      Metadata(MediaType.TV, tmdbid=1396, season=1, episode=1)
+    recs = [r for r in caplog.records if r.levelname == "WARNING" and "content ratings" in r.getMessage()]
+    assert len(recs) == 1 and "\n" not in recs[0].getMessage()

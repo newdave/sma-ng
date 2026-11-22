@@ -628,10 +628,16 @@ def processFile(
       try:
         import guessit as _guessit
 
-        from resources.naming import generate_name, rename_file
+        from resources.naming import generate_name, rename_file, video_is_copy
 
-        guess_data = _guessit.guessit(original or os.path.basename(inputfile))
-        new_name = generate_name(output["output"], info, tagdata, mp.settings, guess_data=guess_data, log=log, lookup_path=inputfile)
+        try:
+          guess_data = _guessit.guessit(original or os.path.basename(inputfile))
+        except Exception as e:
+          log.warning("guessit failed for rename, continuing without it: %s", " ".join(str(e).split()) or type(e).__name__)
+          guess_data = None
+        new_name = generate_name(
+          output["output"], info, tagdata, mp.settings, guess_data=guess_data, log=log, lookup_path=inputfile, video_copied=video_is_copy(output.get("options")), original=original
+        )
         if new_name:
           output["output"] = rename_file(output["output"], new_name, log=log)
       except Exception:

@@ -816,12 +816,29 @@ class MediaProcessor:
           # File renaming
           if self.settings.naming_enabled and tagdata:
             try:
-              from resources.naming import generate_name, rename_file
+              from resources.naming import generate_name, rename_file, video_is_copy
 
               # Re-probe the converted output so codec/quality tokens reflect
               # the encoded file, not the source (e.g. x265 instead of x264).
               output_info = self.converter.probe(output["output"], posters_as_video=False) or info
-              new_name = generate_name(output["output"], output_info, tagdata, self.settings, log=self.log, lookup_path=inputfile)
+              import guessit as _guessit
+
+              try:
+                guess_data = _guessit.guessit(original or os.path.basename(inputfile))
+              except Exception as e:
+                self.log.warning("guessit failed for rename, continuing without it: %s", " ".join(str(e).split()) or type(e).__name__)
+                guess_data = None
+              new_name = generate_name(
+                output["output"],
+                output_info,
+                tagdata,
+                self.settings,
+                guess_data=guess_data,
+                log=self.log,
+                lookup_path=inputfile,
+                video_copied=video_is_copy(output.get("options")),
+                original=original,
+              )
               if new_name:
                 output["output"] = rename_file(output["output"], new_name, log=self.log)
             except Exception:

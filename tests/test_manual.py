@@ -552,6 +552,79 @@ class TestProcessFile:
     assert not src.exists(), "Original .mkv must be unlinked when output extension differs"
     assert out_in_input_dir.exists(), "New .mp4 must remain in the input directory"
 
+  @pytest.mark.parametrize("action,expected_copy", [("copy", True), ("transcode", False)])
+  def test_rename_passes_copy_flag_and_original_guess(self, tmp_path, action, expected_copy):
+    src = tmp_path / "Show.mkv"
+    src.write_bytes(b"x")
+    out = tmp_path / "Show.mp4"
+    out.write_bytes(b"y")
+    mp = self._make_mp()
+    mp.settings.naming_enabled = True
+    mp.settings.output_dir = None
+    mp.settings.moveto = None
+    mp.deletesubs = set()
+    mp.process.return_value = {
+      "output": str(out),
+      "input": str(src),
+      "input_deleted": False,
+      "delete": False,
+      "external_subs": [],
+      "options": {"video": {"action": action}},
+      "x": 1920,
+      "y": 1080,
+      "cues_to_front": False,
+    }
+    mp.replicate.return_value = [str(out)]
+    mp.getDefaultAudioLanguage.return_value = None
+    mp.restoreFromOutput.return_value = str(out)
+    with (
+      patch("manual.getInfo", return_value=MagicMock()),
+      patch("manual._find_arr_instance", return_value=(None, None)),
+      patch("manual.triggerRescan", return_value=None),
+      patch("guessit.guessit", return_value={"source": "Web"}) as g,
+      patch("resources.naming.generate_name", return_value=None) as gn,
+    ):
+      processFile(str(src), mp, info=MagicMock(), original="Orig.2020.WEBRip.mkv")
+    g.assert_called_once_with("Orig.2020.WEBRip.mkv")
+    assert gn.call_args.kwargs["guess_data"] == {"source": "Web"}
+    assert gn.call_args.kwargs["video_copied"] is expected_copy
+
+  def test_rename_guessit_failure_falls_back_to_no_guess(self, tmp_path):
+    src = tmp_path / "Show.mkv"
+    src.write_bytes(b"x")
+    out = tmp_path / "Show.mp4"
+    out.write_bytes(b"y")
+    mp = self._make_mp()
+    mp.settings.naming_enabled = True
+    mp.settings.output_dir = None
+    mp.settings.moveto = None
+    mp.deletesubs = set()
+    mp.process.return_value = {
+      "output": str(out),
+      "input": str(src),
+      "input_deleted": False,
+      "delete": False,
+      "external_subs": [],
+      "options": {"video": {"action": "copy"}},
+      "x": 1920,
+      "y": 1080,
+      "cues_to_front": False,
+    }
+    mp.replicate.return_value = [str(out)]
+    mp.getDefaultAudioLanguage.return_value = None
+    mp.restoreFromOutput.return_value = str(out)
+    with (
+      patch("manual.getInfo", return_value=MagicMock()),
+      patch("manual._find_arr_instance", return_value=(None, None)),
+      patch("manual.triggerRescan", return_value=None),
+      patch("guessit.guessit", side_effect=ValueError("boom")),
+      patch("resources.naming.generate_name", return_value=None) as gn,
+    ):
+      processFile(str(src), mp, info=MagicMock(), original="Orig.2020.h264.mkv")
+    gn.assert_called_once()
+    assert gn.call_args.kwargs["guess_data"] is None
+    assert gn.call_args.kwargs["original"] == "Orig.2020.h264.mkv"
+
   def test_overwrite_input_skips_unlink_when_extensions_match(self, tmp_path):
     """When input and output share filename + extension, restoreFromOutput
     has already atomically overwritten the original. The cleanup branch
