@@ -1450,7 +1450,7 @@ paths:
           in: query
           schema:
             type: integer
-          description: Filter entries to a specific job
+          description: Filter entries to a specific job; scans the live log and rotated backups (.1 to .5), keeping the newest `lines` matches
         - name: offset
           in: query
           schema:

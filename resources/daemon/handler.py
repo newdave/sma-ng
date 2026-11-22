@@ -3,6 +3,7 @@ import json
 import os
 import re as _re
 import threading
+from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING
@@ -18,6 +19,7 @@ from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase
 from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html, doc_file_for_slug
 from resources.daemon.queueing import SKIP_RECENTLY_COMPLETED, SKIP_RECYCLE_BIN, SKIP_SAME_EXTENSION, duplicate_outcome, queue_job, skip_reason
+from resources.log import LOG_BACKUP_COUNT
 
 __all__ = ["WebhookHandler", "_inline"]
 from resources.daemon import job_kinds
@@ -747,10 +749,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
       raw_lines = self._read_from_offset(log_path, offset_param)
     elif offset_param is not None:
       raw_lines = self._read_from_offset(log_path, offset_param)
+    elif job_id_filter is not None:
+      raw_lines = self._iter_job_lines(log_path, job_id_filter)
     else:
       raw_lines = self._tail_lines(log_path, lines_param)
 
-    entries = []
+    # Bound memory: with a job_id the whole file set is streamed, keep only the newest N matches
+    entries = deque(maxlen=lines_param) if job_id_filter is not None and not is_tail and offset_param is None else []
     for line in raw_lines:
       line = line.strip()
       if not line:
@@ -769,7 +774,27 @@ class WebhookHandler(BaseHTTPRequestHandler):
           continue
       entries.append(entry)
 
-    self.send_json_response(200, {"entries": entries, "file_size": file_size})
+    self.send_json_response(200, {"entries": list(entries), "file_size": file_size})
+
+  @staticmethod
+  def _iter_job_lines(log_path, job_id):
+    """Yield raw lines mentioning job_id from the rotated backups (oldest first) then the live file.
+
+    Streams line by line; the work is bounded by RotatingFileHandler limits (LOG_BACKUP_COUNT + 1 files of at most
+    LOG_MAX_BYTES). A cheap substring test skips most JSON parsing.
+    """
+    needle = str(job_id)
+    paths = [f"{log_path}.{i}" for i in range(LOG_BACKUP_COUNT, 0, -1)] + [log_path]
+    for candidate in paths:
+      if candidate != log_path and not os.path.isfile(candidate):
+        continue
+      try:
+        with open(candidate, "r", encoding="utf-8", errors="replace") as f:
+          for line in f:
+            if needle in line:
+              yield line
+      except OSError:
+        continue
 
   @staticmethod
   def _tail_lines(filepath, n):

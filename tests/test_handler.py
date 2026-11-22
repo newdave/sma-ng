@@ -701,6 +701,29 @@ class TestGetLogContent:
     assert len(body["entries"]) == 1
     assert body["entries"][0]["job_id"] == 1
 
+  def test_job_id_reads_past_tail_and_rotated_backups(self, tmp_path):
+    log_file = tmp_path / "test.log"
+    old = json.dumps({"level": "INFO", "message": "rotated", "job_id": 7})
+    (tmp_path / "test.log.1").write_text(old + "\n")
+    mid = json.dumps({"level": "INFO", "message": "scrolled", "job_id": 7})
+    noise = [json.dumps({"level": "INFO", "message": f"n{i}", "job_id": 8}) for i in range(3000)]
+    log_file.write_text("\n".join([mid] + noise) + "\n")
+    h = _make_handler()
+    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h._get_log_content("/logs/test", {"job_id": ["7"]})
+    body = _get_response_body(h)
+    assert [e["message"] for e in body["entries"]] == ["rotated", "scrolled"]
+
+  def test_job_id_respects_lines_limit_keeping_newest(self, tmp_path):
+    log_file = tmp_path / "test.log"
+    rows = [json.dumps({"level": "INFO", "message": f"m{i}", "job_id": 7}) for i in range(10)]
+    log_file.write_text("\n".join(rows) + "\n")
+    h = _make_handler()
+    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h._get_log_content("/logs/test", {"job_id": ["7"], "lines": ["3"]})
+    body = _get_response_body(h)
+    assert [e["message"] for e in body["entries"]] == ["m7", "m8", "m9"]
+
   def test_filters_by_level(self, tmp_path):
     log_file = tmp_path / "test.log"
     lines = [

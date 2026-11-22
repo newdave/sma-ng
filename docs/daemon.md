@@ -493,10 +493,14 @@ Structured timestamps returned by the daemon API use the daemon host's local tim
 
 | Parameter | Default | Description                                                                 |
 | --------- | ------- | --------------------------------------------------------------------------- |
-| `lines`   | `200`   | Maximum lines to return (tail of file)                                      |
+| `lines`   | `200`   | Maximum lines to return (newest; max 2000)                                  |
 | `level`   | —       | Minimum log level filter: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`   |
-| `job_id`  | —       | Filter entries to a specific job                                            |
+| `job_id`  | —       | Filter entries to a specific job; scans the live file and rotated backups   |
 | `offset`  | —       | Return content starting from this byte offset (auto-resets on log rotation) |
+
+With `job_id`, the daemon streams the live log and its rotated backups (`<log>.1` to `<log>.5`, at most 10 MB each)
+instead of only the last lines, so jobs that scrolled out of the tail still return their entries (oldest first, newest
+`lines` kept). Entries older than the oldest backup are gone. `/tail` and `offset` reads are unchanged.
 
 ### Poll for new entries (live tail)
 
