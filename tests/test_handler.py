@@ -11,6 +11,7 @@ import pytest
 from resources.daemon.handler import (
   WebhookHandler,
 )
+from resources.daemon.queueing import resolve_config
 
 _tail_lines = WebhookHandler._tail_lines
 _read_from_offset = WebhookHandler._read_from_offset
@@ -1592,13 +1593,13 @@ class TestQueueDirectory:
     cfg = tmp_path / "alt.ini"
     cfg.write_text("")
     h = _make_handler()
-    resolved = h._resolve_config("/media/movie.mkv", str(cfg))
+    resolved = resolve_config(h.server.path_config_manager, "/media/movie.mkv", str(cfg))
     assert resolved == str(cfg)
     h.server.path_config_manager.get_config_for_path.assert_not_called()
 
   def test_resolve_config_falls_back_when_override_missing(self):
     h = _make_handler()
-    resolved = h._resolve_config("/media/movie.mkv", "/missing/config.ini")
+    resolved = resolve_config(h.server.path_config_manager, "/media/movie.mkv", "/missing/config.ini")
     assert resolved == "/config/sma-ng.yml"
     h.server.path_config_manager.get_config_for_path.assert_called_once_with("/media/movie.mkv")
 
@@ -2250,6 +2251,34 @@ class TestHandleWebhook:
     h.server.job_db.add_job.return_value = 1
     h._handle_webhook()
     assert h._response_code == 202
+
+  def _webhook(self, path):
+    body = json.dumps({"path": path}).encode()
+    return _make_handler(
+      method="POST",
+      body=body,
+      headers={"Content-Length": str(len(body)), "Content-Type": "application/json"},
+    )
+
+  def test_response_carries_normalised_path(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_text("x")
+    h = self._webhook(str(tmp_path) + "//./movie.mkv")
+    h.server.path_config_manager.rewrite_path.side_effect = lambda p: p
+    h.server.job_db.add_job.return_value = 1
+    h._handle_webhook()
+    assert h._response_code == 202
+    assert _get_response_body(h)["path"] == str(media)
+
+  def test_profile_lookup_error_returns_500_without_queueing(self, tmp_path):
+    # SMANG-32 review: Sonarr/Radarr must see a failure and retry, not a job queued without its profile.
+    media = tmp_path / "movie.mkv"
+    media.write_text("x")
+    h = self._webhook(str(media))
+    h.server.path_config_manager.get_profile_for_path.side_effect = RuntimeError("routing broke")
+    h._handle_webhook()
+    assert h._response_code == 500
+    h.server.job_db.add_job.assert_not_called()
 
 
 class TestHandleSonarrWebhook:

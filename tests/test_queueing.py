@@ -1,8 +1,11 @@
 from unittest import mock
 
+import pytest
+
 from resources.daemon.queueing import (
   DUPLICATE,
   NO_ROUTING_MATCH,
+  PROFILE_LOOKUP_FAILED,
   QUEUED,
   REFUSED,
   SKIP_RECENTLY_COMPLETED,
@@ -14,6 +17,7 @@ from resources.daemon.queueing import (
   normalise_job_path,
   queue_job,
   queue_media_path,
+  resolve_config,
   skip_reason,
 )
 
@@ -136,12 +140,41 @@ class TestQueueMediaPath:
     queue_media_path(db, self._pcm(), "/m/a.mkv", extra_args=["--profile", "sd"])
     assert db.add_job.call_args.args[2] == ["--profile", "sd"]
 
-  def test_profile_lookup_error_queues_without_profile(self):
+  def test_profile_lookup_error_propagates_by_default(self):
     db = mock.MagicMock()
-    db.add_job.return_value = 1
     pcm = self._pcm()
     pcm.get_profile_for_path.side_effect = RuntimeError("boom")
-    assert queue_media_path(db, pcm, "/m/a.mkv").profile is None
+    with pytest.raises(RuntimeError):
+      queue_media_path(db, pcm, "/m/a.mkv")
+    db.add_job.assert_not_called()
+
+  def test_profile_lookup_error_skips_when_asked(self):
+    db = mock.MagicMock()
+    pcm = self._pcm()
+    pcm.get_profile_for_path.side_effect = RuntimeError("boom")
+    out = queue_media_path(db, pcm, "/m//a.mkv", skip_on_profile_error=True)
+    assert (out.status, out.reason, out.path) == (SKIPPED, PROFILE_LOOKUP_FAILED, "/m/a.mkv")
+    db.add_job.assert_not_called()
+
+  def test_routing_first_reports_routing_miss_over_skip_rule(self):
+    db = mock.MagicMock()
+    pcm = self._pcm(strict_routing=True)
+    pcm.has_routing_match.return_value = False
+    pcm.is_recycle_bin_path.return_value = True
+    assert queue_media_path(db, pcm, "/m/a.mkv").reason == SKIP_RECYCLE_BIN
+    out = queue_media_path(db, pcm, "/m/a.mkv", routing_first=True)
+    assert (out.status, out.reason) == (REFUSED, NO_ROUTING_MATCH)
+
+
+def test_resolve_config_override_and_fallback(tmp_path):
+  pcm = mock.Mock()
+  pcm.get_config_for_path.return_value = "/c.yml"
+  override = tmp_path / "o.yml"
+  override.write_text("")
+  assert resolve_config(pcm, "/m/a.mkv", str(override)) == str(override)
+  pcm.get_config_for_path.assert_not_called()
+  assert resolve_config(pcm, "/m/a.mkv", "/missing.yml") == "/c.yml"
+  assert resolve_config(pcm, "/m/a.mkv") == "/c.yml"
 
   def test_recently_completed(self):
     db = mock.MagicMock()

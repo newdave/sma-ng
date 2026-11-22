@@ -30,6 +30,7 @@ from resources.daemon.queueing import (
   merge_default_args,
   merge_profile_arg,
   queue_media_path,
+  resolve_config,
   resolve_profile,
 )
 from resources.log import LOG_BACKUP_COUNT
@@ -1525,18 +1526,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
       return False
     return os.path.realpath(config_override) == os.path.realpath(known)
 
-  def _resolve_config(self, path, config_override):
-    """Return the config file to use for path, respecting any override."""
-    if config_override and os.path.exists(config_override):
-      return config_override
-    return self.server.path_config_manager.get_config_for_path(path)
-
-  def _resolve_profile(self, path, config_override):
-    """Return the profile to apply for path, unless an explicit config override is used."""
-    if config_override:
-      return None
-    return resolve_profile(self.server.path_config_manager, path)
-
   def _merge_args(self, path, extra_args):
     """Merge per-path default_args with request args (see ``queueing.merge_default_args``)."""
     return merge_default_args(self.server.path_config_manager, path, extra_args)
@@ -1891,7 +1880,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
     ``convert`` behaves exactly like POST /convert (directories expand per
     file). Other kinds queue one job for the path as given, without the
     convert-only default args or same-extension skip.
+
+    An unexpected error (e.g. a failing routing-profile lookup) answers 500
+    so the caller retries, rather than queueing a job without its profile.
     """
+    try:
+      self._queue_jobs_request()
+    except _BadRequest:
+      raise
+    except Exception as e:
+      self.server.logger.exception("Error handling /jobs request: %s" % e)
+      self.send_json_response(500, {"error": str(e)})
+
+  def _queue_jobs_request(self):
+    """Body of POST /jobs; see ``_post_jobs``."""
     body = self.rfile.read(self._content_length()).decode("utf-8").strip()
     req = parse_jobs_body(body, self.send_json_response)
     if req is None:
@@ -1934,8 +1936,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
     if os.path.isdir(path) and not kind.directory_ok:
       self.send_json_response(400, {"error": "%s needs a file, not a directory" % kind.name, "path": path})
       return
-    config = self._resolve_config(job_path, None)
-    profile = req["profile"] or self._resolve_profile(job_path, None)
+    config = resolve_config(pcm, job_path)
+    profile = req["profile"] or resolve_profile(pcm, job_path)
     if kind.uses_profile:
       args = self._merge_profile_arg(args, profile)
     priority = req["priority"] if req["priority"] is not None else (PREVIEW_PRIORITY if kind.name == "preview" else 0)

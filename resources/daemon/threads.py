@@ -6,7 +6,7 @@ import time
 from resources.daemon import job_kinds, metrics_prom, storage
 from resources.daemon.db import NO_CLAIM_TOKEN
 from resources.daemon.log_archiver import LogArchiver
-from resources.daemon.queueing import QUEUED, REFUSED, SKIP_RECENTLY_COMPLETED, SKIPPED, queue_media_path
+from resources.daemon.queueing import PROFILE_LOOKUP_FAILED, QUEUED, REFUSED, SKIP_RECENTLY_COMPLETED, SKIPPED, queue_media_path
 from resources.library_audit.engine import AuditEngine
 from resources.library_audit.enumerator import enumerate_paths
 from resources.log import getLogger
@@ -321,9 +321,20 @@ class ScannerThread(_StoppableThread):
       if rewrite_from and rewrite_to and filepath.startswith(rewrite_from):
         submit_path = rewrite_to + filepath[len(rewrite_from) :]
 
-      result = queue_media_path(self.job_db, self.path_config_manager, submit_path, request_source="scan")
+      result = queue_media_path(
+        self.job_db,
+        self.path_config_manager,
+        submit_path,
+        request_source="scan",
+        routing_first=True,
+        skip_on_profile_error=True,
+      )
       if result.status == REFUSED:
         self.log.warning("Scanner skipped %s under strict-routing — no daemon.routing rule matched [routing-miss]." % result.path)
+        continue
+      if result.reason == PROFILE_LOOKUP_FAILED:
+        # Unrecorded so the next scan retries once routing works again.
+        self.log.warning("Profile lookup failed for %s; skipping until next scan [routing-miss]" % result.path)
         continue
       if result.status == SKIPPED and result.reason != SKIP_RECENTLY_COMPLETED:
         # Left unrecorded, like strict-routing skips, so a config change can pick the file up later.

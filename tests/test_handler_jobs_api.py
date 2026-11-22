@@ -30,6 +30,15 @@ def server():
 
 
 class TestPostJobs:
+  @pytest.mark.parametrize("kind", ["convert", "preview"])
+  def test_profile_lookup_error_returns_500_without_queueing(self, server, tmp_path, kind):
+    media = tmp_path / "a.mkv"
+    media.write_text("x")
+    server.path_config_manager.get_profile_for_path.side_effect = RuntimeError("routing broke")
+    h = _post(server, {"kind": kind, "path": str(media)})
+    assert h._response_code == 500
+    server.job_db.add_job.assert_not_called()
+
   def test_repair_queued(self, server, tmp_path):
     server.job_db.add_job.return_value = 12
     h = _post(server, {"kind": "repair", "path": str(tmp_path), "args": ["-n"]})
