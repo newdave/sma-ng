@@ -997,7 +997,8 @@ corresponding Python config block in `sma-ng.yml`. See
    - Encoders with no usable quality mode: `h264_v4l2m2m`, `hevc_v4l2m2m`, `h264_omx`, `mpeg4` (divx), `libtheora`,
      `h263`, `flv`, `mpeg1video`, `mpeg2video`, and VideoToolbox on Intel (x86_64 FFmpeg has no `-q:v`). They get a
      fallback bitrate by output height (2160p 20000k, 1440p 10000k, 1080p 6000k, 720p 3000k, smaller 1500k). The
-     fallback never exceeds `max-bitrate` (`[video-bitrate-fallback]`).
+     fallback never exceeds `max-bitrate` (`[video-bitrate-fallback]`), and `min-bitrate` still raises it to the
+     floor (`[video-min-bitrate]`).
 
 When `[Analyzer]` is enabled, the analyzer may additionally:
 

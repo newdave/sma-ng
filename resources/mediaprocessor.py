@@ -2826,7 +2826,8 @@ class MediaProcessor:
         self.log.info("Source bitrate is unknown; encoding at constant quality and dropping VBV maxrate/bufsize [icq-rate-control].")
         vmaxrate = None
         vbufsize = None
-    elif vcodec != "copy" and vbitrate and self.settings.vminbitrate and vbitrate < self.settings.vminbitrate:
+    # Separate step so the [video-bitrate-fallback] target gets the floor too.
+    if vcodec != "copy" and vbitrate and self.settings.vminbitrate and vbitrate < self.settings.vminbitrate:
       self.log.info("Video bitrate target %dk is below the configured floor; raising to %dk [video-min-bitrate]." % (vbitrate, self.settings.vminbitrate))
       vbitrate = self.settings.vminbitrate
       vdebug = vdebug + ".min-bitrate"

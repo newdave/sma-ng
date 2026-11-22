@@ -1807,6 +1807,15 @@ class TestUnknownSourceBitrateEncoderFamilies:
     assert video["bitrate"] == 4000
     assert self._value(args, "-maxrate:v") == "4000k"
 
+  def test_fallback_bitrate_raised_to_min_bitrate(self, tmp_yaml, make_media_info):
+    # 720p fallback is 3000k; a 4500k min-bitrate floor still applies to it.
+    mp = self._make_mp(tmp_yaml, "h264_v4l2m2m", global_quality=0, vmaxbitrate=0)
+    mp.settings.vminbitrate = 4500
+    video, args = self._ffmpeg_args(mp, self._unknown_info(make_media_info, height=720))
+    assert video["bitrate"] == 4500
+    assert self._value(args, "-vb") == "4500k"
+    assert ".min-bitrate" in video["debug"]
+
   @pytest.mark.parametrize("vcodec, keeps_vbv", [("h264", True), ("hevc_qsv", False)])
   def test_analyzer_ceiling_with_unknown_bitrate(self, tmp_yaml, make_media_info, vcodec, keeps_vbv):
     from resources.analyzer import AnalyzerRecommendations
