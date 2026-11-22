@@ -1,0 +1,24 @@
+docs/daemon.md
+  s_d73ac5e457a585::t_2bc7e3c397fabe 590-591
+  s_d73ac5e457a585::t_6c4a2bad22e89e 496
+  s_d73ac5e457a585::t_5390ff6c2063e7 552-555
+  s_d73ac5e457a585::t_883edf783516b9 556-558
+resources/daemon/threads.py
+  s_d73ac5e457a585::t_c7d2a318a23138 315-316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "1539c703adfae05134fe6d11c0a53febcd0dbed7",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
