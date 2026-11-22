@@ -698,7 +698,7 @@ def _resolve_hdr_color_tags(hdr_input, hdr_output, hdr_settings):
 from collections.abc import Callable
 
 from converter import Converter, FFMpegConvertError
-from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, HWAccelVideoCodec, _default_vaapi_render_node, parse_filter_segments, video_codec_list
+from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments, video_codec_list
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
@@ -2779,22 +2779,23 @@ class MediaProcessor:
     elif vcodec != "copy" and vbitrate_unknown and not vbitrate:
       vdebug = vdebug + ".bitrate-unknown"
       encoder = next((c for c in video_codec_list if c.codec_name == vcodec), None)
-      if getattr(encoder, "needs_bitrate_target", False):
-        # No constant-quality mode: a conservative resolution-based target
-        # beats FFmpeg's silent 200 kb/s default.
+      if encoder is not None and encoder.requires_bitrate_target():
+        # No usable constant-quality mode: a conservative resolution-based
+        # target beats FFmpeg's silent 200 kb/s default.
         vbitrate = self._unknown_bitrate_fallback_kbps(info.video, vwidth, vheight, effective_vmaxbitrate)
         self.log.info("Source bitrate is unknown and %s has no constant-quality mode; using fallback bitrate %dk [video-bitrate-fallback]." % (vcodec, vbitrate))
-      elif encoder is not None and issubclass(encoder, HWAccelVideoCodec) and (vmaxrate or vbufsize):
-        # Hardware quality modes take no VBV: QSV picks QVBR with a zero
-        # target when -maxrate rides along with -global_quality and fails
-        # encoder init; NVENC/VAAPI CQP ignore it.
+      elif encoder is not None and encoder.keeps_vbv_without_target():
+        # libx264/libx265 CRF and Apple Silicon VideoToolbox -q:v honour VBV,
+        # so the max-bitrate / HDR / analyzer ceiling stays as a capped CRF.
+        if vmaxrate:
+          self.log.info("Source bitrate is unknown; encoding at constant quality capped by maxrate %s bufsize %s [icq-rate-control]." % (vmaxrate, vbufsize))
+      elif vmaxrate or vbufsize:
+        # No capped CRF: libvpx-vp9 / libaom-av1 reject VBV without a bitrate
+        # (EINVAL), QSV ICQ picks QVBR with a zero target and fails init, and
+        # NVENC/VAAPI CQP and SVT-AV1 ignore it.
         self.log.info("Source bitrate is unknown; encoding at constant quality and dropping VBV maxrate/bufsize [icq-rate-control].")
         vmaxrate = None
         vbufsize = None
-      elif vmaxrate:
-        # Software CRF and VideoToolbox constant quality honour VBV, so the
-        # max-bitrate / HDR / analyzer ceiling stays as a capped CRF.
-        self.log.info("Source bitrate is unknown; encoding at constant quality capped by maxrate %s bufsize %s [icq-rate-control]." % (vmaxrate, vbufsize))
     elif vcodec != "copy" and vbitrate and self.settings.vminbitrate and vbitrate < self.settings.vminbitrate:
       self.log.info("Video bitrate target %dk is below the configured floor; raising to %dk [video-min-bitrate]." % (vbitrate, self.settings.vminbitrate))
       vbitrate = self.settings.vminbitrate

@@ -1,5 +1,7 @@
 """Tests for converter/avcodecs.py - codec option parsing and FFmpeg flag generation."""
 
+from unittest.mock import patch
+
 import pytest
 
 from converter.avcodecs import (
@@ -21,6 +23,7 @@ from converter.avcodecs import (
   NVEncH265Codec,
   OpusCodec,
   SrtCodec,
+  VideoCodec,
   VideotoolboxEncH264,
   VideotoolboxEncH265,
   Vp9QSVCodec,
@@ -581,8 +584,9 @@ class TestNVEncCodecs:
     assert "hevc_nvenc" in opts
 
   def test_nvenc_av1_constant_qp_without_bitrate(self):
+    # av1_nvenc -qp is on the AV1 0-255 qindex scale; 110 is about CRF 25-30.
     opts = NVEncAV1Codec().parse_options({"codec": "av1nvenc"})
-    assert opts[opts.index("-qp") + 1] == "23"
+    assert opts[opts.index("-qp") + 1] == "110"
     assert "-vb" not in opts
 
   def test_nvenc_av1_bitrate_target_has_no_qp(self):
@@ -592,23 +596,48 @@ class TestNVEncCodecs:
 
 
 class TestVideotoolboxAndNoQualityModeCodecs:
-  """VideoToolbox gets -q:v without a target; V4L2 M2M / OMX need a bitrate target."""
+  """VideoToolbox gets -q:v without a target on arm64 only; encoders with no quality mode need a bitrate target."""
 
-  @pytest.mark.parametrize("cls, name", [(VideotoolboxEncH264, "h264_videotoolbox"), (VideotoolboxEncH265, "h265_videotoolbox")])
-  def test_constant_quality_without_bitrate(self, cls, name):
-    opts = cls().parse_options({"codec": name})
+  VT = [(VideotoolboxEncH264, "h264_videotoolbox"), (VideotoolboxEncH265, "h265_videotoolbox")]
+
+  @pytest.mark.parametrize("cls, name", VT)
+  def test_constant_quality_without_bitrate_on_arm64(self, cls, name):
+    with patch("platform.machine", return_value="arm64"):
+      opts = cls().parse_options({"codec": name})
+      assert not cls.requires_bitrate_target()
+      assert cls.keeps_vbv_without_target()
     assert opts[opts.index("-q:v") + 1] == "65"
     assert "-vb" not in opts
 
-  @pytest.mark.parametrize("cls, name", [(VideotoolboxEncH264, "h264_videotoolbox"), (VideotoolboxEncH265, "h265_videotoolbox")])
+  @pytest.mark.parametrize("cls, name", VT)
+  def test_no_qscale_on_x86_64(self, cls, name):
+    # x86_64 VideoToolbox rejects -q:v ("qscale not available for encoder"), so it needs a bitrate target.
+    with patch("platform.machine", return_value="x86_64"):
+      opts = cls().parse_options({"codec": name})
+      assert cls.requires_bitrate_target()
+    assert "-q:v" not in opts
+
+  @pytest.mark.parametrize("cls, name", VT)
   def test_bitrate_target_has_no_quality(self, cls, name):
-    opts = cls().parse_options({"codec": name, "bitrate": 4000})
+    with patch("platform.machine", return_value="arm64"):
+      opts = cls().parse_options({"codec": name, "bitrate": 4000})
     assert "-q:v" not in opts
     assert opts[opts.index("-vb") + 1] == "4000k"
 
   def test_needs_bitrate_target_flags(self):
-    flagged = {c.codec_name for c in video_codec_list if getattr(c, "needs_bitrate_target", False)}
-    assert flagged == {"h264_omx", "h264_v4l2m2m", "hevc_v4l2m2m"}
+    with patch("platform.machine", return_value="arm64"):
+      flagged = {c.codec_name for c in video_codec_list if issubclass(c, VideoCodec) and c.requires_bitrate_target()}
+    assert flagged == {"h264_omx", "h264_v4l2m2m", "hevc_v4l2m2m", "divx", "theora", "h263", "flv", "mpeg1", "mpeg2"}
+
+  @pytest.mark.parametrize("machine, vt", [("arm64", True), ("x86_64", False)])
+  def test_capped_crf_encoders(self, machine, vt):
+    # Only encoders that honour maxrate/bufsize with no target (capped CRF) keep VBV when the bitrate is unknown.
+    with patch("platform.machine", return_value=machine):
+      capped = {c.codec_name for c in video_codec_list if issubclass(c, VideoCodec) and c.keeps_vbv_without_target()}
+    expected = {"h264", "x264", "h265", "hevc"}
+    if vt:
+      expected |= {"h264_videotoolbox", "h265_videotoolbox"}
+    assert capped == expected
 
 
 class TestCopyCodecs:

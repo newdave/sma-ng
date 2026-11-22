@@ -1717,7 +1717,10 @@ class TestUnknownSourceBitrateEncoderFamilies:
     assert options is not None
     video = options["video"]
     encoder = next(c for c in video_codec_list if c.codec_name == video["codec"])()
-    return video, encoder.parse_options(dict(video))
+    opts = dict(video)
+    # Vp9Codec/AV1Codec parse framedata unconditionally; the mock source carries none.
+    opts["framedata"] = opts.get("framedata") or {}
+    return video, encoder.parse_options(opts)
 
   @staticmethod
   def _value(args, flag):
@@ -1732,16 +1735,23 @@ class TestUnknownSourceBitrateEncoderFamilies:
       # VAAPI/NVENC take no global-quality; their CQP default (hw_quality_default) applies.
       ("hevc_vaapi", "-qp", "23", False),
       ("hevc_nvenc", "-qp", "23", False),
-      ("av1nvenc", "-qp", "23", False),
+      # AV1 qindex scale (0-255): 110 is about CRF 25-30.
+      ("av1nvenc", "-qp", "110", False),
       ("h264", None, None, True),
       ("h265", None, None, True),
+      # libvpx-vp9 / libaom-av1 reject VBV without a bitrate (EINVAL); SVT-AV1 has no capped CRF.
+      ("vp9", None, None, False),
+      ("av1", None, None, False),
+      ("svtav1", None, None, False),
       ("h264_videotoolbox", "-q:v", "65", True),
       ("h265_videotoolbox", "-q:v", "65", True),
     ],
   )
   def test_quality_mode_per_family(self, tmp_yaml, make_media_info, vcodec, quality_flag, quality_value, keeps_vbv):
     mp = self._make_mp(tmp_yaml, vcodec)
-    video, args = self._ffmpeg_args(mp, self._unknown_info(make_media_info))
+    # VideoToolbox -q:v exists only on Apple Silicon builds.
+    with patch("platform.machine", return_value="arm64"):
+      video, args = self._ffmpeg_args(mp, self._unknown_info(make_media_info))
     assert video["codec"] == vcodec
     assert video["bitrate"] is None
     assert "-vb" not in args
@@ -1769,6 +1779,28 @@ class TestUnknownSourceBitrateEncoderFamilies:
     assert ".bitrate-unknown" in video["debug"]
     infos = [c.args[0] for c in mp.log.info.call_args_list if c.args]
     assert any("video-bitrate-fallback" in m for m in infos)
+
+  @pytest.mark.parametrize("vcodec", ["h264_videotoolbox", "h265_videotoolbox"])
+  def test_videotoolbox_on_x86_64_uses_resolution_fallback(self, tmp_yaml, make_media_info, vcodec):
+    # Intel VideoToolbox has no -q:v ("qscale not available for encoder"), so it needs a bitrate target.
+    mp = self._make_mp(tmp_yaml, vcodec)
+    with patch("platform.machine", return_value="x86_64"):
+      video, args = self._ffmpeg_args(mp, self._unknown_info(make_media_info))
+    assert video["bitrate"] == 6000
+    assert self._value(args, "-vb") == "6000k"
+    assert "-q:v" not in args
+    assert self._value(args, "-maxrate:v") == "8000k"
+    infos = [c.args[0] for c in mp.log.info.call_args_list if c.args]
+    assert any("video-bitrate-fallback" in m for m in infos)
+
+  @pytest.mark.parametrize("vcodec", ["divx", "theora", "h263", "flv", "mpeg1", "mpeg2"])
+  def test_legacy_encoders_use_resolution_fallback(self, tmp_yaml, make_media_info, vcodec):
+    # No constant-quality default: without a target FFmpeg would encode at 200 kb/s.
+    mp = self._make_mp(tmp_yaml, vcodec, global_quality=0, vmaxbitrate=0)
+    video, args = self._ffmpeg_args(mp, self._unknown_info(make_media_info, height=720))
+    assert video["bitrate"] == 3000
+    assert self._value(args, "-vb") == "3000k"
+    assert ".bitrate-unknown" in video["debug"]
 
   def test_fallback_bitrate_respects_max_bitrate(self, tmp_yaml, make_media_info):
     mp = self._make_mp(tmp_yaml, "h264_v4l2m2m", global_quality=0, vmaxbitrate=4000)

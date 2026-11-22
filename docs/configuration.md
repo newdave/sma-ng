@@ -981,15 +981,19 @@ corresponding Python config block in `sma-ng.yml`. See
    negative after subtracting assumed audio), steps 1-4, `crf-profiles` and the same-family clamp are skipped. No
    bitrate target is set and the encode runs at constant quality instead of failing. `video.debug` gains
    `.bitrate-unknown` (`[video-bitrate-unknown]`); the marker never blocks the copy fallback. Per encoder family:
-   - Software (libx264, libx265, SVT-AV1): the encoder's default CRF. `max-bitrate`, `hdr.max-bitrate` and the
-     analyzer ceiling still apply as VBV `maxrate`/`bufsize`, so the encode is a capped CRF.
-   - QSV (`-global_quality`): ICQ at `global-quality` (or the encoder default). VBV is dropped: `-maxrate` without a
-     target makes QSV pick QVBR, which fails encoder init. These caps do **not** apply.
-   - NVENC and VAAPI: constant QP (`-qp`, default 23). VBV is dropped because CQP ignores it.
-   - VideoToolbox: constant quality `-q:v 65` (Apple Silicon only); `max-bitrate` still applies as a data-rate limit.
-   - Encoders with no quality mode (`h264_v4l2m2m`, `hevc_v4l2m2m`, `h264_omx`): a fallback bitrate by output
-     height (2160p 20000k, 1440p 10000k, 1080p 6000k, 720p 3000k, smaller 1500k). The fallback never exceeds
-     `max-bitrate` (`[video-bitrate-fallback]`).
+   - Capped CRF (only libx264, libx265 and VideoToolbox on Apple Silicon): `max-bitrate`, `hdr.max-bitrate` and the
+     analyzer ceiling still apply as VBV `maxrate`/`bufsize`. libx264/libx265 use their default CRF; VideoToolbox
+     uses constant quality `-q:v 65`.
+   - Every other encoder drops VBV, so these caps do **not** apply. libvpx-vp9 and libaom-av1 reject `maxrate`
+     without a bitrate at encoder init; QSV picks QVBR and fails init; NVENC, VAAPI and SVT-AV1 ignore it.
+   - Software VP9/AV1 (libvpx-vp9, libaom-av1, SVT-AV1, rav1e): the encoder's default CRF.
+   - QSV (`-global_quality`): ICQ at `global-quality` (or the encoder default).
+   - NVENC and VAAPI: constant QP (`-qp`). H.264/HEVC default 23 (0-51 scale). `av1_nvenc` defaults to 110 on the
+     AV1 0-255 qindex scale (about CRF 25-30); `av1_vaapi` keeps 23.
+   - Encoders with no usable quality mode: `h264_v4l2m2m`, `hevc_v4l2m2m`, `h264_omx`, `mpeg4` (divx), `libtheora`,
+     `h263`, `flv`, `mpeg1video`, `mpeg2video`, and VideoToolbox on Intel (x86_64 FFmpeg has no `-q:v`). They get a
+     fallback bitrate by output height (2160p 20000k, 1440p 10000k, 1080p 6000k, 720p 3000k, smaller 1500k). The
+     fallback never exceeds `max-bitrate` (`[video-bitrate-fallback]`).
 
 When `[Analyzer]` is enabled, the analyzer may additionally:
 
