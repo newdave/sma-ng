@@ -507,7 +507,7 @@ See also:
 | Workflow      | Trigger                                  | Description                                                                 |
 | ------------- | ---------------------------------------- | --------------------------------------------------------------------------- |
 | `ci.yml`      | PR / push to main                        | Tests + coverage gates, pre-commit lint, OpenAPI/docs/config checks, runtime `pip-audit` |
-| `docker.yml`  | PR; CI passed on main; called by release | Build and smoke test the image; Trivy scan and push only for main and releases |
+| `docker.yml`  | PR (image paths); CI passed on main; called by release | Build and smoke test the image; Trivy scan and push only for main and releases |
 | `release.yml` | Push to main; manual with `tag`          | release-please PR + version bump; on release: wheel/sdist + release image   |
 | `codeql.yml`  | PR (Python changes) / weekly             | CodeQL static analysis (results in the Security tab)                        |
 

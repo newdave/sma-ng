@@ -2,6 +2,7 @@ name: Docker
 
 # Three ways in:
 #   pull_request   build + smoke test the PR's image (no Trivy scan); never pushes.
+#                  Only runs when image-affecting paths change.
 #   workflow_run   after CI passes on a push to main: build, smoke test, push
 #                  ghcr.io/<repo>:latest, :main and :sha-<short> (linux/amd64).
 #                  latest therefore always tracks main HEAD that passed CI.
@@ -15,15 +16,15 @@ name: Docker
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "tests/**"
-      - "*.md"
-      - ".claude/**"
-      - ".codex/**"
-      - "renovate.json"
-      - ".github/workflows/ci.yml"
-      - ".github/workflows/release.yml"
-      - ".github/workflows/codeql.yml"
+    # Allow-list of image-affecting paths; the workflow_run build on main is unconditional.
+    paths:
+      - "Dockerfile*"
+      - "docker/**"
+      - "setup/requirements*.txt"
+      - "pyproject.toml"
+      - "**/*.py"
+      - "setup/**"
+      - ".github/workflows/docker.yml"
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -71,6 +72,7 @@ jobs:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     outputs:
       push: ${{ steps.plan.outputs.push }}
+      release: ${{ steps.plan.outputs.release }}
       sha: ${{ steps.commit.outputs.sha }}
       matrix: ${{ steps.plan.outputs.matrix }}
       tags: ${{ steps.meta.outputs.tags }}
@@ -229,8 +231,9 @@ jobs:
           target: runtime
           platforms: ${{ matrix.platform }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          provenance: mode=max
-          sbom: true
+          # Attestations only for release images; main/dispatch pushes skip them.
+          provenance: ${{ needs.plan.outputs.release == 'true' && 'mode=max' || 'false' }}
+          sbom: ${{ needs.plan.outputs.release == 'true' }}
           labels: ${{ needs.plan.outputs.labels }}
           cache-from: |
             type=gha,scope=${{ matrix.cache }}
