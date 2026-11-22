@@ -141,6 +141,19 @@ def extract_air_date(text):
   return None
 
 
+_TRAILING_YEAR_RE = re.compile(r"\s*\(\d{4}\)\s*$")
+
+
+def strip_trailing_year(title):
+  """Drop a trailing ' (YYYY)' so the year is not doubled when titleyear is built.
+
+  Only a 4-digit year in parentheses is removed; other parenthetical text stays.
+  """
+  title = title or ""
+  stripped = _TRAILING_YEAR_RE.sub("", title)
+  return stripped if stripped.strip() else title
+
+
 def sanitize_filename(name):
   """Remove characters unsafe for filenames."""
   name = UNSAFE_CHARS.sub("", name)
@@ -271,7 +284,7 @@ class NamingData:
     from resources.metadata import MediaType
 
     if tagdata.mediatype == MediaType.TV:
-      self.series_title = tagdata.showname or ""
+      self.series_title = strip_trailing_year(tagdata.showname)
       year = ""
       if hasattr(tagdata, "showdata") and tagdata.showdata:
         first_air = tagdata.showdata.get("first_air_date", "")
@@ -291,7 +304,7 @@ class NamingData:
         self.air_date = extract_air_date(date) or self.air_date
       self.episode_substituted = getattr(tagdata, "episode_substituted", False) is True
     elif tagdata.mediatype == MediaType.Movie:
-      self.movie_title = tagdata.title or ""
+      self.movie_title = strip_trailing_year(tagdata.title)
       self.movie_cleantitle = sanitize_filename(self.movie_title)
       date = getattr(tagdata, "date", "") or ""
       self.movie_year = date[:4] if len(date) >= 4 else ""
@@ -347,7 +360,7 @@ class NamingData:
     """Apply Sonarr parse response fields to this NamingData instance."""
     if data.get("series"):
       series = data["series"]
-      self.series_title = series.get("title", self.series_title)
+      self.series_title = strip_trailing_year(series.get("title", self.series_title))
       self.series_type = series.get("seriesType", "") or ""
       year = series.get("year")
       if year:  # don't overwrite a known year with 0 or None
@@ -374,7 +387,7 @@ class NamingData:
     """Apply Radarr parse response fields to this NamingData instance."""
     if data.get("movie"):
       movie = data["movie"]
-      self.movie_title = movie.get("title", self.movie_title)
+      self.movie_title = strip_trailing_year(movie.get("title", self.movie_title))
       self.movie_cleantitle = sanitize_filename(self.movie_title)
       year = movie.get("year")
       if year:  # don't overwrite a known year with 0 or None

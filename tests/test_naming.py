@@ -1274,3 +1274,72 @@ class TestDailySeriesNaming:
     from resources.naming import extract_air_date
 
     assert extract_air_date("Show.2026.02.31.mkv") is None
+
+
+class TestTrailingYearStripped:
+  """Titles already ending in (YYYY) must not get the year appended twice."""
+
+  def _tv_tagdata(self, showname, first_air="2026-01-01"):
+    from resources.metadata import MediaType
+
+    tagdata = MagicMock()
+    tagdata.mediatype = MediaType.TV
+    tagdata.showname = showname
+    tagdata.showdata = {"first_air_date": first_air}
+    tagdata.season = 1
+    tagdata.episode = 5
+    tagdata.episodes = [5]
+    tagdata.title = "Ep"
+    return tagdata
+
+  def test_strip_helper(self):
+    from resources.naming import strip_trailing_year
+
+    assert strip_trailing_year("Rivals (2024)") == "Rivals"
+    assert strip_trailing_year("Rivals (2024) ") == "Rivals"
+    assert strip_trailing_year("Rivals") == "Rivals"
+    assert strip_trailing_year("Show (US)") == "Show (US)"
+    assert strip_trailing_year("Show (UK) (2020)") == "Show (UK)"
+    assert strip_trailing_year("(2024)") == "(2024)"
+    assert strip_trailing_year("Blade Runner 2049") == "Blade Runner 2049"
+    assert strip_trailing_year(None) == ""
+
+  def test_sonarr_title_with_year(self):
+    data = NamingData()
+    data._apply_sonarr_data({"series": {"title": "Treasure Island (2026)", "year": 2026}}, MagicMock())
+    assert data.series_titleyear == "Treasure Island (2026)"
+    assert data.series_title == "Treasure Island"
+
+  def test_sonarr_title_without_year_unchanged(self):
+    data = NamingData()
+    data._apply_sonarr_data({"series": {"title": "Rivals", "year": 2024}}, MagicMock())
+    assert data.series_titleyear == "Rivals (2024)"
+
+  def test_sonarr_keeps_non_year_parenthetical(self):
+    data = NamingData()
+    data._apply_sonarr_data({"series": {"title": "Show (US)", "year": 2024}}, MagicMock())
+    assert data.series_titleyear == "Show (US) (2024)"
+
+  def test_tmdb_tv_title_with_year(self):
+    data = NamingData()
+    data.from_tagdata(self._tv_tagdata("Rivals (2026)"))
+    assert data.series_titleyear == "Rivals (2026)"
+    assert data.series_title == "Rivals"
+
+  def test_tmdb_movie_title_with_year(self):
+    from resources.metadata import MediaType
+
+    tagdata = MagicMock()
+    tagdata.mediatype = MediaType.Movie
+    tagdata.title = "Dune (2021)"
+    tagdata.date = "2021-10-22"
+    data = NamingData()
+    data.from_tagdata(tagdata)
+    assert data.movie_title == "Dune"
+    assert data.movie_cleantitle == "Dune"
+
+  def test_radarr_movie_title_with_year(self):
+    data = NamingData()
+    data._apply_radarr_data({"movie": {"title": "Dune (2021)", "year": 2021}}, MagicMock())
+    assert data.movie_title == "Dune"
+    assert data.movie_cleantitle == "Dune"
