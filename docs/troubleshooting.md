@@ -373,6 +373,14 @@ The job finished, but its row had already been cancelled, requeued by stale-node
 node, so this node's result was dropped instead of overwriting the newer state. This is expected after a cancel
 or a network partition. A cancelled job's output may still exist on disk if ffmpeg finished before the kill landed.
 
+### Job returned to pending with "Interrupted by ErrorName before the job started; requeued"
+
+The database failed between claiming the job and starting the conversion, so the worker freed its slot and put the
+job back to pending without burning a retry. The write is retried with backoff. If it still fails, the log shows
+`Job N requeue write failed after 4 attempts` and the worker retries it on every loop pass
+(`Job N pending requeue still failing`); if the node dies first, stale-node recovery requeues the row. Fix the
+database connection (see the surrounding error) rather than the job.
+
 ### Conversion produces larger output file
 
 - Lower the `crf` value (lower CRF = higher quality = larger file; raise it to reduce size)

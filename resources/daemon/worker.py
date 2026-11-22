@@ -51,6 +51,8 @@ JOB_STATUS_POLL_SECONDS = 10.0
 KILL_GRACE_SECONDS = 5.0
 # Back-off after an unexpected error in the worker loop (e.g. DB outage).
 LOOP_ERROR_BACKOFF_SECONDS = 5.0
+# Delays between retries of a terminal job write (fail/requeue) after a DB error.
+TERMINAL_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
 
 # Reasons a running conversion can be aborted by the daemon.
 ABORT_TIMEOUT = "timeout"
@@ -319,6 +321,7 @@ class ConversionWorker(threading.Thread):
     self._abort_lock = threading.Lock()
     self._abort_reason = None
     self._watchdog = None
+    self._pending_release = None
 
   def stop(self):
     """Signal worker to stop."""
@@ -427,6 +430,7 @@ class ConversionWorker(threading.Thread):
       if self.pool is not None and self.pool._drain_mode.is_set():
         break
 
+      self._flush_pending_release()
       locked = self.config_lock_manager.get_locked_configs()
       profile_caps = None
       profile_costs = None
@@ -483,65 +487,56 @@ class ConversionWorker(threading.Thread):
     job_started_at = time.monotonic()
     in_flight = metrics_prom.in_flight_counter(self.node_id)
     in_flight.inc()
+    lock_held = False
+    started = False
     try:
-      args = json.loads(job["args"]) if job["args"] else []
-    except (TypeError, ValueError) as e:
-      self.log.error("Job %d has invalid args payload: %s" % (job_id, e))
-      cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
-      self.job_db.fail_job(job_id, "Invalid job args", failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, **self._owner_kwargs())
-      metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
-      metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
-      in_flight.dec()
-      self.current_job_id = None
-      return
+      try:
+        args = json.loads(job["args"]) if job["args"] else []
+      except (TypeError, ValueError) as e:
+        self.log.error("Job %d has invalid args payload: %s" % (job_id, e))
+        cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
+        self.job_db.fail_job(job_id, "Invalid job args", failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, **self._owner_kwargs())
+        metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
+        metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
+        return
 
-    if kind is None:
-      self.log.error("Job %d has unsupported kind %r" % (job_id, job.get("kind")))
-      cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
-      self.job_db.fail_job(job_id, "Unsupported job kind %r" % job.get("kind"), failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, **self._owner_kwargs())
-      metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
-      metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
-      in_flight.dec()
-      self.current_job_id = None
-      return
-    is_convert = kind.name == job_kinds.DEFAULT_KIND
+      if kind is None:
+        self.log.error("Job %d has unsupported kind %r" % (job_id, job.get("kind")))
+        cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
+        self.job_db.fail_job(job_id, "Unsupported job kind %r" % job.get("kind"), failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, **self._owner_kwargs())
+        metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
+        metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
+        return
+      is_convert = kind.name == job_kinds.DEFAULT_KIND
 
-    if not os.path.exists(path):
-      self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
-      cat = categorize_failure(WORKER_SENTINEL_PATH_MISSING).value
-      self.job_db.fail_job(job_id, "Path does not exist", failure_category=cat, failure_cause=WORKER_SENTINEL_PATH_MISSING, **self._owner_kwargs())
-      metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
-      metrics_prom.record_failure(cat, WORKER_SENTINEL_PATH_MISSING)
-      in_flight.dec()
-      self.current_job_id = None
-      return
+      if not os.path.exists(path):
+        self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
+        cat = categorize_failure(WORKER_SENTINEL_PATH_MISSING).value
+        self.job_db.fail_job(job_id, "Path does not exist", failure_category=cat, failure_cause=WORKER_SENTINEL_PATH_MISSING, **self._owner_kwargs())
+        metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
+        metrics_prom.record_failure(cat, WORKER_SENTINEL_PATH_MISSING)
+        return
 
-    # Job is already marked running by claim_next_job()
+      # Job is already marked running by claim_next_job()
 
-    # Check if job was cancelled before we even start (e.g. cancelled while pending)
-    current = self.job_db.get_job(job_id)
-    if current and current.get("status") == "cancelled":
-      self.log.info("Job %d was cancelled before processing started" % job_id)
-      metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
-      in_flight.dec()
-      self.current_job_id = None
-      return
+      # Check if job was cancelled before we even start (e.g. cancelled while pending)
+      current = self.job_db.get_job(job_id)
+      if current and current.get("status") == "cancelled":
+        self.log.info("Job %d was cancelled before processing started" % job_id)
+        metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
+        return
 
-    # Acquire lock for this config (blocks if another job is using it)
-    self.log.debug("Worker %d acquiring lock for job %d: %s" % (self.worker_id, job_id, os.path.basename(config_file)))
-    self.config_lock_manager.acquire(config_file, job_id, path)
+      # Acquire lock for this config (blocks if another job is using it)
+      self.log.debug("Worker %d acquiring lock for job %d: %s" % (self.worker_id, job_id, os.path.basename(config_file)))
+      self.config_lock_manager.acquire(config_file, job_id, path)
+      lock_held = True
 
-    # Check again after acquiring lock (may have been cancelled while waiting)
-    current = self.job_db.get_job(job_id)
-    if current and current.get("status") == "cancelled":
-      self.log.info("Job %d was cancelled while waiting for lock" % job_id)
-      self.config_lock_manager.release(config_file, job_id)
-      metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
-      in_flight.dec()
-      self.current_job_id = None
-      return
-
-    try:
+      # Check again after acquiring lock (may have been cancelled while waiting)
+      current = self.job_db.get_job(job_id)
+      if current and current.get("status") == "cancelled":
+        self.log.info("Job %d was cancelled while waiting for lock" % job_id)
+        metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
+        return
       profile = job.get("profile")
       if kind.uses_profile and profile and "--profile" not in args and "-p" not in args:
         args = ["--profile", profile] + args
@@ -559,6 +554,7 @@ class ConversionWorker(threading.Thread):
           return
       # Conversions keep their original call shape; other kinds name themselves.
       kind_kwargs = {} if is_convert else {"kind": kind.name}
+      started = True
       success, final_output, source_duration_secs = self._run_conversion(job_id, path, config_file, args, **kind_kwargs)
       elapsed = time.monotonic() - job_started_at
       output_size = None
@@ -668,23 +664,79 @@ class ConversionWorker(threading.Thread):
           metrics_prom.record_failure(cat, cause)
     except Exception as e:
       self.log.exception("Job %d failed: %s" % (job_id, e))
-      elapsed = time.monotonic() - job_started_at
-      current = self.job_db.get_job(job_id)
-      if current and current.get("status") == "cancelled":
-        metrics_prom.record_job_terminal("cancelled", elapsed)
-      else:
-        cat = categorize_failure(WORKER_SENTINEL_EXCEPTION).value
-        updated = self.job_db.fail_job(job_id, str(e), failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION, **self._owner_kwargs())
-        self._log_discarded(job_id, updated, "failure")
-        self._ingest_ffmpeg_stderr_sidecars(job_id)
-        metrics_prom.record_job_terminal("failed", elapsed)
-        metrics_prom.record_failure(cat, WORKER_SENTINEL_EXCEPTION)
+      self._handle_job_error(job_id, e, started, job_started_at)
     finally:
-      self.config_lock_manager.release(config_file, job_id)
+      if lock_held:
+        self.config_lock_manager.release(config_file, job_id)
       in_flight.dec()
       with self._abort_lock:
         self.current_job_id = None
         self._watchdog = None
+        self._claim_token = None
+
+  def _handle_job_error(self, job_id, error, started, job_started_at):
+    """Release the claim after an exception in process_job; never raises.
+
+    Before the conversion starts (a DB error after the claim) the job goes
+    back to pending without burning a retry; afterwards it is failed. Writes
+    are owner-guarded and retried with backoff; if the DB still refuses, the
+    write is parked for the worker loop and node recovery is the backstop.
+    """
+    elapsed = time.monotonic() - job_started_at
+    owner = self._owner_kwargs()
+    try:
+      current = self._retry_terminal("status read", lambda: self.job_db.get_job(job_id), job_id)
+    except Exception:
+      current = None
+    if current and current.get("status") == "cancelled":
+      metrics_prom.record_job_terminal("cancelled", elapsed)
+      return
+    if not started:
+      reason = "Interrupted by %s before the job started; requeued" % type(error).__name__
+      write = lambda: self.job_db.requeue_interrupted_job(job_id, reason, **owner)  # noqa: E731
+      terminal = "requeue"
+    else:
+      cat = categorize_failure(WORKER_SENTINEL_EXCEPTION).value
+      write = lambda: self.job_db.fail_job(job_id, str(error), failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION, **owner)  # noqa: E731
+      terminal = "failure"
+    try:
+      updated = self._retry_terminal(terminal, write, job_id)
+    except Exception:
+      self._pending_release = (job_id, terminal, write)
+      return
+    self._log_discarded(job_id, updated, terminal)
+    if started:
+      self._ingest_ffmpeg_stderr_sidecars(job_id)
+      metrics_prom.record_job_terminal("failed", elapsed)
+      metrics_prom.record_failure(cat, WORKER_SENTINEL_EXCEPTION)
+    else:
+      metrics_prom.record_job_terminal("cancelled", elapsed)
+
+  def _retry_terminal(self, what, write, job_id):
+    """Call *write*, retrying with backoff; re-raise the last error when every attempt fails."""
+    delays = list(TERMINAL_RETRY_BACKOFF_SECONDS)
+    for attempt in range(len(delays) + 1):
+      try:
+        return write()
+      except Exception as e:
+        if attempt == len(delays):
+          self.log.error("Job %d %s write failed after %d attempts (%s); leaving it for retry or node recovery" % (job_id, what, attempt + 1, type(e).__name__))
+          raise
+        self._stop_event.wait(timeout=delays[attempt])
+
+  def _flush_pending_release(self):
+    """Retry a parked terminal write from an earlier DB outage (single attempt per loop pass)."""
+    pending = self._pending_release
+    if pending is None:
+      return
+    job_id, what, write = pending
+    try:
+      updated = write()
+    except Exception as e:
+      self.log.warning("Job %d pending %s still failing (%s); will retry" % (job_id, what, type(e).__name__))
+      return
+    self._pending_release = None
+    self._log_discarded(job_id, updated, what)
 
   @staticmethod
   def _signal_name(returncode):
