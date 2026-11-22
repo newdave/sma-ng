@@ -349,6 +349,28 @@ class TestLadderStopReason:
 
     assert ladder_stop_reason(1, stderr).startswith("filesystem ")
 
+  # A crash (driver segfault, abort) is not a cancel: the software tiers may
+  # still succeed, so the ladder must climb (golden rule).
+  @pytest.mark.parametrize("rc", [-11, -6, -7, -4, -8, 139, 134])
+  def test_crash_signals_climb(self, rc):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(rc, "Segmentation fault") is None
+
+  # ffmpeg traps SIGTERM/SIGINT itself and exits 255 with this line.
+  @pytest.mark.parametrize("n,name", [(15, "SIGTERM"), (2, "SIGINT"), (1, "SIGHUP"), (9, "SIGKILL")])
+  def test_received_signal_exit_255_stops(self, n, name):
+    from resources.processor.failures import ladder_stop_reason
+
+    stderr = "frame=  100 fps=50\nExiting normally, received signal %d.\n" % n
+    assert ladder_stop_reason(255, stderr) == "signal " + name
+
+  @pytest.mark.parametrize("n", [11, 6])
+  def test_received_crash_signal_exit_255_climbs(self, n):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(255, "Exiting normally, received signal %d.\n" % n) is None
+
   @pytest.mark.parametrize("rc,stderr", [(1, "Segmentation fault"), (1, ""), (None, "Error while decoding stream"), (1, "Error reading: Input/output error")])
   def test_other_failures_climb(self, rc, stderr):
     from resources.processor.failures import ladder_stop_reason

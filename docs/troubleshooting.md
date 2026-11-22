@@ -107,8 +107,9 @@ genuinely corrupt source), switch to `fallback-policy: aggressive` to add the
 full software encode tier (`full_sw`) as a last resort.
 
 The ladder stops early, with no further tiers, when a retry could not help.
-That covers an ffmpeg killed by a signal (SIGTERM, SIGINT, SIGKILL, SIGHUP, as
-a negative or 128+N exit code) and output-side filesystem failures: disk full,
+That covers an ffmpeg killed or cancelled by SIGTERM, SIGINT, SIGKILL or SIGHUP
+(a negative or 128+N exit code, or exit 255 with `received signal N` in the
+error output) and output-side filesystem failures: disk full,
 quota exceeded or read-only filesystem anywhere in the ffmpeg error output, and
 permission denied or an I/O error only on a line naming the output file or a
 write, trailer or muxing step. A permission error opening a hardware device
@@ -117,7 +118,8 @@ climbs, because the software tiers do not need the device. A disk-full or
 cancelled job no longer retries on the CPU; the log shows
 `[attempt-ladder] stop: signal SIGTERM` or `stop: filesystem enospc`. Free the
 space or fix the mount, then requeue the job. Every other failure class still
-climbs the ladder.
+climbs the ladder, including a crash signal such as SIGSEGV or SIGABRT from a
+hardware driver, because a software tier may still succeed.
 
 ### 7.1 source fails immediately with `encoder_init_failed` / `audio_channel_layout_mismatch`
 

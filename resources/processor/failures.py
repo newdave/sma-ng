@@ -15,7 +15,6 @@ or `resources.daemon` to keep import order simple.
 from __future__ import annotations
 
 import re
-import signal
 from dataclasses import dataclass
 from enum import Enum
 
@@ -575,7 +574,12 @@ def categorize_failure(cause_or_class: str | None) -> FailureCategory:
 
 
 # Exit codes a shell reports for a signal-killed child (128 + N): HUP, INT, KILL, TERM.
-_SIGNAL_EXIT_CODES = {129: "SIGHUP", 130: "SIGINT", 137: "SIGKILL", 143: "SIGTERM"}
+# Kill/cancel signals only. A crash signal (SIGSEGV, SIGABRT, SIGBUS, ...) is a
+# hw driver or decoder fault that a software tier may survive, so it climbs.
+_STOP_SIGNALS = {1: "SIGHUP", 2: "SIGINT", 9: "SIGKILL", 15: "SIGTERM"}
+_SIGNAL_EXIT_CODES = {128 + n: name for n, name in _STOP_SIGNALS.items()}
+# ffmpeg traps SIGINT/SIGTERM itself and exits 255 after logging this.
+_RECEIVED_SIGNAL_RE = re.compile(r"received signal (\d+)")
 # Errors that only arise when writing, so they stop the ladder wherever they
 # appear in the tail. Tested directly (not via the first-match diagnosis) so an
 # earlier HDR or channel-layout line cannot hide them.
@@ -606,23 +610,25 @@ def _is_output_line(line: str, outfile: str | None) -> bool:
 def ladder_stop_reason(returncode: int | None, stderr: str | bytes | None, outfile: str | None = None) -> str | None:
   """Return why the encode fallback ladder must stop, or ``None`` to keep climbing.
 
-  A signal-killed ffmpeg (negative return code, or 128+N for HUP/INT/KILL/TERM)
-  and output-side filesystem failures fail identically on every tier, so
+  An ffmpeg killed or cancelled by SIGHUP/SIGINT/SIGKILL/SIGTERM (negative
+  return code, 128+N, or exit 255 with "received signal N") and output-side
+  filesystem failures fail identically on every tier, so
   retrying only wastes encodes. Disk full, quota and read-only filesystem stop
   wherever they appear; permission denied and I/O errors stop only on a line
   naming *outfile* or a write/trailer/muxing/``out#`` marker, never on a
-  hardware-device line. Anything else climbs.
+  hardware-device line. Anything else, crash signals included, climbs.
   """
   if returncode is not None:
-    if returncode < 0:
-      try:
-        return "signal " + signal.Signals(-returncode).name
-      except ValueError:
-        return "signal %d" % -returncode
+    if returncode < 0 and -returncode in _STOP_SIGNALS:
+      return "signal " + _STOP_SIGNALS[-returncode]
     if returncode in _SIGNAL_EXIT_CODES:
       return "signal " + _SIGNAL_EXIT_CODES[returncode]
   text = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else (stderr if isinstance(stderr, str) else "")
   tail = text[-TAIL_BYTES:]
+  if returncode == 255:
+    match = _RECEIVED_SIGNAL_RE.search(tail)
+    if match and int(match.group(1)) in _STOP_SIGNALS:
+      return "signal " + _STOP_SIGNALS[int(match.group(1))]
   for pattern, reason in _WRITE_ONLY_ERRORS:
     if pattern.search(tail):
       return "filesystem " + reason

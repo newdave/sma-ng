@@ -479,6 +479,27 @@ class TestAttemptLadderStopRules:
     assert len(attempts) == 1
     assert "stop: signal %s" % name in self._logged(mp)[0]
 
+  @pytest.mark.parametrize("rc", [-11, -6])
+  def test_crash_signal_climbs_to_next_tier(self, rc):
+    # A hw driver segfault/abort is not a cancel: the next tier must run.
+    mp = _make_mp(FallbackPolicy.AGGRESSIVE)
+    attempts = []
+
+    def run_fn(preopts, options=None):
+      attempts.append(list(preopts))
+      if len(attempts) == 1:
+        raise self._rc_err(rc, "Segmentation fault")
+      return None
+
+    mp._attempt_ladder(list(self.PREOPTS), {"video": {"codec": "h265qsv"}}, None, run_fn)
+    assert len(attempts) == 2
+    assert self._logged(mp) == []
+
+  def test_ffmpeg_trapped_sigterm_exit_255_stops(self):
+    mp, attempts = self._run(self._rc_err(255, "Exiting normally, received signal 15."))
+    assert len(attempts) == 1
+    assert "stop: signal SIGTERM;" in self._logged(mp)[0]
+
   def test_returncode_parsed_from_message_when_attribute_missing(self):
     mp, attempts = self._run(FFMpegConvertError("Exited with code -9", "ffmpeg", "x"))
     assert len(attempts) == 1
