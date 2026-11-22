@@ -505,6 +505,85 @@ class TestRestoreFromOutputCollision:
     assert result == str(tmp_path / "in" / "movie.2.mp4")
     assert other.read_bytes() == b"unrelated"
 
+  def _tagged(self, value):
+    tags = MagicMock()
+    tags.tags = {"\xa9too": [value]}
+    return tags
+
+  def test_earlier_sma_output_of_same_source_is_recycled_and_replaced(self, tmp_path):
+    mp = self._mp(tmp_path, delete=True)
+    mp._recycle_to_bin = MagicMock(return_value=True)
+    src = tmp_path / "in" / "movie.mkv"
+    src.write_bytes(b"regrab")
+    old = tmp_path / "in" / "movie.mp4"
+    old.write_bytes(b"old-output")
+    out = tmp_path / "out" / "movie.mp4"
+    out.write_bytes(b"converted")
+    with patch("resources.mediaprocessor.MP4", return_value=self._tagged("SMA-NG:movie.mkv")):
+      result = mp.restoreFromOutput(str(src), str(out))
+    assert result == str(old)
+    assert old.read_bytes() == b"converted"
+    assert not (tmp_path / "in" / "movie.2.mp4").exists()
+    mp._recycle_to_bin.assert_called_once_with(str(old))
+
+  def test_earlier_sma_output_kept_and_numbered_when_recycle_fails(self, tmp_path):
+    mp = self._mp(tmp_path, delete=True)
+    mp._recycle_to_bin = MagicMock(return_value=False)
+    src = tmp_path / "in" / "movie.mkv"
+    src.write_bytes(b"regrab")
+    old = tmp_path / "in" / "movie.mp4"
+    old.write_bytes(b"old-output")
+    out = tmp_path / "out" / "movie.mp4"
+    out.write_bytes(b"converted")
+    with patch("resources.mediaprocessor.MP4", return_value=self._tagged("SMA-NG:movie.mkv")):
+      result = mp.restoreFromOutput(str(src), str(out))
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+    assert old.read_bytes() == b"old-output"
+
+  @pytest.mark.parametrize("tag", ["SMA-NG:other.mkv", "Lavf60.3.100", None])
+  def test_sma_tag_for_other_source_or_foreign_file_is_not_replaced(self, tmp_path, tag):
+    mp = self._mp(tmp_path, delete=True)
+    mp._recycle_to_bin = MagicMock(return_value=True)
+    src = tmp_path / "in" / "movie.mkv"
+    src.write_bytes(b"regrab")
+    old = tmp_path / "in" / "movie.mp4"
+    old.write_bytes(b"foreign")
+    out = tmp_path / "out" / "movie.mp4"
+    out.write_bytes(b"converted")
+    tags = MagicMock()
+    tags.tags = {} if tag is None else {"\xa9too": [tag]}
+    with patch("resources.mediaprocessor.MP4", return_value=tags):
+      result = mp.restoreFromOutput(str(src), str(out))
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+    assert old.read_bytes() == b"foreign"
+    mp._recycle_to_bin.assert_not_called()
+
+  def test_earlier_sma_output_not_replaced_when_delete_off(self, tmp_path):
+    mp = self._mp(tmp_path, delete=False)
+    mp._recycle_to_bin = MagicMock(return_value=True)
+    src = tmp_path / "in" / "movie.mkv"
+    src.write_bytes(b"regrab")
+    old = tmp_path / "in" / "movie.mp4"
+    old.write_bytes(b"old-output")
+    out = tmp_path / "out" / "movie.mp4"
+    out.write_bytes(b"converted")
+    with patch("resources.mediaprocessor.MP4", return_value=self._tagged("SMA-NG:movie.mkv")):
+      result = mp.restoreFromOutput(str(src), str(out))
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+    assert old.read_bytes() == b"old-output"
+
+  def test_unreadable_target_is_not_replaced(self, tmp_path):
+    mp = self._mp(tmp_path, delete=True)
+    src = tmp_path / "in" / "movie.mkv"
+    src.write_bytes(b"regrab")
+    old = tmp_path / "in" / "movie.mp4"
+    old.write_bytes(b"not an mp4")
+    out = tmp_path / "out" / "movie.mp4"
+    out.write_bytes(b"converted")
+    result = mp.restoreFromOutput(str(src), str(out))
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+    assert old.read_bytes() == b"not an mp4"
+
   def test_identical_bypass_copy_is_not_duplicated(self, tmp_path):
     mp = self._mp(tmp_path, delete=False)
     src = tmp_path / "in" / "movie.mp4"

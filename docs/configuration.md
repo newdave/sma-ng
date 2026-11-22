@@ -149,6 +149,11 @@ SMA-NG never overwrites an existing file that is not the input it is replacing:
   source has the same name (`movie.mp4` to `movie.mp4`) it is replaced only when `delete-original` is
   `true` (after copying it to `recycle-bin`, if set). With `delete-original: false` the original is kept
   and the output is restored as `movie.2.mp4`.
+- With `output-directory` set, `delete-original: true` and an existing file at the restore name that is not the
+  source, that file is replaced only when it is provably an earlier SMA-NG output of the same source: an MP4
+  whose encoder tag (`©too`) reads `SMA-NG:<source file name>`. It is copied to `recycle-bin` first (if set);
+  when that copy fails it is kept and the new output is numbered. Files without that tag, or tagged for another
+  source, are never replaced.
 
 ### Full-software fallback
 

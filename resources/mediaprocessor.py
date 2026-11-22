@@ -697,6 +697,8 @@ def _resolve_hdr_color_tags(hdr_input, hdr_output, hdr_settings):
 
 from collections.abc import Callable
 
+from mutagen.mp4 import MP4
+
 from converter import Converter, FFMpegConvertError
 from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments
 
@@ -3626,6 +3628,23 @@ class MediaProcessor:
       return newoutputfile
     return outputfile
 
+  def _is_earlier_sma_output(self, target, inputfile):
+    """True only when *target* carries the SMA-NG encoder tag for this exact source.
+
+    ``Metadata.writeTags`` stamps MP4 outputs with ``\xa9too`` =
+    ``SMA-NG:<source basename>``. A match on both the prefix and the basename
+    of *inputfile* proves the file is an earlier SMA output of the same
+    source. Anything unreadable or untagged is not SMA output.
+    """
+    try:
+      tags = MP4(target).tags
+      values = tags.get("\xa9too") if tags is not None else None
+    except KeyboardInterrupt:
+      raise
+    except Exception:
+      return False
+    return bool(values) and str(values[0]) == "SMA-NG:" + os.path.basename(inputfile)
+
   def _resolve_restore_collision(self, inputfile, outputfile, target):
     """Pick a safe destination when moving *outputfile* back onto an existing *target*.
 
@@ -3633,6 +3652,9 @@ class MediaProcessor:
       (the caller recycles the original first). Returns *target*.
     - *target* holds the same bytes as *outputfile* (a bypass copy of the
       input): drop the redundant copy and return ``None`` (nothing to move).
+    - ``delete`` is enabled and *target* is provably an earlier SMA output of
+      this same source (``_is_earlier_sma_output``): recycle it and replace it,
+      so a re-grab leaves one file. A failed recycle keeps it and numbers.
     - Otherwise (``delete`` is off, or *target* is an unrelated file): keep
       the existing file and return a numbered path (``name.2.mp4``).
     """
@@ -3648,6 +3670,11 @@ class MediaProcessor:
         return None
     except OSError:
       pass
+    if not is_input and self.settings.delete and self._is_earlier_sma_output(target, inputfile):
+      if self._recycle_to_bin(target):
+        self.log.info("%s is an earlier SMA-NG output of %s; replacing it [output-replace-stale]." % (target, os.path.basename(inputfile)))
+        return target
+      self.log.warning("Not replacing earlier SMA-NG output %s: recycle bin copy failed." % target)
     base, ext = os.path.splitext(target)
     i = 2
     candidate = "%s.%d%s" % (base, i, ext)

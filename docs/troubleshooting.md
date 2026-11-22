@@ -321,6 +321,9 @@ usually the FFmpeg build lacks the decoder, or the source is damaged and needs r
 - With `output-directory` and `delete-original: false`, a source that has the same name as the output
   (`movie.mp4` to `movie.mp4`) is kept and the new file is restored as `movie.2.mp4`. Set
   `delete-original: true` to replace the source instead.
+- With `delete-original: true`, an earlier SMA-NG output of the same source (encoder tag
+  `SMA-NG:<source file name>`) at that name is recycled and replaced instead of numbered. Existing `name.2.mp4`
+  duplicates from before this behavior are not cleaned up automatically; remove them by hand.
 
 ### `[dolby-vision]` warning on re-encode
 
