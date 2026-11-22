@@ -1,0 +1,25 @@
+tests/test_naming.py
+  s_d73ac5e457a585::t_49da8ad2b6aeff 1480-1575,1577
+  s_d73ac5e457a585::t_3f64acc26aa811 1576
+  s_d73ac5e457a585::t_9338db5d6b68a1 1300-1309
+resources/naming.py
+  s_d73ac5e457a585::t_61abb0eabfb3f8 153-154,156-158,161-166,332,349-350,407,413-418,441-442,666,683,706
+docs/configuration.md
+  s_d73ac5e457a585::t_6f4af293e6c86e 607-608
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "4fc0c57150c13a96de42a1612661cccf95badc8c",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
