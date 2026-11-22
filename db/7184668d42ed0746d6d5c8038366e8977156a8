@@ -1,0 +1,36 @@
+docs/configuration.md
+  s_d73ac5e457a585::t_9d9f1008bb7501 83
+tests/test_job_retention.py
+  s_d73ac5e457a585::t_cde4d6fb117424 44,51-52,66,76-77
+tests/test_daemon.py
+  s_d73ac5e457a585::t_cde4d6fb117424 150-160,163-164
+  s_d73ac5e457a585::t_22bb8f9a7ac49b 161-162
+tests/test_config_schema.py
+  s_d73ac5e457a585::t_cde4d6fb117424 90-99
+docs/daemon.md
+  s_d73ac5e457a585::t_2931e1e9f38e9d 548-549,729-730
+  s_d73ac5e457a585::t_9d9f1008bb7501 350
+  s_d73ac5e457a585::t_5927d820e44174 114-117
+resources/daemon/db.py
+  s_d73ac5e457a585::t_22bb8f9a7ac49b 864-867,874,881-882,2041-2044,2062-2063
+resources/config_schema.py
+  s_d73ac5e457a585::t_22bb8f9a7ac49b 972
+docs/openapi.yaml
+  s_d73ac5e457a585::t_22bb8f9a7ac49b 379,1146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "db7184668d42ed0746d6d5c8038366e8977156a8",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
