@@ -3093,3 +3093,30 @@ class TestSecurityHardening:
       h = _make_handler(api_key="secret", headers={"X-API-Key": "anything"})
       assert h.check_auth() is True
     cd.assert_called()
+
+
+class TestRouteTableArity:
+  def test_post_reload_via_dispatch_post(self):
+    from resources.daemon import routes
+
+    h = _make_handler(method="POST", path="/reload")
+    with patch("threading.Thread") as mock_thread:
+      routes.dispatch_post(h)
+    assert h._response_code == 200
+    assert _get_response_body(h)["status"] == "reloading"
+    mock_thread.assert_called_once()
+
+  def test_every_route_matches_handler_signature(self):
+    from unittest.mock import create_autospec
+
+    from resources.daemon import routes
+
+    entries = list(routes._get_routes().items()) + list(routes._post_routes().items())
+    entries += routes._get_prefix_routes() + routes._post_prefix_routes()
+    for key, route in entries:
+      mock = create_autospec(WebhookHandler, instance=True)
+      path = key if not key.endswith("/") or key == "/" else key + "1/ack"
+      try:
+        route(mock, path, {})
+      except TypeError as exc:
+        raise AssertionError(f"route {key!r} arity mismatch: {exc}") from exc
