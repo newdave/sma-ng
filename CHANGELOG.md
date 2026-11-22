@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.45](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.44...sma-ng-v3.2.45) (2026-11-22)
+
+
+### Documentation
+
+* use the master's current address 10.30.10.40 ([#242](https://github.com/newdave/sma-ng/issues/242)) ([2ec543a](https://github.com/newdave/sma-ng/commit/2ec543ada0fda77e8e47d8c479a5fadffa549d4b))
+
 ## [3.2.44](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.43...sma-ng-v3.2.44) (2026-11-22)
 
 
