@@ -1597,3 +1597,64 @@ class TestResolveTmdbIDEdgeCases:
     log = MagicMock()
     result = Metadata.resolveTmdbID(MediaType.Movie, log)
     assert result is None
+
+
+class TestExpectedMetadataMisses:
+  """Missing US rating and missing TMDB season are expected, handled cases: info, no traceback."""
+
+  _MOVIE = {"original_language": "en", "title": "T", "genres": [], "tagline": "", "overview": "", "release_date": "2020-01-01"}
+
+  def _movie(self, releases, caplog):
+    with (
+      patch("resources.metadata.Metadata.resolveTmdbID", return_value=5),
+      patch("resources.metadata.tmdb.Movies") as movies,
+      caplog.at_level("DEBUG"),
+    ):
+      movies.return_value.info.return_value = self._MOVIE
+      movies.return_value.external_ids.return_value = {}
+      movies.return_value.credits.return_value = {"cast": [], "crew": []}
+      movies.return_value.release_dates.return_value = releases
+      return Metadata(MediaType.Movie, tmdbid=5)
+
+  def test_movie_picks_first_nonempty_us_certification(self, caplog):
+    releases = {"results": [{"iso_3166_1": "US", "release_dates": [{"certification": ""}, {"certification": "PG-13"}]}]}
+    with patch("resources.metadata.Metadata.getRating", return_value="r") as gr:
+      m = self._movie(releases, caplog)
+    gr.assert_called_once_with("PG-13")
+    assert m.rating == "r"
+
+  def test_movie_missing_rating_logs_info_only(self, caplog):
+    m = self._movie({"results": [{"iso_3166_1": "US", "release_dates": [{"certification": ""}]}]}, caplog)
+    assert m.rating is None
+    msgs = [r for r in caplog.records if "rating" in r.getMessage().lower()]
+    assert len(msgs) == 1 and msgs[0].levelname == "INFO" and msgs[0].exc_info is None
+    assert not [r for r in caplog.records if r.levelname in ("ERROR", "WARNING")]
+
+  @patch("resources.metadata.tmdb.TV_Episodes")
+  @patch("resources.metadata.tmdb.TV_Seasons")
+  @patch("resources.metadata.tmdb.TV")
+  @patch("resources.metadata.Metadata.resolveTmdbID", return_value=1396)
+  def test_tv_missing_rating_and_season_are_info_and_cached(self, mock_resolve, mock_tv, mock_seasons, mock_eps, caplog):
+    mock_tv.return_value.info.return_value = {
+      "name": "S",
+      "genres": [],
+      "networks": [],
+      "original_language": "en",
+      "seasons": [{"season_number": 1, "air_date": "2020-01-01"}, {"season_number": 2, "air_date": "2021-01-01"}],
+    }
+    mock_tv.return_value.external_ids.return_value = {}
+    mock_tv.return_value.content_ratings.return_value = {"results": []}
+    mock_seasons.return_value.info.side_effect = Exception("404 Client Error")
+    mock_eps.return_value.info.return_value = {"name": "E", "overview": "", "air_date": "2021-02-02", "episode_number": 1}
+    mock_eps.return_value.credits.return_value = {"cast": [], "crew": []}
+    with caplog.at_level("DEBUG"):
+      m = Metadata(MediaType.TV, tmdbid=1396, season=1, episode=1)
+    assert m.rating is None
+    assert 1 in m._missing_seasons
+    assert not [r for r in caplog.records if r.levelname in ("ERROR", "WARNING")]
+    assert not [r for r in caplog.records if r.exc_info]
+    fake_tmdb = MagicMock(TV_Seasons=mock_seasons)
+    calls = mock_seasons.call_count
+    assert m._find_episode_by_air_date(fake_tmdb, "2021-02-02") is None
+    assert m._find_episode_by_air_date(fake_tmdb, "2021-02-02") is None
+    assert mock_seasons.call_count == calls + 1  # season 2 fetched once, then negative-cached

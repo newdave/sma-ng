@@ -85,6 +85,7 @@ class Metadata:
     self.episode = None
     self.episodes = None
     self.episode_substituted = False
+    self._missing_seasons = set()
     self.original_language = None
 
     tmdb.API_KEY = tmdb_api_key
@@ -119,13 +120,24 @@ class Metadata:
       self.credit = f_credits.result()
       try:
         releases = f_releases.result()
-        release = next(x for x in releases["results"] if x["iso_3166_1"] == "US")
-        rating = release["release_dates"][0]["certification"]
-        self.rating = self.getRating(rating)
       except KeyboardInterrupt:
         raise
-      except Exception:
-        self.log.exception("Unable to retrieve rating.")
+      except Exception as e:
+        self.log.warning("Unable to retrieve release dates from TMDB (tmdbid %s): %s", self.tmdbid, e)
+        releases = None
+      rating = None
+      for release in (releases or {}).get("results") or []:
+        if release.get("iso_3166_1") != "US":
+          continue
+        # A US entry often lists several release dates; only some carry a certification.
+        rating = next((d.get("certification") for d in release.get("release_dates") or [] if d.get("certification")), None)
+        if rating:
+          break
+      if rating:
+        self.rating = self.getRating(rating)
+      else:
+        if releases is not None:
+          self.log.info("No US rating available for tmdbid %s.", self.tmdbid)
         self.rating = None
 
       self.original_language = getAlpha3TCode(self.moviedata["original_language"])
@@ -162,7 +174,9 @@ class Metadata:
       try:
         self.seasondata = f_seasondata.result()
       except Exception as e:
-        self.log.warning("Unable to retrieve season %s data from TMDB (tmdbid %s): %s", season, self.tmdbid, e)
+        # Expected for air-date shows whose arr numbering TMDB lacks; the air-date fallback below handles it.
+        self.log.info("TMDB has no season %s data (tmdbid %s): %s", season, self.tmdbid, e)
+        self._missing_seasons.add(self.season)
         self.seasondata = {}
       self.externalids = f_externalids.result()
 
@@ -246,12 +260,17 @@ class Metadata:
 
       try:
         content_ratings = f_content_ratings.result()
-        rating = next(x for x in content_ratings["results"] if x["iso_3166_1"] == "US")["rating"]
-        self.rating = self.getRating(rating)
       except KeyboardInterrupt:
         raise
-      except Exception:
-        self.log.error("Unable to retrieve rating.")
+      except Exception as e:
+        self.log.warning("Unable to retrieve content ratings from TMDB (tmdbid %s): %s", self.tmdbid, e)
+        content_ratings = None
+      rating = next((x.get("rating") for x in (content_ratings or {}).get("results") or [] if x.get("iso_3166_1") == "US" and x.get("rating")), None)
+      if rating:
+        self.rating = self.getRating(rating)
+      else:
+        if content_ratings is not None:
+          self.log.info("No US rating available for tmdbid %s.", self.tmdbid)
         self.rating = None
 
       self.original_language = getAlpha3TCode(self.showdata["original_language"])
@@ -302,12 +321,13 @@ class Metadata:
         continue
       if s_air <= air_date:
         candidate = s_num
-    if candidate is None or candidate == self.season:
+    if candidate is None or candidate == self.season or candidate in self._missing_seasons:
       return None
     try:
       season_data = tmdb.TV_Seasons(self.tmdbid, candidate).info(language=self.language)
     except Exception as e:
       self.log.debug("Unable to fetch season %s for air-date lookup (tmdbid %s): %s", candidate, self.tmdbid, e)
+      self._missing_seasons.add(candidate)
       return None
     for ep in season_data.get("episodes") or []:
       if ep.get("air_date") == air_date:
