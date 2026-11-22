@@ -165,17 +165,6 @@ class TestQueueMediaPath:
     out = queue_media_path(db, pcm, "/m/a.mkv", routing_first=True)
     assert (out.status, out.reason) == (REFUSED, NO_ROUTING_MATCH)
 
-
-def test_resolve_config_override_and_fallback(tmp_path):
-  pcm = mock.Mock()
-  pcm.get_config_for_path.return_value = "/c.yml"
-  override = tmp_path / "o.yml"
-  override.write_text("")
-  assert resolve_config(pcm, "/m/a.mkv", str(override)) == str(override)
-  pcm.get_config_for_path.assert_not_called()
-  assert resolve_config(pcm, "/m/a.mkv", "/missing.yml") == "/c.yml"
-  assert resolve_config(pcm, "/m/a.mkv") == "/c.yml"
-
   def test_recently_completed(self):
     db = mock.MagicMock()
     db.add_job.return_value = None
@@ -197,3 +186,14 @@ def test_resolve_config_override_and_fallback(tmp_path):
     db = mock.MagicMock()
     db.find_active_job.side_effect = lambda p: {"id": 4} if p == "/m/a.mkv" else None
     assert duplicate_outcome(db, mock.Mock(job_dedupe_window_seconds=0), "/m//a.mkv") == (DUPLICATE, 4)
+
+
+def test_resolve_config_override_and_fallback(tmp_path):
+  pcm = mock.Mock()
+  pcm.get_config_for_path.return_value = "/c.yml"
+  override = tmp_path / "o.yml"
+  override.write_text("")
+  assert resolve_config(pcm, "/m/a.mkv", str(override)) == str(override)
+  pcm.get_config_for_path.assert_not_called()
+  assert resolve_config(pcm, "/m/a.mkv", "/missing.yml") == "/c.yml"
+  assert resolve_config(pcm, "/m/a.mkv") == "/c.yml"
