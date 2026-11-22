@@ -981,6 +981,9 @@ class MediaProcessor:
       outputfile, inputfile, ripped_subs = self._run_ffmpeg(inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput)
       if outputfile is None:
         return None
+      outputfile, inputfile, ripped_subs = self._fallback_to_copy_if_larger(
+        outputfile, inputfile, ripped_subs, info, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput
+      )
 
     self.log.debug("%s created from %s successfully." % (outputfile, inputfile))
 
@@ -1017,6 +1020,70 @@ class MediaProcessor:
       "y": dim["y"],
       "cues_to_front": self.settings.output_format in ["mkv"] and self.settings.relocate_moov,
     }
+
+  def _fallback_to_copy_if_larger(self, outputfile, inputfile, ripped_subs, info, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput):
+    """Re-run as a video stream copy when a video re-encode came out larger than its source.
+
+    Audio and subtitle plans are kept. The larger output is moved aside (never
+    overwritten) while the copy runs, deleted if the copy succeeds, and put
+    back if it fails, so a usable output always exists.
+    Returns (outputfile, inputfile, ripped_subs).
+    """
+    video = options.get("video") or {}
+    if video.get("codec") in (None, "copy") or video.get("map") is None:
+      return outputfile, inputfile, ripped_subs
+    try:
+      if os.path.abspath(outputfile) == os.path.abspath(inputfile):
+        return outputfile, inputfile, ripped_subs
+      out_size = os.path.getsize(outputfile)
+      in_size = os.path.getsize(inputfile)
+    except OSError:
+      return outputfile, inputfile, ripped_subs
+    if out_size <= in_size:
+      return outputfile, inputfile, ripped_subs
+
+    self.log.warning("Re-encoded output %d bytes is larger than input %d bytes; falling back to video stream copy [output-larger-than-input]." % (out_size, in_size))
+    aside = outputfile + ".larger"
+    n = 2
+    while os.path.exists(aside):
+      aside = "%s.larger.%d" % (outputfile, n)
+      n += 1
+    try:
+      os.rename(outputfile, aside)
+    except OSError:
+      self.log.warning("Unable to move aside the larger output %s; keeping it [output-larger-than-input]." % outputfile)
+      return outputfile, inputfile, ripped_subs
+
+    copy_options = copy.deepcopy(options)
+    copy_options["source"][0] = inputfile
+    copy_video = {"codec": "copy", "map": video["map"]}
+    for key in ("bsf", "title"):
+      if video.get(key):
+        copy_video[key] = video[key]
+    copy_options["video"] = copy_video
+    copy_postopts = list(postopts)
+    if getattr(info.video, "codec", None) in ["x265", "h265", "hevc"] and "-tag:v" not in copy_postopts:
+      copy_postopts.extend(["-tag:v", "dvh1" if self.isDolbyVisionProfile5(info.video) else "hvc1"])
+
+    try:
+      new_output, new_input, _ = self._run_ffmpeg(inputfile, copy_options, preopts, copy_postopts, [], downloaded_subs, reportProgress, progressOutput)
+    except KeyboardInterrupt:
+      raise
+    except Exception:
+      self.log.exception("Video copy fallback failed [output-larger-than-input].")
+      new_output, new_input = None, inputfile
+
+    if not new_output:
+      self.log.warning("Video copy fallback produced no output; keeping the larger re-encode [output-larger-than-input].")
+      if not os.path.exists(outputfile):
+        os.rename(aside, outputfile)
+      return outputfile, new_input or inputfile, ripped_subs
+
+    self.removeFile(aside)
+    options.clear()
+    options.update(copy_options)
+    postopts[:] = copy_postopts
+    return new_output, new_input, ripped_subs
 
   def _run_ffmpeg(self, inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput):
     """Log options, rip external subs, run FFmpeg conversion.
@@ -2287,6 +2354,9 @@ class MediaProcessor:
     is_uhd = src_height is not None and src_height > 1080
     is_hd = src_height is not None and 720 <= src_height <= 1080
     profile_match = self._match_bitrate_profile(vbitrate_estimate, hd=is_hd, uhd=is_uhd)
+    if profile_match and profile_match["target"] >= vbitrate_estimate:
+      self.log.debug("Bitrate profile target %dkbps is not below source %dkbps; not forcing a re-encode [crf-profiles]." % (profile_match["target"], vbitrate_estimate))
+      profile_match = None
     if profile_match:
       vbitrate = profile_match["target"]
       vmaxrate = "%dk" % profile_match["maxrate"]
@@ -2514,18 +2584,18 @@ class MediaProcessor:
     # rather than fail.
     vb_frames, vref_frames = self._cap_frames_to_profile(vcodec, vprofile, vb_frames, vref_frames)
 
-    # Same-family re-encode (e.g. hevc -> hevc_qsv) at a bitrate far above
-    # the source's effective bitrate just bloats the output without quality
-    # gain. Hardware encoders need some headroom over the source so we cap
-    # at a 1.2× soft ceiling rather than the source kbps directly.
+    # Same-family re-encode (e.g. hevc -> hevc_qsv) at a bitrate above the
+    # source's effective bitrate just bloats the output without quality gain
+    # (hevc -> hevc_qsv outputs came out 9-14% larger), so cap the target at
+    # the source estimate.
     if vcodec != "copy" and isinstance(vbitrate, (int, float)) and vbitrate_estimate:
       source_family = self._codec_family(info.video.codec)
       output_family = self._codec_family(vcodec)
       if source_family and source_family == output_family:
-        soft_cap = vbitrate_estimate * 1.2
+        soft_cap = vbitrate_estimate
         if vbitrate > soft_cap:
           self.log.warning(
-            "Output video bitrate %.0fk exceeds 1.2x source bitrate %.0fk for same-family %s -> %s re-encode; clamping to %.0fk [video-same-family-bitrate-clamp]."
+            "Output video bitrate %.0fk exceeds source bitrate %.0fk for same-family %s -> %s re-encode; clamping to %.0fk [video-same-family-bitrate-clamp]."
             % (vbitrate, vbitrate_estimate, info.video.codec, vcodec, soft_cap)
           )
           vbitrate = soft_cap

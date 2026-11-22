@@ -1306,7 +1306,7 @@ class TestMaxBitrateVBV:
 
 
 class TestSameFamilyVideoBitrateClamp:
-  """Same-family re-encode (e.g. h264 -> libx264) should soft-cap at 1.2x source kbps."""
+  """Same-family re-encode (e.g. h264 -> libx264) should cap at 1.0x source kbps."""
 
   def _make_mp(self, tmp_yaml, vbitrateratio=None):
     with patch("resources.readsettings.ReadSettings._validate_binaries"):
@@ -1339,15 +1339,15 @@ class TestSameFamilyVideoBitrateClamp:
     mp.subtitles = SubtitleProcessor(mp)
     return mp
 
-  def test_same_family_high_target_clamped_to_1_2x_source(self, tmp_yaml, make_media_info):
+  def test_same_family_high_target_clamped_to_source_estimate(self, tmp_yaml, make_media_info):
     # h264 source @ 10 Mbps, ratio 1.5 -> vbitrate 15000k. Soft cap = 12000k.
     mp = self._make_mp(tmp_yaml, vbitrateratio={"h264": 1.5})
     info = make_media_info(video_codec="h264", video_bitrate=10_000_000, total_bitrate=10_128_000, audio_bitrate=128_000)
     with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
       options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
     assert options is not None
-    # vbitrate_estimate = 10000 * 0.95 (tolerance) = 9500; soft cap = 11400
-    assert options["video"]["bitrate"] == pytest.approx(11400.0, rel=0.01)
+    # vbitrate_estimate = 10000 * 0.95 (tolerance) = 9500; cap = estimate
+    assert options["video"]["bitrate"] == pytest.approx(9500.0, rel=0.01)
     warnings = [c.args[0] for c in mp.log.warning.call_args_list if c.args]
     assert any("video-same-family-bitrate-clamp" in w for w in warnings)
 
@@ -9231,3 +9231,105 @@ class TestImageAttachmentsDropped:
       options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
     assert options is not None
     assert [a["map"] for a in options["attachment"]] == [3]
+
+
+class TestProfileTargetAboveEstimate:
+  """A crf-profile only forces a re-encode when its target is below the source estimate [SMANG-5]."""
+
+  def test_profile_target_above_estimate_does_not_force_reencode(self, tmp_yaml, make_media_info):
+    mp = TestBitrateProfileIntegration()._make_mp(tmp_yaml, vbitrate_profiles=[{"source_kbps": 0, "target": 9000, "maxrate": 12000}])
+    mp.settings.vprofile = []
+    info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
+    with patch("resources.mediaprocessor.Converter.encoder", return_value=None), patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c):
+      options, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    assert options["video"]["codec"] == "copy"
+
+
+class TestOutputLargerThanInput:
+  """Re-encode larger than the source falls back to video copy [output-larger-than-input]."""
+
+  def _mp(self):
+    mp = TestProcess()._make_mp()
+    mp.generateOptions = MagicMock()
+    mp.canBypassConvert = MagicMock(return_value=False)
+    mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
+    mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    return mp
+
+  def _options(self, src, codec="hevc_qsv"):
+    return {
+      "source": [src],
+      "video": {"codec": codec, "map": 0, "bitrate": 5000, "filter": "scale=1280:-1", "fps": 24, "bsf": None, "title": "t"},
+      "audio": [{"map": 1, "codec": "aac"}],
+      "subtitle": [{"map": 2, "codec": "mov_text"}],
+    }
+
+  def test_larger_output_reruns_as_video_copy_keeping_audio_and_subs(self, tmp_path):
+    mp = self._mp()
+    src = tmp_path / "in.mkv"
+    src.write_bytes(b"x" * 100)
+    big = tmp_path / "in.mp4"
+    big.write_bytes(b"y" * 120)
+    small = tmp_path / "in.copy.mp4"
+    info = MagicMock()
+    info.video.codec = "hevc"
+    options = self._options(str(src))
+    mp.generateOptions.return_value = (options, ["-pre"], ["-post"], [], [])
+    calls = []
+
+    def fake_run(inputfile, opts, preopts, postopts, *a):
+      calls.append((opts, list(postopts)))
+      if len(calls) == 1:
+        return str(big), str(src), []
+      assert not big.exists()  # larger output moved aside, never overwritten
+      small.write_bytes(b"z" * 80)
+      return str(small), str(src), []
+
+    mp._run_ffmpeg = fake_run
+    result = mp.process(str(src), info=info)
+    assert result["output"] == str(small)
+    assert not big.exists()
+    assert len(calls) == 2
+    v = calls[1][0]["video"]
+    assert v["codec"] == "copy" and v["map"] == 0
+    assert "filter" not in v and "bitrate" not in v and "fps" not in v
+    assert calls[1][0]["audio"] == options["audio"]
+    assert calls[1][0]["subtitle"] == options["subtitle"]
+    assert calls[1][1][-2:] == ["-tag:v", "hvc1"]
+    assert any("[output-larger-than-input]" in c.args[0] for c in mp.log.warning.call_args_list)
+    assert "\n" not in mp.log.warning.call_args_list[-1].args[0]
+
+  def test_smaller_output_not_retried(self, tmp_path):
+    mp = self._mp()
+    src = tmp_path / "in.mkv"
+    src.write_bytes(b"x" * 100)
+    out = tmp_path / "in.mp4"
+    out.write_bytes(b"y" * 60)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+    mp._run_ffmpeg = MagicMock(return_value=(str(out), str(src), []))
+    result = mp.process(str(src), info=MagicMock())
+    assert mp._run_ffmpeg.call_count == 1
+    assert result["output"] == str(out)
+
+  def test_video_copy_output_not_retried(self, tmp_path):
+    mp = self._mp()
+    src = tmp_path / "in.mkv"
+    src.write_bytes(b"x" * 100)
+    out = tmp_path / "in.mp4"
+    out.write_bytes(b"y" * 120)
+    mp.generateOptions.return_value = (self._options(str(src), codec="copy"), [], [], [], [])
+    mp._run_ffmpeg = MagicMock(return_value=(str(out), str(src), []))
+    mp.process(str(src), info=MagicMock())
+    assert mp._run_ffmpeg.call_count == 1
+
+  def test_failed_copy_fallback_keeps_larger_output(self, tmp_path):
+    mp = self._mp()
+    src = tmp_path / "in.mkv"
+    src.write_bytes(b"x" * 100)
+    big = tmp_path / "in.mp4"
+    big.write_bytes(b"y" * 120)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+    mp._run_ffmpeg = MagicMock(side_effect=[(str(big), str(src), []), (None, str(src), [])])
+    result = mp.process(str(src), info=MagicMock())
+    assert result["output"] == str(big)
+    assert big.read_bytes() == b"y" * 120

@@ -365,6 +365,11 @@ or a network partition. A cancelled job's output may still exist on disk if ffmp
 
 ### Conversion produces larger output file
 
+When a video re-encode comes out larger than its source, SMA-NG logs
+`[output-larger-than-input]`, discards the larger file and re-runs the job with the video stream copied (audio and
+subtitle handling are unchanged). If that copy run fails, the larger re-encode is kept so the job still produces
+an output. Same-family re-encodes (for example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
+
 - Lower the `crf` value (lower CRF = higher quality = larger file; raise it to reduce size)
 - Add a `max-bitrate` cap in `[Video]`
 - Use `bitrate-ratio` to scale based on source codec
