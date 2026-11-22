@@ -1,0 +1,31 @@
+resources/daemon/docs_ui.py
+  s_d73ac5e457a585::t_4e9ff67465622a 21,32
+setup/sma-host.sh
+  s_d73ac5e457a585::t_4e9ff67465622a 10
+docker/Dockerfile
+  s_d73ac5e457a585::t_4e9ff67465622a 312
+install-smang.sh
+  s_d73ac5e457a585::t_4e9ff67465622a 9
+README.md
+  s_d73ac5e457a585::t_4e9ff67465622a 32,36-37,57-58
+resources/cli/errors.py
+  s_d73ac5e457a585::t_4e9ff67465622a 1
+scripts/wiki_sync.py
+  s_d73ac5e457a585::t_863efc071bce5d 44,55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "16ec86053d5cdf403240a1571ee2adeb008b1a47",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
