@@ -542,3 +542,126 @@ class TestSQLiteJobDatabase:
     assert first["id"] == legacy
     assert second["id"] == weighted
     db.close()
+
+
+class TestJobTelemetryPersistence:
+  _TEL = {
+    "source_video_codec": "hevc",
+    "source_video_width": 3840,
+    "source_video_height": 2160,
+    "source_audio_codec": "eac3",
+    "source_audio_channels": 6,
+    "source_hdr": "hdr10",
+    "dest_video_codec": "h264",
+    "dest_video_width": 1920,
+    "dest_video_height": 1080,
+    "dest_audio_codec": "aac",
+    "dest_audio_channels": 2,
+    "dest_hdr": "sdr",
+    "not_a_column": "ignored",
+  }
+
+  def test_complete_job_writes_every_telemetry_column(self, tmp_path):
+    db = _db(tmp_path)
+    jid = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    assert db.complete_job(jid, 10, 5, 90.0, "qsv", "h265qsv", node_id="n", telemetry=self._TEL)
+    row = db.get_job(jid)
+    for col, val in self._TEL.items():
+      if col != "not_a_column":
+        assert row[col] == val
+    assert row["encoder_backend"] == "qsv"
+    assert row["encoder_name"] == "h265qsv"
+    assert row["source_duration_seconds"] == 90.0
+    db.close()
+
+  def test_complete_job_without_telemetry_leaves_columns_null(self, tmp_path):
+    db = _db(tmp_path)
+    jid = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.complete_job(jid, 10, 5)
+    assert db.get_job(jid)["source_video_codec"] is None
+    db.close()
+
+  def test_fail_job_records_source_telemetry_on_terminal_failure_and_requeue(self, tmp_path):
+    db = _db(tmp_path)
+    jid = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    with db._conn() as conn:
+      conn.execute("UPDATE jobs SET max_retries = 0 WHERE id = ?", (jid,))
+    assert db.fail_job(jid, "boom", node_id="n", telemetry=self._TEL, source_duration_seconds=90.0)
+    row = db.get_job(jid)
+    assert row["status"] == STATUS_FAILED
+    assert row["source_video_codec"] == "hevc"
+    assert row["source_hdr"] == "hdr10"
+    assert row["source_duration_seconds"] == 90.0
+
+    jid2 = db.add_job("/m/b.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    with db._conn() as conn:
+      conn.execute("UPDATE jobs SET max_retries = 2 WHERE id = ?", (jid2,))
+    assert db.fail_job(jid2, "boom", node_id="n", telemetry={"source_video_codec": "av1"})
+    row2 = db.get_job(jid2)
+    assert row2["status"] == STATUS_PENDING
+    assert row2["source_video_codec"] == "av1"
+    db.close()
+
+
+class TestJobDedupe:
+  def test_equivalent_paths_are_duplicates(self, tmp_path):
+    db = _db(tmp_path)
+    assert db.add_job("/mnt/Media/show/ep1.mkv", "/c.yml") == 1
+    assert db.add_job("/mnt/Media//show/./ep1.mkv", "/c.yml") is None
+    assert db.add_job("/mnt/Media/show/../show/ep1.mkv", "/c.yml") is None
+    assert db.find_active_job("/mnt/Media//show/ep1.mkv")["id"] == 1
+    assert db.get_job(1)["path"] == "/mnt/Media/show/ep1.mkv"
+    db.close()
+
+  def test_recently_completed_path_is_skipped_within_window(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.complete_job(job_id, input_size=1, output_size=1)
+    assert db.add_job("/m/a.mkv", "/c.yml", dedupe_window_seconds=3600) is None
+    assert db.add_job("/m//a.mkv", "/c.yml", dedupe_window_seconds=3600) is None
+    db.close()
+
+  def test_find_recent_completed_job(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.complete_job(job_id, input_size=1, output_size=1)
+    assert db.find_recent_completed_job("/m//a.mkv", "convert", 3600)["id"] == job_id
+    assert db.find_recent_completed_job("/m/a.mkv", "preview", 3600) is None
+    assert db.find_recent_completed_job("/m/a.mkv", "convert", 0) is None
+    db.close()
+
+  def test_window_zero_disables_recent_completion_skip(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.complete_job(job_id, input_size=1, output_size=1)
+    assert db.add_job("/m/a.mkv", "/c.yml", dedupe_window_seconds=0) is not None
+    db.close()
+
+  def test_completion_older_than_window_is_requeued(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.complete_job(job_id, input_size=1, output_size=1)
+    with db._conn() as conn:
+      conn.execute("UPDATE jobs SET completed_at = '2020-01-01T00:00:00+00:00' WHERE id = ?", (job_id,))
+    assert db.add_job("/m/a.mkv", "/c.yml", dedupe_window_seconds=3600) is not None
+    db.close()
+
+  def test_failed_job_does_not_block_and_kind_is_separate(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.fail_job(job_id, "boom")
+    assert db.add_job("/m/a.mkv", "/c.yml", dedupe_window_seconds=3600) is not None
+    done = db.add_job("/m/b.mkv", "/c.yml")
+    db.claim_next_job(worker_id=2, node_id="n")
+    db.complete_job(done, input_size=1, output_size=1)
+    assert db.add_job("/m/b.mkv", "/c.yml", kind="preview", dedupe_window_seconds=3600) is not None
+    db.close()

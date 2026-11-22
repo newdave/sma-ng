@@ -229,7 +229,8 @@ daemon start time (e.g. after a host kernel or driver upgrade).
 ### `/health` schema additions
 
 `GET /health` returns three additive top-level fields on top of the
-existing payload (consumers MUST ignore unknown keys per
+existing payload, in the authenticated view only (unauthenticated callers on an auth-enabled daemon get a minimal
+liveness view without them; consumers MUST ignore unknown keys per
 `docs/daemon.md`):
 
 ```json

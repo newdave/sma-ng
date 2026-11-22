@@ -701,6 +701,29 @@ class TestGetLogContent:
     assert len(body["entries"]) == 1
     assert body["entries"][0]["job_id"] == 1
 
+  def test_job_id_reads_past_tail_and_rotated_backups(self, tmp_path):
+    log_file = tmp_path / "test.log"
+    old = json.dumps({"level": "INFO", "message": "rotated", "job_id": 7})
+    (tmp_path / "test.log.1").write_text(old + "\n")
+    mid = json.dumps({"level": "INFO", "message": "scrolled", "job_id": 7})
+    noise = [json.dumps({"level": "INFO", "message": f"n{i}", "job_id": 8}) for i in range(3000)]
+    log_file.write_text("\n".join([mid] + noise) + "\n")
+    h = _make_handler()
+    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h._get_log_content("/logs/test", {"job_id": ["7"]})
+    body = _get_response_body(h)
+    assert [e["message"] for e in body["entries"]] == ["rotated", "scrolled"]
+
+  def test_job_id_respects_lines_limit_keeping_newest(self, tmp_path):
+    log_file = tmp_path / "test.log"
+    rows = [json.dumps({"level": "INFO", "message": f"m{i}", "job_id": 7}) for i in range(10)]
+    log_file.write_text("\n".join(rows) + "\n")
+    h = _make_handler()
+    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h._get_log_content("/logs/test", {"job_id": ["7"], "lines": ["3"]})
+    body = _get_response_body(h)
+    assert [e["message"] for e in body["entries"]] == ["m7", "m8", "m9"]
+
   def test_filters_by_level(self, tmp_path):
     log_file = tmp_path / "test.log"
     lines = [
@@ -829,13 +852,15 @@ class TestGetStatus:
 class TestPostCleanup:
   def test_default_days_is_30(self):
     h = _make_handler(method="POST", path="/cleanup")
+    h.server.path_config_manager.job_dedupe_window_seconds = 0
     h._post_cleanup({})
-    h.server.job_db.cleanup_old_jobs.assert_called_once_with(30)
+    h.server.job_db.cleanup_old_jobs.assert_called_once_with(30, protect_seconds=0)
 
   def test_custom_days(self):
     h = _make_handler(method="POST", path="/cleanup")
+    h.server.path_config_manager.job_dedupe_window_seconds = 0
     h._post_cleanup({"days": ["7"]})
-    h.server.job_db.cleanup_old_jobs.assert_called_once_with(7)
+    h.server.job_db.cleanup_old_jobs.assert_called_once_with(7, protect_seconds=0)
 
   def test_returns_deleted_count(self):
     h = _make_handler(method="POST", path="/cleanup")
@@ -1001,10 +1026,86 @@ class TestParseWebhookBody:
     assert args == ["-tmdb", "603"]
 
   def test_json_body_with_config_override(self):
-    data = json.dumps({"path": "/mnt/movie.mkv", "config": "/alt/config.ini"}).encode()
+    data = json.dumps({"path": "/mnt/movie.mkv", "config": "/config/sma-ng.yml"}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    h.server.path_config_manager.default_config = "/config/sma-ng.yml"
+    path, args, config, retries = h._parse_webhook_body()
+    assert config == "/config/sma-ng.yml"
+
+  @pytest.mark.parametrize("cfg", ["/etc/passwd", "/alt/config.ini", "/config/../etc/passwd", "../sma-ng.yml", 5, ["x"]])
+  def test_json_body_unknown_config_rejected(self, cfg):
+    data = json.dumps({"path": "/mnt/movie.mkv", "config": cfg}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    h.server.path_config_manager.default_config = "/config/sma-ng.yml"
+    path, args, config, retries = h._parse_webhook_body()
+    assert path is None
+    assert h._response_code == 400
+    assert "config" in _get_response_body(h)["error"]
+    assert "passwd" not in _get_response_body(h)["error"]
+
+  @pytest.mark.parametrize("bad", ["-i", "--input=/etc/x", "-c", "--config=/x", "--job-id"])
+  @pytest.mark.parametrize("as_string", [False, True])
+  def test_json_body_forbidden_args_rejected(self, bad, as_string):
+    args_val = bad if as_string else ["-tmdb", "603", bad]
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": args_val}).encode()
     h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
     path, args, config, retries = h._parse_webhook_body()
-    assert config == "/alt/config.ini"
+    assert path is None
+    assert h._response_code == 400
+    assert "set by the daemon" in _get_response_body(h)["error"]
+
+  @pytest.mark.parametrize("bad", ["-c/evil", "-i/evil", "-ac", "-aai/x", "--conf", "--conf=/evil", "--inp=/evil", "--job", "--job=9"])
+  def test_json_body_forbidden_arg_bypass_forms_rejected(self, bad):
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": ["-tmdb", "603", bad]}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    path, args, config, retries = h._parse_webhook_body()
+    assert path is None
+    assert h._response_code == 400
+    assert "set by the daemon" in _get_response_body(h)["error"]
+
+  def test_json_body_manual_nc_allowed(self):
+    """The generic webhook always runs manual.py, where -nc is its own option, not -n -c."""
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": ["-nc", "-cl"]}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    path, args, config, retries = h._parse_webhook_body()
+    assert path == "/mnt/movie.mkv"
+    assert args == ["-nc", "-cl"]
+
+  @pytest.mark.parametrize("bad_path", [5, ["x"], {}, {"a": 1}, True])
+  def test_json_body_non_string_path_rejected(self, bad_path):
+    data = json.dumps({"path": bad_path}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    path, args, config, retries = h._parse_webhook_body()
+    assert path is None
+    assert h._response_code == 400
+    assert "path" in _get_response_body(h)["error"]
+
+  def test_json_body_unbalanced_quote_args_rejected(self):
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": "-tmdb 'unclosed"}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    path, args, config, retries = h._parse_webhook_body()
+    assert path is None
+    assert h._response_code == 400
+    assert _get_response_body(h)["error"] == "Invalid webhook body"
+
+  def test_handle_webhook_forbidden_arg_queues_nothing(self):
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": ["-i", "/etc/shadow"]}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    h._handle_webhook()
+    assert h._response_code == 400
+    h.server.job_db.add_job.assert_not_called()
+
+  @pytest.mark.parametrize("bad", [{"a": 1}, 5, ["-tmdb", 603], [["x"]], None])
+  def test_json_body_non_string_args_rejected(self, bad):
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": bad}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    path, args, config, retries = h._parse_webhook_body()
+    if bad is None:
+      assert path == "/mnt/movie.mkv" and args == []
+      return
+    assert path is None
+    assert h._response_code == 400
+    assert "args" in _get_response_body(h)["error"]
 
   def test_json_body_with_max_retries(self):
     data = json.dumps({"path": "/mnt/movie.mkv", "max_retries": 3}).encode()
@@ -3023,6 +3124,78 @@ class TestSecurityHardening:
     assert "n1" not in json.dumps(body)
     assert body["status"] == "ok"
 
+  def test_health_public_view_hides_paths_and_node(self):
+    h = _make_handler(api_key="k", headers={})
+    h.server.config_lock_manager.get_status.return_value = {
+      "active": [{"path": "/media/secret.mkv", "job_id": 7}],
+      "waiting": [{"path": "/media/other.mkv"}],
+    }
+    h._get_health()
+    body = _get_response_body(h)
+    text = json.dumps(body)
+    assert h._response_code == 200
+    assert body["status"] == "ok"
+    assert "/media" not in text
+    assert "test-node-1" not in text
+    for key in ("node", "active", "waiting"):
+      assert key not in body
+
+  def test_health_authenticated_has_full_detail(self):
+    h = _make_handler(api_key="k", headers={"X-API-Key": "k"})
+    h.server.config_lock_manager.get_status.return_value = {"active": [{"path": "/media/a.mkv"}], "waiting": []}
+    h._get_health()
+    body = _get_response_body(h)
+    assert body["node"] == "test-node-1"
+    assert body["active"][0]["path"] == "/media/a.mkv"
+
+  def test_prometheus_metrics_not_public(self):
+    h = _make_handler()
+    assert h.is_public_endpoint("/metrics") is False
+
+  def test_prometheus_metrics_requires_auth(self):
+    h = _make_handler(path="/metrics", api_key="k", headers={})
+    h.do_GET()
+    assert h._response_code == 401
+
+  def test_no_auth_configured_metrics_open_and_health_full(self):
+    h = _make_handler(path="/metrics", headers={})
+    h.do_GET()
+    assert h._response_code == 200
+    h = _make_handler()
+    h._get_health()
+    assert "node" in _get_response_body(h)
+
+  def test_metrics_dashboard_page_is_public(self):
+    """The HTML shell loads without a key; its data comes from /api/metrics, which stays authenticated."""
+    h = _make_handler(path="/dashboard/metrics", api_key="k", headers={})
+    assert h.is_public_endpoint("/dashboard/metrics") is True
+    h.do_GET()
+    assert h._response_code == 200
+    h = _make_handler(path="/api/metrics", api_key="k", headers={})
+    h.do_GET()
+    assert h._response_code == 401
+
+  @pytest.mark.parametrize("path", ["/health", "/status"])
+  def test_keyless_minimal_probe_logs_no_warning(self, path):
+    """Docker HEALTHCHECK probes /health keyless every 30 s; that must not log an Unauthorized warning."""
+    h = _make_handler(path=path, api_key="k", headers={})
+    h.do_GET()
+    assert h._response_code == 200
+    h.server.logger.warning.assert_not_called()
+
+  @pytest.mark.parametrize("headers", [{"X-API-Key": "wrong"}, {"Authorization": "Bearer wrong"}])
+  def test_wrong_key_on_health_still_warns(self, headers):
+    h = _make_handler(path="/health", api_key="k", headers=headers)
+    h.do_GET()
+    assert h._response_code == 200
+    assert "test-node-1" not in json.dumps(_get_response_body(h))
+    h.server.logger.warning.assert_called_once()
+
+  def test_prometheus_metrics_accepts_bearer(self):
+    h = _make_handler(path="/metrics", api_key="k", headers={"Authorization": "Bearer k"})
+    h.do_GET()
+    assert h._response_code == 200
+
   def test_status_authenticated_has_full_detail(self):
     h = _make_handler(api_key="k", headers={"X-API-Key": "k"})
     h.server.job_db.get_cluster_nodes.return_value = [{"node_id": "n1", "host": "10.0.0.5"}]
@@ -3093,3 +3266,101 @@ class TestSecurityHardening:
       h = _make_handler(api_key="secret", headers={"X-API-Key": "anything"})
       assert h.check_auth() is True
     cd.assert_called()
+
+
+class TestRouteTableArity:
+  def test_post_reload_via_dispatch_post(self):
+    from resources.daemon import routes
+
+    h = _make_handler(method="POST", path="/reload")
+    with patch("threading.Thread") as mock_thread:
+      routes.dispatch_post(h)
+    assert h._response_code == 200
+    assert _get_response_body(h)["status"] == "reloading"
+    mock_thread.assert_called_once()
+
+  def test_every_route_matches_handler_signature(self):
+    from unittest.mock import create_autospec
+
+    from resources.daemon import routes
+
+    entries = list(routes._get_routes().items()) + list(routes._post_routes().items())
+    entries += routes._get_prefix_routes() + routes._post_prefix_routes()
+    for key, route in entries:
+      mock = create_autospec(WebhookHandler, instance=True)
+      path = key if not key.endswith("/") or key == "/" else key + "1/ack"
+      try:
+        route(mock, path, {})
+      except TypeError as exc:
+        raise AssertionError(f"route {key!r} arity mismatch: {exc}") from exc
+
+
+class TestQueueSharedRules:
+  def test_queue_file_normalises_path_and_passes_window(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.job_dedupe_window_seconds = 7200
+    h.server.job_db.add_job.return_value = 7
+    h._queue_file(str(tmp_path) + "//./movie.mkv", [], None)
+    call = h.server.job_db.add_job.call_args
+    assert call.args[0] == str(f)
+    assert call.kwargs["dedupe_window_seconds"] == 7200
+
+  def test_queue_file_reports_recently_completed(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.job_dedupe_window_seconds = 7200
+    h.server.job_db.add_job.return_value = None
+    h.server.job_db.find_active_job.return_value = None
+    h.server.job_db.find_recent_completed_job.return_value = {"id": 42}
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert h._response_code == 200
+    assert body["status"] == "skipped"
+    assert body["reason"] == "recently_completed"
+    assert body["job_id"] == 42
+
+  def test_queue_file_active_duplicate_unchanged(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.job_db.add_job.return_value = None
+    h.server.job_db.find_active_job.return_value = {"id": 3}
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert body["status"] == "duplicate"
+    assert body["job_id"] == 3
+
+  def test_queue_directory_reports_recently_completed_as_skipped(self, tmp_path):
+    (tmp_path / "movie.mkv").write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.job_dedupe_window_seconds = 7200
+    h.server.job_db.add_job.return_value = None
+    h.server.job_db.find_active_job.return_value = None
+    h.server.job_db.find_recent_completed_job.return_value = {"id": 42}
+    h._queue_directory(str(tmp_path), [], None)
+    body = _get_response_body(h)
+    assert body["duplicates"] == []
+    assert body["skipped"] == [{"path": str(tmp_path / "movie.mkv"), "reason": "recently_completed", "job_id": 42}]
+
+  def test_queue_file_skips_recycle_bin(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.is_recycle_bin_path.return_value = True
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert body["status"] == "skipped"
+    assert body["reason"] == "recycle_bin"
+    h.server.job_db.add_job.assert_not_called()
+
+  def test_queue_directory_skips_recycle_bin(self, tmp_path):
+    (tmp_path / "movie.mkv").write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.is_recycle_bin_path.return_value = True
+    h._queue_directory(str(tmp_path), [], None)
+    body = _get_response_body(h)
+    assert body["skipped"][0]["reason"] == "recycle_bin"
+    h.server.job_db.add_job.assert_not_called()

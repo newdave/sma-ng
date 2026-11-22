@@ -15,6 +15,7 @@ import shlex
 import shutil
 import sys
 import time
+from pathlib import Path
 
 from autoprocess import autoscan, plex
 from autoprocess import emby as emby_refresh
@@ -197,6 +198,31 @@ def _first_attempt_tier(preopts, options):
   if codec and codec not in _HW_CODEC_TO_SW and "-hwaccel" not in (preopts or []):
     return "sw"
   return "hw"
+
+
+_ENCODER_BACKEND_MARKERS = ("qsv", "vaapi", "nvenc", "videotoolbox", "amf")
+
+
+def _resolve_encoder(options):
+  """Return ``(encoder_name, encoder_backend)`` for a convert *options* dict.
+
+  The name is the configured video codec (head of a fallback chain); the
+  backend is one of the ``metrics_prom.ENCODER_BACKENDS`` labels. Both are
+  ``None`` when *options* carries no video codec.
+  """
+  video = options.get("video") if isinstance(options, dict) else None
+  codec = video.get("codec") if isinstance(video, dict) else None
+  if isinstance(codec, list):
+    codec = codec[0] if codec else None
+  if not codec or not isinstance(codec, str):
+    return None, None
+  if codec == "copy":
+    return codec, "copy"
+  lowered = codec.lower()
+  for backend in _ENCODER_BACKEND_MARKERS:
+    if backend in lowered:
+      return codec, backend
+  return codec, "software"
 
 
 def _swap_hw_codec_to_sw(options):
@@ -721,18 +747,29 @@ def _resolve_hdr_color_tags(hdr_input, hdr_output, hdr_settings):
 
 from collections.abc import Callable
 
+from mutagen.mp4 import MP4
+
 from converter import Converter, FFMpegConvertError
 from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments, video_codec_list
+from converter.ffmpeg import TerminatedBySignal, is_unknown_stream
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
+
+# Post-conversion output verification (see MediaProcessor._verify_output): the output duration may
+# differ from the source by 2% (never less than 1 second), and conversion writes one video stream.
+OUTPUT_DURATION_TOLERANCE = 0.02
+OUTPUT_DURATION_MIN_SLACK = 1.0
+# Conversion maps exactly one video stream (the single options["video"] dict) and isValidSource
+# rejects sources without a video stream, so a good output always has exactly one.
+OUTPUT_EXPECTED_VIDEO_STREAMS = 1
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
 from resources.config_schema import FallbackPolicy
 from resources.extensions import bad_sub_extensions, subtitle_codec_extensions
 from resources.lang import getAlpha3TCode
-from resources.metadata import Metadata
+from resources.metadata import MediaType, Metadata
 from resources.openvino_analyzer import OpenVINOAnalyzerBackend, OpenVINOAnalyzerError
 from resources.postprocess import PostProcessor
-from resources.processor.failures import TAIL_BYTES, AttemptRecord, FfmpegFailureClass, diagnose_ffmpeg_failure, ladder_stop_reason, parse_ffmpeg_failure
+from resources.processor.failures import OUTPUT_VERIFY_FAILED, TAIL_BYTES, AttemptRecord, FfmpegFailureClass, diagnose_ffmpeg_failure, ladder_stop_reason, parse_ffmpeg_failure
 from resources.subtitles import SubtitleProcessor
 
 # VBV peak allowed above max-bitrate when the cap is what forced the re-encode
@@ -845,19 +882,36 @@ class MediaProcessor:
           # File renaming
           if self.settings.naming_enabled and tagdata:
             try:
-              from resources.naming import generate_name, rename_file
+              from resources.naming import generate_name, rename_file, video_is_copy
 
               # Re-probe the converted output so codec/quality tokens reflect
               # the encoded file, not the source (e.g. x265 instead of x264).
               output_info = self.converter.probe(output["output"], posters_as_video=False) or info
-              new_name = generate_name(output["output"], output_info, tagdata, self.settings, log=self.log, lookup_path=inputfile)
+              import guessit as _guessit
+
+              try:
+                guess_data = _guessit.guessit(original or os.path.basename(inputfile))
+              except Exception as e:
+                self.log.warning("guessit failed for rename, continuing without it: %s", " ".join(str(e).split()) or type(e).__name__)
+                guess_data = None
+              new_name = generate_name(
+                output["output"],
+                output_info,
+                tagdata,
+                self.settings,
+                guess_data=guess_data,
+                log=self.log,
+                lookup_path=inputfile,
+                video_copied=video_is_copy(output.get("options")),
+                original=original,
+              )
               if new_name:
                 output["output"] = rename_file(output["output"], new_name, log=self.log)
             except Exception:
               self.log.exception("Error during file rename")
 
           # Reverse Ouput
-          output["output"] = self.restoreFromOutput(inputfile, output["output"])
+          output["output"] = self.restoreFromOutput(inputfile, output["output"], tagdata=tagdata)
           for i, sub in enumerate(output["external_subs"]):
             output["external_subs"][i] = self.restoreFromOutput(inputfile, sub)
 
@@ -961,7 +1015,9 @@ class MediaProcessor:
     The original input file is NOT recycled or deleted here. The caller is
     responsible for calling _cleanup_input (or _recycle_to_bin for the
     no-moveto case) after the output has been safely placed at its final
-    destination. The returned dict includes a ``"delete"`` flag indicating
+    destination. Both report success as a boolean: when the recycle copy
+    fails (``_recycle_to_bin`` returns False) the caller must keep the
+    original rather than delete or replace it. The returned dict includes a ``"delete"`` flag indicating
     whether the caller should perform cleanup.
     """
     self.log.debug("Process started.")
@@ -1000,16 +1056,35 @@ class MediaProcessor:
     if options and tagdata and getattr(tagdata, "title", None):
       options["title"] = tagdata.title
 
+    bypassed = False
     if self.canBypassConvert(inputfile, info, options):
+      bypassed = True
       outputfile = inputfile
       self.log.info("Bypassing conversion and setting outputfile to inputfile.")
     else:
       if not options:
         self.log.error("Error converting, inputfile %s had a valid extension but returned no data. Either the file does not exist, was unreadable, or was an incorrect format." % inputfile)
         return None
+      source_path = inputfile
       outputfile, inputfile, ripped_subs = self._run_ffmpeg(inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput)
       if outputfile is None:
         return None
+      # ffmpeg exit 0 is not proof of a complete file: refuse to hand a truncated or
+      # stream-less output to the caller, which would then delete or recycle the source.
+      problem = self._verify_output(info, outputfile)
+      if problem:
+        failed = self._quarantine_failed_output(outputfile)
+        # A same-name conversion renamed the source to name.original: put it back.
+        inputfile = self._restore_source_name(inputfile, source_path)
+        # Subtitle files this job ripped have no output to go with: remove them.
+        for rs in ripped_subs:
+          self.removeFile(rs)
+        self.log.warning("Output verification failed (%s), keeping source %s, moved the output to %s [output-verify]." % (problem, inputfile, failed))
+        # One structured line so the daemon worker records the failure class and reason.
+        self.log.info(json.dumps({"event": "output.verify", "failure_class": OUTPUT_VERIFY_FAILED, "reason": problem}, sort_keys=True))
+        return None
+      # Only a verified re-encode may be swapped for a smaller stream copy; the
+      # fallback verifies the copy itself before it replaces the re-encode.
       outputfile, inputfile, ripped_subs = self._fallback_to_copy_if_larger(outputfile, inputfile, ripped_subs, info, options, preopts, postopts, downloaded_subs, reportProgress, progressOutput)
 
     self.log.debug("%s created from %s successfully." % (outputfile, inputfile))
@@ -1017,9 +1092,28 @@ class MediaProcessor:
     if outputfile == inputfile:
       if self.settings.output_dir:
         try:
-          outputfile = os.path.join(self.settings.output_dir, os.path.split(inputfile)[1])
-          self.log.debug("Outputfile set to %s." % outputfile)
-          shutil.copy(inputfile, outputfile)
+          # Never overwrite a file already in output_dir: number the copy instead
+          # (name.2.ext), keeping the input's own extension and its case
+          # (parseFile lowercases it, so Movie.MKV would target Movie.mkv).
+          _dir, bypass_name, _ext = self.parseFile(inputfile)
+          bypass_ext = os.path.splitext(inputfile)[1][1:]
+          target, _ = self.getOutputFile(os.path.dirname(inputfile), bypass_name, bypass_ext, temp_extension=bypass_ext)
+          if target is None:
+            raise OSError("Unable to determine output path in %s" % self.settings.output_dir)
+          if Path(target).exists() and Path(target).samefile(inputfile):
+            # Input already sits in output_dir: nothing to copy, keep it as the output.
+            delete = False
+          else:
+            preferred = os.path.join(self.settings.output_dir, os.path.split(inputfile)[1])
+            i = 2
+            while os.path.exists(target):
+              target, _ = self.getOutputFile(os.path.dirname(inputfile), bypass_name, bypass_ext, temp_extension=bypass_ext, number=i)
+              i += 1
+            if target != preferred:
+              self.log.warning("%s already exists in the output directory; copying the bypassed file to %s instead of replacing it [output-collision]." % (preferred, target))
+            outputfile = target
+            self.log.debug("Outputfile set to %s." % outputfile)
+            self._atomic_copy(inputfile, outputfile)
         except KeyboardInterrupt:
           raise
         except Exception:
@@ -1040,6 +1134,7 @@ class MediaProcessor:
       "output": outputfile,
       "output_extension": output_extension,
       "options": options,
+      "bypassed": bypassed,
       "preopts": preopts,
       "postopts": postopts,
       "external_subs": (downloaded_subs or []) + ripped_subs,
@@ -1111,6 +1206,14 @@ class MediaProcessor:
     if not copy_output:
       self.log.warning("Video copy fallback produced no output; keeping the larger re-encode [output-larger-than-input].")
       return restored, inputfile, ripped_subs
+
+    # The re-encode was verified before this fallback ran; the copy must pass the
+    # same check before it may replace it. A bad copy is quarantined, never kept.
+    problem = self._verify_output(info, copy_output)
+    if problem:
+      failed = self._quarantine_failed_output(copy_output)
+      self.log.warning("Video copy fallback output failed verification (%s), moved it to %s; keeping the larger re-encode [output-larger-than-input]." % (problem, failed))
+      return self._restore_aside(aside, outputfile), inputfile, ripped_subs
 
     try:
       copy_size = os.path.getsize(copy_output)
@@ -1249,6 +1352,78 @@ class MediaProcessor:
       return aside
     return target
 
+  def _restore_source_name(self, inputfile, source_path):
+    """Rename the source back to *source_path* after a failed conversion.
+
+    convert() renames the source to ``name.original`` when the output has the
+    same name. Never overwrites: when *source_path* is taken the source stays
+    at its current name and one warning says where. Returns the source path.
+    """
+    if not source_path or inputfile == source_path:
+      return inputfile
+    if os.path.lexists(source_path):
+      self.log.warning("Cannot restore source name %s, the path is taken; the source stays at %s [output-verify]." % (source_path, inputfile))
+      return inputfile
+    try:
+      os.rename(inputfile, source_path)
+    except OSError as e:
+      self.log.warning("Could not restore source %s to %s: %s [output-verify]." % (inputfile, source_path, " ".join(str(e).split())))
+      return inputfile
+    return source_path
+
+  def _quarantine_failed_output(self, outputfile):
+    """Rename a bad output to ``<name>.failed`` (``.failed.2``, ... when taken).
+
+    Never deletes or overwrites: the file is kept for inspection under a name
+    media scanners ignore. Returns the new path, or the original one if the
+    rename failed.
+    """
+    target = outputfile + ".failed"
+    n = 2
+    while os.path.lexists(target):
+      target = "%s.failed.%d" % (outputfile, n)
+      n += 1
+    try:
+      os.rename(outputfile, target)
+    except OSError as e:
+      self.log.warning("Could not rename failed output %s: %s" % (outputfile, " ".join(str(e).split())))
+      return outputfile
+    return target
+
+  def _verify_output(self, source_info, outputfile):
+    """Probe a converted output and compare it with the source.
+
+    Returns None when the output looks complete, otherwise a single-line
+    description of the mismatch. The checks are the output duration (within
+    OUTPUT_DURATION_TOLERANCE, at least OUTPUT_DURATION_MIN_SLACK seconds) and
+    the number of picture video streams. Conversion maps exactly one video
+    stream and drops cover art and unknown/data streams on purpose, so the
+    expected count is 1 and only real video streams are counted. A duration is
+    only compared when both the source and the output report a numeric one.
+    """
+    try:
+      out_info = self.converter.probe(outputfile, posters_as_video=False)
+    except KeyboardInterrupt:
+      raise
+    except Exception as e:
+      return "output could not be probed"
+    if not out_info:
+      return "output could not be probed"
+
+    out_videos = [s for s in out_info.streams if s.type == "video" and not is_unknown_stream(s) and s not in out_info.cover_art and not s.attached_pic]
+    if len(out_videos) != OUTPUT_EXPECTED_VIDEO_STREAMS:
+      return "video streams %d vs %d" % (len(out_videos), OUTPUT_EXPECTED_VIDEO_STREAMS)
+
+    src_duration = getattr(getattr(source_info, "format", None), "duration", None)
+    out_duration = getattr(getattr(out_info, "format", None), "duration", None)
+    if isinstance(src_duration, (int, float)) and src_duration > 0:
+      if not isinstance(out_duration, (int, float)) or out_duration <= 0:
+        return "no output duration vs %.0fs" % src_duration
+      slack = max(src_duration * OUTPUT_DURATION_TOLERANCE, OUTPUT_DURATION_MIN_SLACK)
+      if abs(out_duration - src_duration) > slack:
+        return "duration %.0fs vs %.0fs" % (out_duration, src_duration)
+    return None
+
   def _run_ffmpeg(self, inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput):
     """Log options, rip external subs, run FFmpeg conversion.
 
@@ -1293,12 +1468,13 @@ class MediaProcessor:
   def _recycle_to_bin(self, inputfile):
     """Copy inputfile to the recycle bin without deleting it.
 
-    No-op when recycle_bin is not configured or the file does not exist.
-    Call this before any operation that will overwrite the input path so
-    the original bytes are preserved before the path is replaced.
+    No-op (returns True) when recycle_bin is not configured or the file does
+    not exist. Returns False when the copy fails, so callers must keep the
+    original. Call this before any operation that will overwrite the input
+    path so the original bytes are preserved before the path is replaced.
     """
     if not self.settings.recycle_bin or not os.path.isfile(inputfile):
-      return
+      return True
     try:
       os.makedirs(self.settings.recycle_bin, exist_ok=True)
       recycle_dst = os.path.join(self.settings.recycle_bin, os.path.basename(inputfile))
@@ -1310,36 +1486,45 @@ class MediaProcessor:
           i += 1
       self._atomic_copy(inputfile, recycle_dst)
       self.log.info("Original file recycled to %s." % recycle_dst)
+      return True
     except KeyboardInterrupt:
       raise
-    except Exception:
-      self.log.exception("Failed to copy original to recycle bin %s." % self.settings.recycle_bin)
+    except Exception as e:
+      self.log.warning("Failed to copy original to recycle bin %s, keeping original: %s" % (self.settings.recycle_bin, " ".join(str(e).split())))
+      return False
 
   def _cleanup_input(self, inputfile, delete):
     """Copy inputfile to the recycle bin then unlink it and any staged subtitle files.
 
-    Returns True if the input file was deleted.
+    Returns True if the input file was deleted. The original, and its staged
+    subtitle sidecars, are kept when a recycle bin is configured and copying
+    to it failed, or when the original could not be deleted.
     Call this only after the output file has been successfully placed at its
     final destination so the original is never removed before the output is safe.
     """
-    if delete:
-      self._recycle_to_bin(inputfile)
+    recycled = self._recycle_to_bin(inputfile) if delete else True
 
     deleted = False
     if delete:
-      self.log.debug("Attempting to remove %s." % inputfile)
-      if self.removeFile(inputfile):
-        self.log.debug("%s deleted." % inputfile)
-        deleted = True
+      if not recycled:
+        self.log.warning("Not deleting %s: recycle bin copy failed." % inputfile)
       else:
-        self.log.error("Couldn't delete %s." % inputfile)
-
-      for subfile in self.deletesubs:
-        self.log.debug("Attempting to remove subtitle %s." % subfile)
-        if self.removeFile(subfile):
-          self.log.debug("Subtitle %s deleted." % subfile)
+        self.log.debug("Attempting to remove %s." % inputfile)
+        if self.removeFile(inputfile):
+          self.log.debug("%s deleted." % inputfile)
+          deleted = True
         else:
-          self.log.debug("Unable to delete subtitle %s." % subfile)
+          self.log.error("Couldn't delete %s." % inputfile)
+
+      # The source's subtitle sidecars go only with the source: when the
+      # original is kept (recycle copy failed, delete failed) keep them too.
+      if deleted:
+        for subfile in self.deletesubs:
+          self.log.debug("Attempting to remove subtitle %s." % subfile)
+          if self.removeFile(subfile):
+            self.log.debug("Subtitle %s deleted." % subfile)
+          else:
+            self.log.debug("Unable to delete subtitle %s." % subfile)
       self.deletesubs = set()
 
     return deleted
@@ -3866,7 +4051,7 @@ class MediaProcessor:
       self.log.exception("Unable to set new file permissions.")
 
   # Undo output dir
-  def restoreFromOutput(self, inputfile, outputfile):
+  def restoreFromOutput(self, inputfile, outputfile, tagdata=None):
     """
     Move outputfile back from output_dir to the original input directory.
 
@@ -3883,7 +4068,7 @@ class MediaProcessor:
       # sidecars keep their language-coded names and replace older copies.
       is_media = self.parseFile(outputfile)[2] == str(self.settings.output_extension or "").lower()
       if is_media and os.path.isfile(newoutputfile) and os.path.abspath(newoutputfile) != os.path.abspath(outputfile):
-        resolved = self._resolve_restore_collision(inputfile, outputfile, newoutputfile)
+        resolved = self._resolve_restore_collision(inputfile, outputfile, newoutputfile, tagdata)
         if resolved is None:
           # Identical bytes already in place (bypass copy): nothing to move.
           return newoutputfile
@@ -3906,13 +4091,67 @@ class MediaProcessor:
       return newoutputfile
     return outputfile
 
-  def _resolve_restore_collision(self, inputfile, outputfile, target):
+  def _earlier_sma_output_verdict(self, target, tagdata):
+    """Classify *target* against the new job's *tagdata*; return ``(replace, reason)``.
+
+    ``Metadata.writeTags`` stamps MP4 outputs with ``\xa9too`` = ``SMA-NG:<source>``
+    plus the ``TMDB``/``TVDB``/``IMDB`` atoms and, for TV, ``tvsn``/``tves``. A
+    target is replaceable only when it carries the SMA marker (any source name) and
+    the first id both sides have, plus season and episode for TV, are equal.
+    Reasons for refusing: ``no SMA marker``, ``identity not comparable``,
+    ``different episode``.
+    """
+    try:
+      tags = MP4(target).tags
+    except KeyboardInterrupt:
+      raise
+    except Exception:
+      tags = None
+    if not tags:
+      return False, "no SMA marker"
+    marker = tags.get("\xa9too")
+    if not marker or not str(marker[0]).startswith("SMA-NG:"):
+      return False, "no SMA marker"
+    if tagdata is None:
+      return False, "identity not comparable"
+
+    def atom(key):
+      values = tags.get(key)
+      if not values:
+        return None
+      return bytes(values[0]).decode("utf-8", errors="ignore") if isinstance(values[0], (bytes, bytearray)) else str(values[0])
+
+    is_tv = getattr(tagdata, "mediatype", None) == MediaType.TV
+    id_keys = (("TMDB", "tmdbid"), ("TVDB", "tvdbid")) if is_tv else (("TMDB", "tmdbid"), ("IMDB", "imdbid"))
+    for atom_name, attr in id_keys:
+      new_id = getattr(tagdata, attr, None)
+      old_id = atom("----:com.apple.iTunes:" + atom_name)
+      if new_id and old_id:
+        if str(new_id) != old_id:
+          return False, "different episode"
+        break
+    else:
+      return False, "identity not comparable"
+    if is_tv:
+      new_sn, new_ep = getattr(tagdata, "season", None), getattr(tagdata, "episode", None)
+      old_sn, old_ep = tags.get("tvsn"), tags.get("tves")
+      if new_sn is None or new_ep is None or not old_sn or not old_ep:
+        return False, "identity not comparable"
+      if str(old_sn[0]) != str(new_sn) or str(old_ep[0]) != str(new_ep):
+        return False, "different episode"
+    return True, ""
+
+  def _resolve_restore_collision(self, inputfile, outputfile, target, tagdata=None):
     """Pick a safe destination when moving *outputfile* back onto an existing *target*.
 
     - *target* is the input and ``delete`` is enabled: replace it by design
       (the caller recycles the original first). Returns *target*.
     - *target* holds the same bytes as *outputfile* (a bypass copy of the
       input): drop the redundant copy and return ``None`` (nothing to move).
+    - ``delete`` is enabled and *target* is provably an earlier SMA output of
+      the same episode/movie (``_earlier_sma_output_verdict``, matched on
+      tagged ids, any source name): recycle it and replace it, so a re-grab
+      leaves one file. A failed recycle keeps it and numbers.
     - Otherwise (``delete`` is off, or *target* is an unrelated file): keep
       the existing file and return a numbered path (``name.2.mp4``).
     """
@@ -3928,6 +4167,15 @@ class MediaProcessor:
         return None
     except OSError:
       pass
+    if not is_input and self.settings.delete:
+      replace, reason = self._earlier_sma_output_verdict(target, tagdata)
+      if replace:
+        if self._recycle_to_bin(target):
+          self.log.info("%s is an earlier SMA-NG output of the same title; replacing it [output-replace-stale]." % target)
+          return target
+        self.log.warning("Not replacing earlier SMA-NG output %s: recycle bin copy failed." % target)
+      else:
+        self.log.info("Not replacing existing %s: %s [output-collision-reason]." % (target, reason))
     base, ext = os.path.splitext(target)
     i = 2
     candidate = "%s.%d%s" % (base, i, ext)
@@ -4773,6 +5021,13 @@ class MediaProcessor:
     """
     policy = getattr(self.settings, "fallback_policy", FallbackPolicy.AGGRESSIVE)
     records: list[AttemptRecord] = []
+    self._attempt_options = options
+
+    def _run(run_preopts, run_options):
+      # Remember the options of the latest run so the attempts event names
+      # the encoder that actually ran (after any hw_alt / full_sw swap).
+      self._attempt_options = run_options
+      run_fn(run_preopts, run_options)
 
     def _ms(start: float) -> int:
       return int((time.monotonic() - start) * 1000)
@@ -4833,7 +5088,7 @@ class MediaProcessor:
         self.removeFile(outputfile)
       t_rescue = time.monotonic()
       try:
-        run_fn(rescue_preopts, rescue_options)
+        _run(rescue_preopts, rescue_options)
         records.append(AttemptRecord(tier="sw_decode_hw_encode", failure_class=None, duration_ms=_ms(t_rescue)))
         self._emit_attempt_log(records, "ok")
         return True
@@ -4845,7 +5100,7 @@ class MediaProcessor:
     first_tier = _first_attempt_tier(preopts, options)
     t0 = time.monotonic()
     try:
-      run_fn(preopts, options)
+      _run(preopts, options)
       records.append(AttemptRecord(tier=first_tier, failure_class=None, duration_ms=_ms(t0)))
       self._emit_attempt_log(records, "ok")
       return
@@ -4887,7 +5142,7 @@ class MediaProcessor:
         self.removeFile(outputfile)
       t_alt = time.monotonic()
       try:
-        run_fn(retry_preopts_alt, retry_options_alt)
+        _run(retry_preopts_alt, retry_options_alt)
         records.append(AttemptRecord(tier="hw_alt", failure_class=None, duration_ms=_ms(t_alt)))
         self._emit_attempt_log(records, "ok")
         return
@@ -4943,7 +5198,7 @@ class MediaProcessor:
         self.removeFile(outputfile)
       t1 = time.monotonic()
       try:
-        run_fn(retry_preopts, options)
+        _run(retry_preopts, options)
         records.append(AttemptRecord(tier="sw_decode", failure_class=None, duration_ms=_ms(t1)))
         self._emit_attempt_log(records, "ok")
         return
@@ -4989,7 +5244,7 @@ class MediaProcessor:
       self.removeFile(outputfile)
     t2 = time.monotonic()
     try:
-      run_fn(sw_preopts, options)
+      _run(sw_preopts, options)
       records.append(AttemptRecord(tier="full_sw", failure_class=None, duration_ms=_ms(t2)))
       self._emit_attempt_log(records, "ok")
       return
@@ -5030,9 +5285,12 @@ class MediaProcessor:
     Single-line per :doc:`brainstorming/2026-04-27-logging-refactor`; new
     structured fields go in the JSON payload, not multiple log records.
     """
+    encoder_name, encoder_backend = _resolve_encoder(getattr(self, "_attempt_options", None))
     payload = {
       "event": "ffmpeg.attempts",
       "result": result,
+      "encoder_name": encoder_name,
+      "encoder_backend": encoder_backend,
       "attempts": [
         {
           "tier": r.tier,
@@ -5319,7 +5577,13 @@ class MediaProcessor:
       self.log.error("Error converting file, FFMPEG error (pid=%s, msg=%s). Full cmd + stderr in sidecar: %s" % (getattr(e, "pid", "?"), getattr(e, "message", "?"), sidecar_path or "<unavailable>"))
       self._emit_failure_diagnosis(e, options, sidecar_path)
       return _restore_after_failure(outputfile)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, TerminatedBySignal) as e:
+      # Interrupted (daemon shutdown SIGTERM or Ctrl-C): keep what stderr ffmpeg
+      # produced, drop the partial output and restore the input so a retry
+      # starts clean, then keep unwinding.
+      self._write_ffmpeg_stderr_sidecar(e)
+      self.log.warning("Conversion interrupted by %s; removed partial output and restored the input" % type(e).__name__)
+      _restore_after_failure(outputfile)
       raise
     except Exception:
       self.log.exception("Unexpected exception during conversion.")

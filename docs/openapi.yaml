@@ -4,7 +4,7 @@ info:
   description: |
     HTTP webhook server for media conversion automation.
     Authentication is optional; when an API key is configured all endpoints
-    except `/health`, `/status`, `/`, `/dashboard`, and `/docs` require it.
+    except `/health`, `/status`, `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, and `/docs` require it.
   version: "1.0.0"
 
 servers:
@@ -64,7 +64,9 @@ components:
             - type: string
         config:
           type: string
-          description: Config override (bypasses path routing)
+          description: >
+            Config override (bypasses path routing). Must be the daemon's loaded config file;
+            any other path is rejected with 400.
         max_retries:
           type: integer
     Job:
@@ -128,6 +130,66 @@ components:
           type: string
           nullable: true
           description: Log file stem for the config used by this job (e.g. "sma-ng")
+        encoder_backend:
+          type: string
+          nullable: true
+          description: "Encoder backend that produced the output: qsv, vaapi, nvenc, videotoolbox, amf, software or copy"
+        encoder_name:
+          type: string
+          nullable: true
+          description: Video encoder (codec name) that produced the output, after any fallback swap
+        source_duration_seconds:
+          type: number
+          nullable: true
+          description: Source duration in seconds
+        source_video_codec:
+          type: string
+          nullable: true
+          description: Source video codec (ffprobe name)
+        source_video_width:
+          type: integer
+          nullable: true
+          description: Source video width in pixels
+        source_video_height:
+          type: integer
+          nullable: true
+          description: Source video height in pixels
+        source_audio_codec:
+          type: string
+          nullable: true
+          description: First source audio stream codec
+        source_audio_channels:
+          type: integer
+          nullable: true
+          description: First source audio stream channel count
+        source_hdr:
+          type: string
+          nullable: true
+          description: "Source dynamic range: sdr, hdr10, hdr10plus, dolby_vision or hlg. Dolby Vision and HDR10+ show only when the probe exposes their side data, otherwise hdr10"
+        dest_video_codec:
+          type: string
+          nullable: true
+          description: Output video codec
+        dest_video_width:
+          type: integer
+          nullable: true
+          description: Output video width in pixels
+        dest_video_height:
+          type: integer
+          nullable: true
+          description: Output video height in pixels
+        dest_audio_codec:
+          type: string
+          nullable: true
+          description: First output audio stream codec
+        dest_audio_channels:
+          type: integer
+          nullable: true
+          description: First output audio stream channel count
+        dest_hdr:
+          type: string
+          nullable: true
+          description: "Output dynamic range: sdr, hdr10, hdr10plus, dolby_vision or hlg. Dolby Vision and HDR10+ show only when the probe exposes their side data, otherwise hdr10"
 
     JobStats:
       type: object
@@ -260,8 +322,13 @@ paths:
   /health:
     get:
       summary: Daemon health check
-      description: Returns node status, uptime, worker count, and job statistics. No authentication required.
-      security: []
+      description: >-
+        Without credentials returns a minimal liveness view (status, version, uptime_seconds, jobs). With a
+        valid API key returns the full detail (node, commit, workers, active and waiting jobs, hardware).
+      security:
+        - {}
+        - apiKey: []
+        - bearerToken: []
       operationId: getHealth
       tags: [monitoring]
       responses:
@@ -277,6 +344,7 @@ paths:
                     example: ok
                   node:
                     type: string
+                    description: Authenticated callers only
                   version:
                     type: string
                     description: SMA-NG release version of this node (from package metadata)
@@ -303,6 +371,25 @@ paths:
                   waiting:
                     type: object
                     description: Map of config path → waiting job count
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: Prometheus text exposition. Requires credentials when an API key or basic auth is configured (series carry the node id).
+      security:
+        - apiKey: []
+        - bearerToken: []
+      operationId: getPrometheusMetrics
+      tags: [monitoring]
+      responses:
+        "200":
+          description: Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          description: Missing or invalid credentials
 
   /status:
     get:
@@ -376,6 +463,7 @@ paths:
             type: string
         - name: limit
           in: query
+          description: Page size. Values above 500 are clamped to 500. Job rows omit ffmpeg_stderr and output (use the per-job endpoints).
           schema:
             type: integer
             default: 100
@@ -419,7 +507,7 @@ paths:
               $ref: "#/components/schemas/JobSubmit"
       responses:
         "200":
-          description: Duplicate (same path already pending or running) or skipped
+          description: Duplicate (same kind and normalised path already pending or running) or skipped
           content:
             application/json:
               schema:
@@ -818,7 +906,7 @@ paths:
               type: string
       responses:
         "200":
-          description: Duplicate (same path already pending or running) or skipped
+          description: Duplicate (same normalised path already pending or running) or skipped (same extension, recycle bin, or reason recently_completed with the completed job_id when the path finished within job-dedupe-window-seconds)
           content:
             application/json:
               schema:
@@ -835,7 +923,9 @@ paths:
                   job_id:
                     type: integer
         "400":
-          description: Invalid request or path
+          description: >
+            Invalid request or path; args not a list of strings; args containing -c, --config, -i, --input or
+            --job-id; config not the daemon's loaded config
           content:
             application/json:
               schema:
@@ -858,7 +948,7 @@ paths:
               type: string
       responses:
         "200":
-          description: Duplicate (same path already pending or running) or skipped
+          description: Duplicate (same normalised path already pending or running) or skipped (same extension, recycle bin, or reason recently_completed with the completed job_id when the path finished within job-dedupe-window-seconds)
           content:
             application/json:
               schema:
@@ -1140,7 +1230,9 @@ paths:
 
   /cleanup:
     post:
-      summary: Remove old completed and failed jobs
+      summary: Remove old completed, failed and cancelled jobs
+      description: >-
+        Jobs completed within daemon.job-dedupe-window-seconds are never removed; scanned_files is not touched. The daemon runs the same pass hourly using daemon.job-retention-days.
       operationId: cleanup
       tags: [jobs]
       parameters:
@@ -1447,7 +1539,7 @@ paths:
           in: query
           schema:
             type: integer
-          description: Filter entries to a specific job
+          description: Filter entries to a specific job; scans the live log and rotated backups (.1 to .5), keeping the newest `lines` matches
         - name: offset
           in: query
           schema:

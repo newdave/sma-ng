@@ -1,5 +1,41 @@
 # Changelog
 
+## [3.2.41](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.40...sma-ng-v3.2.41) (2026-11-22)
+
+
+### Bug Fixes
+
+* daemon worker job safety (shutdown requeue, claim tokens, DB error recovery, telemetry) ([#230](https://github.com/newdave/sma-ng/issues/230)) ([f03df1d](https://github.com/newdave/sma-ng/commit/f03df1d8822195b0c58111742edf454d56d1d47b))
+
+## [3.2.40](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.39...sma-ng-v3.2.40) (2026-11-22)
+
+
+### Bug Fixes
+
+* daemon HTTP security (reload route, health/metrics auth views, webhook arg validation) ([#228](https://github.com/newdave/sma-ng/issues/228)) ([c1753c9](https://github.com/newdave/sma-ng/commit/c1753c96465e8519ed0d10cfee6e932ae0ef3ce9))
+
+## [3.2.39](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.38...sma-ng-v3.2.39) (2026-11-22)
+
+
+### Bug Fixes
+
+* output safety (recycle failure, stale outputs, bypass numbering, output verification) ([#227](https://github.com/newdave/sma-ng/issues/227)) ([e229180](https://github.com/newdave/sma-ng/commit/e229180e07ca6850264406267ccadac96ad30acf))
+
+## [3.2.38](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.37...sma-ng-v3.2.38) (2026-11-22)
+
+
+### Bug Fixes
+
+* dedupe queued jobs, schedule job retention, return older job logs ([#224](https://github.com/newdave/sma-ng/issues/224)) ([679d4ee](https://github.com/newdave/sma-ng/commit/679d4ee7b277d83d4d60ca251abeff090c0cb10e))
+* renaming and metadata fixes (doubled year, release tags, season audit, quiet misses) ([#223](https://github.com/newdave/sma-ng/issues/223)) ([f171931](https://github.com/newdave/sma-ng/commit/f1719313ccbae4d0afd023a8a56912073642af6f))
+
+## [3.2.37](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.36...sma-ng-v3.2.37) (2026-11-22)
+
+
+### Bug Fixes
+
+* import after Sonarr/Radarr rescan wait times out ([#222](https://github.com/newdave/sma-ng/issues/222)) ([b9369b2](https://github.com/newdave/sma-ng/commit/b9369b20a50efe7290ea88228848f6e72286a8b1))
+
 ## [3.2.36](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.35...sma-ng-v3.2.36) (2026-11-04)
 
 

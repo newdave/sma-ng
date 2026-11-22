@@ -14,6 +14,7 @@ import glob
 import json
 import logging
 import os
+import signal
 import struct
 import sys
 
@@ -21,13 +22,15 @@ import guessit
 import tmdbsimple as tmdb
 
 from converter.avcodecs import attachment_codec_list, audio_codec_list, subtitle_codec_list, video_codec_list
+from converter.ffmpeg import TerminatedBySignal
 from resources.config_loader import ConfigError, ConfigLoader
 from resources.daemon.context import set_job_id
 from resources.extensions import tmdb_api_key
-from resources.log import getLogger
+from resources.log import enable_level_token, getLogger
 from resources.media_repair import STATUS_REPAIRED, RepairProcessor
 from resources.mediaprocessor import InsufficientOutputSpace, MediaProcessor
 from resources.metadata import MediaType, Metadata
+from resources.naming import classify_hdr
 from resources.readsettings import ReadSettings
 from resources.version import version_string
 
@@ -428,8 +431,8 @@ def triggerRescan(filepath, settings):
     # movie shows as missing.
     if rescan_id:
       if not wait_for_command(base_url, headers, rescan_id, log):
-        log.warning("%s [%s] rescan command did not complete; skipping import." % (arr_type.title(), instance["section"]))
-        return None
+        # Still import: skipping leaves the file unlinked and Sonarr/Radarr re-grabs the release.
+        log.warning("%s [%s] rescan command did not complete; importing anyway." % (arr_type.title(), instance["section"]))
 
     import_id = downloaded_scan_via_arr(base_url, headers, arr_type, filepath, log)
     if import_id and not wait_for_command(base_url, headers, import_id, log):
@@ -480,6 +483,57 @@ def addtoProcessedArchive(files, processedList, processedArchive):
   with open(processedArchive, "w", encoding="utf8") as pa:
     json.dump(list(set(processedList)), pa, indent=4)
   log.debug("Adding %s to processed archive %s" % (files, processedArchive))
+
+
+def media_facts(info):
+  """Return the telemetry facts for a probed ``MediaInfo`` (None-safe).
+
+  Keys match the daemon ``jobs`` telemetry columns minus their ``source_`` /
+  ``dest_`` prefix: video_codec, video_width, video_height, audio_codec,
+  audio_channels and hdr (``sdr``, ``hdr10``, ``hdr10plus``, ``dolby_vision``
+  or ``hlg``, see ``resources.naming.classify_hdr``).
+  """
+  if info is None:
+    return None
+  video = info.video
+  audio = info.audio[0] if info.audio else None
+  facts = {
+    "video_codec": video.codec if video else None,
+    "video_width": video.video_width if video else None,
+    "video_height": video.video_height if video else None,
+    "audio_codec": audio.codec if audio else None,
+    "audio_channels": audio.audio_channels if audio else None,
+    "hdr": classify_hdr(video),
+  }
+  return facts
+
+
+def emit_job_summary(info=None, dest_info=None, encoder=None):
+  """Log one single-line ``sma.job.summary`` JSON event for the daemon worker.
+
+  The worker parses it to fill the job telemetry columns and the progress
+  percent denominator. Either side may be omitted; empty events are skipped.
+  *encoder* is an optional ``(name, backend)`` pair for jobs where no video
+  encoder ran (``("copy", "copy")``); encoding jobs report it in ``ffmpeg.attempts``.
+  """
+  try:
+    payload = {"event": "sma.job.summary"}
+    if encoder:
+      payload["encoder_name"], payload["encoder_backend"] = encoder
+    source = media_facts(info)
+    if source:
+      payload["source"] = source
+    dest = media_facts(dest_info)
+    if dest:
+      payload["dest"] = dest
+    duration = info.format.duration if info is not None else None
+    if duration:
+      payload["duration_seconds"] = duration
+    if len(payload) > 1:
+      log.info(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+  except Exception:
+    # Telemetry must never fail a conversion.
+    log.debug("Could not emit the job summary event", exc_info=True)
 
 
 def processFile(
@@ -561,6 +615,9 @@ def processFile(
     displayOptions(inputfile, mp.settings, tagdata)
     return None
 
+  if not tagOnly:
+    emit_job_summary(info)
+
   if not tagdata:
     log.info("Processing file %s" % inputfile)
   elif tagdata.mediatype == MediaType.Movie:
@@ -594,6 +651,10 @@ def processFile(
 
   output = mp.process(inputfile, True, info=info, original=original, tagdata=tagdata)
   if output:
+    try:
+      emit_job_summary(dest_info=mp.converter.probe(output["output"]), encoder=("copy", "copy") if output.get("bypassed") else None)
+    except Exception:
+      log.debug("Could not probe output for the job summary event", exc_info=True)
     if not language:
       language = mp.getDefaultAudioLanguage(output["options"]) or None
       if language and tagdata:
@@ -628,10 +689,16 @@ def processFile(
       try:
         import guessit as _guessit
 
-        from resources.naming import generate_name, rename_file
+        from resources.naming import generate_name, rename_file, video_is_copy
 
-        guess_data = _guessit.guessit(original or os.path.basename(inputfile))
-        new_name = generate_name(output["output"], info, tagdata, mp.settings, guess_data=guess_data, log=log, lookup_path=inputfile)
+        try:
+          guess_data = _guessit.guessit(original or os.path.basename(inputfile))
+        except Exception as e:
+          log.warning("guessit failed for rename, continuing without it: %s", " ".join(str(e).split()) or type(e).__name__)
+          guess_data = None
+        new_name = generate_name(
+          output["output"], info, tagdata, mp.settings, guess_data=guess_data, log=log, lookup_path=inputfile, video_copied=video_is_copy(output.get("options")), original=original
+        )
         if new_name:
           output["output"] = rename_file(output["output"], new_name, log=log)
       except Exception:
@@ -639,14 +706,24 @@ def processFile(
 
     # When output_dir is set without moveto, restoreFromOutput moves the output
     # back next to the input. If the names collide it only replaces the input
-    # when delete is enabled (recycle the original now, while it still exists);
-    # with delete disabled it keeps the original and numbers the output.
+    # when delete is enabled and the recycle copy (when a recycle bin is set)
+    # succeeded; take that copy now, while the original still exists.
+    # Otherwise it keeps the original and numbers the output.
     _overwrite_input = mp.settings.output_dir and not mp.settings.moveto and os.path.commonpath([mp.settings.output_dir, output["output"]]) == mp.settings.output_dir
+    _saved_delete = mp.settings.delete
     if _overwrite_input and output.get("delete"):
-      mp._recycle_to_bin(output["input"])
+      if not mp._recycle_to_bin(output["input"]):
+        # No backup exists: behave as if delete were off so the original is
+        # neither replaced by restoreFromOutput nor unlinked below.
+        log.warning("Recycle copy of %s failed; keeping the original and not replacing it." % output["input"])
+        output["delete"] = False
+        mp.settings.delete = False
 
     # Reverse Output
-    output["output"] = mp.restoreFromOutput(inputfile, output["output"])
+    try:
+      output["output"] = mp.restoreFromOutput(inputfile, output["output"], tagdata=tagdata)
+    finally:
+      mp.settings.delete = _saved_delete
     for i, sub in enumerate(output["external_subs"]):
       output["external_subs"][i] = mp.restoreFromOutput(inputfile, sub)
 
@@ -664,8 +741,8 @@ def processFile(
       mp.setPermissions(file)
 
     # Clean up the original input only after the output is safely placed.
-    # For the no-moveto case the recycle copy was already taken above
-    # (line 617). restoreFromOutput moves the converted file back into
+    # For the no-moveto case the recycle copy was already taken above,
+    # before restoreFromOutput (a failed copy turns delete off). restoreFromOutput moves the converted file back into
     # the input directory under the OUTPUT filename, which only collides
     # with — and atomically replaces — the original when the input and
     # output share a filename + extension (typical mp4 -> mp4 force
@@ -684,11 +761,14 @@ def processFile(
         else:
           log.error("Couldn't delete original %s." % output["input"])
           deleted = False
-      for subfile in list(mp.deletesubs):
-        if mp.removeFile(subfile):
-          log.debug("Subtitle %s deleted." % subfile)
-        else:
-          log.debug("Unable to delete subtitle %s." % subfile)
+      # The source's subtitle sidecars go only with the source: keep them when
+      # the original is kept (delete off, failed recycle copy, failed unlink).
+      if output.get("delete") and deleted:
+        for subfile in list(mp.deletesubs):
+          if mp.removeFile(subfile):
+            log.debug("Subtitle %s deleted." % subfile)
+          else:
+            log.debug("Unable to delete subtitle %s." % subfile)
       mp.deletesubs = set()
       output["input_deleted"] = bool(output.get("delete")) and deleted
     else:
@@ -921,6 +1001,23 @@ def _resolve_effective_profile(config_arg, input_path, cli_profile):
   return resolved.profile
 
 
+def _on_sigterm(signum, frame):
+  """Unwind the running conversion so ffmpeg is stopped and partial output is removed."""
+  raise TerminatedBySignal(signum)
+
+
+def run():
+  """Run main(); on SIGTERM exit by that signal so the daemon sees a signal death, not a failure."""
+  signal.signal(signal.SIGTERM, _on_sigterm)
+  try:
+    main()
+  except TerminatedBySignal:
+    log.warning("Terminated by SIGTERM; conversion stopped and cleaned up")
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    os.kill(os.getpid(), signal.SIGTERM)
+    sys.exit(128 + signal.SIGTERM)  # only reached if the signal is somehow ignored
+
+
 def main():
   """Parse CLI arguments and drive the manual conversion/tagging workflow.
 
@@ -1009,6 +1106,8 @@ def main():
   # worker finds and ingests it by that name after this process exits.
   if args.get("job_id"):
     set_job_id(args["job_id"])
+    # Daemon-launched child: tag each record with its level for the worker.
+    enable_level_token()
 
   # Setup the silent mode
   silent = args["auto"]
@@ -1191,4 +1290,4 @@ def main():
 
 
 if __name__ == "__main__":
-  main()
+  run()

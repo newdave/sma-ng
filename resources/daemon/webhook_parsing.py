@@ -2,6 +2,8 @@ import json
 import re as _re
 import shlex
 
+from resources.daemon.job_kinds import forbidden_arg
+
 _ARR_TVDB_RE = _re.compile(r"\{tvdb-(\d+)\}", _re.IGNORECASE)
 _ARR_TMDB_RE = _re.compile(r"\{tmdb-(\d+)\}", _re.IGNORECASE)
 _ARR_PROFILE_TAG_PREFIX = "sma-profile-"
@@ -67,11 +69,23 @@ def parse_generic_webhook_body(body_text, content_type, send_json_response):
       data = json.loads(body_text)
       if isinstance(data, dict):
         path = data.get("path") or data.get("file") or data.get("input")
-        extra_args = data.get("args", [])
+        extra_args = data.get("args")
+        if extra_args is None:
+          extra_args = []
         config_override = data.get("config")
         max_retries = int(data.get("max_retries", 0))
         if isinstance(extra_args, str):
           extra_args = shlex.split(extra_args)
+        if not isinstance(extra_args, list) or not all(isinstance(a, str) for a in extra_args):
+          send_json_response(400, {"error": "args must be a list of strings"})
+          return None, [], None, 0
+        bad = forbidden_arg(extra_args)
+        if bad:
+          send_json_response(400, {"error": "Argument %s is set by the daemon and cannot be passed" % bad})
+          return None, [], None, 0
+        if config_override is not None and not isinstance(config_override, str):
+          send_json_response(400, {"error": "config must be a string"})
+          return None, [], None, 0
       elif isinstance(data, str):
         path = data
     except json.JSONDecodeError:
@@ -82,6 +96,9 @@ def parse_generic_webhook_body(body_text, content_type, send_json_response):
   else:
     path = body_text
 
+  if path and not isinstance(path, str):
+    send_json_response(400, {"error": "path must be a string"})
+    return None, [], None, 0
   if not path:
     send_json_response(400, {"error": "No path provided"})
     return None, [], None, 0

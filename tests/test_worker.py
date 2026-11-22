@@ -2,10 +2,13 @@
 
 import json
 import logging
+import threading
+import time
 import unittest.mock as mock
 
 import pytest
 
+from resources.daemon.db import NO_CLAIM_TOKEN
 from resources.daemon.worker import (
   ConversionWorker,
   WorkerPool,
@@ -134,7 +137,7 @@ class TestConversionWorkerProcessJob:
     worker = _make_worker(job_db=db)
     job = {"id": 1, "path": str(tmp_path / "missing.mkv"), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(1, "Path does not exist", failure_category="source_media", failure_cause="path_missing", node_id=worker.node_id)
+    db.fail_job.assert_called_once_with(1, "Path does not exist", failure_category="source_media", failure_cause="path_missing", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN)
 
   def test_skips_cancelled_job_before_start(self, tmp_path):
     media = tmp_path / "movie.mkv"
@@ -186,7 +189,9 @@ class TestConversionWorkerProcessJob:
     worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
     job = {"id": 5, "path": str(media), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(5, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id)
+    db.fail_job.assert_called_once_with(
+      5, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN, telemetry={}, source_duration_seconds=None
+    )
     db.complete_job.assert_not_called()
 
   def test_does_not_overwrite_cancelled_status_after_failed_conversion(self, tmp_path):
@@ -244,7 +249,7 @@ class TestConversionWorkerProcessJob:
     worker._run_conversion = mock.MagicMock()
     job = {"id": 8, "path": str(media), "config": "/cfg.ini", "args": '["-tmdb", '}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(8, "Invalid job args", failure_category="config", failure_cause="invalid_args", node_id=worker.node_id)
+    db.fail_job.assert_called_once_with(8, "Invalid job args", failure_category="config", failure_cause="invalid_args", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN)
     worker._run_conversion.assert_not_called()
     assert worker.current_job_id is None
 
@@ -363,7 +368,9 @@ class TestIngestFfmpegStderrSidecars:
     worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
     worker.process_job({"id": 8, "path": str(media), "config": "/cfg.ini", "args": None})
 
-    db.fail_job.assert_called_once_with(8, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id)
+    db.fail_job.assert_called_once_with(
+      8, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN, telemetry={}, source_duration_seconds=None
+    )
     db.update_job_ffmpeg_stderr.assert_called_once()
     args, _ = db.update_job_ffmpeg_stderr.call_args
     assert args[0] == 8
@@ -504,10 +511,20 @@ class TestRunConversionInner:
     progress_line = "frame=  100 fps= 25 speed=1.50x time=00:01:00 size=  5000kB"
     proc = _make_fake_process([duration_line, progress_line], returncode=0)
 
-    # The watchdog thread also reads time.monotonic; stub it out so the
-    # patched clock is consumed only by the progress loop.
+    # time.monotonic is process-global, so watchdog or other background threads
+    # (including ones leaked by earlier tests) read it too. Script the values
+    # for this thread only and defer every other caller to the real clock.
+    real_monotonic = time.monotonic
+    test_thread = threading.get_ident()
+    scripted = iter([0.0, 10.0])
+
+    def fake_monotonic():
+      if threading.get_ident() != test_thread:
+        return real_monotonic()
+      return next(scripted, 10.0)
+
     with mock.patch("subprocess.Popen", return_value=proc), mock.patch("resources.daemon.worker._JobWatchdog"):
-      with mock.patch("resources.daemon.worker.time.monotonic", side_effect=[0.0, 10.0]):
+      with mock.patch("resources.daemon.worker.time.monotonic", side_effect=fake_monotonic):
         result = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
 
     assert result[0] is True
@@ -867,6 +884,138 @@ class TestFallbackEventParsing:
     worker._fallback_counter_callback = None
     worker._record_fallback_event('{"event": "ffmpeg.attempts", "attempts": [], "result": "ok"}')  # must not raise
 
+  @staticmethod
+  def _formatted_attempts_line():
+    import logging
+
+    from resources.log import SingleLineFormatter
+
+    payload = {
+      "event": "ffmpeg.attempts",
+      "attempts": [{"tier": "hw", "failure_class": "device_open_failed", "duration_ms": 12}],
+      "result": "failed",
+    }
+    rec = logging.LogRecord("t", logging.INFO, __file__, 1, json.dumps(payload, indent=2), None, None)
+    line = SingleLineFormatter("%(message)s").format(rec)
+    assert '"event": "ffmpeg.attempts"' not in line  # compacted: no space after colon
+    assert '"event":"ffmpeg.attempts"' in line
+    return line
+
+  def test_records_line_from_real_single_line_formatter(self):
+    worker, calls = self._worker_with_cb()
+    worker._record_fallback_event(self._formatted_attempts_line())
+    assert calls == [("hw", "failed", "device_open_failed")]
+
+  def test_read_loop_parses_compact_line_without_callback(self, tmp_path):
+    """The read loop must parse compact JSON and stash the failure class even
+    when no metrics callback is registered."""
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    worker.job_timeout_seconds = 0
+    worker._fallback_counter_callback = None
+    proc = _make_fake_process([self._formatted_attempts_line()], returncode=1)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    assert worker._last_attempt_failure_class == "device_open_failed"
+
+  def test_read_loop_feeds_callback_with_compact_line(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker, calls = self._worker_with_cb()
+    worker.job_timeout_seconds = 0
+    proc = _make_fake_process([self._formatted_attempts_line()], returncode=1)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    assert calls == [("hw", "failed", "device_open_failed")]
+
+
+class TestOutputVerifyEvent:
+  def test_event_sets_failure_class_and_reason(self):
+    worker = _make_worker()
+    worker._record_output_verify_event('INFO x: {"event": "output.verify", "failure_class": "output_verify_failed", "reason": "duration 3600s vs 7200s"}')
+    assert worker._last_attempt_failure_class == "output_verify_failed"
+    assert worker._last_verify_reason == "duration 3600s vs 7200s"
+
+  def test_job_failure_carries_category_cause_and_reason(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+    worker.job_timeout_seconds = 0
+    line = '{"event": "output.verify", "failure_class": "output_verify_failed", "reason": "video streams 0 vs 1"}'
+    proc = _make_fake_process([line], returncode=1)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker.process_job({"id": 9, "path": str(media), "config": "/cfg.ini", "args": None})
+    db.fail_job.assert_called_once_with(
+      9,
+      "Conversion process failed: output verification failed (video streams 0 vs 1) (exit code 1)",
+      failure_category="system",
+      failure_cause="output_verify_failed",
+      node_id=worker.node_id,
+      claim_token="",
+      telemetry={},
+      source_duration_seconds=None,
+    )
+
+
+def _manual_formatted_line(payload):
+  """Render *payload* the way manual.py's MANUAL logger does: json.dumps
+  through the real SingleLineFormatter, which compacts the JSON (no spaces
+  after ``:``)."""
+  from resources.log import SingleLineFormatter
+
+  record = logging.LogRecord("MANUAL", logging.INFO, __file__, 0, json.dumps(payload, sort_keys=True), None, None)
+  return SingleLineFormatter("%(asctime)s - %(levelname)s - %(message)s").format(record)
+
+
+class TestRealFormatterEventLines:
+  """The worker must recognise structured events in the compact JSON that the
+  real SingleLineFormatter emits, not only in json.dumps' spaced form."""
+
+  def test_output_verify_line_from_real_formatter_fails_job_with_cause(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+    worker.job_timeout_seconds = 0
+    line = _manual_formatted_line({"event": "output.verify", "failure_class": "output_verify_failed", "reason": "video streams 0 vs 1"})
+    assert '"event":"output.verify"' in line
+    proc = _make_fake_process([line], returncode=1)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker.process_job({"id": 9, "path": str(media), "config": "/cfg.ini", "args": None})
+    db.fail_job.assert_called_once_with(
+      9,
+      "Conversion process failed: output verification failed (video streams 0 vs 1) (exit code 1)",
+      failure_category="system",
+      failure_cause="output_verify_failed",
+      node_id=worker.node_id,
+      claim_token="",
+      telemetry={},
+      source_duration_seconds=None,
+    )
+
+  def test_ffmpeg_attempts_line_from_real_formatter_bumps_counters(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    calls = []
+    worker = _make_worker()
+    worker.job_timeout_seconds = 0
+    worker._fallback_counter_callback = lambda *a: calls.append(a)
+    line = _manual_formatted_line(
+      {
+        "event": "ffmpeg.attempts",
+        "attempts": [{"tier": "hw", "failure_class": "device_open_failed", "duration_ms": 12}, {"tier": "sw_decode", "failure_class": None, "duration_ms": 100}],
+        "result": "ok",
+      }
+    )
+    proc = _make_fake_process([line], returncode=0)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker._run_conversion(1, str(media), "/cfg.ini", [])
+    assert calls == [("hw", "sw_decode", "device_open_failed")]
+
 
 # ---------------------------------------------------------------------------
 # preflight_output_capacity helper + ConversionWorker._preflight_disk_pressure
@@ -1028,3 +1177,183 @@ class TestPreflightDiskPressureIntegration:
     worker.process_job({"id": 103, "path": str(media), "config": "/cfg.ini", "args": None})
     db.defer_job.assert_called_once()
     worker._run_conversion.assert_not_called()
+
+
+class _Capture(logging.Handler):
+  def __init__(self):
+    super().__init__(logging.DEBUG)
+    self.records = []
+
+  def emit(self, record):
+    self.records.append(record)
+
+
+class TestChildLogLevels:
+  """Child records carry SMA_LEVEL=<LEVEL>; the worker re-logs at that level (SMANG-13)."""
+
+  def _run(self, tmp_path, lines):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    logger = logging.getLogger("test.childlevels")
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    cap = _Capture()
+    logger.addHandler(cap)
+    worker.config_log_manager.get_logger.return_value = logger
+    proc = _make_fake_process(lines, returncode=0)
+    try:
+      with mock.patch("subprocess.Popen", return_value=proc):
+        worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    finally:
+      logger.removeHandler(cap)
+    return worker, cap.records
+
+  def test_levels_preserved_and_token_stripped(self, tmp_path):
+    _, recs = self._run(
+      tmp_path,
+      [
+        "SMA_LEVEL=WARNING [t job:1] careful",
+        "SMA_LEVEL=ERROR [t job:1] boom",
+        "SMA_LEVEL=ERROR [t job:1] Traceback",
+        "| ValueError: x",
+        "raw ffmpeg line",
+      ],
+    )
+    got = [(r.levelno, r.getMessage()) for r in recs]
+    assert (logging.WARNING, "[t job:1] careful") in got
+    assert (logging.ERROR, "[t job:1] boom") in got
+    assert (logging.ERROR, "| ValueError: x") in got
+    assert (logging.INFO, "raw ffmpeg line") in got
+    assert not any("SMA_LEVEL" in m for _, m in got)
+
+  def test_no_empty_separator_record(self, tmp_path):
+    _, recs = self._run(tmp_path, ["hello"])
+    assert not [r for r in recs if r.getMessage() == ""]
+
+  def test_attempts_line_with_level_token_still_parsed(self, tmp_path):
+    line = 'SMA_LEVEL=INFO {"attempts":[{"tier":"hw","failure_class":"encoder_init_failed","duration_ms":5}],"event":"ffmpeg.attempts","result":"failed"}'
+    worker, recs = self._run(tmp_path, [line])
+    assert worker._last_attempt_failure_class == "encoder_init_failed"
+    assert any(r.getMessage().startswith('{"attempts"') for r in recs)
+
+  def test_warning_reaches_logs_level_filter(self, tmp_path):
+    from resources.daemon.config import ConfigLogManager
+    from tests.test_handler import _get_response_body, _make_handler
+
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    mgr = ConfigLogManager(logs_dir=str(tmp_path / "logs"))
+    worker = _make_worker()
+    worker.config_log_manager = mgr
+    proc = _make_fake_process(["SMA_LEVEL=INFO [t job:1] fine", "SMA_LEVEL=WARNING [t job:1] careful"], returncode=0)
+    logger = mgr.get_logger("/cfg/test-lvl.yml")
+    try:
+      with mock.patch("subprocess.Popen", return_value=proc):
+        worker._run_conversion_inner(1, str(media), "/cfg/test-lvl.yml", [])
+      for h in logger.handlers:
+        h.flush()
+      handler = _make_handler()
+      handler.server.config_log_manager.get_all_log_files.return_value = [{"name": "test-lvl", "path": mgr.get_log_file("/cfg/test-lvl.yml")}]
+      handler._get_log_content("/logs/test-lvl", {"level": ["WARNING"]})
+      msgs = [e["message"] for e in _get_response_body(handler)["entries"]]
+    finally:
+      for h in list(logger.handlers):
+        logger.removeHandler(h)
+        h.close()
+    assert any("careful" in m for m in msgs)
+    assert not any("fine" in m for m in msgs)
+
+
+_SUMMARY_SOURCE = '{"duration_seconds":5400.5,"event":"sma.job.summary","source":{"audio_channels":6,"audio_codec":"eac3","hdr":"hdr10","video_codec":"hevc","video_height":2160,"video_width":3840}}'
+_SUMMARY_DEST = '{"dest":{"audio_channels":2,"audio_codec":"aac","hdr":"sdr","video_codec":"h264","video_height":1080,"video_width":1920},"event":"sma.job.summary"}'
+
+
+class TestJobSummaryTelemetry:
+  """The worker parses manual.py's sma.job.summary event into job telemetry."""
+
+  def test_summary_events_merge_into_telemetry(self):
+    worker = _make_worker()
+    worker._record_job_summary(_SUMMARY_SOURCE)
+    worker._record_job_summary("INFO [t job:1] " + _SUMMARY_DEST)
+    t = worker._job_telemetry
+    assert t["source_video_codec"] == "hevc"
+    assert t["source_video_width"] == 3840
+    assert t["source_video_height"] == 2160
+    assert t["source_audio_codec"] == "eac3"
+    assert t["source_audio_channels"] == 6
+    assert t["source_hdr"] == "hdr10"
+    assert t["dest_video_codec"] == "h264"
+    assert t["dest_video_width"] == 1920
+    assert t["dest_audio_channels"] == 2
+    assert t["dest_hdr"] == "sdr"
+    assert t["source_duration_seconds"] == 5400.5
+
+  def test_malformed_and_foreign_records_ignored(self):
+    worker = _make_worker()
+    worker._record_job_summary("no json here sma.job.summary")
+    worker._record_job_summary("{not json} sma.job.summary")
+    worker._record_job_summary('{"event":"other","source":{"video_codec":"x"}}')
+    worker._record_job_summary('{"event":"sma.job.summary","source":{"bogus_key":1,"video_codec":null},"dest":"x","duration_seconds":"n"}')
+    assert worker._job_telemetry == {}
+
+  def test_run_conversion_feeds_progress_and_duration_from_summary(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    worker.progress_log_interval = 0
+    proc = _make_fake_process(
+      ["SMA_LEVEL=INFO [t job:1] " + _SUMMARY_SOURCE, "frame=  100 fps= 25 speed=1.00x time=00:09:00 size=  5000kB"],
+      returncode=0,
+    )
+    with mock.patch("subprocess.Popen", return_value=proc):
+      ok, _final, duration = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    assert ok is True
+    assert duration == 5400.5
+    assert worker._job_telemetry["source_video_codec"] == "hevc"
+
+  def test_progress_percent_uses_summary_duration(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    worker.progress_log_interval = 0
+    seen = []
+    original = worker._build_progress_payload
+
+    def spy(*args, **kwargs):
+      payload = original(*args, **kwargs)
+      seen.append(payload)
+      return payload
+
+    worker._build_progress_payload = spy
+    proc = _make_fake_process([_SUMMARY_SOURCE, "frame=  100 fps= 25 speed=1.00x time=00:09:00 size=  5000kB"], returncode=0)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    assert seen and seen[0]["percent"] == 10.0
+
+  def test_process_job_persists_telemetry_on_success_and_failure(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+
+    def fake_run(*_a, **_k):
+      worker._job_telemetry = {"source_video_codec": "hevc", "dest_video_codec": "h264"}
+      return (True, None, 90.0)
+
+    worker._run_conversion = mock.MagicMock(side_effect=fake_run)
+    worker.process_job({"id": 4, "path": str(media), "config": "/cfg.ini", "args": None})
+    kwargs = db.complete_job.call_args.kwargs
+    assert kwargs["telemetry"] == {"source_video_codec": "hevc", "dest_video_codec": "h264"}
+    assert kwargs["source_duration_seconds"] == 90.0
+
+    def fake_fail(*_a, **_k):
+      worker._job_telemetry = {"source_video_codec": "hevc"}
+      return (False, None, 90.0)
+
+    worker._run_conversion = mock.MagicMock(side_effect=fake_fail)
+    worker.process_job({"id": 5, "path": str(media), "config": "/cfg.ini", "args": None})
+    kwargs = db.fail_job.call_args.kwargs
+    assert kwargs["telemetry"] == {"source_video_codec": "hevc"}
+    assert kwargs["source_duration_seconds"] == 90.0

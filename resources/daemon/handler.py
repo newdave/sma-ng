@@ -3,6 +3,7 @@ import json
 import os
 import re as _re
 import threading
+from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING
@@ -17,6 +18,8 @@ from resources.daemon.constants import MAX_REQUEST_BODY_BYTES, SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase
 from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html, doc_file_for_slug
+from resources.daemon.queueing import SKIP_RECENTLY_COMPLETED, SKIP_RECYCLE_BIN, SKIP_SAME_EXTENSION, duplicate_outcome, queue_job, skip_reason
+from resources.log import LOG_BACKUP_COUNT
 
 __all__ = ["WebhookHandler", "_inline"]
 from resources.daemon import job_kinds
@@ -220,14 +223,25 @@ class _NullWriter:
 # Queue priority for preview jobs submitted without one: a plan is quick and someone is waiting for it.
 PREVIEW_PRIORITY = 100
 
+_SKIP_MESSAGES = {
+  SKIP_SAME_EXTENSION: "process-same-extensions is false and force-convert is false; file already matches output extension",
+  SKIP_RECYCLE_BIN: "path is inside a configured recycle-bin directory",
+  SKIP_RECENTLY_COMPLETED: "path was converted within job-dedupe-window-seconds; not queued again",
+}
+
+
+# Upper bound for GET /jobs `limit`.
+MAX_JOBS_LIMIT = 500
+
 
 def _public_job(job):
   """Shape a job row for API responses: always a kind, never the stored output."""
   job.setdefault("kind", job_kinds.DEFAULT_KIND)
   if not job.get("kind"):
     job["kind"] = job_kinds.DEFAULT_KIND
-  for column in JOB_OUTPUT_COLUMNS:
+  for column in (*JOB_OUTPUT_COLUMNS, "ffmpeg_stderr"):
     job.pop(column, None)
+  job.pop("claim_token", None)  # internal ownership state
   return job
 
 
@@ -237,8 +251,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
   if TYPE_CHECKING:
     server: "DaemonServer"
 
-  # Endpoints that don't require authentication (prefix-matched for /docs/*)
-  PUBLIC_ENDPOINTS = ["/", "/dashboard", "/admin", "/metrics", "/health", "/status", "/docs", "/favicon.png"]
+  # Endpoints that don't require authentication (prefix-matched for /docs/*). HTML shells fetch their data from
+  # authenticated APIs (/dashboard/metrics reads /api/metrics).
+  PUBLIC_ENDPOINTS = ["/", "/dashboard", "/dashboard/metrics", "/admin", "/health", "/status", "/docs", "/favicon.png"]
 
   def log_message(self, format, *args):
     self.server.logger.debug("%s - %s" % (self.address_string(), format % args))
@@ -315,6 +330,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """Return True if the request carries valid credentials (or none are required). Sends no response."""
     if not self.server.api_key and not self.server.basic_auth:
       return True
+    if not self.headers.get("X-API-Key") and not self.headers.get("Authorization"):
+      return False  # keyless probe (Docker HEALTHCHECK): minimal view, no Unauthorized warning
     saved = (self.send_response, self.send_header, self.end_headers, self.wfile)
     try:
       self.send_response = lambda *a, **k: None
@@ -383,6 +400,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
   # ------------------------------------------------------------------
 
   def _get_health(self):
+    if not self._is_authenticated():
+      # Unauthenticated callers get a minimal liveness view only: no node id,
+      # job ids or media paths (those live in the active/waiting lists).
+      now = _local_now()
+      self.send_json_response(
+        200,
+        {
+          "status": "ok",
+          "version": self.server.version,
+          "uptime_seconds": int((now - self.server.started_at).total_seconds()),
+          "jobs": self.server.job_db.get_stats(),
+        },
+      )
+      return
     lock_status = self.server.config_lock_manager.get_status()
     stats = self.server.job_db.get_stats()
     now = _local_now()
@@ -462,6 +493,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     if search:
       offset = 0
       limit = max(limit, 200)
+    limit = min(limit, MAX_JOBS_LIMIT)
     jobs = self.server.job_db.get_jobs(
       status=status,
       config=config,
@@ -735,10 +767,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
       raw_lines = self._read_from_offset(log_path, offset_param)
     elif offset_param is not None:
       raw_lines = self._read_from_offset(log_path, offset_param)
+    elif job_id_filter is not None:
+      raw_lines = self._iter_job_lines(log_path, job_id_filter)
     else:
       raw_lines = self._tail_lines(log_path, lines_param)
 
-    entries = []
+    # Bound memory: with a job_id the whole file set is streamed, keep only the newest N matches
+    entries = deque(maxlen=lines_param) if job_id_filter is not None and not is_tail and offset_param is None else []
     for line in raw_lines:
       line = line.strip()
       if not line:
@@ -757,7 +792,27 @@ class WebhookHandler(BaseHTTPRequestHandler):
           continue
       entries.append(entry)
 
-    self.send_json_response(200, {"entries": entries, "file_size": file_size})
+    self.send_json_response(200, {"entries": list(entries), "file_size": file_size})
+
+  @staticmethod
+  def _iter_job_lines(log_path, job_id):
+    """Yield raw lines mentioning job_id from the rotated backups (oldest first) then the live file.
+
+    Streams line by line; the work is bounded by RotatingFileHandler limits (LOG_BACKUP_COUNT + 1 files of at most
+    LOG_MAX_BYTES). A cheap substring test skips most JSON parsing.
+    """
+    needle = str(job_id)
+    paths = [f"{log_path}.{i}" for i in range(LOG_BACKUP_COUNT, 0, -1)] + [log_path]
+    for candidate in paths:
+      if candidate != log_path and not os.path.isfile(candidate):
+        continue
+      try:
+        with open(candidate, "r", encoding="utf-8", errors="replace") as f:
+          for line in f:
+            if needle in line:
+              yield line
+      except OSError:
+        continue
 
   @staticmethod
   def _tail_lines(filepath, n):
@@ -939,7 +994,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
   def _post_cleanup(self, query):
     days = self._query_int(query, "days", 30)
-    deleted = self.server.job_db.cleanup_old_jobs(days)
+    # Never prune a finished job that still blocks re-queueing its path.
+    protect = self.server.path_config_manager.job_dedupe_window_seconds
+    deleted = self.server.job_db.cleanup_old_jobs(days, protect_seconds=protect)
     self.send_json_response(200, {"deleted": deleted, "days": days})
 
   def _parse_job_id(self, path, segment=-2):
@@ -1441,7 +1498,19 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """
     content_length = self._content_length()
     body = self.rfile.read(content_length).decode("utf-8").strip()
-    return parse_generic_webhook_body(body, self.headers.get("Content-Type", ""), self.send_json_response)
+    path, extra_args, config_override, max_retries = parse_generic_webhook_body(body, self.headers.get("Content-Type", ""), self.send_json_response)
+    if path is not None and config_override and not self._is_known_config(config_override):
+      self.server.logger.warning("Rejected webhook config override: not a configured daemon config")
+      self.send_json_response(400, {"error": "config must be the daemon's configured config file"})
+      return None, [], None, 0
+    return path, extra_args, config_override, max_retries
+
+  def _is_known_config(self, config_override):
+    """True when *config_override* is the daemon's loaded config (compared by resolved path)."""
+    known = getattr(self.server.path_config_manager, "default_config", None)
+    if not isinstance(known, str) or not known:
+      return False
+    return os.path.realpath(config_override) == os.path.realpath(known)
 
   def _resolve_config(self, path, config_override):
     """Return the config file to use for path, respecting any override."""
@@ -1580,14 +1649,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
     discard.
     """
     pcm = self.server.path_config_manager
-    skip_same_ext = getattr(pcm, "should_skip_same_extension", None)
     has_match = getattr(pcm, "has_routing_match", None)
     strict = getattr(pcm, "strict_routing", False) and not config_override
     queued, duplicates, skipped = [], [], []
     for filepath in self._walk_media_files(path):
       job_path = pcm.rewrite_path(filepath)
-      if callable(skip_same_ext) and skip_same_ext(job_path):
-        skipped.append({"path": job_path, "reason": "same_as_output_extension"})
+      reason = skip_reason(pcm, job_path)
+      if reason:
+        skipped.append({"path": job_path, "reason": reason})
         continue
       if strict and callable(has_match) and not has_match(job_path):
         skipped.append({"path": job_path, "reason": "no_routing_match"})
@@ -1595,7 +1664,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
       resolved_config = self._resolve_config(job_path, config_override)
       profile = self._resolve_profile(job_path, config_override)
       job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
-      job_id = self.server.job_db.add_job(
+      job_id = queue_job(
+        self.server.job_db,
+        pcm,
         job_path,
         resolved_config,
         job_args,
@@ -1604,8 +1675,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
         request_profile=profile,
       )
       if job_id is None:
-        existing = self.server.job_db.find_active_job(job_path)
-        duplicates.append({"path": job_path, "job_id": existing["id"] if existing else None})
+        outcome, existing_id = duplicate_outcome(self.server.job_db, pcm, job_path)
+        if outcome == SKIP_RECENTLY_COMPLETED:
+          self.server.logger.info("Skipped queue: %s (%s, job %s)" % (job_path, outcome, existing_id))
+          skipped.append({"path": job_path, "reason": outcome, "job_id": existing_id})
+        else:
+          duplicates.append({"path": job_path, "job_id": existing_id})
       else:
         queued.append({"job_id": job_id, "path": job_path, "config": resolved_config, "profile": profile})
         metrics_prom.record_job_enqueued(request_source, profile)
@@ -1638,16 +1713,16 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """Queue a single file job and respond."""
     pcm = self.server.path_config_manager
     job_path = pcm.rewrite_path(path)
-    skip_same_ext = getattr(pcm, "should_skip_same_extension", None)
-    if callable(skip_same_ext) and skip_same_ext(job_path):
-      self.server.logger.info("Skipped queue: %s (same as output extension)" % job_path)
+    reason = skip_reason(pcm, job_path)
+    if reason:
+      self.server.logger.info("Skipped queue: %s (%s)" % (job_path, reason))
       self.send_json_response(
         200,
         {
           "status": "skipped",
           "path": job_path,
-          "reason": "same_as_output_extension",
-          "message": "process-same-extensions is false and force-convert is false; file already matches output extension",
+          "reason": reason,
+          "message": _SKIP_MESSAGES[reason],
         },
       )
       return
@@ -1668,7 +1743,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
     resolved_config = self._resolve_config(job_path, config_override)
     profile = self._resolve_profile(job_path, config_override)
     job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
-    job_id = self.server.job_db.add_job(
+    job_id = queue_job(
+      self.server.job_db,
+      pcm,
       job_path,
       resolved_config,
       job_args,
@@ -1678,9 +1755,16 @@ class WebhookHandler(BaseHTTPRequestHandler):
     )
 
     if job_id is None:
-      existing = self.server.job_db.find_active_job(job_path)
+      outcome, existing_id = duplicate_outcome(self.server.job_db, pcm, job_path)
+      if outcome == SKIP_RECENTLY_COMPLETED:
+        self.server.logger.info("Skipped queue: %s (%s, job %s)" % (job_path, outcome, existing_id))
+        self.send_json_response(
+          200,
+          {"status": "skipped", "path": job_path, "reason": outcome, "job_id": existing_id, "message": _SKIP_MESSAGES[outcome]},
+        )
+        return
       self.server.logger.info("Duplicate job submission for: %s" % job_path)
-      self.send_json_response(200, {"status": "duplicate", "job_id": existing["id"] if existing else None, "path": job_path, "config": resolved_config})
+      self.send_json_response(200, {"status": "duplicate", "job_id": existing_id, "path": job_path, "config": resolved_config})
       return
 
     self.server.notify_workers()
@@ -1856,7 +1940,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     except KeyError:
       self.send_json_response(400, {"error": "Unknown job kind %r" % req["kind"], "kinds": list(job_kinds.SUPPORTED_KINDS)})
       return
-    bad = job_kinds.forbidden_arg(req["args"])
+    bad = job_kinds.forbidden_arg(req["args"], kind)
     if bad:
       self.send_json_response(400, {"error": "Argument %s is set by the daemon and cannot be passed" % bad})
       return

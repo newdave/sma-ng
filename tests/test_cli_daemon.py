@@ -562,3 +562,27 @@ class TestCommandsRouting:
 
 def test_facts_dataclass_is_replaceable():
   assert dataclasses.replace(_facts(), os="Darwin").os == "Darwin"
+
+
+def test_client_sends_api_key_header_on_health():
+  seen = {}
+
+  class _Resp:
+    status = 200
+    headers = {}
+
+    def read(self):
+      return b"{}"
+
+    def __enter__(self):
+      return self
+
+    def __exit__(self, *a):
+      return False
+
+  def opener(req, timeout=None):
+    seen["key"] = req.get_header("X-api-key")
+    return _Resp()
+
+  DaemonClient("http://x", "secret", opener=opener).health()
+  assert seen["key"] == "secret"

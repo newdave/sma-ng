@@ -1,5 +1,6 @@
 import glob
 import json
+import logging
 import os
 import re as _re
 import shutil
@@ -8,12 +9,15 @@ import subprocess
 import sys
 import threading
 import time
+from functools import partial
 
 from resources.daemon import job_kinds, metrics_prom
 from resources.daemon.constants import FFMPEG_STDERR_DIR, SCRIPT_DIR, resolve_node_id
 from resources.daemon.context import clear_job_id, set_job_id
-from resources.log import getLogger
+from resources.daemon.db import NO_CLAIM_TOKEN, TELEMETRY_COLUMNS
+from resources.log import LEVEL_TOKEN_RE, getLogger
 from resources.processor.failures import (
+  OUTPUT_VERIFY_FAILED,
   WORKER_SENTINEL_DISK_PRESSURE,
   WORKER_SENTINEL_EXCEPTION,
   WORKER_SENTINEL_INVALID_ARGS,
@@ -49,6 +53,19 @@ JOB_STATUS_POLL_SECONDS = 10.0
 KILL_GRACE_SECONDS = 5.0
 # Back-off after an unexpected error in the worker loop (e.g. DB outage).
 LOOP_ERROR_BACKOFF_SECONDS = 5.0
+# Delays between retries of a terminal job write (fail/requeue) after a DB error.
+TERMINAL_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
+# After stop() the stop event no longer waits; keep a short real pause so the
+# retries still space out without delaying shutdown past its grace.
+SHUTDOWN_RETRY_BACKOFF_CAP_SECONDS = 0.25
+# Exit codes of a conversion stopped by SIGTERM/SIGINT: killed by the signal
+# (-15, -2) or exited through manual.py's 128 + signum fallback (143, 130).
+INTERRUPT_RETURNCODES = (-signal.SIGTERM, -signal.SIGINT, 128 + signal.SIGTERM, 128 + signal.SIGINT)
+# Returned by _terminal_write when every attempt failed and the write was parked.
+_PARKED = object()
+# Consecutive pre-start errors (claim, then DB/lock error before the conversion
+# starts) that requeue a job; the next one fails it so a poison job cannot loop.
+MAX_PRE_START_REQUEUES = 3
 
 # Reasons a running conversion can be aborted by the daemon.
 ABORT_TIMEOUT = "timeout"
@@ -237,6 +254,25 @@ def _load_settings_for_preflight(config_file, profile, logger):
     return None
 
 
+def _parse_event(line: str, event: str):
+  """Return the JSON object of the *event* record embedded in a log *line*, or None.
+
+  The daemon log formatter may prefix the record (the prefix can itself hold
+  braces), so every ``{`` is tried as the start of the payload.
+  """
+  decoder = json.JSONDecoder()
+  start = line.find("{")
+  while start >= 0:
+    try:
+      payload, _end = decoder.raw_decode(line, start)
+    except ValueError:
+      payload = None
+    if isinstance(payload, dict) and payload.get("event") == event:
+      return payload
+    start = line.find("{", start + 1)
+  return None
+
+
 def _hms_to_seconds(h, m, s):
   return int(h) * 3600 + int(m) * 60 + float(s)
 
@@ -271,6 +307,7 @@ class ConversionWorker(threading.Thread):
     self._fallback_counter_callback = fallback_counter_callback
     self.worker_id = worker_id
     self.node_id = resolve_node_id()
+    self._claim_token = None  # token of the claim for the job this worker is running
     self.pool = pool
     self.job_db = job_db
     self.job_event = threading.Event()  # per-worker event; set by notify_workers()
@@ -286,6 +323,9 @@ class ConversionWorker(threading.Thread):
     self.current_job_id = None
     self._job_processes = job_processes if job_processes is not None else {}
     self._job_progress = job_progress if job_progress is not None else {}
+    self._job_telemetry: dict = {}
+    self._last_encoder_name: str | None = None
+    self._last_encoder_backend: str | None = None
     self._last_approval_log = 0.0
     self._stop_event = threading.Event()
     # Abort bookkeeping for the job currently being converted. The reason
@@ -294,6 +334,12 @@ class ConversionWorker(threading.Thread):
     self._abort_lock = threading.Lock()
     self._abort_reason = None
     self._watchdog = None
+    # Terminal writes parked after a DB outage, keyed by job id: (what, write).
+    self._pending_releases = {}
+    self._pending_lock = threading.Lock()
+    # Consecutive pre-start errors per job id, shared across the pool's workers.
+    shared = getattr(pool, "_pre_start_failures", None)
+    self._pre_start_failures = shared if isinstance(shared, dict) else {}
 
   def stop(self):
     """Signal worker to stop."""
@@ -323,6 +369,10 @@ class ConversionWorker(threading.Thread):
       watchdog.wake.set()
     return True
 
+  def _owner_kwargs(self):
+    """Ownership arguments for fail/complete/requeue/defer: node plus the claim token (NO_CLAIM_TOKEN when this run holds none)."""
+    return {"node_id": self.node_id, "claim_token": self._claim_token or NO_CLAIM_TOKEN}
+
   def _check_job_ownership(self, job_id):
     """Return an abort reason when the job row no longer belongs to this run.
 
@@ -344,6 +394,9 @@ class ConversionWorker(threading.Thread):
       return self._set_abort_reason(ABORT_CANCELLED)
     owner = row.get("node_id")
     if status in ("pending", "completed", "failed") or (status == "running" and isinstance(owner, str) and owner and owner != self.node_id):
+      return self._set_abort_reason(ABORT_REASSIGNED)
+    # Same node, new claim: the job was requeued and another worker took it.
+    if status == "running" and "claim_token" in row and (row["claim_token"] or None) != (self._claim_token or None):
       return self._set_abort_reason(ABORT_REASSIGNED)
     return None
 
@@ -367,6 +420,9 @@ class ConversionWorker(threading.Thread):
     # * 50ms keeps total latency bounded while breaking the tie.
     self.job_event.wait(timeout=5.0 + (self.worker_id - 1) * 0.05)
     self.job_event.clear()
+
+    # Before the pause/drain/approval gates, so a paused or draining worker still releases rows.
+    self._flush_pending_release()
 
     if not self.running:
       return
@@ -424,11 +480,14 @@ class ConversionWorker(threading.Thread):
         if self.pool is not None:
           self.pool.notify_one()
         self.process_job(job)
+        # A write parked by that job must land before the next claim, not after the next conversion.
+        self._flush_pending_release()
       else:
         break
 
   def process_job(self, job):
     job_id = job["id"]
+    self._claim_token = job.get("claim_token")
     with self._abort_lock:
       self.current_job_id = job_id
       self._abort_reason = None
@@ -436,8 +495,11 @@ class ConversionWorker(threading.Thread):
     # Reset per-job state captured from the ffmpeg.attempts JSON line so
     # one job's classification doesn't leak into the next.
     self._last_attempt_failure_class: str | None = None
+    self._last_verify_reason: str | None = None
     self._last_encoder_name: str | None = None
     self._last_encoder_backend: str | None = None
+    self._job_telemetry: dict = {}
+    self._last_returncode: int | None = None
     path = job["path"]
     config_file = job["config"]
     try:
@@ -448,65 +510,56 @@ class ConversionWorker(threading.Thread):
     job_started_at = time.monotonic()
     in_flight = metrics_prom.in_flight_counter(self.node_id)
     in_flight.inc()
+    lock_held = False
+    started = False
     try:
-      args = json.loads(job["args"]) if job["args"] else []
-    except (TypeError, ValueError) as e:
-      self.log.error("Job %d has invalid args payload: %s" % (job_id, e))
-      cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
-      self.job_db.fail_job(job_id, "Invalid job args", failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, node_id=self.node_id)
-      metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
-      metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
-      in_flight.dec()
-      self.current_job_id = None
-      return
+      try:
+        args = json.loads(job["args"]) if job["args"] else []
+      except (TypeError, ValueError) as e:
+        self.log.error("Job %d has invalid args payload: %s" % (job_id, e))
+        cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
+        self.job_db.fail_job(job_id, "Invalid job args", failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, **self._owner_kwargs())
+        metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
+        metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
+        return
 
-    if kind is None:
-      self.log.error("Job %d has unsupported kind %r" % (job_id, job.get("kind")))
-      cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
-      self.job_db.fail_job(job_id, "Unsupported job kind %r" % job.get("kind"), failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, node_id=self.node_id)
-      metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
-      metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
-      in_flight.dec()
-      self.current_job_id = None
-      return
-    is_convert = kind.name == job_kinds.DEFAULT_KIND
+      if kind is None:
+        self.log.error("Job %d has unsupported kind %r" % (job_id, job.get("kind")))
+        cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
+        self.job_db.fail_job(job_id, "Unsupported job kind %r" % job.get("kind"), failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, **self._owner_kwargs())
+        metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
+        metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
+        return
+      is_convert = kind.name == job_kinds.DEFAULT_KIND
 
-    if not os.path.exists(path):
-      self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
-      cat = categorize_failure(WORKER_SENTINEL_PATH_MISSING).value
-      self.job_db.fail_job(job_id, "Path does not exist", failure_category=cat, failure_cause=WORKER_SENTINEL_PATH_MISSING, node_id=self.node_id)
-      metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
-      metrics_prom.record_failure(cat, WORKER_SENTINEL_PATH_MISSING)
-      in_flight.dec()
-      self.current_job_id = None
-      return
+      if not os.path.exists(path):
+        self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
+        cat = categorize_failure(WORKER_SENTINEL_PATH_MISSING).value
+        self.job_db.fail_job(job_id, "Path does not exist", failure_category=cat, failure_cause=WORKER_SENTINEL_PATH_MISSING, **self._owner_kwargs())
+        metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
+        metrics_prom.record_failure(cat, WORKER_SENTINEL_PATH_MISSING)
+        return
 
-    # Job is already marked running by claim_next_job()
+      # Job is already marked running by claim_next_job()
 
-    # Check if job was cancelled before we even start (e.g. cancelled while pending)
-    current = self.job_db.get_job(job_id)
-    if current and current.get("status") == "cancelled":
-      self.log.info("Job %d was cancelled before processing started" % job_id)
-      metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
-      in_flight.dec()
-      self.current_job_id = None
-      return
+      # Check if job was cancelled before we even start (e.g. cancelled while pending)
+      current = self.job_db.get_job(job_id)
+      if current and current.get("status") == "cancelled":
+        self.log.info("Job %d was cancelled before processing started" % job_id)
+        metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
+        return
 
-    # Acquire lock for this config (blocks if another job is using it)
-    self.log.debug("Worker %d acquiring lock for job %d: %s" % (self.worker_id, job_id, os.path.basename(config_file)))
-    self.config_lock_manager.acquire(config_file, job_id, path)
+      # Acquire lock for this config (blocks if another job is using it)
+      self.log.debug("Worker %d acquiring lock for job %d: %s" % (self.worker_id, job_id, os.path.basename(config_file)))
+      self.config_lock_manager.acquire(config_file, job_id, path)
+      lock_held = True
 
-    # Check again after acquiring lock (may have been cancelled while waiting)
-    current = self.job_db.get_job(job_id)
-    if current and current.get("status") == "cancelled":
-      self.log.info("Job %d was cancelled while waiting for lock" % job_id)
-      self.config_lock_manager.release(config_file, job_id)
-      metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
-      in_flight.dec()
-      self.current_job_id = None
-      return
-
-    try:
+      # Check again after acquiring lock (may have been cancelled while waiting)
+      current = self.job_db.get_job(job_id)
+      if current and current.get("status") == "cancelled":
+        self.log.info("Job %d was cancelled while waiting for lock" % job_id)
+        metrics_prom.record_job_terminal("cancelled", time.monotonic() - job_started_at)
+        return
       profile = job.get("profile")
       if kind.uses_profile and profile and "--profile" not in args and "-p" not in args:
         args = ["--profile", profile] + args
@@ -524,29 +577,55 @@ class ConversionWorker(threading.Thread):
           return
       # Conversions keep their original call shape; other kinds name themselves.
       kind_kwargs = {} if is_convert else {"kind": kind.name}
+      started = True
+      self._pre_start_failures.pop(job_id, None)
       success, final_output, source_duration_secs = self._run_conversion(job_id, path, config_file, args, **kind_kwargs)
       elapsed = time.monotonic() - job_started_at
       output_size = None
       # A conversion that exited 0 before the kill landed is still a
       # success; the DB guard discards it if the row was cancelled.
       abort_reason = None if success else self._abort_reason
+      returncode = self._last_returncode
+      if abort_reason is None and not success and (not self.running or returncode in INTERRUPT_RETURNCODES):
+        # A conversion that ended while this worker is stopping, or that died
+        # from SIGTERM/SIGINT (the daemon's shutdown signal reaches manual.py
+        # and ffmpeg directly; manual.py's fallback exits 128 + signum), was
+        # interrupted, not broken. Other signals
+        # (SIGKILL/OOM, SIGSEGV) take the normal retry/backoff failure path so
+        # a deterministic crash cannot requeue forever.
+        abort_reason = ABORT_SHUTDOWN
       if abort_reason == ABORT_SHUTDOWN:
-        # Killed at the shutdown deadline: leave the row 'running' so
-        # mark_node_offline (cluster) or the next startup (SQLite)
-        # requeues it instead of burning a retry or failing it.
-        self.log.warning("Job %d interrupted by daemon shutdown; it will be requeued: %s" % (job_id, path))
+        # Interrupted by shutdown / a signal: put the job back to pending
+        # without burning a retry or recording a failure. If this write is
+        # lost the row stays 'running' and mark_node_offline (cluster) or the
+        # next startup (SQLite) requeues it.
+        self.log.warning("Job %d interrupted by daemon shutdown or signal (exit code %s); requeuing: %s" % (job_id, returncode, path))
+        try:
+          requeued = self.job_db.requeue_interrupted_job(job_id, self._interrupt_reason(returncode), **self._owner_kwargs())
+          if requeued is False:
+            self._log_discarded(job_id, False, "requeue")
+        except Exception:
+          self.log.exception("Failed to requeue interrupted job %d; leaving it for node recovery" % job_id)
+        self._ingest_ffmpeg_stderr_sidecars(job_id)
         metrics_prom.record_job_terminal("cancelled", elapsed)
       elif abort_reason in (ABORT_CANCELLED, ABORT_REASSIGNED):
         self.log.info("Job %d stopped: job was %s while converting: %s" % (job_id, "cancelled" if abort_reason == ABORT_CANCELLED else "requeued or claimed elsewhere", path))
         metrics_prom.record_job_terminal("cancelled", elapsed)
       elif abort_reason == ABORT_TIMEOUT:
         cat = categorize_failure(WORKER_CAUSE_TIMEOUT).value
-        updated = self.job_db.fail_job(
+        updated = self._terminal_write(
           job_id,
-          "Job timed out after %ds" % self.job_timeout_seconds,
-          failure_category=cat,
-          failure_cause=WORKER_CAUSE_TIMEOUT,
-          node_id=self.node_id,
+          "timeout failure",
+          partial(
+            self.job_db.fail_job,
+            job_id,
+            "Job timed out after %ds" % self.job_timeout_seconds,
+            failure_category=cat,
+            failure_cause=WORKER_CAUSE_TIMEOUT,
+            **self._owner_kwargs(),
+            telemetry=self._job_telemetry,
+            source_duration_seconds=source_duration_secs,
+          ),
         )
         self._log_discarded(job_id, updated, "timeout failure")
         self._ingest_ffmpeg_stderr_sidecars(job_id)
@@ -562,14 +641,21 @@ class ConversionWorker(threading.Thread):
             output_size = os.path.getsize(stat_target)
           except OSError:
             self.log.warning("Could not stat output file for job %d: %s" % (job_id, stat_target))
-        updated = self.job_db.complete_job(
+        # Retried and parked, never raised: a DB error here must not fail or re-run a finished conversion.
+        updated = self._terminal_write(
           job_id,
-          input_size=input_size,
-          output_size=output_size,
-          source_duration_seconds=source_duration_secs,
-          encoder_backend=self._last_encoder_backend,
-          encoder_name=self._last_encoder_name,
-          node_id=self.node_id,
+          "completion",
+          partial(
+            self.job_db.complete_job,
+            job_id,
+            input_size=input_size,
+            output_size=output_size,
+            source_duration_seconds=source_duration_secs,
+            encoder_backend=self._last_encoder_backend,
+            encoder_name=self._last_encoder_name,
+            **self._owner_kwargs(),
+            telemetry=self._job_telemetry,
+          ),
         )
         if updated is False:
           self._log_discarded(job_id, updated, "completion")
@@ -595,30 +681,167 @@ class ConversionWorker(threading.Thread):
           cause = self._last_attempt_failure_class or WORKER_SENTINEL_PROCESS_FAILED
           cat = categorize_failure(cause).value
           message = "Conversion process failed" if is_convert else "%s process failed" % kind.name.capitalize()
-          updated = self.job_db.fail_job(job_id, message, failure_category=cat, failure_cause=cause, node_id=self.node_id)
+          if cause == OUTPUT_VERIFY_FAILED and self._last_verify_reason:
+            message += ": output verification failed (%s)" % self._last_verify_reason
+          if returncode is not None and returncode < 0:
+            message += ": killed by signal %d (exit code %d)" % (-returncode, returncode)
+          elif returncode is not None:
+            message += " (exit code %d)" % returncode
+          updated = self._terminal_write(
+            job_id,
+            "failure",
+            partial(
+              self.job_db.fail_job,
+              job_id,
+              message,
+              failure_category=cat,
+              failure_cause=cause,
+              **self._owner_kwargs(),
+              telemetry=self._job_telemetry,
+              source_duration_seconds=source_duration_secs,
+            ),
+          )
           self._log_discarded(job_id, updated, "failure")
           self._ingest_ffmpeg_stderr_sidecars(job_id)
           metrics_prom.record_job_terminal("failed", elapsed)
           metrics_prom.record_failure(cat, cause)
     except Exception as e:
       self.log.exception("Job %d failed: %s" % (job_id, e))
-      elapsed = time.monotonic() - job_started_at
-      current = self.job_db.get_job(job_id)
-      if current and current.get("status") == "cancelled":
-        metrics_prom.record_job_terminal("cancelled", elapsed)
-      else:
-        cat = categorize_failure(WORKER_SENTINEL_EXCEPTION).value
-        updated = self.job_db.fail_job(job_id, str(e), failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION, node_id=self.node_id)
-        self._log_discarded(job_id, updated, "failure")
-        self._ingest_ffmpeg_stderr_sidecars(job_id)
-        metrics_prom.record_job_terminal("failed", elapsed)
-        metrics_prom.record_failure(cat, WORKER_SENTINEL_EXCEPTION)
+      self._handle_job_error(job_id, e, started, job_started_at)
     finally:
-      self.config_lock_manager.release(config_file, job_id)
-      in_flight.dec()
-      with self._abort_lock:
-        self.current_job_id = None
-        self._watchdog = None
+      try:
+        if lock_held:
+          self.config_lock_manager.release(config_file, job_id)
+      finally:
+        in_flight.dec()
+        with self._abort_lock:
+          self.current_job_id = None
+          self._watchdog = None
+          self._claim_token = None
+
+  def _handle_job_error(self, job_id, error, started, job_started_at):
+    """Release the claim after an exception in process_job; never raises.
+
+    Before the conversion starts (a DB error after the claim) the job goes
+    back to pending without burning a retry, up to MAX_PRE_START_REQUEUES in a
+    row; the next pre-start error fails it through fail_job. After the start
+    it is failed. Writes are owner-guarded and retried with backoff; if the DB
+    still refuses, the write is parked for the worker loop and the orphan
+    sweep / node recovery is the backstop.
+    """
+    elapsed = time.monotonic() - job_started_at
+    owner = self._owner_kwargs()
+    try:
+      current = self._retry_terminal("status read", lambda: self.job_db.get_job(job_id), job_id)
+    except Exception:
+      current = None
+    if current and current.get("status") == "cancelled":
+      self._pre_start_failures.pop(job_id, None)
+      metrics_prom.record_job_terminal("cancelled", elapsed)
+      return
+    failed = started
+    if not started:
+      count = self._pre_start_failures.get(job_id, 0) + 1
+      if count > MAX_PRE_START_REQUEUES:
+        self._pre_start_failures.pop(job_id, None)
+        failed = True
+        cat = categorize_failure(WORKER_SENTINEL_EXCEPTION).value
+        reason = "Job start failed %d times in a row (%s: %s); giving up" % (count, type(error).__name__, " ".join(str(error).split()))
+        self.log.error("Job %d start failed %d times in a row (%s); failing it instead of requeuing" % (job_id, count, type(error).__name__))
+        write = lambda: self.job_db.fail_job(job_id, reason, failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION, **owner)  # noqa: E731
+        terminal = "failure"
+      else:
+        self._pre_start_failures[job_id] = count
+        reason = "Interrupted by %s before the job started; requeued" % type(error).__name__
+        write = lambda: self.job_db.requeue_interrupted_job(job_id, reason, **owner)  # noqa: E731
+        terminal = "requeue"
+    else:
+      cat = categorize_failure(WORKER_SENTINEL_EXCEPTION).value
+      write = lambda: self.job_db.fail_job(job_id, str(error), failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION, **owner)  # noqa: E731
+      terminal = "failure"
+    updated = self._terminal_write(job_id, terminal, write)
+    if updated is _PARKED:
+      return
+    self._log_discarded(job_id, updated, terminal)
+    if failed:
+      if started:
+        self._ingest_ffmpeg_stderr_sidecars(job_id)
+      metrics_prom.record_job_terminal("failed", elapsed)
+      metrics_prom.record_failure(cat, WORKER_SENTINEL_EXCEPTION)
+    # A pre-start requeue is not terminal: the job runs again, so sma_jobs_total is left alone.
+
+  def _terminal_write(self, job_id, what, write):
+    """Run a terminal write with retries; park it for the worker loop when every attempt fails.
+
+    Returns the write's result, or _PARKED. Never raises, so a DB error on the
+    terminal write cannot replace the job's real outcome.
+    """
+    try:
+      return self._retry_terminal(what, write, job_id)
+    except Exception:
+      with self._pending_lock:
+        self._pending_releases[job_id] = (what, write)
+      return _PARKED
+
+  def _retry_terminal(self, what, write, job_id):
+    """Call *write*, retrying with backoff; re-raise the last error when every attempt fails."""
+    delays = list(TERMINAL_RETRY_BACKOFF_SECONDS)
+    for attempt in range(len(delays) + 1):
+      try:
+        return write()
+      except Exception as e:
+        if attempt == len(delays):
+          self.log.error("Job %d %s write failed after %d attempts (%s); leaving it for retry or node recovery" % (job_id, what, attempt + 1, type(e).__name__))
+          raise
+        if self._stop_event.is_set():
+          # stop() makes the event wait return at once; keep a short bounded pause instead.
+          time.sleep(min(delays[attempt], SHUTDOWN_RETRY_BACKOFF_CAP_SECONDS))
+        else:
+          self._stop_event.wait(timeout=delays[attempt])
+
+  def _flush_pending_release(self):
+    """Retry every parked terminal write from an earlier DB outage (one attempt each per loop pass)."""
+    with self._pending_lock:
+      pending = list(self._pending_releases.items())
+    for job_id, (what, write) in pending:
+      try:
+        updated = write()
+      except Exception as e:
+        self.log.warning("Job %d pending %s still failing (%s); will retry" % (job_id, what, type(e).__name__))
+        continue
+      with self._pending_lock:
+        if self._pending_releases.get(job_id, (None, None))[1] is write:
+          del self._pending_releases[job_id]
+      self._log_discarded(job_id, updated, what)
+
+  def held_job_ids(self):
+    """Job ids this worker still owns: the running job plus rows with a parked terminal write."""
+    # Read current_job_id first: process_job parks a write before it clears current_job_id,
+    # so a job moving from one to the other is always seen in at least one of them.
+    current = self.current_job_id
+    with self._pending_lock:
+      held = set(self._pending_releases)
+    if current is not None:
+      held.add(current)
+    return held
+
+  @staticmethod
+  def _signal_name(returncode):
+    """Human name for a negative (signal) return code: 'SIGTERM' or 'signal 250'."""
+    try:
+      return signal.Signals(-returncode).name
+    except ValueError:
+      return "signal %d" % -returncode
+
+  @staticmethod
+  def _interrupt_reason(returncode):
+    """Operator-facing jobs.error text for a conversion interrupted by shutdown or a signal."""
+    if returncode is not None and returncode < 0:
+      name = ConversionWorker._signal_name(returncode)
+      return "Interrupted by %s (exit code %d); requeued" % (name, returncode)
+    if returncode is None:
+      return "Interrupted by daemon shutdown; requeued"
+    return "Interrupted by daemon shutdown (exit code %d); requeued" % returncode
 
   def _log_discarded(self, job_id, updated, what):
     """Log when complete_job/fail_job reported that no row was updated.
@@ -647,7 +870,9 @@ class ConversionWorker(threading.Thread):
       if ok:
         return False
       try:
-        self.job_db.defer_job(job_id, PREFLIGHT_DEFER_SECONDS, reason=WORKER_SENTINEL_DISK_PRESSURE)
+        if self.job_db.defer_job(job_id, PREFLIGHT_DEFER_SECONDS, reason=WORKER_SENTINEL_DISK_PRESSURE, **self._owner_kwargs()) is False:
+          self.log.warning("Job %d no longer owned by this run; disk-pressure deferral discarded" % job_id)
+          return False
       except Exception:
         self.log.exception("Failed to defer job %d after disk-pressure preflight; failing open" % job_id)
         return False
@@ -768,6 +993,7 @@ class ConversionWorker(threading.Thread):
     total_duration_secs = None
     _last_progress_log: float = 0.0
     final_output: str | None = None
+    line_level = logging.INFO
 
     watchdog = None
     try:
@@ -797,6 +1023,19 @@ class ConversionWorker(threading.Thread):
         line = line.strip()
         if not line:
           continue
+        # Child records carry "SMA_LEVEL=<LEVEL> "; strip it and keep the
+        # level. Traceback continuation lines inherit the previous level;
+        # anything else (raw ffmpeg output) stays INFO.
+        level_match = LEVEL_TOKEN_RE.match(line)
+        if level_match:
+          line_level = getattr(logging, level_match.group(1))
+          line = line[level_match.end() :].strip()
+          if not line:
+            continue
+        elif line.startswith("| ") and line_level > logging.INFO:
+          pass
+        else:
+          line_level = logging.INFO
         # Capture the final-output marker emitted by manual.py:processFile
         # so completion logs can show the post-rename output path instead
         # of the original input path. Last marker wins (covers batched
@@ -821,20 +1060,34 @@ class ConversionWorker(threading.Thread):
               config_logger.info("Progress: %s" % json.dumps(progress))
             _last_progress_log = now
         else:
-          config_logger.info(line)
+          config_logger.log(line_level, line)
           output.add(line)
         # Capture MediaProcessor's structured ffmpeg.attempts event so the
         # daemon's /health fallback counters reflect work done in worker
         # subprocesses. The event is single-line JSON per the logging
-        # contract; we look for the event marker substring first to keep
-        # the hot path cheap.
-        if self._fallback_counter_callback is not None and '"event": "ffmpeg.attempts"' in line:
+        # contract and SingleLineFormatter compacts it (no space after the
+        # colon), so match the bare event name, not a whitespace-exact
+        # key/value pair. Always parse: the failure class feeds
+        # jobs.failure_category even when no metrics callback is registered
+        # (the callback is gated inside _record_fallback_event).
+        if "ffmpeg.attempts" in line:
           self._record_fallback_event(line)
+        # manual.py's sma.job.summary event carries the source/output media
+        # facts and the source duration (ffmpeg's own "Duration:" banner is
+        # never printed to this pipe, so it is the only progress-percent
+        # denominator).
+        if "sma.job.summary" in line:
+          self._record_job_summary(line)
+          if total_duration_secs is None:
+            total_duration_secs = self._job_telemetry.get("source_duration_seconds")
+        if "output.verify" in line:
+          self._record_output_verify_event(line)
 
       # EOF reached; the watchdog still guards this wait.
       process.wait()
 
       report_path = final_output or path
+      self._last_returncode = process.returncode
       reason = self._abort_reason
       if reason == ABORT_TIMEOUT and process.returncode != 0:
         msg = "Job %d timed out after %ds; killed conversion process tree: %s" % (job_id, self.job_timeout_seconds, path)
@@ -860,7 +1113,50 @@ class ConversionWorker(threading.Thread):
         watchdog.finish()
       self._job_processes.pop(job_id, None)
       self._job_progress.pop(job_id, None)
-      config_logger.info("")  # blank line separates jobs in the per-config log
+
+  def _record_job_summary(self, line: str) -> None:
+    """Merge a single-line ``sma.job.summary`` JSON record into ``_job_telemetry``.
+
+    The record may carry ``source``, ``dest`` (dicts of video_codec,
+    video_width, video_height, audio_codec, audio_channels, hdr) and
+    ``duration_seconds``. Several records per job merge; later non-null
+    values win. Malformed records are ignored.
+    """
+    payload = _parse_event(line, "sma.job.summary")
+    if payload is None:
+      return
+    # A job where no video encoder ran (stream copy, bypassed conversion)
+    # never emits ffmpeg.attempts, so manual.py names the encoder here. An
+    # encoder reported by the ladder wins.
+    name = payload.get("encoder_name")
+    backend = payload.get("encoder_backend")
+    if isinstance(name, str) and name and self._last_encoder_name is None:
+      self._last_encoder_name = name
+    if isinstance(backend, str) and backend and self._last_encoder_backend is None:
+      self._last_encoder_backend = backend
+    for prefix in ("source", "dest"):
+      facts = payload.get(prefix)
+      if not isinstance(facts, dict):
+        continue
+      for key, value in facts.items():
+        column = "%s_%s" % (prefix, key)
+        if value is not None and column in TELEMETRY_COLUMNS:
+          self._job_telemetry[column] = value
+    duration = payload.get("duration_seconds")
+    if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
+      self._job_telemetry["source_duration_seconds"] = float(duration)
+
+  def _record_output_verify_event(self, line: str) -> None:
+    """Record the output.verify JSON line the subprocess logs when a finished
+    conversion fails the duration / video-stream check, so the job fails with
+    the output_verify_failed cause and the short reason."""
+    payload = _parse_event(line, "output.verify")
+    if payload is None:
+      return
+    self._last_attempt_failure_class = OUTPUT_VERIFY_FAILED
+    reason = payload.get("reason")
+    if isinstance(reason, str) and reason:
+      self._last_verify_reason = reason
 
   def _record_fallback_event(self, line: str) -> None:
     """Parse a single-line ffmpeg.attempts JSON record and bump daemon counters.
@@ -870,14 +1166,8 @@ class ConversionWorker(threading.Thread):
     Tolerate both the bare-JSON case and the wrapped case by locating the
     first ``{`` and parsing from there.
     """
-    start = line.find("{")
-    if start < 0:
-      return
-    try:
-      payload = json.loads(line[start:])
-    except (ValueError, json.JSONDecodeError):
-      return
-    if payload.get("event") != "ffmpeg.attempts":
+    payload = _parse_event(line, "ffmpeg.attempts")
+    if payload is None:
       return
     attempts = payload.get("attempts") or []
     if not isinstance(attempts, list):
@@ -1005,6 +1295,8 @@ class WorkerPool:
     self._notify_cursor = 0
     self._notify_lock = threading.Lock()
     self._stopped = False
+    # Consecutive pre-start errors per job id, shared so a poison job cannot hop between workers.
+    self._pre_start_failures = {}
     self._start_workers()
 
   def _make_worker(self, worker_id, template=None):
@@ -1060,6 +1352,13 @@ class WorkerPool:
       if worker.abort_job(job_id, reason):
         return True
     return False
+
+  def held_job_ids(self):
+    """Job ids a live local worker or ffmpeg process still owns; the orphan sweep never touches them."""
+    held = set(self._job_processes)
+    for worker in list(self._workers):
+      held |= worker.held_job_ids()
+    return held
 
   def abort_all(self, reason):
     """Kill every in-flight conversion (used at the shutdown deadline)."""

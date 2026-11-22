@@ -422,7 +422,9 @@ give the daemon up to two minutes to drain before Docker sends SIGKILL; jobs sti
 the deadline are requeued. To change the window, set `STOP_GRACE_PERIOD` (for example `10m`)
 in a `.env` file next to `docker-compose.yml` on the host or in the shell that runs `docker compose` (it is a compose
 substitution, so `config/daemon.env` does not apply). To avoid requeues entirely,
-run `cluster:drain` first (or use `cluster:upgrade`, which does).
+run `cluster:drain` first (or use `cluster:upgrade`, which does). The effective drain is the smaller of
+`daemon.shutdown-grace-seconds` (default `100`) and `STOP_GRACE_PERIOD`: raise both together and keep
+`shutdown-grace-seconds` below `STOP_GRACE_PERIOD`.
 
 #### Reload or restart
 

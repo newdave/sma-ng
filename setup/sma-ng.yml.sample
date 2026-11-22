@@ -12,12 +12,15 @@ daemon:
   username: ''
   password: ''
   job-timeout-seconds: 7200
+  shutdown-grace-seconds: 100
   heartbeat-interval: 30
   stale-seconds: 120
   progress-log-interval: 30
   smoke-test: true
   recycle-bin-max-age-days: 30
   recycle-bin-min-free-gb: 50
+  job-dedupe-window-seconds: 21600
+  job-retention-days: 30
   log-ttl-days: 30
   node-expiry-days: 7
   log-archive-dir: ''

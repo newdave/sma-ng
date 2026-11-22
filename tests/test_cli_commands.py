@@ -211,3 +211,13 @@ def test_python_dash_m_entrypoint():
   r = subprocess.run([sys.executable, "-m", "resources.cli", "version"], cwd=root, env=env, capture_output=True, text=True, check=False)
   assert r.returncode == 0, r.stderr
   assert r.stdout.startswith("sma image: ")
+
+
+def test_version_minimal_health_says_unavailable(env, monkeypatch):
+  monkeypatch.setattr(commands, "get_version", lambda: "dev")
+  monkeypatch.setattr(commands, "get_commit", lambda: "c")
+  monkeypatch.setattr("resources.cli.http.DaemonClient.health", lambda self, timeout=2.0: {"status": "ok", "version": "3.2.35", "uptime_seconds": 1})
+  monkeypatch.setattr("resources.cli.releases.latest_release", lambda repo=None: _release("3.2.35"))
+  out = io.StringIO()
+  assert commands.run(["version"], env=env, out=out, err=io.StringIO()) == 0
+  assert "commit unavailable without API key" in out.getvalue()

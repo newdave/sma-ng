@@ -336,6 +336,36 @@ usually the FFmpeg build lacks the decoder, or the source is damaged and needs r
 - With `output-directory` and `delete-original: false`, a source that has the same name as the output
   (`movie.mp4` to `movie.mp4`) is kept and the new file is restored as `movie.2.mp4`. Set
   `delete-original: true` to replace the source instead.
+- When a file needs no conversion and `output-directory` is set, it is copied there. If that name is taken, the copy
+  is numbered (`movie.2.mp4`, `[output-collision]` warning) instead of overwriting the existing file. A stale
+  `movie.mkv` left in `output-directory` from an earlier run therefore makes the bypassed file come back as
+  `movie.2.mkv`, so the tracked path changes; remove the stale file and re-run to keep the plain name.
+- With `delete-original: true`, an earlier SMA-NG output of the same episode or movie (encoder tag `SMA-NG:`
+  and matching TMDB/TVDB/IMDB id, plus season and episode for TV) at that name is recycled and replaced instead
+  of numbered, even when the source file name differs. When it is numbered anyway, the INFO line
+  `[output-collision-reason]` gives the cause: `no SMA marker`, `identity not comparable` or `different episode`.
+- Replacement requires tagging on (`tagfile`) and metadata found; otherwise outputs are numbered. Numbering from
+  `move-to` and `getOutputFile` is not covered. Existing `name.2.mp4` duplicates from before this behavior are
+  not cleaned up automatically; remove them by hand.
+
+### Job failed with `[output-verify]` (output does not match the source)
+
+- FFmpeg exited 0, but the output failed the post-conversion check, so SMA-NG treated the job as failed
+  (exit code 1). In the daemon the job fails with category `system`, cause `output_verify_failed` and the reason in
+  its error text: `duration Xs vs Ys`, `video streams N vs 1`, `no output duration vs Ys` or
+  `output could not be probed`.
+- The source is kept (not deleted or recycled). The bad output is renamed to `<output name>.failed`
+  (for example `movie.mp4.failed`, or `movie.mp4.failed.2` when that name exists), so Plex, Sonarr and Radarr
+  do not scan it. Nothing is tagged, moved or sent to Sonarr/Radarr/Plex for that job. The warning names the
+  `.failed` path; keep it for inspection and delete it yourself when done.
+- When the output has the source's own name (`movie.mp4` to `movie.mp4`), the source was renamed to
+  `movie.mp4.original` for the encode; it is renamed back. If something now holds `movie.mp4`, the source stays at
+  `movie.mp4.original` and a warning names both paths. Subtitle files ripped for that job are removed; existing
+  subtitle files are kept.
+- The duration may differ by 2% (at least 1 second). Cover art and unknown or data streams are not counted, and a
+  duration is only compared when the source reports one.
+- Usual causes are a full output disk, a damaged source or a killed encoder. Fix that and re-run. If the output
+  plays correctly, report the file; the check is not configurable.
 
 ### `[dolby-vision]` warning on re-encode
 
@@ -372,11 +402,53 @@ conversion process tree and failed the job with cause `timeout` (category `syste
 unionfs reads, a hung GPU) or the encode is genuinely slow (4K software encode); raise the timeout or set it to `0`
 to disable it. See [Job timeout](daemon.md#job-timeout).
 
+### Job returned to pending with "Interrupted by SIGTERM (exit code -15); requeued"
+
+The conversion was killed by SIGTERM or SIGINT, usually the daemon's own shutdown during a deploy restart, so the job
+was requeued instead of failed and runs again on the next start. When `manual.py` exits on the signal itself the
+message reads `Interrupted by daemon shutdown (exit code 143); requeued` (`130` for SIGINT) and is handled the same
+way. Raise `daemon.shutdown-grace-seconds` (and the compose
+`STOP_GRACE_PERIOD`) to let long conversions finish before the restart, or run `cluster:drain` first. If a job
+keeps coming back with this message without a restart, an operator or another process is sending SIGTERM to ffmpeg.
+Deaths from other signals (the OOM killer's SIGKILL, a SIGSEGV crash) are not requeued: the job fails with
+`Conversion process failed: killed by signal 9 (exit code -9)` and goes through the normal retry/backoff; check
+`dmesg` and the container memory limit.
+
 ### "Job N completion discarded: job is no longer running on this node"
 
 The job finished, but its row had already been cancelled, requeued by stale-node recovery, or claimed by another
 node, so this node's result was dropped instead of overwriting the newer state. This is expected after a cancel
 or a network partition. A cancelled job's output may still exist on disk if ffmpeg finished before the kill landed.
+
+### Job returned to pending with "Interrupted by ErrorName before the job started; requeued"
+
+The database failed between claiming the job and starting the conversion, so the worker freed its slot and put the
+job back to pending without burning a retry. The write is retried with backoff. If it still fails, the log shows
+`Job N requeue write failed after 4 attempts` and the worker retries it after each job and on every loop pass, even
+while the node is paused or draining (`Job N pending requeue still failing`). Fix the database connection (see the
+surrounding error) rather than the job.
+
+A job is requeued this way at most 3 times in a row. If its start fails a fourth time, the log shows
+`Job N start failed 4 times in a row (ErrorName); failing it instead of requeuing` and the job goes through the
+normal failure path (it fails, or retries with backoff if it has retries left). Its error reads
+`Job start failed 4 times in a row (ErrorName: detail); giving up`. A successful start resets the count.
+
+### "Job N completion write failed after 4 attempts"
+
+The conversion ended, but the database refused the write that records the result (`completion`, `failure` or
+`timeout failure`). The worker retried it with backoff, then parked it and retries it after each job and on every
+loop pass (`Job N pending completion still failing`). Until the write lands the row stays `running`. The job is not
+re-run, and its result is not replaced by the database error: a finished conversion still ends `completed`, and a
+failed one keeps its own failure cause and exit code. Fix the database connection (see the surrounding error).
+
+### Job returned to pending with "Running on this node with no live worker; requeued by orphan sweep"
+
+Every heartbeat interval each node (SQLite and PostgreSQL) checks its own running rows. A row is requeued when it
+has been running for more than 120 seconds and no local worker, ffmpeg process or parked write holds it, for
+example after a lost write during a database outage. The log shows
+`Job N was running on this node with no live worker; orphan sweep requeued it`. The sweep never touches another
+node's rows (stale-node recovery handles those) or a row re-claimed since it was checked. One such line after a
+database outage is expected; repeated lines without an outage point to a worker bug worth reporting.
 
 ### Conversion produces larger output file
 
@@ -398,7 +470,11 @@ produces an output. Only the copy run's own partial output is removed, and only 
 started. When the copy run writes to a different name (an in-place MP4 copy writes `name.mp4.mp4`), a file that
 appears at the output name meanwhile is left alone. Such a file is not overwritten: the re-encode is restored under
 a numbered name instead (for example `name.2.mp4`) and the log line names it. A failed copy run's stderr sidecar is
-removed, because the job still succeeds. Same-family re-encodes (for
+removed, because the job still succeeds.
+
+Both outputs pass the `[output-verify]` check. The re-encode is verified first; a re-encode that fails it fails the
+job and no copy run starts. A copy output that fails the check is renamed to `<output name>.failed` and the verified
+larger re-encode is kept. Same-family re-encodes (for
 example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
 
 - Lower the `crf` value (lower CRF = higher quality = larger file; raise it to reduce size)
@@ -425,6 +501,9 @@ example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
 - Verify `path` is set in the `[Sonarr]`/`[Radarr]` section
 - Verify `apikey` is correct and `rescan = true`
 - Verify the output file path starts with the configured `path` prefix
+- A slow rescan no longer blocks the import: SMA waits up to 5 minutes (polling with backoff), logs the last
+  command status (`failed`, `aborted`, `cancelled` and `orphaned` stop the wait early) and then still issues the
+  import. The log line `rescan command did not complete; importing anyway` means the rescan was slow or failed
 
 ### Docker: "Read-only file system" errors
 

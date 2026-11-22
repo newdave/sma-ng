@@ -27,6 +27,14 @@ class FFMpegError(Exception):
   """Raised when FFmpeg or FFprobe cannot be located or executed."""
 
 
+class TerminatedBySignal(BaseException):
+  """Raised by manual.py's SIGTERM handler to unwind a running conversion.
+
+  Derives from BaseException so ``except Exception`` fallbacks do not
+  swallow it or retry the next fallback tier.
+  """
+
+
 class FFMpegConvertError(Exception):
   def __init__(self, message, cmd, output, details=None, pid=0, returncode=None):
     """
@@ -662,6 +670,20 @@ class FFMpeg:
     return formats[1].strip().split(" ") if formats and len(formats) > 1 else []
 
   @staticmethod
+  def _stop_child(p, grace=5):
+    """Terminate ffmpeg process *p*, escalating to SIGKILL after *grace* seconds. Never raises."""
+    try:
+      if p.poll() is None:
+        p.terminate()
+        try:
+          p.wait(timeout=grace)
+        except Exception:
+          p.kill()
+          p.wait(timeout=grace)
+    except Exception:
+      pass
+
+  @staticmethod
   def _spawn(cmds):
     clean_cmds = []
     try:
@@ -871,51 +893,60 @@ class FFMpeg:
     buf = ""
     total_output = ""
     pat = re.compile(r"time=([0-9.:]+) ")
-    while True:
-      if timeout:
-        signal.alarm(timeout)
+    try:
+      while True:
+        if timeout:
+          signal.alarm(timeout)
 
-      ret = p.stderr.read(10)
-      if isinstance(ret, str):
-        ret = ret.encode(console_encoding, errors="ignore")
+        ret = p.stderr.read(10)
+        if isinstance(ret, str):
+          ret = ret.encode(console_encoding, errors="ignore")
 
-      if timeout:
-        signal.alarm(0)
+        if timeout:
+          signal.alarm(0)
 
-      if not ret:
-        # For small or very fast jobs, ffmpeg may never output a '\r'.  When EOF is reached, yield if we haven't yet.
-        if not yielded:
-          yielded = True
-          yield 10, ""
-        break
+        if not ret:
+          # For small or very fast jobs, ffmpeg may never output a '\r'.  When EOF is reached, yield if we haven't yet.
+          if not yielded:
+            yielded = True
+            yield 10, ""
+          break
 
-      decoded: str
-      try:
-        decoded = ret.decode(console_encoding)
-      except UnicodeDecodeError:
+        decoded: str
         try:
-          decoded = ret.decode(console_encoding, errors="ignore")
-        except Exception:
-          decoded = ""
+          decoded = ret.decode(console_encoding)
+        except UnicodeDecodeError:
+          try:
+            decoded = ret.decode(console_encoding, errors="ignore")
+          except Exception:
+            decoded = ""
 
-      total_output += decoded
-      buf += decoded
-      if "\r" in buf:
-        line, buf = buf.split("\r", 1)
+        total_output += decoded
+        buf += decoded
+        if "\r" in buf:
+          line, buf = buf.split("\r", 1)
 
-        tmp = pat.findall(line)
-        if len(tmp) == 1:
-          timespec = tmp[0]
-          if ":" in timespec:
-            timecode = 0
-            for part in timespec.split(":"):
-              timecode = 60 * timecode + float(part)
-          else:
-            timecode = float(tmp[0])
-          yielded = True
-          debug = line.strip()
-          debug = debug if debug.startswith("frame") else ""
-          yield timecode, debug
+          tmp = pat.findall(line)
+          if len(tmp) == 1:
+            timespec = tmp[0]
+            if ":" in timespec:
+              timecode = 0
+              for part in timespec.split(":"):
+                timecode = 60 * timecode + float(part)
+            else:
+              timecode = float(tmp[0])
+            yielded = True
+            debug = line.strip()
+            debug = debug if debug.startswith("frame") else ""
+            yield timecode, debug
+    except BaseException as interrupt:
+      # SIGTERM/SIGINT (or generator close) mid-encode: do not orphan ffmpeg. Stop it and
+      # hand the captured stderr to the caller so it can write the stderr sidecar.
+      self._stop_child(p)
+      if not isinstance(interrupt, GeneratorExit):
+        interrupt.cmd = " ".join(cmds)  # type: ignore[attr-defined]
+        interrupt.output = total_output  # type: ignore[attr-defined]
+      raise
 
     if timeout:
       signal.signal(signal.SIGALRM, signal.SIG_DFL)

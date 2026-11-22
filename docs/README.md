@@ -443,7 +443,8 @@ See [daemon.md](daemon.md#concurrency) and [profile concurrency caps](configurat
 
 Open `http://localhost:8585/` (redirects to `/dashboard`). It shows job statistics, active and waiting jobs with
 progress, cluster nodes (PostgreSQL mode), config mappings, a filterable job history with requeue/cancel actions, a
-Submit Job form with path autocomplete, a log viewer, and admin node controls at `/admin`. Metrics are at `/metrics`.
+Submit Job form with path autocomplete, a log viewer, and admin node controls at `/admin`. The metrics page is
+`/dashboard/metrics`; `/metrics` serves Prometheus text exposition.
 
 ### API Endpoints
 
@@ -452,7 +453,7 @@ The route table (including `/jobs`, `/logs`, `/library/*`, `/reload`, `/restart`
 
 | Method | Path                | Auth   | Description                                                   |
 | ------ | ------------------- | ------ | ------------------------------------------------------------- |
-| `GET`  | `/health`           | No     | Health check with job stats                                   |
+| `GET`  | `/health`           | Partly | Minimal liveness without credentials; job detail with a key   |
 | `GET`  | `/status`           | Partly | Minimal without credentials; cluster detail with a valid key  |
 | `GET`  | `/jobs`             | Yes    | List jobs. Query: `?status=pending&limit=50&offset=0`         |
 | `POST` | `/webhook/generic`  | Yes    | Submit a conversion job (file or directory path)              |
@@ -475,11 +476,11 @@ curl -X POST http://localhost:8585/webhook/generic \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "args": ["-tmdb", "603"]}'
 
-# JSON with config override (bypasses path matching)
+# JSON naming the daemon's own config (any other config path is refused with 400)
 curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
-  -d '{"path": "/path/to/movie.mkv", "config": "/custom/sma-ng.yml"}'
+  -d '{"path": "/path/to/movie.mkv", "config": "/config/sma-ng.yml"}'
 ```
 
 ### Authentication
@@ -487,7 +488,9 @@ curl -X POST http://localhost:8585/webhook/generic \
 The API key resolves as `--api-key`, then `daemon.api-key` in `sma-ng.yml`; with neither set, authentication is
 disabled. Send it as `X-API-Key: SECRET` or `Authorization: Bearer SECRET`.
 
-- Public endpoints: `/`, `/dashboard`, `/admin`, `/metrics`, `/health`, `/status`, `/docs`, `/favicon.png`.
+- Public endpoints: `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, `/health`, `/status`, `/docs`,
+  `/favicon.png`. `/health` and `/status` return only a minimal view without credentials. Prometheus `/metrics`
+  needs a key when auth is configured.
 - The dashboard, admin, and metrics pages are HTML shells; the API key is never embedded in the page. When a key is
   configured, the first `401` opens one in-page dialog; the key is kept in `localStorage` for the daemon's address
   and sent as `X-API-Key` on every request. Cancel stops asking (an "API key required" button reopens the dialog).

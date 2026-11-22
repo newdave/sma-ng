@@ -62,8 +62,9 @@ every docs page shows the running version.
 | ------ | -------------------------------- | ------ | ----------------------------------------------------------------------- |
 | `GET`  | `/`                              | No     | Redirects to `/dashboard`                                               |
 | `GET`  | `/dashboard`                     | No     | Web dashboard (HTML shell; prompts for the API key)                     |
+| `GET`  | `/dashboard/metrics`             | No     | Metrics page (HTML shell; its data comes from keyed `/api/metrics`)     |
 | `GET`  | `/admin`                         | No     | Admin panel (destructive actions)                                       |
-| `GET`  | `/health`                        | No     | Health check with job stats + GPU capabilities + fallback counters      |
+| `GET`  | `/health`                        | Partly | Public: minimal liveness. With a key: jobs, GPU capabilities, fallbacks |
 | `GET`  | `/status`                        | Partly | Public: minimal status. With a key: cluster-wide node and job detail    |
 | `GET`  | `/docs`                          | No     | Rendered documentation (`/docs/<page>`; includes `/docs/changelog`)     |
 | `GET`  | `/jobs`                          | Yes    | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
@@ -72,7 +73,7 @@ every docs page shows the running version.
 | `GET`  | `/jobs/<id>/ffmpeg-stderr`       | Yes    | Stored ffmpeg stderr of a failed conversion, as text                    |
 | `GET`  | `/paths`                         | Yes    | Path roots this daemon serves (routing, scan, audit, path-rewrite from) |
 | `GET`  | `/configs`                       | Yes    | Config mappings and status                                              |
-| `GET`  | `/metrics`                       | No     | Cluster metrics web page (PostgreSQL required)                          |
+| `GET`  | `/metrics`                       | Yes    | Prometheus text (`X-API-Key`/Bearer; Basic needs `daemon.basic-auth`)  |
 | `GET`  | `/api/metrics`                   | Yes    | Metrics JSON. Query: `?window=24h\|7d\|30d\|all` (PostgreSQL required)  |
 | `GET`  | `/stats`                         | Yes    | Job statistics by status                                                |
 | `GET`  | `/scan`                          | Yes    | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv`               |
@@ -85,7 +86,7 @@ every docs page shows the running version.
 | `POST` | `/convert`, `/`                  | Yes    | Aliases of `/webhook/generic`                                           |
 | `POST` | `/webhook/sonarr`                | Yes    | Native Sonarr webhook; Download queues, other events go to Autoscan     |
 | `POST` | `/webhook/radarr`                | Yes    | Native Radarr webhook; Download queues, other events go to Autoscan     |
-| `POST` | `/cleanup`                       | Yes    | Remove old jobs. Query: `?days=30`                                      |
+| `POST` | `/cleanup`                       | Yes    | Remove old finished jobs now. Query: `?days=30`                         |
 | `POST` | `/reload`                        | Yes    | Reload `daemon:` section in `sma-ng.yml` without restarting             |
 | `POST` | `/restart`                       | Yes    | Graceful restart. Query: `?node=<id>` for remote node (PostgreSQL)      |
 | `POST` | `/shutdown`                      | Yes    | Graceful shutdown. Query: `?node=<id>` for remote node (PostgreSQL)     |
@@ -111,6 +112,10 @@ Node admin API route:
 
 - `POST /admin/nodes/<node_id>/<action>` where action is one of `approve`, `reject`, `restart`, `shutdown`, `delete`
 
+**`GET /jobs` response size:** rows use an explicit column list that omits `ffmpeg_stderr` and the captured `output`
+(up to 1 MiB each per job). Read them with `GET /jobs/<id>/ffmpeg-stderr` and `GET /jobs/<id>/output`. `limit`
+values above `500` are clamped to `500`.
+
 ---
 
 ## Webhook Request Formats
@@ -133,12 +138,25 @@ curl -X POST http://localhost:8585/webhook/generic \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "args": ["-tmdb", "603"]}'
 
-# JSON with config override (bypasses path matching)
+# JSON naming the daemon's own config (bypasses path matching)
 curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
-  -d '{"path": "/path/to/movie.mkv", "config": "/custom/sma-ng.yml"}'
+  -d '{"path": "/path/to/movie.mkv", "config": "/config/sma-ng.yml"}'
 ```
+
+The generic webhook validates its JSON body the same way as `POST /jobs` and answers `400` with a one-line error
+for any of these:
+
+- `args` is not a list of strings (or one string, which is split like a shell).
+- `args` contains `-c`, `--config`, `-i`, `--input` or `--job-id`, written in any form argparse accepts: `--config=...`,
+  attached values (`-c/x`), bundles with `manual.py`'s value-less `-a` (`-ac`) or abbreviations (`--conf`, `--job`).
+  The daemon sets these itself. `manual.py` options such as `-nc` and `-cl` are their own flags and are allowed.
+- `path` is present but not a string.
+- `config` is not a string, or is not the daemon's loaded config file (compared by resolved path). Any other path is
+  refused, so a caller cannot point the daemon at an arbitrary file.
+
+A rejected request queues nothing; the daemon logs one line without the rejected value.
 
 ---
 
@@ -171,11 +189,25 @@ curl -X POST http://localhost:8585/jobs \
 | `rename` | `rename.py PATH` | One job for the directory | exit `0` |
 
 Every kind runs with the daemon's config (`-c`), chosen by path routing when the job is queued. `-c`, `--config`,
-`-i`, `--input` and `--job-id` are set by the daemon and rejected in `args` (400). `convert` behaves exactly like
-`POST /webhook/generic`: default args, the same-extension skip and per-file expansion apply only to it. A path and
-kind that are already pending or running return `200 {"status": "duplicate"}`; a new job returns
+`-i`, `--input` and `--job-id` are set by the daemon and rejected in `args` (400), including attached values (`-c/x`),
+abbreviations (`--conf`, `--inp=x`, `--job`) and bundles with the tool's own value-less short flags. Bundling is
+checked per kind: `-ac` for `manual.py` kinds (`convert`, `preview`, `audit`), `-nc`, `-vc` or `-nvc` for `repair`,
+and `-vc` for `rename`. `-nc` stays allowed for `manual.py` kinds, where it is its own option.
+`convert` behaves exactly like `POST /webhook/generic`: default args, the same-extension skip and per-file expansion
+apply only to it. A path and kind that are already pending or running return `200 {"status": "duplicate"}`; a new job returns
 `202 {"status": "queued", "job_id": ..., "kind": ...}`. Jobs on the same config still run one at a time, so a queued
 preview waits for the running job on its config, then goes first.
+
+**Telemetry.** Before converting, `manual.py` logs a single-line `sma.job.summary` JSON event with the source video and
+audio facts and duration; after converting it logs one for the output. The worker stores them on the job as
+`source_*` and `dest_*` columns (video codec, width, height, audio codec, channels, HDR class) plus
+`source_duration_seconds`, on success and on failure (source side only if the conversion failed). The HDR class is one
+of `sdr`, `hdr10`, `hdr10plus`, `dolby_vision` or `hlg`. Dolby Vision is detected from the container's DOVI
+configuration record or Dolby Vision frame side data, HDR10+ from SMPTE 2094-40 dynamic-metadata frame side data; when
+the probe does not expose that data the stream is reported as plain `hdr10`. The `ffmpeg.attempts` event also carries
+`encoder_name` and `encoder_backend`, stored on success. A job that ran no video encoder (stream copy or a bypassed
+conversion) stores `copy` for both. The source duration drives the `progress` percent of a running job. All fields
+appear in `GET /jobs/<id>`.
 
 **Output.** The daemon stores each job's tool output (without FFmpeg progress lines), keeping the newest 1 MiB, and
 deletes it with the job. Read it while the job runs:
@@ -222,7 +254,7 @@ curl -H "X-API-Key: SECRET" ...
 curl -H "Authorization: Bearer SECRET" ...
 ```
 
-Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/metrics`, `/health`, `/status`, `/docs`, `/favicon.png`
+Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`, `/favicon.png`
 
 The dashboard, admin, and metrics pages are only HTML shells. The API key is never written into the page: when the
 daemon has an API key configured, the first `401` opens one in-page dialog asking for it (`daemon.api-key` in
@@ -321,38 +353,41 @@ auto-profile selection happens for one-shot conversions. Pass
 
 ### Top-Level `daemon` Keys
 
-| Key                                | Description                                                                                                                                                                                      |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `host` / `port` / `workers`        | HTTP listen address and worker pool size                                                                                                                                                         |
-| `api-key`                          | API authentication key                                                                                                                                                                           |
-| `username` / `password`            | Optional HTTP-basic credentials for the web dashboard                                                                                                                                            |
-| `db-url`                           | SQLite or PostgreSQL URL for daemon job persistence. This value is loaded only from `sma-ng.yml`.                                                                                                |
-| `ffmpeg-dir`                       | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion                                                                                                          |
-| `node-id`                          | Stable identity in cluster mode (auto-generated UUID on first start; override for human-readable identity)                                                                                       |
-| `media-extensions`                 | File extensions considered media for directory scanning and `/browse`                                                                                                                            |
-| `path-rewrites`                    | Prefix substitutions applied to incoming webhook paths before routing; overlapping rewrites are matched longest-prefix-first                                                                     |
-| `scan-paths`                       | Directories for scheduled background scanning                                                                                                                                                    |
-| `routing`                          | Path-to-profile / path-to-services mapping (see above)                                                                                                                                           |
-| `strict-routing`                   | Refuse jobs whose paths don't match any `routing` rule (default `false`; webhook gets HTTP 400, scanner skips the file)                                                                          |
-| `default-args`                     | Args prepended to every conversion regardless of which routing rule matched                                                                                                                      |
-| `smoke-test`                       | Run option-generation dry-run against the loaded config at startup. Exits 1 on failure.                                                                                                          |
-| `job-timeout-seconds`              | Maximum seconds a conversion may run before its process tree is killed and the job failed (0 = no timeout). CLI `--job-timeout` overrides.                                                       |
-| `heartbeat-interval`               | Seconds between cluster heartbeat updates (PostgreSQL only, default `30`). CLI `--heartbeat-interval` overrides.                                                                                 |
-| `stale-seconds`                    | Seconds without a heartbeat before a node is declared stale and its running jobs requeued (PostgreSQL only, default `120`). CLI `--stale-seconds` overrides.                                     |
-| `progress-log-interval`            | Seconds between progress log lines for in-flight conversions                                                                                                                                     |
-| `recycle-bin-max-age-days`         | Delete recycle-bin media files older than this many days (default: `30`, `0` = disabled)                                                                                                         |
-| `recycle-bin-min-free-gb`          | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled)                                                                           |
-| `log-ttl-days`                     | Cluster-mode: retention for log entries in PostgreSQL                                                                                                                                            |
-| `node-expiry-days`                 | Cluster-mode: hard-delete offline nodes after this many days (`0` = disabled)                                                                                                                    |
-| `log-archive-dir`                  | Cluster-mode: directory for gzipped JSONL archive of cluster logs                                                                                                                                |
-| `log-archive-after-days`           | Cluster-mode: move logs older than this many days from DB to `log-archive-dir`                                                                                                                   |
-| `log-delete-after-days`            | Cluster-mode: prune archived log files older than this many days                                                                                                                                 |
-| `concurrency-budget`               | Per-node encoder-capacity budget summed over running jobs' `concurrency-cost` (default: `workers`; see [Configuration](configuration.md#profilesnameconcurrency-cost--daemonconcurrency-budget)) |
-| `storage-janitor-interval-seconds` | Seconds between storage-janitor sweeps of leftover `*.sma` / `*.smatmp` / zero-byte `*.mp4` in `output-directory` (default: `900`; `<=0` or `null` disables)                                     |
-| `storage-janitor-max-age-seconds`  | Minimum age in seconds before the janitor deletes a leftover file (default: `21600`; `<=0` or `null` disables)                                                                                   |
-| `storage-clear-on-start`           | Wipe `output-directory` at daemon startup (default: `true`; see [Storage management](#storage-management--output-directory-clear-on-start))                                                      |
-| `config-watch`                     | Config-file watcher: `enabled` (`true`), `interval-seconds` (`5`), `debounce-seconds` (`2`); see [Auto-reload](#auto-reload-on-file-change)                                                      |
-| `audit`                            | Library audit settings (`enabled`, `paths`, `interval-seconds`, `skip-dirs`, `auto-fix.*`, ...); see [Library Audit](library-audit.md)                                                           |
+| Key                                | Description                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `host` / `port` / `workers`        | HTTP listen address and worker pool size                                                                                                                                                                                                                                                                                                            |
+| `api-key`                          | API authentication key                                                                                                                                                                                                                                                                                                                              |
+| `username` / `password`            | Optional HTTP-basic credentials for the web dashboard                                                                                                                                                                                                                                                                                               |
+| `db-url`                           | SQLite or PostgreSQL URL for daemon job persistence. This value is loaded only from `sma-ng.yml`.                                                                                                                                                                                                                                                   |
+| `ffmpeg-dir`                       | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion                                                                                                                                                                                                                                                             |
+| `node-id`                          | Stable identity in cluster mode (auto-generated UUID on first start; override for human-readable identity)                                                                                                                                                                                                                                          |
+| `media-extensions`                 | File extensions considered media for directory scanning and `/browse`                                                                                                                                                                                                                                                                               |
+| `path-rewrites`                    | Prefix substitutions applied to incoming webhook paths before routing; overlapping rewrites are matched longest-prefix-first                                                                                                                                                                                                                        |
+| `scan-paths`                       | Directories for scheduled background scanning                                                                                                                                                                                                                                                                                                       |
+| `routing`                          | Path-to-profile / path-to-services mapping (see above)                                                                                                                                                                                                                                                                                              |
+| `strict-routing`                   | Refuse jobs whose paths don't match any `routing` rule (default `false`; webhook gets HTTP 400, scanner skips the file)                                                                                                                                                                                                                             |
+| `default-args`                     | Args prepended to every conversion regardless of which routing rule matched                                                                                                                                                                                                                                                                         |
+| `smoke-test`                       | Run option-generation dry-run against the loaded config at startup. Exits 1 on failure.                                                                                                                                                                                                                                                             |
+| `job-timeout-seconds`              | Maximum seconds a conversion may run before its process tree is killed and the job failed (0 = no timeout). CLI `--job-timeout` overrides.                                                                                                                                                                                                          |
+| `shutdown-grace-seconds`           | Longest wait for in-flight jobs on shutdown or restart before they are killed and requeued (default `100`; `0` = job timeout + 5 minutes, or 24 hours with no job timeout). Under Docker keep it below `STOP_GRACE_PERIOD` (2m); `docker stop` drains for the smaller of the two. `POST /shutdown`, `POST /restart` and SIGHUP wait the full grace. |
+| `heartbeat-interval`               | Seconds between cluster heartbeat updates (PostgreSQL only, default `30`). CLI `--heartbeat-interval` overrides.                                                                                                                                                                                                                                    |
+| `stale-seconds`                    | Seconds without a heartbeat before a node is declared stale and its running jobs requeued (PostgreSQL only, default `120`). CLI `--stale-seconds` overrides.                                                                                                                                                                                        |
+| `progress-log-interval`            | Seconds between progress log lines for in-flight conversions                                                                                                                                                                                                                                                                                        |
+| `recycle-bin-max-age-days`         | Delete recycle-bin media files older than this many days (default: `30`, `0` = disabled)                                                                                                                                                                                                                                                            |
+| `recycle-bin-min-free-gb`          | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled)                                                                                                                                                                                                                              |
+| `job-dedupe-window-seconds`        | Skip a path whose job completed within this many seconds, for the scanner and webhooks alike (default: `21600`, `0` = disabled). See [Duplicate Suppression](#duplicate-suppression).                                                                                                                                                               |
+| `job-retention-days`               | Delete completed, failed and cancelled jobs older than this many days (default: `30`, `0` = keep forever)                                                                                                                                                                                                                                           |
+| `log-ttl-days`                     | Cluster-mode: retention for log entries in PostgreSQL                                                                                                                                                                                                                                                                                               |
+| `node-expiry-days`                 | Cluster-mode: hard-delete offline nodes after this many days (`0` = disabled)                                                                                                                                                                                                                                                                       |
+| `log-archive-dir`                  | Cluster-mode: directory for gzipped JSONL archive of cluster logs                                                                                                                                                                                                                                                                                   |
+| `log-archive-after-days`           | Cluster-mode: move logs older than this many days from DB to `log-archive-dir`                                                                                                                                                                                                                                                                      |
+| `log-delete-after-days`            | Cluster-mode: prune archived log files older than this many days                                                                                                                                                                                                                                                                                    |
+| `concurrency-budget`               | Per-node encoder-capacity budget summed over running jobs' `concurrency-cost` (default: `workers`; see [Configuration](configuration.md#profilesnameconcurrency-cost--daemonconcurrency-budget))                                                                                                                                                    |
+| `storage-janitor-interval-seconds` | Seconds between storage-janitor sweeps of leftover `*.sma` / `*.smatmp` / zero-byte `*.mp4` in `output-directory` (default: `900`; `<=0` or `null` disables)                                                                                                                                                                                        |
+| `storage-janitor-max-age-seconds`  | Minimum age in seconds before the janitor deletes a leftover file (default: `21600`; `<=0` or `null` disables)                                                                                                                                                                                                                                      |
+| `storage-clear-on-start`           | Wipe `output-directory` at daemon startup (default: `true`; see [Storage management](#storage-management--output-directory-clear-on-start))                                                                                                                                                                                                         |
+| `config-watch`                     | Config-file watcher: `enabled` (`true`), `interval-seconds` (`5`), `debounce-seconds` (`2`); see [Auto-reload](#auto-reload-on-file-change)                                                                                                                                                                                                         |
+| `audit`                            | Library audit settings (`enabled`, `paths`, `interval-seconds`, `skip-dirs`, `auto-fix.*`, ...); see [Library Audit](library-audit.md)                                                                                                                                                                                                              |
 
 The `default-args` list is global only — there is no per-routing-rule
 override. Per-rule customisation is expressed by selecting a different
@@ -375,9 +410,16 @@ Job 2: /Movies/film1.mkv -> sma-ng.yml profile lq [starts immediately]
 Job 3: /TV/show2.mkv     -> sma-ng.yml profile rq [waits for an available worker]
 ```
 
-Check active/waiting jobs: `curl http://localhost:8585/health`
+Check active/waiting jobs: `curl -H "X-API-Key: SECRET" http://localhost:8585/health`
 
-Both `/health` and `/status` report the running build in two top-level fields:
+Without credentials, `/health` returns only a minimal liveness view: `status`, `version`, `uptime_seconds` and
+`jobs` (counts by status). The node id, `commit`, `active`/`waiting` job lists (media paths and job ids), worker
+count and hardware fields need a valid key. When no API key or basic auth is configured every caller is
+authenticated and gets the full view. `/metrics` requires the same credentials because its series carry the node
+id; point Prometheus at it with `authorization` (Bearer) in the scrape config, or `basic_auth` when
+`daemon.basic-auth` is configured (an API-key-only daemon accepts only Bearer or `X-API-Key`).
+
+Both `/health` (with a key) and `/status` report the running build in two top-level fields:
 
 - `version` — the SMA-NG release version (from package metadata, e.g. `3.1.0`).
 - `commit` — the git commit the running image was built from, baked in at
@@ -405,6 +447,15 @@ Each config gets a separate rotating log file in `logs/` named after the config 
 | `config/sma-ng.yml` | `logs/sma-ng.log` |
 
 Rotation: 10MB max, 5 backups. Use `--logs-dir` to change the directory.
+
+### Child log levels
+
+When the daemon runs a conversion, `manual.py --job-id` prefixes each child log record with the token
+`SMA_LEVEL=<LEVEL>` and a space (for example `SMA_LEVEL=WARNING`). The worker strips the token and writes the line
+to the per-config log at that level. Traceback continuation lines (starting with a pipe and a space) inherit the
+level of the record before them. Raw FFmpeg output has no token and stays at `INFO`. As a result,
+`GET /logs/<name>?level=WARNING` and `?level=ERROR` return conversion warnings and errors instead of only
+daemon-level records. The token is only added with `--job-id`; manual runs print unchanged output.
 
 ### FFmpeg Failure Sidecars
 
@@ -487,10 +538,14 @@ Structured timestamps returned by the daemon API use the daemon host's local tim
 
 | Parameter | Default | Description                                                                 |
 | --------- | ------- | --------------------------------------------------------------------------- |
-| `lines`   | `200`   | Maximum lines to return (tail of file)                                      |
+| `lines`   | `500`   | Maximum lines to return (newest; max 2000)                                  |
 | `level`   | —       | Minimum log level filter: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`   |
-| `job_id`  | —       | Filter entries to a specific job                                            |
+| `job_id`  | —       | Filter entries to a specific job; scans the live file and rotated backups   |
 | `offset`  | —       | Return content starting from this byte offset (auto-resets on log rotation) |
+
+With `job_id`, the daemon streams the live log and its rotated backups (`<log>.1` to `<log>.5`, at most 10 MB each)
+instead of only the last lines, so jobs that scrolled out of the tail still return their entries (oldest first, newest
+`lines` kept). Entries older than the oldest backup are gone. `/tail` and `offset` reads are unchanged.
 
 ### Poll for new entries (live tail)
 
@@ -539,10 +594,13 @@ daemon:
 | `rewrite-to`   | Replacement prefix                                   |
 | `enabled`      | Set to `false` to disable without removing the entry |
 
-Files already in the `scanned_files` database table are skipped on subsequent scans. A file is
-recorded there only once it has been queued (or already has a pending/running job); files skipped
-by `strict-routing` stay unrecorded, so they are queued on a later scan once a matching routing
-rule is added. Any file whose extension matches `media-extensions` is eligible for submission. `.mp4` is excluded from the default list to avoid re-processing already-converted output; add it explicitly if you want scanning to pick it up.
+Files already in the `scanned_files` database table are skipped on subsequent scans; job cleanup and retention
+never prune that table. A file is recorded there when it is queued, already has a pending or running job, or had a
+job complete within `job-dedupe-window-seconds` (`recently_completed`). Files skipped for `strict-routing`, because
+they already match the output extension, or because they sit in a recycle bin stay unrecorded and are re-checked on
+every scan, so a later config or routing change picks them up. Any file whose extension matches `media-extensions`
+is eligible for submission. `.mp4` is excluded from the default list to avoid re-processing already-converted
+output; add it explicitly if you want scanning to pick it up.
 
 **Manual batch scan script:**
 
@@ -558,6 +616,30 @@ bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --dry-run
 ```
 
 ---
+
+## Duplicate Suppression
+
+The scanner and the webhooks (`/webhook`, `/webhook/generic`, `/webhook/sonarr`, `/webhook/radarr`, `/queue`) share
+one queue path, so a file is judged the same way however it arrives. `POST /jobs` only normalises paths and skips
+pending or running duplicates of the same kind; it ignores the completion window and the skip rules below:
+
+- Paths are normalised (repeated separators, `.` and `..` segments, trailing slash) before the duplicate check, so
+  `/media//tv/./ep1.mkv` and `/media/tv/ep1.mkv` are the same file.
+- A path with a pending or running job of the same kind is not queued again. A webhook gets
+  `200 {"status": "duplicate"}`; the scanner counts the file as handled.
+- A path whose job completed within `job-dedupe-window-seconds` (default `21600`, six hours; `0` disables) is not
+  queued again either, for every source (this also stops a download client re-grab loop). Failed and cancelled jobs
+  never block a retry. A single-file request gets `200 {"status": "skipped", "reason": "recently_completed",
+  "job_id": <completed job id>}`; a directory request lists the file under `skipped` with the same `reason` and
+  `job_id` (not under `duplicates`); the scanner logs one INFO line `Scanner skipped <path> (recently_completed, job
+  <id>)`. `duplicates` is only for pending or running jobs. Conversions queued by the library audit
+  (`resources/library_audit`) do not apply the completion window.
+- Files that already match the output extension (unless `process-same-extensions` or `force-convert` is set) and
+  files inside a configured recycle bin are skipped by the scanner too, as they already are for webhooks. Webhooks
+  report `reason: same_as_output_extension` or `reason: recycle_bin`.
+
+The jobs table has no episode or movie identity, so a newer job for a different path of the same episode does not
+replace an older pending job; only the same normalised path is deduplicated.
 
 ## Recycle Bin Cleanup
 
@@ -692,6 +774,16 @@ curl "http://localhost:8585/jobs?status=pending"
 curl -X POST "http://localhost:8585/cleanup?days=7"
 ```
 
+### Job Retention
+
+Every node prunes finished jobs automatically, on the first heartbeat after startup and then at most once an
+hour, on SQLite and PostgreSQL alike. Rows with status `completed`, `failed` or `cancelled` whose `completed_at`
+is older than `daemon.job-retention-days` (default `30`) are deleted; `scanned_files` is never pruned.
+Set `job-retention-days: 0` to keep everything.
+
+A job completed within `job-dedupe-window-seconds` is never deleted, so retention (and `POST /cleanup?days=0`)
+cannot reopen the duplicate-suppression window. `POST /cleanup` runs the same pass on demand with the given `days`.
+
 **Database schema:**
 
 ```sql
@@ -793,10 +885,23 @@ The auto-watcher and `POST /reload` share a lock so they cannot race on the scan
 ## Graceful Shutdown / Restart
 
 Both operations drain in-progress conversions before stopping or re-execing. The drain is bounded:
-it waits up to the job timeout plus 5 minutes (or 24 hours when `job-timeout-seconds` is `0`). At
-that deadline any conversion still running is killed and left `running` so it is requeued — by
-`mark_node_offline` in cluster mode, or on the next start for SQLite — then the daemon proceeds.
-If marking the node offline fails, a warning is logged and shutdown continues.
+it waits up to `shutdown-grace-seconds` (default `100`, deliberately below the compose
+`stop_grace_period` of 2 minutes so the requeue happens before Docker's SIGKILL). Set it to `0` to wait up to the
+job timeout plus 5 minutes instead (24 hours when `job-timeout-seconds` is `0`). At that deadline any conversion
+still running is killed and its job is returned to `pending` (no retry used, no failure recorded); `jobs.error`
+keeps the reason, for example `Interrupted by SIGTERM (exit code -15); requeued`. This is a behaviour change:
+in-flight jobs are now cut at the grace period and requeued (`0` restores the old bound). `POST /shutdown`,
+`POST /restart` and SIGHUP wait the full grace; under `docker stop` the drain also ends at Docker's
+`STOP_GRACE_PERIOD`, whichever comes first. A conversion that dies from SIGTERM or SIGINT (exit code `-15` or `-2`,
+or `143` or `130` when `manual.py` exits on the signal itself), or ends while the worker is stopping, is requeued
+the same way. Any other signal death on a
+running daemon (SIGKILL/OOM, SIGSEGV) is a normal failure with retry/backoff, for example
+`Conversion process failed: killed by signal 9 (exit code -9)`. If the requeue write
+fails the row stays `running` and is requeued by `mark_node_offline` in cluster mode, or on the next start for
+SQLite. The cluster heartbeat keeps running during the drain so other nodes do not requeue live jobs.
+The killed `manual.py` handles `SIGTERM` by stopping ffmpeg, writing the ffmpeg stderr sidecar and removing the
+partial output, so the retry starts clean. A real failure records its exit code, for example
+`Conversion process failed (exit code 1)`.
 
 ```bash
 # Shutdown (waits for all active jobs to finish)
