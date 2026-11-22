@@ -1,2 +1,0 @@
-deluge-client>=1.10.2,<2
-gevent>=26.9.0,<27

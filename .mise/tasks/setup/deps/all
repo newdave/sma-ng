@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-#MISE description="Install dev dependencies plus the optional download-client extras (qbittorrent, deluge) from pyproject.toml"
+#MISE description="Install dev dependencies plus the optional postgres and openvino extras from pyproject.toml"
 #MISE depends=["setup:deps:dev"]
 set -euo pipefail
 
-"$PIP" install -e '.[dev,qbittorrent,deluge]'
+"$PIP" install -e '.[dev,postgres,openvino]'

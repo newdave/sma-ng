@@ -52,8 +52,6 @@ dependencies = [
 [project.optional-dependencies]
 openvino = ["openvino>=2026.4.1,<2027", "numpy>=2.5.4"]
 postgres = ["psycopg2-binary>=2.9.13,<3"]
-qbittorrent = ["python-qbittorrent>=0.4.3,<1"]
-deluge = ["deluge-client>=1.10.2,<2", "gevent>=26.9.0,<27"]
 dev = [
   "pytest>=9.2.0",
   "pytest-cov>=7.1.0",

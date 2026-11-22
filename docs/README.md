@@ -61,8 +61,6 @@ Optional extras (`pip install ".[extra]"`, or `mise run setup:deps:all` for ever
 | Extra         | Adds                                                                       |
 | ------------- | -------------------------------------------------------------------------- |
 | `postgres`    | `psycopg2-binary` for PostgreSQL job persistence and cluster mode          |
-| `qbittorrent` | qBittorrent client library                                                 |
-| `deluge`      | Deluge client library                                                      |
 | `openvino`    | OpenVINO runtime for the analyzer                                          |
 | `dev`         | pytest, ruff, pre-commit, and other lint/test tooling (`setup:deps:dev`)   |
 
