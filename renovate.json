@@ -1,6 +1,53 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "automerge": false,
+  "enabledManagers": ["github-actions", "dockerfile", "pep621", "pip_requirements", "pre-commit"],
+  "pre-commit": {
+    "enabled": true
+  },
+  "pip_requirements": {
+    "managerFilePatterns": ["/^setup/requirements.*\\.txt$/"]
+  },
+  "packageRules": [
+    {
+      "description": "pyproject.toml and setup/requirements*.txt must move together (tests/test_requirements_sync.py): one group covers both managers",
+      "matchManagers": ["pep621", "pip_requirements"],
+      "groupName": "python-runtime",
+      "semanticCommitType": "fix",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "description": "Dev-only Python dependencies (the dev extra and setup/requirements-dev.txt)",
+      "matchManagers": ["pep621", "pip_requirements"],
+      "matchPackageNames": ["pytest", "pytest-cov", "ruff", "openapi-spec-validator", "build", "bandit", "pre-commit", "shellcheck-py"],
+      "groupName": "python-dev",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "description": "Docker base image: stay on the 24.04 LTS line, digest refreshes only",
+      "matchManagers": ["dockerfile"],
+      "groupName": "docker base images",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "matchPackageNames": ["ubuntu"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": false
+    }
   ]
 }

@@ -11,7 +11,7 @@
 # instead (--enable-encoder=aac is on by default).
 # ──────────────────────────────────────────────────────────────────────────────
 # Base image pinned by digest (ubuntu:24.04 multi-arch index, resolved 2026-10-28)
-# and written literally in each FROM line: Dependabot's docker ecosystem only
+# and written literally in each FROM line: Renovate's dockerfile manager only
 # updates literal FROM references, not ARG-substituted ones. Keep the three
 # FROM lines on the same digest.
 
