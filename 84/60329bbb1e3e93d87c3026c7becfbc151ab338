@@ -1,0 +1,23 @@
+.github/workflows/docker.yml
+  s_d73ac5e457a585::t_8d611d1f919390 5
+  s_d73ac5e457a585::t_77b6cc260142ee 75,234-236
+  s_d73ac5e457a585::t_1b1b11c08e22a8 19-27
+docs/deployment.md
+  s_d73ac5e457a585::t_ea49b989406f3f 510
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "8460329bbb1e3e93d87c3026c7becfbc151ab338",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
