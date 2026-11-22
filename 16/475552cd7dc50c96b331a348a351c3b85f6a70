@@ -1,0 +1,21 @@
+tests/test_naming.py
+  s_d73ac5e457a585::t_dfb7fa73894cc6 1320-1337
+resources/naming.py
+  s_d73ac5e457a585::t_e35d118e1013b8 405,416-419
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "16475552cd7dc50c96b331a348a351c3b85f6a70",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
