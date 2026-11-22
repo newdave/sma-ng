@@ -1,0 +1,29 @@
+tests/test_worker.py
+  s_d73ac5e457a585::t_dd3fd897ae609b 1067-1103
+manual.py
+  s_d73ac5e457a585::t_e8bc54d6139b7e 27,1012-1013
+resources/daemon/worker.py
+  s_d73ac5e457a585::t_dd3fd897ae609b 3,16
+  s_d73ac5e457a585::t_e8bc54d6139b7e 772,802-814,839
+resources/log.py
+  s_d73ac5e457a585::t_e8bc54d6139b7e 117-129,348-349
+  s_d73ac5e457a585::t_41bad17d1da4d4 350
+tests/test_log_formatter.py
+  s_d73ac5e457a585::t_dd3fd897ae609b 215-229
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "5efdaae0a27edb6e8847fc3687c787b3ae1a7a54",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
