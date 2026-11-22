@@ -1,0 +1,52 @@
+docs/daemon.md
+  s_d73ac5e457a585::t_4e9ff67465622a 166
+resources/cli/errors.py
+  s_d73ac5e457a585::t_4e9ff67465622a 1
+docs/architecture.md
+  s_d73ac5e457a585::t_64fafad757188b 1-205
+docs/docker-quickstart.md
+  s_d73ac5e457a585::t_9107cb60a61f14 316,433,435-438
+  s_d73ac5e457a585::t_e6fcb26e8dd494 346-347
+  s_d73ac5e457a585::t_a72f566b5ae373 1-315,317-345,348-432,434,439-661
+docker/Dockerfile
+  s_d73ac5e457a585::t_4e9ff67465622a 312
+README.md
+  s_d73ac5e457a585::t_4e9ff67465622a 32,36-37,57-58
+.pre-commit-config.yaml
+  s_d73ac5e457a585::t_4e9ff67465622a 41
+install-smang.sh
+  s_d73ac5e457a585::t_4e9ff67465622a 9
+setup/sma-host.sh
+  s_d73ac5e457a585::t_4e9ff67465622a 10
+docs/cluster-operations.md
+  s_d73ac5e457a585::t_fb1845bfcf90ab 3-5,61-367,618,620-622
+docs/README.md
+  s_d73ac5e457a585::t_95373078e3b0b9 5-21,24,26-33,35,37-40
+docs/getting-started.md
+  s_d73ac5e457a585::t_e5593b0dadf6e9 15-17,19,21-28
+  s_d73ac5e457a585::t_4e9ff67465622a 9,182,591
+docs/deployment.md
+  s_d73ac5e457a585::t_4e9ff67465622a 158-159
+  s_d73ac5e457a585::t_391e015165d1a6 501-503
+  s_d73ac5e457a585::t_3b8a171b9de130 187-188,563-820
+scripts/wiki_sync.py
+  s_d73ac5e457a585::t_863efc071bce5d 44,55
+resources/daemon/docs_ui.py
+  s_d73ac5e457a585::t_4e9ff67465622a 21,32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "2a2b103fcce4e2f119c17438fb6fa3575453112c",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
