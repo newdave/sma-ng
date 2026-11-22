@@ -62,8 +62,9 @@ every docs page shows the running version.
 | ------ | -------------------------------- | ------ | ----------------------------------------------------------------------- |
 | `GET`  | `/`                              | No     | Redirects to `/dashboard`                                               |
 | `GET`  | `/dashboard`                     | No     | Web dashboard (HTML shell; prompts for the API key)                     |
+| `GET`  | `/dashboard/metrics`             | No     | Metrics page (HTML shell; its data comes from keyed `/api/metrics`)     |
 | `GET`  | `/admin`                         | No     | Admin panel (destructive actions)                                       |
-| `GET`  | `/health`                        | No     | Health check with job stats + GPU capabilities + fallback counters      |
+| `GET`  | `/health`                        | Partly | Public: minimal liveness. With a key: jobs, GPU capabilities, fallbacks |
 | `GET`  | `/status`                        | Partly | Public: minimal status. With a key: cluster-wide node and job detail    |
 | `GET`  | `/docs`                          | No     | Rendered documentation (`/docs/<page>`; includes `/docs/changelog`)     |
 | `GET`  | `/jobs`                          | Yes    | List jobs. Query: `?status=pending&limit=50&offset=0`                   |
@@ -72,7 +73,7 @@ every docs page shows the running version.
 | `GET`  | `/jobs/<id>/ffmpeg-stderr`       | Yes    | Stored ffmpeg stderr of a failed conversion, as text                    |
 | `GET`  | `/paths`                         | Yes    | Path roots this daemon serves (routing, scan, audit, path-rewrite from) |
 | `GET`  | `/configs`                       | Yes    | Config mappings and status                                              |
-| `GET`  | `/metrics`                       | No     | Cluster metrics web page (PostgreSQL required)                          |
+| `GET`  | `/metrics`                       | Yes    | Prometheus text (`X-API-Key`/Bearer; Basic needs `daemon.basic-auth`)  |
 | `GET`  | `/api/metrics`                   | Yes    | Metrics JSON. Query: `?window=24h\|7d\|30d\|all` (PostgreSQL required)  |
 | `GET`  | `/stats`                         | Yes    | Job statistics by status                                                |
 | `GET`  | `/scan`                          | Yes    | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv`               |
@@ -137,12 +138,25 @@ curl -X POST http://localhost:8585/webhook/generic \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "args": ["-tmdb", "603"]}'
 
-# JSON with config override (bypasses path matching)
+# JSON naming the daemon's own config (bypasses path matching)
 curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
-  -d '{"path": "/path/to/movie.mkv", "config": "/custom/sma-ng.yml"}'
+  -d '{"path": "/path/to/movie.mkv", "config": "/config/sma-ng.yml"}'
 ```
+
+The generic webhook validates its JSON body the same way as `POST /jobs` and answers `400` with a one-line error
+for any of these:
+
+- `args` is not a list of strings (or one string, which is split like a shell).
+- `args` contains `-c`, `--config`, `-i`, `--input` or `--job-id`, written in any form argparse accepts: `--config=...`,
+  attached values (`-c/x`), bundles with `manual.py`'s value-less `-a` (`-ac`) or abbreviations (`--conf`, `--job`).
+  The daemon sets these itself. `manual.py` options such as `-nc` and `-cl` are their own flags and are allowed.
+- `path` is present but not a string.
+- `config` is not a string, or is not the daemon's loaded config file (compared by resolved path). Any other path is
+  refused, so a caller cannot point the daemon at an arbitrary file.
+
+A rejected request queues nothing; the daemon logs one line without the rejected value.
 
 ---
 
@@ -175,9 +189,12 @@ curl -X POST http://localhost:8585/jobs \
 | `rename` | `rename.py PATH` | One job for the directory | exit `0` |
 
 Every kind runs with the daemon's config (`-c`), chosen by path routing when the job is queued. `-c`, `--config`,
-`-i`, `--input` and `--job-id` are set by the daemon and rejected in `args` (400). `convert` behaves exactly like
-`POST /webhook/generic`: default args, the same-extension skip and per-file expansion apply only to it. A path and
-kind that are already pending or running return `200 {"status": "duplicate"}`; a new job returns
+`-i`, `--input` and `--job-id` are set by the daemon and rejected in `args` (400), including attached values (`-c/x`),
+abbreviations (`--conf`, `--inp=x`, `--job`) and bundles with the tool's own value-less short flags. Bundling is
+checked per kind: `-ac` for `manual.py` kinds (`convert`, `preview`, `audit`), `-nc`, `-vc` or `-nvc` for `repair`,
+and `-vc` for `rename`. `-nc` stays allowed for `manual.py` kinds, where it is its own option.
+`convert` behaves exactly like `POST /webhook/generic`: default args, the same-extension skip and per-file expansion
+apply only to it. A path and kind that are already pending or running return `200 {"status": "duplicate"}`; a new job returns
 `202 {"status": "queued", "job_id": ..., "kind": ...}`. Jobs on the same config still run one at a time, so a queued
 preview waits for the running job on its config, then goes first.
 
@@ -226,7 +243,7 @@ curl -H "X-API-Key: SECRET" ...
 curl -H "Authorization: Bearer SECRET" ...
 ```
 
-Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/metrics`, `/health`, `/status`, `/docs`, `/favicon.png`
+Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`, `/favicon.png`
 
 The dashboard, admin, and metrics pages are only HTML shells. The API key is never written into the page: when the
 daemon has an API key configured, the first `401` opens one in-page dialog asking for it (`daemon.api-key` in
@@ -381,9 +398,16 @@ Job 2: /Movies/film1.mkv -> sma-ng.yml profile lq [starts immediately]
 Job 3: /TV/show2.mkv     -> sma-ng.yml profile rq [waits for an available worker]
 ```
 
-Check active/waiting jobs: `curl http://localhost:8585/health`
+Check active/waiting jobs: `curl -H "X-API-Key: SECRET" http://localhost:8585/health`
 
-Both `/health` and `/status` report the running build in two top-level fields:
+Without credentials, `/health` returns only a minimal liveness view: `status`, `version`, `uptime_seconds` and
+`jobs` (counts by status). The node id, `commit`, `active`/`waiting` job lists (media paths and job ids), worker
+count and hardware fields need a valid key. When no API key or basic auth is configured every caller is
+authenticated and gets the full view. `/metrics` requires the same credentials because its series carry the node
+id; point Prometheus at it with `authorization` (Bearer) in the scrape config, or `basic_auth` when
+`daemon.basic-auth` is configured (an API-key-only daemon accepts only Bearer or `X-API-Key`).
+
+Both `/health` (with a key) and `/status` report the running build in two top-level fields:
 
 - `version` — the SMA-NG release version (from package metadata, e.g. `3.1.0`).
 - `commit` — the git commit the running image was built from, baked in at

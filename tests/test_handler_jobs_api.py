@@ -98,6 +98,31 @@ class TestPostJobs:
     assert match in _get_response_body(h)["error"]
     server.job_db.add_job.assert_not_called()
 
+  @pytest.mark.parametrize("arg", ["-c/evil", "-i/evil", "-nc", "--conf", "--conf=/evil", "--inp=/evil", "--job", "--job=9"])
+  def test_forbidden_arg_bypass_forms_rejected(self, server, arg):
+    h = _post(server, {"kind": "repair", "path": "/", "args": ["-n", arg]})
+    assert h._response_code == 400
+    assert "set by the daemon" in _get_response_body(h)["error"]
+    server.job_db.add_job.assert_not_called()
+
+  @pytest.mark.parametrize(
+    "kind,args",
+    [("repair", ["-nc/x"]), ("repair", ["-vc/x"]), ("repair", ["-nvc", "x"]), ("rename", ["-vc/x"]), ("rename", ["-vc", "x"])],
+  )
+  def test_bool_flag_bundle_bypass_rejected(self, server, tmp_path, kind, args):
+    """repair.py's -n/-v and rename.py's -v take no value, so "-nc/x" there sets the config."""
+    h = _post(server, {"kind": kind, "path": str(tmp_path), "args": args})
+    assert h._response_code == 400
+    assert "set by the daemon" in _get_response_body(h)["error"]
+    server.job_db.add_job.assert_not_called()
+
+  def test_manual_nc_allowed_for_manual_py_kinds(self, server, tmp_path):
+    media = tmp_path / "a.mkv"
+    media.write_text("x")
+    h = _post(server, {"kind": "audit", "path": str(media), "args": ["-nc"]})
+    assert h._response_code == 202
+    assert server.job_db.add_job.call_args.args[2] == ["-nc"]
+
   def test_not_json(self, server):
     h = _post(server, b"/just/a/path")
     assert h._response_code == 400

@@ -250,8 +250,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
   if TYPE_CHECKING:
     server: "DaemonServer"
 
-  # Endpoints that don't require authentication (prefix-matched for /docs/*)
-  PUBLIC_ENDPOINTS = ["/", "/dashboard", "/admin", "/metrics", "/health", "/status", "/docs", "/favicon.png"]
+  # Endpoints that don't require authentication (prefix-matched for /docs/*). HTML shells fetch their data from
+  # authenticated APIs (/dashboard/metrics reads /api/metrics).
+  PUBLIC_ENDPOINTS = ["/", "/dashboard", "/dashboard/metrics", "/admin", "/health", "/status", "/docs", "/favicon.png"]
 
   def log_message(self, format, *args):
     self.server.logger.debug("%s - %s" % (self.address_string(), format % args))
@@ -328,6 +329,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """Return True if the request carries valid credentials (or none are required). Sends no response."""
     if not self.server.api_key and not self.server.basic_auth:
       return True
+    if not self.headers.get("X-API-Key") and not self.headers.get("Authorization"):
+      return False  # keyless probe (Docker HEALTHCHECK): minimal view, no Unauthorized warning
     saved = (self.send_response, self.send_header, self.end_headers, self.wfile)
     try:
       self.send_response = lambda *a, **k: None
@@ -396,6 +399,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
   # ------------------------------------------------------------------
 
   def _get_health(self):
+    if not self._is_authenticated():
+      # Unauthenticated callers get a minimal liveness view only: no node id,
+      # job ids or media paths (those live in the active/waiting lists).
+      now = _local_now()
+      self.send_json_response(
+        200,
+        {
+          "status": "ok",
+          "version": self.server.version,
+          "uptime_seconds": int((now - self.server.started_at).total_seconds()),
+          "jobs": self.server.job_db.get_stats(),
+        },
+      )
+      return
     lock_status = self.server.config_lock_manager.get_status()
     stats = self.server.job_db.get_stats()
     now = _local_now()
@@ -1480,7 +1497,19 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """
     content_length = self._content_length()
     body = self.rfile.read(content_length).decode("utf-8").strip()
-    return parse_generic_webhook_body(body, self.headers.get("Content-Type", ""), self.send_json_response)
+    path, extra_args, config_override, max_retries = parse_generic_webhook_body(body, self.headers.get("Content-Type", ""), self.send_json_response)
+    if path is not None and config_override and not self._is_known_config(config_override):
+      self.server.logger.warning("Rejected webhook config override: not a configured daemon config")
+      self.send_json_response(400, {"error": "config must be the daemon's configured config file"})
+      return None, [], None, 0
+    return path, extra_args, config_override, max_retries
+
+  def _is_known_config(self, config_override):
+    """True when *config_override* is the daemon's loaded config (compared by resolved path)."""
+    known = getattr(self.server.path_config_manager, "default_config", None)
+    if not isinstance(known, str) or not known:
+      return False
+    return os.path.realpath(config_override) == os.path.realpath(known)
 
   def _resolve_config(self, path, config_override):
     """Return the config file to use for path, respecting any override."""
@@ -1910,7 +1939,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     except KeyError:
       self.send_json_response(400, {"error": "Unknown job kind %r" % req["kind"], "kinds": list(job_kinds.SUPPORTED_KINDS)})
       return
-    bad = job_kinds.forbidden_arg(req["args"])
+    bad = job_kinds.forbidden_arg(req["args"], kind)
     if bad:
       self.send_json_response(400, {"error": "Argument %s is set by the daemon and cannot be passed" % bad})
       return

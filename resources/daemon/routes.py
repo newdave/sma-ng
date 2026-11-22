@@ -122,7 +122,7 @@ def _post_routes():
     "/admin/delete-all-jobs": lambda handler, path, query: handler._post_admin_delete_all_jobs(),
     "/shutdown": lambda handler, path, query: handler._post_shutdown(path, query),
     "/restart": lambda handler, path, query: handler._post_restart(path, query),
-    "/reload": lambda handler, path, query: handler._post_reload(),
+    "/reload": lambda handler, path, query: handler._post_reload(path, query),
     "/cleanup": lambda handler, path, query: handler._post_cleanup(query),
     "/jobs/requeue": lambda handler, path, query: handler._post_jobs_requeue_bulk(query),
     "/jobs/bulk": lambda handler, path, query: handler._post_jobs_bulk(),

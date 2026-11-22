@@ -174,6 +174,11 @@ class TestStatus:
     assert rc == 0
     assert "sma-ng running (compose project docker, service sma-intel)" in out and "answering at http://127.0.0.1:8585" in out
 
+  def test_minimal_health_says_unavailable(self, monkeypatch, env):
+    rc, out = self._status(monkeypatch, env, COMPOSE, True, health={"status": "ok", "version": "3.2.35", "uptime_seconds": 1})
+    assert rc == 0
+    assert "unavailable without API key" in out and "? workers" not in out
+
   def test_health_details(self, monkeypatch, env):
     health = {"version": "3.2.35", "commit": "a9c347adb19f", "node": "sma-master", "workers": 6, "selected_backend": "qsv", "active": {"1": {}}, "waiting": {}, "jobs": {"completed": 10, "failed": 2}}
     rc, out = self._status(monkeypatch, env, COMPOSE, True, health=health)

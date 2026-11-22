@@ -4,7 +4,7 @@ info:
   description: |
     HTTP webhook server for media conversion automation.
     Authentication is optional; when an API key is configured all endpoints
-    except `/health`, `/status`, `/`, `/dashboard`, and `/docs` require it.
+    except `/health`, `/status`, `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, and `/docs` require it.
   version: "1.0.0"
 
 servers:
@@ -64,7 +64,9 @@ components:
             - type: string
         config:
           type: string
-          description: Config override (bypasses path routing)
+          description: >
+            Config override (bypasses path routing). Must be the daemon's loaded config file;
+            any other path is rejected with 400.
         max_retries:
           type: integer
     Job:
@@ -260,8 +262,13 @@ paths:
   /health:
     get:
       summary: Daemon health check
-      description: Returns node status, uptime, worker count, and job statistics. No authentication required.
-      security: []
+      description: >-
+        Without credentials returns a minimal liveness view (status, version, uptime_seconds, jobs). With a
+        valid API key returns the full detail (node, commit, workers, active and waiting jobs, hardware).
+      security:
+        - {}
+        - apiKey: []
+        - bearerToken: []
       operationId: getHealth
       tags: [monitoring]
       responses:
@@ -277,6 +284,7 @@ paths:
                     example: ok
                   node:
                     type: string
+                    description: Authenticated callers only
                   version:
                     type: string
                     description: SMA-NG release version of this node (from package metadata)
@@ -303,6 +311,25 @@ paths:
                   waiting:
                     type: object
                     description: Map of config path → waiting job count
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: Prometheus text exposition. Requires credentials when an API key or basic auth is configured (series carry the node id).
+      security:
+        - apiKey: []
+        - bearerToken: []
+      operationId: getPrometheusMetrics
+      tags: [monitoring]
+      responses:
+        "200":
+          description: Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          description: Missing or invalid credentials
 
   /status:
     get:
@@ -836,7 +863,9 @@ paths:
                   job_id:
                     type: integer
         "400":
-          description: Invalid request or path
+          description: >
+            Invalid request or path; args not a list of strings; args containing -c, --config, -i, --input or
+            --job-id; config not the daemon's loaded config
           content:
             application/json:
               schema:
