@@ -1,0 +1,30 @@
+tests/test_mediaprocessor.py
+  s_d73ac5e457a585::t_f5314b4d7231cc 10051,10053,10057
+  s_d73ac5e457a585::t_a1f008ce43cfa2 9989-10050,10052,10054-10056,10058-10100
+  s_d73ac5e457a585::t_64987311687f09 4542,4545
+  s_d73ac5e457a585::t_61bfa3e9c1bc2d 4518-4519,4522
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_17963f333442fd 4234-4250,4254-4256,4263-4276
+  s_d73ac5e457a585::t_7400f3a3956367 2510-2512,2517
+  s_d73ac5e457a585::t_f88685822ff567 4278-4281
+  s_d73ac5e457a585::t_a836d197284a58 4413-4422,4424,4426-4440,4445-4447,4449,4452,4454-4458
+  s_d73ac5e457a585::t_41f98f0b1356d0 4277
+docs/configuration.md
+  s_d73ac5e457a585::t_d87ae3a892195d 181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "c2cc9f92f34e3c41cc4befbbb55313603530cb2c",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
