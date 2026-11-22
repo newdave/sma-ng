@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -9272,6 +9273,7 @@ class TestOutputLargerThanInput:
     mp.settings.preopts = ["-fflags", "+genpts"]
     mp.settings.postopts = list(postopts)
     mp.settings.removebvs = False
+    mp.settings.temp_extension = None
     mp.converter.ffmpeg.pix_fmts = {"yuv420p": 8, "yuv420p10le": 10, "p010le": 10}
     return mp
 
@@ -9527,7 +9529,9 @@ class TestOutputLargerThanInput:
     assert big.read_bytes() == b"y" * 120
     assert sorted(p.name for p in tmp_path.iterdir()) == ["in.mkv", "in.mp4"]
 
-  def test_failed_copy_partial_output_removed_and_larger_restored(self, tmp_path):
+  def test_failed_copy_keeps_foreign_file_and_numbers_reencode(self, tmp_path):
+    # convert() already removed its own partial on failure, so a file at the
+    # output path belongs to someone else (another worker): never delete it.
     mp = self._mp()
     src, big = self._files(tmp_path)
     mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
@@ -9535,14 +9539,102 @@ class TestOutputLargerThanInput:
     def run(*a):
       if not list(tmp_path.glob("*.larger*")):
         return str(big), str(src), []
-      big.write_bytes(b"p")  # partial copy left by the failed run
+      big.write_bytes(b"p")  # another worker's output
       return None, str(src), []
 
     mp._run_ffmpeg = run
     result = mp.process(str(src), info=self._info())
-    assert result["output"] == str(big)
+    numbered = tmp_path / "in.2.mp4"
+    assert big.read_bytes() == b"p"
+    assert result["output"] == str(numbered)
+    assert numbered.read_bytes() == b"y" * 120
+    assert not list(tmp_path.glob("*.larger*"))
+
+  def test_interrupted_copy_with_temp_extension_keeps_file_at_output(self, tmp_path):
+    # With temp-extension the copy's partial is <stem>.<temp>, never the output path.
+    mp = self._mp()
+    mp.settings.temp_extension = "part"
+    src, big = self._files(tmp_path)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+
+    def run(*a):
+      if not list(tmp_path.glob("*.larger*")):
+        return str(big), str(src), []
+      big.write_bytes(b"p")  # another worker's output
+      raise KeyboardInterrupt()
+
+    mp._run_ffmpeg = run
+    with pytest.raises(KeyboardInterrupt):
+      mp.process(str(src), info=self._info())
+    assert big.read_bytes() == b"p"
+    assert (tmp_path / "in.2.mp4").read_bytes() == b"y" * 120
+    assert not list(tmp_path.glob("*.larger*"))
+
+  def test_interrupted_copy_keeps_file_older_than_copy_run(self, tmp_path):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+
+    def run(*a):
+      if not list(tmp_path.glob("*.larger*")):
+        return str(big), str(src), []
+      big.write_bytes(b"p")
+      old = time.time() - 3600
+      os.utime(big, (old, old))  # predates the copy run: not ours
+      raise KeyboardInterrupt()
+
+    mp._run_ffmpeg = run
+    with pytest.raises(KeyboardInterrupt):
+      mp.process(str(src), info=self._info())
+    assert big.read_bytes() == b"p"
+    assert (tmp_path / "in.2.mp4").read_bytes() == b"y" * 120
+
+  def test_interrupted_copy_partial_removed_without_retry_delay(self, tmp_path):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+    real_remove = mp.removeFile
+    calls = []
+
+    def remove(path, *a, **k):
+      calls.append((path, k))
+      return real_remove(path, *a, **k)
+
+    mp.removeFile = remove
+
+    def run(*a):
+      if not list(tmp_path.glob("*.larger*")):
+        return str(big), str(src), []
+      big.write_bytes(b"p")  # the interrupted copy's own partial
+      raise KeyboardInterrupt()
+
+    mp._run_ffmpeg = run
+    with pytest.raises(KeyboardInterrupt):
+      mp.process(str(src), info=self._info())
+    assert calls == [(str(big), {"retries": 0, "delay": 0})]
     assert big.read_bytes() == b"y" * 120
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["in.mkv", "in.mp4"]
+
+  def test_interrupted_in_place_copy_removes_own_partial(self, tmp_path):
+    # In-place mp4: the copy reads x.mp4.original, so its partial is x.mp4.mp4.
+    mp = self._mp()
+    src = tmp_path / "x.mp4"
+    original = tmp_path / "x.mp4.original"
+    original.write_bytes(b"x" * 100)
+    big = tmp_path / "x.mp4"
+    big.write_bytes(b"y" * 120)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+
+    def run(*a):
+      if not list(tmp_path.glob("*.larger*")):
+        return str(big), str(original), []
+      (tmp_path / "x.mp4.mp4").write_bytes(b"p")
+      raise KeyboardInterrupt()
+
+    mp._run_ffmpeg = run
+    with pytest.raises(KeyboardInterrupt):
+      mp.process(str(original), info=self._info())
+    assert big.read_bytes() == b"y" * 120
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["x.mp4", "x.mp4.original"]
 
   def test_restore_blocked_by_existing_file_numbers_output(self, tmp_path):
     mp = self._mp()

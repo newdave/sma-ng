@@ -1059,16 +1059,20 @@ class MediaProcessor:
     copy_options, copy_preopts, copy_postopts = self._copy_fallback_options(info, options, postopts, inputfile)
     copy_output = None
     restored = outputfile
+    interrupted = False
+    copy_input = inputfile
+    t0 = time.time()
     try:
       copy_output, inputfile, _ = self._run_ffmpeg(inputfile, copy_options, copy_preopts, copy_postopts, [], downloaded_subs, reportProgress, progressOutput)
+    except KeyboardInterrupt:
+      interrupted = True
+      raise
     except Exception:
       self.log.exception("Video copy fallback failed [output-larger-than-input].")
     finally:
       if not copy_output:  # also on KeyboardInterrupt: never leave the result at <out>.larger
-        # outputfile was free before the copy run, so anything there now is
-        # its partial output (no temp-extension, or an interrupt).
-        if os.path.exists(outputfile) and not self.removeFile(outputfile, retries=0):
-          self.log.warning("Unable to remove the partial video copy %s [output-larger-than-input]." % outputfile)
+        if interrupted and not self.settings.temp_extension:
+          self._remove_interrupted_copy_partial(copy_input, outputfile, t0)
         restored = self._restore_aside(aside, outputfile)
     if not copy_output:
       self.log.warning("Video copy fallback produced no output; keeping the larger re-encode [output-larger-than-input].")
@@ -1136,6 +1140,33 @@ class MediaProcessor:
     if tag and not any(str(o).startswith("-tag:v") or o == "-vtag" for o in copy_postopts):
       copy_postopts.extend(["-tag:v", tag])
     return copy_options, copy_preopts, copy_postopts
+
+  def _remove_interrupted_copy_partial(self, copy_input, outputfile, t0):
+    """Remove the partial an interrupted copy run (no temp-extension) left behind.
+
+    Only files written since the copy run started (``t0``) are touched, so a
+    file another worker wrote earlier survives. The copy run's own target can
+    differ from outputfile (in-place mp4 reads x.mp4.original and writes
+    x.mp4.mp4), so both paths are checked.
+    """
+    candidates = [outputfile]
+    try:
+      input_dir, filename, input_extension = self.parseFile(copy_input)
+      target, _ = self.getOutputFile(input_dir, filename, input_extension)
+      if target and os.path.abspath(target) != os.path.abspath(outputfile):
+        candidates.append(target)
+    except Exception:
+      self.log.debug("Unable to determine the video copy output path [output-larger-than-input].")
+    for path in candidates:
+      try:
+        # 1 s slack: coarse filesystem clocks can stamp a just-written file
+        # slightly before time.time().
+        if os.stat(path).st_mtime < t0 - 1:
+          continue
+      except OSError:
+        continue
+      if not self.removeFile(path, retries=0, delay=0):
+        self.log.warning("Unable to remove the partial video copy %s [output-larger-than-input]." % path)
 
   def _move_aside(self, path):
     """Rename path to a free <path>.larger[.N]; return the new path, or None on failure."""
