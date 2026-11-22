@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.41](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.40...sma-ng-v3.2.41) (2026-11-22)
+
+
+### Bug Fixes
+
+* daemon worker job safety (shutdown requeue, claim tokens, DB error recovery, telemetry) ([#230](https://github.com/newdave/sma-ng/issues/230)) ([f03df1d](https://github.com/newdave/sma-ng/commit/f03df1d8822195b0c58111742edf454d56d1d47b))
+
 ## [3.2.40](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.39...sma-ng-v3.2.40) (2026-11-22)
 
 
