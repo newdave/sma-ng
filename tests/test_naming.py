@@ -375,6 +375,22 @@ class TestGenerateNameEdgeCases:
     assert "My Show" in result  # local data used
 
   @patch("resources.naming._requests")
+  def test_instance_without_apikey_or_on_sibling_path_is_not_queried(self, mock_requests, make_media_info):
+    """Behaviour change (SMANG-32): naming uses the shared arr lookup, which skips
+    instances with no API key and matches paths on directory boundaries."""
+    settings = MagicMock()
+    settings.naming_enabled = True
+    settings.naming_tv_template = "{Series TitleYear} - S{season:00}E{episode:00}"
+    settings.sonarr_instances = [
+      {"path": "/tv-anime", "host": "localhost", "port": 8989, "apikey": ""},
+      {"path": "/tv", "host": "localhost", "port": 8989, "apikey": "key"},
+    ]
+
+    result = generate_name("/tv-anime/show/ep.mp4", make_media_info(), self._tv_tagdata(), settings)
+    mock_requests.get.assert_not_called()
+    assert "My Show" in result
+
+  @patch("resources.naming._requests")
   def test_lookup_path_used_for_api_match_when_output_in_temp_dir(self, mock_requests, make_media_info):
     """When the output file is in a temp/output dir, lookup_path (the original
     input path) is used for Sonarr path-prefix matching instead of filepath.

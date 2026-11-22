@@ -24,6 +24,8 @@ from typing import Annotated, Any
 
 from pydantic import AliasChoices, BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
+from converter.avcodecs import QSV_ONLY_HW_FLAGS, VAAPI_ONLY_HW_FLAGS
+
 _log = logging.getLogger(__name__)
 
 
@@ -224,22 +226,9 @@ class MetadataSettings(_Base):
   keep_titles: bool = False
 
 
-_QSV_ONLY_FLAG_TOKENS = frozenset(
-  {
-    "-low_power",
-    "-async_depth",
-    "-extbrc",
-    "-b_strategy",
-    "-look_ahead",
-    "-look_ahead_depth",
-    "-adaptive_i",
-    "-adaptive_b",
-    "-p_strategy",
-    "-rdo",
-  }
-)
-
-_VAAPI_ONLY_FLAG_TOKENS = frozenset({"-rc_mode", "-compression_level", "-qp"})
+# Encoder-specific flag sets live in converter.avcodecs (single source of truth).
+_QSV_ONLY_FLAG_TOKENS = QSV_ONLY_HW_FLAGS
+_VAAPI_ONLY_FLAG_TOKENS = VAAPI_ONLY_HW_FLAGS
 
 
 def _migrate_encoder_flags(data: Any) -> Any:

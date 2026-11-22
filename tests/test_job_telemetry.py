@@ -102,7 +102,7 @@ class TestCopyEncoder:
     mp.replicate.return_value = ["/out/file.mp4"]
     mp.getDefaultAudioLanguage.return_value = None
     mp.restoreFromOutput.return_value = "/out/file.mp4"
-    with patch("manual.getInfo", return_value=None), patch("manual._find_arr_instance", return_value=(None, None)), patch("manual.triggerRescan", return_value=None):
+    with patch("manual.getInfo", return_value=None), patch("manual.find_arr_instance", return_value=(None, None)), patch("manual.triggerRescan", return_value=None):
       with patch("manual.emit_job_summary") as emit:
         processFile("/file.mp4", mp, info=TestJobSummaryEvent._info())
     assert emit.call_args_list[1].kwargs["encoder"] == ("copy", "copy")
@@ -125,7 +125,7 @@ class TestCopyEncoder:
     mp.replicate.return_value = ["/out/file.mp4"]
     mp.getDefaultAudioLanguage.return_value = None
     mp.restoreFromOutput.return_value = "/out/file.mp4"
-    with patch("manual.getInfo", return_value=None), patch("manual._find_arr_instance", return_value=(None, None)), patch("manual.triggerRescan", return_value=None):
+    with patch("manual.getInfo", return_value=None), patch("manual.find_arr_instance", return_value=(None, None)), patch("manual.triggerRescan", return_value=None):
       with patch("manual.emit_job_summary") as emit:
         processFile("/file.mp4", mp, info=TestJobSummaryEvent._info())
     assert emit.call_args_list[1].kwargs.get("encoder") is None

@@ -5,10 +5,40 @@ import time
 
 import requests
 
-from autoprocess._media_server import apply_path_mapping
+from autoprocess._media_server import apply_path_mapping, path_under
 
 # Seconds before any Sonarr/Radarr HTTP call is abandoned.
 REQUEST_TIMEOUT = 30
+
+ARR_KINDS = ("sonarr", "radarr")
+
+
+def matching_arr_instances(filepath, settings, kinds=ARR_KINDS):
+  """Return every ``(instance, kind)`` whose routing path holds *filepath*, best match first.
+
+  An instance is usable only when it has both a ``path`` and an ``apikey``.
+  Both paths are normalised and matched on directory boundaries (``/TV`` does not
+  claim ``/TV-Anime``). The longest instance path wins across all *kinds*; ties keep
+  the order of *kinds* and then the settings order.
+  """
+  dirpath = os.path.normpath(os.path.dirname(filepath))
+  found = []
+  for kind in kinds:
+    for instance in getattr(settings, kind + "_instances", None) or []:
+      ipath = instance.get("path") or ""
+      if not ipath or not instance.get("apikey"):
+        continue
+      ipath = os.path.normpath(ipath)
+      if path_under(dirpath, ipath):
+        found.append((len(ipath), instance, kind))
+  found.sort(key=lambda item: item[0], reverse=True)
+  return [(instance, kind) for _, instance, kind in found]
+
+
+def find_arr_instance(filepath, settings, kinds=ARR_KINDS):
+  """Return ``(instance, kind)`` for the best Sonarr/Radarr match of *filepath*, or ``(None, None)``."""
+  matches = matching_arr_instances(filepath, settings, kinds)
+  return matches[0] if matches else (None, None)
 
 
 def build_api(settings_section, user_agent):
@@ -195,6 +225,14 @@ def _find_file_id(records, file_path, path_mapping=None):
   return None
 
 
+# Per-arr API shape for rename_via_arr: parse-response key, file-record
+# endpoint and the media id field shared by the file list and RenameFiles.
+_ARR_RENAME_SPECS = {
+  "sonarr": {"label": "Sonarr", "parse_key": "series", "files_endpoint": "episodefile", "id_field": "seriesId"},
+  "radarr": {"label": "Radarr", "parse_key": "movie", "files_endpoint": "moviefile", "id_field": "movieId"},
+}
+
+
 def rename_via_arr(base_url, headers, arr_type, file_path, log, path_mapping=None):
   """Trigger Sonarr/Radarr's built-in RenameFiles command for a specific file.
 
@@ -205,107 +243,49 @@ def rename_via_arr(base_url, headers, arr_type, file_path, log, path_mapping=Non
   Returns the new file path string on success, or None if the file record
   could not be found or the command failed.
   """
+  spec = _ARR_RENAME_SPECS["sonarr" if arr_type == "sonarr" else "radarr"]
+  label, files_endpoint, id_field = spec["label"], spec["files_endpoint"], spec["id_field"]
   try:
-    if arr_type == "sonarr":
-      parse_resp = requests.get(
-        base_url + "/api/v3/parse",
-        headers=headers,
-        params={"title": os.path.basename(file_path)},
-        timeout=REQUEST_TIMEOUT,
-      )
-      parse_data = parse_resp.json()
-      series = parse_data.get("series") or {}
-      media_id = series.get("id")
-      if not media_id:
-        log.warning("rename_via_arr: Sonarr could not parse series for %s" % file_path)
-        return None
+    parse_resp = requests.get(
+      base_url + "/api/v3/parse",
+      headers=headers,
+      params={"title": os.path.basename(file_path)},
+      timeout=REQUEST_TIMEOUT,
+    )
+    parse_data = parse_resp.json()
+    media = parse_data.get(spec["parse_key"]) or {}
+    media_id = media.get("id")
+    if not media_id:
+      log.warning("rename_via_arr: %s could not parse %s for %s" % (label, spec["parse_key"], file_path))
+      return None
 
-      files_resp = requests.get(
-        base_url + "/api/v3/episodefile",
-        headers=headers,
-        params={"seriesId": media_id},
-        timeout=REQUEST_TIMEOUT,
-      )
-      file_records = files_resp.json()
-      file_id = _find_file_id(file_records, file_path, path_mapping)
+    files_resp = requests.get(
+      base_url + "/api/v3/" + files_endpoint,
+      headers=headers,
+      params={id_field: media_id},
+      timeout=REQUEST_TIMEOUT,
+    )
+    file_records = files_resp.json()
+    if isinstance(file_records, dict):
+      file_records = [file_records]
+    file_id = _find_file_id(file_records, file_path, path_mapping)
 
-      if not file_id:
-        log.warning("rename_via_arr: no Sonarr episodefile record matched path %s" % file_path)
-        return None
+    if not file_id:
+      log.warning("rename_via_arr: no %s %s record matched path %s" % (label, files_endpoint, file_path))
+      return None
 
-      log.info("rename_via_arr: triggering Sonarr RenameFiles for seriesId=%s fileId=%s" % (media_id, file_id))
-      cmd = api_command(
-        base_url,
-        headers,
-        {
-          "name": "RenameFiles",
-          "seriesId": media_id,
-          "files": [file_id],
-        },
-        log,
-      )
-      if not wait_for_command(base_url, headers, cmd["id"], log):
-        log.warning("rename_via_arr: Sonarr RenameFiles command did not complete successfully")
-        return None
+    log.info("rename_via_arr: triggering %s RenameFiles for %s=%s fileId=%s" % (label, id_field, media_id, file_id))
+    cmd = api_command(base_url, headers, {"name": "RenameFiles", id_field: media_id, "files": [file_id]}, log)
+    if not wait_for_command(base_url, headers, cmd["id"], log):
+      log.warning("rename_via_arr: %s RenameFiles command did not complete successfully" % label)
+      return None
 
-      updated = requests.get(
-        base_url + "/api/v3/episodefile/" + str(file_id),
-        headers=headers,
-        timeout=REQUEST_TIMEOUT,
-      )
-      return updated.json().get("path")
-
-    else:  # radarr
-      parse_resp = requests.get(
-        base_url + "/api/v3/parse",
-        headers=headers,
-        params={"title": os.path.basename(file_path)},
-        timeout=REQUEST_TIMEOUT,
-      )
-      parse_data = parse_resp.json()
-      movie = parse_data.get("movie") or {}
-      media_id = movie.get("id")
-      if not media_id:
-        log.warning("rename_via_arr: Radarr could not parse movie for %s" % file_path)
-        return None
-
-      files_resp = requests.get(
-        base_url + "/api/v3/moviefile",
-        headers=headers,
-        params={"movieId": media_id},
-        timeout=REQUEST_TIMEOUT,
-      )
-      file_records = files_resp.json()
-      if isinstance(file_records, dict):
-        file_records = [file_records]
-      file_id = _find_file_id(file_records, file_path, path_mapping)
-
-      if not file_id:
-        log.warning("rename_via_arr: no Radarr moviefile record matched path %s" % file_path)
-        return None
-
-      log.info("rename_via_arr: triggering Radarr RenameFiles for movieId=%s fileId=%s" % (media_id, file_id))
-      cmd = api_command(
-        base_url,
-        headers,
-        {
-          "name": "RenameFiles",
-          "movieId": media_id,
-          "files": [file_id],
-        },
-        log,
-      )
-      if not wait_for_command(base_url, headers, cmd["id"], log):
-        log.warning("rename_via_arr: Radarr RenameFiles command did not complete successfully")
-        return None
-
-      updated = requests.get(
-        base_url + "/api/v3/moviefile/" + str(file_id),
-        headers=headers,
-        timeout=REQUEST_TIMEOUT,
-      )
-      return updated.json().get("path")
-
+    updated = requests.get(
+      base_url + "/api/v3/" + files_endpoint + "/" + str(file_id),
+      headers=headers,
+      timeout=REQUEST_TIMEOUT,
+    )
+    return updated.json().get("path")
   except Exception:
     log.exception("rename_via_arr: unexpected error for %s" % file_path)
     return None

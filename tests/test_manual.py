@@ -12,11 +12,11 @@ import pytest
 # ---------------------------------------------------------------------------
 from manual import (
   SkipFileException,
-  _find_arr_instance,
   _tmdb_search,
   addtoProcessedArchive,
   apply_cli_overrides,
   checkAlreadyProcessed,
+  find_arr_instance,
   guessInfo,
   main,
   movieInfo,
@@ -190,7 +190,7 @@ class TestApplyCliOverrides:
 
 
 # ---------------------------------------------------------------------------
-# _find_arr_instance
+# find_arr_instance
 # ---------------------------------------------------------------------------
 
 
@@ -203,35 +203,48 @@ class TestFindArrInstance:
 
   def test_no_instances_returns_none(self):
     s = self._settings_with()
-    inst, kind = _find_arr_instance("/mnt/unionfs/Media/TV/show.mkv", s)
+    inst, kind = find_arr_instance("/mnt/unionfs/Media/TV/show.mkv", s)
     assert inst is None
     assert kind is None
 
   def test_sonarr_match_by_path_prefix(self):
     instance = {"path": "/mnt/unionfs/Media/TV", "apikey": "abc", "section": "sonarr"}
     s = self._settings_with(sonarr=[instance])
-    inst, kind = _find_arr_instance("/mnt/unionfs/Media/TV/show/ep.mkv", s)
+    inst, kind = find_arr_instance("/mnt/unionfs/Media/TV/show/ep.mkv", s)
     assert inst is instance
     assert kind == "sonarr"
 
   def test_radarr_match_by_path_prefix(self):
     instance = {"path": "/mnt/unionfs/Media/Movies", "apikey": "xyz", "section": "radarr"}
     s = self._settings_with(radarr=[instance])
-    inst, kind = _find_arr_instance("/mnt/unionfs/Media/Movies/film.mkv", s)
+    inst, kind = find_arr_instance("/mnt/unionfs/Media/Movies/film.mkv", s)
     assert inst is instance
     assert kind == "radarr"
 
   def test_no_match_when_path_not_prefix(self):
     instance = {"path": "/mnt/unionfs/Media/TV", "apikey": "abc", "section": "sonarr"}
     s = self._settings_with(sonarr=[instance])
-    inst, kind = _find_arr_instance("/mnt/unionfs/Media/Movies/film.mkv", s)
+    inst, kind = find_arr_instance("/mnt/unionfs/Media/Movies/film.mkv", s)
     assert inst is None
 
   def test_no_match_when_apikey_missing(self):
     instance = {"path": "/mnt/unionfs/Media/TV", "section": "sonarr"}  # no apikey
     s = self._settings_with(sonarr=[instance])
-    inst, kind = _find_arr_instance("/mnt/unionfs/Media/TV/ep.mkv", s)
+    inst, kind = find_arr_instance("/mnt/unionfs/Media/TV/ep.mkv", s)
     assert inst is None
+
+  def test_no_match_on_sibling_directory_sharing_a_prefix(self):
+    # Behaviour change (SMANG-32): matching is separator-aware, so /TV does not claim /TV-Anime.
+    instance = {"path": "/mnt/unionfs/Media/TV", "apikey": "abc"}
+    s = self._settings_with(sonarr=[instance])
+    assert find_arr_instance("/mnt/unionfs/Media/TV-Anime/S/ep.mkv", s) == (None, None)
+
+  def test_longest_prefix_wins_across_sonarr_and_radarr(self):
+    # Behaviour change (SMANG-32): a deeper Radarr path beats a broader Sonarr path.
+    broad = {"path": "/mnt/unionfs/Media", "apikey": "abc"}
+    narrow = {"path": "/mnt/unionfs/Media/Movies", "apikey": "xyz"}
+    s = self._settings_with(sonarr=[broad], radarr=[narrow])
+    assert find_arr_instance("/mnt/unionfs/Media/Movies/F/f.mkv", s) == (narrow, "radarr")
 
 
 # ---------------------------------------------------------------------------
@@ -468,7 +481,7 @@ class TestProcessFile:
     mp.getDefaultAudioLanguage.return_value = None
     mp.restoreFromOutput.return_value = "/out/file.mp4"
     with patch("manual.getInfo", return_value=None):
-      with patch("manual._find_arr_instance", return_value=(None, None)):
+      with patch("manual.find_arr_instance", return_value=(None, None)):
         with patch("manual.triggerRescan", return_value=None):
           result = processFile("/file.mp4", mp, info=MagicMock())
     assert result is True
@@ -491,7 +504,7 @@ class TestProcessFile:
     mp.replicate.return_value = ["/out/file.mp4"]
     mp.getDefaultAudioLanguage.return_value = None
     mp.restoreFromOutput.return_value = "/out/file.mp4"
-    with patch("manual.getInfo", return_value=None), patch("manual._find_arr_instance", return_value=(None, None)), patch("manual.triggerRescan", return_value=None):
+    with patch("manual.getInfo", return_value=None), patch("manual.find_arr_instance", return_value=(None, None)), patch("manual.triggerRescan", return_value=None):
       with patch("manual.emit_job_summary") as emit:
         processFile("/file.mp4", mp, info=TestJobSummaryEvent._info())
     assert emit.call_args_list[0].args[0].video.codec == "hevc"
@@ -576,7 +589,7 @@ class TestProcessFile:
     mp.removeFile.side_effect = lambda p, *a, **kw: (os.remove(p) or True) if os.path.isfile(p) else True
 
     with patch("manual.getInfo", return_value=None):
-      with patch("manual._find_arr_instance", return_value=(None, None)):
+      with patch("manual.find_arr_instance", return_value=(None, None)):
         with patch("manual.triggerRescan", return_value=None):
           result = processFile(str(src), mp, info=MagicMock())
 
@@ -611,7 +624,7 @@ class TestProcessFile:
     mp.restoreFromOutput.return_value = str(out)
     with (
       patch("manual.getInfo", return_value=MagicMock()),
-      patch("manual._find_arr_instance", return_value=(None, None)),
+      patch("manual.find_arr_instance", return_value=(None, None)),
       patch("manual.triggerRescan", return_value=None),
       patch("guessit.guessit", return_value={"source": "Web"}) as g,
       patch("resources.naming.generate_name", return_value=None) as gn,
@@ -647,7 +660,7 @@ class TestProcessFile:
     mp.restoreFromOutput.return_value = str(out)
     with (
       patch("manual.getInfo", return_value=MagicMock()),
-      patch("manual._find_arr_instance", return_value=(None, None)),
+      patch("manual.find_arr_instance", return_value=(None, None)),
       patch("manual.triggerRescan", return_value=None),
       patch("guessit.guessit", side_effect=ValueError("boom")),
       patch("resources.naming.generate_name", return_value=None) as gn,
@@ -686,7 +699,7 @@ class TestProcessFile:
     mp.removeFile.side_effect = AssertionError("removeFile must not be called when input was atomically overwritten")
 
     with patch("manual.getInfo", return_value=None):
-      with patch("manual._find_arr_instance", return_value=(None, None)):
+      with patch("manual.find_arr_instance", return_value=(None, None)):
         with patch("manual.triggerRescan", return_value=None):
           result = processFile(str(src), mp, info=MagicMock())
 
@@ -730,7 +743,7 @@ class TestProcessFile:
     mp.removeFile.side_effect = AssertionError("removeFile must not delete the original after a failed recycle")
 
     with patch("manual.getInfo", return_value=None):
-      with patch("manual._find_arr_instance", return_value=(None, None)):
+      with patch("manual.find_arr_instance", return_value=(None, None)):
         with patch("manual.triggerRescan", return_value=None):
           result = processFile(str(src), mp, info=MagicMock())
 
@@ -773,7 +786,7 @@ class TestProcessFile:
     mp.removeFile.side_effect = lambda p, *a, **kw: (os.remove(p) or True) if os.path.isfile(p) else True
 
     with patch("manual.getInfo", return_value=None):
-      with patch("manual._find_arr_instance", return_value=(None, None)):
+      with patch("manual.find_arr_instance", return_value=(None, None)):
         with patch("manual.triggerRescan", return_value=None):
           result = processFile(str(src), mp, info=MagicMock())
 
@@ -1224,7 +1237,7 @@ class TestTriggerRescan:
   def _run(self, wait_results, rename=False):
     inst = dict(self.INSTANCE, rename=rename)
     with (
-      patch("manual._find_arr_instance", return_value=(inst, "sonarr")),
+      patch("manual.find_arr_instance", return_value=(inst, "sonarr")),
       patch("resources.mediamanager.rescan_via_arr", return_value=7),
       patch("resources.mediamanager.downloaded_scan_via_arr", return_value=8) as scan,
       patch("resources.mediamanager.rename_via_arr", return_value="/new.mp4") as ren,

@@ -290,7 +290,7 @@ class TestScannerThreadScan:
     result = scanner._scan({"path": str(tmp_path)})
     assert result == 1
     db.filter_unscanned.assert_called_once()
-    db.add_job.assert_called_once_with(str(media), "/default.ini", [], dedupe_window_seconds=0, request_source="scan", request_profile=None)
+    db.add_job.assert_called_once_with(str(media), "/default.ini", [], dedupe_window_seconds=0, max_retries=0, request_source="scan", request_profile=None)
 
   def test_applies_path_rewrite(self, tmp_path):
     media = tmp_path / "show.mkv"
@@ -1295,6 +1295,39 @@ class TestScannerSharedQueueRules:
     result, db = self._scan(tmp_path, self._pcm())
     assert result == 1
     assert db.add_job.call_args.kwargs["dedupe_window_seconds"] == 21600
+
+  def test_profile_lookup_error_warns_and_leaves_file_unrecorded(self, tmp_path, caplog):
+    pcm = self._pcm()
+    pcm.get_profile_for_path.side_effect = RuntimeError("routing broke")
+    with caplog.at_level(logging.WARNING):
+      result, db = self._scan(tmp_path, pcm)
+    assert result == 0
+    db.add_job.assert_not_called()
+    db.record_scanned.assert_not_called()
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == ["Profile lookup failed for %s; skipping until next scan [routing-miss]" % (tmp_path / "show.mkv")]
+
+  def test_routing_miss_warns_even_when_a_skip_rule_also_matches(self, tmp_path, caplog):
+    pcm = self._pcm()
+    pcm.strict_routing = True
+    pcm.has_routing_match.return_value = False
+    pcm.should_skip_same_extension.return_value = True
+    with caplog.at_level(logging.WARNING):
+      result, db = self._scan(tmp_path, pcm)
+    assert result == 0
+    db.record_scanned.assert_not_called()
+    assert any("[routing-miss]" in r.getMessage() and r.levelno == logging.WARNING for r in caplog.records)
+
+  def test_applies_daemon_default_args(self, tmp_path):
+    # Behaviour change (SMANG-32): scanner jobs now get daemon.default-args like
+    # webhook and /convert jobs ("prepended to every conversion").
+    pcm = self._pcm()
+    pcm.get_args_for_path.return_value = ["--nomove"]
+    pcm.get_profile_for_path.return_value = "hd"
+    result, db = self._scan(tmp_path, pcm)
+    assert result == 1
+    assert db.add_job.call_args.args[2] == ["--nomove", "--profile", "hd"]
+    assert db.record_scanned.call_args.args[0] == [str(tmp_path / "show.mkv")]
 
   def test_recently_completed_logs_one_info_line(self, tmp_path, caplog):
     import logging

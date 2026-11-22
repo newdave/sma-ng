@@ -597,7 +597,8 @@ daemon:
 Files already in the `scanned_files` database table are skipped on subsequent scans; job cleanup and retention
 never prune that table. A file is recorded there when it is queued, already has a pending or running job, or had a
 job complete within `job-dedupe-window-seconds` (`recently_completed`). Files skipped for `strict-routing`, because
-they already match the output extension, or because they sit in a recycle bin stay unrecorded and are re-checked on
+they already match the output extension, because they sit in a recycle bin, or because their routing-profile lookup
+failed stay unrecorded and are re-checked on
 every scan, so a later config or routing change picks them up. Any file whose extension matches `media-extensions`
 is eligible for submission. `.mp4` is excluded from the default list to avoid re-processing already-converted
 output; add it explicitly if you want scanning to pick it up.
@@ -637,6 +638,11 @@ pending or running duplicates of the same kind; it ignores the completion window
 - Files that already match the output extension (unless `process-same-extensions` or `force-convert` is set) and
   files inside a configured recycle bin are skipped by the scanner too, as they already are for webhooks. Webhooks
   report `reason: same_as_output_extension` or `reason: recycle_bin`.
+- Scanner jobs receive `daemon.default-args` like webhook jobs. A `--profile` or `-p` in `default-args` suppresses
+  the routing profile.
+- If the routing-profile lookup fails, a webhook or `/jobs` request gets `500` so Sonarr or Radarr retries. The
+  scanner logs one WARNING `Profile lookup failed for <path>; skipping until next scan [routing-miss]` and leaves the
+  file unrecorded.
 
 The jobs table has no episode or movie identity, so a newer job for a different path of the same episode does not
 replace an older pending job; only the same normalised path is deduplicated.

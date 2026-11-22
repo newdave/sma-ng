@@ -300,9 +300,10 @@ can never leak onto a non-VAAPI command line. Unset fields inherit from
 `av1_vaapi` has no `-qp` option, so for it `global-quality` becomes `-rc_mode CQP -global_quality <N x 5>` on the
 AV1 0-255 qindex scale instead.
 
-> **VAAPI vs QSV flag names diverge.** `-global_quality` is QSV-only; on
-> VAAPI use `-rc_mode CQP -qp <N>` for quality-targeted, or `-rc_mode VBR
-> -b:v <rate> -maxrate <max>` for capped-VBR. Either write the encoder
+> **VAAPI vs QSV flag names diverge.** QSV takes quality as ICQ `-global_quality`. On
+> `hevc_vaapi` / `h264_vaapi` use `-rc_mode CQP -qp <N>` for quality-targeted; `av1_vaapi` has no `-qp` and uses
+> `-rc_mode CQP -global_quality <N x 5>` (0-255 qindex scale). For capped-VBR use `-rc_mode VBR
+> -b:v <rate> -maxrate <max>`. Either write the encoder
 > tunings as typed fields here and let the runtime translate, or stuff
 > them into `codec-parameters` verbatim.
 

@@ -18,7 +18,21 @@ from resources.daemon.constants import MAX_REQUEST_BODY_BYTES, SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase
 from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html, doc_file_for_slug
-from resources.daemon.queueing import SKIP_RECENTLY_COMPLETED, SKIP_RECYCLE_BIN, SKIP_SAME_EXTENSION, duplicate_outcome, queue_job, skip_reason
+from resources.daemon.queueing import (
+  DUPLICATE,
+  NO_ROUTING_MATCH,
+  QUEUED,
+  REFUSED,
+  SKIP_RECENTLY_COMPLETED,
+  SKIP_RECYCLE_BIN,
+  SKIP_SAME_EXTENSION,
+  SKIPPED,
+  merge_default_args,
+  merge_profile_arg,
+  queue_media_path,
+  resolve_config,
+  resolve_profile,
+)
 from resources.log import LOG_BACKUP_COUNT
 
 __all__ = ["WebhookHandler", "_inline"]
@@ -1512,45 +1526,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
       return False
     return os.path.realpath(config_override) == os.path.realpath(known)
 
-  def _resolve_config(self, path, config_override):
-    """Return the config file to use for path, respecting any override."""
-    if config_override and os.path.exists(config_override):
-      return config_override
-    return self.server.path_config_manager.get_config_for_path(path)
-
-  def _resolve_profile(self, path, config_override):
-    """Return the profile to apply for path, unless an explicit config override is used."""
-    if config_override:
-      return None
-    getter = getattr(self.server.path_config_manager, "get_profile_for_path", None)
-    profile = getter(path) if callable(getter) else None
-    return profile if isinstance(profile, str) and profile else None
-
   def _merge_args(self, path, extra_args):
-    """Merge per-path default_args with request args.
-
-    Default args are prepended; request args are appended. If a flag
-    appears in both, the request arg takes precedence (default is dropped).
-    This also handles the --tv/--movie mutual exclusivity.
-    """
-    default_args = self.server.path_config_manager.get_args_for_path(path)
-    if not default_args:
-      return list(extra_args)
-
-    # Flags the caller explicitly provided — strip leading dashes for comparison
-    caller_flags = {a.lstrip("-") for a in extra_args if a.startswith("-")}
-
-    # Filter out any default flags already covered by the caller
-    filtered_defaults = [a for a in default_args if not a.startswith("-") or a.lstrip("-") not in caller_flags]
-
-    return filtered_defaults + list(extra_args)
+    """Merge per-path default_args with request args (see ``queueing.merge_default_args``)."""
+    return merge_default_args(self.server.path_config_manager, path, extra_args)
 
   def _merge_profile_arg(self, args, profile):
     """Append a path profile unless the caller already supplied one."""
-    merged = list(args)
-    if profile and "--profile" not in merged and "-p" not in merged:
-      merged.extend(["--profile", profile])
-    return merged
+    return merge_profile_arg(args, profile)
 
   @staticmethod
   def _extract_profile_from_tag_labels(tag_labels):
@@ -1649,41 +1631,26 @@ class WebhookHandler(BaseHTTPRequestHandler):
     discard.
     """
     pcm = self.server.path_config_manager
-    has_match = getattr(pcm, "has_routing_match", None)
-    strict = getattr(pcm, "strict_routing", False) and not config_override
     queued, duplicates, skipped = [], [], []
     for filepath in self._walk_media_files(path):
-      job_path = pcm.rewrite_path(filepath)
-      reason = skip_reason(pcm, job_path)
-      if reason:
-        skipped.append({"path": job_path, "reason": reason})
-        continue
-      if strict and callable(has_match) and not has_match(job_path):
-        skipped.append({"path": job_path, "reason": "no_routing_match"})
-        continue
-      resolved_config = self._resolve_config(job_path, config_override)
-      profile = self._resolve_profile(job_path, config_override)
-      job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
-      job_id = queue_job(
+      result = queue_media_path(
         self.server.job_db,
         pcm,
-        job_path,
-        resolved_config,
-        job_args,
+        pcm.rewrite_path(filepath),
+        extra_args=extra_args,
+        config_override=config_override,
         max_retries=max_retries,
         request_source=request_source,
-        request_profile=profile,
       )
-      if job_id is None:
-        outcome, existing_id = duplicate_outcome(self.server.job_db, pcm, job_path)
-        if outcome == SKIP_RECENTLY_COMPLETED:
-          self.server.logger.info("Skipped queue: %s (%s, job %s)" % (job_path, outcome, existing_id))
-          skipped.append({"path": job_path, "reason": outcome, "job_id": existing_id})
-        else:
-          duplicates.append({"path": job_path, "job_id": existing_id})
+      if result.status == QUEUED:
+        queued.append({"job_id": result.job_id, "path": result.path, "config": result.config, "profile": result.profile})
+      elif result.status == DUPLICATE:
+        duplicates.append({"path": result.path, "job_id": result.job_id})
+      elif result.reason == SKIP_RECENTLY_COMPLETED:
+        self.server.logger.info("Skipped queue: %s (%s, job %s)" % (result.path, result.reason, result.job_id))
+        skipped.append({"path": result.path, "reason": result.reason, "job_id": result.job_id})
       else:
-        queued.append({"job_id": job_id, "path": job_path, "config": resolved_config, "profile": profile})
-        metrics_prom.record_job_enqueued(request_source, profile)
+        skipped.append({"path": result.path, "reason": result.reason})
 
     if not queued and not duplicates and not skipped:
       self.send_json_response(200, {"status": "empty", "path": path, "message": "No media files found in directory"})
@@ -1712,63 +1679,46 @@ class WebhookHandler(BaseHTTPRequestHandler):
   def _queue_file(self, path, extra_args, config_override, max_retries=0, *, request_source=None):
     """Queue a single file job and respond."""
     pcm = self.server.path_config_manager
-    job_path = pcm.rewrite_path(path)
-    reason = skip_reason(pcm, job_path)
-    if reason:
-      self.server.logger.info("Skipped queue: %s (%s)" % (job_path, reason))
+    result = queue_media_path(
+      self.server.job_db,
+      pcm,
+      pcm.rewrite_path(path),
+      extra_args=extra_args,
+      config_override=config_override,
+      max_retries=max_retries,
+      request_source=request_source,
+    )
+    job_path = result.path
+    if result.status == REFUSED:
+      self.server.logger.warning("Refused queue under strict-routing: %s did not match any daemon.routing rule [routing-miss]." % job_path)
       self.send_json_response(
-        200,
+        400,
         {
-          "status": "skipped",
+          "status": "refused",
           "path": job_path,
-          "reason": reason,
-          "message": _SKIP_MESSAGES[reason],
+          "reason": NO_ROUTING_MATCH,
+          "message": "daemon.strict-routing=true and no daemon.routing rule matched this path. Add a rule or set strict-routing=false.",
         },
       )
       return
-    if getattr(pcm, "strict_routing", False) and not config_override:
-      has_match = getattr(pcm, "has_routing_match", None)
-      if callable(has_match) and not has_match(job_path):
-        self.server.logger.warning("Refused queue under strict-routing: %s did not match any daemon.routing rule [routing-miss]." % job_path)
-        self.send_json_response(
-          400,
-          {
-            "status": "refused",
-            "path": job_path,
-            "reason": "no_routing_match",
-            "message": "daemon.strict-routing=true and no daemon.routing rule matched this path. Add a rule or set strict-routing=false.",
-          },
-        )
-        return
-    resolved_config = self._resolve_config(job_path, config_override)
-    profile = self._resolve_profile(job_path, config_override)
-    job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
-    job_id = queue_job(
-      self.server.job_db,
-      pcm,
-      job_path,
-      resolved_config,
-      job_args,
-      max_retries=max_retries,
-      request_source=request_source,
-      request_profile=profile,
-    )
-
-    if job_id is None:
-      outcome, existing_id = duplicate_outcome(self.server.job_db, pcm, job_path)
-      if outcome == SKIP_RECENTLY_COMPLETED:
-        self.server.logger.info("Skipped queue: %s (%s, job %s)" % (job_path, outcome, existing_id))
-        self.send_json_response(
-          200,
-          {"status": "skipped", "path": job_path, "reason": outcome, "job_id": existing_id, "message": _SKIP_MESSAGES[outcome]},
-        )
-        return
+    if result.status == SKIPPED:
+      if result.reason == SKIP_RECENTLY_COMPLETED:
+        self.server.logger.info("Skipped queue: %s (%s, job %s)" % (job_path, result.reason, result.job_id))
+        body = {"status": "skipped", "path": job_path, "reason": result.reason, "job_id": result.job_id, "message": _SKIP_MESSAGES[result.reason]}
+      else:
+        self.server.logger.info("Skipped queue: %s (%s)" % (job_path, result.reason))
+        body = {"status": "skipped", "path": job_path, "reason": result.reason, "message": _SKIP_MESSAGES[result.reason]}
+      self.send_json_response(200, body)
+      return
+    resolved_config = result.config
+    profile = result.profile
+    if result.status == DUPLICATE:
       self.server.logger.info("Duplicate job submission for: %s" % job_path)
-      self.send_json_response(200, {"status": "duplicate", "job_id": existing_id, "path": job_path, "config": resolved_config})
+      self.send_json_response(200, {"status": "duplicate", "job_id": result.job_id, "path": job_path, "config": resolved_config})
       return
 
+    job_id = result.job_id
     self.server.notify_workers()
-    metrics_prom.record_job_enqueued(request_source, profile)
     log_file = self.server.config_log_manager.get_log_file(resolved_config)
     config_busy = self.server.config_lock_manager.is_locked(resolved_config)
     pending = self.server.job_db.pending_count_for_config(resolved_config)
@@ -1930,7 +1880,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
     ``convert`` behaves exactly like POST /convert (directories expand per
     file). Other kinds queue one job for the path as given, without the
     convert-only default args or same-extension skip.
+
+    An unexpected error (e.g. a failing routing-profile lookup) answers 500
+    so the caller retries, rather than queueing a job without its profile.
     """
+    try:
+      self._queue_jobs_request()
+    except _BadRequest:
+      raise
+    except Exception as e:
+      self.server.logger.error("Job submit failed: %s", type(e).__name__)
+      self.send_json_response(500, {"error": "Internal error"})
+
+  def _queue_jobs_request(self):
+    """Body of POST /jobs; see ``_post_jobs``."""
     body = self.rfile.read(self._content_length()).decode("utf-8").strip()
     req = parse_jobs_body(body, self.send_json_response)
     if req is None:
@@ -1973,8 +1936,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
     if os.path.isdir(path) and not kind.directory_ok:
       self.send_json_response(400, {"error": "%s needs a file, not a directory" % kind.name, "path": path})
       return
-    config = self._resolve_config(job_path, None)
-    profile = req["profile"] or self._resolve_profile(job_path, None)
+    config = resolve_config(pcm, job_path)
+    profile = req["profile"] or resolve_profile(pcm, job_path)
     if kind.uses_profile:
       args = self._merge_profile_arg(args, profile)
     priority = req["priority"] if req["priority"] is not None else (PREVIEW_PRIORITY if kind.name == "preview" else 0)

@@ -1116,16 +1116,16 @@ class TestAtomicFileOps:
     src = tmp_path / "source.mp4"
     src.write_bytes(b"media data")
     dst = tmp_path / "dest.mp4"
-    with patch("os.rename") as mock_rename:
+    with patch("os.replace") as mock_replace:
       mp._atomic_move(str(src), str(dst))
-    mock_rename.assert_called_once_with(str(src), str(dst))
+    mock_replace.assert_called_once_with(str(src), str(dst))
 
   def test_atomic_move_cross_filesystem_fallback(self, tmp_path):
     mp = self._make_processor()
     src = tmp_path / "source.mp4"
     src.write_bytes(b"media data")
     dst = tmp_path / "dest.mp4"
-    with patch("os.rename", side_effect=OSError(18, "Invalid cross-device link")):
+    with patch("os.replace", side_effect=OSError(18, "Invalid cross-device link")):
       with patch.object(mp, "_atomic_copy") as mock_copy:
         with patch("os.remove") as mock_remove:
           mp._atomic_move(str(src), str(dst))
@@ -9350,6 +9350,25 @@ class TestStripQsvOnlyFlags:
       parts.extend([flag, "1"])
     parts.extend(["-preset", "slow"])
     assert _strip_qsv_only_flags(" ".join(parts)) == "-preset slow"
+
+  def test_strips_rdo(self):
+    # Behaviour change (SMANG-32): the hw_alt strip list had drifted from
+    # converter.avcodecs and kept `-rdo`. The VAAPI codec's hw_forbidden_flags
+    # already filtered it (with a WARNING), so ffmpeg never saw it; stripping it
+    # here is defence in depth and avoids that warning.
+    from resources.mediaprocessor import _strip_qsv_only_flags as f
+
+    assert f("-rdo 1 -preset slow") == "-preset slow"
+
+  def test_strip_list_is_the_shared_qsv_set_plus_global_quality(self):
+    # -global_quality is valid on av1_vaapi, so it is not in the shared
+    # QSV-only set; the hw_alt swap strips it because it re-maps quality itself.
+    from converter.avcodecs import QSV_ONLY_HW_FLAGS
+    from resources.mediaprocessor import _QSV_ONLY_CODEC_FLAGS
+
+    assert QSV_ONLY_HW_FLAGS == _QSV_ONLY_CODEC_FLAGS - {"-global_quality"}
+    assert "-global_quality" in _QSV_ONLY_CODEC_FLAGS
+    assert "-global_quality" not in QSV_ONLY_HW_FLAGS
 
 
 class TestSwapQsvCodecToVaapi:
