@@ -1,0 +1,35 @@
+resources/daemon/queueing.py
+  s_d73ac5e457a585::t_63ee5ea65bb531 65,71,75-149
+  s_d73ac5e457a585::t_be3a596b55ded0 10-12,17,20-23
+  s_d73ac5e457a585::t_a838927dd6d1bf 24
+tests/test_queueing.py
+  s_d73ac5e457a585::t_0c548fdec1b1d7 74-99,101-166
+  s_d73ac5e457a585::t_b8de06273c22cd 100
+  s_d73ac5e457a585::t_80a84ed9aca067 5-7,11,16
+resources/daemon/threads.py
+  s_d73ac5e457a585::t_97a642c25ad2c9 324-326,328,330,333-334,336-337,339-340
+  s_d73ac5e457a585::t_c6e1f7073d4634 9
+tests/test_threads.py
+  s_d73ac5e457a585::t_03409923fb6b00 1299-1309
+  s_d73ac5e457a585::t_031406e92f9e41 293
+resources/daemon/handler.py
+  s_d73ac5e457a585::t_d06d8acda80fa6 1647,1650-1652,1656-1662,1664,1693-1704,1706,1708,1710-1711,1715-1726,1728,1731
+  s_d73ac5e457a585::t_52a63a7e366085 1538,1541-1542,1546
+  s_d73ac5e457a585::t_5b35b865a32efc 21-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "2460f0fae0540ef394907a9bcb408d4c454ab1a0",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
