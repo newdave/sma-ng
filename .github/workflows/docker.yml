@@ -58,9 +58,11 @@ jobs:
     name: Plan image build
     # workflow_run fires for every CI completion on main; only a passing CI on
     # a push (not a PR merge-queue or a failed run) builds the main image.
+    # Release-please PRs only bump versions and the changelog: no image build.
     if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+      (github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')) &&
+      (github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     timeout-minutes: 3
     # Job-level so a call from release.yml does not share the caller's group.

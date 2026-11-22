@@ -27,6 +27,7 @@ jobs:
     name: Analyze (Python)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    if: ${{ github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--') }}
     permissions:
       contents: read
       security-events: write
