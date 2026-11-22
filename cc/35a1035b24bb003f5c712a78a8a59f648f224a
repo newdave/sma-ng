@@ -1,0 +1,39 @@
+tests/test_claim_token.py
+  s_d73ac5e457a585::t_9f408fb4e6de7b 199,201-202
+  s_d73ac5e457a585::t_d3b62cc1a6103b 7
+  s_d73ac5e457a585::t_7516942161cc31 149,153-198,200,203-268
+resources/daemon/db.py
+  s_d73ac5e457a585::t_8b88b5efe0f0e0 775,779-781,785,787,791-795,797-800,815-816,1742,1746-1748,1751,1759-1763,1765-1768,1784-1785
+  s_d73ac5e457a585::t_7cb28687ba3b40 430-431,433-434,441-442,449-453
+  s_d73ac5e457a585::t_259e204bee9540 432
+tests/test_worker.py
+  s_d73ac5e457a585::t_f1a251d6f92e40 138,250
+  s_d73ac5e457a585::t_fa7a9d16dd9fbb 9,190-192,369-371
+tests/test_interrupted_requeue.py
+  s_d73ac5e457a585::t_f1a251d6f92e40 58,71,82
+  s_d73ac5e457a585::t_fa7a9d16dd9fbb 16
+tests/test_worker_reliability.py
+  s_d73ac5e457a585::t_fa7a9d16dd9fbb 14,257-259
+  s_d73ac5e457a585::t_f1a251d6f92e40 266
+resources/daemon/handler.py
+  s_d73ac5e457a585::t_8b88b5efe0f0e0 231
+resources/daemon/worker.py
+  s_d73ac5e457a585::t_8b88b5efe0f0e0 352-353,378,734-736
+  s_d73ac5e457a585::t_21803a59b2be35 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "cc35a1035b24bb003f5c712a78a8a59f648f224a",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
