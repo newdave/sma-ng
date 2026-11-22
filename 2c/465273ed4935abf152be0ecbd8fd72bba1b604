@@ -1,0 +1,27 @@
+tests/test_mediaprocessor_pipeline_fixes.py
+  s_d73ac5e457a585::t_32993023ef9c1b 508-586
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_32993023ef9c1b 700,3631-3647,3655-3657,3673-3677
+  s_d73ac5e457a585::t_dbe3d461c4936f 701
+docs/configuration.md
+  s_d73ac5e457a585::t_dea8411c685357 152-153,155-156
+  s_d73ac5e457a585::t_dbe3d461c4936f 154
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_dea8411c685357 324-326
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "2c465273ed4935abf152be0ecbd8fd72bba1b604",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
