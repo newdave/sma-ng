@@ -312,7 +312,8 @@ class ScannerThread(_StoppableThread):
         request_profile=scan_profile,
       )
       # add_job returns None when a pending/running job already exists for
-      # the path; that file is handled too, so record it either way.
+      # the path or one completed within the dedupe window (recently_completed);
+      # that file is handled too, so record it either way.
       handled.append(filepath)
       if job_id is not None:
         self.log.info("Scanner queued job %d: %s" % (job_id, submit_path))

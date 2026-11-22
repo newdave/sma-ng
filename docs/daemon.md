@@ -493,7 +493,7 @@ Structured timestamps returned by the daemon API use the daemon host's local tim
 
 | Parameter | Default | Description                                                                 |
 | --------- | ------- | --------------------------------------------------------------------------- |
-| `lines`   | `200`   | Maximum lines to return (newest; max 2000)                                  |
+| `lines`   | `500`   | Maximum lines to return (newest; max 2000)                                  |
 | `level`   | —       | Minimum log level filter: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`   |
 | `job_id`  | —       | Filter entries to a specific job; scans the live file and rotated backups   |
 | `offset`  | —       | Return content starting from this byte offset (auto-resets on log rotation) |
@@ -549,11 +549,13 @@ daemon:
 | `rewrite-to`   | Replacement prefix                                   |
 | `enabled`      | Set to `false` to disable without removing the entry |
 
-Files already in the `scanned_files` database table are skipped on subsequent scans (job retention never
-prunes it). A file is
-recorded there only once it has been queued (or already has a pending/running job); files skipped
-by `strict-routing` stay unrecorded, so they are queued on a later scan once a matching routing
-rule is added. Any file whose extension matches `media-extensions` is eligible for submission. `.mp4` is excluded from the default list to avoid re-processing already-converted output; add it explicitly if you want scanning to pick it up.
+Files already in the `scanned_files` database table are skipped on subsequent scans; job cleanup and retention
+never prune that table. A file is recorded there when it is queued, already has a pending or running job, or had a
+job complete within `job-dedupe-window-seconds` (`recently_completed`). Files skipped for `strict-routing`, because
+they already match the output extension, or because they sit in a recycle bin stay unrecorded and are re-checked on
+every scan, so a later config or routing change picks them up. Any file whose extension matches `media-extensions`
+is eligible for submission. `.mp4` is excluded from the default list to avoid re-processing already-converted
+output; add it explicitly if you want scanning to pick it up.
 
 **Manual batch scan script:**
 
@@ -585,7 +587,8 @@ pending or running duplicates of the same kind; it ignores the completion window
   never block a retry. A single-file request gets `200 {"status": "skipped", "reason": "recently_completed",
   "job_id": <completed job id>}`; a directory request lists the file under `skipped` with the same `reason` and
   `job_id` (not under `duplicates`); the scanner logs one INFO line `Scanner skipped <path> (recently_completed, job
-  <id>)`. `duplicates` is only for pending or running jobs.
+  <id>)`. `duplicates` is only for pending or running jobs. Conversions queued by the library audit
+  (`resources/library_audit`) do not apply the completion window.
 - Files that already match the output extension (unless `process-same-extensions` or `force-convert` is set) and
   files inside a configured recycle bin are skipped by the scanner too, as they already are for webhooks. Webhooks
   report `reason: same_as_output_extension` or `reason: recycle_bin`.
