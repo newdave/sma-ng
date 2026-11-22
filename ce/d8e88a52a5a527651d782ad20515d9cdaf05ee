@@ -1,0 +1,19 @@
+tests/test_mediaprocessor.py
+  s_d73ac5e457a585::t_d6dd8d3f95bc29 9356-9358
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "ced8e88a52a5a527651d782ad20515d9cdaf05ee",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
