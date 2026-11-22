@@ -1317,6 +1317,24 @@ class TestTrailingYearStripped:
     data._apply_sonarr_data({"series": {"title": "Rivals", "year": 2024}}, MagicMock())
     assert data.series_titleyear == "Rivals (2024)"
 
+  def test_sonarr_season_override_logged_single_line(self):
+    data = NamingData()
+    data.season = 2
+    data.episode = 4
+    log = MagicMock()
+    data._apply_sonarr_data({"episodes": [{"seasonNumber": 3, "episodeNumber": 4}]}, log)
+    assert data.season == 3
+    msgs = [c.args[0] % c.args[1:] if len(c.args) > 1 else c.args[0] for c in log.info.call_args_list]
+    assert any("S02E04" in m and "S03E04" in m and "Sonarr" in m and "\n" not in m for m in msgs)
+
+  def test_sonarr_season_same_not_logged_at_info(self):
+    data = NamingData()
+    data.season = 2
+    data.episode = 4
+    log = MagicMock()
+    data._apply_sonarr_data({"episodes": [{"seasonNumber": 2, "episodeNumber": 4}]}, log)
+    log.info.assert_not_called()
+
   def test_sonarr_keeps_non_year_parenthetical(self):
     data = NamingData()
     data._apply_sonarr_data({"series": {"title": "Show (US)", "year": 2024}}, MagicMock())

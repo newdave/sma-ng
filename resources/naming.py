@@ -402,6 +402,7 @@ class NamingData:
 
     if data.get("episodes"):
       eps = data["episodes"]
+      prev_season, prev_episode = self.season, self.episode
       self.season = eps[0].get("seasonNumber", self.season)
       self.episode = eps[0].get("episodeNumber", self.episode)
       self.episodes = sorted(ep.get("episodeNumber") for ep in eps if ep.get("episodeNumber") is not None)
@@ -412,6 +413,10 @@ class NamingData:
       air = eps[0].get("airDate", "") or eps[0].get("air_date", "")
       if air:
         self.air_date = air
+      if prev_season and (prev_season, prev_episode) != (self.season, self.episode):
+        log.info(
+          "Sonarr numbering overrides earlier S%02dE%02d with S%02dE%02d for %s (airDate %s)" % (prev_season, prev_episode, self.season, self.episode, self.series_title, self.air_date or "n/a")
+        )
 
     ep_display = "-E".join("%02d" % e for e in self.episodes) if self.episodes else "%02d" % self.episode
     log.debug("Got naming data from Sonarr: %s S%02dE%s" % (self.series_title, self.season, ep_display))
