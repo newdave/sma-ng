@@ -3093,3 +3093,36 @@ class TestSecurityHardening:
       h = _make_handler(api_key="secret", headers={"X-API-Key": "anything"})
       assert h.check_auth() is True
     cd.assert_called()
+
+
+class TestQueueSharedRules:
+  def test_queue_file_normalises_path_and_passes_window(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.job_dedupe_window_seconds = 7200
+    h.server.job_db.add_job.return_value = 7
+    h._queue_file(str(tmp_path) + "//./movie.mkv", [], None)
+    call = h.server.job_db.add_job.call_args
+    assert call.args[0] == str(f)
+    assert call.kwargs["dedupe_window_seconds"] == 7200
+
+  def test_queue_file_skips_recycle_bin(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.is_recycle_bin_path.return_value = True
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert body["status"] == "skipped"
+    assert body["reason"] == "recycle_bin"
+    h.server.job_db.add_job.assert_not_called()
+
+  def test_queue_directory_skips_recycle_bin(self, tmp_path):
+    (tmp_path / "movie.mkv").write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.is_recycle_bin_path.return_value = True
+    h._queue_directory(str(tmp_path), [], None)
+    body = _get_response_body(h)
+    assert body["skipped"][0]["reason"] == "recycle_bin"
+    h.server.job_db.add_job.assert_not_called()

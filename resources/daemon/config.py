@@ -303,6 +303,7 @@ class PathConfigManager:
     self.progress_log_interval = 60
     self.smoke_test = False
     self.recycle_bin_max_age_days = 3
+    self.job_dedupe_window_seconds = 0
     self.recycle_bin_min_free_gb = 50.0
     self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
     self.scan_paths = []
@@ -407,6 +408,7 @@ class PathConfigManager:
     self.progress_log_interval = d.progress_log_interval
     self.smoke_test = d.smoke_test
     self.recycle_bin_max_age_days = d.recycle_bin_max_age_days
+    self.job_dedupe_window_seconds = d.job_dedupe_window_seconds
     self.recycle_bin_min_free_gb = float(d.recycle_bin_min_free_gb)
     self.media_extensions = frozenset(("." + e.lower().lstrip(".")) for e in (d.media_extensions or []) if e)
     self.default_args = self._parse_args_list(d.default_args)

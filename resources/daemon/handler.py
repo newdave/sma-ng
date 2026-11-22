@@ -17,6 +17,7 @@ from resources.daemon.constants import MAX_REQUEST_BODY_BYTES, SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase
 from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html, doc_file_for_slug
+from resources.daemon.queueing import SKIP_RECYCLE_BIN, SKIP_SAME_EXTENSION, queue_job, skip_reason
 
 __all__ = ["WebhookHandler", "_inline"]
 from resources.daemon import job_kinds
@@ -219,6 +220,11 @@ class _NullWriter:
 
 # Queue priority for preview jobs submitted without one: a plan is quick and someone is waiting for it.
 PREVIEW_PRIORITY = 100
+
+_SKIP_MESSAGES = {
+  SKIP_SAME_EXTENSION: "process-same-extensions is false and force-convert is false; file already matches output extension",
+  SKIP_RECYCLE_BIN: "path is inside a configured recycle-bin directory",
+}
 
 
 def _public_job(job):
@@ -1580,14 +1586,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
     discard.
     """
     pcm = self.server.path_config_manager
-    skip_same_ext = getattr(pcm, "should_skip_same_extension", None)
     has_match = getattr(pcm, "has_routing_match", None)
     strict = getattr(pcm, "strict_routing", False) and not config_override
     queued, duplicates, skipped = [], [], []
     for filepath in self._walk_media_files(path):
       job_path = pcm.rewrite_path(filepath)
-      if callable(skip_same_ext) and skip_same_ext(job_path):
-        skipped.append({"path": job_path, "reason": "same_as_output_extension"})
+      reason = skip_reason(pcm, job_path)
+      if reason:
+        skipped.append({"path": job_path, "reason": reason})
         continue
       if strict and callable(has_match) and not has_match(job_path):
         skipped.append({"path": job_path, "reason": "no_routing_match"})
@@ -1595,7 +1601,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
       resolved_config = self._resolve_config(job_path, config_override)
       profile = self._resolve_profile(job_path, config_override)
       job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
-      job_id = self.server.job_db.add_job(
+      job_id = queue_job(
+        self.server.job_db,
+        pcm,
         job_path,
         resolved_config,
         job_args,
@@ -1638,16 +1646,16 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """Queue a single file job and respond."""
     pcm = self.server.path_config_manager
     job_path = pcm.rewrite_path(path)
-    skip_same_ext = getattr(pcm, "should_skip_same_extension", None)
-    if callable(skip_same_ext) and skip_same_ext(job_path):
-      self.server.logger.info("Skipped queue: %s (same as output extension)" % job_path)
+    reason = skip_reason(pcm, job_path)
+    if reason:
+      self.server.logger.info("Skipped queue: %s (%s)" % (job_path, reason))
       self.send_json_response(
         200,
         {
           "status": "skipped",
           "path": job_path,
-          "reason": "same_as_output_extension",
-          "message": "process-same-extensions is false and force-convert is false; file already matches output extension",
+          "reason": reason,
+          "message": _SKIP_MESSAGES[reason],
         },
       )
       return
@@ -1668,7 +1676,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
     resolved_config = self._resolve_config(job_path, config_override)
     profile = self._resolve_profile(job_path, config_override)
     job_args = self._merge_profile_arg(self._merge_args(job_path, extra_args), profile)
-    job_id = self.server.job_db.add_job(
+    job_id = queue_job(
+      self.server.job_db,
+      pcm,
       job_path,
       resolved_config,
       job_args,

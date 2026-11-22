@@ -290,7 +290,7 @@ class TestScannerThreadScan:
     result = scanner._scan({"path": str(tmp_path)})
     assert result == 1
     db.filter_unscanned.assert_called_once()
-    db.add_job.assert_called_once_with(str(media), "/default.ini", [], request_source="scan", request_profile=None)
+    db.add_job.assert_called_once_with(str(media), "/default.ini", [], dedupe_window_seconds=0, request_source="scan", request_profile=None)
 
   def test_applies_path_rewrite(self, tmp_path):
     media = tmp_path / "show.mkv"
@@ -1235,3 +1235,43 @@ class TestHeartbeatMaintenanceThrottle:
     assert "Recovered 3 jobs from 2 stale node(s)" in text
     assert "secret-node" not in text
     ht.server.notify_workers.assert_called_once()
+
+
+class TestScannerSharedQueueRules:
+  def _pcm(self):
+    pcm = mock.MagicMock()
+    pcm.media_extensions = frozenset([".mkv", ".mp4"])
+    pcm.get_config_for_path.return_value = "/default.ini"
+    pcm.get_profile_for_path.return_value = None
+    pcm.should_skip_same_extension.return_value = False
+    pcm.is_recycle_bin_path.return_value = False
+    pcm.job_dedupe_window_seconds = 21600
+    return pcm
+
+  def _scan(self, tmp_path, pcm):
+    media = tmp_path / "show.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.filter_unscanned.return_value = [str(media)]
+    db.add_job.return_value = 5
+    scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db, path_config_manager=pcm)
+    return scanner._scan({"path": str(tmp_path)}), db
+
+  def test_passes_dedupe_window(self, tmp_path):
+    result, db = self._scan(tmp_path, self._pcm())
+    assert result == 1
+    assert db.add_job.call_args.kwargs["dedupe_window_seconds"] == 21600
+
+  def test_skips_same_extension(self, tmp_path):
+    pcm = self._pcm()
+    pcm.should_skip_same_extension.return_value = True
+    result, db = self._scan(tmp_path, pcm)
+    assert result == 0
+    db.add_job.assert_not_called()
+
+  def test_skips_recycle_bin_paths(self, tmp_path):
+    pcm = self._pcm()
+    pcm.is_recycle_bin_path.return_value = True
+    result, db = self._scan(tmp_path, pcm)
+    assert result == 0
+    db.add_job.assert_not_called()

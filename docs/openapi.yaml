@@ -419,7 +419,7 @@ paths:
               $ref: "#/components/schemas/JobSubmit"
       responses:
         "200":
-          description: Duplicate (same path already pending or running) or skipped
+          description: Duplicate (same normalised path already pending or running, or completed within job-dedupe-window-seconds) or skipped
           content:
             application/json:
               schema:
@@ -818,7 +818,7 @@ paths:
               type: string
       responses:
         "200":
-          description: Duplicate (same path already pending or running) or skipped
+          description: Duplicate (same normalised path already pending or running, or completed within job-dedupe-window-seconds) or skipped
           content:
             application/json:
               schema:
@@ -858,7 +858,7 @@ paths:
               type: string
       responses:
         "200":
-          description: Duplicate (same path already pending or running) or skipped
+          description: Duplicate (same normalised path already pending or running, or completed within job-dedupe-window-seconds) or skipped
           content:
             application/json:
               schema:

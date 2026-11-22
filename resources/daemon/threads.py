@@ -5,6 +5,7 @@ import time
 
 from resources.daemon import job_kinds, metrics_prom, storage
 from resources.daemon.log_archiver import LogArchiver
+from resources.daemon.queueing import queue_job, skip_reason
 from resources.library_audit.engine import AuditEngine
 from resources.library_audit.enumerator import enumerate_paths
 from resources.log import getLogger
@@ -277,13 +278,21 @@ class ScannerThread(_StoppableThread):
         self.log.warning("Scanner skipped %s under strict-routing — no daemon.routing rule matched [routing-miss]." % submit_path)
         continue
 
+      reason = skip_reason(self.path_config_manager, submit_path)
+      if reason:
+        # Left unrecorded, like strict-routing skips, so a config change can pick the file up later.
+        self.log.debug("Scanner skipped %s (%s)" % (submit_path, reason))
+        continue
+
       resolved_config = self.path_config_manager.get_config_for_path(submit_path)
       try:
         scan_profile = self.path_config_manager.get_profile_for_path(submit_path)
       except Exception:
         scan_profile = None
       scan_args = ["--profile", scan_profile] if scan_profile else []
-      job_id = self.job_db.add_job(
+      job_id = queue_job(
+        self.job_db,
+        self.path_config_manager,
         submit_path,
         resolved_config,
         scan_args,
