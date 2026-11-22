@@ -1,0 +1,21 @@
+resources/daemon/worker.py
+  s_d73ac5e457a585::t_a49a4c34a4fa51 829-834
+tests/test_worker.py
+  s_d73ac5e457a585::t_86dd5fec67ce64 861-905
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "2deffdcb6847f303a24af7742ddef0453cd904d3",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
