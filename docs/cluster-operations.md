@@ -1,8 +1,8 @@
 # Cluster Operations
 
-Operator runbook for managing a cluster of SMA-NG nodes remotely via `mise` and
-`docker compose`. Each section is a self-contained scenario — the steps to run
-when something happens.
+Deployment patterns and operator runbooks for running SMA-NG on one host with several daemons, or as a cluster of
+nodes managed remotely via `mise` and `docker compose`. Each runbook is a self-contained scenario — the steps to
+run when something happens.
 
 For the underlying *reference* material see:
 
@@ -55,6 +55,313 @@ graph LR
 
 The `cluster` mise task (every verb) accepts `HOST=<one>`, `HOSTS='<a> <b>'`, or default
 to `deploy.hosts` from `setup/local.yml`.
+
+---
+
+## Deployment patterns
+
+The key requirement for more than one daemon is a shared PostgreSQL database. When `daemon.db-url` points at the same
+PostgreSQL instance, all SMA-NG nodes coordinate through the job table and heartbeat system:
+
+- pending jobs are visible to every node
+- only one node can claim a given job
+- stale running jobs are requeued if a node disappears
+- `/status` shows the full cluster, not just the local process
+
+### Deployment Models
+
+#### 1. One host, one instance
+
+Use this when you just want a single daemon with one worker pool.
+
+```text
+Host A
+└─ sma-ng daemon
+   └─ PostgreSQL
+```
+
+#### 2. One host, multiple instances
+
+Use this when one machine needs separate SMA daemons, usually because:
+
+- different media trees need different path mappings
+- different ports or API keys are required
+- you want process isolation between workloads
+- you want to dedicate different instances to different GPUs or configs
+
+```text
+Host A
+├─ sma-ng-tv       -> port 8585
+├─ sma-ng-movies   -> port 8586
+└─ PostgreSQL
+```
+
+#### 3. Multiple hosts, shared cluster
+
+Use this when you want to scale out conversion work across multiple machines.
+
+```text
+Host A               Host B               Host C
+├─ sma-ng daemon     ├─ sma-ng daemon     ├─ sma-ng daemon
+└─ shared mounts?    └─ shared mounts?    └─ shared mounts?
+         \               |               /
+          \              |              /
+           └──── shared PostgreSQL ────┘
+```
+
+### Non-Negotiable Requirements
+
+For multi-instance or multi-host setups:
+
+- every instance must use the same PostgreSQL database via `daemon.db-url`
+- every instance must have access to the same effective media paths for any jobs it can claim
+- path rewriting must normalize host-specific mount differences
+- API keys and daemon ports must not conflict on the same host
+- each instance should have its own config directory and logs directory unless intentional sharing is required
+
+If two nodes see the same file under different paths, fix that first with `daemon.path-rewrites` and consistent mount layout.
+
+### Shared PostgreSQL
+
+Set the same database URL on every node:
+
+```yaml
+daemon:
+  db-url: postgresql://sma:password@db-host:5432/sma
+```
+
+Database URLs are intentionally read only from `sma-ng.yml`; environment variables are ignored for this setting.
+
+#### Recommended PostgreSQL Placement
+
+- small single-host setup: PostgreSQL on the same machine
+- multi-host cluster: PostgreSQL on a stable host or managed service
+- SQLite is suitable for a single SMA-NG daemon on one host. Use PostgreSQL when multiple daemons or hosts share work.
+
+### Path Strategy
+
+The safest clustered layout is for all nodes to see the same media roots under the same paths:
+
+```text
+/mnt/unionfs/Media/TV
+/mnt/unionfs/Media/Movies
+/mnt/unionfs/downloads
+```
+
+If that is not possible, normalize incoming paths with `daemon.path-rewrites`:
+
+```yaml
+daemon:
+  path-rewrites:
+    - from: /srv/media
+      to: /mnt/unionfs/Media
+    - from: /volume1/media
+      to: /mnt/unionfs/Media
+```
+
+The shipped compose file no longer mounts `/downloads`. Download clients in other containers that report
+`/downloads/...` need a `daemon.path-rewrites` entry with `from: /downloads` and `to: /mnt/unionfs/downloads`.
+
+This is especially important when:
+
+- Sonarr/Radarr webhooks come from a different host than SMA-NG
+- one machine uses local disks and another uses NFS/SMB mounts
+- Docker containers see different inside-container paths than the host
+
+### One Host, Multiple Instances
+
+On a single machine, run each instance with its own:
+
+- `sma-ng.yml` (its `daemon:` block)
+- `daemon.env`
+- port
+- logs directory
+- container name
+
+Example layout:
+
+```text
+/opt/sma-tv/
+├─ config/
+│  ├─ sma-ng.yml
+│  └─ daemon.env
+└─ logs/
+
+/opt/sma-movies/
+├─ config/
+│  ├─ sma-ng.yml
+│  └─ daemon.env
+└─ logs/
+```
+
+Example `daemon:` block in `sma-ng.yml` values:
+
+```yaml
+daemon:
+  api-key: tv-secret
+  db-url: postgresql://sma:password@127.0.0.1:5432/sma
+  routing:
+    - match: /mnt/unionfs/Media/TV
+      profile: rq
+```
+
+```yaml
+daemon:
+  api-key: movies-secret
+  db-url: postgresql://sma:password@127.0.0.1:5432/sma
+  routing:
+    - match: /mnt/unionfs/Media/Movies
+      profile: rq
+```
+
+Start them on different ports:
+
+```bash
+python daemon.py --port 8585 --daemon-config /opt/sma-tv/config/sma-ng.yml --logs-dir /opt/sma-tv/logs
+python daemon.py --port 8586 --daemon-config /opt/sma-movies/config/sma-ng.yml --logs-dir /opt/sma-movies/logs
+```
+
+### Multiple Hosts
+
+For multiple hosts, keep these values aligned:
+
+- shared `daemon.db-url`
+- compatible `daemon.routing`
+- identical API behavior and webhook expectations
+
+Typical pattern:
+
+1. mount media on every node
+2. deploy the same code version everywhere
+3. give each node its own `daemon:` block in `sma-ng.yml` and `daemon.env`
+4. point all nodes at the same PostgreSQL
+5. set per-node `ffmpeg_dir`, GPU config, and worker count as needed
+
+Host-specific differences usually belong in:
+
+- mount paths plus `daemon.path-rewrites`
+- `ffmpeg_dir`
+- hardware-specific `sma-ng.yml`
+- worker count
+
+### Worker Count and Capacity Planning
+
+Each daemon process has its own `--workers` pool.
+
+Examples:
+
+- 3 hosts × 2 workers each = up to 6 concurrent conversions cluster-wide
+- 1 host with 2 daemon instances × 3 workers each = up to 6 concurrent conversions on that host
+
+Be realistic about hardware contention:
+
+- software encodes compete for CPU
+- QSV instances compete for the same iGPU
+- NVENC sessions compete for the same NVIDIA card
+- too many workers will usually reduce throughput, not improve it
+
+Start conservative:
+
+- software: `1-2` workers per host
+- Intel QSV: `1-2` workers per iGPU
+- NVIDIA: depends on model and session limits; start with `1-2`
+
+### Logging
+
+Each instance should have its own `--logs-dir`.
+
+On one host, do not point multiple independent daemons at the same logs directory unless you explicitly want mixed daemon-level logs. Per-config logs are named from config stems, so separate directories keep the log API and dashboard cleaner.
+
+Recommended:
+
+```text
+/opt/sma-tv/logs
+/opt/sma-movies/logs
+/opt/sma-node-a/logs
+/opt/sma-node-b/logs
+```
+
+### Docker / Compose Pattern
+
+For Docker-based clusters:
+
+- run one compose project per host
+- point every `sma-ng` container at the same PostgreSQL if clustering across hosts
+- publish a distinct port per instance on the same host
+- mount the same media paths into the container on every node
+- set a distinct `daemon.node_id` for every daemon instance in its
+  `sma-ng.yml`
+
+If you want a quick starting point, see [Docker Quick Start](docker-quickstart.md#docker-compose).
+
+### Verification Checklist
+
+After bringing nodes up:
+
+1. `GET /health` on each node should succeed
+2. `GET /status` should show all nodes when PostgreSQL is enabled
+3. submit one job and verify exactly one node claims it
+4. stop one node mid-job and confirm stale recovery works after `stale_seconds`
+5. check `/logs` and `/jobs/<id>` on each instance
+
+For the day-2 procedures (drain, rolling upgrade, recover a stale node, read cluster logs), see the runbooks below.
+
+### Common Failure Modes
+
+#### Jobs never get picked up
+
+- `daemon.db-url` not set or not shared
+- PostgreSQL connectivity broken
+- all nodes excluded by locked configs or no workers available
+
+#### Jobs fail only on some nodes
+
+- mismatched mount paths
+- missing FFmpeg binaries or GPU access on one host
+- different config files or stale deployment version
+
+#### Same webhook path works on one node but not another
+
+- inconsistent `daemon.path-rewrites`
+- different container bind mounts
+
+#### Dashboard only shows one node
+
+- instance is not using PostgreSQL mode
+- heartbeat not reaching the database
+- multiple Docker daemon containers are sharing the same hostname / node ID
+- nodes are using different `daemon.db-url` values
+
+### Minimal Multi-Host Example
+
+Node A and Node B both run:
+
+```yaml
+daemon:
+  db-url: postgresql://sma:password@db.example.com:5432/sma
+  path-rewrites:
+    - from: /downloads
+      to: /mnt/unionfs/downloads
+  routing:
+    - match: /mnt/unionfs/Media/TV
+      profile: rq
+    - match: /mnt/unionfs/Media/Movies
+      profile: lq
+```
+
+Node A:
+
+```bash
+python daemon.py --host 0.0.0.0 --port 8585 --workers 2
+```
+
+Node B:
+
+```bash
+python daemon.py --host 0.0.0.0 --port 8585 --workers 2
+```
+
+Both nodes will participate in the same queue as long as the media paths resolve correctly on both machines.
 
 ---
 
@@ -308,20 +615,11 @@ registers a fresh row; re-approve them via `/admin`.
 
 ---
 
-## Docker compose profile reference
+## Docker compose profiles
 
-| Profile | GPU stack | Database | Use on |
-|---|---|---|---|
-| `software` | none (CPU only) | no — uses `daemon.db_url` from `sma-ng.yml` | a node without GPU + with an external DB |
-| `software-pg` | none (CPU only) | external PostgreSQL (`daemon.db-url`) | a single-node deployment with no GPU |
-| `intel` | Intel QSV / VAAPI | no | a slave with Intel GPU |
-| `intel-pg` | Intel QSV / VAAPI | external PostgreSQL (`daemon.db-url`) | the master in an Intel-GPU cluster |
-| `nvidia` | NVIDIA NVENC | no | a slave with NVIDIA GPU |
-| `nvidia-pg` | NVIDIA NVENC | external PostgreSQL (`daemon.db-url`) | the master in an NVIDIA-GPU cluster |
-
-Only one node should run a `*-pg` profile. Set it in
-`hosts.<that-host>.docker_profile`; leave the cluster-wide `deploy.docker_profile`
-as the non-pg variant for the slaves.
+The profile table lives in [Deployment](deployment.md#docker-compose-profile-reference).
+Only one node should run a `*-pg` profile. Set it in `hosts.<that-host>.docker_profile`; leave the cluster-wide
+`deploy.docker_profile` as the non-pg variant for the slaves.
 
 ---
 
@@ -331,5 +629,3 @@ as the non-pg variant for the slaves.
   `setup/local.yml` schema
 - [Daemon Mode](daemon.md) — admin API, heartbeats, approval flow,
   drain/pause/resume internals, log archival
-- [Multi-instance Deployment](multi-instance-deployment.md) — running
-  multiple SMA daemons on a single host
