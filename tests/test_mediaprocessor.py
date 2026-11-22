@@ -10084,6 +10084,14 @@ class TestProfileMatchesBitDepth:
     mp.settings.vprofile = ["main10", "high", "high10"]
     assert mp._reconcile_profile_to_bit_depth("h264_vaapi", "high", 10) == "high10"
 
+  @pytest.mark.parametrize("hevc_only", ["main12", "main422-10", "main422-12", "main444-8", "main444-10", "main444-16-intra", "rext", "mainstillpicture"])
+  def test_h264_never_gets_hevc_range_extension_profiles(self, hevc_only):
+    # libx264 aborts with "Error setting profile" on these HEVC-only names.
+    mp = _make_mp()
+    mp.settings.vprofile = [hevc_only, "high"]
+    assert mp._first_listed_profile("h264") == "high"
+    assert mp._first_listed_profile("h265") == hevc_only
+
   def test_first_matching_listed_profile_wins(self):
     mp = _make_mp()
     mp.settings.vprofile = ["main10", "main", "Main 10"]

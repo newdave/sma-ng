@@ -4279,7 +4279,9 @@ class MediaProcessor:
   _TEN_BIT_PROFILES = frozenset(["main10", "high10"])
   _EIGHT_BIT_PROFILES = frozenset(["main", "high", "baseline"])
   _H264_ONLY_PROFILES = frozenset(["baseline", "constrainedbaseline", "constrainedhigh", "high", "high10", "extended"])
-  _HEVC_ONLY_PROFILES = frozenset(["main10", "main444", "main4:4:4"])
+  _HEVC_ONLY_PROFILES = frozenset(["main10", "main12", "main444", "main4:4:4", "rext", "mainstillpicture"])
+  # HEVC range-extension families (main422-10, main444-16-intra, ...): libx264 rejects them all.
+  _HEVC_ONLY_PROFILE_PREFIXES = ("main422", "main444")
   # ffprobe-only names no encoder accepts as -profile:v (libx264 aborts with "Error setting profile").
   _UNENCODABLE_PROFILES = frozenset(["constrainedbaseline", "constrainedhigh"])
   # The 10-bit profile each family derives when no listed profile matches a 10-bit output.
@@ -4297,7 +4299,7 @@ class MediaProcessor:
     if candidate in cls._UNENCODABLE_PROFILES:
       return False
     if family == "h264":
-      return candidate not in cls._HEVC_ONLY_PROFILES
+      return candidate not in cls._HEVC_ONLY_PROFILES and not candidate.startswith(cls._HEVC_ONLY_PROFILE_PREFIXES)
     if family == "h265":
       return candidate not in cls._H264_ONLY_PROFILES
     return True
