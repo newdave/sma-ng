@@ -1,7 +1,7 @@
 name: Docker
 
 # Three ways in:
-#   pull_request   build + smoke test + scan the PR's image; never pushes.
+#   pull_request   build + smoke test the PR's image (no Trivy scan); never pushes.
 #   workflow_run   after CI passes on a push to main: build, smoke test, push
 #                  ghcr.io/<repo>:latest, :main and :sha-<short> (linux/amd64).
 #                  latest therefore always tracks main HEAD that passed CI.
@@ -185,11 +185,12 @@ jobs:
           TAG: ${{ env.SMOKE_TAG }}
         run: mise run build:smoke
 
+      # Skipped on PR builds (report-only there, and fork PRs cannot upload).
       # Report-only for now: findings land in code scanning (Security tab)
       # without failing the build. Fork PRs cannot upload, hence continue-on-error.
       # Both platforms share one package set, so amd64 is scanned only.
       - name: Scan image (Trivy)
-        if: matrix.arch == 'amd64'
+        if: matrix.arch == 'amd64' && github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.SMOKE_TAG }}
@@ -200,7 +201,7 @@ jobs:
           exit-code: "0"
 
       - name: Upload scan results
-        if: matrix.arch == 'amd64'
+        if: matrix.arch == 'amd64' && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         continue-on-error: true
         with:

@@ -27,21 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # apt mirrors occasionally stall (one run hung 24 minutes here); bound
-      # each attempt and retry. The apt archive cache was removed: the runner
-      # image deletes downloaded .debs, so it never saved anything.
-      - name: Install ffmpeg
-        timeout-minutes: 5
-        run: |
-          for attempt in 1 2 3; do
-            if timeout 90 sudo apt-get -o Acquire::Retries=3 update -qq \
-              && timeout 90 sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg; then
-              exit 0
-            fi
-            echo "::warning::ffmpeg install attempt $attempt failed; retrying"
-          done
-          exit 1
-
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
@@ -54,8 +39,32 @@ jobs:
         with:
           install: false
 
-      - name: Set up venv and install dev deps
-        run: mise run setup:deps:dev
+      # apt mirrors occasionally stall (one run hung 24 minutes here); bound
+      # each attempt and retry. The apt install runs in the background while the
+      # pip install runs; both happen in one step because the runner reaps
+      # background processes when a step ends.
+      - name: Install ffmpeg and dev deps
+        timeout-minutes: 7
+        run: |
+          (
+            for attempt in 1 2 3; do
+              if timeout 90 sudo apt-get -o Acquire::Retries=3 update -qq \
+                && timeout 90 sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg; then
+                exit 0
+              fi
+              echo "::warning::ffmpeg install attempt $attempt failed; retrying"
+            done
+            exit 1
+          ) > /tmp/ffmpeg-install.log 2>&1 &
+          ffmpeg_pid=$!
+
+          deps_status=0
+          mise run setup:deps:dev || deps_status=$?
+
+          ffmpeg_status=0
+          wait "$ffmpeg_pid" || ffmpeg_status=$?
+          cat /tmp/ffmpeg-install.log
+          [ "$deps_status" -eq 0 ] && [ "$ffmpeg_status" -eq 0 ]
 
       # test:cov runs pytest with coverage, then scripts/check-coverage-floor.py
       # (70% per-module floor for modules with >= 100 statements).
@@ -69,6 +78,35 @@ jobs:
             { echo "## Coverage"; venv/bin/python -m coverage report --format=markdown --skip-covered; } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Formerly the separate `checks` job; folded in so the venv is built once.
+      - name: Validate OpenAPI spec
+        if: ${{ !cancelled() }}
+        run: mise run test:openapi
+
+      # markdownlint runs in the lint job via pre-commit; these catch broken
+      # relative links, stale `mise run` references and docs with no wiki page.
+      - name: Check docs links and task references
+        if: ${{ !cancelled() }}
+        run: venv/bin/python scripts/check_docs.py
+
+      - name: Check wiki pages render
+        if: ${{ !cancelled() }}
+        run: mise run wiki:check
+
+      - name: Check setup/sma-ng.yml.sample matches the schema
+        if: ${{ !cancelled() }}
+        run: mise run config:sample --check
+
+      # Audits what ships (setup/requirements.txt) in a clean venv; dev-only
+      # tooling is not part of the image or the wheel's runtime dependencies.
+      - name: Audit runtime dependencies (pip-audit)
+        if: ${{ !cancelled() }}
+        run: |
+          python -m venv /tmp/audit
+          /tmp/audit/bin/pip install -q --upgrade pip
+          /tmp/audit/bin/pip install -q -r setup/requirements.txt pip-audit
+          /tmp/audit/bin/pip-audit --skip-editable
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -77,53 +115,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # pre-commit runs ruff, bandit, markdownlint and shellcheck (one pinned
-      # shellcheck-py version, the same one `mise run test:shell` uses).
-      - name: Run pre-commit
-        uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
-
-  checks:
-    name: OpenAPI, docs, config sample and dependency audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+      # Pin the hook environments to the same Python the project uses; the
+      # runner default moves ahead of what bandit and friends support.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            setup/requirements*.txt
 
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          install: false
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
 
-      - name: Set up venv and install dev deps
-        run: mise run setup:deps:dev
-
-      - name: Validate OpenAPI spec
-        run: mise run test:openapi
-
-      # markdownlint runs in the lint job via pre-commit; these catch broken
-      # relative links, stale `mise run` references and docs with no wiki page.
-      - name: Check docs links and task references
-        run: venv/bin/python scripts/check_docs.py
-
-      - name: Check wiki pages render
-        run: mise run wiki:check
-
-      - name: Check setup/sma-ng.yml.sample matches the schema
-        run: mise run config:sample --check
-
-      # Audits what ships (setup/requirements.txt) in a clean venv; dev-only
-      # tooling is not part of the image or the wheel's runtime dependencies.
-      - name: Audit runtime dependencies (pip-audit)
+      # pre-commit runs ruff, bandit, markdownlint and shellcheck (one pinned
+      # shellcheck-py version, the same one `mise run test:shell` uses).
+      - name: Run pre-commit
         run: |
-          python -m venv /tmp/audit
-          /tmp/audit/bin/pip install -q --upgrade pip
-          /tmp/audit/bin/pip install -q -r setup/requirements.txt pip-audit
-          /tmp/audit/bin/pip-audit --skip-editable
+          python -m pip install --disable-pip-version-check pre-commit
+          pre-commit run --show-diff-on-failure --color=always --all-files
