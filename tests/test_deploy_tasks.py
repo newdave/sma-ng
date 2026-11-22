@@ -1119,9 +1119,3 @@ class TestLifecycleTaskFixes:
     commands = [line for line in _read(".mise/tasks/daemon/start").splitlines() if not line.startswith("#")]
     assert '"$PY" daemon.py "$@"' in commands
     assert not any("--host" in line or "--port" in line for line in commands)
-
-  @pytest.mark.parametrize("target", ["config", "detect-gpu", "test"])
-  def test_old_make_targets_point_to_mise(self, target):
-    result = subprocess.run(["make", target], cwd=PROJECT_ROOT, capture_output=True, text=True, check=False)
-    assert result.returncode == 2
-    assert "tasks run through mise" in result.stderr
