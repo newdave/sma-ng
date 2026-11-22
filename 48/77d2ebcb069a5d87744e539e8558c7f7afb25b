@@ -1,0 +1,26 @@
+docs/daemon.md
+  s_d73ac5e457a585::t_e9c47eee0a2aba 66,75,225,378,380-386
+docs/openapi.yaml
+  s_d73ac5e457a585::t_e9c47eee0a2aba 263-269,285,313-330
+  s_d73ac5e457a585::t_f01980f21636e6 331
+tests/test_handler.py
+  s_d73ac5e457a585::t_04f4d0619e89eb 3026-3063
+resources/daemon/handler.py
+  s_d73ac5e457a585::t_04f4d0619e89eb 241,386-399
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "4877d2ebcb069a5d87744e539e8558c7f7afb25b",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
