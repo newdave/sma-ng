@@ -1297,14 +1297,16 @@ class TestTrailingYearStripped:
   def test_strip_helper(self):
     from resources.naming import strip_trailing_year
 
-    assert strip_trailing_year("Rivals (2024)") == "Rivals"
-    assert strip_trailing_year("Rivals (2024) ") == "Rivals"
-    assert strip_trailing_year("Rivals") == "Rivals"
-    assert strip_trailing_year("Show (US)") == "Show (US)"
-    assert strip_trailing_year("Show (UK) (2020)") == "Show (UK)"
-    assert strip_trailing_year("(2024)") == "(2024)"
-    assert strip_trailing_year("Blade Runner 2049") == "Blade Runner 2049"
-    assert strip_trailing_year(None) == ""
+    assert strip_trailing_year("Rivals (2024)", "2024") == "Rivals"
+    assert strip_trailing_year("Rivals (2024) ", 2024) == "Rivals"
+    assert strip_trailing_year("Rivals", "2024") == "Rivals"
+    assert strip_trailing_year("Show (US)", "2024") == "Show (US)"
+    assert strip_trailing_year("Show (UK) (2020)", "2020") == "Show (UK)"
+    assert strip_trailing_year("(2024)", "2024") == "(2024)"
+    assert strip_trailing_year("Blade Runner 2049", "2049") == "Blade Runner 2049"
+    assert strip_trailing_year("Rivals (2024)", "") == "Rivals (2024)"
+    assert strip_trailing_year("Rivals (2024)", "2023") == "Rivals (2024)"
+    assert strip_trailing_year(None, "2024") == ""
 
   def test_sonarr_title_with_year(self):
     data = NamingData()
@@ -1475,3 +1477,101 @@ class TestOtherFlagShapes:
     assert _get_source({"source": "Web", "other": "Rip"}) == "WEBRip"
     assert _get_source({"source": "Blu-ray", "other": ["Rip"]}) == "BluRay"
     assert _get_source({"source": "Blu-ray", "other": "Rip"}) == "BluRay"
+
+
+class TestTitleYearRule:
+  """Final review: Sonarr TitleYear rule, null-safe Sonarr episodes, original-name codec."""
+
+  @staticmethod
+  def _settings():
+    settings = MagicMock()
+    settings.naming_enabled = True
+    settings.naming_tv_template = "{Series TitleYear} S{season:00}E{episode:00}"
+    settings.naming_movie_template = "{Movie CleanTitle} ({Release Year})"
+    settings.radarr_instances = []
+    settings.sonarr_instances = []
+    return settings
+
+  @staticmethod
+  def _tv_tag(showname, first_air="2024-01-01"):
+    tagdata = MagicMock()
+    tagdata.mediatype = MediaType.TV
+    tagdata.showname = showname
+    tagdata.showdata = {"first_air_date": first_air} if first_air else {}
+    tagdata.season = 1
+    tagdata.episode = 1
+    tagdata.episodes = [1]
+    tagdata.title = "Ep"
+    return tagdata
+
+  @staticmethod
+  def _movie_tag(title, date="2021-10-22"):
+    tagdata = MagicMock()
+    tagdata.mediatype = MediaType.Movie
+    tagdata.title = title
+    tagdata.date = date
+    return tagdata
+
+  @pytest.mark.parametrize("year", [0, None])
+  def test_sonarr_year_missing_keeps_title_year(self, year):
+    data = NamingData()
+    data._apply_sonarr_data({"series": {"title": "Rivals (2024)", "year": year}}, MagicMock())
+    assert data.series_titleyear == "Rivals (2024)"
+
+  def test_sonarr_year_mismatch_keeps_title_year(self):
+    data = NamingData()
+    data._apply_sonarr_data({"series": {"title": "X (2003)", "year": 2004}}, MagicMock())
+    assert data.series_titleyear == "X (2003) (2004)"
+
+  def test_tmdb_tv_without_air_date_keeps_title_year(self):
+    data = NamingData()
+    data.from_tagdata(self._tv_tag("Rivals (2024)", first_air=""))
+    assert data.series_titleyear == "Rivals (2024)"
+
+  def test_radarr_year_missing_keeps_title_year(self):
+    data = NamingData()
+    data._apply_radarr_data({"movie": {"title": "Dune (2021)", "year": 0}}, MagicMock())
+    assert data.movie_title == "Dune (2021)"
+
+  def test_tmdb_movie_without_date_keeps_title_year(self):
+    data = NamingData()
+    data.from_tagdata(self._movie_tag("Dune (2021)", date=""))
+    assert data.movie_title == "Dune (2021)"
+
+  def test_generate_name_year_once_sonarr(self, make_media_info):
+    settings = self._settings()
+    settings.sonarr_instances = [{"path": "/tv", "host": "s", "port": 8989, "apikey": "k"}]
+    resp = {"series": {"title": "Rivals (2024)", "year": 2024, "seriesType": "standard"}, "episodes": [{"seasonNumber": 1, "episodeNumber": 1}]}
+    with patch("resources.naming._requests.get") as get:
+      get.return_value.json.return_value = resp
+      out = generate_name("/tv/r.mp4", make_media_info(), self._tv_tag("Rivals"), settings, lookup_path="/tv/r.mkv")
+    assert out is not None and out.count("2024") == 1
+
+  def test_generate_name_year_once_tmdb_tv(self, make_media_info):
+    out = generate_name("/tv/r.mp4", make_media_info(), self._tv_tag("Rivals (2024)"), self._settings())
+    assert out.count("2024") == 1
+
+  def test_generate_name_year_once_tmdb_movie(self, make_media_info):
+    out = generate_name("/m/d.mp4", make_media_info(), self._movie_tag("Dune (2021)"), self._settings())
+    assert out.count("2021") == 1
+
+  def test_generate_name_year_once_radarr(self, make_media_info):
+    settings = self._settings()
+    settings.radarr_instances = [{"path": "/m", "host": "r", "port": 7878, "apikey": "k"}]
+    with patch("resources.naming._requests.get") as get:
+      get.return_value.json.return_value = {"movie": {"title": "Dune (2021)", "year": 2021}}
+      out = generate_name("/m/d.mp4", make_media_info(), self._movie_tag("Dune"), settings, lookup_path="/m/d.mkv")
+    assert out.count("2021") == 1
+
+  def test_sonarr_null_episode_numbers_do_not_raise(self):
+    data = NamingData()
+    data.season = 2
+    data.episode = 4
+    data._apply_sonarr_data({"episodes": [{"seasonNumber": None, "episodeNumber": None}]}, MagicMock())
+    assert data.season == 2 and data.episode == 4
+
+  def test_codec_kept_from_original_name(self, make_media_info):
+    settings = self._settings()
+    settings.naming_movie_template = "{Movie CleanTitle} [{VideoCodec}]"
+    out = generate_name("/tmp/out.mp4", make_media_info(video_codec="h264"), self._movie_tag("Movie"), settings, lookup_path="/in/tmpname.mkv", video_copied=True, original="Movie.2020.h264-G.mkv")
+    assert "[h264]" in out

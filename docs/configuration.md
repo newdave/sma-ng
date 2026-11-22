@@ -604,6 +604,8 @@ the file path falls under a configured `services.*` path, with FFprobe,
 guessit, and TMDB as fallbacks. When the arr API does not supply them, the release source and release group come
 from the input (or original) filename via guessit, and the video codec token written in that name (for example
 `h264`) is kept only when the video stream is copied; a re-encode is named `x264`/`x265`.
+A title that already ends in its own year is not given the year twice, and a year in the title is kept when the
+year field is missing or differs.
 
 `tv-airdate-template` is used instead of `tv-template` when the episode is
 air-date based: the episode number is 0, Sonarr reports the series type as
