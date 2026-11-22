@@ -42,7 +42,7 @@ def test_host_inherits_from_defaults(tmp_path):
     "deploy": {"workers": 1},
     "hosts": {
       "_defaults": {"user": "iadmin", "ffmpeg_dir": "/usr/local/bin", "workers": 3},
-      "sma-master": {"address": "10.30.0.40"},
+      "sma-master": {"address": "10.30.10.40"},
     },
   }
   _yaml(data, tmp_path)
@@ -50,14 +50,14 @@ def test_host_inherits_from_defaults(tmp_path):
   assert local_config.resolve(d, "sma-master", "user", "") == "iadmin"
   assert local_config.resolve(d, "sma-master", "ffmpeg_dir", "") == "/usr/local/bin"
   assert local_config.resolve(d, "sma-master", "workers", "") == "3"
-  assert local_config.resolve(d, "sma-master", "address", "") == "10.30.0.40"
+  assert local_config.resolve(d, "sma-master", "address", "") == "10.30.10.40"
 
 
 def test_host_overrides_defaults(tmp_path):
   data = {
     "hosts": {
       "_defaults": {"workers": 3},
-      "sma-master": {"address": "10.30.0.40", "workers": 8},
+      "sma-master": {"address": "10.30.10.40", "workers": 8},
     },
   }
   _yaml(data, tmp_path)
@@ -71,7 +71,7 @@ def test_host_falls_through_to_deploy_when_not_in_defaults(tmp_path):
     "deploy": {"ssh_port": "2222"},
     "hosts": {
       "_defaults": {"user": "iadmin"},
-      "sma-master": {"address": "10.30.0.40"},
+      "sma-master": {"address": "10.30.10.40"},
     },
   }
   _yaml(data, tmp_path)
@@ -83,12 +83,12 @@ def test_host_falls_through_to_deploy_when_not_in_defaults(tmp_path):
 def test_no_defaults_still_works(tmp_path):
   data = {
     "deploy": {"workers": 1},
-    "hosts": {"sma-master": {"address": "10.30.0.40", "workers": 4}},
+    "hosts": {"sma-master": {"address": "10.30.10.40", "workers": 4}},
   }
   _yaml(data, tmp_path)
   d = local_config._load(str(tmp_path / "local.yml"))
   assert local_config.resolve(d, "sma-master", "workers", "") == "4"
-  assert local_config.resolve(d, "sma-master", "address", "") == "10.30.0.40"
+  assert local_config.resolve(d, "sma-master", "address", "") == "10.30.10.40"
 
 
 def test_service_defaults_cascade_in_local_config(tmp_path):
