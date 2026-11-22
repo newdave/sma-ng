@@ -1,0 +1,22 @@
+tests/test_metadata.py
+  s_d73ac5e457a585::t_647f69620dd9d9 1656,1658-1659
+  s_d73ac5e457a585::t_ae30b15e94b9b4 1600-1655,1657,1660
+resources/metadata.py
+  s_d73ac5e457a585::t_1677b948bec629 88,125-140,177-179,265-273,324,330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "f87396a7b3536233751b20defe8e3fd1f1ace1d7",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
