@@ -7,6 +7,9 @@ enabled = true
 [plugins."bp@cc-blueprint-toolkit"]
 enabled = true
 
+[plugins."superpowers@claude-plugins-official"]
+enabled = true
+
 [plugins."codex@openai-codex"]
 enabled = false
 

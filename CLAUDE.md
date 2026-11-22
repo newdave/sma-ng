@@ -186,8 +186,10 @@ When workflow rules change, update this file first and sync `AGENTS.md` plus any
 Plugins and skills are scoped to this project:
 
 - `.claude/settings.json` `enabledPlugins` and `.codex/config.toml` `[plugins.*]` hold the required plugin set:
-  `pyright-lsp` and `bp` (cc-blueprint-toolkit: `/bp:brainstorm`, `/bp:generate-prp`, `/bp:execute-prp`,
-  `/bp:execute-task`). Plans `bp` writes into `docs/prps/` or `docs/tasks/` follow the in-flight PRP rules above.
+  `pyright-lsp`, `bp` (cc-blueprint-toolkit: `/bp:brainstorm`, `/bp:generate-prp`, `/bp:execute-prp`,
+  `/bp:execute-task`) and `superpowers` (brainstorming, planning, TDD, debugging and subagent-driven skills).
+  Plans `bp` writes into `docs/prps/` or `docs/tasks/` follow the in-flight PRP rules above.
+  Specs and plans from `superpowers` go to Plane Pages, not `docs/superpowers/`.
 - The same file sets unneeded globally enabled plugins to `false` (`codex`, `code-simplifier`,
   `frontend-design`, `rust-analyzer-lsp`).
 - Project skills are vendored in `.claude/skills/`; `.skillfish.json` records the upstream source.
