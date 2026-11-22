@@ -1,0 +1,24 @@
+docs/architecture.md
+  s_d73ac5e457a585::t_64fafad757188b 1-205
+docs/getting-started.md
+  s_d73ac5e457a585::t_4e9ff67465622a 9,182,591
+  s_d73ac5e457a585::t_e5593b0dadf6e9 15-17,19,21-28
+docs/README.md
+  s_d73ac5e457a585::t_95373078e3b0b9 5-21,24,26-33,35,37-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "cd11dae9dcda0edbaf5cb21e8b5c17a52ab69494",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
