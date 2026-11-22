@@ -1,0 +1,30 @@
+tests/test_worker.py
+  s_d73ac5e457a585::t_630e957dba999d 856-864
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_f39b09f928669f 1094-1095,1100-1102,1104-1105,1109-1110,1178-1188,1195-1196,1203,5043-5046,5105
+tests/test_mediaprocessor.py
+  s_d73ac5e457a585::t_630e957dba999d 9754,9759-9807,9943-9968
+  s_d73ac5e457a585::t_79fd93c97a1c36 9969
+docs/hardware-acceleration.md
+  s_d73ac5e457a585::t_be8ced8d90dbd1 266-270
+resources/daemon/worker.py
+  s_d73ac5e457a585::t_f39b09f928669f 889-891
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_be8ced8d90dbd1 396-401
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "dd938acf5c9bec71e22596970434eb1f0749a919",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
