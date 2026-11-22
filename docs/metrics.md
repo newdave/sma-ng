@@ -18,8 +18,22 @@ to enable. In standalone (in-memory) mode the metrics page shows an
   selector (24h / 7d / 30d / all-time). *(Previously served at `/metrics`; that path now serves
   Prometheus text exposition — see "Prometheus" below.)*
 - **Prometheus**: `GET /metrics` returns Prometheus text exposition for scraping by Prometheus /
-  Grafana / Alertmanager. See the [Prometheus Exposition](daemon.md#prometheus-exposition) section in
-  `docs/daemon.md` for the metric catalogue and a sample scrape config.
+  Grafana / Alertmanager. When an API key or basic auth is configured the endpoint requires credentials,
+  because its series carry the node id; with no auth configured it is open. Use `authorization` (Bearer)
+  or `basic_auth` in the scrape config:
+
+  ```yaml
+  scrape_configs:
+    - job_name: sma-ng
+      metrics_path: /metrics
+      authorization:
+        type: Bearer
+        credentials: YOUR_API_KEY
+      static_configs:
+        - targets: ["sma-host:8585"]
+  ```
+
+  See [daemon.md](daemon.md) for the `/health` and `/metrics` authentication rules.
 
 ## Metrics API
 

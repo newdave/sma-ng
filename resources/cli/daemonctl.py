@@ -192,6 +192,9 @@ def status(facts, cfg, env, out, as_json=False):
     if health:
       commit = (health.get("commit") or "")[:7]
       out.write("version:   %s%s\n" % (health.get("version") or "unknown", " (commit %s)" % commit if commit else ""))
+      if "node" not in health:
+        out.write("details:   unavailable without API key (set the API key for this target)\n")
+        return 0 if healthy else 3
       out.write(
         "node:      %s, %s workers, gpu %s\n" % (health.get("node") or "unknown", health.get("workers") if health.get("workers") is not None else "?", health.get("selected_backend") or "none")
       )

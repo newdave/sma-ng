@@ -3056,6 +3056,14 @@ class TestSecurityHardening:
     h.do_GET()
     assert h._response_code == 401
 
+  def test_no_auth_configured_metrics_open_and_health_full(self):
+    h = _make_handler(path="/metrics", headers={})
+    h.do_GET()
+    assert h._response_code == 200
+    h = _make_handler()
+    h._get_health()
+    assert "node" in _get_response_body(h)
+
   def test_prometheus_metrics_accepts_bearer(self):
     h = _make_handler(path="/metrics", api_key="k", headers={"Authorization": "Bearer k"})
     h.do_GET()

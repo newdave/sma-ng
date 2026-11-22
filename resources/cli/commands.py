@@ -128,7 +128,7 @@ def version(env, opts, out, check=None):
     return 0
   out.write("sma image: %s (commit %s)%s\n" % (image_version, image_commit, " - out of date" if image_outdated else ""))
   if health and target:
-    commit = ((health.get("commit") or "")[:7]) or "unknown"
+    commit = ((health.get("commit") or "")[:7]) or ("unavailable without API key" if "commit" not in health else "unknown")
     out.write("daemon:    %s (commit %s) at %s%s\n" % (daemon_version or "unknown", commit, target.url, " - out of date" if daemon_outdated else ""))
   if latest:
     out.write("latest:    %s%s\n" % (latest_version, " (released %s)" % latest["published"] if latest.get("published") else ""))
