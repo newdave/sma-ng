@@ -389,6 +389,9 @@ or a network partition. A cancelled job's output may still exist on disk if ffmp
 - Verify `path` is set in the `[Sonarr]`/`[Radarr]` section
 - Verify `apikey` is correct and `rescan = true`
 - Verify the output file path starts with the configured `path` prefix
+- A slow rescan no longer blocks the import: SMA waits up to 5 minutes (polling with backoff), logs the last
+  command status (`failed`, `aborted`, `cancelled` and `orphaned` stop the wait early) and then still issues the
+  import. The log line `rescan command did not complete; importing anyway` means the rescan was slow or failed
 
 ### Docker: "Read-only file system" errors
 
