@@ -6,6 +6,7 @@ chosen tiers and asserts which tier the ladder lands on for each
 fallback-policy setting.
 """
 
+import json
 import os
 import sys
 from unittest.mock import MagicMock
@@ -395,3 +396,45 @@ class TestAttemptLadderTier2HwAlt:
     # Rescue tier: hw decode dropped, GPU filter rewritten to system memory.
     assert attempts[2]["hwaccel"] is False
     assert attempts[2]["filter"] == "scale=3840:2080,format=p010le"
+
+
+class TestFirstAttemptTierLabel:
+  """The first ladder rung is labelled copy / sw / hw from the options it runs."""
+
+  @staticmethod
+  def _first_tier(preopts, options):
+    mp = _make_mp(FallbackPolicy.AGGRESSIVE)
+    mp._attempt_ladder(preopts, options, None, lambda *_a, **_k: None)
+    payloads = [json.loads(c.args[0]) for c in mp.log.info.call_args_list if c.args and str(c.args[0]).startswith("{")]
+    assert payloads[-1]["event"] == "ffmpeg.attempts"
+    return payloads[-1]["attempts"][0]["tier"]
+
+  def test_remux_reports_copy(self):
+    assert self._first_tier([], {"video": {"codec": "copy"}}) == "copy"
+
+  def test_software_encode_reports_sw(self):
+    assert self._first_tier([], {"video": {"codec": "h265"}}) == "sw"
+
+  def test_software_encode_codec_chain_reports_sw(self):
+    assert self._first_tier([], {"video": {"codec": ["h264", "copy"]}}) == "sw"
+
+  def test_hardware_encode_reports_hw(self):
+    assert self._first_tier(["-hwaccel", "qsv"], {"video": {"codec": "h265qsv"}}) == "hw"
+
+  def test_hardware_encoder_without_hwaccel_reports_hw(self):
+    assert self._first_tier([], {"video": {"codec": "h265qsv"}}) == "hw"
+
+  def test_software_encode_with_hw_decode_reports_hw(self):
+    assert self._first_tier(["-hwaccel", "cuda"], {"video": {"codec": "h265"}}) == "hw"
+
+  def test_failed_remux_records_copy_tier(self):
+    mp = _make_mp(FallbackPolicy.HW_ONLY)
+
+    def run_fn(*_a, **_k):
+      raise _err()
+
+    with pytest.raises(FFMpegConvertError):
+      mp._attempt_ladder([], {"video": {"codec": "copy"}}, None, run_fn)
+    payload = json.loads(mp.log.info.call_args_list[-1].args[0])
+    assert payload["attempts"][0]["tier"] == "copy"
+    assert payload["result"] == "failed"

@@ -259,6 +259,10 @@ existing payload (consumers MUST ignore unknown keys per
 subprocesses emit the `ffmpeg.attempts` structured log line (single-line
 JSON, picked up by the worker stdout parser).
 
+The first attempt in `ffmpeg.attempts` is labelled `copy` for a stream-copy video remux, `sw` for a software video
+encoder with no hardware decode, and `hw` otherwise. `copy` and `sw` are labels only, not fallbacks; later tiers
+are `hw_alt`, `sw_decode_hw_encode`, `sw_decode` and `full_sw`.
+
 ### `fallback-policy` (replaces the deprecated boolean `software-fallback`)
 
 `base.converter.fallback-policy` selects how far the hardware → software

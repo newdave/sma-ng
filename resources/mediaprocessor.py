@@ -182,6 +182,23 @@ _HW_DEINTERLACE_TO_SW = {
 }
 
 
+def _first_attempt_tier(preopts, options):
+  """Label the first ladder attempt for the ``ffmpeg.attempts`` event.
+
+  ``copy`` for a stream-copy video remux, ``sw`` for a software video encoder
+  with no hardware decode in *preopts*, otherwise ``hw``.
+  """
+  video = (options or {}).get("video")
+  codec = video.get("codec") if isinstance(video, dict) else None
+  if isinstance(codec, (list, tuple)):
+    codec = codec[0] if codec else None
+  if codec == "copy":
+    return "copy"
+  if codec and codec not in _HW_CODEC_TO_SW and "-hwaccel" not in (preopts or []):
+    return "sw"
+  return "hw"
+
+
 def _swap_hw_codec_to_sw(options):
   """Swap a hardware video encoder in *options* to its software equivalent.
 
@@ -4783,21 +4800,22 @@ class MediaProcessor:
         records.append(AttemptRecord(tier="sw_decode_hw_encode", failure_class=_classify(err), duration_ms=_ms(t_rescue)))
         return False
 
-    # Tier 1: hardware
+    # Tier 1: labelled copy / sw / hw from the options it runs
+    first_tier = _first_attempt_tier(preopts, options)
     t0 = time.monotonic()
     try:
       run_fn(preopts, options)
-      records.append(AttemptRecord(tier="hw", failure_class=None, duration_ms=_ms(t0)))
+      records.append(AttemptRecord(tier=first_tier, failure_class=None, duration_ms=_ms(t0)))
       self._emit_attempt_log(records, "ok")
       return
     except FFMpegConvertError as err:
       hw_err = err
       cls = _classify(err)
-      records.append(AttemptRecord(tier="hw", failure_class=cls, duration_ms=_ms(t0)))
+      records.append(AttemptRecord(tier=first_tier, failure_class=cls, duration_ms=_ms(t0)))
       if policy == FallbackPolicy.HW_ONLY:
         # Carve-out: a decode-side failure can still be rescued with software
         # decode + hardware encode without violating "no software encode".
-        if _try_decode_side_rescue("hw", cls):
+        if _try_decode_side_rescue(first_tier, cls):
           return
         self.log.warning(
           "Conversion failed with hardware decoder and fallback-policy=hw_only; surfacing original error (cause=%s)." % cls.value,
@@ -4819,7 +4837,7 @@ class MediaProcessor:
         "Conversion failed with hw QSV (cause=%s); retrying with hw_alt (swap encoder %s -> %s, preserve QSV decoder via hwmap bridge). Original error: %s"
         % (cls_hw.value if cls_hw else "unknown", original_codec_alt, retry_options_alt["video"]["codec"], str(hw_err)[:300]),
       )
-      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("hw", "hw_alt", cls_hw.value if cls_hw else "other")
+      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)(first_tier, "hw_alt", cls_hw.value if cls_hw else "other")
       if outputfile is not None and os.path.isfile(outputfile):
         self.removeFile(outputfile)
       t_alt = time.monotonic()
@@ -4847,7 +4865,7 @@ class MediaProcessor:
       if policy == FallbackPolicy.HW_ALT:
         # No VAAPI tier possible (source wasn't QSV-encoded). Try a decode-side
         # rescue off the original hw failure before surfacing.
-        if cls_hw is not None and _try_decode_side_rescue("hw", cls_hw):
+        if cls_hw is not None and _try_decode_side_rescue(first_tier, cls_hw):
           return
         self._emit_attempt_log(records, "failed")
         assert hw_err is not None
@@ -4865,13 +4883,13 @@ class MediaProcessor:
         assert (hw_alt_err or hw_err) is not None
         raise hw_alt_err or hw_err
       sw_decode_err = hw_alt_err or hw_err
-      from_tier = "hw" if hw_alt_err is None else "hw_alt"
+      from_tier = first_tier if hw_alt_err is None else "hw_alt"
     else:
       cls_prev = records[-1].failure_class
       self.log.warning(
         "Conversion failed (cause=%s); retrying with software decode (stripping `-vcodec` from preopts). Last error: %s" % (cls_prev.value if cls_prev else "unknown", str(hw_alt_err or hw_err)[:300]),
       )
-      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("hw" if hw_alt_err is None else "hw_alt", "sw_decode", cls_prev.value if cls_prev else "other")
+      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)(first_tier if hw_alt_err is None else "hw_alt", "sw_decode", cls_prev.value if cls_prev else "other")
       if outputfile is not None and os.path.isfile(outputfile):
         self.removeFile(outputfile)
       t1 = time.monotonic()
