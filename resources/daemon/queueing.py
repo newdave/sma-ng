@@ -10,6 +10,8 @@ import os
 
 SKIP_SAME_EXTENSION = "same_as_output_extension"
 SKIP_RECYCLE_BIN = "recycle_bin"
+SKIP_RECENTLY_COMPLETED = "recently_completed"
+DUPLICATE = "duplicate"
 
 
 def normalise_job_path(path):
@@ -47,3 +49,16 @@ def queue_job(job_db, path_config_manager, path, config, args=None, **kwargs):
     dedupe_window_seconds=dedupe_window_seconds(path_config_manager),
     **kwargs,
   )
+
+
+def duplicate_outcome(job_db, path_config_manager, path, kind="convert"):
+  """Explain why ``queue_job`` returned None: ``(DUPLICATE | SKIP_RECENTLY_COMPLETED, job_id or None)``."""
+  existing = job_db.find_active_job(path, kind=kind) if kind != "convert" else job_db.find_active_job(path)
+  if existing:
+    return DUPLICATE, existing["id"]
+  window = dedupe_window_seconds(path_config_manager)
+  if window > 0:
+    recent = job_db.find_recent_completed_job(normalise_job_path(path), kind, window)
+    if recent:
+      return SKIP_RECENTLY_COMPLETED, recent["id"]
+  return DUPLICATE, None

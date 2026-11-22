@@ -563,6 +563,16 @@ class TestJobDedupe:
     assert db.add_job("/m//a.mkv", "/c.yml", dedupe_window_seconds=3600) is None
     db.close()
 
+  def test_find_recent_completed_job(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.complete_job(job_id, input_size=1, output_size=1)
+    assert db.find_recent_completed_job("/m//a.mkv", "convert", 3600)["id"] == job_id
+    assert db.find_recent_completed_job("/m/a.mkv", "preview", 3600) is None
+    assert db.find_recent_completed_job("/m/a.mkv", "convert", 0) is None
+    db.close()
+
   def test_window_zero_disables_recent_completion_skip(self, tmp_path):
     db = _db(tmp_path)
     job_id = db.add_job("/m/a.mkv", "/c.yml")

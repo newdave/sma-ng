@@ -580,6 +580,18 @@ class SQLiteJobDatabase:
       ).fetchone()
       return dict(row) if row else None
 
+  def find_recent_completed_job(self, path, kind="convert", window_seconds=0):
+    """Find a job of *kind* for the path completed within *window_seconds*, if any."""
+    if not window_seconds or window_seconds <= 0:
+      return None
+    cutoff = (datetime.now(UTC) - timedelta(seconds=window_seconds)).replace(microsecond=0).isoformat()
+    with self._conn() as conn:
+      row = conn.execute(
+        "SELECT * FROM jobs WHERE path = ? AND COALESCE(kind, 'convert') = ? AND status = ? AND completed_at >= ? ORDER BY completed_at DESC LIMIT 1",
+        (normalise_job_path(path), kind or "convert", STATUS_COMPLETED, cutoff),
+      ).fetchone()
+      return dict(row) if row else None
+
   def claim_next_job(
     self,
     worker_id,
@@ -1412,6 +1424,19 @@ class PostgreSQLJobDatabase:
         cur.execute(
           "SELECT * FROM jobs WHERE path = %s AND COALESCE(kind, 'convert') = %s AND status IN (%s, %s) LIMIT 1",
           (normalise_job_path(path), kind or "convert", STATUS_PENDING, STATUS_RUNNING),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+  def find_recent_completed_job(self, path, kind="convert", window_seconds=0):
+    """Find a job of *kind* for the path completed within *window_seconds*, if any."""
+    if not window_seconds or window_seconds <= 0:
+      return None
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          "SELECT * FROM jobs WHERE path = %s AND COALESCE(kind, 'convert') = %s AND status = %s AND completed_at >= NOW() - make_interval(secs => %s) ORDER BY completed_at DESC LIMIT 1",
+          (normalise_job_path(path), kind or "convert", STATUS_COMPLETED, window_seconds),
         )
         row = cur.fetchone()
         return dict(row) if row else None

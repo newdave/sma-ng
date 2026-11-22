@@ -3107,6 +3107,44 @@ class TestQueueSharedRules:
     assert call.args[0] == str(f)
     assert call.kwargs["dedupe_window_seconds"] == 7200
 
+  def test_queue_file_reports_recently_completed(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.job_dedupe_window_seconds = 7200
+    h.server.job_db.add_job.return_value = None
+    h.server.job_db.find_active_job.return_value = None
+    h.server.job_db.find_recent_completed_job.return_value = {"id": 42}
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert h._response_code == 200
+    assert body["status"] == "skipped"
+    assert body["reason"] == "recently_completed"
+    assert body["job_id"] == 42
+
+  def test_queue_file_active_duplicate_unchanged(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.job_db.add_job.return_value = None
+    h.server.job_db.find_active_job.return_value = {"id": 3}
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert body["status"] == "duplicate"
+    assert body["job_id"] == 3
+
+  def test_queue_directory_reports_recently_completed_as_skipped(self, tmp_path):
+    (tmp_path / "movie.mkv").write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.job_dedupe_window_seconds = 7200
+    h.server.job_db.add_job.return_value = None
+    h.server.job_db.find_active_job.return_value = None
+    h.server.job_db.find_recent_completed_job.return_value = {"id": 42}
+    h._queue_directory(str(tmp_path), [], None)
+    body = _get_response_body(h)
+    assert body["duplicates"] == []
+    assert body["skipped"] == [{"path": str(tmp_path / "movie.mkv"), "reason": "recently_completed", "job_id": 42}]
+
   def test_queue_file_skips_recycle_bin(self, tmp_path):
     f = tmp_path / "movie.mkv"
     f.write_text("x")

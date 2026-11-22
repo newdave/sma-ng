@@ -17,8 +17,8 @@ daemon:
   progress-log-interval: 30
   smoke-test: true
   recycle-bin-max-age-days: 30
-  job-dedupe-window-seconds: 21600
   recycle-bin-min-free-gb: 50
+  job-dedupe-window-seconds: 21600
   log-ttl-days: 30
   node-expiry-days: 7
   log-archive-dir: ''

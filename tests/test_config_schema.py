@@ -8,6 +8,7 @@ this module focuses on the secrets contract that lives in
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from resources.config_schema import SmaConfig
 from resources.daemon.config import _strip_secrets
@@ -79,6 +80,16 @@ class TestSchemaDefaultsContract:
     assert cfg.daemon.smoke_test is True
     assert cfg.daemon.media_extensions[:3] == [".mkv", ".m4v", ".avi"]
     assert ".mp4" not in cfg.daemon.media_extensions
+
+  def test_job_dedupe_window_default_and_bounds(self):
+    assert SmaConfig().daemon.job_dedupe_window_seconds == 21600
+    assert SmaConfig(daemon={"job_dedupe_window_seconds": 0}).daemon.job_dedupe_window_seconds == 0
+    with pytest.raises(ValidationError):
+      SmaConfig(daemon={"job_dedupe_window_seconds": -1})
+
+  def test_job_dedupe_window_kebab_alias_parses(self):
+    cfg = SmaConfig.model_validate({"daemon": {"job-dedupe-window-seconds": 90}})
+    assert cfg.daemon.job_dedupe_window_seconds == 90
 
   def test_audit_skip_dirs_default_excludes_plex_owned_dirs(self):
     # Plex Media Optimizer output must never be probed: mid-write files have

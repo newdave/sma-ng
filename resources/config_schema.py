@@ -966,9 +966,9 @@ class DaemonConfig(_Base):
   progress_log_interval: int = 30
   smoke_test: bool = True
   recycle_bin_max_age_days: int = 30
+  recycle_bin_min_free_gb: int = 50
   # Seconds a completed job blocks re-queueing the same path (scanner and webhooks); 0 disables.
   job_dedupe_window_seconds: int = Field(default=21600, ge=0)
-  recycle_bin_min_free_gb: int = 50
   log_ttl_days: int = 30
   node_expiry_days: int = 7
   log_archive_dir: str = ""

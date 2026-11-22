@@ -1262,6 +1262,23 @@ class TestScannerSharedQueueRules:
     assert result == 1
     assert db.add_job.call_args.kwargs["dedupe_window_seconds"] == 21600
 
+  def test_recently_completed_logs_one_info_line(self, tmp_path, caplog):
+    import logging
+
+    media = tmp_path / "show.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.filter_unscanned.return_value = [str(media)]
+    db.add_job.return_value = None
+    db.find_active_job.return_value = None
+    db.find_recent_completed_job.return_value = {"id": 11}
+    scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db, path_config_manager=self._pcm())
+    with caplog.at_level(logging.INFO):
+      assert scanner._scan({"path": str(tmp_path)}) == 0
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Scanner skipped") and "(recently_completed" in r.getMessage()]
+    assert len(lines) == 1
+    assert "\n" not in lines[0] and str(media) in lines[0] and "11" in lines[0]
+
   def test_skips_same_extension(self, tmp_path):
     pcm = self._pcm()
     pcm.should_skip_same_extension.return_value = True

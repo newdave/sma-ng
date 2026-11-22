@@ -5,7 +5,7 @@ import time
 
 from resources.daemon import job_kinds, metrics_prom, storage
 from resources.daemon.log_archiver import LogArchiver
-from resources.daemon.queueing import queue_job, skip_reason
+from resources.daemon.queueing import SKIP_RECENTLY_COMPLETED, duplicate_outcome, queue_job, skip_reason
 from resources.library_audit.engine import AuditEngine
 from resources.library_audit.enumerator import enumerate_paths
 from resources.log import getLogger
@@ -306,6 +306,10 @@ class ScannerThread(_StoppableThread):
         self.log.info("Scanner queued job %d: %s" % (job_id, submit_path))
         queued += 1
         metrics_prom.record_job_enqueued("scan", scan_profile)
+      else:
+        outcome, existing_id = duplicate_outcome(self.job_db, self.path_config_manager, submit_path)
+        if outcome == SKIP_RECENTLY_COMPLETED:
+          self.log.info("Scanner skipped %s (%s, job %s)" % (submit_path, outcome, existing_id))
 
     if handled:
       self.job_db.record_scanned(handled)

@@ -17,7 +17,7 @@ from resources.daemon.constants import MAX_REQUEST_BODY_BYTES, SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase
 from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html, doc_file_for_slug
-from resources.daemon.queueing import SKIP_RECYCLE_BIN, SKIP_SAME_EXTENSION, queue_job, skip_reason
+from resources.daemon.queueing import SKIP_RECENTLY_COMPLETED, SKIP_RECYCLE_BIN, SKIP_SAME_EXTENSION, duplicate_outcome, queue_job, skip_reason
 
 __all__ = ["WebhookHandler", "_inline"]
 from resources.daemon import job_kinds
@@ -224,6 +224,7 @@ PREVIEW_PRIORITY = 100
 _SKIP_MESSAGES = {
   SKIP_SAME_EXTENSION: "process-same-extensions is false and force-convert is false; file already matches output extension",
   SKIP_RECYCLE_BIN: "path is inside a configured recycle-bin directory",
+  SKIP_RECENTLY_COMPLETED: "path was converted within job-dedupe-window-seconds; not queued again",
 }
 
 
@@ -1612,8 +1613,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
         request_profile=profile,
       )
       if job_id is None:
-        existing = self.server.job_db.find_active_job(job_path)
-        duplicates.append({"path": job_path, "job_id": existing["id"] if existing else None})
+        outcome, existing_id = duplicate_outcome(self.server.job_db, pcm, job_path)
+        if outcome == SKIP_RECENTLY_COMPLETED:
+          self.server.logger.info("Skipped queue: %s (%s, job %s)" % (job_path, outcome, existing_id))
+          skipped.append({"path": job_path, "reason": outcome, "job_id": existing_id})
+        else:
+          duplicates.append({"path": job_path, "job_id": existing_id})
       else:
         queued.append({"job_id": job_id, "path": job_path, "config": resolved_config, "profile": profile})
         metrics_prom.record_job_enqueued(request_source, profile)
@@ -1688,9 +1693,16 @@ class WebhookHandler(BaseHTTPRequestHandler):
     )
 
     if job_id is None:
-      existing = self.server.job_db.find_active_job(job_path)
+      outcome, existing_id = duplicate_outcome(self.server.job_db, pcm, job_path)
+      if outcome == SKIP_RECENTLY_COMPLETED:
+        self.server.logger.info("Skipped queue: %s (%s, job %s)" % (job_path, outcome, existing_id))
+        self.send_json_response(
+          200,
+          {"status": "skipped", "path": job_path, "reason": outcome, "job_id": existing_id, "message": _SKIP_MESSAGES[outcome]},
+        )
+        return
       self.server.logger.info("Duplicate job submission for: %s" % job_path)
-      self.send_json_response(200, {"status": "duplicate", "job_id": existing["id"] if existing else None, "path": job_path, "config": resolved_config})
+      self.send_json_response(200, {"status": "duplicate", "job_id": existing_id, "path": job_path, "config": resolved_config})
       return
 
     self.server.notify_workers()

@@ -341,8 +341,8 @@ auto-profile selection happens for one-shot conversions. Pass
 | `stale-seconds`                    | Seconds without a heartbeat before a node is declared stale and its running jobs requeued (PostgreSQL only, default `120`). CLI `--stale-seconds` overrides.                                     |
 | `progress-log-interval`            | Seconds between progress log lines for in-flight conversions                                                                                                                                     |
 | `recycle-bin-max-age-days`         | Delete recycle-bin media files older than this many days (default: `30`, `0` = disabled)                                                                                                         |
-| `job-dedupe-window-seconds`        | Skip a path whose job completed within this many seconds, for the scanner and webhooks alike (default: `21600`, `0` = disabled). See Duplicate suppression. |
 | `recycle-bin-min-free-gb`          | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled)                                                                           |
+| `job-dedupe-window-seconds`        | Skip a path whose job completed within this many seconds, for the scanner and webhooks alike (default: `21600`, `0` = disabled). See [Duplicate Suppression](#duplicate-suppression).            |
 | `log-ttl-days`                     | Cluster-mode: retention for log entries in PostgreSQL                                                                                                                                            |
 | `node-expiry-days`                 | Cluster-mode: hard-delete offline nodes after this many days (`0` = disabled)                                                                                                                    |
 | `log-archive-dir`                  | Cluster-mode: directory for gzipped JSONL archive of cluster logs                                                                                                                                |
@@ -562,15 +562,20 @@ bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --dry-run
 
 ## Duplicate Suppression
 
-The scanner and the webhooks share one queue path, so a file is judged the same way however it arrives
-(`POST /jobs` also normalises paths but ignores the completion window and skip rules):
+The scanner and the webhooks (`/webhook`, `/webhook/generic`, `/webhook/sonarr`, `/webhook/radarr`, `/queue`) share
+one queue path, so a file is judged the same way however it arrives. `POST /jobs` only normalises paths and skips
+pending or running duplicates of the same kind; it ignores the completion window and the skip rules below:
 
 - Paths are normalised (repeated separators, `.` and `..` segments, trailing slash) before the duplicate check, so
   `/media//tv/./ep1.mkv` and `/media/tv/ep1.mkv` are the same file.
 - A path with a pending or running job of the same kind is not queued again. A webhook gets
   `200 {"status": "duplicate"}`; the scanner counts the file as handled.
 - A path whose job completed within `job-dedupe-window-seconds` (default `21600`, six hours; `0` disables) is not
-  queued again either. Failed and cancelled jobs never block a retry.
+  queued again either, for every source (this also stops a download client re-grab loop). Failed and cancelled jobs
+  never block a retry. A single-file request gets `200 {"status": "skipped", "reason": "recently_completed",
+  "job_id": <completed job id>}`; a directory request lists the file under `skipped` with the same `reason` and
+  `job_id` (not under `duplicates`); the scanner logs one INFO line `Scanner skipped <path> (recently_completed, job
+  <id>)`. `duplicates` is only for pending or running jobs.
 - Files that already match the output extension (unless `process-same-extensions` or `force-convert` is set) and
   files inside a configured recycle bin are skipped by the scanner too, as they already are for webhooks. Webhooks
   report `reason: same_as_output_extension` or `reason: recycle_bin`.
