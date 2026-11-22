@@ -336,7 +336,13 @@ class TestLadderStopReason:
 
   @pytest.mark.parametrize(
     "stderr",
-    ["No space left on device", "Disk quota exceeded", "Read-only file system", "Permission denied", "write_frame(): Input/output error"],
+    [
+      "No space left on device",
+      "Disk quota exceeded",
+      "Read-only file system",
+      "Could not write header: Permission denied",
+      "write_frame(): Input/output error",
+    ],
   )
   def test_filesystem_stderr_stops(self, stderr):
     from resources.processor.failures import ladder_stop_reason
@@ -349,6 +355,56 @@ class TestLadderStopReason:
 
     assert ladder_stop_reason(rc, stderr) is None
 
-  def test_quota_and_readonly_causes(self):
-    assert diagnose_ffmpeg_failure("Disk quota exceeded").cause == FfmpegFailureCause.DISK_QUOTA
-    assert diagnose_ffmpeg_failure("Read-only file system").cause == FfmpegFailureCause.READ_ONLY_FS
+  # An HDR stream dump or a channel-layout warning earlier in the tail must not
+  # hide the filesystem cause behind a first-match diagnosis.
+  HDR_DUMP = "Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084), 3840x2160\n"
+  LAYOUT_WARN = "[aac @ 0x1] Guessed Channel Layout for Input Stream #0.1 : 7.1\n"
+
+  @pytest.mark.parametrize(
+    "stderr,reason",
+    [
+      (HDR_DUMP + "av_interleaved_write_frame(): No space left on device", "filesystem enospc"),
+      (HDR_DUMP + "Error writing trailer: Read-only file system", "filesystem erofs"),
+      (HDR_DUMP + "Error writing trailer: Disk quota exceeded", "filesystem edquota"),
+      (LAYOUT_WARN + "av_interleaved_write_frame(): No space left on device", "filesystem enospc"),
+    ],
+  )
+  def test_filesystem_cause_found_behind_earlier_pattern(self, stderr, reason):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(1, stderr) == reason
+
+  @pytest.mark.parametrize(
+    "stderr",
+    [
+      "[AVHWDeviceContext @ 0x1] Failed to open /dev/dri/renderD128: Permission denied",
+      "Failed to set value 'vaapi=va:/dev/dri/renderD128' for option 'init_hw_device': Permission denied",
+      "Device creation failed: -13.\nFailed to set value 'cuda' for option 'hwaccel': Permission denied",
+      "[AVHWDeviceContext @ 0x1] cu->cuInit(0) failed -> /dev/nvidia0: Permission denied",
+      "Error opening input file /media/in.mkv.\n/media/in.mkv: Permission denied",
+      "/media/in.mkv: Input/output error",
+    ],
+  )
+  def test_device_and_input_side_errors_climb(self, stderr):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(1, stderr) is None
+
+  def test_eio_inside_a_word_climbs(self):
+    from resources.processor.failures import ladder_stop_reason
+
+    stderr = "[in#0 @ 0x1] Error opening input: /media/O Torneio (2020).mkv\nError while decoding stream #0:0: Invalid data found when processing input"
+    assert ladder_stop_reason(1, stderr) is None
+
+  @pytest.mark.parametrize(
+    "stderr,reason",
+    [
+      ("[out#0/mp4 @ 0x1] Error opening output /out/movie.mp4: Permission denied", "filesystem permission_denied"),
+      ("/out/movie.mp4: Permission denied", "filesystem permission_denied"),
+      ("/out/movie.mp4: Input/output error", "filesystem eio"),
+    ],
+  )
+  def test_output_side_permission_and_eio_stop(self, stderr, reason):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(1, stderr, outfile="/out/movie.mp4") == reason

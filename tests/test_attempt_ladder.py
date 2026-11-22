@@ -461,7 +461,9 @@ class TestAttemptLadderStopRules:
 
   @staticmethod
   def _rc_err(rc, output="Conversion failed!"):
-    return FFMpegConvertError("Exited with code %d" % rc, "ffmpeg", output, returncode=rc)
+    # No returncode= kwarg: the ladder parses the code from the message, so
+    # these cases exercise behaviour on any FFMpegConvertError signature.
+    return FFMpegConvertError("Exited with code %d" % rc, "ffmpeg", output)
 
   def _logged(self, mp):
     return [c.args[0] for c in mp.log.warning.call_args_list if "[attempt-ladder] stop" in c.args[0]]
@@ -524,3 +526,113 @@ class TestAttemptLadderStopRules:
     mp._attempt_ladder(list(self.PREOPTS), {"video": {"codec": "h265qsv"}}, None, run_fn)
     assert len(attempts) == 4
     assert self._logged(mp) == []
+
+
+def _attempt_payloads(mp):
+  return [json.loads(c.args[0]) for c in mp.log.info.call_args_list if '"ffmpeg.attempts"' in c.args[0]]
+
+
+def _stop_lines(mp):
+  return [c.args[0] for c in mp.log.warning.call_args_list if "[attempt-ladder] stop" in c.args[0]]
+
+
+QSV_PREOPTS = ["-vcodec", "hevc_qsv", "-hwaccel", "qsv", "-hwaccel_output_format", "qsv", "-qsv_device", "/dev/dri/renderD128", "-i", "in.mkv"]
+CLIMB = "generic runtime failure"
+HDR_DUMP = "Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084), 3840x2160\n"
+LAYOUT_WARN = "[aac @ 0x1] Guessed Channel Layout for Input Stream #0.1 : 7.1\n"
+
+
+def _ladder(policy, stderrs, outputfile=None, cmd="ffmpeg"):
+  """Run the ladder; attempt N raises with stderrs[N] (rc 1) or succeeds past the list."""
+  mp = _make_mp(policy)
+  tiers = []
+
+  def run_fn(preopts, options=None):
+    n = len(tiers)
+    tiers.append(n)
+    if n < len(stderrs):
+      raise FFMpegConvertError("Exited with code 1", cmd, stderrs[n])
+
+  try:
+    mp._attempt_ladder(list(QSV_PREOPTS), {"video": {"codec": "h265qsv"}}, outputfile, run_fn)
+    raised = False
+  except FFMpegConvertError:
+    raised = True
+  return mp, len(tiers), raised
+
+
+class TestAttemptLadderStopAcrossPolicies:
+  """Each stop point under every policy that reaches it: one attempts record, result failed."""
+
+  ENOSPC = "av_interleaved_write_frame(): No space left on device"
+
+  @pytest.mark.parametrize("policy", [FallbackPolicy.HW_ONLY, FallbackPolicy.HW_ALT, FallbackPolicy.SW_DECODE_ONLY, FallbackPolicy.AGGRESSIVE])
+  def test_stop_at_first_tier(self, policy):
+    mp, n, raised = _ladder(policy, [self.ENOSPC])
+    assert raised and n == 1
+    payloads = _attempt_payloads(mp)
+    assert len(payloads) == 1
+    assert payloads[0]["result"] == "failed"
+    assert [a["tier"] for a in payloads[0]["attempts"]] == ["hw"]
+    assert _stop_lines(mp) == ["[attempt-ladder] stop: filesystem enospc; no further tiers"]
+
+  @pytest.mark.parametrize("policy", [FallbackPolicy.HW_ALT, FallbackPolicy.SW_DECODE_ONLY, FallbackPolicy.AGGRESSIVE])
+  def test_stop_at_hw_alt(self, policy):
+    mp, n, raised = _ladder(policy, [CLIMB, HDR_DUMP + "Error writing trailer: Read-only file system"])
+    assert raised and n == 2
+    payloads = _attempt_payloads(mp)
+    assert len(payloads) == 1
+    assert payloads[0]["result"] == "failed"
+    assert [a["tier"] for a in payloads[0]["attempts"]] == ["hw", "hw_alt"]
+    assert _stop_lines(mp) == ["[attempt-ladder] stop: filesystem erofs; no further tiers"]
+
+  @pytest.mark.parametrize("policy", [FallbackPolicy.SW_DECODE_ONLY, FallbackPolicy.AGGRESSIVE])
+  def test_stop_at_sw_decode(self, policy):
+    mp, n, raised = _ladder(policy, [CLIMB, CLIMB, LAYOUT_WARN + self.ENOSPC])
+    assert raised and n == 3
+    payloads = _attempt_payloads(mp)
+    assert len(payloads) == 1
+    assert payloads[0]["result"] == "failed"
+    assert [a["tier"] for a in payloads[0]["attempts"]] == ["hw", "hw_alt", "sw_decode"]
+    assert _stop_lines(mp) == ["[attempt-ladder] stop: filesystem enospc; no further tiers"]
+
+
+class TestAttemptLadderFalseStops:
+  """Failures a later tier can rescue keep climbing."""
+
+  def test_hw_device_permission_denied_climbs_to_sw_decode(self):
+    eacces = (
+      "[AVHWDeviceContext @ 0x1] Failed to open /dev/dri/renderD128: Permission denied\n"
+      "Failed to set value 'vaapi=va:/dev/dri/renderD128' for option 'init_hw_device': Permission denied\n"
+      "Error parsing global options: Permission denied"
+    )
+    mp, n, raised = _ladder(FallbackPolicy.AGGRESSIVE, [eacces, eacces], outputfile="/out/movie.mp4")
+    assert not raised and n == 3
+    payload = _attempt_payloads(mp)[-1]
+    assert payload["result"] == "ok"
+    assert [a["tier"] for a in payload["attempts"]] == ["hw", "hw_alt", "sw_decode"]
+    assert _stop_lines(mp) == []
+
+  def test_eio_inside_a_filename_climbs(self):
+    stderr = "[in#0 @ 0x1] Error opening input: /media/O Torneio (2020).mkv\nError while decoding stream #0:0: Invalid data found when processing input"
+    mp, n, raised = _ladder(FallbackPolicy.AGGRESSIVE, [stderr], outputfile="/out/O Torneio (2020).mp4")
+    assert not raised and n == 2
+    assert _stop_lines(mp) == []
+
+  def test_input_side_permission_denied_climbs(self):
+    stderr = "/media/in.mkv: Permission denied"
+    mp, n, raised = _ladder(FallbackPolicy.AGGRESSIVE, [stderr], outputfile="/out/movie.mp4")
+    assert not raised and n == 2
+
+
+class TestAttemptLadderOutputSideStops:
+  def test_permission_denied_on_outputfile_stops(self):
+    mp, n, raised = _ladder(FallbackPolicy.AGGRESSIVE, ["/out/movie.mp4: Permission denied"], outputfile="/out/movie.mp4")
+    assert raised and n == 1
+    assert _stop_lines(mp) == ["[attempt-ladder] stop: filesystem permission_denied; no further tiers"]
+
+  def test_eio_on_output_from_cmd_last_arg_stops(self):
+    cmd = ["ffmpeg", "-i", "in.mkv", "/out/movie.mp4"]
+    mp, n, raised = _ladder(FallbackPolicy.AGGRESSIVE, ["/out/movie.mp4: Input/output error"], cmd=cmd)
+    assert raised and n == 1
+    assert _stop_lines(mp) == ["[attempt-ladder] stop: filesystem eio; no further tiers"]

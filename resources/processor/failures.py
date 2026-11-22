@@ -576,26 +576,42 @@ def categorize_failure(cause_or_class: str | None) -> FailureCategory:
 
 # Exit codes a shell reports for a signal-killed child (128 + N): HUP, INT, KILL, TERM.
 _SIGNAL_EXIT_CODES = {129: "SIGHUP", 130: "SIGINT", 137: "SIGKILL", 143: "SIGTERM"}
-# A write-side I/O error (as opposed to a read error on the source).
-_OUTPUT_IO_ERROR = re.compile(
-  r"Input/output error.*(?:write|trailer|muxing|header)|(?:write|trailer|muxing|header).*Input/output error|EIO",
-  re.IGNORECASE,
+# Errors that only arise when writing, so they stop the ladder wherever they
+# appear in the tail. Tested directly (not via the first-match diagnosis) so an
+# earlier HDR or channel-layout line cannot hide them.
+_WRITE_ONLY_ERRORS = (
+  (re.compile(r"No space left on device|\bENOSPC\b"), "enospc"),
+  (re.compile(r"Disk quota exceeded|\bEDQUOT\b"), "edquota"),
+  (re.compile(r"Read-only file system|\bEROFS\b"), "erofs"),
 )
-_STOP_CAUSES = {
-  FfmpegFailureCause.DISK_FULL: "enospc",
-  FfmpegFailureCause.DISK_QUOTA: "edquota",
-  FfmpegFailureCause.READ_ONLY_FS: "erofs",
-  FfmpegFailureCause.PERMISSION_DENIED: "permission_denied",
-}
+# Errors that also arise on the source or a hardware device: they stop the
+# ladder only on an output-side line.
+_SIDE_DEPENDENT_ERRORS = (
+  (re.compile(r"Permission denied"), "permission_denied"),
+  (re.compile(r"Input/output error"), "eio"),
+)
+_OUTPUT_LINE_MARKER = re.compile(r"writ(?:e|ing)|trailer|muxing|out#|Error opening output", re.IGNORECASE)
+# A hardware-device line is never output-side: sw tiers drop the device.
+_DEVICE_LINE_MARKER = re.compile(r"/dev/dri|/dev/nvidia|init_hw_device|hwaccel|Device creation|qsv_device", re.IGNORECASE)
 
 
-def ladder_stop_reason(returncode: int | None, stderr: str | bytes | None) -> str | None:
+def _is_output_line(line: str, outfile: str | None) -> bool:
+  if _DEVICE_LINE_MARKER.search(line):
+    return False
+  if outfile and outfile in line:
+    return True
+  return bool(_OUTPUT_LINE_MARKER.search(line))
+
+
+def ladder_stop_reason(returncode: int | None, stderr: str | bytes | None, outfile: str | None = None) -> str | None:
   """Return why the encode fallback ladder must stop, or ``None`` to keep climbing.
 
   A signal-killed ffmpeg (negative return code, or 128+N for HUP/INT/KILL/TERM)
-  and filesystem failures (disk full, quota, read-only fs, permission denied or
-  an I/O error writing the output) fail identically on every tier, so retrying
-  only wastes encodes.
+  and output-side filesystem failures fail identically on every tier, so
+  retrying only wastes encodes. Disk full, quota and read-only filesystem stop
+  wherever they appear; permission denied and I/O errors stop only on a line
+  naming *outfile* or a write/trailer/muxing/``out#`` marker, never on a
+  hardware-device line. Anything else climbs.
   """
   if returncode is not None:
     if returncode < 0:
@@ -605,17 +621,21 @@ def ladder_stop_reason(returncode: int | None, stderr: str | bytes | None) -> st
         return "signal %d" % -returncode
     if returncode in _SIGNAL_EXIT_CODES:
       return "signal " + _SIGNAL_EXIT_CODES[returncode]
-  cause = diagnose_ffmpeg_failure(stderr).cause
-  if cause in _STOP_CAUSES:
-    return "filesystem " + _STOP_CAUSES[cause]
   text = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else (stderr if isinstance(stderr, str) else "")
-  if _OUTPUT_IO_ERROR.search(text[-TAIL_BYTES:]):
-    return "filesystem eio"
+  tail = text[-TAIL_BYTES:]
+  for pattern, reason in _WRITE_ONLY_ERRORS:
+    if pattern.search(tail):
+      return "filesystem " + reason
+  if outfile is not None and (not isinstance(outfile, str) or outfile.startswith(("-", "pipe:"))):
+    outfile = None
+  for line in tail.splitlines():
+    for pattern, reason in _SIDE_DEPENDENT_ERRORS:
+      if pattern.search(line) and _is_output_line(line, outfile):
+        return "filesystem " + reason
   return None
 
 
 __all__ = [
-  "ladder_stop_reason",
   "TAIL_BYTES",
   "WORKER_SENTINEL_DISK_PRESSURE",
   "WORKER_SENTINEL_EXCEPTION",
@@ -630,5 +650,6 @@ __all__ = [
   "FfmpegFailureClass",
   "categorize_failure",
   "diagnose_ffmpeg_failure",
+  "ladder_stop_reason",
   "parse_ffmpeg_failure",
 ]

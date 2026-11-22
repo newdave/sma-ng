@@ -4754,20 +4754,19 @@ class MediaProcessor:
       blob = getattr(err, "output", "") or ""
       return parse_ffmpeg_failure(blob[-TAIL_BYTES:] if isinstance(blob, str) else blob)
 
-    def _must_stop(err: FFMpegConvertError) -> bool:
-      """True (after logging and the final attempt log) when the failure is a
-      signal exit or filesystem error that every further tier would repeat."""
+    def _stop_reason(err: FFMpegConvertError) -> str | None:
+      """Why no further tier can help (signal exit or output-side filesystem
+      error), or ``None`` to keep climbing."""
       rc = getattr(err, "returncode", None)
       if not isinstance(rc, int):
         m = re.match(r"Exited with code (-?\d+)", str(getattr(err, "message", "") or ""))
         rc = int(m.group(1)) if m else None
+      outfile = outputfile
+      cmd = getattr(err, "cmd", None)
+      if outfile is None and isinstance(cmd, (list, tuple)) and cmd:
+        outfile = str(cmd[-1])
       blob = getattr(err, "output", "") or ""
-      reason = ladder_stop_reason(rc, blob[-TAIL_BYTES:] if isinstance(blob, str) else blob)
-      if reason is None:
-        return False
-      self.log.warning("[attempt-ladder] stop: %s; no further tiers" % reason)
-      self._emit_attempt_log(records, "failed")
-      return True
+      return ladder_stop_reason(rc, blob[-TAIL_BYTES:] if isinstance(blob, str) else blob, outfile=outfile)
 
     hw_err: FFMpegConvertError | None = None
     hw_alt_err: FFMpegConvertError | None = None
@@ -4827,7 +4826,9 @@ class MediaProcessor:
       hw_err = err
       cls = _classify(err)
       records.append(AttemptRecord(tier=first_tier, failure_class=cls, duration_ms=_ms(t0)))
-      if _must_stop(err):
+      if (stop := _stop_reason(err)) is not None:
+        self.log.warning("[attempt-ladder] stop: %s; no further tiers" % stop)
+        self._emit_attempt_log(records, "failed")
         raise
       if policy == FallbackPolicy.HW_ONLY:
         # Carve-out: a decode-side failure can still be rescued with software
@@ -4867,7 +4868,9 @@ class MediaProcessor:
         hw_alt_err = err
         cls = _classify(err)
         records.append(AttemptRecord(tier="hw_alt", failure_class=cls, duration_ms=_ms(t_alt)))
-        if _must_stop(err):
+        if (stop := _stop_reason(err)) is not None:
+          self.log.warning("[attempt-ladder] stop: %s; no further tiers" % stop)
+          self._emit_attempt_log(records, "failed")
           raise
         if policy == FallbackPolicy.HW_ALT:
           # The VAAPI encoder swap re-used the broken QSV decoder; a decode-side
@@ -4921,7 +4924,9 @@ class MediaProcessor:
         sw_decode_err = err
         cls = _classify(err)
         records.append(AttemptRecord(tier="sw_decode", failure_class=cls, duration_ms=_ms(t1)))
-        if _must_stop(err):
+        if (stop := _stop_reason(err)) is not None:
+          self.log.warning("[attempt-ladder] stop: %s; no further tiers" % stop)
+          self._emit_attempt_log(records, "failed")
           raise
         if policy == FallbackPolicy.SW_DECODE_ONLY:
           self.log.warning(
