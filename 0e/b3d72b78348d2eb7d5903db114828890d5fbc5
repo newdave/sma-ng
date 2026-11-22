@@ -1,0 +1,38 @@
+manual.py
+  s_d73ac5e457a585::t_dc3590806d8467 491-492
+  s_d73ac5e457a585::t_de43660957f4d4 509,514-515,519-520
+  s_d73ac5e457a585::t_145ae9f495f3d2 653
+  s_d73ac5e457a585::t_4234593350a1a0 31,504
+resources/daemon/worker.py
+  s_d73ac5e457a585::t_530bf92df7c387 242-260,575-576,933-934,936-944,965-966
+  s_d73ac5e457a585::t_25586a6b2f9d7e 311-312
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_cc71594d264462 999,1001
+  s_d73ac5e457a585::t_f49cd570c627b7 1040
+tests/test_worker_reliability.py
+  s_d73ac5e457a585::t_926d02240ad864 256
+tests/test_job_telemetry.py
+  s_d73ac5e457a585::t_4156e8368f03da 1-176
+docs/openapi.yaml
+  s_d73ac5e457a585::t_ed0d31f608b807 166,190
+resources/naming.py
+  s_d73ac5e457a585::t_83f907f93c65cf 115-140
+docs/daemon.md
+  s_d73ac5e457a585::t_ed0d31f608b807 182-189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "0eb3d72b78348d2eb7d5903db114828890d5fbc5",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
