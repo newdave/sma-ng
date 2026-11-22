@@ -1,0 +1,29 @@
+tests/test_manual.py
+  s_d73ac5e457a585::t_ac870c936abc3e 950-988
+  s_d73ac5e457a585::t_ad4a4f34f97702 25
+tests/test_mediamanager.py
+  s_d73ac5e457a585::t_b65649fb5a480a 5-7
+  s_d73ac5e457a585::t_b050b43e6fe4f5 91,96-107,110-150
+resources/mediamanager.py
+  s_d73ac5e457a585::t_b050b43e6fe4f5 36-46,48-67
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_377d8a05555455 392-394
+manual.py
+  s_d73ac5e457a585::t_b050b43e6fe4f5 431-432
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "042a4e58624bcc6db5e1ae62c721bd449d4e6020",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
