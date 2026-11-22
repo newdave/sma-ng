@@ -78,7 +78,7 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
      ssh_port: 22
      ssh_key: ~/.ssh/id_ed25519_sma
      use_sudo: true
-     db_host: 10.30.0.40   # the master's IP
+     db_host: 10.30.10.40   # the master's IP
      db_port: 5432
      db_user: iadmin
      db_password: <strong-pw>
@@ -86,7 +86,7 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
      docker_profile: intel
    hosts:
      sma-master:
-       address: 10.30.0.40
+       address: 10.30.10.40
        user: iadmin
        docker_profile: intel-pg   # this host runs the bundled Postgres
      sma-slave0:
@@ -279,7 +279,7 @@ Three log surfaces exist:
    (`SMA_FINAL_OUTPUT:`) and the per-job summary line all land here.
 
    ```bash
-   ssh iadmin@10.30.0.40 'tail -F /opt/sma/logs/sma-ng.log'
+   ssh iadmin@10.30.10.40 'tail -F /opt/sma/logs/sma-ng.log'
    ```
 
 2. **Centralised cluster log** — every node also writes its log records to the
