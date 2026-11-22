@@ -414,7 +414,9 @@ def _swap_qsv_codec_to_vaapi(options, vaapi_overlay):
   - Scalar overlay fields (``preset``, ``b_frames``, ``ref_frames``,
     ``look_ahead_depth``) win when they're non-sentinel.
   - ``global_quality`` from source or overlay maps to ``-rc_mode CQP -qp N``
-    on the VAAPI params line (QSV ICQ has no direct VAAPI equivalent).
+    on the VAAPI params line (QSV ICQ has no direct VAAPI equivalent); for
+    av1_vaapi it stays ``global_quality`` and the encoder emits
+    ``-rc_mode CQP -global_quality <qindex>``.
   """
   if not options or not isinstance(options.get("video"), dict):
     return None
@@ -457,11 +459,16 @@ def _swap_qsv_codec_to_vaapi(options, vaapi_overlay):
     cleaned = ((cleaned.rstrip() + " " + overlay_params.lstrip()).strip()) if cleaned else overlay_params.strip()
 
   # global_quality (QSV ICQ) → -rc_mode CQP -qp N on VAAPI (if not already overridden).
+  # av1_vaapi has no -qp: hand the value to the encoder, which emits
+  # -rc_mode CQP -global_quality <qindex>.
   ov_gq = overlay.get("global_quality", 0) or 0
   src_gq = video.pop("global_quality", 0) or 0
   effective_q = ov_gq if ov_gq > 0 else src_gq
   if effective_q > 0 and not video.get("bitrate") and "-rc_mode" not in cleaned:
-    cleaned = ((cleaned.rstrip() + " ") if cleaned else "") + "-rc_mode CQP -qp %d" % effective_q
+    if vaapi_codec == "av1_vaapi":
+      video["global_quality"] = effective_q
+    else:
+      cleaned = ((cleaned.rstrip() + " ") if cleaned else "") + "-rc_mode CQP -qp %d" % effective_q
 
   video["params"] = cleaned or None
 

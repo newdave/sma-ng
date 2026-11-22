@@ -284,6 +284,9 @@ can never leak onto a non-VAAPI command line. Unset fields inherit from
 | `ref-frames`        | int    | `-1`    | Reference frame override. `-1` = inherit from `base.video.ref-frames`.                                                                                 |
 | `max-level`         | float  | `0.0`   | Profile level cap override. `0.0` = inherit from `base.video.max-level`.                                                                               |
 
+`av1_vaapi` has no `-qp` option, so for it `global-quality` becomes `-rc_mode CQP -global_quality <N x 5>` on the
+AV1 0-255 qindex scale instead.
+
 > **VAAPI vs QSV flag names diverge.** `-global_quality` is QSV-only; on
 > VAAPI use `-rc_mode CQP -qp <N>` for quality-targeted, or `-rc_mode VBR
 > -b:v <rate> -maxrate <max>` for capped-VBR. Either write the encoder
@@ -989,7 +992,8 @@ corresponding Python config block in `sma-ng.yml`. See
    - Software VP9/AV1 (libvpx-vp9, libaom-av1, SVT-AV1, rav1e): the encoder's default CRF.
    - QSV (`-global_quality`): ICQ at `global-quality` (or the encoder default).
    - NVENC and VAAPI: constant QP (`-qp`). H.264/HEVC default 23 (0-51 scale). `av1_nvenc` defaults to 110 on the
-     AV1 0-255 qindex scale (about CRF 25-30); `av1_vaapi` keeps 23.
+     AV1 0-255 qindex scale (about CRF 25-30). `av1_vaapi` has no `-qp`: it gets `-rc_mode CQP -global_quality`,
+     with `global-quality` multiplied by 5 onto the qindex scale (22 becomes 110), or 110 when unset.
    - Encoders with no usable quality mode: `h264_v4l2m2m`, `hevc_v4l2m2m`, `h264_omx`, `mpeg4` (divx), `libtheora`,
      `h263`, `flv`, `mpeg1video`, `mpeg2video`, and VideoToolbox on Intel (x86_64 FFmpeg has no `-q:v`). They get a
      fallback bitrate by output height (2160p 20000k, 1440p 10000k, 1080p 6000k, 720p 3000k, smaller 1500k). The

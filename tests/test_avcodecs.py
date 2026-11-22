@@ -444,6 +444,30 @@ class TestAV1VAAPICodec:
     assert "-init_hw_device" in opts
     assert "-vaapi_device" not in opts
 
+  @staticmethod
+  def _value(opts, flag):
+    return opts[opts.index(flag) + 1] if flag in opts else None
+
+  def test_no_target_uses_cqp_global_quality_qindex(self):
+    # av1_vaapi has no private -qp option (dead, dropped by ffmpeg); CQP
+    # quality comes from -global_quality on the AV1 0-255 qindex scale.
+    opts = AV1VAAPICodec().parse_options({"codec": "av1vaapi"})
+    assert "-qp" not in opts
+    assert self._value(opts, "-rc_mode") == "CQP"
+    assert self._value(opts, "-global_quality") == "110"
+
+  def test_global_quality_scaled_to_qindex(self):
+    # global-quality is on the shared 1-51 ICQ scale; x5 maps it to qindex.
+    opts = AV1VAAPICodec().parse_options({"codec": "av1vaapi", "global_quality": 23})
+    assert "-qp" not in opts
+    assert self._value(opts, "-rc_mode") == "CQP"
+    assert self._value(opts, "-global_quality") == "115"
+
+  def test_bitrate_target_has_no_quality_or_cqp(self):
+    opts = AV1VAAPICodec().parse_options({"codec": "av1vaapi", "bitrate": 5000, "global_quality": 23})
+    assert "-global_quality" not in opts
+    assert "-rc_mode" not in opts
+
 
 class TestVp9QSVCodec:
   """Test VP9 QSV codec."""

@@ -2450,26 +2450,43 @@ class AV1QSVCodec(QSVVideoCodec, AV1Codec):
     return optlist
 
 
+def av1_qindex_from_global_quality(gq: int) -> int:
+  """Map a global-quality value (shared 1-51 ICQ scale) to the AV1 0-255 qindex scale."""
+  return max(1, min(255, int(gq) * 5))
+
+
 class AV1VAAPICodec(VAAPIVideoCodec, AV1Codec):
   """
   AV1 VAAPI Codec
+
+  av1_vaapi has no private ``-qp`` option (FFmpeg drops it unused); constant
+  quality comes from ``-global_quality`` on the AV1 0-255 qindex scale. With
+  no bitrate target, ``-rc_mode CQP`` is pinned, because rc_mode auto picks
+  ICQ where the driver supports it and ICQ clips quality to 1-51.
   """
 
   codec_name = "av1vaapi"
   ffmpeg_codec_name = "av1_vaapi"
   scale_filter = "scale_vaapi"
+  hw_quality_key = "gq"
+  hw_quality_flag = "-global_quality"
   hw_quality_range = (0, 255)
+  # 110 is about CRF 25-30 (same qindex as av1_nvenc); 23 would be near-lossless.
+  hw_quality_default = 110
   encoder_options = AV1Codec.encoder_options.copy()
   encoder_options.update(
     {
       "decode_device": str,
       "device": str,
+      "global_quality": int,
     }
   )
 
   def _codec_specific_parse_options(self, safe, stream=0):
     safe = super()._codec_specific_parse_options(safe, stream)
     self._hw_parse_scale(safe)
+    if safe.get("global_quality") and safe["global_quality"] > 0:
+      safe["global_quality"] = av1_qindex_from_global_quality(safe["global_quality"])
     self._hw_parse_quality(safe)
     self._hw_parse_pix_fmt(safe)
     return safe
@@ -2478,6 +2495,8 @@ class AV1VAAPICodec(VAAPIVideoCodec, AV1Codec):
     optlist = []
     if "preset" in safe:
       optlist.extend(["-preset", str(safe["preset"])])
+    if self.hw_quality_key in safe and "bitrate" not in safe:
+      optlist.extend(["-rc_mode", "CQP"])
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
     optlist.extend(self._hw_vaapi_scale_opts(safe))

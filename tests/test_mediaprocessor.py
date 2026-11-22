@@ -1734,6 +1734,8 @@ class TestUnknownSourceBitrateEncoderFamilies:
       ("hevc_nvenc", "-qp", "23", False),
       # AV1 qindex scale (0-255): 110 is about CRF 25-30.
       ("av1nvenc", "-qp", "110", False),
+      # av1_vaapi has no -qp; CQP quality is -global_quality (global-quality 22 x5 -> qindex 110).
+      ("av1vaapi", "-global_quality", "110", False),
       ("h264", None, None, True),
       ("h265", None, None, True),
       # libvpx-vp9 / libaom-av1 reject VBV without a bitrate (EINVAL); SVT-AV1 has no capped CRF.
@@ -8943,6 +8945,20 @@ class TestSwapQsvCodecToVaapi:
     opts = {"video": {"codec": "hevc_qsv", "global_quality": 21, "bitrate": None}}
     f(opts, {})
     assert "-rc_mode CQP -qp 21" in opts["video"]["params"]
+
+  def test_av1_global_quality_maps_to_cqp_global_quality(self):
+    # av1_vaapi has no -qp option: the swap hands global-quality to the
+    # encoder, which emits -rc_mode CQP -global_quality <qindex>.
+    from converter.avcodecs import AV1VAAPICodec
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "av1qsv", "global_quality": 23, "bitrate": None}}
+    f(opts, {})
+    assert "-qp" not in (opts["video"].get("params") or "")
+    args = AV1VAAPICodec().parse_options(dict(opts["video"], codec="av1vaapi"))
+    assert "-qp" not in args
+    assert args.count("-rc_mode") == 1 and args[args.index("-rc_mode") + 1] == "CQP"
+    assert args.count("-global_quality") == 1 and args[args.index("-global_quality") + 1] == "115"
 
   def test_global_quality_skipped_when_bitrate_set(self):
     from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
