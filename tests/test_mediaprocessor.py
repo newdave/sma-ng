@@ -1116,16 +1116,16 @@ class TestAtomicFileOps:
     src = tmp_path / "source.mp4"
     src.write_bytes(b"media data")
     dst = tmp_path / "dest.mp4"
-    with patch("os.rename") as mock_rename:
+    with patch("os.replace") as mock_replace:
       mp._atomic_move(str(src), str(dst))
-    mock_rename.assert_called_once_with(str(src), str(dst))
+    mock_replace.assert_called_once_with(str(src), str(dst))
 
   def test_atomic_move_cross_filesystem_fallback(self, tmp_path):
     mp = self._make_processor()
     src = tmp_path / "source.mp4"
     src.write_bytes(b"media data")
     dst = tmp_path / "dest.mp4"
-    with patch("os.rename", side_effect=OSError(18, "Invalid cross-device link")):
+    with patch("os.replace", side_effect=OSError(18, "Invalid cross-device link")):
       with patch.object(mp, "_atomic_copy") as mock_copy:
         with patch("os.remove") as mock_remove:
           mp._atomic_move(str(src), str(dst))

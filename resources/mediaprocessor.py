@@ -765,6 +765,7 @@ OUTPUT_EXPECTED_VIDEO_STREAMS = 1
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
 from resources.config_schema import FallbackPolicy
 from resources.extensions import bad_sub_extensions, subtitle_codec_extensions
+from resources.file_ops import FileOpsMixin
 from resources.lang import getAlpha3TCode
 from resources.metadata import MediaType, Metadata
 from resources.openvino_analyzer import OpenVINOAnalyzerBackend, OpenVINOAnalyzerError
@@ -803,7 +804,7 @@ except ImportError:
 from resources.custom import *
 
 
-class MediaProcessor:
+class MediaProcessor(FileOpsMixin):
   default_channel_bitrate = 128
 
   # Maps title keywords to disposition flags, used by titleDispositionCheck
@@ -4031,25 +4032,6 @@ class MediaProcessor:
           return os.path.join(dirName, fname)
     return None
 
-  # Generic permission setter
-  def setPermissions(self, path):
-    """
-    Apply chmod and chown to a file using values from settings.
-
-    Uses the chmod, uid, and gid values in settings.permissions. On Windows
-    (os.name == 'nt') the chown call is skipped. Logs an exception if
-    permissions cannot be applied but does not raise.
-    """
-    try:
-      if os.path.exists(path):
-        os.chmod(path, self.settings.permissions.get("chmod", int("0664", 8)))
-        if os.name != "nt":
-          os.chown(path, self.settings.permissions.get("uid", -1), self.settings.permissions.get("gid", -1))
-      else:
-        self.log.debug("File %s does not exist, unable to set permissions." % path)
-    except Exception:
-      self.log.exception("Unable to set new file permissions.")
-
   # Undo output dir
   def restoreFromOutput(self, inputfile, outputfile, tagdata=None):
     """
@@ -5808,42 +5790,6 @@ class MediaProcessor:
       except Exception:
         self.log.exception("Unable to check free space on output directory %s [output-directory-space-ratio]." % self.settings.output_dir)
     return True
-
-  # Copy src to dst atomically: write to a temp file then rename into place
-  def _atomic_copy(self, src, dst):
-    """
-    Copy src to dst atomically by writing to a temp file then renaming it into place.
-
-    Uses shutil.copy2 to preserve metadata, applies permissions to the temp
-    file, then calls os.replace for an atomic rename. Cleans up the temp file
-    if any step fails before re-raising the exception.
-    """
-    dst_tmp = dst + ".smatmp"
-    try:
-      shutil.copy2(src, dst_tmp)
-      self.setPermissions(dst_tmp)
-      os.replace(dst_tmp, dst)
-    except Exception:
-      try:
-        if os.path.exists(dst_tmp):
-          os.remove(dst_tmp)
-      except Exception:
-        pass
-      raise
-
-  # Move src to dst atomically: rename if same filesystem, else atomic copy + delete
-  def _atomic_move(self, src, dst):
-    """
-    Move src to dst atomically.
-
-    Attempts os.rename first (instant on the same filesystem). Falls back to
-    _atomic_copy followed by os.remove when a cross-device OSError is raised.
-    """
-    try:
-      os.rename(src, dst)
-    except OSError:
-      self._atomic_copy(src, dst)
-      os.remove(src)
 
   # Robust file removal function, with options to retry in the event the file is in use, and replace a deleted file
   def removeFile(self, filename, retries=2, delay=10, replacement=None):

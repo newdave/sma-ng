@@ -611,6 +611,26 @@ class TestRepairProcessor:
       assert rp.repair_file(str(media)).status == mr.STATUS_REPAIRED
     log.exception.assert_called_once()
 
+  def test_file_helpers_are_the_media_processor_ones(self):
+    from resources.mediaprocessor import MediaProcessor
+
+    for name in ("setPermissions", "_atomic_copy", "_atomic_move"):
+      assert getattr(RepairProcessor, name) is getattr(MediaProcessor, name)
+
+  def test_set_permissions_on_missing_path_logs_debug_not_exception(self, tmp_path):
+    # Behaviour change (SMANG-32): matches MediaProcessor, which checks the path exists first.
+    log = mock.MagicMock()
+    rp = _processor(FakeFFMpeg(DAMAGED), logger=log)
+    rp.setPermissions(str(tmp_path / "gone.mp4"))
+    log.exception.assert_not_called()
+    log.debug.assert_called_once()
+
+  def test_set_permissions_applies_chmod(self, tmp_path):
+    f = tmp_path / "x.mp4"
+    f.write_bytes(b"x")
+    _processor(FakeFFMpeg(DAMAGED)).setPermissions(str(f))
+    assert (f.stat().st_mode & 0o777) == 0o640
+
 
 # ---------------------------------------------------------------------------
 # iter_targets

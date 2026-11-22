@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 
 from converter.ffmpeg import FFMpeg, is_unknown_stream
+from resources.file_ops import FileOpsMixin
 
 REPAIRABLE_EXTS = frozenset({".mp4", ".m4v", ".mov", ".mkv"})
 MP4_FAMILY_EXTS = frozenset({".mp4", ".m4v", ".mov"})
@@ -395,7 +396,7 @@ def verify(plan: RepairPlan, source, output) -> None:
     raise RepairError("repaired file still needs repair: %s" % leftover.describe())
 
 
-class RepairProcessor:
+class RepairProcessor(FileOpsMixin):
   """Diagnose and repair media files in place using SMA settings for the
   ffmpeg/ffprobe binaries, the in-transit ``output-directory`` and
   ``temp-extension``, and output permissions."""
@@ -462,37 +463,6 @@ class RepairProcessor:
       except Exception:
         self.log.exception("Unable to check free space on output directory %s [output-directory-space-ratio]." % self.settings.output_dir)
     return True
-
-  def _atomic_move(self, src: str, dst: str) -> None:
-    """Move *src* over *dst* as MediaProcessor._atomic_move does: rename on the
-    same filesystem, otherwise copy to ``<dst>.smatmp`` and rename into place."""
-    try:
-      os.replace(src, dst)
-      return
-    except OSError:
-      pass
-    dst_tmp = dst + ".smatmp"
-    try:
-      shutil.copy2(src, dst_tmp)
-      self.setPermissions(dst_tmp)
-      os.replace(dst_tmp, dst)
-    except Exception:
-      try:
-        if os.path.exists(dst_tmp):
-          os.remove(dst_tmp)
-      except OSError:
-        pass
-      raise
-    os.remove(src)
-
-  def setPermissions(self, path: str) -> None:
-    """Apply chmod/chown from settings, as MediaProcessor.setPermissions does."""
-    try:
-      os.chmod(path, self.settings.permissions.get("chmod", int("0664", 8)))
-      if os.name != "nt":
-        os.chown(path, self.settings.permissions.get("uid", -1), self.settings.permissions.get("gid", -1))
-    except Exception:
-      self.log.exception("Unable to set new file permissions.")
 
   def repair_file(self, path: str, dry_run: bool = False) -> RepairResult:
     """Diagnose *path* and, unless it is normal, repair it in place by stream copy."""
