@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.38](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.37...sma-ng-v3.2.38) (2026-11-22)
+
+
+### Bug Fixes
+
+* dedupe queued jobs, schedule job retention, return older job logs ([#224](https://github.com/newdave/sma-ng/issues/224)) ([679d4ee](https://github.com/newdave/sma-ng/commit/679d4ee7b277d83d4d60ca251abeff090c0cb10e))
+* renaming and metadata fixes (doubled year, release tags, season audit, quiet misses) ([#223](https://github.com/newdave/sma-ng/issues/223)) ([f171931](https://github.com/newdave/sma-ng/commit/f1719313ccbae4d0afd023a8a56912073642af6f))
+
 ## [3.2.37](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.36...sma-ng-v3.2.37) (2026-11-22)
 
 
