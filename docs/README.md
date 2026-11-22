@@ -818,7 +818,8 @@ Language code conversion (ISO 639 alpha2/alpha3) via babelfish.
 
 ### resources/custom.py
 
-Optional hook points loaded from `config/custom.py`: `validation()`, `blockVideoCopy()`, `blockAudioCopy()`,
+Optional hook points loaded from `config/custom.py` (an untracked operator file; copy `setup/custom.py.sample`, or let
+the Docker entrypoint seed it): `validation()`, `blockVideoCopy()`, `blockAudioCopy()`,
 `skipStream()`, `streamTitle()`.
 
 ### autoprocess/plex.py
