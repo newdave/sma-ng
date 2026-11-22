@@ -1889,8 +1889,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
     except _BadRequest:
       raise
     except Exception as e:
-      self.server.logger.exception("Error handling /jobs request: %s" % e)
-      self.send_json_response(500, {"error": str(e)})
+      self.server.logger.error("Job submit failed: %s", type(e).__name__)
+      self.send_json_response(500, {"error": "Internal error"})
 
   def _queue_jobs_request(self):
     """Body of POST /jobs; see ``_post_jobs``."""
