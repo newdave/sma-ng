@@ -4,9 +4,6 @@
 [plugins."pyright-lsp@claude-plugins-official"]
 enabled = true
 
-[plugins."bp@cc-blueprint-toolkit"]
-enabled = true
-
 [plugins."superpowers@claude-plugins-official"]
 enabled = true
 

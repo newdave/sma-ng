@@ -186,13 +186,13 @@ When workflow rules change, update this file first and sync `AGENTS.md` plus any
 Plugins and skills are scoped to this project:
 
 - `.claude/settings.json` `enabledPlugins` and `.codex/config.toml` `[plugins.*]` hold the required plugin set:
-  `pyright-lsp`, `bp` (cc-blueprint-toolkit: `/bp:brainstorm`, `/bp:generate-prp`, `/bp:execute-prp`,
-  `/bp:execute-task`) and `superpowers` (brainstorming, planning, TDD, debugging and subagent-driven skills).
-  Plans `bp` writes into `docs/prps/` or `docs/tasks/` follow the in-flight PRP rules above.
+  `pyright-lsp` and `superpowers` (brainstorming, planning, TDD, debugging and subagent-driven skills).
   Specs and plans from `superpowers` go to Plane Pages, not `docs/superpowers/`.
 - The same file sets unneeded globally enabled plugins to `false` (`codex`, `code-simplifier`,
   `frontend-design`, `rust-analyzer-lsp`).
-- Project skills are vendored in `.claude/skills/`; `.skillfish.json` records the upstream source.
+- Project skills are vendored in `.claude/skills/`; a `.skillfish.json` in a skill directory records its upstream
+  source. They cover only SMA-specific workflow; generic process
+  (brainstorming, planning, TDD, review, writing skills) comes from `superpowers`, so do not re-add local copies.
 - Add new plugins or skills here, never in `~/.claude/`.
 - The skill-reminder hook runs on `UserPromptSubmit`: Claude via `.claude/settings.json` `hooks`
   (`.claude/hooks/claude-code/`), Codex via `.codex/hooks.json` (`.claude/hooks/codex/`).
@@ -231,19 +231,17 @@ If a row matches the current request, invoke the listed tool before (or instead 
 
 | Trigger / signal in the request                                          | Tool to invoke                          |
 | ------------------------------------------------------------------------ | --------------------------------------- |
-| Vague goal, no files named, no acceptance criteria                       | skill `discovering`                     |
-| New FFmpeg pipeline / hwaccel / codec / container / persistence approach | skill `researching`                     |
+| Vague goal, or new FFmpeg pipeline / hwaccel / codec / container / persistence approach | skill `superpowers:brainstorming` |
 | Change spans 2+ of converter/, resources/, triggers/, .mise/tasks/, docs/ | skill `blueprinting`                    |
-| Implementation plan is agreed; ready to write code                       | skill `implementing` + `python-testing` |
-| "refactor / clean up / simplify / rename / extract / dedupe"             | skill `refactoring`                     |
+| Implementation plan is agreed; ready to write code                       | skill `superpowers:subagent-driven-development` or `superpowers:executing-plans` + `superpowers:test-driven-development` |
+| Bug, test failure or unexpected behavior                                 | skill `superpowers:systematic-debugging` |
 | Edits to `resources/config_schema.py`, `readsettings.py`, `daemon/config.py`, `setup/sma-ng.yml.sample`, or any field under daemon:/base:/profiles:/services: | skill `python-configuration` + subagent `config-schema-reviewer` |
 | Edits to `converter/*.py`, `resources/mediaprocessor.py`, hwaccel filter graphs, encoder option blocks | skill `ffmpeg-cli` / `ffmpeg-hardware-acceleration` + subagent `ffmpeg-args-auditor` |
-| Writing or updating pytest coverage                                      | skill `python-testing` + subagent `test-writer` |
+| Writing or updating pytest coverage                                      | subagent `test-writer`                  |
 | Operator docs, openapi, changelog, deploy/cluster docs                   | subagent `documentation-writer`         |
-| Read-only exploration ("where is X", "what references Y")                | subagent `explorer`                     |
+| Read-only exploration ("where is X", "what references Y")                | subagent `Explore`                      |
 | Pre-merge / pre-commit review of staged changes                          | subagent `code-reviewer`                |
-| Adding a new skill                                                       | skill `creating-skills`                 |
-| Adding a new subagent                                                    | skill `creating-subagents`              |
+| Adding or editing a skill                                                | skill `superpowers:writing-skills`      |
 
 When two rows match (e.g. schema + FFmpeg args), invoke both reviewers; their scopes do not overlap.
 A skill miss is cheaper than a regression — bias toward invoking when uncertain.

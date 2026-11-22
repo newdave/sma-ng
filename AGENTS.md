@@ -106,7 +106,8 @@ Say explicitly when the relevant validation could not be run.
 Codex treats `.claude/` as active compatibility configuration.
 When workflow rules change, update `CLAUDE.md` first, then sync this file and any Codex mirrors under `.codex/`.
 
-Codex loads project skills from `.agents/skills/`, copies of `.claude/skills/`; keep them identical. The
+Codex loads project skills from `.agents/skills/`, copies of `.claude/skills/`; keep them identical. They cover only
+SMA-specific workflow; generic process (brainstorming, planning, TDD, review) comes from the `superpowers` plugin. The
 `UserPromptSubmit` hook in `.codex/hooks.json` (`.claude/hooks/codex/skill-reminder.sh`) detects FFmpeg work with
 `.claude/hooks/ffmpeg-prompt-match.sh`. On a match it tells Codex to read `.agents/skills/ffmpeg-cli/SKILL.md` and
 `.agents/skills/ffmpeg-hardware-acceleration/SKILL.md`, and to run the `ffmpeg-args-auditor` agent for
