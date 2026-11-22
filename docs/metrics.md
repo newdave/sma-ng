@@ -20,7 +20,8 @@ to enable. In standalone (in-memory) mode the metrics page shows an
 - **Prometheus**: `GET /metrics` returns Prometheus text exposition for scraping by Prometheus /
   Grafana / Alertmanager. When an API key or basic auth is configured the endpoint requires credentials,
   because its series carry the node id; with no auth configured it is open. Use `authorization` (Bearer)
-  or `basic_auth` in the scrape config:
+  in the scrape config, or `basic_auth` only when `daemon.basic-auth` is configured (an API-key-only daemon
+  accepts Bearer or `X-API-Key`, not Basic):
 
   ```yaml
   scrape_configs:

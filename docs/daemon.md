@@ -73,7 +73,7 @@ every docs page shows the running version.
 | `GET`  | `/jobs/<id>/ffmpeg-stderr`       | Yes    | Stored ffmpeg stderr of a failed conversion, as text                    |
 | `GET`  | `/paths`                         | Yes    | Path roots this daemon serves (routing, scan, audit, path-rewrite from) |
 | `GET`  | `/configs`                       | Yes    | Config mappings and status                                              |
-| `GET`  | `/metrics`                       | Yes    | Prometheus text exposition (key via `X-API-Key`, Bearer or Basic auth)  |
+| `GET`  | `/metrics`                       | Yes    | Prometheus text (`X-API-Key`/Bearer; Basic needs `daemon.basic-auth`)  |
 | `GET`  | `/api/metrics`                   | Yes    | Metrics JSON. Query: `?window=24h\|7d\|30d\|all` (PostgreSQL required)  |
 | `GET`  | `/stats`                         | Yes    | Job statistics by status                                                |
 | `GET`  | `/scan`                          | Yes    | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv`               |
@@ -398,7 +398,8 @@ Without credentials, `/health` returns only a minimal liveness view: `status`, `
 `jobs` (counts by status). The node id, `commit`, `active`/`waiting` job lists (media paths and job ids), worker
 count and hardware fields need a valid key. When no API key or basic auth is configured every caller is
 authenticated and gets the full view. `/metrics` requires the same credentials because its series carry the node
-id; point Prometheus at it with `authorization` (Bearer) or `basic_auth` in the scrape config.
+id; point Prometheus at it with `authorization` (Bearer) in the scrape config, or `basic_auth` when
+`daemon.basic-auth` is configured (an API-key-only daemon accepts only Bearer or `X-API-Key`).
 
 Both `/health` (with a key) and `/status` report the running build in two top-level fields:
 

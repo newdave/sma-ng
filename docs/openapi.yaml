@@ -315,7 +315,7 @@ paths:
   /metrics:
     get:
       summary: Prometheus metrics
-      description: Prometheus text exposition. Requires credentials (series carry the node id).
+      description: Prometheus text exposition. Requires credentials when an API key or basic auth is configured (series carry the node id).
       security:
         - apiKey: []
         - bearerToken: []
