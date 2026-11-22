@@ -1,0 +1,21 @@
+tests/test_handler.py
+  s_d73ac5e457a585::t_76355c21b585ed 3096-3122
+resources/daemon/routes.py
+  s_d73ac5e457a585::t_76355c21b585ed 125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "140f9459b7401b1354736982924a44fb2028995c",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
