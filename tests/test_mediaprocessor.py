@@ -4656,7 +4656,7 @@ class TestCleanupInput:
     mp._cleanup_input(str(src), delete=True)
     assert not sub.exists()
 
-  def test_recycle_exception_logged_not_raised(self, tmp_path):
+  def test_recycle_failure_keeps_original(self, tmp_path):
     mp = self._make_mp()
     recycle = tmp_path / "recycle"
     recycle.mkdir()
@@ -4664,9 +4664,24 @@ class TestCleanupInput:
     src = tmp_path / "input.mkv"
     src.write_bytes(b"data")
     with patch.object(mp, "_atomic_copy", side_effect=Exception("disk full")):
-      # Should not raise; the exception is logged
-      mp._cleanup_input(str(src), delete=True)
-    mp.log.exception.assert_called()
+      result = mp._cleanup_input(str(src), delete=True)
+    assert result is False
+    assert src.exists()
+    mp.log.warning.assert_called()
+    mp.log.exception.assert_not_called()
+    assert "\n" not in mp.log.warning.call_args[0][0]
+
+  def test_recycle_to_bin_returns_bool(self, tmp_path):
+    mp = self._make_mp()
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"data")
+    assert mp._recycle_to_bin(str(src)) is True  # no bin configured
+    recycle = tmp_path / "recycle"
+    mp.settings.recycle_bin = str(recycle)
+    assert mp._recycle_to_bin(str(src)) is True
+    assert (recycle / "input.mkv").exists()
+    with patch.object(mp, "_atomic_copy", side_effect=OSError("denied")):
+      assert mp._recycle_to_bin(str(src)) is False
 
 
 # ---------------------------------------------------------------------------
@@ -7015,7 +7030,7 @@ class TestCleanupInputDup:
     mp._cleanup_input(str(src), delete=True)
     assert not sub.exists()
 
-  def test_recycle_exception_logged_not_raised(self, tmp_path):
+  def test_recycle_failure_keeps_original(self, tmp_path):
     mp = self._make_mp()
     recycle = tmp_path / "recycle"
     recycle.mkdir()
@@ -7023,9 +7038,24 @@ class TestCleanupInputDup:
     src = tmp_path / "input.mkv"
     src.write_bytes(b"data")
     with patch.object(mp, "_atomic_copy", side_effect=Exception("disk full")):
-      # Should not raise; the exception is logged
-      mp._cleanup_input(str(src), delete=True)
-    mp.log.exception.assert_called()
+      result = mp._cleanup_input(str(src), delete=True)
+    assert result is False
+    assert src.exists()
+    mp.log.warning.assert_called()
+    mp.log.exception.assert_not_called()
+    assert "\n" not in mp.log.warning.call_args[0][0]
+
+  def test_recycle_to_bin_returns_bool(self, tmp_path):
+    mp = self._make_mp()
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"data")
+    assert mp._recycle_to_bin(str(src)) is True  # no bin configured
+    recycle = tmp_path / "recycle"
+    mp.settings.recycle_bin = str(recycle)
+    assert mp._recycle_to_bin(str(src)) is True
+    assert (recycle / "input.mkv").exists()
+    with patch.object(mp, "_atomic_copy", side_effect=OSError("denied")):
+      assert mp._recycle_to_bin(str(src)) is False
 
 
 # ---------------------------------------------------------------------------

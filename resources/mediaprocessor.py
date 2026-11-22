@@ -1062,12 +1062,13 @@ class MediaProcessor:
   def _recycle_to_bin(self, inputfile):
     """Copy inputfile to the recycle bin without deleting it.
 
-    No-op when recycle_bin is not configured or the file does not exist.
-    Call this before any operation that will overwrite the input path so
-    the original bytes are preserved before the path is replaced.
+    No-op (returns True) when recycle_bin is not configured or the file does
+    not exist. Returns False when the copy fails, so callers must keep the
+    original. Call this before any operation that will overwrite the input
+    path so the original bytes are preserved before the path is replaced.
     """
     if not self.settings.recycle_bin or not os.path.isfile(inputfile):
-      return
+      return True
     try:
       os.makedirs(self.settings.recycle_bin, exist_ok=True)
       recycle_dst = os.path.join(self.settings.recycle_bin, os.path.basename(inputfile))
@@ -1079,29 +1080,34 @@ class MediaProcessor:
           i += 1
       self._atomic_copy(inputfile, recycle_dst)
       self.log.info("Original file recycled to %s." % recycle_dst)
+      return True
     except KeyboardInterrupt:
       raise
-    except Exception:
-      self.log.exception("Failed to copy original to recycle bin %s." % self.settings.recycle_bin)
+    except Exception as e:
+      self.log.warning("Failed to copy original to recycle bin %s, keeping original: %s" % (self.settings.recycle_bin, " ".join(str(e).split())))
+      return False
 
   def _cleanup_input(self, inputfile, delete):
     """Copy inputfile to the recycle bin then unlink it and any staged subtitle files.
 
-    Returns True if the input file was deleted.
+    Returns True if the input file was deleted. The original is kept when a
+    recycle bin is configured and copying to it failed.
     Call this only after the output file has been successfully placed at its
     final destination so the original is never removed before the output is safe.
     """
-    if delete:
-      self._recycle_to_bin(inputfile)
+    recycled = self._recycle_to_bin(inputfile) if delete else True
 
     deleted = False
     if delete:
-      self.log.debug("Attempting to remove %s." % inputfile)
-      if self.removeFile(inputfile):
-        self.log.debug("%s deleted." % inputfile)
-        deleted = True
+      if not recycled:
+        self.log.warning("Not deleting %s: recycle bin copy failed." % inputfile)
       else:
-        self.log.error("Couldn't delete %s." % inputfile)
+        self.log.debug("Attempting to remove %s." % inputfile)
+        if self.removeFile(inputfile):
+          self.log.debug("%s deleted." % inputfile)
+          deleted = True
+        else:
+          self.log.error("Couldn't delete %s." % inputfile)
 
       for subfile in self.deletesubs:
         self.log.debug("Attempting to remove subtitle %s." % subfile)
