@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.39](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.38...sma-ng-v3.2.39) (2026-11-22)
+
+
+### Bug Fixes
+
+* output safety (recycle failure, stale outputs, bypass numbering, output verification) ([#227](https://github.com/newdave/sma-ng/issues/227)) ([e229180](https://github.com/newdave/sma-ng/commit/e229180e07ca6850264406267ccadac96ad30acf))
+
 ## [3.2.38](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.37...sma-ng-v3.2.38) (2026-11-22)
 
 
