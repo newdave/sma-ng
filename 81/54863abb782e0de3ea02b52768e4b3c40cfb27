@@ -1,0 +1,52 @@
+docs/docker-compose-quickstart.md
+  s_d73ac5e457a585::t_b50766d8b23cbe 161
+.mise/tasks/cluster/_default
+  s_d73ac5e457a585::t_f4b9286e3cbf53 1-44
+docs/daemon.md
+  s_d73ac5e457a585::t_cfe3e19a71db13 1015-1018
+docs/cluster-operations.md
+  s_d73ac5e457a585::t_cfe3e19a71db13 45,54,120-121,149,171-172,175,186,190-191,210,217-219,221,225,263
+  s_d73ac5e457a585::t_b50766d8b23cbe 37,46-48,53,56
+.mise/tasks/test/_default
+  s_d73ac5e457a585::t_f4b9286e3cbf53 1-5
+.mise/shared/deploy/cluster_upgrade.sh
+  s_d73ac5e457a585::t_f4b9286e3cbf53 1-110
+.mise/shared/deploy/cluster_action.sh
+  s_d73ac5e457a585::t_f4b9286e3cbf53 2
+.mise/shared/deploy/lib/node_running_jobs.py
+  s_d73ac5e457a585::t_f4b9286e3cbf53 3
+.mise/shared/deploy/cluster_compose.sh
+  s_d73ac5e457a585::t_f4b9286e3cbf53 2
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_cfe3e19a71db13 411
+docs/deployment.md
+  s_d73ac5e457a585::t_b50766d8b23cbe 393-401,412
+  s_d73ac5e457a585::t_cfe3e19a71db13 186,338-339,413,415,422,427,433-434,449
+  s_d73ac5e457a585::t_fc4d5c48c2addb 35-37,402-404
+docs/README.md
+  s_d73ac5e457a585::t_cfe3e19a71db13 1045-1046,1100-1101
+  s_d73ac5e457a585::t_b50766d8b23cbe 1116-1117
+  s_d73ac5e457a585::t_fc4d5c48c2addb 938,940-941
+tests/test_deploy_tasks.py
+  s_d73ac5e457a585::t_fc8cec3887b42f 108-121,161-163,173,177-178,779-781,791-793,796,800-804
+  s_d73ac5e457a585::t_270cc145395e67 782-790
+  s_d73ac5e457a585::t_ace3ae6d709b1f 805
+.mise/shared/deploy/cluster_reload.sh
+  s_d73ac5e457a585::t_11e548fd6e9540 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "8154863abb782e0de3ea02b52768e4b3c40cfb27",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
