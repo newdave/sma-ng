@@ -1,0 +1,56 @@
+resources/daemon/config.py
+  s_d73ac5e457a585::t_c078b7d9be5f27 306
+resources/daemon/db.py
+  s_d73ac5e457a585::t_c078b7d9be5f27 583-594,1431-1439
+  s_d73ac5e457a585::t_90158603eb8f38 1440-1443
+tests/test_daemon.py
+  s_d73ac5e457a585::t_07c945ee1bddbf 133-149
+docs/configuration.md
+  s_d73ac5e457a585::t_aa3613d828ac52 82
+tests/test_db_job_kinds.py
+  s_d73ac5e457a585::t_1c7d8721dfae83 182-186,188-206
+  s_d73ac5e457a585::t_27d473f14ceccd 187
+tests/test_queueing.py
+  s_d73ac5e457a585::t_1c7d8721dfae83 4-5,9,46-68
+resources/daemon/queueing.py
+  s_d73ac5e457a585::t_c078b7d9be5f27 13-14,52-64
+resources/daemon/threads.py
+  s_d73ac5e457a585::t_c078b7d9be5f27 8,309-312
+resources/config_schema.py
+  s_d73ac5e457a585::t_aa3613d828ac52 969
+docs/openapi.yaml
+  s_d73ac5e457a585::t_b7b9f0b8b99d22 821,861
+  s_d73ac5e457a585::t_aa3613d828ac52 422
+setup/sma-ng.yml.sample
+  s_d73ac5e457a585::t_c6a8b53e9ca8ac 21
+tests/test_config_schema.py
+  s_d73ac5e457a585::t_07c945ee1bddbf 11,84-92
+  s_d73ac5e457a585::t_c528fc4e9f00b6 93
+tests/test_sqlite_db.py
+  s_d73ac5e457a585::t_1c7d8721dfae83 566-575
+resources/daemon/handler.py
+  s_d73ac5e457a585::t_c078b7d9be5f27 20,227,1616-1621,1696-1703,1705
+docs/daemon.md
+  s_d73ac5e457a585::t_aa3613d828ac52 345,565-567,574-578
+tests/test_handler.py
+  s_d73ac5e457a585::t_1c7d8721dfae83 3110-3147
+tests/test_threads.py
+  s_d73ac5e457a585::t_aa178370588404 1278
+  s_d73ac5e457a585::t_07c945ee1bddbf 1265-1277,1279-1281
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "3ab952352ba490b3b028ae1cecdf43ef9d06e9f7",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
