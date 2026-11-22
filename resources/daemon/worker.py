@@ -886,7 +886,9 @@ class ConversionWorker(threading.Thread):
     # Stash the LAST attempt's failure_class so process_job can hand a
     # specific cause to fail_job/categorize_failure. On success this is
     # None; on failure it carries the precise ffmpeg classification.
-    if attempts and isinstance(attempts[-1], dict):
+    # A failed copy_fallback run (output-larger-than-input) keeps the
+    # re-encode and the job goes on to succeed, so it never sets the cause.
+    if attempts and isinstance(attempts[-1], dict) and not payload.get("copy_fallback"):
       self._last_attempt_failure_class = attempts[-1].get("failure_class")
     # Capture the final encoder used (after any hw_alt / full_sw swaps)
     # so the worker can label Prometheus counters + persist the column.

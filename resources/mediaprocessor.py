@@ -1091,18 +1091,23 @@ class MediaProcessor:
     interrupted = False
     copy_input = inputfile
     t0 = time.time()
+    self._last_stderr_sidecar = None
+    self._copy_fallback_active = True
     try:
       copy_output, inputfile, _ = self._run_ffmpeg(inputfile, copy_options, copy_preopts, copy_postopts, [], downloaded_subs, reportProgress, progressOutput)
-    except KeyboardInterrupt:
-      interrupted = True
-      raise
     except Exception:
       self.log.exception("Video copy fallback failed [output-larger-than-input].")
+    except BaseException:  # KeyboardInterrupt, or SIGTERM raised as a BaseException
+      interrupted = True
+      raise
     finally:
-      if not copy_output:  # also on KeyboardInterrupt: never leave the result at <out>.larger
+      self._copy_fallback_active = False
+      if not copy_output:  # also on interrupt: never leave the result at <out>.larger
         if interrupted and not self.settings.temp_extension:
           self._remove_interrupted_copy_partial(copy_input, outputfile, t0)
         restored = self._restore_aside(aside, outputfile)
+        if not interrupted:
+          self._remove_copy_fallback_sidecar()
     if not copy_output:
       self.log.warning("Video copy fallback produced no output; keeping the larger re-encode [output-larger-than-input].")
       return restored, inputfile, ripped_subs
@@ -1170,20 +1175,32 @@ class MediaProcessor:
       copy_postopts.extend(["-tag:v", tag])
     return copy_options, copy_preopts, copy_postopts
 
+  def _remove_copy_fallback_sidecar(self):
+    """Delete the stderr sidecar a failed copy run wrote; the job keeps the re-encode and succeeds."""
+    sidecar = getattr(self, "_last_stderr_sidecar", None)
+    self._last_stderr_sidecar = None
+    if not sidecar:
+      return
+    try:
+      os.remove(sidecar)
+    except OSError:
+      self.log.debug("Unable to remove the video copy stderr sidecar [output-larger-than-input].")
+
   def _remove_interrupted_copy_partial(self, copy_input, outputfile, t0):
     """Remove the partial an interrupted copy run (no temp-extension) left behind.
 
     Only files written since the copy run started (``t0``) are touched, so a
     file another worker wrote earlier survives. The copy run's own target can
     differ from outputfile (in-place mp4 reads x.mp4.original and writes
-    x.mp4.mp4), so both paths are checked.
+    x.mp4.mp4); then only that target is checked, because a file at
+    outputfile was written by someone else.
     """
     candidates = [outputfile]
     try:
       input_dir, filename, input_extension = self.parseFile(copy_input)
       target, _ = self.getOutputFile(input_dir, filename, input_extension)
       if target and os.path.abspath(target) != os.path.abspath(outputfile):
-        candidates.append(target)
+        candidates = [target]
     except Exception:
       self.log.debug("Unable to determine the video copy output path [output-larger-than-input].")
     for path in candidates:
@@ -5023,6 +5040,10 @@ class MediaProcessor:
         for r in records
       ],
     }
+    if getattr(self, "_copy_fallback_active", False):
+      # The output-larger-than-input copy run: a failure here keeps the
+      # re-encode, so the worker must not attribute it to the job.
+      payload["copy_fallback"] = True
     self.log.info(json.dumps(payload, sort_keys=True))
 
   def _write_ffmpeg_stderr_sidecar(self, e):
@@ -5081,6 +5102,7 @@ class MediaProcessor:
         f.write(e.output)
         if not e.output.endswith("\n"):
           f.write("\n")
+      self._last_stderr_sidecar = sidecar
       return sidecar
     except Exception:
       self.log.debug("Could not write ffmpeg stderr sidecar.", exc_info=True)

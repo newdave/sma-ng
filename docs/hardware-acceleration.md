@@ -263,6 +263,11 @@ The first attempt in `ffmpeg.attempts` is labelled `copy` for a stream-copy vide
 encoder with no hardware decode, and `hw` otherwise. `copy` and `sw` are labels only, not fallbacks; later tiers
 are `hw_alt`, `sw_decode_hw_encode`, `sw_decode` and `full_sw`.
 
+A job that uses the output-larger-than-input copy fallback (see the troubleshooting guide) emits two
+`ffmpeg.attempts` lines: one for the re-encode and one for the copy run, which carries `"copy_fallback": true`. The
+copy run's line counts toward the `fallback` counters, but a failed copy run never sets the job's failure cause,
+because the job keeps the re-encode and succeeds.
+
 ### `fallback-policy` (replaces the deprecated boolean `software-fallback`)
 
 `base.converter.fallback-policy` selects how far the hardware → software

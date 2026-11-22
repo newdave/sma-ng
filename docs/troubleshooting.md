@@ -393,10 +393,12 @@ The fallback does not fire, and the larger re-encode is kept, when:
 - the source codec is not in `video-codec` (for example XviD or AV1 converted to H.264);
 - the source codec cannot be stream-copied into MP4 (VC-1/WMV, MS-MPEG4, RealVideo, Theora, FLV, or any AVI source).
 
-If the copy run fails or is interrupted, the larger re-encode is kept so the job still produces an output. Only the
-copy run's own partial output is removed. A file that another job wrote to the output name meanwhile is never deleted
-or overwritten: the re-encode is restored under a numbered name instead (for example `name.2.mp4`) and the log line
-names it. Same-family re-encodes (for
+If the copy run fails or is interrupted (including by SIGTERM), the larger re-encode is kept so the job still
+produces an output. Only the copy run's own partial output is removed, and only a file written since the copy run
+started. When the copy run writes to a different name (an in-place MP4 copy writes `name.mp4.mp4`), a file that
+appears at the output name meanwhile is left alone. Such a file is not overwritten: the re-encode is restored under
+a numbered name instead (for example `name.2.mp4`) and the log line names it. A failed copy run's stderr sidecar is
+removed, because the job still succeeds. Same-family re-encodes (for
 example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
 
 - Lower the `crf` value (lower CRF = higher quality = larger file; raise it to reduce size)

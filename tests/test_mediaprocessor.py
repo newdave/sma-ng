@@ -9751,9 +9751,59 @@ class TestOutputLargerThanInput:
     mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
     mp._run_ffmpeg = MagicMock(side_effect=[(str(big), str(src), []), (None, str(src), [])])
     result = mp.process(str(src), info=self._info())
+    assert mp._run_ffmpeg.call_count == 2
     assert result["output"] == str(big)
     assert big.read_bytes() == b"y" * 120
     assert result["options"]["video"]["codec"] == "hevc_qsv"
+
+  def test_failed_copy_fallback_removes_its_stderr_sidecar(self, tmp_path, monkeypatch):
+    # The job succeeds with the re-encode, so the worker never ingests the
+    # copy run's sidecar; it must not be left behind.
+    from converter.ffmpeg import FFMpegConvertError
+
+    stderr_dir = tmp_path / "stderr"
+    monkeypatch.setattr("resources.daemon.constants.FFMPEG_STDERR_DIR", str(stderr_dir))
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+    emitted = []
+
+    def run(*a):
+      if not list(tmp_path.glob("*.larger*")):
+        mp._emit_attempt_log([], "ok")
+        return str(big), str(src), []
+      mp._emit_attempt_log([], "failed")
+      assert mp._write_ffmpeg_stderr_sidecar(FFMpegConvertError("Exited with code 1", "ffmpeg -i x", "boom"))
+      return None, str(src), []
+
+    mp._run_ffmpeg = run
+    mp.log.info.side_effect = lambda msg, *a: emitted.append(msg)
+    result = mp.process(str(src), info=self._info())
+    assert result["output"] == str(big)
+    assert list(stderr_dir.iterdir()) == []
+    attempts = [json.loads(m) for m in emitted if isinstance(m, str) and m.startswith("{") and "ffmpeg.attempts" in m]
+    assert [a.get("copy_fallback", False) for a in attempts] == [False, True]
+
+  def test_terminated_copy_removes_partial_and_restores_larger_output(self, tmp_path):
+    # SIGTERM reaches the copy run as a non-KeyboardInterrupt BaseException.
+    class Terminated(BaseException):
+      pass
+
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+
+    def run(*a):
+      if not list(tmp_path.glob("*.larger*")):
+        return str(big), str(src), []
+      big.write_bytes(b"p")  # partial copy
+      raise Terminated()
+
+    mp._run_ffmpeg = run
+    with pytest.raises(Terminated):
+      mp.process(str(src), info=self._info())
+    assert big.read_bytes() == b"y" * 120
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["in.mkv", "in.mp4"]
 
   def test_interrupted_copy_restores_larger_output(self, tmp_path):
     mp = self._mp()
@@ -9889,6 +9939,33 @@ class TestOutputLargerThanInput:
       mp.process(str(original), info=self._info())
     assert big.read_bytes() == b"y" * 120
     assert sorted(p.name for p in tmp_path.iterdir()) == ["x.mp4", "x.mp4.original"]
+
+  def test_interrupted_in_place_copy_keeps_foreign_file_at_output(self, tmp_path):
+    # In-place mp4: the copy writes x.mp4.mp4, so a file that appears at
+    # x.mp4 during the copy run belongs to someone else and is never deleted.
+    mp = self._mp()
+    src = tmp_path / "x.mp4"
+    original = tmp_path / "x.mp4.original"
+    original.write_bytes(b"x" * 100)
+    big = tmp_path / "x.mp4"
+    big.write_bytes(b"y" * 120)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+
+    def run(*a):
+      if not list(tmp_path.glob("*.larger*")):
+        return str(big), str(original), []
+      (tmp_path / "x.mp4.mp4").write_bytes(b"p")
+      big.write_bytes(b"f")  # foreign file at the re-encode's name
+      raise KeyboardInterrupt()
+
+    mp._run_ffmpeg = run
+    with pytest.raises(KeyboardInterrupt):
+      mp.process(str(original), info=self._info())
+    assert big.read_bytes() == b"f"
+    assert not (tmp_path / "x.mp4.mp4").exists()
+    assert not list(tmp_path.glob("*.larger*"))
+    restored = [p for p in tmp_path.iterdir() if p.read_bytes() == b"y" * 120]
+    assert len(restored) == 1
 
   def test_restore_blocked_by_existing_file_numbers_output(self, tmp_path):
     mp = self._mp()
