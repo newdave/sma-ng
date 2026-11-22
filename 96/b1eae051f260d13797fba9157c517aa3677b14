@@ -1,0 +1,23 @@
+AGENTS.md
+  s_d73ac5e457a585::t_60410d8ec3ade4 109-110
+CLAUDE.md
+  s_d73ac5e457a585::t_221468d29cbd44 193-194
+  s_d73ac5e457a585::t_cff42c87718e1a 189,195
+  s_d73ac5e457a585::t_254abafcad1f88 234,236-237,240,242,244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "96b1eae051f260d13797fba9157c517aa3677b14",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
