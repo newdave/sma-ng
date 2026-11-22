@@ -1,0 +1,35 @@
+converter/avcodecs.py
+  s_d73ac5e457a585::t_b8b5dfbee26eba 455-459,1555-1572,1589,1756,2079,2225,2449,2456-2470
+tests/test_avcodecs.py
+  s_d73ac5e457a585::t_be32439d623b7f 583-609,611-612
+  s_d73ac5e457a585::t_34eeef03a687f0 19,24-25
+  s_d73ac5e457a585::t_5b398b10a08e00 610
+tests/test_mediaprocessor.py
+  s_d73ac5e457a585::t_e9d1548dd4e3fb 1707-1709
+  s_d73ac5e457a585::t_db74fb54b794fc 1531-1533,1536,1544-1548,1670-1706,1710-1731,1736-1829
+  s_d73ac5e457a585::t_e91d83cd48c97a 1732-1735
+  s_d73ac5e457a585::t_ff6c30121aa564 8909-8917
+  s_d73ac5e457a585::t_8d6d333954f9a8 1830-1831
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_b8b5dfbee26eba 446,701,718-722,1030,2441-2442,2444,2520,2779-2781,2783-2797,4098-4108
+  s_d73ac5e457a585::t_3e3a004010f790 2782
+  s_d73ac5e457a585::t_b617dd315a7337 4109
+docs/configuration.md
+  s_d73ac5e457a585::t_5321d216d4167b 980-992
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "1ab4d054195cf4ccdf67a17c7583186fdd188f57",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
