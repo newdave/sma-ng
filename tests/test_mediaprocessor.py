@@ -1,6 +1,7 @@
 """Tests for resources/mediaprocessor.py - core processing logic."""
 
 import json
+import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -9508,7 +9509,8 @@ class TestOutputLargerThanInput:
     assert big.read_bytes() == b"y" * 120
     assert not list(tmp_path.glob("*.larger*"))
 
-  def test_restore_blocked_by_existing_file_is_logged_not_overwritten(self, tmp_path):
+  def test_interrupted_copy_with_partial_output_restores_larger_output(self, tmp_path):
+    # No temp-extension: the interrupted copy run leaves its partial at the output path.
     mp = self._mp()
     src, big = self._files(tmp_path)
     mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
@@ -9516,15 +9518,74 @@ class TestOutputLargerThanInput:
     def run(*a):
       if not list(tmp_path.glob("*.larger*")):
         return str(big), str(src), []
-      big.write_bytes(b"q")  # a partial file now occupies the output path
+      big.write_bytes(b"p")  # partial copy
+      raise KeyboardInterrupt()
+
+    mp._run_ffmpeg = run
+    with pytest.raises(KeyboardInterrupt):
+      mp.process(str(src), info=self._info())
+    assert big.read_bytes() == b"y" * 120
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["in.mkv", "in.mp4"]
+
+  def test_failed_copy_partial_output_removed_and_larger_restored(self, tmp_path):
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+
+    def run(*a):
+      if not list(tmp_path.glob("*.larger*")):
+        return str(big), str(src), []
+      big.write_bytes(b"p")  # partial copy left by the failed run
       return None, str(src), []
 
     mp._run_ffmpeg = run
     result = mp.process(str(src), info=self._info())
-    assert result["output"] == str(tmp_path / "in.mp4.larger")  # the real re-encode, not the squatter
+    assert result["output"] == str(big)
+    assert big.read_bytes() == b"y" * 120
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["in.mkv", "in.mp4"]
+
+  def test_restore_blocked_by_existing_file_numbers_output(self, tmp_path):
+    mp = self._mp()
+    mp.removeFile = MagicMock(return_value=False)  # the file at the output path cannot be removed
+    src, big = self._files(tmp_path)
+    mp.generateOptions.return_value = (self._options(str(src)), [], [], [], [])
+
+    def run(*a):
+      if not list(tmp_path.glob("*.larger*")):
+        return str(big), str(src), []
+      big.write_bytes(b"q")  # a file now occupies the output path
+      return None, str(src), []
+
+    mp._run_ffmpeg = run
+    result = mp.process(str(src), info=self._info())
+    numbered = tmp_path / "in.2.mp4"
+    assert result["output"] == str(numbered)  # the real re-encode, never <out>.larger
+    assert result["output_extension"] == "mp4"
     assert big.read_bytes() == b"q"
-    assert (tmp_path / "in.mp4.larger").read_bytes() == b"y" * 120
-    assert any("[output-larger-than-input]" in w and "in.mp4.larger" in w for w in self._warnings(mp))
+    assert numbered.read_bytes() == b"y" * 120
+    assert not list(tmp_path.glob("*.larger*"))
+    warned = [w for w in self._warnings(mp) if "[output-larger-than-input]" in w and "in.2.mp4" in w]
+    assert len(warned) == 1 and "\n" not in warned[0]
+
+  def test_copy_remove_failure_keeps_copy(self, tmp_path):
+    # The larger copy holds the output name and cannot be removed: keep it, drop the re-encode.
+    mp = self._mp()
+    src, big = self._files(tmp_path)
+    real_remove = os.remove
+
+    def remove(path, *a, **k):
+      if path == str(big):
+        return False
+      real_remove(path)
+      return True
+
+    mp.removeFile = remove
+    result, _ = self._run(mp, src, big, self._info(), self._options(str(src)), copy_size=150)
+    assert result["output"] == str(big)
+    assert big.read_bytes() == b"z" * 150
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["in.mkv", "in.mp4"]
+    assert result["options"]["video"]["codec"] == "copy"
+    assert any("[output-larger-than-input]" in w and "Unable to remove" in w for w in self._warnings(mp))
 
   def test_aside_remove_failure_logged(self, tmp_path):
     mp = self._mp()
@@ -9532,3 +9593,44 @@ class TestOutputLargerThanInput:
     src, big = self._files(tmp_path)
     self._run(mp, src, big, self._info(), self._options(str(src)))
     assert any("[output-larger-than-input]" in w and "in.mp4.larger" in w for w in self._warnings(mp))
+
+
+class TestOutputLargerThanInputMarkers:
+  """Real generateOptions markers decide the larger-output fallback [output-larger-than-input]."""
+
+  def _generate(self, tmp_yaml, make_media_info, marker):
+    profiles = [{"source_kbps": 0, "target": 2000, "maxrate": 3000}] if marker == "crf-profile" else []
+    mp = TestBitrateProfileIntegration()._make_mp(tmp_yaml, vbitrate_profiles=profiles)
+    mp.settings.vprofile = []
+    if marker == "max-width":
+      mp.settings.vwidth = 1280
+    info = make_media_info(video_codec="h264", video_bitrate=5000000, total_bitrate=5128000, audio_bitrate=128000)
+    burn = "subtitles=/fake/input.mkv:si=0" if marker == "burn-subtitles" else None
+    with (
+      patch("resources.mediaprocessor.Converter.encoder", return_value=None),
+      patch("resources.mediaprocessor.Converter.codec_name_to_ffprobe_codec_name", side_effect=lambda c: c),
+      patch.object(mp.subtitles, "burnSubtitleFilter", return_value=burn),
+    ):
+      options, preopts, postopts, *_ = mp.generateOptions("/fake/input.mkv", info=info)
+    return mp, info, options, preopts, postopts
+
+  @pytest.mark.parametrize("marker,falls_back", [("burn-subtitles", False), ("max-width", False), ("crf-profile", True)])
+  def test_generated_marker_decides_fallback(self, tmp_path, tmp_yaml, make_media_info, marker, falls_back):
+    mp, info, options, preopts, postopts = self._generate(tmp_yaml, make_media_info, marker)
+    assert options["video"]["codec"] != "copy"
+    assert "." + marker in options["video"]["debug"]
+    src = tmp_path / "in.mkv"
+    src.write_bytes(b"x" * 100)
+    big = tmp_path / "in.mp4"
+    big.write_bytes(b"y" * 120)
+    options["source"] = [str(src)]
+
+    def copy_run(inputfile, opts, *a):
+      big.write_bytes(b"z" * 80)
+      return str(big), inputfile, []
+
+    mp._run_ffmpeg = MagicMock(side_effect=copy_run)
+    out, _, _ = mp._fallback_to_copy_if_larger(str(big), str(src), [], info, options, preopts, postopts, [], None, False)
+    assert out == str(big)
+    assert mp._run_ffmpeg.call_count == (1 if falls_back else 0)
+    assert big.read_bytes() == (b"z" * 80 if falls_back else b"y" * 120)

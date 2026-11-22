@@ -378,7 +378,9 @@ The fallback does not fire, and the larger re-encode is kept, when:
 - the source codec is not in `video-codec` (for example XviD or AV1 converted to H.264);
 - the source codec cannot be stream-copied into MP4 (VC-1/WMV, MS-MPEG4, RealVideo, Theora, FLV, or any AVI source).
 
-If the copy run fails, the larger re-encode is kept so the job still produces an output. Same-family re-encodes (for
+If the copy run fails or is interrupted, its partial output is removed and the larger re-encode is kept so the job
+still produces an output. If the output name is still taken, the re-encode is restored under a numbered name (for
+example `name.2.mp4`) and the log line names it; an existing file is never overwritten. Same-family re-encodes (for
 example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
 
 - Lower the `crf` value (lower CRF = higher quality = larger file; raise it to reduce size)

@@ -1065,6 +1065,10 @@ class MediaProcessor:
       self.log.exception("Video copy fallback failed [output-larger-than-input].")
     finally:
       if not copy_output:  # also on KeyboardInterrupt: never leave the result at <out>.larger
+        # outputfile was free before the copy run, so anything there now is
+        # its partial output (no temp-extension, or an interrupt).
+        if os.path.exists(outputfile) and not self.removeFile(outputfile, retries=0):
+          self.log.warning("Unable to remove the partial video copy %s [output-larger-than-input]." % outputfile)
         restored = self._restore_aside(aside, outputfile)
     if not copy_output:
       self.log.warning("Video copy fallback produced no output; keeping the larger re-encode [output-larger-than-input].")
@@ -1074,11 +1078,12 @@ class MediaProcessor:
       copy_size = os.path.getsize(copy_output)
     except OSError:
       copy_size = out_size + 1
-    if copy_size > out_size:
+    if copy_size > out_size and self.removeFile(copy_output):
       self.log.warning("Video copy %d bytes and re-encode %d bytes are both larger than input %d bytes; keeping the smaller re-encode [output-larger-than-input]." % (copy_size, out_size, in_size))
-      self.removeFile(copy_output)
       return self._restore_aside(aside, outputfile), inputfile, ripped_subs
-    if copy_size > in_size:
+    if copy_size > out_size:
+      self.log.warning("Unable to remove the larger video copy %s (%d bytes, re-encode %d bytes, input %d bytes); keeping it [output-larger-than-input]." % (copy_output, copy_size, out_size, in_size))
+    elif copy_size > in_size:
       self.log.warning("Video copy %d bytes and re-encode %d bytes are both larger than input %d bytes; keeping the smaller video copy [output-larger-than-input]." % (copy_size, out_size, in_size))
     if not self.removeFile(aside):
       self.log.warning("Unable to remove the larger re-encode %s [output-larger-than-input]." % aside)
@@ -1147,16 +1152,25 @@ class MediaProcessor:
     return aside
 
   def _restore_aside(self, aside, outputfile):
-    """Move the larger re-encode back to outputfile without overwriting; return where it now lives."""
-    if os.path.exists(outputfile):
-      self.log.warning("Cannot restore the larger re-encode: %s exists; it stays at %s [output-larger-than-input]." % (outputfile, aside))
-      return aside
+    """Move the larger re-encode back to outputfile, or a free numbered name, never overwriting; return where it now lives."""
+    target = outputfile
+    if os.path.exists(target):
+      output_dir, name = os.path.split(outputfile)
+      filename, ext = os.path.splitext(name)
+      i = 2
+      while target and os.path.exists(target):
+        target, _ = self.getOutputFile(output_dir, filename, ext, temp_extension=ext[1:], ignore_output_dir=True, number=i)
+        i += 1
+      if not target:
+        self.log.warning("Cannot restore the larger re-encode: %s exists; it stays at %s [output-larger-than-input]." % (outputfile, aside))
+        return aside
+      self.log.warning("Cannot restore the larger re-encode to %s: it exists; restoring it as %s instead [output-larger-than-input]." % (outputfile, target))
     try:
-      os.rename(aside, outputfile)
+      os.rename(aside, target)
     except OSError:
-      self.log.warning("Unable to restore the larger re-encode %s to %s [output-larger-than-input]." % (aside, outputfile))
+      self.log.warning("Unable to restore the larger re-encode %s to %s [output-larger-than-input]." % (aside, target))
       return aside
-    return outputfile
+    return target
 
   def _run_ffmpeg(self, inputfile, options, preopts, postopts, ripsubopts, downloaded_subs, reportProgress, progressOutput):
     """Log options, rip external subs, run FFmpeg conversion.
