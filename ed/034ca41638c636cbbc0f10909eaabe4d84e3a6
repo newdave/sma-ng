@@ -1,0 +1,33 @@
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_9ebb6bedaa7f5b 337-343,345-347
+tests/test_failure_categorization.py
+  s_d73ac5e457a585::t_a94d3b2d0acdd9 78-81
+tests/test_worker.py
+  s_d73ac5e457a585::t_3861db148f0ddd 862-888
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_40ab4f0c8daa13 713-714,723,1002-1005,1061-1079,1096,1102,1108,1111
+tests/test_mediaprocessor.py
+  s_d73ac5e457a585::t_3861db148f0ddd 3669-3672,3677-3679,3682-3705,3712-3713,3719-3745
+resources/daemon/worker.py
+  s_d73ac5e457a585::t_40ab4f0c8daa13 440,600-601,837-838,871-887
+  s_d73ac5e457a585::t_9ebb6bedaa7f5b 17
+  s_d73ac5e457a585::t_e7734e9c6f7110 888
+resources/processor/failures.py
+  s_d73ac5e457a585::t_40ab4f0c8daa13 489-492,549,568
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "ed034ca41638c636cbbc0f10909eaabe4d84e3a6",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
