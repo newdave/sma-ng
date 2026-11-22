@@ -991,9 +991,24 @@ class MediaProcessor:
     if outputfile == inputfile:
       if self.settings.output_dir:
         try:
-          outputfile = os.path.join(self.settings.output_dir, os.path.split(inputfile)[1])
+          # Never overwrite a file already in output_dir: number the copy instead
+          # (name.2.ext), keeping the input's own extension.
+          _dir, bypass_name, bypass_ext = self.parseFile(inputfile)
+          target, _ = self.getOutputFile(os.path.dirname(inputfile), bypass_name, bypass_ext, temp_extension=bypass_ext)
+          if target is None:
+            raise OSError("Unable to determine output path in %s" % self.settings.output_dir)
+          i = 2
+          while os.path.exists(target):
+            target, _ = self.getOutputFile(os.path.dirname(inputfile), bypass_name, bypass_ext, temp_extension=bypass_ext, number=i)
+            i += 1
+          if target != os.path.join(self.settings.output_dir, os.path.split(inputfile)[1]):
+            self.log.warning(
+              "%s already exists in the output directory; copying the bypassed file to %s instead of replacing it [output-collision]."
+              % (os.path.join(self.settings.output_dir, os.path.split(inputfile)[1]), target)
+            )
+          outputfile = target
           self.log.debug("Outputfile set to %s." % outputfile)
-          shutil.copy(inputfile, outputfile)
+          self._atomic_copy(inputfile, outputfile)
         except KeyboardInterrupt:
           raise
         except Exception:

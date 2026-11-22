@@ -3651,6 +3651,26 @@ class TestProcess:
     # outputfile should be in output_dir
     assert str(output_dir) in result["output"]
 
+  def test_bypass_with_output_dir_never_overwrites_existing(self, tmp_path):
+    mp = self._make_mp()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    mp.settings.output_dir = str(output_dir)
+    mp.settings.permissions = {"chmod": 0o664}
+    src = tmp_path / "movie.mp4"
+    src.write_bytes(b"new")
+    existing = output_dir / "movie.mp4"
+    existing.write_bytes(b"precious")
+    mp.isValidSource = MagicMock(return_value=MagicMock())
+    mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    mp.generateOptions = MagicMock(return_value=({"video": {}, "audio": []}, [], [], [], []))
+    mp.canBypassConvert = MagicMock(return_value=True)
+    mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
+    result = mp.process(str(src))
+    assert existing.read_bytes() == b"precious"
+    assert result["output"] == str(output_dir / "movie.2.mp4")
+    assert (output_dir / "movie.2.mp4").read_bytes() == b"new"
+
   def test_options_empty_returns_none(self):
     mp = self._make_mp()
     info = MagicMock()
