@@ -1717,10 +1717,7 @@ class TestUnknownSourceBitrateEncoderFamilies:
     assert options is not None
     video = options["video"]
     encoder = next(c for c in video_codec_list if c.codec_name == video["codec"])()
-    opts = dict(video)
-    # Vp9Codec/AV1Codec parse framedata unconditionally; the mock source carries none.
-    opts["framedata"] = opts.get("framedata") or {}
-    return video, encoder.parse_options(opts)
+    return video, encoder.parse_options(dict(video))
 
   @staticmethod
   def _value(args, flag):

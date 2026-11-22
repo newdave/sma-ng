@@ -2311,7 +2311,7 @@ class Vp9Codec(VideoCodec):
   color_space = {"bt2020nc": 9, "bt709": 1}
 
   def _codec_specific_parse_options(self, safe, stream=0):
-    framedata = safe["framedata"]
+    framedata = safe.get("framedata") or {}
     if "color_primaries" in framedata and self.color_primaries.get(framedata["color_primaries"]):
       safe["color_primaries"] = self.color_primaries.get(framedata["color_primaries"])
     if "color_transfer" in framedata and self.color_transfer.get(framedata["color_transfer"]):
