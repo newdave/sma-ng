@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from functools import partial
 
 from resources.daemon import job_kinds, metrics_prom
 from resources.daemon.constants import FFMPEG_STDERR_DIR, SCRIPT_DIR, resolve_node_id
@@ -56,6 +57,8 @@ TERMINAL_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
 # After stop() the stop event no longer waits; keep a short real pause so the
 # retries still space out without delaying shutdown past its grace.
 SHUTDOWN_RETRY_BACKOFF_CAP_SECONDS = 0.25
+# Returned by _terminal_write when every attempt failed and the write was parked.
+_PARKED = object()
 # Consecutive pre-start errors (claim, then DB/lock error before the conversion
 # starts) that requeue a job; the next one fails it so a poison job cannot loop.
 MAX_PRE_START_REQUEUES = 3
@@ -473,6 +476,8 @@ class ConversionWorker(threading.Thread):
         if self.pool is not None:
           self.pool.notify_one()
         self.process_job(job)
+        # A write parked by that job must land before the next claim, not after the next conversion.
+        self._flush_pending_release()
       else:
         break
 
@@ -602,14 +607,19 @@ class ConversionWorker(threading.Thread):
         metrics_prom.record_job_terminal("cancelled", elapsed)
       elif abort_reason == ABORT_TIMEOUT:
         cat = categorize_failure(WORKER_CAUSE_TIMEOUT).value
-        updated = self.job_db.fail_job(
+        updated = self._terminal_write(
           job_id,
-          "Job timed out after %ds" % self.job_timeout_seconds,
-          failure_category=cat,
-          failure_cause=WORKER_CAUSE_TIMEOUT,
-          **self._owner_kwargs(),
-          telemetry=self._job_telemetry,
-          source_duration_seconds=source_duration_secs,
+          "timeout failure",
+          partial(
+            self.job_db.fail_job,
+            job_id,
+            "Job timed out after %ds" % self.job_timeout_seconds,
+            failure_category=cat,
+            failure_cause=WORKER_CAUSE_TIMEOUT,
+            **self._owner_kwargs(),
+            telemetry=self._job_telemetry,
+            source_duration_seconds=source_duration_secs,
+          ),
         )
         self._log_discarded(job_id, updated, "timeout failure")
         self._ingest_ffmpeg_stderr_sidecars(job_id)
@@ -625,15 +635,21 @@ class ConversionWorker(threading.Thread):
             output_size = os.path.getsize(stat_target)
           except OSError:
             self.log.warning("Could not stat output file for job %d: %s" % (job_id, stat_target))
-        updated = self.job_db.complete_job(
+        # Retried and parked, never raised: a DB error here must not fail or re-run a finished conversion.
+        updated = self._terminal_write(
           job_id,
-          input_size=input_size,
-          output_size=output_size,
-          source_duration_seconds=source_duration_secs,
-          encoder_backend=self._last_encoder_backend,
-          encoder_name=self._last_encoder_name,
-          **self._owner_kwargs(),
-          telemetry=self._job_telemetry,
+          "completion",
+          partial(
+            self.job_db.complete_job,
+            job_id,
+            input_size=input_size,
+            output_size=output_size,
+            source_duration_seconds=source_duration_secs,
+            encoder_backend=self._last_encoder_backend,
+            encoder_name=self._last_encoder_name,
+            **self._owner_kwargs(),
+            telemetry=self._job_telemetry,
+          ),
         )
         if updated is False:
           self._log_discarded(job_id, updated, "completion")
@@ -663,14 +679,19 @@ class ConversionWorker(threading.Thread):
             message += ": killed by signal %d (exit code %d)" % (-returncode, returncode)
           elif returncode is not None:
             message += " (exit code %d)" % returncode
-          updated = self.job_db.fail_job(
+          updated = self._terminal_write(
             job_id,
-            message,
-            failure_category=cat,
-            failure_cause=cause,
-            **self._owner_kwargs(),
-            telemetry=self._job_telemetry,
-            source_duration_seconds=source_duration_secs,
+            "failure",
+            partial(
+              self.job_db.fail_job,
+              job_id,
+              message,
+              failure_category=cat,
+              failure_cause=cause,
+              **self._owner_kwargs(),
+              telemetry=self._job_telemetry,
+              source_duration_seconds=source_duration_secs,
+            ),
           )
           self._log_discarded(job_id, updated, "failure")
           self._ingest_ffmpeg_stderr_sidecars(job_id)
@@ -730,11 +751,8 @@ class ConversionWorker(threading.Thread):
       cat = categorize_failure(WORKER_SENTINEL_EXCEPTION).value
       write = lambda: self.job_db.fail_job(job_id, str(error), failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION, **owner)  # noqa: E731
       terminal = "failure"
-    try:
-      updated = self._retry_terminal(terminal, write, job_id)
-    except Exception:
-      with self._pending_lock:
-        self._pending_releases[job_id] = (terminal, write)
+    updated = self._terminal_write(job_id, terminal, write)
+    if updated is _PARKED:
       return
     self._log_discarded(job_id, updated, terminal)
     if failed:
@@ -743,6 +761,19 @@ class ConversionWorker(threading.Thread):
       metrics_prom.record_job_terminal("failed", elapsed)
       metrics_prom.record_failure(cat, WORKER_SENTINEL_EXCEPTION)
     # A pre-start requeue is not terminal: the job runs again, so sma_jobs_total is left alone.
+
+  def _terminal_write(self, job_id, what, write):
+    """Run a terminal write with retries; park it for the worker loop when every attempt fails.
+
+    Returns the write's result, or _PARKED. Never raises, so a DB error on the
+    terminal write cannot replace the job's real outcome.
+    """
+    try:
+      return self._retry_terminal(what, write, job_id)
+    except Exception:
+      with self._pending_lock:
+        self._pending_releases[job_id] = (what, write)
+      return _PARKED
 
   def _retry_terminal(self, what, write, job_id):
     """Call *write*, retrying with backoff; re-raise the last error when every attempt fails."""

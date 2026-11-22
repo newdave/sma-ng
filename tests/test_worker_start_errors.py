@@ -278,6 +278,99 @@ class TestParkedWrites:
     db.claim_next_job.assert_not_called()
 
 
+class TestTerminalWriteRetry:
+  """complete_job / post-run fail_job DB errors are retried and parked, never turned into a re-run (SMANG-21)."""
+
+  def _setup(self, tmp_path, returncode=0, failure_class=None, success=True):
+    db = SQLiteJobDatabase("sqlite:///%s" % (tmp_path / "sma.db"))
+    media = tmp_path / "m.mkv"
+    media.write_bytes(b"")
+    db.add_job(str(media), "/cfg.yml", max_retries=3)
+    worker = _worker(db)
+    job = db.claim_next_job(worker.worker_id, worker.node_id)
+
+    def fake_run(*_a, **_k):
+      worker._last_returncode = returncode
+      worker._last_attempt_failure_class = failure_class
+      return (success, None, None)
+
+    worker._run_conversion = mock.MagicMock(side_effect=fake_run)
+    worker._preflight_disk_pressure = mock.MagicMock(return_value=False)
+    return db, worker, job
+
+  def test_complete_job_error_once_still_completes(self, tmp_path):
+    db, worker, job = self._setup(tmp_path)
+    db.complete_job = _fail_n(db.complete_job, 1)
+    db.fail_job = mock.MagicMock(wraps=db.fail_job)
+    worker.process_job(job)
+    row = db.get_job(job["id"])
+    assert row["status"] == "completed"
+    assert row["retry_count"] == 0
+    db.fail_job.assert_not_called()
+    worker._run_conversion.assert_called_once()
+    assert worker._pending_releases == {}
+    _assert_clean(worker)
+
+  def test_complete_job_outage_is_parked_then_flushed_as_completed(self, tmp_path):
+    db, worker, job = self._setup(tmp_path)
+    # Fails every in-line attempt (3 with the patched backoff), then the DB recovers.
+    db.complete_job = _fail_n(db.complete_job, 3)
+    db.fail_job = mock.MagicMock(wraps=db.fail_job)
+    worker.process_job(job)
+    assert set(worker._pending_releases) == {job["id"]}
+    assert db.get_job(job["id"])["status"] == STATUS_RUNNING
+    db.fail_job.assert_not_called()
+    _assert_clean(worker)
+    worker._flush_pending_release()
+    assert worker._pending_releases == {}
+    assert db.get_job(job["id"])["status"] == "completed"
+
+  def test_post_run_fail_job_error_once_keeps_original_failure(self, tmp_path):
+    db, worker, job = self._setup(tmp_path, returncode=1, failure_class="encoder_init_failed", success=False)
+    db.fail_job = _fail_n(db.fail_job, 1)
+    worker.process_job(job)
+    row = db.get_job(job["id"])
+    assert row["error"] == "Conversion process failed (exit code 1)"
+    assert row["failure_cause"] == "encoder_init_failed"
+    assert worker._pending_releases == {}
+    _assert_clean(worker)
+
+  def test_timeout_fail_job_error_once_keeps_timeout_cause(self, tmp_path):
+    db, worker, job = self._setup(tmp_path, success=False)
+
+    def fake_run(*_a, **_k):
+      worker._abort_reason = worker_mod.ABORT_TIMEOUT
+      return (False, None, None)
+
+    worker._run_conversion = mock.MagicMock(side_effect=fake_run)
+    db.fail_job = _fail_n(db.fail_job, 1)
+    worker.process_job(job)
+    assert db.get_job(job["id"])["failure_cause"] == worker_mod.WORKER_CAUSE_TIMEOUT
+
+  def test_parked_write_is_flushed_before_next_claim(self):
+    db = mock.MagicMock()
+    db.is_distributed = False
+    worker = _worker(db)
+    write = mock.MagicMock(return_value=True)
+    seen = []
+
+    def claim(*_a, **_k):
+      seen.append(write.call_count)
+      return {"id": len(seen)} if len(seen) < 3 else None
+
+    def process(job):
+      if job["id"] == 1:
+        worker._pending_releases[1] = ("completion", write)
+
+    db.claim_next_job.side_effect = claim
+    worker.process_job = process
+    worker.job_event.set()
+    worker._run_once()
+    # Claim 1 runs before anything is parked; claim 2 must see the parked write already flushed.
+    assert seen == [0, 1, 1]
+    assert worker._pending_releases == {}
+
+
 class TestMinorFixes:
   def test_lock_release_error_still_decrements_in_flight_and_clears_state(self, tmp_path):
     import contextlib

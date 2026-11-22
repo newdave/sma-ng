@@ -377,14 +377,22 @@ or a network partition. A cancelled job's output may still exist on disk if ffmp
 
 The database failed between claiming the job and starting the conversion, so the worker freed its slot and put the
 job back to pending without burning a retry. The write is retried with backoff. If it still fails, the log shows
-`Job N requeue write failed after 4 attempts` and the worker retries it on every loop pass, even while the node
-is paused or draining (`Job N pending requeue still failing`). Fix the database connection (see the surrounding
-error) rather than the job.
+`Job N requeue write failed after 4 attempts` and the worker retries it after each job and on every loop pass, even
+while the node is paused or draining (`Job N pending requeue still failing`). Fix the database connection (see the
+surrounding error) rather than the job.
 
 A job is requeued this way at most 3 times in a row. If its start fails a fourth time, the log shows
 `Job N start failed 4 times in a row (ErrorName); failing it instead of requeuing` and the job goes through the
 normal failure path (it fails, or retries with backoff if it has retries left). Its error reads
 `Job start failed 4 times in a row (ErrorName: detail); giving up`. A successful start resets the count.
+
+### "Job N completion write failed after 4 attempts"
+
+The conversion ended, but the database refused the write that records the result (`completion`, `failure` or
+`timeout failure`). The worker retried it with backoff, then parked it and retries it after each job and on every
+loop pass (`Job N pending completion still failing`). Until the write lands the row stays `running`. The job is not
+re-run, and its result is not replaced by the database error: a finished conversion still ends `completed`, and a
+failed one keeps its own failure cause and exit code. Fix the database connection (see the surrounding error).
 
 ### Job returned to pending with "Running on this node with no live worker; requeued by orphan sweep"
 
