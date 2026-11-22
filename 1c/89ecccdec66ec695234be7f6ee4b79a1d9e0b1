@@ -1,0 +1,20 @@
+pyproject.toml
+  s_d73ac5e457a585::t_2ce2903e0ae446 42,44-45,49
+  s_d73ac5e457a585::t_35368623b77723 62,64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "1c89ecccdec66ec695234be7f6ee4b79a1d9e0b1",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
