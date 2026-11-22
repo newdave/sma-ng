@@ -1066,7 +1066,7 @@ For each host it:
 
 - **Creates missing configs** from `setup/sma-ng.yml.sample` (auto-detects GPU on first creation)
 - **Backs up** `config/` to `.backup/<timestamp>/` before any mutation
-- **Merges new keys** from the sample via `yaml_merge.py` (non-destructive)
+- **Merges new keys** from the sample (non-destructive)
 - **Deep-merges `base:` and `profiles:`** from `setup/local.yml` into the same blocks of
   `sma-ng.yml`. Dicts recurse, lists/scalars overwrite, anything you omit inherits from
   the sample.
