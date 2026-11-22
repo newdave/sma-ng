@@ -1,0 +1,27 @@
+docs/daemon.md
+  s_d73ac5e457a585::t_759fc92712e9d9 496,498,501-503
+  s_d73ac5e457a585::t_0f3bd223a09558 504
+resources/daemon/handler.py
+  s_d73ac5e457a585::t_d4093048d63c9e 752-753,757-758,777-797
+  s_d73ac5e457a585::t_90956adfb3cbac 6,22
+tests/test_handler.py
+  s_d73ac5e457a585::t_759fc92712e9d9 704-726
+docs/openapi.yaml
+  s_d73ac5e457a585::t_759fc92712e9d9 1453
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "6767574c85e5d58f87878d31d5c6b70b1c503373",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
