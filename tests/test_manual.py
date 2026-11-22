@@ -661,6 +661,94 @@ class TestProcessFile:
     assert result is True
     assert src.exists()
 
+  def test_overwrite_input_recycle_failure_keeps_original(self, tmp_path):
+    """A failed recycle copy must not let restoreFromOutput replace the input
+    or the cleanup branch unlink it: no backup means the original stays."""
+    src = tmp_path / "Show - S02E03.mkv"
+    src.write_bytes(b"x")
+    out_in_input_dir = tmp_path / "Show - S02E03.mp4"
+    out_in_input_dir.write_bytes(b"y")
+
+    mp = self._make_mp()
+    mp.settings.output_dir = str(tmp_path / "transcodes")
+    mp.settings.moveto = None
+    mp.settings.delete = True
+    mp.deletesubs = set()
+    mp.process.return_value = {
+      "output": str(tmp_path / "transcodes" / "Show - S02E03.mp4"),
+      "input": str(src),
+      "input_deleted": False,
+      "delete": True,
+      "external_subs": [],
+      "options": {},
+      "x": 1920,
+      "y": 1080,
+      "cues_to_front": False,
+    }
+    mp.replicate.return_value = [str(out_in_input_dir)]
+    mp.getDefaultAudioLanguage.return_value = None
+    mp._recycle_to_bin.return_value = False
+    seen = {}
+
+    def _restore(inp, out, **kw):
+      seen["delete"] = mp.settings.delete
+      return str(out_in_input_dir)
+
+    mp.restoreFromOutput.side_effect = _restore
+    mp.removeFile.side_effect = AssertionError("removeFile must not delete the original after a failed recycle")
+
+    with patch("manual.getInfo", return_value=None):
+      with patch("manual._find_arr_instance", return_value=(None, None)):
+        with patch("manual.triggerRescan", return_value=None):
+          result = processFile(str(src), mp, info=MagicMock())
+
+    assert result is True
+    assert src.exists()
+    assert seen["delete"] is False, "restoreFromOutput must run with delete off so it numbers instead of replacing"
+    assert mp.settings.delete is True, "delete setting must be restored afterwards"
+
+  @pytest.mark.parametrize("delete, recycled", [(True, False), (False, True)], ids=["recycle-failed", "delete-off"])
+  def test_overwrite_input_keeps_source_subtitle_sidecars_when_original_kept(self, tmp_path, delete, recycled):
+    """Sidecar subtitles of the source are only removed together with the
+    source: a failed recycle copy or delete off keeps both."""
+    src = tmp_path / "Show - S02E03.mkv"
+    src.write_bytes(b"x")
+    sidecar = tmp_path / "Show - S02E03.eng.srt"
+    sidecar.write_text("1")
+    out_in_input_dir = tmp_path / "Show - S02E03.mp4"
+    out_in_input_dir.write_bytes(b"y")
+
+    mp = self._make_mp()
+    mp.settings.output_dir = str(tmp_path / "transcodes")
+    mp.settings.moveto = None
+    mp.settings.delete = delete
+    mp.deletesubs = {str(sidecar)}
+    mp.process.return_value = {
+      "output": str(tmp_path / "transcodes" / "Show - S02E03.mp4"),
+      "input": str(src),
+      "input_deleted": False,
+      "delete": delete,
+      "external_subs": [],
+      "options": {},
+      "x": 1920,
+      "y": 1080,
+      "cues_to_front": False,
+    }
+    mp.replicate.return_value = [str(out_in_input_dir)]
+    mp.getDefaultAudioLanguage.return_value = None
+    mp._recycle_to_bin.return_value = recycled
+    mp.restoreFromOutput.return_value = str(out_in_input_dir)
+    mp.removeFile.side_effect = lambda p, *a, **kw: (os.remove(p) or True) if os.path.isfile(p) else True
+
+    with patch("manual.getInfo", return_value=None):
+      with patch("manual._find_arr_instance", return_value=(None, None)):
+        with patch("manual.triggerRescan", return_value=None):
+          result = processFile(str(src), mp, info=MagicMock())
+
+    assert result is True
+    assert src.exists()
+    assert sidecar.exists()
+
 
 # ---------------------------------------------------------------------------
 # main() — arg parsing and branching

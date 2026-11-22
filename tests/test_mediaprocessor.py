@@ -1,6 +1,7 @@
 """Tests for resources/mediaprocessor.py - core processing logic."""
 
 import json
+import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -3387,7 +3388,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -3449,7 +3450,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -3474,7 +3475,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -3495,7 +3496,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -3531,7 +3532,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -3556,7 +3557,7 @@ class TestFullProcess:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -3672,6 +3673,227 @@ class TestProcess:
     result = mp.process("/fake/input.mkv", info=info)
     assert result is None
 
+  def _media(self, make_stream, make_format, duration, videos=1, cover=0, unknown=0):
+    info = MediaInfo()
+    info.format = make_format(duration=duration)
+    index = 0
+    for _ in range(videos):
+      info.streams.append(make_stream(type="video", codec="h264", index=index))
+      index += 1
+    info.streams.append(make_stream(type="audio", codec="aac", index=index))
+    index += 1
+    for _ in range(cover):
+      info.streams.append(make_stream(type="video", codec="mjpeg", index=index, attached_pic=True))
+      index += 1
+    for _ in range(unknown):
+      info.streams.append(make_stream(type="data", codec="", index=index))
+      index += 1
+    return info
+
+  def _convert_mp(self, tmp_path, src_info, out_info):
+    mp = self._make_mp()
+    mp.settings.delete = True
+    src = tmp_path / "movie.mkv"
+    src.write_bytes(b"source")
+    out = tmp_path / "movie.mp4"
+    out.write_bytes(b"output")
+    mp.isValidSource = MagicMock(return_value=src_info)
+    mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    mp.generateOptions = MagicMock(return_value=({"video": {}, "audio": [{"map": 1, "codec": "aac"}]}, [], [], [], []))
+    mp.canBypassConvert = MagicMock(return_value=False)
+    mp._run_ffmpeg = MagicMock(return_value=(str(out), str(src), []))
+    mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
+    mp.removeFile = MagicMock()
+    mp.converter.probe = MagicMock(return_value=out_info)
+    return mp, src, out
+
+  def _verify_events(self, mp):
+    return [json.loads(c.args[0]) for c in mp.log.info.call_args_list if c.args and isinstance(c.args[0], str) and c.args[0].startswith("{") and "output.verify" in c.args[0]]
+
+  def test_truncated_output_fails_keeps_source_and_renames_output(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    assert mp.process(str(src), info=src_info) is None
+    failed = tmp_path / "movie.mp4.failed"
+    assert src.exists() and not out.exists()
+    assert failed.read_bytes() == b"output"
+    mp.removeFile.assert_not_called()
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list]
+    assert any("[output-verify]" in w and "duration" in w and str(failed) in w and "\n" not in w for w in warnings)
+
+  def test_failed_name_is_numbered_never_overwritten(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    (tmp_path / "movie.mp4.failed").write_bytes(b"older")
+    (tmp_path / "movie.mp4.failed.2").write_bytes(b"older2")
+    assert mp.process(str(src), info=src_info) is None
+    assert (tmp_path / "movie.mp4.failed").read_bytes() == b"older"
+    assert (tmp_path / "movie.mp4.failed.2").read_bytes() == b"older2"
+    assert (tmp_path / "movie.mp4.failed.3").read_bytes() == b"output"
+    assert src.exists() and not out.exists()
+
+  def test_verify_failure_emits_structured_event(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    mp.process(str(src), info=src_info)
+    events = self._verify_events(mp)
+    assert len(events) == 1
+    assert events[0]["failure_class"] == "output_verify_failed"
+    assert events[0]["reason"] == "duration 3600s vs 7200s"
+    assert str(tmp_path) not in events[0]["reason"]
+
+  def test_missing_video_stream_fails(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 100.0)
+    out_info = self._media(make_stream, make_format, 100.0, videos=0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    assert mp.process(str(src), info=src_info) is None
+    assert src.exists() and (tmp_path / "movie.mp4.failed").exists()
+    assert self._verify_events(mp)[0]["reason"] == "video streams 0 vs 1"
+
+  def test_unprobeable_output_fails(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 100.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, None)
+    assert mp.process(str(src), info=src_info) is None
+    assert (tmp_path / "movie.mp4.failed").exists()
+
+  def test_output_without_duration_fails(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 100.0)
+    out_info = self._media(make_stream, make_format, None)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    assert mp.process(str(src), info=src_info) is None
+    assert self._verify_events(mp)[0]["reason"].startswith("no output duration")
+
+  @pytest.mark.parametrize(
+    ("src_dur", "out_dur", "ok"),
+    [
+      (1000.0, 980.0, True),  # exactly 2%
+      (1000.0, 979.0, False),
+      (1000.0, 1020.0, True),
+      (1000.0, 1021.0, False),
+      (10.0, 9.0, True),  # 2% is 0.2s, the 1 s floor applies
+      (10.0, 8.9, False),
+      (10.0, 11.0, True),
+      (10.0, 11.1, False),
+    ],
+  )
+  def test_duration_boundaries(self, tmp_path, make_stream, make_format, src_dur, out_dur, ok):
+    src_info = self._media(make_stream, make_format, src_dur)
+    out_info = self._media(make_stream, make_format, out_dur)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    assert (mp.process(str(src), info=src_info) is not None) is ok
+
+  def test_correct_output_passes_within_tolerance(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0, cover=1, unknown=1)
+    out_info = self._media(make_stream, make_format, 7200.0 * 0.985)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    result = mp.process(str(src), info=src_info)
+    assert result is not None
+    assert result["output"] == str(out)
+    assert result["delete"] is True
+
+  def test_missing_source_duration_skips_duration_check(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, None)
+    out_info = self._media(make_stream, make_format, 50.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    assert mp.process(str(src), info=src_info) is not None
+
+  def _same_name_mp(self, tmp_path, src_info, out_info):
+    """Drive process() through the real _run_ffmpeg and convert() for an
+    mp4 -> mp4 conversion with no output-directory, so convert() renames the
+    source to ``movie.mp4.original``. Only the FFmpeg generator is faked."""
+    mp = self._make_mp()
+    mp.settings.delete = True
+    mp.settings.temp_extension = None
+    mp.settings.burn_subtitles = False
+    mp.settings.strip_metadata = False
+    mp.settings.embedsubs = True
+    mp.settings.downloadsubs = False
+    mp.settings.permissions = {"chmod": 0o664, "uid": -1, "gid": -1}
+    src = tmp_path / "movie.mp4"
+    src.write_bytes(b"source")
+    mp.isValidSource = MagicMock(return_value=src_info)
+    mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    mp.generateOptions = MagicMock(return_value=({"source": [str(src)], "video": {}, "audio": [{"map": 1, "codec": "aac"}], "subtitle": []}, [], [], [], []))
+    mp.canBypassConvert = MagicMock(return_value=False)
+    mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
+    mp.setPermissions = MagicMock()
+    mp.subtitles.ripSubs = MagicMock(return_value=[])
+    mp.converter.probe = MagicMock(return_value=out_info)
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      with open(outputfile, "wb") as f:
+        f.write(b"truncated")
+      yield None, ["ffmpeg"]
+      yield 100, ""
+
+    mp.converter.convert = fake_convert
+    mp._attempt_ladder = lambda preopts, options, outputfile, run_convert: run_convert(preopts)
+    return mp, src
+
+  def test_same_name_verify_failure_restores_source_name(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src = self._same_name_mp(tmp_path, src_info, out_info)
+    assert mp.process(str(src), info=src_info) is None
+    assert src.read_bytes() == b"source"
+    assert not (tmp_path / "movie.mp4.original").exists()
+    assert (tmp_path / "movie.mp4.failed").read_bytes() == b"truncated"
+
+  def test_same_name_verify_failure_keeps_original_when_name_taken(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src = self._same_name_mp(tmp_path, src_info, out_info)
+    real_quarantine = mp._quarantine_failed_output
+
+    def quarantine_then_occupy(outputfile):
+      failed = real_quarantine(outputfile)
+      src.write_bytes(b"someone else")
+      return failed
+
+    mp._quarantine_failed_output = quarantine_then_occupy
+    assert mp.process(str(src), info=src_info) is None
+    assert src.read_bytes() == b"someone else"
+    assert (tmp_path / "movie.mp4.original").read_bytes() == b"source"
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list]
+    assert any("Cannot restore source name" in w and "movie.mp4.original" in w and "\n" not in w for w in warnings)
+
+  def test_verify_failure_removes_subs_this_job_ripped(self, tmp_path, make_stream, make_format):
+    src_info = self._media(make_stream, make_format, 7200.0)
+    out_info = self._media(make_stream, make_format, 3600.0)
+    mp, src, out = self._convert_mp(tmp_path, src_info, out_info)
+    ripped = tmp_path / "movie.eng.srt"
+    ripped.write_text("1")
+    existing = tmp_path / "movie.fra.srt"
+    existing.write_text("2")
+    mp._run_ffmpeg = MagicMock(return_value=(str(out), str(src), [str(ripped)]))
+    mp.removeFile = MagicMock(side_effect=lambda p, *a, **k: os.remove(p) or True)
+    assert mp.process(str(src), info=src_info) is None
+    assert not ripped.exists()
+    assert existing.exists() and src.exists()
+    mp.removeFile.assert_called_once_with(str(ripped))
+
+  def test_bypass_keeps_uppercase_extension_without_collision(self, tmp_path):
+    mp = self._make_mp()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    mp.settings.output_dir = str(output_dir)
+    mp.settings.permissions = {"chmod": 0o664}
+    src = tmp_path / "Movie.MKV"
+    src.write_bytes(b"new")
+    mp.isValidSource = MagicMock(return_value=MagicMock())
+    mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    mp.generateOptions = MagicMock(return_value=({"video": {}, "audio": []}, [], [], [], []))
+    mp.canBypassConvert = MagicMock(return_value=True)
+    mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
+    result = mp.process(str(src))
+    assert result["output"] == str(output_dir / "Movie.MKV")
+    assert (output_dir / "Movie.MKV").read_bytes() == b"new"
+    warnings = [c.args[0] for c in mp.log.warning.call_args_list]
+    assert not any("[output-collision]" in w for w in warnings)
+
   def test_bypass_with_output_dir_copies_file(self, tmp_path):
     mp = self._make_mp()
     output_dir = tmp_path / "output"
@@ -3690,6 +3912,71 @@ class TestProcess:
     assert result is not None
     # outputfile should be in output_dir
     assert str(output_dir) in result["output"]
+
+  def test_bypass_with_output_dir_never_overwrites_existing(self, tmp_path):
+    mp = self._make_mp()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    mp.settings.output_dir = str(output_dir)
+    mp.settings.permissions = {"chmod": 0o664}
+    src = tmp_path / "movie.mp4"
+    src.write_bytes(b"new")
+    existing = output_dir / "movie.mp4"
+    existing.write_bytes(b"precious")
+    mp.isValidSource = MagicMock(return_value=MagicMock())
+    mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    mp.generateOptions = MagicMock(return_value=({"video": {}, "audio": []}, [], [], [], []))
+    mp.canBypassConvert = MagicMock(return_value=True)
+    mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
+    result = mp.process(str(src))
+    assert existing.read_bytes() == b"precious"
+    assert result["output"] == str(output_dir / "movie.2.mp4")
+    assert (output_dir / "movie.2.mp4").read_bytes() == b"new"
+
+  def _bypass_mp(self, output_dir):
+    mp = self._make_mp()
+    mp.settings.output_dir = str(output_dir)
+    mp.settings.permissions = {"chmod": 0o664}
+    mp.isValidSource = MagicMock(return_value=MagicMock())
+    mp.outputDirHasFreeSpace = MagicMock(return_value=True)
+    mp.generateOptions = MagicMock(return_value=({"video": {}, "audio": []}, [], [], [], []))
+    mp.canBypassConvert = MagicMock(return_value=True)
+    mp.getDimensions = MagicMock(return_value={"x": 1920, "y": 1080})
+    mp._cleanup_input = MagicMock(return_value=False)
+    return mp
+
+  def test_bypass_input_already_in_output_dir_is_not_duplicated(self, tmp_path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    mp = self._bypass_mp(output_dir)
+    src = output_dir / "movie.mp4"
+    src.write_bytes(b"data")
+    result = mp.process(str(src))
+    assert result["output"] == str(src)
+    assert result["delete"] is False
+    assert sorted(p.name for p in output_dir.iterdir()) == ["movie.mp4"]
+
+  @pytest.mark.parametrize(
+    "ext,taken,expected",
+    [
+      ("mkv", ["movie.mkv"], "movie.2.mkv"),
+      ("mp4", ["movie.mp4", "movie.2.mp4"], "movie.3.mp4"),
+      ("mkv", ["movie.mkv", "movie.2.mkv", "movie.3.mkv"], "movie.4.mkv"),
+    ],
+  )
+  def test_bypass_numbering_keeps_extension_and_skips_taken(self, tmp_path, ext, taken, expected):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    mp = self._bypass_mp(output_dir)
+    src = tmp_path / ("movie." + ext)
+    src.write_bytes(b"new")
+    for name in taken:
+      (output_dir / name).write_bytes(b"precious")
+    result = mp.process(str(src))
+    assert result["output"] == str(output_dir / expected)
+    assert (output_dir / expected).read_bytes() == b"new"
+    for name in taken:
+      assert (output_dir / name).read_bytes() == b"precious"
 
   def test_options_empty_returns_none(self):
     mp = self._make_mp()
@@ -4696,7 +4983,7 @@ class TestCleanupInput:
     mp._cleanup_input(str(src), delete=True)
     assert not sub.exists()
 
-  def test_recycle_exception_logged_not_raised(self, tmp_path):
+  def test_recycle_failure_keeps_original(self, tmp_path):
     mp = self._make_mp()
     recycle = tmp_path / "recycle"
     recycle.mkdir()
@@ -4704,9 +4991,48 @@ class TestCleanupInput:
     src = tmp_path / "input.mkv"
     src.write_bytes(b"data")
     with patch.object(mp, "_atomic_copy", side_effect=Exception("disk full")):
-      # Should not raise; the exception is logged
-      mp._cleanup_input(str(src), delete=True)
-    mp.log.exception.assert_called()
+      result = mp._cleanup_input(str(src), delete=True)
+    assert result is False
+    assert src.exists()
+    mp.log.warning.assert_called()
+    mp.log.exception.assert_not_called()
+    assert "\n" not in mp.log.warning.call_args[0][0]
+
+  def test_recycle_failure_keeps_subtitle_sidecars(self, tmp_path):
+    mp = self._make_mp()
+    recycle = tmp_path / "recycle"
+    recycle.mkdir()
+    mp.settings.recycle_bin = str(recycle)
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"data")
+    sub = tmp_path / "input.eng.srt"
+    sub.write_bytes(b"subtitle")
+    mp.deletesubs = {str(sub)}
+    with patch.object(mp, "_atomic_copy", side_effect=Exception("disk full")):
+      assert mp._cleanup_input(str(src), delete=True) is False
+    assert src.exists() and sub.exists()
+
+  def test_delete_off_keeps_subtitle_sidecars(self, tmp_path):
+    mp = self._make_mp()
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"data")
+    sub = tmp_path / "input.eng.srt"
+    sub.write_bytes(b"subtitle")
+    mp.deletesubs = {str(sub)}
+    assert mp._cleanup_input(str(src), delete=False) is False
+    assert src.exists() and sub.exists()
+
+  def test_recycle_to_bin_returns_bool(self, tmp_path):
+    mp = self._make_mp()
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"data")
+    assert mp._recycle_to_bin(str(src)) is True  # no bin configured
+    recycle = tmp_path / "recycle"
+    mp.settings.recycle_bin = str(recycle)
+    assert mp._recycle_to_bin(str(src)) is True
+    assert (recycle / "input.mkv").exists()
+    with patch.object(mp, "_atomic_copy", side_effect=OSError("denied")):
+      assert mp._recycle_to_bin(str(src)) is False
 
 
 # ---------------------------------------------------------------------------
@@ -6517,7 +6843,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -6560,7 +6886,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -6585,7 +6911,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -6606,7 +6932,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -6642,7 +6968,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -6667,7 +6993,7 @@ class TestFullProcessDup:
       "cues_to_front": False,
     }
     mp.process = MagicMock(return_value=output)
-    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o, **kw: o)
     mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
     mp.setPermissions = MagicMock()
     mp.post = MagicMock()
@@ -7076,7 +7402,7 @@ class TestCleanupInputDup:
     mp._cleanup_input(str(src), delete=True)
     assert not sub.exists()
 
-  def test_recycle_exception_logged_not_raised(self, tmp_path):
+  def test_recycle_failure_keeps_original(self, tmp_path):
     mp = self._make_mp()
     recycle = tmp_path / "recycle"
     recycle.mkdir()
@@ -7084,9 +7410,24 @@ class TestCleanupInputDup:
     src = tmp_path / "input.mkv"
     src.write_bytes(b"data")
     with patch.object(mp, "_atomic_copy", side_effect=Exception("disk full")):
-      # Should not raise; the exception is logged
-      mp._cleanup_input(str(src), delete=True)
-    mp.log.exception.assert_called()
+      result = mp._cleanup_input(str(src), delete=True)
+    assert result is False
+    assert src.exists()
+    mp.log.warning.assert_called()
+    mp.log.exception.assert_not_called()
+    assert "\n" not in mp.log.warning.call_args[0][0]
+
+  def test_recycle_to_bin_returns_bool(self, tmp_path):
+    mp = self._make_mp()
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"data")
+    assert mp._recycle_to_bin(str(src)) is True  # no bin configured
+    recycle = tmp_path / "recycle"
+    mp.settings.recycle_bin = str(recycle)
+    assert mp._recycle_to_bin(str(src)) is True
+    assert (recycle / "input.mkv").exists()
+    with patch.object(mp, "_atomic_copy", side_effect=OSError("denied")):
+      assert mp._recycle_to_bin(str(src)) is False
 
 
 # ---------------------------------------------------------------------------
