@@ -1,0 +1,54 @@
+resources/daemon/server.py
+  s_d73ac5e457a585::t_8cebce252ce333 531
+  s_d73ac5e457a585::t_630d0dec29ddcc 532-535,576-578,589
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_cc5aaa63691dc9 360-367
+resources/daemon/worker.py
+  s_d73ac5e457a585::t_bb0596d4809a93 466,559-564,566-577,641-642,676-688,929
+setup/sma-ng.yml.sample
+  s_d73ac5e457a585::t_207f69305a7f32 15
+resources/daemon/config.py
+  s_d73ac5e457a585::t_630d0dec29ddcc 303,408
+docs/daemon.md
+  s_d73ac5e457a585::t_cc5aaa63691dc9 351,817-827
+docs/configuration.md
+  s_d73ac5e457a585::t_cc5aaa63691dc9 76
+converter/ffmpeg.py
+  s_d73ac5e457a585::t_cd7505baadd753 895-914,916-948
+  s_d73ac5e457a585::t_6d23ccad2157ce 30-37,671-683
+  s_d73ac5e457a585::t_c5c938f3af6783 684
+tests/test_interrupted_requeue.py
+  s_d73ac5e457a585::t_61755a7b3844e7 149
+  s_d73ac5e457a585::t_357541aeebb209 230
+  s_d73ac5e457a585::t_f663e028e140fc 295-308
+  s_d73ac5e457a585::t_5756f0fd27ebc5 1-148,150-229,231-294
+manual.py
+  s_d73ac5e457a585::t_6db952f997f55f 25
+  s_d73ac5e457a585::t_40f431a5f07a90 17,985-1001,1274
+resources/daemon/db.py
+  s_d73ac5e457a585::t_6db952f997f55f 768-793,1723-1748
+  s_d73ac5e457a585::t_3c25c29284c94c 1749
+resources/config_schema.py
+  s_d73ac5e457a585::t_630d0dec29ddcc 962-965
+tests/test_worker_reliability.py
+  s_d73ac5e457a585::t_f663e028e140fc 259-260,263
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_61755a7b3844e7 727
+  s_d73ac5e457a585::t_25899a58015ada 4956-4962
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "431957c838dd5b1fb191dd1f9983248c80bca299",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
