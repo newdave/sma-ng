@@ -1,0 +1,22 @@
+tests/test_handler_jobs_api.py
+  s_d73ac5e457a585::t_b2903f6aceb4ac 40,42-46
+  s_d73ac5e457a585::t_99167ddd90bc84 47-48
+resources/daemon/handler.py
+  s_d73ac5e457a585::t_779363c4ae3549 1892-1893
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "0885ddb04e4f3ce1219c8a81ae4b50092792291c",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
