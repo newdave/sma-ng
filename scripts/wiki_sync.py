@@ -158,7 +158,10 @@ def mise_tasks(root: Path = ROOT) -> list[Task]:
           aliases = [str(a) for a in parsed] if isinstance(parsed, list) else [str(parsed)]
     if not description:
       continue
-    name = ":".join(path.relative_to(tasks_dir).parts)
+    parts = path.relative_to(tasks_dir).parts
+    if parts[-1] == "_default":  # mise names <group>/_default as the bare group task
+      parts = parts[:-1]
+    name = ":".join(parts)
     tasks.append(Task(name, aliases, description))
   return tasks
 

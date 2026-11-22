@@ -32,13 +32,12 @@ curl https://mise.run | sh
 | `mise run dev:agent`     | Start a Claude Code session through omnigent (`omni`) with smart routing; extra arguments go to `omni claude` |
 | `mise run dev:team`      | Start the omnigent team in `.omnigent/agents/team/`: a manager delegates to a read-only architect and two Claude engineers, who cross-review each other; changes land as PRs |
 | `mise run test:openapi`  | Validate `docs/openapi.yaml`                             |
-| `mise run test`          | Run the test suite (daemon tests require `TEST_DB_URL`)  |
-| `mise run test:run`      | Same as `mise run test` (the task behind the alias)      |
+| `mise run test`          | Run the test suite (daemon tests require `TEST_DB_URL`); extra args go to pytest after `--` |
+| `mise run test -- tests/test_daemon.py tests/test_handler.py tests/test_worker.py tests/test_server.py` | Focused daemon/API worker tests (replaces `test:daemon`) |
+| `mise run test -- tests/test_deploy_tasks.py` | Focused deploy/config task tests (replaces `test:deploy`) |
 | `mise run test:shell`    | Run `shellcheck -x` over tracked shell scripts and `.mise/tasks` entrypoints |
 | `mise run test:cov`      | Run tests with coverage (HTML, JSON) and enforce the per-module coverage floor |
 | `mise run build:dist`    | Build wheel and sdist artifacts into `dist/`             |
-| `mise run test:daemon`   | Run focused daemon/API worker tests                      |
-| `mise run test:deploy`   | Run focused deploy/config task tests                     |
 
 ### Media Tools
 
@@ -184,7 +183,7 @@ You can run `python manual.py -cl` or inspect config files without starting the 
 ### Docker compose profile reference
 
 `docker_profile` (in `setup/local.yml` `deploy:` or per-host) selects which
-compose profile is brought up by `cluster:start` / `deploy:docker`. Only one
+compose profile is brought up by `cluster start` / `deploy:docker`. Only one
 node should run a `*-pg` profile — that's the host that carries the bundled
 PostgreSQL the rest of the cluster connects to. Non-`*-pg` profiles default
 to a local SQLite database at `/opt/sma/data/sma-ng.db` for single-node use.
@@ -336,8 +335,8 @@ mise run deploy:config   # generate + push sma-ng.yml only
 mise run deploy:docker   # push compose yml + pull + restart or recreate
 
 # After deploy:config alone, apply the new config:
-mise run cluster:reload    # hot-reloadable changes
-mise run cluster:restart   # everything else
+mise run cluster -- reload    # hot-reloadable changes
+mise run cluster -- restart   # everything else
 ```
 
 `deploy:config` pushes only `sma-ng.yml`; it does not copy post-process scripts. Bake them
@@ -391,15 +390,18 @@ For each remote host the staging build:
 | `config:show`     | Render the effective resolved config for a profile                                        |
 | `config:validate` | Validate effective config — schema, unknowns, encoder-flag leaks, routing refs            |
 | `deploy:docker`   | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate`   |
-| `cluster:start`   | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`)                            |
-| `cluster:stop`    | `docker compose stop` for selected hosts (graceful drain, see `STOP_GRACE_PERIOD`)        |
-| `cluster:restart` | `docker compose restart` for selected hosts (graceful drain, see `STOP_GRACE_PERIOD`)     |
-| `cluster:status`  | `docker compose ps` for selected hosts                                                    |
-| `cluster:reload`  | `POST /reload` on selected hosts so daemons re-read `sma-ng.yml` without a restart        |
-| `cluster:drain`   | `POST /admin/nodes/<host>/drain`; workers finish active jobs then go idle                 |
-| `cluster:pause`   | `POST /admin/nodes/<host>/pause`; workers stop picking up new jobs                        |
-| `cluster:resume`  | `POST /admin/nodes/<host>/resume`; clear drain or pause                                   |
-| `cluster:upgrade` | Drain each host, wait for `running_jobs=0`, then run `deploy:remote HOST=<host>`          |
+| `mise run cluster -- start` | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`)                            |
+| `mise run cluster -- stop` | `docker compose stop` for selected hosts (graceful drain, see `STOP_GRACE_PERIOD`)        |
+| `mise run cluster -- restart` | `docker compose restart` for selected hosts (graceful drain, see `STOP_GRACE_PERIOD`)     |
+| `mise run cluster -- status` | `docker compose ps` for selected hosts                                                    |
+| `mise run cluster -- reload` | `POST /reload` on selected hosts so daemons re-read `sma-ng.yml` without a restart        |
+| `mise run cluster -- drain` | `POST /admin/nodes/<host>/drain`; workers finish active jobs then go idle                 |
+| `mise run cluster -- pause` | `POST /admin/nodes/<host>/pause`; workers stop picking up new jobs                        |
+| `mise run cluster -- resume` | `POST /admin/nodes/<host>/resume`; clear drain or pause                                   |
+| `mise run cluster -- upgrade` | Drain each host, wait for `running_jobs=0`, then run `deploy:remote HOST=<host>`          |
+
+The nine rows above are verbs of one task: `mise run cluster -- <verb>`. A missing or unknown verb prints usage
+and exits 2. Set `HOST` or `HOSTS` in the environment (`HOST=sma-master mise run cluster -- status`), not after `--`.
 
 See [Cluster Operations](cluster-operations.md) for runbooks combining these.
 
@@ -407,29 +409,29 @@ Hosts run the Docker image only: no code, Python, or `mise` is installed on them
 deploy and cluster task runs locally and only needs an SSH path to each host. The
 Docker-specific tasks require `docker_profile` to be set per host (or under
 `deploy:`) in `setup/local.yml`. Use `HOST=<host>` to target one node, or
-`HOSTS="<host1> <host2>"` to target multiple nodes (this applies to every `cluster:*` task,
-including `cluster:reload`).
+`HOSTS="<host1> <host2>"` to target multiple nodes (this applies to every `cluster` verb,
+including `cluster reload`).
 
-`cluster:start`, `cluster:stop`, `cluster:restart` and `cluster:status` share
+`cluster start`, `cluster stop`, `cluster restart` and `cluster status` share
 `.mise/shared/deploy/cluster_compose.sh`, which runs
 `docker compose --profile <docker_profile> start|stop|restart|ps` on each host.
 
 #### Graceful stop and restart
 
 Every daemon service in `docker/docker-compose.yml` sets
-`stop_grace_period: ${STOP_GRACE_PERIOD:-2m}`. `cluster:stop` and `cluster:restart` therefore
+`stop_grace_period: ${STOP_GRACE_PERIOD:-2m}`. `cluster stop` and `cluster restart` therefore
 give the daemon up to two minutes to drain before Docker sends SIGKILL; jobs still running at
 the deadline are requeued. To change the window, set `STOP_GRACE_PERIOD` (for example `10m`)
 in a `.env` file next to `docker-compose.yml` on the host or in the shell that runs `docker compose` (it is a compose
 substitution, so `config/daemon.env` does not apply). To avoid requeues entirely,
-run `cluster:drain` first (or use `cluster:upgrade`, which does). The effective drain is the smaller of
+run `cluster drain` first (or use `cluster upgrade`, which does). The effective drain is the smaller of
 `daemon.shutdown-grace-seconds` (default `100`) and `STOP_GRACE_PERIOD`: raise both together and keep
 `shutdown-grace-seconds` below `STOP_GRACE_PERIOD`.
 
 #### Reload or restart
 
-After `deploy:config`, use `mise run cluster:reload` for hot-reloadable changes (API key,
-routing rules, scan paths, codec lists, profile overlays). Use `mise run cluster:restart`
+After `deploy:config`, use `mise run cluster -- reload` for hot-reloadable changes (API key,
+routing rules, scan paths, codec lists, profile overlays). Use `mise run cluster -- restart`
 for anything else, such as worker count or the API bind address and port.
 
 ### Fallback Policy Rollout
@@ -444,7 +446,7 @@ Recommended phased rollout when introducing `hw_alt` to a cluster:
 
 1. **Observation window — `hw_alt`** (one to two weeks): set
    `base.converter.fallback-policy: hw_alt` in `setup/local.yml` and run
-   `mise run deploy:config && mise run cluster:reload`. The ladder will retry
+   `mise run deploy:config && mise run cluster -- reload`. The ladder will retry
    tier-1 QSV failures on the same-vendor VAAPI encoder (10-bit preserved) and
    stop there. No software fallback runs, so any unrecovered job still surfaces
    as a failure — making the new tier easy to evaluate.

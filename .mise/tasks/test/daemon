@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Run focused daemon/API worker tests"
-set -euo pipefail
-
-"$PY" -m pytest tests/test_daemon.py tests/test_handler.py tests/test_worker.py tests/test_server.py -q

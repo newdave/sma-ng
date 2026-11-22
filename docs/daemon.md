@@ -1012,10 +1012,10 @@ Or, from your operator workstation, via mise wrappers that target each
 host's local daemon (uses the host key as `node_id`):
 
 ```bash
-mise run cluster:drain  HOST=media-server-2
-mise run cluster:pause  HOST=media-server-2
-mise run cluster:resume HOST=media-server-2
-mise run cluster:upgrade        # rolling drain + deploy:remote, all hosts
+HOST=media-server-2 mise run cluster -- drain
+HOST=media-server-2 mise run cluster -- pause
+HOST=media-server-2 mise run cluster -- resume
+mise run cluster -- upgrade        # rolling drain + deploy:remote, all hosts
 ```
 
 For runbooks combining these — bootstrap, add a node, roll a config,

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run tests; extra args go to pytest (e.g. -- tests/test_daemon.py -k worker). Smoke tests skip without fixture/ffmpeg; daemon tests skip without TEST_DB_URL"
+set -euo pipefail
+
+"$PY" -m pytest "$@"

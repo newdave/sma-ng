@@ -34,7 +34,7 @@ graph LR
   `config/daemon.env`. Both are stamped per-host by `mise run deploy:config`.
 - Cluster identity comes from `SMA_NODE_NAME` (stamped into `daemon.env`,
   defaults to the host key in `setup/local.yml`). The same string is what every
-  cluster API and `mise run cluster:*` command uses as `node_id`.
+  cluster API and `mise run cluster` command uses as `node_id`.
 
 ---
 
@@ -42,18 +42,18 @@ graph LR
 
 | Action | Mise task | Admin API | DB effect |
 |---|---|---|---|
-| List node status | `mise run cluster:status` | `GET /admin/nodes` | reads `cluster_nodes` |
-| Drain (finish active jobs, stop accepting new) | `mise run cluster:drain HOST=<host>` | `POST /admin/nodes/<host>/drain` | `status='draining'` |
-| Pause (immediately stop pickup; active jobs continue) | `mise run cluster:pause HOST=<host>` | `POST /admin/nodes/<host>/pause` | `status='paused'` |
-| Resume from drain or pause | `mise run cluster:resume HOST=<host>` | `POST /admin/nodes/<host>/resume` | `status='online'` |
+| List node status | `mise run cluster -- status` | `GET /admin/nodes` | reads `cluster_nodes` |
+| Drain (finish active jobs, stop accepting new) | `HOST=<host> mise run cluster -- drain` | `POST /admin/nodes/<host>/drain` | `status='draining'` |
+| Pause (immediately stop pickup; active jobs continue) | `HOST=<host> mise run cluster -- pause` | `POST /admin/nodes/<host>/pause` | `status='paused'` |
+| Resume from drain or pause | `HOST=<host> mise run cluster -- resume` | `POST /admin/nodes/<host>/resume` | `status='online'` |
 | Graceful restart (drain → reexec) | — (use admin UI or curl) | `POST /admin/nodes/<host>/restart` | `status='restarting'` → `online` |
 | Graceful shutdown (drain → exit) | — (use admin UI or curl) | `POST /admin/nodes/<host>/shutdown` | `status='offline'` |
 | Approve pending node | — (use admin UI or curl) | `POST /admin/nodes/<host>/approve` | `approval_status='approved'` |
 | Hard-delete an offline node row | — (use admin UI or curl) | `POST /admin/nodes/<host>/delete` | row removed |
-| Stop / start / restart container | `mise run cluster:{stop,start,restart} HOST=<host>` | — | docker compose |
-| Rolling cluster upgrade | `mise run cluster:upgrade` | — | drain → deploy:docker, per host |
+| Stop / start / restart container | `HOST=<host> mise run cluster -- {stop,start,restart}` | — | docker compose |
+| Rolling cluster upgrade | `mise run cluster -- upgrade` | — | drain → deploy:docker, per host |
 
-All `cluster:*` mise tasks accept `HOST=<one>`, `HOSTS='<a> <b>'`, or default
+The `cluster` mise task (every verb) accepts `HOST=<one>`, `HOSTS='<a> <b>'`, or default
 to `deploy.hosts` from `setup/local.yml`.
 
 ---
@@ -117,8 +117,8 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
 4. **Bring up the containers:**
 
    ```bash
-   mise run cluster:start
-   mise run cluster:status   # confirm sma healthy on every node
+   mise run cluster -- start
+   mise run cluster -- status   # confirm sma healthy on every node
    ```
 
 5. **Approve every pending node** in the master's `/admin` UI (or via
@@ -146,7 +146,7 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
    ```bash
    mise run deploy:setup HOST=sma-slave2
    mise run deploy:config   HOST=sma-slave2
-   mise run cluster:start HOST=sma-slave2
+   HOST=sma-slave2 mise run cluster -- start
    ```
 
 3. **Approve the node** in the master `/admin` UI. The node will start
@@ -168,11 +168,11 @@ mise run deploy:config
 does **not** restart the daemon. Apply it with:
 
 ```bash
-mise run cluster:reload     # hot-reloadable changes (routing, scan paths, codec lists, profile overlays)
-mise run cluster:restart    # anything else (worker count, bind address/port)
+mise run cluster -- reload     # hot-reloadable changes (routing, scan paths, codec lists, profile overlays)
+mise run cluster -- restart    # anything else (worker count, bind address/port)
 ```
 
-`cluster:restart` gives the daemon `STOP_GRACE_PERIOD` (default `2m`) to drain before SIGKILL; jobs still
+`cluster restart` gives the daemon `STOP_GRACE_PERIOD` (default `2m`) to drain before SIGKILL; jobs still
 running at the deadline are requeued. The effective drain is the smaller of `daemon.shutdown-grace-seconds`
 (default `100`) and `STOP_GRACE_PERIOD`: raise both together and keep `shutdown-grace-seconds` below
 `STOP_GRACE_PERIOD`. Both tasks honour `HOST=` / `HOSTS=`.
@@ -183,12 +183,12 @@ For zero-loss restarts, use the upgrade runbook below.
 
 ## Runbook: cluster-wide image upgrade with no queued-job loss
 
-`cluster:upgrade` does this for you, one node at a time, in `deploy.hosts`
+`cluster upgrade` does this for you, one node at a time, in `deploy.hosts`
 order:
 
 ```bash
-mise run cluster:upgrade
-# DRAIN_TIMEOUT=3600 mise run cluster:upgrade   # raise the per-host wait
+mise run cluster -- upgrade
+# DRAIN_TIMEOUT=3600 mise run cluster -- upgrade   # raise the per-host wait
 ```
 
 For each host it:
@@ -207,22 +207,22 @@ so the queue stays serviced.
 
 If a host fails to drain within `DRAIN_TIMEOUT`, the task issues a `resume`
 for that host (so it doesn't stay drained forever) and skips it; you can
-re-run `cluster:upgrade HOST=<host>` after the slow conversion completes.
+re-run `HOST=<host> mise run cluster -- upgrade` after the slow conversion completes.
 
 ---
 
 ## Runbook: take a node out of rotation for maintenance
 
 ```bash
-mise run cluster:drain HOST=sma-slave1
-# Wait for cluster:status to show running_jobs=0 on that node
-mise run cluster:stop  HOST=sma-slave1   # docker compose stop
+HOST=sma-slave1 mise run cluster -- drain
+# Wait for cluster status to show running_jobs=0 on that node
+HOST=sma-slave1 mise run cluster -- stop   # docker compose stop
 # Do the maintenance
-mise run cluster:start HOST=sma-slave1
+HOST=sma-slave1 mise run cluster -- start
 # Heartbeat will flip status back to 'online' on its own
 ```
 
-Use `cluster:pause` instead of `cluster:drain` only when you want active jobs
+Use `cluster pause` instead of `cluster drain` only when you want active jobs
 to continue but new pickups halted (e.g. while you investigate a slow job).
 
 ---
@@ -260,7 +260,7 @@ curl -sf -X POST -H "X-API-Key: $SMA_DAEMON_API_KEY" \
 If the node is alive but stuck (e.g. hung ffmpeg), restart its container:
 
 ```bash
-mise run cluster:restart HOST=sma-slave2
+HOST=sma-slave2 mise run cluster -- restart
 ```
 
 To trace what happened to the requeued jobs: every job carries the original

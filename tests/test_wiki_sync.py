@@ -78,6 +78,11 @@ class TestMiseTasks:
     ]
     assert wiki_sync.task_names(repo) == {"test:run", "test", "wiki:build"}
 
+  def test_default_file_names_the_bare_group_task(self, repo):
+    _write(repo, ".mise/tasks/cluster/_default", '#!/usr/bin/env bash\n#MISE description="Cluster verbs"\n')
+    assert "cluster" in wiki_sync.task_names(repo)
+    assert "cluster:_default" not in wiki_sync.task_names(repo)
+
   def test_rendered_table_escapes_pipes(self, repo):
     page = wiki_sync.render_mise_tasks(wiki_sync.mise_tasks(repo))
     assert "| `mise run wiki:build` |  | Build the wiki \\| pages |" in page
