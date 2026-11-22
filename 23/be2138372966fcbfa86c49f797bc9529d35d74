@@ -1,0 +1,35 @@
+docs/metrics.md
+  s_d73ac5e457a585::t_5740d2c57a417e 21-36
+resources/dashboard.html
+  s_d73ac5e457a585::t_5740d2c57a417e 151,263
+resources/cli/commands.py
+  s_d73ac5e457a585::t_5740d2c57a417e 131
+resources/cli/daemonctl.py
+  s_d73ac5e457a585::t_5740d2c57a417e 195-197
+docs/hardware-acceleration.md
+  s_d73ac5e457a585::t_e5908bb72bb5be 232-233
+tests/test_cli_commands.py
+  s_d73ac5e457a585::t_8f0af3eaf6a680 214-223
+tests/test_cli_daemon.py
+  s_d73ac5e457a585::t_a6120d04272f14 565-588
+tests/test_handler.py
+  s_d73ac5e457a585::t_1d1df105f96d85 3059-3066
+tests/test_cli_daemonctl.py
+  s_d73ac5e457a585::t_b3bad3fd989a27 177-181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "23be2138372966fcbfa86c49f797bc9529d35d74",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
