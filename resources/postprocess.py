@@ -58,6 +58,9 @@ class PostProcessor:
     current_directory = os.path.dirname(os.path.realpath(__file__))
     post_process_directory = os.path.join(current_directory, "../post_process")
     scripts = []
+    if not os.path.isdir(post_process_directory):
+      self.log.debug("No post_process directory at %s." % post_process_directory)
+      return scripts
     for script in sorted(os.listdir(post_process_directory)):
       # "_"-prefixed files are private helpers, never hooks.
       if script.startswith("_") or os.path.splitext(script)[1] in bad_post_extensions or os.path.isdir(os.path.join(post_process_directory, script)) or script in bad_post_files:

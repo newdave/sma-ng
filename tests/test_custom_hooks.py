@@ -1,10 +1,32 @@
-"""Tests for config/custom.py and resources/custom.py."""
+"""Tests for the custom hook sample (setup/custom.py.sample) and resources/custom.py."""
 
 import importlib
+import importlib.machinery
+import importlib.util
 import runpy
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+SAMPLE = Path(__file__).resolve().parent.parent / "setup" / "custom.py.sample"
+
+
+@pytest.fixture(autouse=True)
+def config_custom(monkeypatch):
+  """Expose setup/custom.py.sample as ``config.custom``.
+
+  config/custom.py is an untracked operator file (seeded from the sample by the Docker entrypoint), so tests
+  exercise the shipped sample instead.
+  """
+  loader = importlib.machinery.SourceFileLoader("config.custom", str(SAMPLE))
+  spec = importlib.util.spec_from_loader("config.custom", loader)
+  module = importlib.util.module_from_spec(spec)
+  loader.exec_module(module)
+  monkeypatch.setitem(sys.modules, "config.custom", module)
+  return module
 
 
 def _make_mp(is_hdr=False, valid_frame_data=True):

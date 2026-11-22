@@ -311,11 +311,6 @@ class TestMiseTaskLayout:
 
     assert offenders == []
 
-  def test_makefile_exposes_install_mise(self):
-    text = _read("Makefile")
-    assert "install-mise:" in text
-    assert "mise run" in text
-
 
 class TestRemoteInstallDirs:
   def test_remote_install_dirs_include_sqlite_data_dir(self):
@@ -1141,9 +1136,3 @@ class TestLifecycleTaskFixes:
     commands = [line for line in _read(".mise/tasks/daemon/start").splitlines() if not line.startswith("#")]
     assert '"$PY" daemon.py "$@"' in commands
     assert not any("--host" in line or "--port" in line for line in commands)
-
-  @pytest.mark.parametrize("target", ["config", "detect-gpu", "test"])
-  def test_old_make_targets_point_to_mise(self, target):
-    result = subprocess.run(["make", target], cwd=PROJECT_ROOT, capture_output=True, text=True, check=False)
-    assert result.returncode == 2
-    assert "tasks run through mise" in result.stderr

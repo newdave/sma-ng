@@ -584,18 +584,26 @@ After you have a first successful run:
 
 ## Post-Process Scripts
 
-Set `post-process: true` under `base.converter`, then place executable hook scripts in `post_process/`. Files whose
-names start with `_`, files with excluded extensions, and directories are skipped. Hooks receive:
+Set `post-process: true` under `base.converter`, then create a `post_process/` directory in the SMA-NG install
+directory (next to `manual.py`; it is not shipped in the repository) and place executable hook scripts in it. If the
+directory is absent, no hooks run. Scripts run automatically after each conversion completes, in sorted filename
+order. Files are skipped (never run as hooks) when they:
 
-| Variable       | Description                                                |
-| -------------- | ---------------------------------------------------------- |
-| `SMA_FILES`    | JSON array of output file paths                            |
-| `SMA_TMDBID`   | TMDB ID                                                    |
-| `SMA_SEASON`   | Season number (TV only)                                    |
-| `SMA_EPISODE`  | Episode number (TV only; first episode of a multi-episode) |
-| `SMA_EPISODES` | Comma-separated episode list (TV only, multi-episode files) |
+- start with `_` (private helpers, for example `_helpers.py`)
+- have an excluded extension (`.txt`, `.log`, `.pyc`, `.md`), or are listed in the excluded file names
+- are directories
 
-See `post_process/post_process.md` for details. `setup/post_process/` is different: it holds sample download-client
+Put shared helper code in `_`-prefixed files. Hooks receive:
+
+| Variable       | Description                                                                                                       |
+| -------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `SMA_FILES`    | JSON array of output files. First entry is the primary file; additional entries are copies created by `copy-to`   |
+| `SMA_TMDBID`   | TMDB ID of the processed file                                                                                     |
+| `SMA_SEASON`   | Season number (TV only)                                                                                           |
+| `SMA_EPISODE`  | Episode number (TV only). For a multi-episode file, the first episode                                             |
+| `SMA_EPISODES` | Comma-separated list of every episode number (TV only, for example `1,2`; a single episode yields just that one) |
+
+`setup/post_process/` is different: it holds sample download-client
 and media-manager submitter scripts (`*_post_process.sh`) that POST `{path, args}` to the daemon's
 `/webhook/generic` endpoint. They are not conversion hooks. See [Integrations](integrations.md).
 

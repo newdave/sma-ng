@@ -11,7 +11,7 @@ Works on Windows, macOS, and Linux.
 
 ## Quick Start
 
-Tasks run through [mise](https://mise.jdx.dev/) (`make install-mise` installs it):
+Tasks run through [mise](https://mise.jdx.dev/) (`curl https://mise.run | sh` installs it):
 
 ```bash
 git clone https://github.com/newdave/sma-ng.git && cd sma-ng
