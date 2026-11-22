@@ -133,12 +133,23 @@ curl -X POST http://localhost:8585/webhook/generic \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "args": ["-tmdb", "603"]}'
 
-# JSON with config override (bypasses path matching)
+# JSON naming the daemon's own config (bypasses path matching)
 curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
-  -d '{"path": "/path/to/movie.mkv", "config": "/custom/sma-ng.yml"}'
+  -d '{"path": "/path/to/movie.mkv", "config": "/config/sma-ng.yml"}'
 ```
+
+The generic webhook validates its JSON body the same way as `POST /jobs` and answers `400` with a one-line error
+for any of these:
+
+- `args` is not a list of strings (or one string, which is split like a shell).
+- `args` contains `-c`, `--config`, `-i`, `--input` or `--job-id` (also as `--config=...`). The daemon sets these
+  itself.
+- `config` is not a string, or is not the daemon's loaded config file (compared by resolved path). Any other path is
+  refused, so a caller cannot point the daemon at an arbitrary file.
+
+A rejected request queues nothing; the daemon logs one line without the rejected value.
 
 ---
 

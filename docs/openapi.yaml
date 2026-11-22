@@ -64,7 +64,9 @@ components:
             - type: string
         config:
           type: string
-          description: Config override (bypasses path routing)
+          description: >
+            Config override (bypasses path routing). Must be the daemon's loaded config file;
+            any other path is rejected with 400.
         max_retries:
           type: integer
     Job:
@@ -860,7 +862,9 @@ paths:
                   job_id:
                     type: integer
         "400":
-          description: Invalid request or path
+          description: >
+            Invalid request or path; args not a list of strings; args containing -c, --config, -i, --input or
+            --job-id; config not the daemon's loaded config
           content:
             application/json:
               schema:

@@ -1001,10 +1001,52 @@ class TestParseWebhookBody:
     assert args == ["-tmdb", "603"]
 
   def test_json_body_with_config_override(self):
-    data = json.dumps({"path": "/mnt/movie.mkv", "config": "/alt/config.ini"}).encode()
+    data = json.dumps({"path": "/mnt/movie.mkv", "config": "/config/sma-ng.yml"}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    h.server.path_config_manager.default_config = "/config/sma-ng.yml"
+    path, args, config, retries = h._parse_webhook_body()
+    assert config == "/config/sma-ng.yml"
+
+  @pytest.mark.parametrize("cfg", ["/etc/passwd", "/alt/config.ini", "/config/../etc/passwd", "../sma-ng.yml", 5, ["x"]])
+  def test_json_body_unknown_config_rejected(self, cfg):
+    data = json.dumps({"path": "/mnt/movie.mkv", "config": cfg}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    h.server.path_config_manager.default_config = "/config/sma-ng.yml"
+    path, args, config, retries = h._parse_webhook_body()
+    assert path is None
+    assert h._response_code == 400
+    assert "config" in _get_response_body(h)["error"]
+    assert "passwd" not in _get_response_body(h)["error"]
+
+  @pytest.mark.parametrize("bad", ["-i", "--input=/etc/x", "-c", "--config=/x", "--job-id"])
+  @pytest.mark.parametrize("as_string", [False, True])
+  def test_json_body_forbidden_args_rejected(self, bad, as_string):
+    args_val = bad if as_string else ["-tmdb", "603", bad]
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": args_val}).encode()
     h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
     path, args, config, retries = h._parse_webhook_body()
-    assert config == "/alt/config.ini"
+    assert path is None
+    assert h._response_code == 400
+    assert "set by the daemon" in _get_response_body(h)["error"]
+
+  def test_handle_webhook_forbidden_arg_queues_nothing(self):
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": ["-i", "/etc/shadow"]}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    h._handle_webhook()
+    assert h._response_code == 400
+    h.server.job_db.add_job.assert_not_called()
+
+  @pytest.mark.parametrize("bad", [{"a": 1}, 5, ["-tmdb", 603], [["x"]], None])
+  def test_json_body_non_string_args_rejected(self, bad):
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": bad}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    path, args, config, retries = h._parse_webhook_body()
+    if bad is None:
+      assert path == "/mnt/movie.mkv" and args == []
+      return
+    assert path is None
+    assert h._response_code == 400
+    assert "args" in _get_response_body(h)["error"]
 
   def test_json_body_with_max_retries(self):
     data = json.dumps({"path": "/mnt/movie.mkv", "max_retries": 3}).encode()
