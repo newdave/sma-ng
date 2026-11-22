@@ -1,0 +1,23 @@
+tests/test_claim_token.py
+  s_d73ac5e457a585::t_9a8e13853a25c0 96-111,130,133-140
+  s_d73ac5e457a585::t_4fbd84b0994348 141
+resources/daemon/db.py
+  s_d73ac5e457a585::t_01d90f4f5ff664 331-341
+  s_d73ac5e457a585::t_7ba410afed7197 681,1634
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "6711cec83890eceb4cb332515e83a0af1fa61d18",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
