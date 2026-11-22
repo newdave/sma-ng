@@ -41,8 +41,7 @@ DEFAULT_REF = "main"
 PAGES: list[tuple[str, str, str]] = [
   ("docs/README.md", "Home", ""),
   ("docs/getting-started.md", "Getting-Started", "User Guide"),
-  ("docs/docker-compose-quickstart.md", "Docker-Compose-Quick-Start", "User Guide"),
-  ("docs/sma-cli-quickstart.md", "SMA-CLI-Quick-Start", "User Guide"),
+  ("docs/docker-quickstart.md", "Docker-Quick-Start", "User Guide"),
   ("docs/configuration.md", "Configuration", "User Guide"),
   ("docs/integrations.md", "Integrations", "User Guide"),
   ("docs/library-audit.md", "Library-Audit", "User Guide"),
@@ -51,10 +50,9 @@ PAGES: list[tuple[str, str, str]] = [
   ("docs/metrics.md", "Cluster-Metrics", "Running the Daemon"),
   ("docs/hardware-acceleration.md", "Hardware-Acceleration", "Running the Daemon"),
   ("docs/deployment.md", "Deployment", "Running the Daemon"),
-  ("docs/multi-instance-deployment.md", "Multi-Instance-Deployment", "Running the Daemon"),
-  ("docs/environment-architecture.md", "Environment-Architecture", "Running the Daemon"),
   ("docs/troubleshooting.md", "Troubleshooting", "Reference"),
   ("docs/migration.md", "Migration-Guide", "Reference"),
+  ("docs/architecture.md", "Architecture", "Reference"),
   ("docs/test-coverage.md", "Test-Coverage", "Development"),
 ]
 # Generated pages that have no markdown source, with their sidebar section.
