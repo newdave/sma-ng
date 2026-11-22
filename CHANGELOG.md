@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.37](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.36...sma-ng-v3.2.37) (2026-11-22)
+
+
+### Bug Fixes
+
+* import after Sonarr/Radarr rescan wait times out ([#222](https://github.com/newdave/sma-ng/issues/222)) ([b9369b2](https://github.com/newdave/sma-ng/commit/b9369b20a50efe7290ea88228848f6e72286a8b1))
+
 ## [3.2.36](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.35...sma-ng-v3.2.36) (2026-11-04)
 
 
