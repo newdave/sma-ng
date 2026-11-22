@@ -858,6 +858,51 @@ class TestFallbackEventParsing:
     worker._fallback_counter_callback = None
     worker._record_fallback_event('{"event": "ffmpeg.attempts", "attempts": [], "result": "ok"}')  # must not raise
 
+  @staticmethod
+  def _formatted_attempts_line():
+    import logging
+
+    from resources.log import SingleLineFormatter
+
+    payload = {
+      "event": "ffmpeg.attempts",
+      "attempts": [{"tier": "hw", "failure_class": "device_open_failed", "duration_ms": 12}],
+      "result": "failed",
+    }
+    rec = logging.LogRecord("t", logging.INFO, __file__, 1, json.dumps(payload, indent=2), None, None)
+    line = SingleLineFormatter("%(message)s").format(rec)
+    assert '"event": "ffmpeg.attempts"' not in line  # compacted: no space after colon
+    assert '"event":"ffmpeg.attempts"' in line
+    return line
+
+  def test_records_line_from_real_single_line_formatter(self):
+    worker, calls = self._worker_with_cb()
+    worker._record_fallback_event(self._formatted_attempts_line())
+    assert calls == [("hw", "failed", "device_open_failed")]
+
+  def test_read_loop_parses_compact_line_without_callback(self, tmp_path):
+    """The read loop must parse compact JSON and stash the failure class even
+    when no metrics callback is registered."""
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    worker.job_timeout_seconds = 0
+    worker._fallback_counter_callback = None
+    proc = _make_fake_process([self._formatted_attempts_line()], returncode=1)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    assert worker._last_attempt_failure_class == "device_open_failed"
+
+  def test_read_loop_feeds_callback_with_compact_line(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker, calls = self._worker_with_cb()
+    worker.job_timeout_seconds = 0
+    proc = _make_fake_process([self._formatted_attempts_line()], returncode=1)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    assert calls == [("hw", "failed", "device_open_failed")]
+
 
 # ---------------------------------------------------------------------------
 # preflight_output_capacity helper + ConversionWorker._preflight_disk_pressure

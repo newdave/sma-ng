@@ -826,9 +826,12 @@ class ConversionWorker(threading.Thread):
         # Capture MediaProcessor's structured ffmpeg.attempts event so the
         # daemon's /health fallback counters reflect work done in worker
         # subprocesses. The event is single-line JSON per the logging
-        # contract; we look for the event marker substring first to keep
-        # the hot path cheap.
-        if self._fallback_counter_callback is not None and '"event": "ffmpeg.attempts"' in line:
+        # contract and SingleLineFormatter compacts it (no space after the
+        # colon), so match the bare event name, not a whitespace-exact
+        # key/value pair. Always parse: the failure class feeds
+        # jobs.failure_category even when no metrics callback is registered
+        # (the callback is gated inside _record_fallback_event).
+        if "ffmpeg.attempts" in line:
           self._record_fallback_event(line)
 
       # EOF reached; the watchdog still guards this wait.
