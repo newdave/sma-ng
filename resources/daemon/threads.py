@@ -5,6 +5,7 @@ import time
 
 from resources.daemon import job_kinds, metrics_prom, storage
 from resources.daemon.log_archiver import LogArchiver
+from resources.daemon.queueing import SKIP_RECENTLY_COMPLETED, duplicate_outcome, queue_job, skip_reason
 from resources.library_audit.engine import AuditEngine
 from resources.library_audit.enumerator import enumerate_paths
 from resources.log import getLogger
@@ -53,9 +54,14 @@ class HeartbeatThread(_StoppableThread):
     self._last_maintenance = None
 
   def run(self):
-    if not self.job_db.is_distributed:
-      return  # Heartbeat only meaningful for the shared PG backend
+    # Heartbeat and stale-node recovery only mean something for the shared PG
+    # backend; the SQLite backend still needs the housekeeping sweeps.
+    distributed = self.job_db.is_distributed
     while self.running:
+      if not distributed:
+        self._maybe_run_maintenance()
+        self._stop_event.wait(timeout=self.interval)
+        continue
       try:
         self.job_db.heartbeat(
           self.node_id,
@@ -86,7 +92,7 @@ class HeartbeatThread(_StoppableThread):
       self._stop_event.wait(timeout=self.interval)
 
   def _maybe_run_maintenance(self):
-    """Run log TTL cleanup, offline-node expiry and log archival at most hourly.
+    """Run job retention, log TTL cleanup, offline-node expiry and log archival at most hourly.
 
     These are housekeeping sweeps over whole tables; running them on every
     30s heartbeat on every node only adds DB load. The first heartbeat runs
@@ -113,6 +119,13 @@ class HeartbeatThread(_StoppableThread):
           archiver.run(self.job_db)
     except Exception:
       self.log.exception("Heartbeat maintenance error")
+    try:
+      pcm = self.server.path_config_manager
+      if pcm.job_retention_days > 0:
+        # cleanup_old_jobs never deletes a job younger than the dedupe window.
+        self.job_db.cleanup_old_jobs(pcm.job_retention_days, protect_seconds=pcm.job_dedupe_window_seconds)
+    except Exception:
+      self.log.exception("Job retention error")
 
   def _execute_command(self, cmd: dict) -> bool:
     """Execute a cluster command. Returns True if the heartbeat loop should exit."""
@@ -277,13 +290,21 @@ class ScannerThread(_StoppableThread):
         self.log.warning("Scanner skipped %s under strict-routing — no daemon.routing rule matched [routing-miss]." % submit_path)
         continue
 
+      reason = skip_reason(self.path_config_manager, submit_path)
+      if reason:
+        # Left unrecorded, like strict-routing skips, so a config change can pick the file up later.
+        self.log.debug("Scanner skipped %s (%s)" % (submit_path, reason))
+        continue
+
       resolved_config = self.path_config_manager.get_config_for_path(submit_path)
       try:
         scan_profile = self.path_config_manager.get_profile_for_path(submit_path)
       except Exception:
         scan_profile = None
       scan_args = ["--profile", scan_profile] if scan_profile else []
-      job_id = self.job_db.add_job(
+      job_id = queue_job(
+        self.job_db,
+        self.path_config_manager,
         submit_path,
         resolved_config,
         scan_args,
@@ -291,12 +312,17 @@ class ScannerThread(_StoppableThread):
         request_profile=scan_profile,
       )
       # add_job returns None when a pending/running job already exists for
-      # the path; that file is handled too, so record it either way.
+      # the path or one completed within the dedupe window (recently_completed);
+      # that file is handled too, so record it either way.
       handled.append(filepath)
       if job_id is not None:
         self.log.info("Scanner queued job %d: %s" % (job_id, submit_path))
         queued += 1
         metrics_prom.record_job_enqueued("scan", scan_profile)
+      else:
+        outcome, existing_id = duplicate_outcome(self.job_db, self.path_config_manager, submit_path)
+        if outcome == SKIP_RECENTLY_COMPLETED:
+          self.log.info("Scanner skipped %s (%s, job %s)" % (submit_path, outcome, existing_id))
 
     if handled:
       self.job_db.record_scanned(handled)

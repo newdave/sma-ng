@@ -85,7 +85,7 @@ every docs page shows the running version.
 | `POST` | `/convert`, `/`                  | Yes    | Aliases of `/webhook/generic`                                           |
 | `POST` | `/webhook/sonarr`                | Yes    | Native Sonarr webhook; Download queues, other events go to Autoscan     |
 | `POST` | `/webhook/radarr`                | Yes    | Native Radarr webhook; Download queues, other events go to Autoscan     |
-| `POST` | `/cleanup`                       | Yes    | Remove old jobs. Query: `?days=30`                                      |
+| `POST` | `/cleanup`                       | Yes    | Remove old finished jobs now. Query: `?days=30`                         |
 | `POST` | `/reload`                        | Yes    | Reload `daemon:` section in `sma-ng.yml` without restarting             |
 | `POST` | `/restart`                       | Yes    | Graceful restart. Query: `?node=<id>` for remote node (PostgreSQL)      |
 | `POST` | `/shutdown`                      | Yes    | Graceful shutdown. Query: `?node=<id>` for remote node (PostgreSQL)     |
@@ -110,6 +110,10 @@ finding kinds, configuration knobs, and auto-fix safety semantics.
 Node admin API route:
 
 - `POST /admin/nodes/<node_id>/<action>` where action is one of `approve`, `reject`, `restart`, `shutdown`, `delete`
+
+**`GET /jobs` response size:** rows use an explicit column list that omits `ffmpeg_stderr` and the captured `output`
+(up to 1 MiB each per job). Read them with `GET /jobs/<id>/ffmpeg-stderr` and `GET /jobs/<id>/output`. `limit`
+values above `500` are clamped to `500`.
 
 ---
 
@@ -342,6 +346,8 @@ auto-profile selection happens for one-shot conversions. Pass
 | `progress-log-interval`            | Seconds between progress log lines for in-flight conversions                                                                                                                                     |
 | `recycle-bin-max-age-days`         | Delete recycle-bin media files older than this many days (default: `30`, `0` = disabled)                                                                                                         |
 | `recycle-bin-min-free-gb`          | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled)                                                                           |
+| `job-dedupe-window-seconds`        | Skip a path whose job completed within this many seconds, for the scanner and webhooks alike (default: `21600`, `0` = disabled). See [Duplicate Suppression](#duplicate-suppression).            |
+| `job-retention-days`               | Delete completed, failed and cancelled jobs older than this many days (default: `30`, `0` = keep forever)                                                                                        |
 | `log-ttl-days`                     | Cluster-mode: retention for log entries in PostgreSQL                                                                                                                                            |
 | `node-expiry-days`                 | Cluster-mode: hard-delete offline nodes after this many days (`0` = disabled)                                                                                                                    |
 | `log-archive-dir`                  | Cluster-mode: directory for gzipped JSONL archive of cluster logs                                                                                                                                |
@@ -487,10 +493,14 @@ Structured timestamps returned by the daemon API use the daemon host's local tim
 
 | Parameter | Default | Description                                                                 |
 | --------- | ------- | --------------------------------------------------------------------------- |
-| `lines`   | `200`   | Maximum lines to return (tail of file)                                      |
+| `lines`   | `500`   | Maximum lines to return (newest; max 2000)                                  |
 | `level`   | —       | Minimum log level filter: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`   |
-| `job_id`  | —       | Filter entries to a specific job                                            |
+| `job_id`  | —       | Filter entries to a specific job; scans the live file and rotated backups   |
 | `offset`  | —       | Return content starting from this byte offset (auto-resets on log rotation) |
+
+With `job_id`, the daemon streams the live log and its rotated backups (`<log>.1` to `<log>.5`, at most 10 MB each)
+instead of only the last lines, so jobs that scrolled out of the tail still return their entries (oldest first, newest
+`lines` kept). Entries older than the oldest backup are gone. `/tail` and `offset` reads are unchanged.
 
 ### Poll for new entries (live tail)
 
@@ -539,10 +549,13 @@ daemon:
 | `rewrite-to`   | Replacement prefix                                   |
 | `enabled`      | Set to `false` to disable without removing the entry |
 
-Files already in the `scanned_files` database table are skipped on subsequent scans. A file is
-recorded there only once it has been queued (or already has a pending/running job); files skipped
-by `strict-routing` stay unrecorded, so they are queued on a later scan once a matching routing
-rule is added. Any file whose extension matches `media-extensions` is eligible for submission. `.mp4` is excluded from the default list to avoid re-processing already-converted output; add it explicitly if you want scanning to pick it up.
+Files already in the `scanned_files` database table are skipped on subsequent scans; job cleanup and retention
+never prune that table. A file is recorded there when it is queued, already has a pending or running job, or had a
+job complete within `job-dedupe-window-seconds` (`recently_completed`). Files skipped for `strict-routing`, because
+they already match the output extension, or because they sit in a recycle bin stay unrecorded and are re-checked on
+every scan, so a later config or routing change picks them up. Any file whose extension matches `media-extensions`
+is eligible for submission. `.mp4` is excluded from the default list to avoid re-processing already-converted
+output; add it explicitly if you want scanning to pick it up.
 
 **Manual batch scan script:**
 
@@ -558,6 +571,30 @@ bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --dry-run
 ```
 
 ---
+
+## Duplicate Suppression
+
+The scanner and the webhooks (`/webhook`, `/webhook/generic`, `/webhook/sonarr`, `/webhook/radarr`, `/queue`) share
+one queue path, so a file is judged the same way however it arrives. `POST /jobs` only normalises paths and skips
+pending or running duplicates of the same kind; it ignores the completion window and the skip rules below:
+
+- Paths are normalised (repeated separators, `.` and `..` segments, trailing slash) before the duplicate check, so
+  `/media//tv/./ep1.mkv` and `/media/tv/ep1.mkv` are the same file.
+- A path with a pending or running job of the same kind is not queued again. A webhook gets
+  `200 {"status": "duplicate"}`; the scanner counts the file as handled.
+- A path whose job completed within `job-dedupe-window-seconds` (default `21600`, six hours; `0` disables) is not
+  queued again either, for every source (this also stops a download client re-grab loop). Failed and cancelled jobs
+  never block a retry. A single-file request gets `200 {"status": "skipped", "reason": "recently_completed",
+  "job_id": <completed job id>}`; a directory request lists the file under `skipped` with the same `reason` and
+  `job_id` (not under `duplicates`); the scanner logs one INFO line `Scanner skipped <path> (recently_completed, job
+  <id>)`. `duplicates` is only for pending or running jobs. Conversions queued by the library audit
+  (`resources/library_audit`) do not apply the completion window.
+- Files that already match the output extension (unless `process-same-extensions` or `force-convert` is set) and
+  files inside a configured recycle bin are skipped by the scanner too, as they already are for webhooks. Webhooks
+  report `reason: same_as_output_extension` or `reason: recycle_bin`.
+
+The jobs table has no episode or movie identity, so a newer job for a different path of the same episode does not
+replace an older pending job; only the same normalised path is deduplicated.
 
 ## Recycle Bin Cleanup
 
@@ -691,6 +728,16 @@ curl http://localhost:8585/stats
 curl "http://localhost:8585/jobs?status=pending"
 curl -X POST "http://localhost:8585/cleanup?days=7"
 ```
+
+### Job Retention
+
+Every node prunes finished jobs automatically, on the first heartbeat after startup and then at most once an
+hour, on SQLite and PostgreSQL alike. Rows with status `completed`, `failed` or `cancelled` whose `completed_at`
+is older than `daemon.job-retention-days` (default `30`) are deleted; `scanned_files` is never pruned.
+Set `job-retention-days: 0` to keep everything.
+
+A job completed within `job-dedupe-window-seconds` is never deleted, so retention (and `POST /cleanup?days=0`)
+cannot reopen the duplicate-suppression window. `POST /cleanup` runs the same pass on demand with the given `days`.
 
 **Database schema:**
 

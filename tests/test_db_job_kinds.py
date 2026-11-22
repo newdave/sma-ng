@@ -179,6 +179,31 @@ class TestPostgreSQL:
     cur.fetchone.return_value = {"id": 3}
     assert db.add_job("/m/a.mkv", "/c.yml") is None
 
+  def test_add_job_window_skips_recently_completed(self):
+    cur, modules = _pg()
+    db = _pg_db(cur, modules)
+    cur.fetchone.side_effect = [None, {"id": 8}]
+    assert db.add_job("/m//a.mkv", "/c.yml", dedupe_window_seconds=600) is None
+    window = next(c for c in cur.execute.call_args_list if c.args and "completed_at" in c.args[0])
+    assert "status = %s AND completed_at >= NOW() - make_interval(secs => %s)" in window.args[0]
+    assert window.args[1] == ("/m/a.mkv", "convert", "completed", 600)
+
+  def test_add_job_window_zero_has_no_completion_query(self):
+    cur, modules = _pg()
+    db = _pg_db(cur, modules)
+    cur.fetchone.side_effect = [None, {"id": 2}]
+    assert db.add_job("/m/a.mkv", "/c.yml", dedupe_window_seconds=0) == 2
+    assert not [c for c in cur.execute.call_args_list if c.args and "completed_at >=" in c.args[0]]
+
+  def test_find_recent_completed_job_sql(self):
+    cur, modules = _pg()
+    db = _pg_db(cur, modules)
+    cur.fetchone.return_value = {"id": 5}
+    assert db.find_recent_completed_job("/m//a.mkv", "convert", 600) == {"id": 5}
+    call = cur.execute.call_args_list[-1]
+    assert "completed_at >= NOW() - make_interval(secs => %s)" in call.args[0]
+    assert call.args[1] == ("/m/a.mkv", "convert", "completed", 600)
+
   def test_find_active_job_filters_kind(self):
     cur, modules = _pg()
     db = _pg_db(cur, modules)
