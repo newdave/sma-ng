@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Shared implementation of `mise run cluster -- upgrade`. Source after lib.sh and cluster_compose.sh.
+#
+# Rolling upgrade: drain each selected node, wait for running_jobs=0 (DRAIN_TIMEOUT seconds, default 1800;
+# POLL_INTERVAL seconds, default 10), then run deploy:remote for that host only.
+
+# POST a cluster action (drain/resume) to one host's local daemon.
+_upgrade_post_action() {
+  local host="$1" action="$2"
+  init_host_context "$host"
+  local daemon_port
+  # shellcheck disable=SC2154  # cfg populated by init_host_context above
+  daemon_port=$($cfg daemon_port 8585)
+  local url="http://127.0.0.1:${daemon_port}/admin/nodes/${host}/${action}"
+  local cmd
+  if [ -n "$daemon_api_key" ]; then
+    cmd="curl -sf -X POST ${url} -H 'X-API-Key: ${daemon_api_key}'"
+  else
+    cmd="curl -sf -X POST ${url}"
+  fi
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by init_host_context; ssh_opts must word-split
+  ssh $ssh_opts "$ssh_target" "$cmd" > /dev/null
+}
+
+# Read this host's running_jobs count from /admin/nodes/<host> (returns "" on
+# transient API failure so the caller can retry rather than abort).
+_upgrade_running_jobs() {
+  local host="$1"
+  init_host_context "$host"
+  local daemon_port
+  # shellcheck disable=SC2154  # cfg populated by init_host_context above
+  daemon_port=$($cfg daemon_port 8585)
+  local url="http://127.0.0.1:${daemon_port}/admin/nodes/${host}"
+  local cmd
+  if [ -n "$daemon_api_key" ]; then
+    cmd="curl -sf ${url} -H 'X-API-Key: ${daemon_api_key}'"
+  else
+    cmd="curl -sf ${url}"
+  fi
+  # shellcheck disable=SC2086,SC2029,SC2154  # ssh_opts/ssh_target populated by init_host_context; ssh_opts must word-split
+  ssh $ssh_opts "$ssh_target" "$cmd" 2>/dev/null \
+    | python3 .mise/shared/deploy/lib/node_running_jobs.py 2>/dev/null \
+    || true
+}
+
+cluster_upgrade() {
+  local failed host rj elapsed drained
+  select_cluster_hosts || return 1
+
+  local DRAIN_TIMEOUT=${DRAIN_TIMEOUT:-1800}      # 30 min default: long-running conversions can take a while
+  local POLL_INTERVAL=${POLL_INTERVAL:-10}
+  local daemon_api_key
+  daemon_api_key=$(lc daemon api_key "")
+
+  failed=""
+  for host in $DEPLOY_HOSTS; do
+    echo ""
+    echo "==> [$host] cluster upgrade: drain → wait → deploy:remote"
+
+    if ! _upgrade_post_action "$host" drain; then
+      echo "  ERROR: [$host] drain request failed; skipping host" >&2
+      failed="$failed $host"
+      continue
+    fi
+    echo "  [$host] drain accepted; waiting up to ${DRAIN_TIMEOUT}s for running_jobs=0"
+
+    elapsed=0
+    drained="false"
+    while [ "$elapsed" -lt "$DRAIN_TIMEOUT" ]; do
+      rj=$(_upgrade_running_jobs "$host")
+      if [ "$rj" = "0" ]; then
+        drained="true"
+        echo "  [$host] queue drained after ${elapsed}s"
+        break
+      fi
+      if [ -n "$rj" ]; then
+        echo "  [$host] running_jobs=${rj} (${elapsed}s elapsed)"
+      fi
+      sleep "$POLL_INTERVAL"
+      elapsed=$((elapsed + POLL_INTERVAL))
+    done
+
+    if [ "$drained" != "true" ]; then
+      echo "  ERROR: [$host] did not drain within ${DRAIN_TIMEOUT}s; resuming and skipping" >&2
+      _upgrade_post_action "$host" resume || true
+      failed="$failed $host"
+      continue
+    fi
+
+    echo "==> [$host] running deploy:remote for this host only"
+    if ! HOST="$host" mise run deploy:remote; then
+      echo "  ERROR: [$host] deploy:remote failed; resuming and continuing" >&2
+      _upgrade_post_action "$host" resume || true
+      failed="$failed $host"
+      continue
+    fi
+    # The new daemon process starts fresh (drain mode is in-memory and lost on
+    # restart); no explicit resume needed — heartbeat will set status to online.
+    echo "==> [$host] upgraded"
+  done
+
+  if [ -n "$failed" ]; then
+    echo ""
+    echo "ERROR: cluster upgrade failed for:$failed" >&2
+    return 1
+  fi
+
+  echo ""
+  echo "Cluster upgrade complete: $DEPLOY_HOSTS"
+}

@@ -158,7 +158,7 @@ daemon container, so keep media under `/mnt` (or add mounts) for Sonarr, Radarr 
 ## Stop grace period
 
 Every daemon service sets `stop_grace_period: ${STOP_GRACE_PERIOD:-2m}`. `docker compose stop`, `restart`, and
-`mise run cluster:stop` / `cluster:restart` give the daemon that long to drain before Docker sends SIGKILL; jobs still
+`mise run cluster -- stop` / `mise run cluster -- restart` give the daemon that long to drain before Docker sends SIGKILL; jobs still
 running at the deadline are requeued. Raise it for long transcodes by setting `STOP_GRACE_PERIOD=10m` in a `.env` file
 next to `docker-compose.yml` or in the shell running compose (compose substitution; `daemon.env` does not apply).
 The effective drain is the smaller of `daemon.shutdown-grace-seconds` (default `100`) and `STOP_GRACE_PERIOD`: raise

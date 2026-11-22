@@ -935,10 +935,10 @@ Runnable tasks are executable scripts under `.mise/tasks/`; `mise.toml` only def
 ```bash
 mise run setup:deps              # Create venv and install base dependencies
 mise run setup:deps:dev          # Install dev + test dependencies
-mise run test                    # Run the test suite (alias of test:run)
+mise run test                    # Run the test suite (extra args go to pytest after `--`)
 mise run test:cov                # Tests with coverage and the per-module floor
-mise run test:daemon             # Focused daemon/API worker tests
-mise run test:deploy             # Focused deploy/config task tests
+mise run test -- tests/test_daemon.py tests/test_handler.py tests/test_worker.py tests/test_server.py  # Daemon/API worker tests
+mise run test -- tests/test_deploy_tasks.py  # Deploy/config task tests
 mise run test:lint               # Ruff linter and bandit scan
 mise run test:openapi            # Validate docs/openapi.yaml
 mise run dev:lint                # Auto-fix lint issues
@@ -1042,8 +1042,8 @@ mise run deploy:remote
 IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:remote
 
 # Stop Docker services on one host (or many)
-HOST=sma-master mise run cluster:stop
-HOSTS="sma-master sma-worker-1" mise run cluster:stop
+HOST=sma-master mise run cluster -- stop
+HOSTS="sma-master sma-worker-1" mise run cluster -- stop
 ```
 
 Production images are built in CI on push to `main`. Once the GitHub Actions
@@ -1097,8 +1097,8 @@ hosts:
 #### Restarting and reloading without deploying
 
 ```bash
-mise run cluster:restart   # docker compose restart; daemon gets STOP_GRACE_PERIOD (default 2m) to drain
-mise run cluster:reload    # POST /reload; hot-reloadable config changes only
+mise run cluster -- restart   # docker compose restart; daemon gets STOP_GRACE_PERIOD (default 2m) to drain
+mise run cluster -- reload    # POST /reload; hot-reloadable config changes only
 ```
 
 Jobs still running when the grace period ends are requeued.
@@ -1113,8 +1113,8 @@ Jobs still running when the grace period ends are requeued.
 | `deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry     |
 | `deploy:docker`   | Push docker-compose.yml, pull image, `docker compose down` + `up -d --force-recreate`|
 
-Cluster lifecycle: `cluster:start`, `cluster:stop`, `cluster:restart`, `cluster:reload`, `cluster:status`,
-`cluster:drain`, `cluster:pause`, `cluster:resume`, `cluster:upgrade` — see
+Cluster lifecycle: `mise run cluster -- <verb>` with verbs `start`, `stop`, `restart`, `reload`, `status`,
+`drain`, `pause`, `resume` and `upgrade` — see
 [Cluster Operations](cluster-operations.md).
 
 ---
