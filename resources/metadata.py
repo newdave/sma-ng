@@ -22,6 +22,17 @@ from resources.lang import getAlpha2BCode, getAlpha3TCode
 from resources.naming import extract_air_date
 
 
+def _is_not_found(exc):
+  """True only for an HTTP 404 from TMDB (tmdbsimple surfaces it as requests.HTTPError)."""
+  return getattr(getattr(exc, "response", None), "status_code", None) == 404
+
+
+def _one_line(exc):
+  """First line of an exception message with whitespace collapsed, safe for single-line log records."""
+  lines = str(exc).strip().splitlines()
+  return " ".join(lines[0].split()) if lines else type(exc).__name__
+
+
 class TMDBIDError(Exception):
   """Raised when a valid TMDB ID cannot be resolved from the provided identifiers."""
 
@@ -123,7 +134,7 @@ class Metadata:
       except KeyboardInterrupt:
         raise
       except Exception as e:
-        self.log.warning("Unable to retrieve release dates from TMDB (tmdbid %s): %s", self.tmdbid, e)
+        self.log.warning("Unable to retrieve release dates from TMDB (tmdbid %s): %s", self.tmdbid, _one_line(e))
         releases = None
       rating = None
       for release in (releases or {}).get("results") or []:
@@ -174,9 +185,12 @@ class Metadata:
       try:
         self.seasondata = f_seasondata.result()
       except Exception as e:
-        # Expected for air-date shows whose arr numbering TMDB lacks; the air-date fallback below handles it.
-        self.log.info("TMDB has no season %s data (tmdbid %s): %s", season, self.tmdbid, e)
-        self._missing_seasons.add(self.season)
+        if _is_not_found(e):
+          # Expected for air-date shows whose arr numbering TMDB lacks; the air-date fallback below handles it.
+          self.log.info("TMDB has no season %s data (tmdbid %s): %s", season, self.tmdbid, _one_line(e))
+          self._missing_seasons.add(self.season)
+        else:
+          self.log.warning("Unable to retrieve season %s data from TMDB (tmdbid %s): %s", season, self.tmdbid, _one_line(e))
         self.seasondata = {}
       self.externalids = f_externalids.result()
 
@@ -263,7 +277,7 @@ class Metadata:
       except KeyboardInterrupt:
         raise
       except Exception as e:
-        self.log.warning("Unable to retrieve content ratings from TMDB (tmdbid %s): %s", self.tmdbid, e)
+        self.log.warning("Unable to retrieve content ratings from TMDB (tmdbid %s): %s", self.tmdbid, _one_line(e))
         content_ratings = None
       rating = next((x.get("rating") for x in (content_ratings or {}).get("results") or [] if x.get("iso_3166_1") == "US" and x.get("rating")), None)
       if rating:
@@ -326,8 +340,9 @@ class Metadata:
     try:
       season_data = tmdb.TV_Seasons(self.tmdbid, candidate).info(language=self.language)
     except Exception as e:
-      self.log.debug("Unable to fetch season %s for air-date lookup (tmdbid %s): %s", candidate, self.tmdbid, e)
-      self._missing_seasons.add(candidate)
+      self.log.debug("Unable to fetch season %s for air-date lookup (tmdbid %s): %s", candidate, self.tmdbid, _one_line(e))
+      if _is_not_found(e):
+        self._missing_seasons.add(candidate)
       return None
     for ep in season_data.get("episodes") or []:
       if ep.get("air_date") == air_date:
