@@ -655,10 +655,12 @@ class TestMain:
 
     token = _job_id.set("-")
     try:
+      # Patched so the process-wide SMA_LEVEL= flag does not leak into later tests.
       with patch("sys.argv", ["manual.py", "-cl", "--job-id", "42"]):
-        with patch("manual.showCodecs"):
+        with patch("manual.showCodecs"), patch("manual.enable_level_token") as enable:
           main()
       assert _job_id.get() == "42"
+      enable.assert_called_once_with()
     finally:
       _job_id.reset(token)
 
