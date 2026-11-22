@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.46](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.45...sma-ng-v3.2.46) (2026-11-22)
+
+
+### Bug Fixes
+
+* updates to claude ([8d4540e](https://github.com/newdave/sma-ng/commit/8d4540eb6a9aca7c7fe27a7aeb6104a2d85800ce))
+
 ## [3.2.45](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.44...sma-ng-v3.2.45) (2026-11-22)
 
 
