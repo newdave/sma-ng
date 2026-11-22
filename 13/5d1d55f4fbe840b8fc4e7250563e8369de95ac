@@ -1,0 +1,40 @@
+resources/naming.py
+  s_d73ac5e457a585::t_6d839c52e104d0 298,643
+  s_d73ac5e457a585::t_9537ac1f364533 668-669
+  s_d73ac5e457a585::t_efc1f9a9515493 689-690
+  s_d73ac5e457a585::t_3bae4ca26354ff 644-651
+  s_d73ac5e457a585::t_d5064eeb15f492 296,299-301,307-309
+tests/test_naming.py
+  s_d73ac5e457a585::t_6d839c52e104d0 1442-1443,1445-1449
+  s_d73ac5e457a585::t_3e6fbfee2ee472 1400-1409,1411-1414,1416-1441,1444,1450-1459
+  s_d73ac5e457a585::t_4fa67adc0542df 1415
+  s_d73ac5e457a585::t_a5035aa1c4eabc 1410
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_7aff64e10773b5 819,826-829
+tests/test_manual.py
+  s_d73ac5e457a585::t_f9edd1e7f557b6 554-579,581-585,587-590
+  s_d73ac5e457a585::t_4fa67adc0542df 580,586
+tests/test_mediaprocessor.py
+  s_d73ac5e457a585::t_44154091648735 3399-3419,6510-6529
+  s_d73ac5e457a585::t_131b28e91233f3 6530
+docs/configuration.md
+  s_d73ac5e457a585::t_1aa28098b4273e 604-606
+manual.py
+  s_d73ac5e457a585::t_7aff64e10773b5 631,634
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "135d1d55f4fbe840b8fc4e7250563e8369de95ac",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
