@@ -1,0 +1,28 @@
+resources/daemon/worker.py
+  s_d73ac5e457a585::t_0c1ab81e8728b0 60-62,587,590-591
+docs/configuration.md
+  s_d73ac5e457a585::t_3d4659b8639c70 65-101
+tests/test_interrupted_requeue.py
+  s_d73ac5e457a585::t_d6d6d072ff295a 74-80
+docs/daemon.md
+  s_d73ac5e457a585::t_6645f4f47f316a 335-367
+  s_d73ac5e457a585::t_658c16985ecd31 822-826
+docs/troubleshooting.md
+  s_d73ac5e457a585::t_658c16985ecd31 363-365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "b90b738af13c9e5b668be554b1278bedc6da97eb",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
