@@ -1,0 +1,54 @@
+resources/config_schema.py
+  s_d73ac5e457a585::t_45b7cb9762c2e7 969-970
+docs/configuration.md
+  s_d73ac5e457a585::t_74596a571192f6 81
+resources/daemon/queueing.py
+  s_d73ac5e457a585::t_20479a0f13cbfb 1-49
+setup/sma-ng.yml.sample
+  s_d73ac5e457a585::t_ac3a9ad3c1c32d 20
+docs/daemon.md
+  s_d73ac5e457a585::t_1333fd313c56da 565-566
+  s_d73ac5e457a585::t_74596a571192f6 344
+  s_d73ac5e457a585::t_9432b902915524 563-564,567-580
+resources/daemon/handler.py
+  s_d73ac5e457a585::t_489d795de42f70 224-227
+  s_d73ac5e457a585::t_d33a53b05b598d 1594-1596,1604-1606,1649-1651,1657-1658,1679-1681
+  s_d73ac5e457a585::t_bf2022c9295ff3 20
+  s_d73ac5e457a585::t_1b34074aadf389 228
+resources/daemon/threads.py
+  s_d73ac5e457a585::t_d33a53b05b598d 8,283
+  s_d73ac5e457a585::t_a98dc0b41bab69 281-282,284-286,293-295
+tests/test_queueing.py
+  s_d73ac5e457a585::t_d87d231f813952 1-42
+docs/openapi.yaml
+  s_d73ac5e457a585::t_74596a571192f6 422,821,861
+tests/test_threads.py
+  s_d73ac5e457a585::t_45b7cb9762c2e7 293
+  s_d73ac5e457a585::t_0daf4b32ceea51 1238-1277
+tests/test_sqlite_db.py
+  s_d73ac5e457a585::t_649e3292a29f8a 545-594
+tests/test_handler.py
+  s_d73ac5e457a585::t_f688c85b1c306d 3096-3128
+resources/daemon/db.py
+  s_d73ac5e457a585::t_13d419f4d26ed4 30
+  s_d73ac5e457a585::t_48d2fc8489d040 546,549,558-566,579,1375,1379,1391-1399
+  s_d73ac5e457a585::t_d01c4ef2bd18fe 1414
+resources/daemon/config.py
+  s_d73ac5e457a585::t_45b7cb9762c2e7 306,411
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "d17f49c60f95ab13fe7bd4634b80f66ad1473591",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
