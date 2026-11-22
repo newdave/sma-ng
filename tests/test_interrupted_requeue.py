@@ -71,6 +71,13 @@ class TestWorkerClassification:
     db.requeue_interrupted_job.assert_called_once_with(31, "Interrupted by SIGINT (exit code -2); requeued", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN)
     db.fail_job.assert_not_called()
 
+  @pytest.mark.parametrize("rc", [128 + signal.SIGTERM, 128 + signal.SIGINT])
+  def test_shell_style_signal_exit_on_running_worker_requeues(self, tmp_path, rc):
+    # manual.py's fallback exits 128 + signum (143, 130) when it handled the signal itself.
+    _worker, db = self._run(tmp_path, rc)
+    db.requeue_interrupted_job.assert_called_once()
+    db.fail_job.assert_not_called()
+
   @pytest.mark.parametrize("rc", [-9, -11, 1])
   def test_any_rc_while_stopping_requeues(self, tmp_path, rc):
     _worker, db = self._run(tmp_path, rc, stopping=True)

@@ -57,6 +57,9 @@ TERMINAL_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
 # After stop() the stop event no longer waits; keep a short real pause so the
 # retries still space out without delaying shutdown past its grace.
 SHUTDOWN_RETRY_BACKOFF_CAP_SECONDS = 0.25
+# Exit codes of a conversion stopped by SIGTERM/SIGINT: killed by the signal
+# (-15, -2) or exited through manual.py's 128 + signum fallback (143, 130).
+INTERRUPT_RETURNCODES = (-signal.SIGTERM, -signal.SIGINT, 128 + signal.SIGTERM, 128 + signal.SIGINT)
 # Returned by _terminal_write when every attempt failed and the write was parked.
 _PARKED = object()
 # Consecutive pre-start errors (claim, then DB/lock error before the conversion
@@ -581,10 +584,11 @@ class ConversionWorker(threading.Thread):
       # success; the DB guard discards it if the row was cancelled.
       abort_reason = None if success else self._abort_reason
       returncode = self._last_returncode
-      if abort_reason is None and not success and (not self.running or returncode in (-signal.SIGTERM, -signal.SIGINT)):
+      if abort_reason is None and not success and (not self.running or returncode in INTERRUPT_RETURNCODES):
         # A conversion that ended while this worker is stopping, or that died
         # from SIGTERM/SIGINT (the daemon's shutdown signal reaches manual.py
-        # and ffmpeg directly), was interrupted, not broken. Other signals
+        # and ffmpeg directly; manual.py's fallback exits 128 + signum), was
+        # interrupted, not broken. Other signals
         # (SIGKILL/OOM, SIGSEGV) take the normal retry/backoff failure path so
         # a deterministic crash cannot requeue forever.
         abort_reason = ABORT_SHUTDOWN
