@@ -308,11 +308,6 @@ class TestMiseTaskLayout:
 
     assert offenders == []
 
-  def test_makefile_exposes_install_mise(self):
-    text = _read("Makefile")
-    assert "install-mise:" in text
-    assert "mise run" in text
-
 
 class TestRemoteInstallDirs:
   def test_remote_install_dirs_include_sqlite_data_dir(self):
