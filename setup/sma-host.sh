@@ -7,7 +7,7 @@
 # client writes. The plan is a list of docker commands, for example a
 # throwaway `docker run --rm` that mounts exactly the paths you named.
 # Plan lines become docker arguments through `set --`; nothing is eval'd.
-# See docs/sma-cli-quickstart.md.
+# See docs/docker-quickstart.md.
 #
 # Environment:
 #   SMA_IMAGE        image to run (default: ~/.config/sma/image, else ghcr.io/newdave/sma-ng:latest)

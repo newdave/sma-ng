@@ -6,18 +6,26 @@ It focuses on the minimum you need to understand to get a successful first run. 
 
 - [Configuration](configuration.md)
 - [Daemon Mode](daemon.md)
-- [Docker Compose Quick Start](docker-compose-quickstart.md)
+- [Docker Quick Start](docker-quickstart.md)
 - [Hardware Acceleration](hardware-acceleration.md)
 
 ## Requirements
 
 - Python 3.12+
-- FFmpeg (system install or via `ffmpeg_dir` in `Daemon:` section in `sma-ng.yml`)
-- Python packages: `pip install -r setup/requirements.txt`
+- FFmpeg and FFprobe (system install, or set `daemon.ffmpeg-dir` / `base.converter.ffmpeg`)
+- Python packages: declared in `pyproject.toml` (the source of truth). `mise run setup:deps` installs them into
+  `venv/`; without mise run `pip install .`.
 
-Optional:
+Optional extras (`pip install ".[extra]"`, or `mise run setup:deps:all` for everything):
 
-- OpenVINO analyzer runtime: `pip install -r setup/requirements-openvino.txt`
+| Extra      | Adds                                                                     |
+| ---------- | ------------------------------------------------------------------------ |
+| `postgres` | `psycopg2-binary` for PostgreSQL job persistence and cluster mode        |
+| `openvino` | OpenVINO runtime for the analyzer                                        |
+| `dev`      | pytest, ruff, pre-commit, and other lint/test tooling (`setup:deps:dev`) |
+
+`setup/requirements*.txt` still exist for `pip install -r` workflows; `setup/requirements.txt` mirrors the base
+dependencies plus the `postgres` extra and is kept in sync by a test.
 
 ## What SMA-NG Does
 
@@ -171,7 +179,7 @@ If FFmpeg is not on `PATH`, either:
 
 ### With Docker Compose
 
-If you want the fastest daemon setup path, see [Docker Compose Quick Start](docker-compose-quickstart.md).
+If you want the fastest daemon setup path, see [Docker Quick Start](docker-quickstart.md).
 
 ---
 
@@ -580,7 +588,7 @@ After you have a first successful run:
 - read [Hardware Acceleration](hardware-acceleration.md) if you want QSV, VAAPI, NVENC, or VideoToolbox
 - read [Daemon Mode](daemon.md) if this will run continuously
 - read [Integrations](integrations.md) when wiring Sonarr, Radarr, Plex, or download clients
-- read [Multi-Instance Deployment](multi-instance-deployment.md) if you are planning multiple nodes or daemons
+- read [Cluster Operations](cluster-operations.md#deployment-patterns) if you are planning multiple nodes or daemons
 
 ## Post-Process Scripts
 

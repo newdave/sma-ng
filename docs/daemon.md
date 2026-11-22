@@ -163,7 +163,7 @@ A rejected request queues nothing; the daemon logs one line without the rejected
 ## Job Kinds
 
 `POST /jobs` queues any of SMA-NG's tools, not only conversions. The `sma` command uses it when it talks to a
-daemon (see [`sma` CLI Quick Start](sma-cli-quickstart.md)).
+daemon (see [Docker Quick Start](docker-quickstart.md#the-sma-host-command)).
 
 ```bash
 curl -X POST http://localhost:8585/jobs \

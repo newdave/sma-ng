@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.48](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.47...sma-ng-v3.2.48) (2026-11-22)
+
+
+### Documentation
+
+* prune planning docs, index README, merge deploy pages (SMANG-37) ([#257](https://github.com/newdave/sma-ng/issues/257)) ([b0b5c43](https://github.com/newdave/sma-ng/commit/b0b5c432182e55f176bcf54d0c312857886f395b))
+
 ## [3.2.47](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.46...sma-ng-v3.2.47) (2026-11-22)
 
 

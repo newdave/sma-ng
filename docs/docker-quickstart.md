@@ -1,4 +1,12 @@
-# `sma` CLI Quick Start
+# Docker Quick Start
+
+SMA-NG ships as a Docker image. There are two ways to run it, and they combine:
+
+- [The `sma` host command](#the-sma-host-command): runs convert, preview, repair, audit and rename on a Docker host
+  with only Docker installed, and can start the daemon itself (`sma daemon up`).
+- [Docker Compose](#docker-compose): the shipped profiles, override files and cluster deployment tooling.
+
+## The `sma` host command
 
 `sma` runs SMA-NG's tools (convert, preview, repair, audit, rename) on a Docker host without a source checkout,
 Compose, or Python. When an SMA-NG daemon answers, on this host or a remote one you configure, `sma` sends the work
@@ -8,7 +16,7 @@ the paths you name, runs the tool as your own user, and removes the container wh
 `sma` itself is a small POSIX `sh` launcher. The logic lives in the image, so `sma` and the image are always upgraded
 together.
 
-## 1. Install
+### Install
 
 Docker is the only requirement:
 
@@ -45,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.s
 Edit `/opt/sma/config/sma-ng.yml` before converting (see [Configuration](configuration.md)). Every `sma` command
 reads it.
 
-## 2. Check it works
+### Check it works
 
 ```bash
 sma version
@@ -56,7 +64,7 @@ sma host command: 6807857c...
 sma image: 3.2.23 (commit 6807857c...)
 ```
 
-## 3. Run something
+### Run something
 
 ```bash
 sma preview /mnt/media/Movies/Film.mkv        # print the conversion plan, change nothing
@@ -69,7 +77,7 @@ sma audit /mnt/media/Movies                   # library audit report
 Paths can be anywhere on the host, absolute or relative to the current directory. Arguments after the path are passed
 to the tool, for example `sma convert Film.mkv -tmdb 603`.
 
-## 4. Commands
+### Commands
 
 | Command | Runs |
 | ------- | ---- |
@@ -80,8 +88,8 @@ to the tool, for example `sma convert Film.mkv -tmdb 603`.
 | `sma rename PATH [ARGS]` | `rename.py PATH` (`--dry-run` to preview) |
 | `sma codecs` | List supported codecs (always a throwaway container) |
 | `sma shell [ARGS]` | `bash` in a throwaway container with the current directory mounted |
-| `sma jobs [list\|show ID\|logs ID [-f]\|cancel ID]` | Daemon jobs (see [Daemon targets](#10-daemon-targets)) |
-| `sma daemon up\|down\|restart\|status\|logs\|upgrade` | The long-running daemon (see [Running the daemon](#11-running-the-daemon)) |
+| `sma jobs [list\|show ID\|logs ID [-f]\|cancel ID]` | Daemon jobs (see [Daemon targets](#daemon-targets)) |
+| `sma daemon up\|down\|restart\|status\|logs\|upgrade` | The long-running daemon (see [Running the daemon](#running-the-daemon)) |
 | `sma target add\|list\|use\|rm ...` | Daemons `sma` can send work to |
 | `sma map add\|list\|rm ...` | Translate local paths to a daemon's paths |
 | `sma upgrade [TAG]` | Pull the image (or switch to `TAG`) and replace `sma` from it |
@@ -102,7 +110,7 @@ Options placed before the command:
 
 `sma` sets the tool's config, input and job id itself, so `-c`, `-i` and `--job-id` are rejected as tool arguments.
 
-## 5. What gets mounted
+### What gets mounted
 
 Each run mounts, at the same path inside the container:
 
@@ -122,7 +130,7 @@ extra-mounts:
 
 Paths containing `:` cannot be mounted, and `/` is never mounted.
 
-## 6. Users and hardware
+### Users and hardware
 
 The container runs as your user and group, so new files are owned by you. Under rootless Docker, `sma` leaves the
 user to Docker's own mapping. On SELinux hosts the mounts get the `:z` label.
@@ -132,7 +140,7 @@ GPU access is detected on the host for every run:
 - `/dev/dri` (Intel, AMD): `--device /dev/dri` plus the device nodes' groups, so VA-API and QSV work as your user;
 - a working `nvidia-smi`: `--gpus all` (needs the NVIDIA container toolkit).
 
-## 7. Scripts and cron
+### Scripts and cron
 
 `sma` asks Docker for a terminal only when you are at one, so it works from cron, scripts and `ssh host sma ...`.
 
@@ -152,7 +160,7 @@ GPU access is detected on the host for every run:
 0 3 * * * sma repair -n /mnt/media/TV >> /var/log/sma-repair.log 2>&1
 ```
 
-## 8. Upgrading
+### Upgrading
 
 ```bash
 sma upgrade            # pull the current tag again (latest moves; a version tag does not)
@@ -168,7 +176,7 @@ command to run (`sma upgrade` or `sma daemon upgrade`). The check gives up after
 command: offline it prints `latest: unknown (...)`. Set `SMA_NO_UPDATE_CHECK=1` to skip it. `--json` prints the
 same as a JSON object.
 
-## 9. Settings
+### Settings
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
@@ -178,9 +186,9 @@ same as a JSON object.
 | `SMA_CONFIG_HOME` | `~/.config/sma` | Client settings |
 | `DOCKER_BIN` | `docker` | Docker executable |
 
-## 10. Daemon targets
+### Daemon targets
 
-### Where a command runs
+#### Where a command runs
 
 For `convert`, `preview`, `repair`, `audit` and `rename`, `sma` picks the daemon first:
 
@@ -209,7 +217,7 @@ While a job runs, `sma` prints its output and exits with `0` when it completes, 
 Ctrl-C stops following (exit `130`) and prints `sma jobs show <id>`; the job keeps running. Daemon jobs share the
 daemon's queue, so a job may wait for others first. See [Job Kinds](daemon.md#job-kinds) for what each kind runs.
 
-### Remote daemons
+#### Remote daemons
 
 ```bash
 sma target add nas http://nas.lan:8585 --api-key-stdin <<< "$SMA_API_KEY"
@@ -245,7 +253,7 @@ targets:
 extra-mounts: [/srv/scratch]
 ```
 
-### Scripting
+#### Scripting
 
 `--json` prints one JSON object per job on stdout. With `--no-wait` that is the queued job; otherwise it is the final
 state, and the job's output is not streamed:
@@ -261,7 +269,7 @@ sma --json repair -n /mnt/media/TV
 Coming from the old `docker exec` version of `sma` or the alias file: `sma manual`, `sma smoke`, `sma logs`,
 `sma status` and the `SMA_CONTAINER` / `SMA_COMPOSE_*` variables are gone. Use `docker logs -f sma-ng` for daemon logs.
 
-## 11. Running the daemon
+### Running the daemon
 
 The daemon receives webhooks from Sonarr and Radarr, keeps the job queue and serves the dashboard. `sma` can run it
 for you, no Compose needed:
@@ -288,7 +296,7 @@ and recreates it with the compose file's image tag. Mounts and ports then stay i
 `SMA_DAEMON_NAME` when the container has another name. Clusters keep their own deployment tooling (see
 [Cluster Operations](cluster-operations.md)); to `sma` each node is a target.
 
-## Troubleshooting
+### `sma` troubleshooting
 
 | Symptom | Fix |
 | ------- | --- |
@@ -302,3 +310,352 @@ and recreates it with the compose file's image tag. Mounts and ports then stay i
 | A tool cannot find or write a directory | It is not one `sma` mounts; add it with `--mount PATH` or `extra-mounts` |
 | Output files owned by root | Older `sma` versions ran as root: `sudo chown -R "$USER" <path>` once |
 | `no matching manifest for linux/arm64` | Install or upgrade with a release tag: `sma upgrade 3.2.23` |
+
+## Docker Compose
+
+Run the SMA-NG daemon with Docker Compose. Compose is optional: on a single host,
+`sma daemon up --media /path/to/media` starts the same daemon without it (see
+[Running the daemon](#running-the-daemon)). Use Compose when you want its profiles, override
+files, or the cluster deployment tooling.
+
+The repository ships a compose file at [`docker/docker-compose.yml`](../docker/docker-compose.yml) with six profiles:
+
+- `software`
+- `software-pg`
+- `intel`
+- `intel-pg`
+- `nvidia`
+- `nvidia-pg`
+
+The non-`-pg` profiles are single-node profiles and default to SQLite at `/data/sma-ng.db`, persisted on the
+Docker host under `/opt/sma/data/sma-ng.db`. The `-pg` profiles run the same container for nodes that use an
+external PostgreSQL server, such as cluster members; compose does not bundle PostgreSQL, and the database is
+chosen only by `daemon.db_url` in `sma-ng.yml`.
+
+With the current compose layout, use config files for different jobs:
+
+- `/opt/sma/config/sma-ng.yml` → daemon runtime settings
+- `/opt/sma/config/daemon.env` → container-only settings (`POSTGRES_*`, `LIBVA_DRIVER_NAME`, `NVIDIA_*`)
+- `docker/.env` → Compose interpolation (`IMAGE_TAG`, `PORT`, `STOP_GRACE_PERIOD`)
+
+For clustered Docker deployments, set `daemon.node_id` in
+`/opt/sma/config/sma-ng.yml`.
+
+### Prepare Host Directories
+
+Install the `sma` command first ([Install](#install)); it creates `/opt/sma/config`, `/opt/sma/logs` and
+`/opt/sma/data` and a sample `/opt/sma/config/sma-ng.yml`, and needs no source checkout.
+
+Then fetch the compose file and the container settings file it requires:
+
+```bash
+sudo mkdir -p /opt/sma/docker /transcode /recycle
+sudo curl -fsSL -o /opt/sma/docker/docker-compose.yml \
+  https://raw.githubusercontent.com/newdave/sma-ng/main/docker/docker-compose.yml
+docker run --rm --entrypoint cat ghcr.io/newdave/sma-ng:latest /app/setup/daemon.env.sample \
+  | sudo tee /opt/sma/config/daemon.env >/dev/null
+```
+
+The default compose mounts are:
+
+- `/opt/sma/config` → container `/config`
+- `/opt/sma/logs` → container `/logs`
+- `/opt/sma/data` → container `/data`
+- `/mnt` → container `/mnt`
+- `/transcode` → container `/transcode`
+- `/recycle` → container `/recycle`
+
+Adjust the compose file if your host uses different media paths; keep host and container paths identical so
+webhook paths resolve inside the daemon.
+
+### Config Files
+
+The installer writes `/opt/sma/config/sma-ng.yml` only when it does not exist, and `daemon.env` above comes from
+the image's sample. Existing local config is never overwritten. Fresh samples are written to
+`/opt/sma/config/defaults/` each time the container starts, so you can diff your config against them.
+
+### Edit `sma-ng.yml`
+
+Set the basics in `/opt/sma/config/sma-ng.yml`:
+
+- `ffmpeg = /usr/local/bin/ffmpeg`
+- `ffprobe = /usr/local/bin/ffprobe`
+- your desired codec/container settings
+- Sonarr/Radarr/Plex sections if needed
+
+For hardware encoders, also set the appropriate `gpu =` and codec values. See [Hardware Acceleration](hardware-acceleration.md).
+
+### Edit `Daemon:` section in `sma-ng.yml`
+
+Minimal example:
+
+```yaml
+Daemon:
+  default_config: /config/sma-ng.yml
+  api_key: change-me
+  db_url: sqlite:////data/sma-ng.db
+  path_configs:
+    - path: /mnt/unionfs/Media/TV
+      profile: rq
+    - path: /mnt/unionfs/Media/Movies
+      profile: rq
+```
+
+Notes:
+
+- `/config/...` paths are inside-container paths
+- `/mnt/...` paths must match the container view of your mounted media
+- for non-`-pg` profiles, use `sqlite:////data/sma-ng.db`
+- for `*-pg` profiles, set `db_url` to the PostgreSQL URL
+- database connection details are not read from `daemon.env`
+
+### Create a Compose `.env` File
+
+From the repo root:
+
+```bash
+cat > docker/.env <<'EOF'
+IMAGE_TAG=latest
+PORT=8585
+EOF
+```
+
+Use `docker/.env` only for values that Docker Compose itself expands from `docker-compose.yml`, such as:
+
+- `IMAGE_TAG`
+- `PORT`
+- `STOP_GRACE_PERIOD`
+
+GPU device permissions (`/dev/dri/*`) are reconciled automatically by the container entrypoint — no `RENDER_GID`/`VIDEO_GID` configuration is required.
+
+Put daemon/container settings in `/opt/sma/config/daemon.env` instead.
+
+### Host command and compose mounts
+
+Every `sma` command runs in its own throwaway container that reads the same `/opt/sma/config/sma-ng.yml` as the
+daemon, so it works alongside a running compose daemon (see [The `sma` host command](#the-sma-host-command) for
+install, commands and mounts). Paths no longer have to sit under the daemon's `/mnt`, `/transcode` and `/recycle`
+mounts.
+
+The daemon itself still uses the compose mounts above: webhook paths must be visible at the same path inside the
+daemon container, so keep media under `/mnt` (or add mounts) for Sonarr, Radarr and other integrations.
+
+#### Migrating from the alias file
+
+- The old `sma-*` alias file was removed; delete the `source` line for it from your shell profile and use `sma`.
+- The `/mnt/unionfs/downloads:/downloads` mount was removed from every compose service. Replace `/downloads/...`
+  arguments with `/mnt/unionfs/downloads/...`.
+- Webhooks from download clients that still report `/downloads/...` keep working with a path rewrite in `sma-ng.yml`:
+
+  ```yaml
+  daemon:
+    path-rewrites:
+      - from: /downloads
+        to: /mnt/unionfs/downloads
+  ```
+
+- `sma` runs commands as your own user, so new files are owned by you. Fix old root-owned output once with
+  `sudo chown -R "$USER" <path>` if needed.
+
+### Stop grace period
+
+Every daemon service sets `stop_grace_period: ${STOP_GRACE_PERIOD:-2m}`. `docker compose stop`, `restart`, and
+`mise run cluster -- stop` / `mise run cluster -- restart` give the daemon that long to drain before Docker sends SIGKILL; jobs still
+running at the deadline are requeued. Raise it for long transcodes by setting `STOP_GRACE_PERIOD=10m` in a `.env` file
+next to `docker-compose.yml` or in the shell running compose (compose substitution; `daemon.env` does not apply).
+The effective drain is the smaller of `daemon.shutdown-grace-seconds` (default `100`) and `STOP_GRACE_PERIOD`: raise
+both together and keep `shutdown-grace-seconds` below `STOP_GRACE_PERIOD`.
+
+### Edit `daemon.env`
+
+For single-node non-`-pg` profiles, set `daemon.db_url` in `sma-ng.yml` to:
+
+```yaml
+daemon:
+  db_url: sqlite:////data/sma-ng.db
+```
+
+The SQLite file is stored on the Docker host at `/opt/sma/data/sma-ng.db`.
+Set `daemon.node_id` and `daemon.api_key` in `sma-ng.yml` if you want stable identity and API protection:
+
+```yaml
+daemon:
+  node_id: media-node-a
+  api_key: change-me-too
+```
+
+For the `-pg` profiles (`software-pg`, `intel-pg`, `nvidia-pg`), point the daemon at your PostgreSQL server:
+
+```yaml
+daemon:
+  node_id: media-node-a
+  api_key: change-me-too
+  db_url: postgresql://sma:password@db-host:5432/sma
+```
+
+### Start a Profile
+
+From the repo root:
+
+| Profile       | Hardware          | Database                            |
+| ------------- | ----------------- | ----------------------------------- |
+| `software`    | CPU only          | SQLite (`/opt/sma/data/sma-ng.db`)  |
+| `software-pg` | CPU only          | external PostgreSQL (`db_url`)      |
+| `intel`       | Intel QSV / VAAPI | SQLite                              |
+| `intel-pg`    | Intel QSV / VAAPI | external PostgreSQL (`db_url`)      |
+| `nvidia`      | NVIDIA NVENC      | SQLite                              |
+| `nvidia-pg`   | NVIDIA NVENC      | external PostgreSQL (`db_url`)      |
+
+```bash
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile intel up -d
+```
+
+### Verify
+
+Check the containers:
+
+```bash
+docker compose --env-file docker/.env -f docker/docker-compose.yml ps
+```
+
+Check daemon health:
+
+```bash
+curl http://localhost:8585/health
+```
+
+Open the dashboard:
+
+```text
+http://localhost:8585/dashboard
+```
+
+### Hardware-Specific Notes
+
+#### Intel QSV
+
+Requirements:
+
+- host Intel GPU
+- `/dev/dri` available
+- correct render/video group IDs
+
+If the Intel GPU is exposed through SR-IOV, confirm which render node belongs to the VF inside the guest. The working device is often `/dev/dri/renderD129` or higher rather than `/dev/dri/renderD128`.
+The Intel compose profiles now mount the whole `/dev/dri` tree so the container can see the matching `card*` and `renderD*` nodes together, which matters on KVM guests where the VF may show up as `card1` with `renderD128`.
+
+Quick check:
+
+```bash
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-intel vainfo
+```
+
+Use `sma-intel-pg` as the service name with the `intel-pg` profile.
+
+#### NVIDIA
+
+Requirements:
+
+- NVIDIA driver installed on host
+- `nvidia-container-toolkit` installed
+
+Quick check:
+
+```bash
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-nvidia ffmpeg -hide_banner -encoders
+```
+
+Or:
+
+```bash
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-nvidia-pg ffmpeg -hide_banner -encoders
+```
+
+### Submitting a Test Job
+
+Plain text webhook:
+
+```bash
+curl -X POST http://localhost:8585/webhook/generic \
+  -H "X-API-Key: change-me-too" \
+  -d "/mnt/unionfs/Media/Movies/Test Movie (2024)/movie.mkv"
+```
+
+JSON webhook:
+
+```bash
+curl -X POST http://localhost:8585/webhook/generic \
+  -H "X-API-Key: change-me-too" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/mnt/unionfs/Media/Movies/Test Movie (2024)/movie.mkv"}'
+```
+
+### Common Customizations
+
+#### Change the published daemon port
+
+In `docker/.env`:
+
+```bash
+PORT=8686
+```
+
+#### Use an external PostgreSQL instance
+
+Use the matching `-pg` profile and set `daemon.db_url` in `sma-ng.yml`:
+
+```yaml
+daemon:
+  db_url: postgresql://sma:password@db-host:5432/sma
+```
+
+Database URLs in `/opt/sma/config/daemon.env` are ignored.
+
+#### Route different media roots to different profiles
+
+```yaml
+Daemon:
+  default_config: /config/sma-ng.yml
+  path_configs:
+    - path: /mnt/unionfs/Media/TV
+      profile: rq
+    - path: /mnt/unionfs/Media/Movies
+      profile: lq
+```
+
+### Updating
+
+Pull new code and recreate the selected profile:
+
+```bash
+git pull --rebase
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile software-pg up -d --build
+```
+
+Replace `software-pg` with whichever profile you use.
+
+### Compose troubleshooting
+
+#### Daemon starts but jobs fail immediately
+
+- check `/opt/sma/config/sma-ng.yml`
+- verify media paths inside the container
+- verify `ffmpeg` and `ffprobe` paths
+
+#### Jobs are accepted but never run
+
+- check PostgreSQL connectivity for `*-pg` or external DB mode
+- check `/health` and `/status`
+- check `/opt/sma/logs`
+
+#### Intel profile cannot see `/dev/dri`
+
+- verify host device exists (`ls -l /dev/dri` on the host)
+- for SR-IOV guests, verify the guest itself exposes a matching `card*` and `renderD*` pair under `/dev/dri`
+- check container startup logs for `granted ubuntu access to /dev/dri/...` lines confirming the entrypoint added the runtime user to the host render/video groups
+- verify `vainfo` works inside the container
+
+#### NVIDIA profile starts without GPU
+
+- verify `nvidia-container-toolkit`
+- verify host driver installation
+- check `docker info` and container runtime configuration
