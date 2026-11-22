@@ -642,11 +642,20 @@ def processFile(
     # when delete is enabled (recycle the original now, while it still exists);
     # with delete disabled it keeps the original and numbers the output.
     _overwrite_input = mp.settings.output_dir and not mp.settings.moveto and os.path.commonpath([mp.settings.output_dir, output["output"]]) == mp.settings.output_dir
+    _saved_delete = mp.settings.delete
     if _overwrite_input and output.get("delete"):
-      mp._recycle_to_bin(output["input"])
+      if not mp._recycle_to_bin(output["input"]):
+        # No backup exists: behave as if delete were off so the original is
+        # neither replaced by restoreFromOutput nor unlinked below.
+        log.warning("Recycle copy of %s failed; keeping the original and not replacing it." % output["input"])
+        output["delete"] = False
+        mp.settings.delete = False
 
     # Reverse Output
-    output["output"] = mp.restoreFromOutput(inputfile, output["output"])
+    try:
+      output["output"] = mp.restoreFromOutput(inputfile, output["output"])
+    finally:
+      mp.settings.delete = _saved_delete
     for i, sub in enumerate(output["external_subs"]):
       output["external_subs"][i] = mp.restoreFromOutput(inputfile, sub)
 

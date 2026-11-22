@@ -932,7 +932,9 @@ class MediaProcessor:
     The original input file is NOT recycled or deleted here. The caller is
     responsible for calling _cleanup_input (or _recycle_to_bin for the
     no-moveto case) after the output has been safely placed at its final
-    destination. The returned dict includes a ``"delete"`` flag indicating
+    destination. Both report success as a boolean: when the recycle copy
+    fails (``_recycle_to_bin`` returns False) the caller must keep the
+    original rather than delete or replace it. The returned dict includes a ``"delete"`` flag indicating
     whether the caller should perform cleanup.
     """
     self.log.debug("Process started.")
