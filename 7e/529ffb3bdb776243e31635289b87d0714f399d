@@ -1,0 +1,21 @@
+.worktreeinclude
+  s_d73ac5e457a585::t_d1a87b603b07f1 1-22
+CLAUDE.md
+  s_d73ac5e457a585::t_4875727f8d1e2d 197-199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "7e529ffb3bdb776243e31635289b87d0714f399d",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
