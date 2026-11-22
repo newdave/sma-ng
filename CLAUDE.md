@@ -194,6 +194,9 @@ Plugins and skills are scoped to this project:
   `frontend-design`, `rust-analyzer-lsp`).
 - Project skills are vendored in `.claude/skills/`; `.skillfish.json` records the upstream source.
 - Add new plugins or skills here, never in `~/.claude/`.
+- `.worktreeinclude` lists the gitignored operator files (`setup/local.yml`, `config/*.env`, `config/sma-ng.yml`,
+  local tasks and scripts, `.claude/settings.local.json`, the test media fixture) that Claude Code copies into each
+  new worktree. Add a file there when agents need it in worktrees; never list logs, caches or `venv/`.
 - The skill-reminder hook runs on `UserPromptSubmit`: Claude via `.claude/settings.json` `hooks`
   (`.claude/hooks/claude-code/`), Codex via `.codex/hooks.json` (`.claude/hooks/codex/`).
 - When the prompt is about FFmpeg work (`.claude/hooks/ffmpeg-prompt-match.sh`), both hooks tell the agent to load
