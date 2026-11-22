@@ -486,6 +486,10 @@ WORKER_SENTINEL_DISK_PRESSURE = "disk_pressure"
 # The job exceeded daemon.job-timeout-seconds and the worker's watchdog
 # killed the conversion process tree.
 WORKER_SENTINEL_TIMEOUT = "timeout"
+# ffmpeg exited 0 but the post-conversion check (MediaProcessor._verify_output)
+# found the output truncated or stream-less. The subprocess reports it with an
+# ``output.verify`` JSON log line; the worker reads it like the ffmpeg.attempts event.
+OUTPUT_VERIFY_FAILED = "output_verify_failed"
 
 # Every value in :class:`FfmpegFailureClass`, :class:`FfmpegFailureCause`,
 # and the worker sentinels must appear here. The drift-guard test
@@ -542,6 +546,7 @@ _FAILURE_CATEGORY_MAP: dict[str, FailureCategory] = {
   WORKER_SENTINEL_EXCEPTION: FailureCategory.SYSTEM,
   WORKER_SENTINEL_DISK_PRESSURE: FailureCategory.DISK,
   WORKER_SENTINEL_TIMEOUT: FailureCategory.SYSTEM,
+  OUTPUT_VERIFY_FAILED: FailureCategory.SYSTEM,
 }
 
 
@@ -560,6 +565,7 @@ def categorize_failure(cause_or_class: str | None) -> FailureCategory:
 
 
 __all__ = [
+  "OUTPUT_VERIFY_FAILED",
   "TAIL_BYTES",
   "WORKER_SENTINEL_DISK_PRESSURE",
   "WORKER_SENTINEL_EXCEPTION",

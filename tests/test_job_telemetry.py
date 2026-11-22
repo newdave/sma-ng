@@ -73,6 +73,7 @@ class TestCopyEncoder:
     mp.generateOptions = MagicMock(return_value=({"video": {}, "audio": [{"map": 1, "codec": "aac"}]}, [], [], [], []))
     mp.canBypassConvert = MagicMock(return_value=False)
     mp._run_ffmpeg = MagicMock(return_value=("/fake/out.mp4", "/fake/input.mkv", []))
+    mp._verify_output = MagicMock(return_value=None)
     mp.getDimensions = MagicMock(return_value={"x": 1, "y": 1})
     assert mp.process("/fake/input.mkv", info=info)["bypassed"] is False
 

@@ -290,7 +290,7 @@ class TestScannerThreadScan:
     result = scanner._scan({"path": str(tmp_path)})
     assert result == 1
     db.filter_unscanned.assert_called_once()
-    db.add_job.assert_called_once_with(str(media), "/default.ini", [], request_source="scan", request_profile=None)
+    db.add_job.assert_called_once_with(str(media), "/default.ini", [], dedupe_window_seconds=0, request_source="scan", request_profile=None)
 
   def test_applies_path_rewrite(self, tmp_path):
     media = tmp_path / "show.mkv"
@@ -730,11 +730,13 @@ class TestHeartbeatThread:
     db.heartbeat.return_value = None
     db.recover_stale_nodes.return_value = []
     ht = _make_heartbeat(job_db=db)
-    ht.sweep_orphaned_jobs = mock.MagicMock(side_effect=ht.stop)  # one sweep pass, then stop
-    ht.run()
+    ht.sweep_orphaned_jobs = mock.MagicMock()
+    ht._stop_event.wait = lambda timeout=None: setattr(ht, "running", False)
+    ht.run()  # one sweep + maintenance-only tick
     ht.sweep_orphaned_jobs.assert_called_once()
     db.poll_node_command.assert_not_called()
     db.recover_stale_nodes.assert_not_called()
+    db.heartbeat.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1186,9 +1188,36 @@ class TestHeartbeatMaintenanceThrottle:
     server.path_config_manager.log_archive_dir = "/archive"
     server.path_config_manager.log_archive_after_days = 7
     server.path_config_manager.log_delete_after_days = 30
+    server.path_config_manager.job_retention_days = 30
+    server.path_config_manager.job_dedupe_window_seconds = 21600
     ht = _make_heartbeat(job_db=db, server=server)
     ht.log_ttl_days = 14
     return ht
+
+  def test_maintenance_prunes_jobs_with_dedupe_protection(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    ht = self._ht(db)
+    with mock.patch("resources.daemon.threads.LogArchiver"):
+      ht._maybe_run_maintenance()
+    db.cleanup_old_jobs.assert_called_once_with(30, protect_seconds=21600)
+
+  def test_maintenance_skips_job_pruning_when_retention_zero(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    ht = self._ht(db)
+    ht.server.path_config_manager.job_retention_days = 0
+    with mock.patch("resources.daemon.threads.LogArchiver"):
+      ht._maybe_run_maintenance()
+    db.cleanup_old_jobs.assert_not_called()
+
+  def test_sqlite_backend_still_runs_maintenance(self):
+    db = mock.MagicMock()
+    db.is_distributed = False
+    ht = self._ht(db)
+    self._run_ticks(ht, 2)
+    db.heartbeat.assert_not_called()
+    db.cleanup_old_jobs.assert_called_once_with(30, protect_seconds=21600)
 
   def test_maintenance_runs_once_across_many_heartbeats(self):
     db = mock.MagicMock()
@@ -1240,3 +1269,60 @@ class TestHeartbeatMaintenanceThrottle:
     assert "Recovered 3 jobs from 2 stale node(s)" in text
     assert "secret-node" not in text
     ht.server.notify_workers.assert_called_once()
+
+
+class TestScannerSharedQueueRules:
+  def _pcm(self):
+    pcm = mock.MagicMock()
+    pcm.media_extensions = frozenset([".mkv", ".mp4"])
+    pcm.get_config_for_path.return_value = "/default.ini"
+    pcm.get_profile_for_path.return_value = None
+    pcm.should_skip_same_extension.return_value = False
+    pcm.is_recycle_bin_path.return_value = False
+    pcm.job_dedupe_window_seconds = 21600
+    return pcm
+
+  def _scan(self, tmp_path, pcm):
+    media = tmp_path / "show.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.filter_unscanned.return_value = [str(media)]
+    db.add_job.return_value = 5
+    scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db, path_config_manager=pcm)
+    return scanner._scan({"path": str(tmp_path)}), db
+
+  def test_passes_dedupe_window(self, tmp_path):
+    result, db = self._scan(tmp_path, self._pcm())
+    assert result == 1
+    assert db.add_job.call_args.kwargs["dedupe_window_seconds"] == 21600
+
+  def test_recently_completed_logs_one_info_line(self, tmp_path, caplog):
+    import logging
+
+    media = tmp_path / "show.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.filter_unscanned.return_value = [str(media)]
+    db.add_job.return_value = None
+    db.find_active_job.return_value = None
+    db.find_recent_completed_job.return_value = {"id": 11}
+    scanner = _make_scanner([{"path": str(tmp_path)}], job_db=db, path_config_manager=self._pcm())
+    with caplog.at_level(logging.INFO):
+      assert scanner._scan({"path": str(tmp_path)}) == 0
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Scanner skipped") and "(recently_completed" in r.getMessage()]
+    assert len(lines) == 1
+    assert "\n" not in lines[0] and str(media) in lines[0] and "11" in lines[0]
+
+  def test_skips_same_extension(self, tmp_path):
+    pcm = self._pcm()
+    pcm.should_skip_same_extension.return_value = True
+    result, db = self._scan(tmp_path, pcm)
+    assert result == 0
+    db.add_job.assert_not_called()
+
+  def test_skips_recycle_bin_paths(self, tmp_path):
+    pcm = self._pcm()
+    pcm.is_recycle_bin_path.return_value = True
+    result, db = self._scan(tmp_path, pcm)
+    assert result == 0
+    db.add_job.assert_not_called()

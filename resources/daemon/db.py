@@ -21,6 +21,7 @@ from resources.daemon.constants import (
   AUDIT_UNIT_ERROR,
   AUDIT_UNIT_PENDING,
   SECRET_KEYS,
+  STATUS_CANCELLED,
   STATUS_COMPLETED,
   STATUS_FAILED,
   STATUS_OPEN,
@@ -28,6 +29,7 @@ from resources.daemon.constants import (
   STATUS_RUNNING,
   resolve_node_id,
 )
+from resources.daemon.queueing import normalise_job_path
 from resources.log import getLogger
 
 log = getLogger("DAEMON")
@@ -148,6 +150,32 @@ _JOB_OUTPUT_MAX_BYTES = 1024 * 1024
 
 # Never returned by job list/detail responses; read through GET /jobs/{id}/output.
 JOB_OUTPUT_COLUMNS = ("output", "output_dropped")
+
+# Columns returned by job list responses. Explicit so the large text blobs
+# (ffmpeg_stderr, output; up to 1 MiB each) never travel with a list query;
+# read them through GET /jobs/{id}/ffmpeg-stderr and /jobs/{id}/output.
+JOB_LIST_COLUMNS = (
+  "id",
+  "path",
+  "config",
+  "args",
+  "status",
+  "worker_id",
+  "node_id",
+  "error",
+  "created_at",
+  "started_at",
+  "completed_at",
+  "retry_count",
+  "max_retries",
+  "next_attempt_at",
+  "priority",
+  "input_size_bytes",
+  "output_size_bytes",
+  "kind",
+  *(name for name, _sqlite, _pg in _METRICS_EXPANSION_COLUMNS),
+)
+_JOB_LIST_SELECT = ", ".join(JOB_LIST_COLUMNS)
 
 
 def _append_output_tail(old, text, dropped):
@@ -604,9 +632,10 @@ class SQLiteJobDatabase:
       _backfill_request_profile(conn, is_sqlite=True)
       return cur.rowcount
 
-  def add_job(self, path, config, args=None, max_retries=0, *, request_source=None, request_profile=None, kind="convert", priority=None):
+  def add_job(self, path, config, args=None, max_retries=0, *, request_source=None, request_profile=None, kind="convert", priority=None, dedupe_window_seconds=0):
     args_json = json.dumps(args or [])
     kind = kind or "convert"
+    path = normalise_job_path(path)
     with self._conn() as conn:
       row = conn.execute(
         "SELECT id FROM jobs WHERE path = ? AND COALESCE(kind, 'convert') = ? AND status IN (?, ?) LIMIT 1",
@@ -615,6 +644,15 @@ class SQLiteJobDatabase:
       if row:
         self.log.debug("Duplicate %s job for path: %s (existing job %d)" % (kind, path, row["id"]))
         return None
+      if dedupe_window_seconds and dedupe_window_seconds > 0:
+        cutoff = (datetime.now(UTC) - timedelta(seconds=dedupe_window_seconds)).replace(microsecond=0).isoformat()
+        row = conn.execute(
+          "SELECT id FROM jobs WHERE path = ? AND COALESCE(kind, 'convert') = ? AND status = ? AND completed_at >= ? LIMIT 1",
+          (path, kind, STATUS_COMPLETED, cutoff),
+        ).fetchone()
+        if row:
+          self.log.debug("Skipping %s job for recently completed path: %s (job %d)" % (kind, path, row["id"]))
+          return None
       cur = conn.execute(
         "INSERT INTO jobs (path, config, args, status, max_retries, request_source, request_profile, kind, priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (path, config, args_json, STATUS_PENDING, max_retries, request_source, request_profile, kind, priority or 0),
@@ -627,7 +665,19 @@ class SQLiteJobDatabase:
     with self._conn() as conn:
       row = conn.execute(
         "SELECT * FROM jobs WHERE path = ? AND COALESCE(kind, 'convert') = ? AND status IN (?, ?) LIMIT 1",
-        (path, kind or "convert", STATUS_PENDING, STATUS_RUNNING),
+        (normalise_job_path(path), kind or "convert", STATUS_PENDING, STATUS_RUNNING),
+      ).fetchone()
+      return dict(row) if row else None
+
+  def find_recent_completed_job(self, path, kind="convert", window_seconds=0):
+    """Find a job of *kind* for the path completed within *window_seconds*, if any."""
+    if not window_seconds or window_seconds <= 0:
+      return None
+    cutoff = (datetime.now(UTC) - timedelta(seconds=window_seconds)).replace(microsecond=0).isoformat()
+    with self._conn() as conn:
+      row = conn.execute(
+        "SELECT * FROM jobs WHERE path = ? AND COALESCE(kind, 'convert') = ? AND status = ? AND completed_at >= ? ORDER BY completed_at DESC LIMIT 1",
+        (normalise_job_path(path), kind or "convert", STATUS_COMPLETED, cutoff),
       ).fetchone()
       return dict(row) if row else None
 
@@ -908,7 +958,7 @@ class SQLiteJobDatabase:
       return dict(row) if row else None
 
   def get_jobs(self, status=None, config=None, path=None, profile=None, sort=None, limit=100, offset=0):
-    query = "SELECT * FROM jobs WHERE 1=1"
+    query = "SELECT " + _JOB_LIST_SELECT + " FROM jobs WHERE 1=1"
     params = []
     if status:
       query += " AND status = ?"
@@ -940,10 +990,23 @@ class SQLiteJobDatabase:
     with self._conn() as conn:
       return [dict(r) for r in conn.execute("SELECT * FROM jobs WHERE status = ?", (STATUS_RUNNING,)).fetchall()]
 
-  def cleanup_old_jobs(self, days=30):
-    cutoff = (datetime.now(UTC) - timedelta(days=days)).replace(microsecond=0).isoformat()
+  def cleanup_old_jobs(self, days=30, protect_seconds=0):
+    """Delete completed, failed and cancelled jobs older than *days*.
+
+    scanned_files is deliberately left alone: it records every path the scanner
+    has handled, and pruning it would make the next scan re-queue the library.
+
+    *protect_seconds* is a floor on the age cutoff (the dedupe window), so a
+    finished job that still blocks re-queueing is never removed. Returns the
+    number of jobs deleted.
+    """
+    age = timedelta(seconds=max(days * 86400, protect_seconds))
+    cutoff = (datetime.now(UTC) - age).replace(microsecond=0).isoformat()
     with self._conn() as conn:
-      cur = conn.execute("DELETE FROM jobs WHERE status IN (?, ?) AND completed_at < ?", (STATUS_COMPLETED, STATUS_FAILED, cutoff))
+      cur = conn.execute(
+        "DELETE FROM jobs WHERE status IN (?, ?, ?) AND completed_at < ?",
+        (STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED, cutoff),
+      )
       deleted = cur.rowcount
     if deleted > 0:
       self.log.info("Cleaned up %d old jobs" % deleted)
@@ -1491,10 +1554,11 @@ class PostgreSQLJobDatabase:
     """
     cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (path,))
 
-  def add_job(self, path, config, args=None, max_retries=0, *, request_source=None, request_profile=None, kind="convert", priority=None):
+  def add_job(self, path, config, args=None, max_retries=0, *, request_source=None, request_profile=None, kind="convert", priority=None, dedupe_window_seconds=0):
     """Add a job to the queue. Returns job ID, or None if the same kind is already pending/running for the path."""
     args_json = json.dumps(args or [])
     kind = kind or "convert"
+    path = normalise_job_path(path)
     with self._conn() as conn:
       with conn.cursor() as cur:
         self._lock_job_path(cur, path)
@@ -1506,6 +1570,15 @@ class PostgreSQLJobDatabase:
         if existing:
           self.log.debug("Duplicate %s job for path: %s (existing job %d)" % (kind, path, existing["id"]))
           return None
+        if dedupe_window_seconds and dedupe_window_seconds > 0:
+          cur.execute(
+            "SELECT id FROM jobs WHERE path = %s AND COALESCE(kind, 'convert') = %s AND status = %s AND completed_at >= NOW() - make_interval(secs => %s) LIMIT 1",
+            (path, kind, STATUS_COMPLETED, dedupe_window_seconds),
+          )
+          recent = cur.fetchone()
+          if recent:
+            self.log.debug("Skipping %s job for recently completed path: %s (job %d)" % (kind, path, recent["id"]))
+            return None
         cur.execute(
           "INSERT INTO jobs (path, config, args, status, max_retries, request_source, request_profile, kind, priority) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
           (path, config, args_json, STATUS_PENDING, max_retries, request_source, request_profile, kind, priority or 0),
@@ -1520,7 +1593,20 @@ class PostgreSQLJobDatabase:
       with conn.cursor() as cur:
         cur.execute(
           "SELECT * FROM jobs WHERE path = %s AND COALESCE(kind, 'convert') = %s AND status IN (%s, %s) LIMIT 1",
-          (path, kind or "convert", STATUS_PENDING, STATUS_RUNNING),
+          (normalise_job_path(path), kind or "convert", STATUS_PENDING, STATUS_RUNNING),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+  def find_recent_completed_job(self, path, kind="convert", window_seconds=0):
+    """Find a job of *kind* for the path completed within *window_seconds*, if any."""
+    if not window_seconds or window_seconds <= 0:
+      return None
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          "SELECT * FROM jobs WHERE path = %s AND COALESCE(kind, 'convert') = %s AND status = %s AND completed_at >= NOW() - make_interval(secs => %s) ORDER BY completed_at DESC LIMIT 1",
+          (normalise_job_path(path), kind or "convert", STATUS_COMPLETED, window_seconds),
         )
         row = cur.fetchone()
         return dict(row) if row else None
@@ -1905,7 +1991,7 @@ class PostgreSQLJobDatabase:
 
   def get_jobs(self, status=None, config=None, path=None, profile=None, sort=None, limit=100, offset=0):
     """Get jobs with optional filtering and sort order."""
-    query = "SELECT * FROM jobs WHERE 1=1"
+    query = "SELECT " + _JOB_LIST_SELECT + " FROM jobs WHERE 1=1"
     params = []
     if status:
       query += " AND status = %s"
@@ -2153,17 +2239,26 @@ class PostgreSQLJobDatabase:
         cur.execute("SELECT * FROM jobs WHERE status = %s", (STATUS_RUNNING,))
         return [dict(r) for r in cur.fetchall()]
 
-  def cleanup_old_jobs(self, days=30):
-    """Remove completed/failed jobs older than specified days."""
+  def cleanup_old_jobs(self, days=30, protect_seconds=0):
+    """Delete completed, failed and cancelled jobs older than *days*.
+
+    scanned_files is deliberately left alone: it records every path the scanner
+    has handled, and pruning it would make the next scan re-queue the library.
+
+    *protect_seconds* is a floor on the age cutoff (the dedupe window), so a
+    finished job that still blocks re-queueing is never removed. Returns the
+    number of jobs deleted.
+    """
+    seconds = max(days * 86400, protect_seconds)
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
           """
                     DELETE FROM jobs
-                    WHERE status IN (%s, %s)
-                    AND completed_at < NOW() - make_interval(days => %s)
+                    WHERE status IN (%s, %s, %s)
+                    AND completed_at < NOW() - make_interval(secs => %s)
                 """,
-          (STATUS_COMPLETED, STATUS_FAILED, days),
+          (STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED, seconds),
         )
         deleted = cur.rowcount
     if deleted > 0:

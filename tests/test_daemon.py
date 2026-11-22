@@ -130,6 +130,38 @@ class TestPathConfigManager:
     assert pcm.get_profile_for_path("/mnt/local/Media/TV/1080P/show.mkv") == "specific"
 
 
+class TestJobDedupeWindowProjection:
+  def test_default_when_unset(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {})
+    assert PathConfigManager(cfg).job_dedupe_window_seconds == 21600
+
+  def test_projects_from_yaml(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {"job-dedupe-window-seconds": 120})
+    assert PathConfigManager(cfg).job_dedupe_window_seconds == 120
+
+  def test_zero_disables(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {"job-dedupe-window-seconds": 0})
+    assert PathConfigManager(cfg).job_dedupe_window_seconds == 0
+
+
+class TestJobRetentionProjection:
+  def test_default_when_unset(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {})
+    assert PathConfigManager(cfg).job_retention_days == 30
+
+  def test_projects_from_yaml(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {"job-retention-days": 7})
+    assert PathConfigManager(cfg).job_retention_days == 7
+
+  def test_init_default_without_config_file(self):
+    assert PathConfigManager().job_retention_days == 30
+
+
 class TestShouldSkipSameExtension:
   """``PathConfigManager.should_skip_same_extension`` filters directory
   submissions so files already at the configured output extension don't

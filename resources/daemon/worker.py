@@ -17,6 +17,7 @@ from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import NO_CLAIM_TOKEN, TELEMETRY_COLUMNS
 from resources.log import LEVEL_TOKEN_RE, getLogger
 from resources.processor.failures import (
+  OUTPUT_VERIFY_FAILED,
   WORKER_SENTINEL_DISK_PRESSURE,
   WORKER_SENTINEL_EXCEPTION,
   WORKER_SENTINEL_INVALID_ARGS,
@@ -494,6 +495,7 @@ class ConversionWorker(threading.Thread):
     # Reset per-job state captured from the ffmpeg.attempts JSON line so
     # one job's classification doesn't leak into the next.
     self._last_attempt_failure_class: str | None = None
+    self._last_verify_reason: str | None = None
     self._last_encoder_name: str | None = None
     self._last_encoder_backend: str | None = None
     self._job_telemetry: dict = {}
@@ -679,6 +681,8 @@ class ConversionWorker(threading.Thread):
           cause = self._last_attempt_failure_class or WORKER_SENTINEL_PROCESS_FAILED
           cat = categorize_failure(cause).value
           message = "Conversion process failed" if is_convert else "%s process failed" % kind.name.capitalize()
+          if cause == OUTPUT_VERIFY_FAILED and self._last_verify_reason:
+            message += ": output verification failed (%s)" % self._last_verify_reason
           if returncode is not None and returncode < 0:
             message += ": killed by signal %d (exit code %d)" % (-returncode, returncode)
           elif returncode is not None:
@@ -1076,6 +1080,8 @@ class ConversionWorker(threading.Thread):
           self._record_job_summary(line)
           if total_duration_secs is None:
             total_duration_secs = self._job_telemetry.get("source_duration_seconds")
+        if "output.verify" in line:
+          self._record_output_verify_event(line)
 
       # EOF reached; the watchdog still guards this wait.
       process.wait()
@@ -1139,6 +1145,18 @@ class ConversionWorker(threading.Thread):
     duration = payload.get("duration_seconds")
     if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
       self._job_telemetry["source_duration_seconds"] = float(duration)
+
+  def _record_output_verify_event(self, line: str) -> None:
+    """Record the output.verify JSON line the subprocess logs when a finished
+    conversion fails the duration / video-stream check, so the job fails with
+    the output_verify_failed cause and the short reason."""
+    payload = _parse_event(line, "output.verify")
+    if payload is None:
+      return
+    self._last_attempt_failure_class = OUTPUT_VERIFY_FAILED
+    reason = payload.get("reason")
+    if isinstance(reason, str) and reason:
+      self._last_verify_reason = reason
 
   def _record_fallback_event(self, line: str) -> None:
     """Parse a single-line ffmpeg.attempts JSON record and bump daemon counters.

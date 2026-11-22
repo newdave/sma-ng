@@ -909,6 +909,93 @@ class TestFallbackEventParsing:
     assert calls == [("hw", "failed", "device_open_failed")]
 
 
+class TestOutputVerifyEvent:
+  def test_event_sets_failure_class_and_reason(self):
+    worker = _make_worker()
+    worker._record_output_verify_event('INFO x: {"event": "output.verify", "failure_class": "output_verify_failed", "reason": "duration 3600s vs 7200s"}')
+    assert worker._last_attempt_failure_class == "output_verify_failed"
+    assert worker._last_verify_reason == "duration 3600s vs 7200s"
+
+  def test_job_failure_carries_category_cause_and_reason(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+    worker.job_timeout_seconds = 0
+    line = '{"event": "output.verify", "failure_class": "output_verify_failed", "reason": "video streams 0 vs 1"}'
+    proc = _make_fake_process([line], returncode=1)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker.process_job({"id": 9, "path": str(media), "config": "/cfg.ini", "args": None})
+    db.fail_job.assert_called_once_with(
+      9,
+      "Conversion process failed: output verification failed (video streams 0 vs 1) (exit code 1)",
+      failure_category="system",
+      failure_cause="output_verify_failed",
+      node_id=worker.node_id,
+      claim_token="",
+      telemetry={},
+      source_duration_seconds=None,
+    )
+
+
+def _manual_formatted_line(payload):
+  """Render *payload* the way manual.py's MANUAL logger does: json.dumps
+  through the real SingleLineFormatter, which compacts the JSON (no spaces
+  after ``:``)."""
+  from resources.log import SingleLineFormatter
+
+  record = logging.LogRecord("MANUAL", logging.INFO, __file__, 0, json.dumps(payload, sort_keys=True), None, None)
+  return SingleLineFormatter("%(asctime)s - %(levelname)s - %(message)s").format(record)
+
+
+class TestRealFormatterEventLines:
+  """The worker must recognise structured events in the compact JSON that the
+  real SingleLineFormatter emits, not only in json.dumps' spaced form."""
+
+  def test_output_verify_line_from_real_formatter_fails_job_with_cause(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+    worker.job_timeout_seconds = 0
+    line = _manual_formatted_line({"event": "output.verify", "failure_class": "output_verify_failed", "reason": "video streams 0 vs 1"})
+    assert '"event":"output.verify"' in line
+    proc = _make_fake_process([line], returncode=1)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker.process_job({"id": 9, "path": str(media), "config": "/cfg.ini", "args": None})
+    db.fail_job.assert_called_once_with(
+      9,
+      "Conversion process failed: output verification failed (video streams 0 vs 1) (exit code 1)",
+      failure_category="system",
+      failure_cause="output_verify_failed",
+      node_id=worker.node_id,
+      claim_token="",
+      telemetry={},
+      source_duration_seconds=None,
+    )
+
+  def test_ffmpeg_attempts_line_from_real_formatter_bumps_counters(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    calls = []
+    worker = _make_worker()
+    worker.job_timeout_seconds = 0
+    worker._fallback_counter_callback = lambda *a: calls.append(a)
+    line = _manual_formatted_line(
+      {
+        "event": "ffmpeg.attempts",
+        "attempts": [{"tier": "hw", "failure_class": "device_open_failed", "duration_ms": 12}, {"tier": "sw_decode", "failure_class": None, "duration_ms": 100}],
+        "result": "ok",
+      }
+    )
+    proc = _make_fake_process([line], returncode=0)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker._run_conversion(1, str(media), "/cfg.ini", [])
+    assert calls == [("hw", "sw_decode", "device_open_failed")]
+
+
 # ---------------------------------------------------------------------------
 # preflight_output_capacity helper + ConversionWorker._preflight_disk_pressure
 # ---------------------------------------------------------------------------

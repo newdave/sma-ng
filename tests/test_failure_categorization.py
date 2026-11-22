@@ -75,3 +75,7 @@ def test_category_set_is_bounded_to_six():
     "system",
     "unknown",
   }
+
+
+def test_output_verify_failed_maps_to_system():
+  assert categorize_failure("output_verify_failed") is FailureCategory.SYSTEM

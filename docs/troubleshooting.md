@@ -321,6 +321,36 @@ usually the FFmpeg build lacks the decoder, or the source is damaged and needs r
 - With `output-directory` and `delete-original: false`, a source that has the same name as the output
   (`movie.mp4` to `movie.mp4`) is kept and the new file is restored as `movie.2.mp4`. Set
   `delete-original: true` to replace the source instead.
+- When a file needs no conversion and `output-directory` is set, it is copied there. If that name is taken, the copy
+  is numbered (`movie.2.mp4`, `[output-collision]` warning) instead of overwriting the existing file. A stale
+  `movie.mkv` left in `output-directory` from an earlier run therefore makes the bypassed file come back as
+  `movie.2.mkv`, so the tracked path changes; remove the stale file and re-run to keep the plain name.
+- With `delete-original: true`, an earlier SMA-NG output of the same episode or movie (encoder tag `SMA-NG:`
+  and matching TMDB/TVDB/IMDB id, plus season and episode for TV) at that name is recycled and replaced instead
+  of numbered, even when the source file name differs. When it is numbered anyway, the INFO line
+  `[output-collision-reason]` gives the cause: `no SMA marker`, `identity not comparable` or `different episode`.
+- Replacement requires tagging on (`tagfile`) and metadata found; otherwise outputs are numbered. Numbering from
+  `move-to` and `getOutputFile` is not covered. Existing `name.2.mp4` duplicates from before this behavior are
+  not cleaned up automatically; remove them by hand.
+
+### Job failed with `[output-verify]` (output does not match the source)
+
+- FFmpeg exited 0, but the output failed the post-conversion check, so SMA-NG treated the job as failed
+  (exit code 1). In the daemon the job fails with category `system`, cause `output_verify_failed` and the reason in
+  its error text: `duration Xs vs Ys`, `video streams N vs 1`, `no output duration vs Ys` or
+  `output could not be probed`.
+- The source is kept (not deleted or recycled). The bad output is renamed to `<output name>.failed`
+  (for example `movie.mp4.failed`, or `movie.mp4.failed.2` when that name exists), so Plex, Sonarr and Radarr
+  do not scan it. Nothing is tagged, moved or sent to Sonarr/Radarr/Plex for that job. The warning names the
+  `.failed` path; keep it for inspection and delete it yourself when done.
+- When the output has the source's own name (`movie.mp4` to `movie.mp4`), the source was renamed to
+  `movie.mp4.original` for the encode; it is renamed back. If something now holds `movie.mp4`, the source stays at
+  `movie.mp4.original` and a warning names both paths. Subtitle files ripped for that job are removed; existing
+  subtitle files are kept.
+- The duration may differ by 2% (at least 1 second). Cover art and unknown or data streams are not counted, and a
+  duration is only compared when the source reports one.
+- Usual causes are a full output disk, a damaged source or a killed encoder. Fix that and re-run. If the output
+  plays correctly, report the file; the check is not configurable.
 
 ### `[dolby-vision]` warning on re-encode
 
@@ -431,6 +461,9 @@ database outage is expected; repeated lines without an outage point to a worker 
 - Verify `path` is set in the `[Sonarr]`/`[Radarr]` section
 - Verify `apikey` is correct and `rescan = true`
 - Verify the output file path starts with the configured `path` prefix
+- A slow rescan no longer blocks the import: SMA waits up to 5 minutes (polling with backoff), logs the last
+  command status (`failed`, `aborted`, `cancelled` and `orphaned` stop the wait early) and then still issues the
+  import. The log line `rescan command did not complete; importing anyway` means the rescan was slow or failed
 
 ### Docker: "Read-only file system" errors
 
