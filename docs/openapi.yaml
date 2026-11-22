@@ -403,6 +403,7 @@ paths:
             type: string
         - name: limit
           in: query
+          description: Page size. Values above 500 are clamped to 500. Job rows omit ffmpeg_stderr and output (use the per-job endpoints).
           schema:
             type: integer
             default: 100
@@ -446,7 +447,7 @@ paths:
               $ref: "#/components/schemas/JobSubmit"
       responses:
         "200":
-          description: Duplicate (same path already pending or running) or skipped
+          description: Duplicate (same kind and normalised path already pending or running) or skipped
           content:
             application/json:
               schema:
@@ -845,7 +846,7 @@ paths:
               type: string
       responses:
         "200":
-          description: Duplicate (same path already pending or running) or skipped
+          description: Duplicate (same normalised path already pending or running) or skipped (same extension, recycle bin, or reason recently_completed with the completed job_id when the path finished within job-dedupe-window-seconds)
           content:
             application/json:
               schema:
@@ -887,7 +888,7 @@ paths:
               type: string
       responses:
         "200":
-          description: Duplicate (same path already pending or running) or skipped
+          description: Duplicate (same normalised path already pending or running) or skipped (same extension, recycle bin, or reason recently_completed with the completed job_id when the path finished within job-dedupe-window-seconds)
           content:
             application/json:
               schema:
@@ -1169,7 +1170,9 @@ paths:
 
   /cleanup:
     post:
-      summary: Remove old completed and failed jobs
+      summary: Remove old completed, failed and cancelled jobs
+      description: >-
+        Jobs completed within daemon.job-dedupe-window-seconds are never removed; scanned_files is not touched. The daemon runs the same pass hourly using daemon.job-retention-days.
       operationId: cleanup
       tags: [jobs]
       parameters:
@@ -1476,7 +1479,7 @@ paths:
           in: query
           schema:
             type: integer
-          description: Filter entries to a specific job
+          description: Filter entries to a specific job; scans the live log and rotated backups (.1 to .5), keeping the newest `lines` matches
         - name: offset
           in: query
           schema:

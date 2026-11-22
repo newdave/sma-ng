@@ -542,3 +542,63 @@ class TestSQLiteJobDatabase:
     assert first["id"] == legacy
     assert second["id"] == weighted
     db.close()
+
+
+class TestJobDedupe:
+  def test_equivalent_paths_are_duplicates(self, tmp_path):
+    db = _db(tmp_path)
+    assert db.add_job("/mnt/Media/show/ep1.mkv", "/c.yml") == 1
+    assert db.add_job("/mnt/Media//show/./ep1.mkv", "/c.yml") is None
+    assert db.add_job("/mnt/Media/show/../show/ep1.mkv", "/c.yml") is None
+    assert db.find_active_job("/mnt/Media//show/ep1.mkv")["id"] == 1
+    assert db.get_job(1)["path"] == "/mnt/Media/show/ep1.mkv"
+    db.close()
+
+  def test_recently_completed_path_is_skipped_within_window(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.complete_job(job_id, input_size=1, output_size=1)
+    assert db.add_job("/m/a.mkv", "/c.yml", dedupe_window_seconds=3600) is None
+    assert db.add_job("/m//a.mkv", "/c.yml", dedupe_window_seconds=3600) is None
+    db.close()
+
+  def test_find_recent_completed_job(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.complete_job(job_id, input_size=1, output_size=1)
+    assert db.find_recent_completed_job("/m//a.mkv", "convert", 3600)["id"] == job_id
+    assert db.find_recent_completed_job("/m/a.mkv", "preview", 3600) is None
+    assert db.find_recent_completed_job("/m/a.mkv", "convert", 0) is None
+    db.close()
+
+  def test_window_zero_disables_recent_completion_skip(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.complete_job(job_id, input_size=1, output_size=1)
+    assert db.add_job("/m/a.mkv", "/c.yml", dedupe_window_seconds=0) is not None
+    db.close()
+
+  def test_completion_older_than_window_is_requeued(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.complete_job(job_id, input_size=1, output_size=1)
+    with db._conn() as conn:
+      conn.execute("UPDATE jobs SET completed_at = '2020-01-01T00:00:00+00:00' WHERE id = ?", (job_id,))
+    assert db.add_job("/m/a.mkv", "/c.yml", dedupe_window_seconds=3600) is not None
+    db.close()
+
+  def test_failed_job_does_not_block_and_kind_is_separate(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.fail_job(job_id, "boom")
+    assert db.add_job("/m/a.mkv", "/c.yml", dedupe_window_seconds=3600) is not None
+    done = db.add_job("/m/b.mkv", "/c.yml")
+    db.claim_next_job(worker_id=2, node_id="n")
+    db.complete_job(done, input_size=1, output_size=1)
+    assert db.add_job("/m/b.mkv", "/c.yml", kind="preview", dedupe_window_seconds=3600) is not None
+    db.close()

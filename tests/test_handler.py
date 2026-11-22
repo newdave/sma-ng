@@ -701,6 +701,29 @@ class TestGetLogContent:
     assert len(body["entries"]) == 1
     assert body["entries"][0]["job_id"] == 1
 
+  def test_job_id_reads_past_tail_and_rotated_backups(self, tmp_path):
+    log_file = tmp_path / "test.log"
+    old = json.dumps({"level": "INFO", "message": "rotated", "job_id": 7})
+    (tmp_path / "test.log.1").write_text(old + "\n")
+    mid = json.dumps({"level": "INFO", "message": "scrolled", "job_id": 7})
+    noise = [json.dumps({"level": "INFO", "message": f"n{i}", "job_id": 8}) for i in range(3000)]
+    log_file.write_text("\n".join([mid] + noise) + "\n")
+    h = _make_handler()
+    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h._get_log_content("/logs/test", {"job_id": ["7"]})
+    body = _get_response_body(h)
+    assert [e["message"] for e in body["entries"]] == ["rotated", "scrolled"]
+
+  def test_job_id_respects_lines_limit_keeping_newest(self, tmp_path):
+    log_file = tmp_path / "test.log"
+    rows = [json.dumps({"level": "INFO", "message": f"m{i}", "job_id": 7}) for i in range(10)]
+    log_file.write_text("\n".join(rows) + "\n")
+    h = _make_handler()
+    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h._get_log_content("/logs/test", {"job_id": ["7"], "lines": ["3"]})
+    body = _get_response_body(h)
+    assert [e["message"] for e in body["entries"]] == ["m7", "m8", "m9"]
+
   def test_filters_by_level(self, tmp_path):
     log_file = tmp_path / "test.log"
     lines = [
@@ -829,13 +852,15 @@ class TestGetStatus:
 class TestPostCleanup:
   def test_default_days_is_30(self):
     h = _make_handler(method="POST", path="/cleanup")
+    h.server.path_config_manager.job_dedupe_window_seconds = 0
     h._post_cleanup({})
-    h.server.job_db.cleanup_old_jobs.assert_called_once_with(30)
+    h.server.job_db.cleanup_old_jobs.assert_called_once_with(30, protect_seconds=0)
 
   def test_custom_days(self):
     h = _make_handler(method="POST", path="/cleanup")
+    h.server.path_config_manager.job_dedupe_window_seconds = 0
     h._post_cleanup({"days": ["7"]})
-    h.server.job_db.cleanup_old_jobs.assert_called_once_with(7)
+    h.server.job_db.cleanup_old_jobs.assert_called_once_with(7, protect_seconds=0)
 
   def test_returns_deleted_count(self):
     h = _make_handler(method="POST", path="/cleanup")
@@ -3268,3 +3293,74 @@ class TestRouteTableArity:
         route(mock, path, {})
       except TypeError as exc:
         raise AssertionError(f"route {key!r} arity mismatch: {exc}") from exc
+
+
+class TestQueueSharedRules:
+  def test_queue_file_normalises_path_and_passes_window(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.job_dedupe_window_seconds = 7200
+    h.server.job_db.add_job.return_value = 7
+    h._queue_file(str(tmp_path) + "//./movie.mkv", [], None)
+    call = h.server.job_db.add_job.call_args
+    assert call.args[0] == str(f)
+    assert call.kwargs["dedupe_window_seconds"] == 7200
+
+  def test_queue_file_reports_recently_completed(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.job_dedupe_window_seconds = 7200
+    h.server.job_db.add_job.return_value = None
+    h.server.job_db.find_active_job.return_value = None
+    h.server.job_db.find_recent_completed_job.return_value = {"id": 42}
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert h._response_code == 200
+    assert body["status"] == "skipped"
+    assert body["reason"] == "recently_completed"
+    assert body["job_id"] == 42
+
+  def test_queue_file_active_duplicate_unchanged(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.job_db.add_job.return_value = None
+    h.server.job_db.find_active_job.return_value = {"id": 3}
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert body["status"] == "duplicate"
+    assert body["job_id"] == 3
+
+  def test_queue_directory_reports_recently_completed_as_skipped(self, tmp_path):
+    (tmp_path / "movie.mkv").write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.job_dedupe_window_seconds = 7200
+    h.server.job_db.add_job.return_value = None
+    h.server.job_db.find_active_job.return_value = None
+    h.server.job_db.find_recent_completed_job.return_value = {"id": 42}
+    h._queue_directory(str(tmp_path), [], None)
+    body = _get_response_body(h)
+    assert body["duplicates"] == []
+    assert body["skipped"] == [{"path": str(tmp_path / "movie.mkv"), "reason": "recently_completed", "job_id": 42}]
+
+  def test_queue_file_skips_recycle_bin(self, tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.is_recycle_bin_path.return_value = True
+    h._queue_file(str(f), [], None)
+    body = _get_response_body(h)
+    assert body["status"] == "skipped"
+    assert body["reason"] == "recycle_bin"
+    h.server.job_db.add_job.assert_not_called()
+
+  def test_queue_directory_skips_recycle_bin(self, tmp_path):
+    (tmp_path / "movie.mkv").write_text("x")
+    h = _make_handler()
+    h.server.path_config_manager.is_recycle_bin_path.return_value = True
+    h._queue_directory(str(tmp_path), [], None)
+    body = _get_response_body(h)
+    assert body["skipped"][0]["reason"] == "recycle_bin"
+    h.server.job_db.add_job.assert_not_called()

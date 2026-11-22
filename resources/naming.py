@@ -106,6 +106,12 @@ SOURCE_MAP = {
   "remux": "Remux",
 }
 
+# guessit source + other 'Rip' combinations that change the display name
+_RIP_SOURCE_MAP = {"web": "WEBRip", "dvd": "DVDRip"}
+
+# Video codec tokens as written in release names
+_SOURCE_CODEC_RE = re.compile(r"(?<![A-Za-z0-9])(h[.\s]?26[45]|x26[45]|hevc|avc|av1|xvid|divx)(?![A-Za-z0-9])", re.IGNORECASE)
+
 HDR_DISPLAY = {
   "smpte2084": "HDR",
   "arib-std-b67": "HLG",
@@ -141,6 +147,26 @@ def extract_air_date(text):
   return None
 
 
+_TRAILING_YEAR_RE = re.compile(r"\s*\(\d{4}\)\s*$")
+
+
+def strip_trailing_year(title, year=None):
+  """Drop a trailing ' (YYYY)' only when it repeats ``year``, so the year is not doubled in titleyear.
+
+  Without a known year, or with a different one, the title is returned unchanged
+  (Sonarr's TitleYear rule): the year may be what disambiguates the series.
+  Other parenthetical text always stays.
+  """
+  title = title or ""
+  if not year:
+    return title
+  m = _TRAILING_YEAR_RE.search(title)
+  if not m or m.group(0).strip() != "(%s)" % year:
+    return title
+  stripped = title[: m.start()]
+  return stripped if stripped.strip() else title
+
+
 def sanitize_filename(name):
   """Remove characters unsafe for filenames."""
   name = UNSAFE_CHARS.sub("", name)
@@ -158,9 +184,19 @@ def _get_quality_label(width):
 
 def _get_source(guess_data):
   """Extract source type from guessit data."""
-  source = guess_data.get("source", "") or guess_data.get("screen_size", "")
-  if isinstance(source, str):
-    return SOURCE_MAP.get(source.lower(), source)
+  source = guess_data.get("source", "")
+  other = guess_data.get("other", "") or []
+  flags = {o.lower() for o in ([other] if isinstance(other, str) else other) if isinstance(o, str)}
+  if isinstance(source, str) and source:
+    key = source.lower()
+    # guessit reports WEBRip as source 'Web' + other 'Rip'; DVDRip likewise.
+    if "rip" in flags and key in _RIP_SOURCE_MAP:
+      return _RIP_SOURCE_MAP[key]
+    if "remux" in flags and key in ("blu-ray", "bluray"):
+      return "Remux"
+    return SOURCE_MAP.get(key, source)
+  if not source and "remux" in flags:
+    return "Remux"
   return ""
 
 
@@ -263,6 +299,23 @@ class NamingData:
 
     self.quality_full = ("%s-%s" % (self.source, self.quality)) if self.source else self.quality
 
+  def keep_source_codec(self, source_name):
+    """Keep the codec token written in the source name when it names the output codec family.
+
+    Call this only when the video stream is copied (see ``video_is_copy``): the
+    probed codec only says h264/hevc, so a stream copy would otherwise be
+    renamed [h264] -> [x264]. A real re-encode must keep the probed token.
+    A source token the display map spells specially (AV1) is normalised through it.
+    """
+    if not self.video_codec:
+      return
+    for m in _SOURCE_CODEC_RE.finditer(os.path.basename(source_name or "")):
+      token = m.group(1)
+      display = VIDEO_CODEC_DISPLAY.get(token.lower().replace(".", "").replace(" ", ""))
+      if display == self.video_codec:
+        self.video_codec = display if token.lower() == "av1" else token
+        return
+
   def from_tagdata(self, tagdata):
     """Populate from TMDB Metadata object."""
     if not tagdata:
@@ -271,12 +324,12 @@ class NamingData:
     from resources.metadata import MediaType
 
     if tagdata.mediatype == MediaType.TV:
-      self.series_title = tagdata.showname or ""
       year = ""
       if hasattr(tagdata, "showdata") and tagdata.showdata:
         first_air = tagdata.showdata.get("first_air_date", "")
         if first_air and len(first_air) >= 4:
           year = first_air[:4]
+      self.series_title = strip_trailing_year(tagdata.showname, year)
       self.series_year = year
       self.series_titleyear = "%s (%s)" % (self.series_title, year) if year else self.series_title
       self.season = int(tagdata.season or 0)
@@ -291,10 +344,10 @@ class NamingData:
         self.air_date = extract_air_date(date) or self.air_date
       self.episode_substituted = getattr(tagdata, "episode_substituted", False) is True
     elif tagdata.mediatype == MediaType.Movie:
-      self.movie_title = tagdata.title or ""
-      self.movie_cleantitle = sanitize_filename(self.movie_title)
       date = getattr(tagdata, "date", "") or ""
       self.movie_year = date[:4] if len(date) >= 4 else ""
+      self.movie_title = strip_trailing_year(tagdata.title, self.movie_year)
+      self.movie_cleantitle = sanitize_filename(self.movie_title)
 
     # Common to both TV and Movie
     if getattr(tagdata, "tmdbid", None):
@@ -347,18 +400,22 @@ class NamingData:
     """Apply Sonarr parse response fields to this NamingData instance."""
     if data.get("series"):
       series = data["series"]
-      self.series_title = series.get("title", self.series_title)
       self.series_type = series.get("seriesType", "") or ""
       year = series.get("year")
       if year:  # don't overwrite a known year with 0 or None
         self.series_year = str(year)
+      self.series_title = strip_trailing_year(series.get("title", self.series_title), self.series_year)
       self.series_titleyear = "%s (%s)" % (self.series_title, self.series_year) if self.series_year else self.series_title
 
     if data.get("episodes"):
       eps = data["episodes"]
-      self.season = eps[0].get("seasonNumber", self.season)
-      self.episode = eps[0].get("episodeNumber", self.episode)
-      self.episodes = sorted(ep.get("episodeNumber") for ep in eps if ep.get("episodeNumber") is not None)
+      prev_season, prev_episode = self.season, self.episode
+      season, episode = eps[0].get("seasonNumber"), eps[0].get("episodeNumber")
+      if isinstance(season, int):
+        self.season = season
+      if isinstance(episode, int):
+        self.episode = episode
+      self.episodes = sorted(ep.get("episodeNumber") for ep in eps if isinstance(ep.get("episodeNumber"), int))
       titles = [ep.get("title", "") for ep in eps if ep.get("title")]
       self.episode_title = " / ".join(titles) if titles else self.episode_title
       self.episode_cleantitle = sanitize_filename(self.episode_title)
@@ -366,6 +423,10 @@ class NamingData:
       air = eps[0].get("airDate", "") or eps[0].get("air_date", "")
       if air:
         self.air_date = air
+      if prev_season and (prev_season, prev_episode) != (self.season, self.episode):
+        log.info(
+          "Sonarr numbering overrides earlier S%02dE%02d with S%02dE%02d for %s (airDate %s)" % (prev_season, prev_episode, self.season, self.episode, self.series_title, self.air_date or "n/a")
+        )
 
     ep_display = "-E".join("%02d" % e for e in self.episodes) if self.episodes else "%02d" % self.episode
     log.debug("Got naming data from Sonarr: %s S%02dE%s" % (self.series_title, self.season, ep_display))
@@ -374,11 +435,11 @@ class NamingData:
     """Apply Radarr parse response fields to this NamingData instance."""
     if data.get("movie"):
       movie = data["movie"]
-      self.movie_title = movie.get("title", self.movie_title)
-      self.movie_cleantitle = sanitize_filename(self.movie_title)
       year = movie.get("year")
       if year:  # don't overwrite a known year with 0 or None
         self.movie_year = str(year)
+      self.movie_title = strip_trailing_year(movie.get("title", self.movie_title), self.movie_year)
+      self.movie_cleantitle = sanitize_filename(self.movie_title)
 
     log.debug("Got naming data from Radarr: %s (%s)" % (self.movie_title, self.movie_year))
 
@@ -594,7 +655,15 @@ def _rename_sidecars(old_path, new_path, log):
       log.exception("Failed to rename sidecar %s" % name)
 
 
-def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, lookup_path=None):
+def video_is_copy(options):
+  """Return True when the conversion options copy the video stream."""
+  video = (options or {}).get("video")
+  if not isinstance(video, dict):
+    return False
+  return (video.get("action") or ("copy" if video.get("codec") == "copy" else "")) == "copy"
+
+
+def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, lookup_path=None, video_copied=False, original=None):
   """
   Generate a new filename using the naming template.
 
@@ -611,6 +680,9 @@ def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, 
           the output file is in a temp directory (e.g. output-directory), pass
           the original *input* path here so the configured instance path
           prefixes resolve correctly.
+      original: Original release filename (the one guessit parsed); its codec token wins over lookup_path.
+      video_copied: True when the video stream is copied; only then is the codec
+          token written in the source name kept (h264 stays h264, not x264).
 
   Returns:
       New filename (without extension), or None if naming disabled
@@ -630,6 +702,8 @@ def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, 
   # Populate from local sources
   data.from_mediainfo(info, guess_data)
   data.from_tagdata(tagdata)
+  if video_copied:
+    data.keep_source_codec(original or lookup_path or filepath)
 
   # Use lookup_path for API matching when the output file is in a temp dir
   api_path = lookup_path or filepath

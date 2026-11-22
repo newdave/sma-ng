@@ -11,6 +11,7 @@ scale folding, and Emby/Jellyfin deleted-path notification.
 
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,6 +22,7 @@ from converter import FFMpegConvertError
 from converter.avcodecs import video_codec_list
 from resources.config_schema import FallbackPolicy
 from resources.mediaprocessor import MediaProcessor, _rewrite_options_for_full_sw, _swap_hw_codec_to_sw
+from resources.metadata import MediaType
 
 HW_TOKENS = ("qsv", "vaapi", "cuda", "npp", "nvenc", "hwupload", "hwmap", "hwdownload", "videotoolbox")
 HW_PREOPT_FLAGS = ("-hwaccel", "-hwaccel_output_format", "-init_hw_device", "-filter_hw_device", "-qsv_device", "-vaapi_device", "-hwaccel_device")
@@ -504,6 +506,124 @@ class TestRestoreFromOutputCollision:
     result = mp.restoreFromOutput(str(src), str(out))
     assert result == str(tmp_path / "in" / "movie.2.mp4")
     assert other.read_bytes() == b"unrelated"
+
+  @staticmethod
+  def _tags(tool="SMA-NG:old.release.mkv", tmdb=None, tvdb=None, imdb=None, season=None, episode=None):
+    d = {}
+    if tool is not None:
+      d["\xa9too"] = [tool]
+    for name, val in (("TMDB", tmdb), ("TVDB", tvdb), ("IMDB", imdb)):
+      if val is not None:
+        d["----:com.apple.iTunes:" + name] = [str(val).encode()]
+    if season is not None:
+      d["tvsn"] = [season]
+    if episode is not None:
+      d["tves"] = [episode]
+    holder = MagicMock()
+    holder.tags = d
+    return holder
+
+  @staticmethod
+  def _tv(tmdb=1, tvdb=2, season=1, episode=3):
+    return SimpleNamespace(mediatype=MediaType.TV, tmdbid=tmdb, tvdbid=tvdb, imdbid=None, season=season, episode=episode)
+
+  @staticmethod
+  def _movie(tmdb=7, imdb="tt1"):
+    return SimpleNamespace(mediatype=MediaType.Movie, tmdbid=tmdb, imdbid=imdb, tvdbid=None, season=None, episode=None)
+
+  def _run(self, tmp_path, tags, tagdata, delete=True, recycle=True):
+    mp = self._mp(tmp_path, delete=delete)
+    mp._recycle_to_bin = MagicMock(return_value=recycle)
+    src = tmp_path / "in" / "regrab.release.mkv"
+    src.write_bytes(b"regrab")
+    old = tmp_path / "in" / "movie.mp4"
+    old.write_bytes(b"old-output")
+    out = tmp_path / "out" / "movie.mp4"
+    out.write_bytes(b"converted")
+    with patch("resources.mediaprocessor.MP4", return_value=tags):
+      result = mp.restoreFromOutput(str(src), str(out), tagdata=tagdata)
+    return mp, old, result
+
+  def test_regrab_different_source_name_same_episode_is_replaced(self, tmp_path):
+    mp, old, result = self._run(tmp_path, self._tags(tmdb=1, tvdb=2, season=1, episode=3), self._tv())
+    assert result == str(old)
+    assert old.read_bytes() == b"converted"
+    assert not (tmp_path / "in" / "movie.2.mp4").exists()
+    mp._recycle_to_bin.assert_called_once_with(str(old))
+
+  def test_same_filename_different_episode_is_numbered(self, tmp_path):
+    mp, old, result = self._run(tmp_path, self._tags(tmdb=1, season=1, episode=4), self._tv(episode=3))
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+    assert old.read_bytes() == b"old-output"
+    mp._recycle_to_bin.assert_not_called()
+    assert "different episode" in str(mp.log.info.call_args_list)
+
+  def test_different_season_is_numbered(self, tmp_path):
+    _, old, result = self._run(tmp_path, self._tags(tmdb=1, season=2, episode=3), self._tv(season=1))
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+
+  def test_tvdb_used_when_tmdb_missing_on_target(self, tmp_path):
+    _, old, result = self._run(tmp_path, self._tags(tvdb=2, season=1, episode=3), self._tv())
+    assert result == str(old)
+
+  @pytest.mark.parametrize(
+    "tags,kind",
+    [
+      (dict(season=1, episode=3), "tv"),  # target lacks ids
+      (dict(tmdb=1, season=1, episode=3), "none"),  # job has no tagdata
+      (dict(tmdb=1), "tv"),  # target lacks season/episode
+      (dict(tmdb=1, season=1, episode=3), "noid"),  # job lacks ids
+    ],
+  )
+  def test_marker_without_comparable_ids_is_numbered_with_reason(self, tmp_path, tags, kind):
+    td = {"tv": self._tv(), "none": None, "noid": self._tv(tmdb=None, tvdb=None)}[kind]
+    mp, old, result = self._run(tmp_path, self._tags(**tags), td)
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+    assert old.read_bytes() == b"old-output"
+    mp._recycle_to_bin.assert_not_called()
+    assert "identity not comparable" in str(mp.log.info.call_args_list)
+
+  @pytest.mark.parametrize("tool", ["Lavf60.3.100", None])
+  def test_non_sma_file_with_matching_ids_is_numbered(self, tmp_path, tool):
+    mp, old, result = self._run(tmp_path, self._tags(tool=tool, tmdb=1, season=1, episode=3), self._tv())
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+    assert old.read_bytes() == b"old-output"
+    mp._recycle_to_bin.assert_not_called()
+    assert "no SMA marker" in str(mp.log.info.call_args_list)
+
+  def test_movie_replaced_by_tmdb_id(self, tmp_path):
+    _, old, result = self._run(tmp_path, self._tags(tmdb=7), self._movie())
+    assert result == str(old)
+
+  def test_movie_different_tmdb_numbered(self, tmp_path):
+    _, old, result = self._run(tmp_path, self._tags(tmdb=8), self._movie())
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+
+  def test_movie_falls_back_to_imdb(self, tmp_path):
+    _, old, result = self._run(tmp_path, self._tags(imdb="tt1"), self._movie())
+    assert result == str(old)
+
+  def test_recycle_failure_keeps_existing_and_numbers(self, tmp_path):
+    mp, old, result = self._run(tmp_path, self._tags(tmdb=1, season=1, episode=3), self._tv(), recycle=False)
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+    assert old.read_bytes() == b"old-output"
+
+  def test_not_replaced_when_delete_off(self, tmp_path):
+    mp, old, result = self._run(tmp_path, self._tags(tmdb=1, season=1, episode=3), self._tv(), delete=False)
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+    mp._recycle_to_bin.assert_not_called()
+
+  def test_unreadable_target_is_not_replaced(self, tmp_path):
+    mp = self._mp(tmp_path, delete=True)
+    src = tmp_path / "in" / "movie.mkv"
+    src.write_bytes(b"regrab")
+    old = tmp_path / "in" / "movie.mp4"
+    old.write_bytes(b"not an mp4")
+    out = tmp_path / "out" / "movie.mp4"
+    out.write_bytes(b"converted")
+    result = mp.restoreFromOutput(str(src), str(out))
+    assert result == str(tmp_path / "in" / "movie.2.mp4")
+    assert old.read_bytes() == b"not an mp4"
 
   def test_identical_bypass_copy_is_not_duplicated(self, tmp_path):
     mp = self._mp(tmp_path, delete=False)

@@ -22,6 +22,7 @@ from manual import (
   movieInfo,
   processFile,
   showCodecs,
+  triggerRescan,
   tvInfo,
 )
 from resources.media_repair import STATUS_FAILED, STATUS_REPAIRED, RepairResult
@@ -551,6 +552,79 @@ class TestProcessFile:
     assert not src.exists(), "Original .mkv must be unlinked when output extension differs"
     assert out_in_input_dir.exists(), "New .mp4 must remain in the input directory"
 
+  @pytest.mark.parametrize("action,expected_copy", [("copy", True), ("transcode", False)])
+  def test_rename_passes_copy_flag_and_original_guess(self, tmp_path, action, expected_copy):
+    src = tmp_path / "Show.mkv"
+    src.write_bytes(b"x")
+    out = tmp_path / "Show.mp4"
+    out.write_bytes(b"y")
+    mp = self._make_mp()
+    mp.settings.naming_enabled = True
+    mp.settings.output_dir = None
+    mp.settings.moveto = None
+    mp.deletesubs = set()
+    mp.process.return_value = {
+      "output": str(out),
+      "input": str(src),
+      "input_deleted": False,
+      "delete": False,
+      "external_subs": [],
+      "options": {"video": {"action": action}},
+      "x": 1920,
+      "y": 1080,
+      "cues_to_front": False,
+    }
+    mp.replicate.return_value = [str(out)]
+    mp.getDefaultAudioLanguage.return_value = None
+    mp.restoreFromOutput.return_value = str(out)
+    with (
+      patch("manual.getInfo", return_value=MagicMock()),
+      patch("manual._find_arr_instance", return_value=(None, None)),
+      patch("manual.triggerRescan", return_value=None),
+      patch("guessit.guessit", return_value={"source": "Web"}) as g,
+      patch("resources.naming.generate_name", return_value=None) as gn,
+    ):
+      processFile(str(src), mp, info=MagicMock(), original="Orig.2020.WEBRip.mkv")
+    g.assert_called_once_with("Orig.2020.WEBRip.mkv")
+    assert gn.call_args.kwargs["guess_data"] == {"source": "Web"}
+    assert gn.call_args.kwargs["video_copied"] is expected_copy
+
+  def test_rename_guessit_failure_falls_back_to_no_guess(self, tmp_path):
+    src = tmp_path / "Show.mkv"
+    src.write_bytes(b"x")
+    out = tmp_path / "Show.mp4"
+    out.write_bytes(b"y")
+    mp = self._make_mp()
+    mp.settings.naming_enabled = True
+    mp.settings.output_dir = None
+    mp.settings.moveto = None
+    mp.deletesubs = set()
+    mp.process.return_value = {
+      "output": str(out),
+      "input": str(src),
+      "input_deleted": False,
+      "delete": False,
+      "external_subs": [],
+      "options": {"video": {"action": "copy"}},
+      "x": 1920,
+      "y": 1080,
+      "cues_to_front": False,
+    }
+    mp.replicate.return_value = [str(out)]
+    mp.getDefaultAudioLanguage.return_value = None
+    mp.restoreFromOutput.return_value = str(out)
+    with (
+      patch("manual.getInfo", return_value=MagicMock()),
+      patch("manual._find_arr_instance", return_value=(None, None)),
+      patch("manual.triggerRescan", return_value=None),
+      patch("guessit.guessit", side_effect=ValueError("boom")),
+      patch("resources.naming.generate_name", return_value=None) as gn,
+    ):
+      processFile(str(src), mp, info=MagicMock(), original="Orig.2020.h264.mkv")
+    gn.assert_called_once()
+    assert gn.call_args.kwargs["guess_data"] is None
+    assert gn.call_args.kwargs["original"] == "Orig.2020.h264.mkv"
+
   def test_overwrite_input_skips_unlink_when_extensions_match(self, tmp_path):
     """When input and output share filename + extension, restoreFromOutput
     has already atomically overwritten the original. The cleanup branch
@@ -586,6 +660,94 @@ class TestProcessFile:
 
     assert result is True
     assert src.exists()
+
+  def test_overwrite_input_recycle_failure_keeps_original(self, tmp_path):
+    """A failed recycle copy must not let restoreFromOutput replace the input
+    or the cleanup branch unlink it: no backup means the original stays."""
+    src = tmp_path / "Show - S02E03.mkv"
+    src.write_bytes(b"x")
+    out_in_input_dir = tmp_path / "Show - S02E03.mp4"
+    out_in_input_dir.write_bytes(b"y")
+
+    mp = self._make_mp()
+    mp.settings.output_dir = str(tmp_path / "transcodes")
+    mp.settings.moveto = None
+    mp.settings.delete = True
+    mp.deletesubs = set()
+    mp.process.return_value = {
+      "output": str(tmp_path / "transcodes" / "Show - S02E03.mp4"),
+      "input": str(src),
+      "input_deleted": False,
+      "delete": True,
+      "external_subs": [],
+      "options": {},
+      "x": 1920,
+      "y": 1080,
+      "cues_to_front": False,
+    }
+    mp.replicate.return_value = [str(out_in_input_dir)]
+    mp.getDefaultAudioLanguage.return_value = None
+    mp._recycle_to_bin.return_value = False
+    seen = {}
+
+    def _restore(inp, out, **kw):
+      seen["delete"] = mp.settings.delete
+      return str(out_in_input_dir)
+
+    mp.restoreFromOutput.side_effect = _restore
+    mp.removeFile.side_effect = AssertionError("removeFile must not delete the original after a failed recycle")
+
+    with patch("manual.getInfo", return_value=None):
+      with patch("manual._find_arr_instance", return_value=(None, None)):
+        with patch("manual.triggerRescan", return_value=None):
+          result = processFile(str(src), mp, info=MagicMock())
+
+    assert result is True
+    assert src.exists()
+    assert seen["delete"] is False, "restoreFromOutput must run with delete off so it numbers instead of replacing"
+    assert mp.settings.delete is True, "delete setting must be restored afterwards"
+
+  @pytest.mark.parametrize("delete, recycled", [(True, False), (False, True)], ids=["recycle-failed", "delete-off"])
+  def test_overwrite_input_keeps_source_subtitle_sidecars_when_original_kept(self, tmp_path, delete, recycled):
+    """Sidecar subtitles of the source are only removed together with the
+    source: a failed recycle copy or delete off keeps both."""
+    src = tmp_path / "Show - S02E03.mkv"
+    src.write_bytes(b"x")
+    sidecar = tmp_path / "Show - S02E03.eng.srt"
+    sidecar.write_text("1")
+    out_in_input_dir = tmp_path / "Show - S02E03.mp4"
+    out_in_input_dir.write_bytes(b"y")
+
+    mp = self._make_mp()
+    mp.settings.output_dir = str(tmp_path / "transcodes")
+    mp.settings.moveto = None
+    mp.settings.delete = delete
+    mp.deletesubs = {str(sidecar)}
+    mp.process.return_value = {
+      "output": str(tmp_path / "transcodes" / "Show - S02E03.mp4"),
+      "input": str(src),
+      "input_deleted": False,
+      "delete": delete,
+      "external_subs": [],
+      "options": {},
+      "x": 1920,
+      "y": 1080,
+      "cues_to_front": False,
+    }
+    mp.replicate.return_value = [str(out_in_input_dir)]
+    mp.getDefaultAudioLanguage.return_value = None
+    mp._recycle_to_bin.return_value = recycled
+    mp.restoreFromOutput.return_value = str(out_in_input_dir)
+    mp.removeFile.side_effect = lambda p, *a, **kw: (os.remove(p) or True) if os.path.isfile(p) else True
+
+    with patch("manual.getInfo", return_value=None):
+      with patch("manual._find_arr_instance", return_value=(None, None)):
+        with patch("manual.triggerRescan", return_value=None):
+          result = processFile(str(src), mp, info=MagicMock())
+
+    assert result is True
+    assert src.exists()
+    assert sidecar.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -946,3 +1108,42 @@ class TestPromptsWithoutInput:
 
     with patch("builtins.input", side_effect=["maybe", "y"]):
       assert manual.getYesNo() is True
+
+
+# ---------------------------------------------------------------------------
+# triggerRescan
+# ---------------------------------------------------------------------------
+
+
+class TestTriggerRescan:
+  INSTANCE = {"section": "main", "host": "h", "port": 8989, "webroot": "", "apikey": "k", "rescan": True}
+
+  def _run(self, wait_results, rename=False):
+    inst = dict(self.INSTANCE, rename=rename)
+    with (
+      patch("manual._find_arr_instance", return_value=(inst, "sonarr")),
+      patch("resources.mediamanager.rescan_via_arr", return_value=7),
+      patch("resources.mediamanager.downloaded_scan_via_arr", return_value=8) as scan,
+      patch("resources.mediamanager.rename_via_arr", return_value="/new.mp4") as ren,
+      patch("resources.mediamanager.wait_for_command", side_effect=wait_results) as wait,
+      patch("manual.log") as mlog,
+    ):
+      result = triggerRescan("/tv/show/ep.mkv", MagicMock())
+    return result, scan, ren, wait, mlog
+
+  def test_rescan_timeout_still_imports(self):
+    result, scan, _, wait, mlog = self._run([False, True])
+    scan.assert_called_once()
+    assert wait.call_count == 2
+    assert any("importing anyway" in c.args[0] for c in mlog.warning.call_args_list)
+    assert result is None
+
+  def test_rescan_timeout_then_rename(self):
+    result, scan, ren, _, _ = self._run([False, True], rename=True)
+    scan.assert_called_once()
+    assert result == "/new.mp4"
+
+  def test_import_timeout_skips_rename(self):
+    result, _, ren, _, _ = self._run([True, False], rename=True)
+    ren.assert_not_called()
+    assert result is None
