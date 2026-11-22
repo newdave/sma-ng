@@ -1,0 +1,23 @@
+.codex/config.toml
+  s_4390c29f4f2c35::t_7f937dd5b1a2fe 10-12
+.claude/settings.json
+  s_4390c29f4f2c35::t_7f937dd5b1a2fe 30
+CLAUDE.md
+  s_4390c29f4f2c35::t_7f937dd5b1a2fe 189-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "f54e974bb8bc68085787de4625dceba2594a9dbe",
+  "prompts": {},
+  "sessions": {
+    "s_4390c29f4f2c35": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef08ae31-b5d1-44d2-8994-dda5e608a571",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
