@@ -1,0 +1,23 @@
+tests/test_mediaprocessor.py
+  s_d73ac5e457a585::t_e49bb979667d52 4659,4667-4684,7033,7041-7058
+resources/mediaprocessor.py
+  s_d73ac5e457a585::t_9fd47ec8290608 1065-1068,1071,1083,1086-1088,1093-1094,1098,1102-1103,1105-1110
+docs/configuration.md
+  s_d73ac5e457a585::t_115d35b9eabacc 127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "d3aa1088310d75814a2bd354dd0a93cf5c61d2dc",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
