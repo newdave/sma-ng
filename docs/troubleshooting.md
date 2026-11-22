@@ -106,6 +106,21 @@ No configuration change is required. If even the software decode fails (a
 genuinely corrupt source), switch to `fallback-policy: aggressive` to add the
 full software encode tier (`full_sw`) as a last resort.
 
+The ladder stops early, with no further tiers, when a retry could not help.
+That covers an ffmpeg killed or cancelled by SIGTERM, SIGINT, SIGKILL or SIGHUP
+(a negative or 128+N exit code, or exit 255 with `received signal N` in the
+error output) and output-side filesystem failures: disk full,
+quota exceeded or read-only filesystem anywhere in the ffmpeg error output, and
+permission denied or an I/O error only on a line naming the output file or a
+write, trailer or muxing step. A permission error opening a hardware device
+(`/dev/dri`, `/dev/nvidia*`, `init_hw_device`) or reading the source still
+climbs, because the software tiers do not need the device. A disk-full or
+cancelled job no longer retries on the CPU; the log shows
+`[attempt-ladder] stop: signal SIGTERM` or `stop: filesystem enospc`. Free the
+space or fix the mount, then requeue the job. Every other failure class still
+climbs the ladder, including a crash signal such as SIGSEGV or SIGABRT from a
+hardware driver, because a software tier may still succeed.
+
 ### 7.1 source fails immediately with `encoder_init_failed` / `audio_channel_layout_mismatch`
 
 A source with a 7.1 (8-channel) audio track re-encoded to `eac3`, `ac3`, or
@@ -436,6 +451,31 @@ node's rows (stale-node recovery handles those) or a row re-claimed since it was
 database outage is expected; repeated lines without an outage point to a worker bug worth reporting.
 
 ### Conversion produces larger output file
+
+When a video re-encode comes out larger than its source, SMA-NG logs `[output-larger-than-input]` with both sizes.
+If the re-encode was optional, it re-runs the job with the video stream copied (audio and subtitle handling are
+unchanged) and keeps whichever of the copy and the re-encode is smaller, under the same output name. A re-encode is
+optional when it was only chasing bitrate (`max-bitrate`, `crf-profiles`), the source codec is in `video-codec`, and
+the bit depth does not change.
+
+The fallback does not fire, and the larger re-encode is kept, when:
+
+- the re-encode is required: a burned-in subtitle, `max-width` downscale, forced filter or HDR filter, `max-fps`,
+  profile, level or pix-fmt limit, `force-reencode`, or an analyzer filter;
+- the source codec is not in `video-codec` (for example XviD or AV1 converted to H.264);
+- the source codec cannot be stream-copied into MP4 (VC-1/WMV, MS-MPEG4, RealVideo, Theora, FLV, or any AVI source).
+
+If the copy run fails or is interrupted (including by SIGTERM), the larger re-encode is kept so the job still
+produces an output. Only the copy run's own partial output is removed, and only a file written since the copy run
+started. When the copy run writes to a different name (an in-place MP4 copy writes `name.mp4.mp4`), a file that
+appears at the output name meanwhile is left alone. Such a file is not overwritten: the re-encode is restored under
+a numbered name instead (for example `name.2.mp4`) and the log line names it. A failed copy run's stderr sidecar is
+removed, because the job still succeeds.
+
+Both outputs pass the `[output-verify]` check. The re-encode is verified first; a re-encode that fails it fails the
+job and no copy run starts. A copy output that fails the check is renamed to `<output name>.failed` and the verified
+larger re-encode is kept. Same-family re-encodes (for
+example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
 
 - Lower the `crf` value (lower CRF = higher quality = larger file; raise it to reduce size)
 - Add a `max-bitrate` cap in `[Video]`

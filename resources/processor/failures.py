@@ -43,7 +43,7 @@ class FfmpegFailureClass(str, Enum):
 class AttemptRecord:
   """One tier of the fallback ladder. Emitted as structured log + /health metric."""
 
-  tier: str  # "hw" | "hw_alt" | "sw_decode_hw_encode" | "sw_decode" | "full_sw"
+  tier: str  # "copy" | "sw" | "hw" | "hw_alt" | "sw_decode_hw_encode" | "sw_decode" | "full_sw"
   failure_class: FfmpegFailureClass | None  # None on success
   duration_ms: int
 
@@ -222,6 +222,8 @@ class FfmpegFailureCause(str, Enum):
   # Environment
   DISK_FULL = "disk_full"
   PERMISSION_DENIED = "permission_denied"
+  DISK_QUOTA = "disk_quota"
+  READ_ONLY_FS = "read_only_fs"
   SOURCE_UNAVAILABLE = "source_unavailable"
   # Catch-all
   UNKNOWN = "unknown"
@@ -373,6 +375,16 @@ _CAUSE_PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureCause, str], ...] = (
     re.compile(r"No space left|ENOSPC", re.IGNORECASE),
     FfmpegFailureCause.DISK_FULL,
     "Output filesystem is full. Free space or change output_directory.",
+  ),
+  (
+    re.compile(r"Disk quota exceeded|EDQUOT", re.IGNORECASE),
+    FfmpegFailureCause.DISK_QUOTA,
+    "Output filesystem quota exceeded. Free space for this user or raise the quota.",
+  ),
+  (
+    re.compile(r"Read-only file system|EROFS", re.IGNORECASE),
+    FfmpegFailureCause.READ_ONLY_FS,
+    "Output filesystem is mounted read-only. Check the mount, container volume flags and systemd ReadWritePaths.",
   ),
   (
     re.compile(r"Permission denied|EACCES", re.IGNORECASE),
@@ -537,6 +549,8 @@ _FAILURE_CATEGORY_MAP: dict[str, FailureCategory] = {
   # ── FfmpegFailureCause: filesystem ────────────────────────────────
   FfmpegFailureCause.DISK_FULL.value: FailureCategory.DISK,
   FfmpegFailureCause.PERMISSION_DENIED.value: FailureCategory.DISK,
+  FfmpegFailureCause.DISK_QUOTA.value: FailureCategory.DISK,
+  FfmpegFailureCause.READ_ONLY_FS.value: FailureCategory.DISK,
   # ── FfmpegFailureCause: catch-all ─────────────────────────────────
   FfmpegFailureCause.UNKNOWN.value: FailureCategory.SYSTEM,
   # ── Worker sentinels ──────────────────────────────────────────────
@@ -564,6 +578,74 @@ def categorize_failure(cause_or_class: str | None) -> FailureCategory:
   return _FAILURE_CATEGORY_MAP.get(str(cause_or_class), FailureCategory.UNKNOWN)
 
 
+# Exit codes a shell reports for a signal-killed child (128 + N): HUP, INT, KILL, TERM.
+# Kill/cancel signals only. A crash signal (SIGSEGV, SIGABRT, SIGBUS, ...) is a
+# hw driver or decoder fault that a software tier may survive, so it climbs.
+_STOP_SIGNALS = {1: "SIGHUP", 2: "SIGINT", 9: "SIGKILL", 15: "SIGTERM"}
+_SIGNAL_EXIT_CODES = {128 + n: name for n, name in _STOP_SIGNALS.items()}
+# ffmpeg traps SIGINT/SIGTERM itself and exits 255 after logging this.
+_RECEIVED_SIGNAL_RE = re.compile(r"received signal (\d+)")
+# Errors that only arise when writing, so they stop the ladder wherever they
+# appear in the tail. Tested directly (not via the first-match diagnosis) so an
+# earlier HDR or channel-layout line cannot hide them.
+_WRITE_ONLY_ERRORS = (
+  (re.compile(r"No space left on device|\bENOSPC\b"), "enospc"),
+  (re.compile(r"Disk quota exceeded|\bEDQUOT\b"), "edquota"),
+  (re.compile(r"Read-only file system|\bEROFS\b"), "erofs"),
+)
+# Errors that also arise on the source or a hardware device: they stop the
+# ladder only on an output-side line.
+_SIDE_DEPENDENT_ERRORS = (
+  (re.compile(r"Permission denied"), "permission_denied"),
+  (re.compile(r"Input/output error"), "eio"),
+)
+_OUTPUT_LINE_MARKER = re.compile(r"writ(?:e|ing)|trailer|muxing|out#|Error opening output", re.IGNORECASE)
+# A hardware-device line is never output-side: sw tiers drop the device.
+_DEVICE_LINE_MARKER = re.compile(r"/dev/dri|/dev/nvidia|init_hw_device|hwaccel|Device creation|qsv_device", re.IGNORECASE)
+
+
+def _is_output_line(line: str, outfile: str | None) -> bool:
+  if _DEVICE_LINE_MARKER.search(line):
+    return False
+  if outfile and outfile in line:
+    return True
+  return bool(_OUTPUT_LINE_MARKER.search(line))
+
+
+def ladder_stop_reason(returncode: int | None, stderr: str | bytes | None, outfile: str | None = None) -> str | None:
+  """Return why the encode fallback ladder must stop, or ``None`` to keep climbing.
+
+  An ffmpeg killed or cancelled by SIGHUP/SIGINT/SIGKILL/SIGTERM (negative
+  return code, 128+N, or exit 255 with "received signal N") and output-side
+  filesystem failures fail identically on every tier, so
+  retrying only wastes encodes. Disk full, quota and read-only filesystem stop
+  wherever they appear; permission denied and I/O errors stop only on a line
+  naming *outfile* or a write/trailer/muxing/``out#`` marker, never on a
+  hardware-device line. Anything else, crash signals included, climbs.
+  """
+  if returncode is not None:
+    if returncode < 0 and -returncode in _STOP_SIGNALS:
+      return "signal " + _STOP_SIGNALS[-returncode]
+    if returncode in _SIGNAL_EXIT_CODES:
+      return "signal " + _SIGNAL_EXIT_CODES[returncode]
+  text = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else (stderr if isinstance(stderr, str) else "")
+  tail = text[-TAIL_BYTES:]
+  if returncode == 255:
+    match = _RECEIVED_SIGNAL_RE.search(tail)
+    if match and int(match.group(1)) in _STOP_SIGNALS:
+      return "signal " + _STOP_SIGNALS[int(match.group(1))]
+  for pattern, reason in _WRITE_ONLY_ERRORS:
+    if pattern.search(tail):
+      return "filesystem " + reason
+  if outfile is not None and (not isinstance(outfile, str) or outfile.startswith(("-", "pipe:"))):
+    outfile = None
+  for line in tail.splitlines():
+    for pattern, reason in _SIDE_DEPENDENT_ERRORS:
+      if pattern.search(line) and _is_output_line(line, outfile):
+        return "filesystem " + reason
+  return None
+
+
 __all__ = [
   "OUTPUT_VERIFY_FAILED",
   "TAIL_BYTES",
@@ -580,5 +662,6 @@ __all__ = [
   "FfmpegFailureClass",
   "categorize_failure",
   "diagnose_ffmpeg_failure",
+  "ladder_stop_reason",
   "parse_ffmpeg_failure",
 ]

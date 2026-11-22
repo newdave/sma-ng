@@ -183,6 +183,23 @@ _HW_DEINTERLACE_TO_SW = {
 }
 
 
+def _first_attempt_tier(preopts, options):
+  """Label the first ladder attempt for the ``ffmpeg.attempts`` event.
+
+  ``copy`` for a stream-copy video remux, ``sw`` for a software video encoder
+  with no hardware decode in *preopts*, otherwise ``hw``.
+  """
+  video = (options or {}).get("video")
+  codec = video.get("codec") if isinstance(video, dict) else None
+  if isinstance(codec, (list, tuple)):
+    codec = codec[0] if codec else None
+  if codec == "copy":
+    return "copy"
+  if codec and codec not in _HW_CODEC_TO_SW and "-hwaccel" not in (preopts or []):
+    return "sw"
+  return "hw"
+
+
 _ENCODER_BACKEND_MARKERS = ("qsv", "vaapi", "nvenc", "videotoolbox", "amf")
 
 
@@ -423,7 +440,9 @@ def _swap_qsv_codec_to_vaapi(options, vaapi_overlay):
   - Scalar overlay fields (``preset``, ``b_frames``, ``ref_frames``,
     ``look_ahead_depth``) win when they're non-sentinel.
   - ``global_quality`` from source or overlay maps to ``-rc_mode CQP -qp N``
-    on the VAAPI params line (QSV ICQ has no direct VAAPI equivalent).
+    on the VAAPI params line (QSV ICQ has no direct VAAPI equivalent); for
+    av1_vaapi it stays ``global_quality`` and the encoder emits
+    ``-rc_mode CQP -global_quality <qindex>``.
   """
   if not options or not isinstance(options.get("video"), dict):
     return None
@@ -466,11 +485,16 @@ def _swap_qsv_codec_to_vaapi(options, vaapi_overlay):
     cleaned = ((cleaned.rstrip() + " " + overlay_params.lstrip()).strip()) if cleaned else overlay_params.strip()
 
   # global_quality (QSV ICQ) → -rc_mode CQP -qp N on VAAPI (if not already overridden).
+  # av1_vaapi has no -qp: hand the value to the encoder, which emits
+  # -rc_mode CQP -global_quality <qindex>.
   ov_gq = overlay.get("global_quality", 0) or 0
   src_gq = video.pop("global_quality", 0) or 0
   effective_q = ov_gq if ov_gq > 0 else src_gq
-  if effective_q > 0 and "bitrate" not in video and "-rc_mode" not in cleaned:
-    cleaned = ((cleaned.rstrip() + " ") if cleaned else "") + "-rc_mode CQP -qp %d" % effective_q
+  if effective_q > 0 and not video.get("bitrate") and "-rc_mode" not in cleaned:
+    if vaapi_codec == "av1_vaapi":
+      video["global_quality"] = effective_q
+    else:
+      cleaned = ((cleaned.rstrip() + " ") if cleaned else "") + "-rc_mode CQP -qp %d" % effective_q
 
   video["params"] = cleaned or None
 
@@ -726,7 +750,7 @@ from collections.abc import Callable
 from mutagen.mp4 import MP4
 
 from converter import Converter, FFMpegConvertError
-from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments
+from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments, video_codec_list
 from converter.ffmpeg import TerminatedBySignal, is_unknown_stream
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
@@ -745,12 +769,17 @@ from resources.lang import getAlpha3TCode
 from resources.metadata import MediaType, Metadata
 from resources.openvino_analyzer import OpenVINOAnalyzerBackend, OpenVINOAnalyzerError
 from resources.postprocess import PostProcessor
-from resources.processor.failures import OUTPUT_VERIFY_FAILED, TAIL_BYTES, AttemptRecord, FfmpegFailureClass, diagnose_ffmpeg_failure, parse_ffmpeg_failure
+from resources.processor.failures import OUTPUT_VERIFY_FAILED, TAIL_BYTES, AttemptRecord, FfmpegFailureClass, diagnose_ffmpeg_failure, ladder_stop_reason, parse_ffmpeg_failure
 from resources.subtitles import SubtitleProcessor
 
 # VBV peak allowed above max-bitrate when the cap is what forced the re-encode
 # (max-bitrate is then the average target, maxrate = target x this).
 VBV_PEAK_RATIO = 1.5
+
+# Conservative H.264-class targets (kbps) by output height, used only when the
+# source bitrate is unknown and the encoder has no constant-quality mode
+# (V4L2 M2M, OMX); without a target FFmpeg would fall to its 200 kb/s default.
+UNKNOWN_BITRATE_FALLBACK_KBPS = ((2160, 20000), (1440, 10000), (1080, 6000), (720, 3000), (0, 1500))
 
 # Exact rationals for the NTSC frame rates a max-fps setting names approximately.
 NTSC_FPS = {23.976: 24000 / 1001, 29.97: 30000 / 1001, 59.94: 60000 / 1001}
@@ -1054,6 +1083,9 @@ class MediaProcessor:
         # One structured line so the daemon worker records the failure class and reason.
         self.log.info(json.dumps({"event": "output.verify", "failure_class": OUTPUT_VERIFY_FAILED, "reason": problem}, sort_keys=True))
         return None
+      # Only a verified re-encode may be swapped for a smaller stream copy; the
+      # fallback verifies the copy itself before it replaces the re-encode.
+      outputfile, inputfile, ripped_subs = self._fallback_to_copy_if_larger(outputfile, inputfile, ripped_subs, info, options, preopts, postopts, downloaded_subs, reportProgress, progressOutput)
 
     self.log.debug("%s created from %s successfully." % (outputfile, inputfile))
 
@@ -1110,6 +1142,215 @@ class MediaProcessor:
       "y": dim["y"],
       "cues_to_front": self.settings.output_format in ["mkv"] and self.settings.relocate_moov,
     }
+
+  # video.debug markers for re-encodes that only chase a lower or capped
+  # bitrate. Any other marker (filter, scale, fps, profile, level, pix-fmt,
+  # burn-in, operator force) means a copy would ignore the configuration.
+  _OPTIONAL_REENCODE_REASONS = frozenset({"video", "hdrInput", "max-bitrate", "crf-profile", "icq", "min-bitrate", "analyzer-preset", "bitrate-unknown"})
+  # Video codecs that stream-copy cleanly into MP4.
+  _MP4_COPYABLE_VIDEO_CODECS = frozenset({"h264", "hevc", "av1", "vp9"})
+
+  def _fallback_to_copy_if_larger(self, outputfile, inputfile, ripped_subs, info, options, preopts, postopts, downloaded_subs, reportProgress, progressOutput):
+    """Re-run as a video stream copy when an optional video re-encode came out larger than its source.
+
+    Audio and subtitle plans are kept. The larger output is moved aside (never
+    overwritten) while the copy runs; the smaller of copy and re-encode is
+    kept under the re-encode's name, so a usable output always exists.
+    Returns (outputfile, inputfile, ripped_subs).
+    """
+    video = options.get("video") or {}
+    if video.get("codec") in (None, "copy") or video.get("map") is None:
+      return outputfile, inputfile, ripped_subs
+    try:
+      if os.path.abspath(outputfile) == os.path.abspath(inputfile):
+        return outputfile, inputfile, ripped_subs
+      out_size = os.path.getsize(outputfile)
+      in_size = os.path.getsize(inputfile)
+    except OSError:
+      return outputfile, inputfile, ripped_subs
+    if out_size <= in_size:
+      return outputfile, inputfile, ripped_subs
+
+    blocker = self._copy_fallback_blocker(info, video, options.get("format"))
+    if blocker:
+      self.log.warning("Re-encoded output %d bytes is larger than input %d bytes; keeping it because %s [output-larger-than-input]." % (out_size, in_size, blocker))
+      return outputfile, inputfile, ripped_subs
+    self.log.warning("Re-encoded output %d bytes is larger than input %d bytes; falling back to video stream copy [output-larger-than-input]." % (out_size, in_size))
+    aside = self._move_aside(outputfile)
+    if not aside:
+      return outputfile, inputfile, ripped_subs
+
+    copy_options, copy_preopts, copy_postopts = self._copy_fallback_options(info, options, postopts, inputfile)
+    copy_output = None
+    restored = outputfile
+    interrupted = False
+    copy_input = inputfile
+    t0 = time.time()
+    self._last_stderr_sidecar = None
+    self._copy_fallback_active = True
+    try:
+      copy_output, inputfile, _ = self._run_ffmpeg(inputfile, copy_options, copy_preopts, copy_postopts, [], downloaded_subs, reportProgress, progressOutput)
+    except Exception:
+      self.log.exception("Video copy fallback failed [output-larger-than-input].")
+    except BaseException:  # KeyboardInterrupt, or SIGTERM raised as a BaseException
+      interrupted = True
+      raise
+    finally:
+      self._copy_fallback_active = False
+      if not copy_output:  # also on interrupt: never leave the result at <out>.larger
+        if interrupted and not self.settings.temp_extension:
+          self._remove_interrupted_copy_partial(copy_input, outputfile, t0)
+        restored = self._restore_aside(aside, outputfile)
+        if not interrupted:
+          self._remove_copy_fallback_sidecar()
+    if not copy_output:
+      self.log.warning("Video copy fallback produced no output; keeping the larger re-encode [output-larger-than-input].")
+      return restored, inputfile, ripped_subs
+
+    # The re-encode was verified before this fallback ran; the copy must pass the
+    # same check before it may replace it. A bad copy is quarantined, never kept.
+    problem = self._verify_output(info, copy_output)
+    if problem:
+      failed = self._quarantine_failed_output(copy_output)
+      self.log.warning("Video copy fallback output failed verification (%s), moved it to %s; keeping the larger re-encode [output-larger-than-input]." % (problem, failed))
+      return self._restore_aside(aside, outputfile), inputfile, ripped_subs
+
+    try:
+      copy_size = os.path.getsize(copy_output)
+    except OSError:
+      copy_size = out_size + 1
+    if copy_size > out_size and self.removeFile(copy_output):
+      self.log.warning("Video copy %d bytes and re-encode %d bytes are both larger than input %d bytes; keeping the smaller re-encode [output-larger-than-input]." % (copy_size, out_size, in_size))
+      return self._restore_aside(aside, outputfile), inputfile, ripped_subs
+    if copy_size > out_size:
+      self.log.warning("Unable to remove the larger video copy %s (%d bytes, re-encode %d bytes, input %d bytes); keeping it [output-larger-than-input]." % (copy_output, copy_size, out_size, in_size))
+    elif copy_size > in_size:
+      self.log.warning("Video copy %d bytes and re-encode %d bytes are both larger than input %d bytes; keeping the smaller video copy [output-larger-than-input]." % (copy_size, out_size, in_size))
+    if not self.removeFile(aside):
+      self.log.warning("Unable to remove the larger re-encode %s [output-larger-than-input]." % aside)
+    # The copy run reads the renamed input (x.mp4.original for an in-place
+    # mp4) and so names its output differently; give it the re-encode's name.
+    if os.path.abspath(copy_output) != os.path.abspath(outputfile) and not os.path.exists(outputfile):
+      try:
+        os.rename(copy_output, outputfile)
+        copy_output = outputfile
+        copy_options["filename"] = os.path.basename(outputfile)
+      except OSError:
+        self.log.warning("Unable to rename video copy %s to %s; keeping its name [output-larger-than-input]." % (copy_output, outputfile))
+    options.clear()
+    options.update(copy_options)
+    preopts[:] = copy_preopts
+    postopts[:] = copy_postopts
+    return copy_output, inputfile, ripped_subs
+
+  def _copy_fallback_blocker(self, info, video, output_format):
+    """Why the video must stay re-encoded, or None when a stream copy honours the configuration."""
+    required = [r for r in (video.get("debug") or "").split(".") if r and r not in self._OPTIONAL_REENCODE_REASONS]
+    if required:
+      return "the re-encode is required (%s)" % ", ".join(required)
+    source = info.video.codec
+    if source not in self._video_codec_pool(self.isHDRInput(info.video)):
+      return "source codec %s is not in video-codec" % source
+    container = (getattr(info.format, "format", None) or "").split(",")
+    if output_format == "mp4" and (source not in self._MP4_COPYABLE_VIDEO_CODECS or "avi" in container):
+      return "source codec %s from %s cannot be stream-copied into mp4" % (source, ",".join(container))
+    depths = self.converter.ffmpeg.pix_fmts
+    if video.get("pix_fmt") and depths.get(video["pix_fmt"]) != depths.get(info.video.pix_fmt):
+      return "the re-encode changes bit depth"
+    return None
+
+  def _copy_fallback_options(self, info, options, postopts, inputfile):
+    """(options, preopts, postopts) re-running ``options`` with the video copied, as the copy path builds them."""
+    copy_video = {"codec": "copy", "map": options["video"]["map"]}
+    bsf = self._video_bsf(info.video, info.video.codec)  # source family; HDR SEI is kept on a copy
+    if bsf:
+      copy_video["bsf"] = bsf
+    if options["video"].get("title"):
+      copy_video["title"] = options["video"]["title"]
+    copy_options = copy.deepcopy(options)
+    copy_options["source"][0] = inputfile
+    copy_options["video"] = copy_video
+    # Encode preopts carry hwaccel decode and device setup; a copy needs only the operator's.
+    copy_preopts = list(self.settings.preopts)
+    copy_postopts = list(postopts)
+    tag = self._copy_video_tag(info.video)
+    if tag and not any(str(o).startswith("-tag:v") or o == "-vtag" for o in copy_postopts):
+      copy_postopts.extend(["-tag:v", tag])
+    return copy_options, copy_preopts, copy_postopts
+
+  def _remove_copy_fallback_sidecar(self):
+    """Delete the stderr sidecar a failed copy run wrote; the job keeps the re-encode and succeeds."""
+    sidecar = getattr(self, "_last_stderr_sidecar", None)
+    self._last_stderr_sidecar = None
+    if not sidecar:
+      return
+    try:
+      os.remove(sidecar)
+    except OSError:
+      self.log.debug("Unable to remove the video copy stderr sidecar [output-larger-than-input].")
+
+  def _remove_interrupted_copy_partial(self, copy_input, outputfile, t0):
+    """Remove the partial an interrupted copy run (no temp-extension) left behind.
+
+    Only files written since the copy run started (``t0``) are touched, so a
+    file another worker wrote earlier survives. The copy run's own target can
+    differ from outputfile (in-place mp4 reads x.mp4.original and writes
+    x.mp4.mp4); then only that target is checked, because a file at
+    outputfile was written by someone else.
+    """
+    candidates = [outputfile]
+    try:
+      input_dir, filename, input_extension = self.parseFile(copy_input)
+      target, _ = self.getOutputFile(input_dir, filename, input_extension)
+      if target and os.path.abspath(target) != os.path.abspath(outputfile):
+        candidates = [target]
+    except Exception:
+      self.log.debug("Unable to determine the video copy output path [output-larger-than-input].")
+    for path in candidates:
+      try:
+        # 1 s slack: coarse filesystem clocks can stamp a just-written file
+        # slightly before time.time().
+        if os.stat(path).st_mtime < t0 - 1:
+          continue
+      except OSError:
+        continue
+      if not self.removeFile(path, retries=0, delay=0):
+        self.log.warning("Unable to remove the partial video copy %s [output-larger-than-input]." % path)
+
+  def _move_aside(self, path):
+    """Rename path to a free <path>.larger[.N]; return the new path, or None on failure."""
+    aside = path + ".larger"
+    n = 2
+    while os.path.exists(aside):
+      aside = "%s.larger.%d" % (path, n)
+      n += 1
+    try:
+      os.rename(path, aside)
+    except OSError:
+      self.log.warning("Unable to move aside the larger output %s; keeping it [output-larger-than-input]." % path)
+      return None
+    return aside
+
+  def _restore_aside(self, aside, outputfile):
+    """Move the larger re-encode back to outputfile, or a free numbered name, never overwriting; return where it now lives."""
+    target = outputfile
+    if os.path.exists(target):
+      output_dir, name = os.path.split(outputfile)
+      filename, ext = os.path.splitext(name)
+      i = 2
+      while target and os.path.exists(target):
+        target, _ = self.getOutputFile(output_dir, filename, ext, temp_extension=ext[1:], ignore_output_dir=True, number=i)
+        i += 1
+      if not target:
+        self.log.warning("Cannot restore the larger re-encode: %s exists; it stays at %s [output-larger-than-input]." % (outputfile, aside))
+        return aside
+      self.log.warning("Cannot restore the larger re-encode to %s: it exists; restoring it as %s instead [output-larger-than-input]." % (outputfile, target))
+    try:
+      os.rename(aside, target)
+    except OSError:
+      self.log.warning("Unable to restore the larger re-encode %s to %s [output-larger-than-input]." % (aside, target))
+      return aside
+    return target
 
   def _restore_source_name(self, inputfile, source_path):
     """Rename the source back to *source_path* after a failed conversion.
@@ -2335,14 +2576,49 @@ class MediaProcessor:
     if options["video"].get("fps"):
       postopts = self._drop_non_cfr_fps_mode(postopts)
 
-    if info.video.codec in ["x265", "h265", "hevc"] and vcodec == "copy":
-      # Profile 5 has no HEVC-compatible base layer, so it must be signalled
-      # as dvh1; players (Apple in particular) only engage Dolby Vision then.
-      tag = "dvh1" if self.isDolbyVisionProfile5(info.video) else "hvc1"
+    tag = self._copy_video_tag(info.video) if vcodec == "copy" else None
+    if tag:
       postopts.extend(["-tag:v", tag])
       self.log.info("Tagging copied video stream as %s" % tag)
 
     return preopts, postopts
+
+  def _copy_video_tag(self, video):
+    """Container tag for a copied HEVC stream, or None for other codecs."""
+    if video.codec not in ["x265", "h265", "hevc"]:
+      return None
+    # Profile 5 has no HEVC-compatible base layer, so it must be signalled
+    # as dvh1; players (Apple in particular) only engage Dolby Vision then.
+    return "dvh1" if self.isDolbyVisionProfile5(video) else "hvc1"
+
+  def _video_codec_pool(self, hdr_input):
+    """Allowed video codecs (video-codec, or hdr.codec for HDR input), with ffprobe names added."""
+    vcodecs = self.settings.hdr.get("codec", []) if hdr_input and len(self.settings.hdr.get("codec", [])) > 0 else self.settings.vcodec
+    return self.ffprobeSafeCodecs(vcodecs)
+
+  def _video_bsf(self, video, output_codec, strip_hdr_sei=False):
+    """filter_units bsf for the bitstream that lands in the output, or None.
+
+    NAL types are codec-specific: SEI is type 6 in H.264 but 39/40
+    (prefix/suffix SEI) in HEVC, where type 6 is RADL_R, so pass the codec
+    that is actually written (the source codec when copying).
+    """
+    bsf_family = self._codec_family(output_codec)
+    sei_types = {"h264": ["6"], "h265": ["39", "40"]}.get(bsf_family or "")
+    remove_types: list[str] = []
+    if self.settings.removebvs and self.hasBitstreamVideoSubs(video.framedata):
+      if sei_types:
+        self.log.debug("Found side data type with closed captioning [remove-bitstream-subs]")
+        remove_types.extend(sei_types)
+      else:
+        self.log.debug("Closed captioning side data found but output codec %s has no SEI NAL filter; leaving bitstream untouched [remove-bitstream-subs]." % bsf_family)
+    if strip_hdr_sei and bsf_family == "h265":
+      # Drop HDR SEI (mastering display / content light) from an HEVC stream
+      # that is no longer HDR. Prefix SEI only, as before.
+      remove_types.append("39")
+    if remove_types:
+      return "filter_units=remove_types=%s" % "|".join(dict.fromkeys(remove_types))
+    return None
 
   def _select_video_codec(self, inputfile, info, codecs, pix_fmts, tagdata, analyzer_recommendations=None):
     """
@@ -2360,8 +2636,7 @@ class MediaProcessor:
     if hdrInput:
       vdebug = vdebug + ".hdrInput"
 
-    vcodecs = self.settings.hdr.get("codec", []) if hdrInput and len(self.settings.hdr.get("codec", [])) > 0 else self.settings.vcodec
-    vcodecs = self.ffprobeSafeCodecs(vcodecs)
+    vcodecs = self._video_codec_pool(hdrInput)
     analyzer_recommendations = analyzer_recommendations or AnalyzerRecommendations()
     vcodecs = self._reorder_codec_pool(vcodecs, analyzer_recommendations.codec_order)
     self.log.debug("Pool of video codecs is %s." % (vcodecs))
@@ -2389,8 +2664,12 @@ class MediaProcessor:
 
     vbitrate_estimate = self.estimateVideoBitrate(info)
     vbitrate_ratio = self.settings.vbitrateratio.get(info.video.codec, self.settings.vbitrateratio.get("*", 1.0))
-    vbitrate = vbitrate_estimate * vbitrate_ratio
-    if analyzer_recommendations.bitrate_ratio_multiplier:
+    # Unknown source bitrate (estimate None, or negative when assumed audio
+    # exceeds the container bitrate): no ratio/max-bitrate/clamp maths is
+    # possible, so leave the target unset and let ICQ/CRF drive the encode.
+    vbitrate_unknown = not vbitrate_estimate or vbitrate_estimate <= 0
+    vbitrate = None if vbitrate_unknown else vbitrate_estimate * vbitrate_ratio
+    if vbitrate and analyzer_recommendations.bitrate_ratio_multiplier:
       vbitrate = vbitrate * analyzer_recommendations.bitrate_ratio_multiplier
     analyzer_max_bitrate = analyzer_recommendations.max_bitrate_ceiling
     effective_vmaxbitrate = self.settings.vmaxbitrate
@@ -2402,8 +2681,11 @@ class MediaProcessor:
         hdr_unlimited = hdr_max_bitrate == 0
     if analyzer_max_bitrate and not hdr_unlimited:
       effective_vmaxbitrate = min(effective_vmaxbitrate, analyzer_max_bitrate) if effective_vmaxbitrate else analyzer_max_bitrate
-    self.log.debug("Using video bitrate ratio of %f, which results in %f changing to %f." % (vbitrate_ratio, vbitrate_estimate, vbitrate))
-    if effective_vmaxbitrate and vbitrate > effective_vmaxbitrate:
+    if vbitrate_unknown:
+      self.log.debug("Source video bitrate is unknown; skipping bitrate ratio and max-bitrate checks [video-bitrate-unknown].")
+    else:
+      self.log.debug("Using video bitrate ratio of %f, which results in %f changing to %f." % (vbitrate_ratio, vbitrate_estimate, vbitrate))
+    if effective_vmaxbitrate and vbitrate and vbitrate > effective_vmaxbitrate:
       self.log.debug("Overriding video bitrate. Codec cannot be copied because video bitrate is too high [video-max-bitrate].")
       vdebug = vdebug + ".max-bitrate"
       vcodec = vcodecs[0]
@@ -2446,13 +2728,19 @@ class MediaProcessor:
         vcodec = vcodecs[0]
     else:
       if len(self.settings.vprofile) > 0:
-        if info.video.profile in self.settings.vprofile:
+        target_family = self._codec_family(info.video.codec if vcodec == "copy" else vcodec)
+        if info.video.profile in self.settings.vprofile and self._codec_family(info.video.codec) == target_family:
           vprofile = info.video.profile
+        elif info.video.profile in self.settings.vprofile:
+          # Same profile name, different codec family (H.264 "Main" is not HEVC "main"): the stream is being
+          # re-encoded anyway, so take the first listed profile the target encoder accepts (none fits: no
+          # profile) and let the bit-depth step pick the depth match.
+          vprofile = self._first_listed_profile(target_family)
         else:
-          vprofile = self.settings.vprofile[0] if len(self.settings.vprofile) > 0 else None
           self.log.debug("Video profile is not supported. Video stream can no longer be copied [video-profile].")
           vdebug = vdebug + ".profile"
           vcodec = vcodecs[0]
+          vprofile = self._first_listed_profile(self._codec_family(vcodec))
 
     vfieldorder = info.video.field_order
 
@@ -2461,12 +2749,16 @@ class MediaProcessor:
     src_height = info.video.video_height
     is_uhd = src_height is not None and src_height > 1080
     is_hd = src_height is not None and 720 <= src_height <= 1080
-    profile_match = self._match_bitrate_profile(vbitrate_estimate, hd=is_hd, uhd=is_uhd)
+    profile_match = None if vbitrate_unknown else self._match_bitrate_profile(vbitrate_estimate, hd=is_hd, uhd=is_uhd)
+    if profile_match and profile_match["target"] >= vbitrate_estimate:
+      self.log.debug("Bitrate profile target %dkbps is not below source %dkbps; not forcing a re-encode [crf-profiles]." % (profile_match["target"], vbitrate_estimate))
+      profile_match = None
     if profile_match:
       vbitrate = profile_match["target"]
       vmaxrate = "%dk" % profile_match["maxrate"]
       vbufsize = "%dk" % (profile_match["maxrate"] * 2)
       vcodec = vcodecs[0]
+      vdebug = vdebug + ".crf-profile"
       self.log.debug("Bitrate profile matched at source %dkbps: target=%dkbps maxrate=%s bufsize=%s [crf-profiles]." % (vbitrate_estimate, vbitrate, vmaxrate, vbufsize))
     elif effective_vmaxbitrate > 0:
       # When the cap forced the re-encode, max-bitrate is the average target;
@@ -2634,22 +2926,7 @@ class MediaProcessor:
     # 39/40 (prefix/suffix SEI) in HEVC, where type 6 is RADL_R — removing
     # it would delete real pictures. Pick SEI types for the codec that
     # actually lands in the output bitstream (source codec when copying).
-    vbsf = None
-    bsf_family = self._codec_family(info.video.codec if vcodec == "copy" else vcodec)
-    sei_types = {"h264": ["6"], "h265": ["39", "40"]}.get(bsf_family or "")
-    remove_types: list[str] = []
-    if self.settings.removebvs and self.hasBitstreamVideoSubs(info.video.framedata):
-      if sei_types:
-        self.log.debug("Found side data type with closed captioning [remove-bitstream-subs]")
-        remove_types.extend(sei_types)
-      else:
-        self.log.debug("Closed captioning side data found but output codec %s has no SEI NAL filter; leaving bitstream untouched [remove-bitstream-subs]." % bsf_family)
-    if hdrInput and not hdrOutput and bsf_family == "h265":
-      # Drop HDR SEI (mastering display / content light) from an HEVC stream
-      # that is no longer HDR. Prefix SEI only, as before.
-      remove_types.append("39")
-    if remove_types:
-      vbsf = "filter_units=remove_types=%s" % "|".join(dict.fromkeys(remove_types))
+    vbsf = self._video_bsf(info.video, info.video.codec if vcodec == "copy" else vcodec, strip_hdr_sei=hdrInput and not hdrOutput)
 
     if vcodec != "copy" and self.isDolbyVision(info.video.framedata):
       self.log.warning(
@@ -2689,18 +2966,18 @@ class MediaProcessor:
     # rather than fail.
     vb_frames, vref_frames = self._cap_frames_to_profile(vcodec, vprofile, vb_frames, vref_frames)
 
-    # Same-family re-encode (e.g. hevc -> hevc_qsv) at a bitrate far above
-    # the source's effective bitrate just bloats the output without quality
-    # gain. Hardware encoders need some headroom over the source so we cap
-    # at a 1.2× soft ceiling rather than the source kbps directly.
+    # Same-family re-encode (e.g. hevc -> hevc_qsv) at a bitrate above the
+    # source's effective bitrate just bloats the output without quality gain
+    # (hevc -> hevc_qsv outputs came out 9-14% larger), so cap the target at
+    # the source estimate.
     if vcodec != "copy" and isinstance(vbitrate, (int, float)) and vbitrate_estimate:
       source_family = self._codec_family(info.video.codec)
       output_family = self._codec_family(vcodec)
       if source_family and source_family == output_family:
-        soft_cap = vbitrate_estimate * 1.2
+        soft_cap = vbitrate_estimate
         if vbitrate > soft_cap:
           self.log.warning(
-            "Output video bitrate %.0fk exceeds 1.2x source bitrate %.0fk for same-family %s -> %s re-encode; clamping to %.0fk [video-same-family-bitrate-clamp]."
+            "Output video bitrate %.0fk exceeds source bitrate %.0fk for same-family %s -> %s re-encode; clamping to %.0fk [video-same-family-bitrate-clamp]."
             % (vbitrate, vbitrate_estimate, info.video.codec, vcodec, soft_cap)
           )
           vbitrate = soft_cap
@@ -2731,7 +3008,28 @@ class MediaProcessor:
       vmaxrate = None
       vbufsize = None
       vdebug = vdebug + ".icq"
-    elif vcodec != "copy" and vbitrate and self.settings.vminbitrate and vbitrate < self.settings.vminbitrate:
+    elif vcodec != "copy" and vbitrate_unknown and not vbitrate:
+      vdebug = vdebug + ".bitrate-unknown"
+      encoder = next((c for c in video_codec_list if c.codec_name == vcodec), None)
+      if encoder is not None and encoder.requires_bitrate_target():
+        # No usable constant-quality mode: a conservative resolution-based
+        # target beats FFmpeg's silent 200 kb/s default.
+        vbitrate = self._unknown_bitrate_fallback_kbps(info.video, vwidth, vheight, effective_vmaxbitrate)
+        self.log.info("Source bitrate is unknown and %s has no constant-quality mode; using fallback bitrate %dk [video-bitrate-fallback]." % (vcodec, vbitrate))
+      elif encoder is not None and encoder.keeps_vbv_without_target():
+        # libx264/libx265 CRF and Apple Silicon VideoToolbox -q:v honour VBV,
+        # so the max-bitrate / HDR / analyzer ceiling stays as a capped CRF.
+        if vmaxrate:
+          self.log.info("Source bitrate is unknown; encoding at constant quality capped by maxrate %s bufsize %s [icq-rate-control]." % (vmaxrate, vbufsize))
+      elif vmaxrate or vbufsize:
+        # No capped CRF: libvpx-vp9 / libaom-av1 reject VBV without a bitrate
+        # (EINVAL), QSV ICQ picks QVBR with a zero target and fails init, and
+        # NVENC/VAAPI CQP and SVT-AV1 ignore it.
+        self.log.info("Source bitrate is unknown; encoding at constant quality and dropping VBV maxrate/bufsize [icq-rate-control].")
+        vmaxrate = None
+        vbufsize = None
+    # Separate step so the [video-bitrate-fallback] target gets the floor too.
+    if vcodec != "copy" and vbitrate and self.settings.vminbitrate and vbitrate < self.settings.vminbitrate:
       self.log.info("Video bitrate target %dk is below the configured floor; raising to %dk [video-min-bitrate]." % (vbitrate, self.settings.vminbitrate))
       vbitrate = self.settings.vminbitrate
       vdebug = vdebug + ".min-bitrate"
@@ -4094,6 +4392,18 @@ class MediaProcessor:
   # and MaxCPB in kbit, which are equal for Main tier.
   _HEVC_MAIN_TIER_MAX_KBPS = {4.0: 12000, 4.1: 20000, 5.0: 25000, 5.1: 40000, 5.2: 60000, 6.0: 60000, 6.1: 120000, 6.2: 240000}
 
+  @staticmethod
+  def _unknown_bitrate_fallback_kbps(video, vwidth, vheight, max_kbps):
+    """Fallback target (kbps) by output height for encoders with no
+    constant-quality mode when the source bitrate is unknown, never above
+    a positive *max_kbps* ceiling."""
+    src_w, src_h = video.video_width, video.video_height
+    height = vheight or (int(src_h * vwidth / src_w) if vwidth and src_w and src_h else src_h) or 0
+    kbps = next(rate for floor, rate in UNKNOWN_BITRATE_FALLBACK_KBPS if height >= floor)
+    if max_kbps and max_kbps > 0:
+      kbps = min(kbps, int(max_kbps))
+    return kbps
+
   def _clamp_vbv_to_level(self, vcodec, vlevel, vbitrate, vmaxrate, vbufsize):
     """Keep an HEVC encode's VBV (maxrate, bufsize) within the configured
     level's Main-tier limits, so the VBV peak and its 2x buffer never ask the
@@ -4210,6 +4520,56 @@ class MediaProcessor:
     "main": "main10",
     "high": "high10",
   }
+
+  # Profile names (encoder spelling: lowercase, no spaces) by bit-depth class and codec family, used to pick the
+  # first listed profile that matches the output depth. "main" is shared by H.264 and HEVC, so it fits either
+  # family. Only the H.264 and HEVC families are filtered; other families keep the profile as written.
+  _TEN_BIT_PROFILES = frozenset(["main10", "high10"])
+  _EIGHT_BIT_PROFILES = frozenset(["main", "high", "baseline"])
+  _H264_ONLY_PROFILES = frozenset(["baseline", "constrainedbaseline", "constrainedhigh", "high", "high10", "extended"])
+  _HEVC_ONLY_PROFILES = frozenset(["main10", "main12", "main444", "main4:4:4", "rext", "mainstillpicture"])
+  # HEVC range-extension families (main422-10, main444-16-intra, ...): libx264 rejects them all.
+  _HEVC_ONLY_PROFILE_PREFIXES = ("main422", "main444")
+  # ffprobe-only names no encoder accepts as -profile:v (libx264 aborts with "Error setting profile").
+  _UNENCODABLE_PROFILES = frozenset(["constrainedbaseline", "constrainedhigh"])
+  # The 10-bit profile each family derives when no listed profile matches a 10-bit output.
+  _TEN_BIT_PROFILE_BY_FAMILY = {"h264": "high10", "h265": "main10"}
+  _PROFILE_FAMILIES = ("h264", "h265")
+
+  @staticmethod
+  def _profile_token(profile):
+    """Return *profile* in encoder spelling: lowercase without spaces ("Main 10" -> "main10")."""
+    return "".join(profile.split()).lower()
+
+  @classmethod
+  def _profile_fits_family(cls, candidate, family):
+    """True when profile token *candidate* is valid for codec *family* (shared names such as main fit both)."""
+    if candidate in cls._UNENCODABLE_PROFILES:
+      return False
+    if family == "h264":
+      return candidate not in cls._HEVC_ONLY_PROFILES and not candidate.startswith(cls._HEVC_ONLY_PROFILE_PREFIXES)
+    if family == "h265":
+      return candidate not in cls._H264_ONLY_PROFILES
+    return True
+
+  def _first_listed_profile(self, family, wanted=None):
+    """First ``video.profile`` entry valid for codec *family* (and in *wanted*, when given), or None.
+
+    H.264 / HEVC entries come back in encoder spelling; other families get the first entry as written.
+    """
+    for candidate in self.settings.vprofile or []:
+      if not isinstance(candidate, str) or not candidate.strip():
+        continue
+      if family not in self._PROFILE_FAMILIES:
+        return candidate
+      token = self._profile_token(candidate)
+      if self._profile_fits_family(token, family) and (wanted is None or token in wanted):
+        return token
+    return None
+
+  def _listed_profile_tokens(self):
+    """Return every ``video.profile`` entry in encoder spelling."""
+    return {self._profile_token(p) for p in self.settings.vprofile or [] if isinstance(p, str)}
 
   # Encoders with a native max sample rate. Sources above the cap need to be
   # downsampled on the encode pass or the encoder refuses to initialise.
@@ -4342,30 +4702,53 @@ class MediaProcessor:
     upgrade direction is safe because the pix_fmt bit-depth safety check that
     runs before this only leaves a 10-bit output when the encoder supports it.
 
-    Prefers the operator's own spelling of the target profile when it appears
-    in ``video.profile`` (so ``profile: [main10, main]`` reuses their exact
-    ``main`` / ``main10``), falling back to the derived sibling otherwise.
-    Returns *vprofile* unchanged for copy streams, absent profiles, unknown
-    profile names, an unknown (0) output depth, or an already-matching depth.
+    This runs on the final codec, so it also repairs a profile that does not
+    fit the codec family (a copy-time H.264 ``high`` left on a later HEVC
+    re-encode): it takes the first listed profile that fits the family and
+    output depth, or drops the profile when none fits. The downgrade prefers
+    the direct sibling (``high10`` -> ``high``) when listed, then the first
+    listed encodable 8-bit profile; the upgrade takes the first listed 10-bit
+    profile. Otherwise the family's sibling is derived (``high10`` for H.264,
+    ``main10`` for HEVC). H.264 / HEVC profiles come back in encoder spelling
+    (``Main 10`` -> ``main10``). Returns *vprofile* unchanged for copy streams,
+    absent profiles, and codec families other than H.264 / HEVC.
     """
-    if vcodec == "copy" or not vprofile or not output_bit_depth:
+    if vcodec == "copy" or not vprofile:
       return vprofile
-    key = vprofile.strip().lower()
+    family = self._codec_family(vcodec)
+    if family not in self._PROFILE_FAMILIES:
+      return vprofile
+    key = self._profile_token(vprofile)
+    if not self._profile_fits_family(key, family):
+      wanted = None
+      if output_bit_depth:
+        wanted = self._EIGHT_BIT_PROFILES if output_bit_depth <= 8 else self._TEN_BIT_PROFILES
+      replacement = (wanted and self._first_listed_profile(family, wanted)) or self._first_listed_profile(family)
+      self.log.info("Profile %s is not valid for the %s encoder; using %s instead [adaptive-profile-family]." % (vprofile, family, replacement or "no profile"))
+      if not replacement:
+        return None
+      key = replacement
+    if not output_bit_depth:
+      return key
     if output_bit_depth <= 8:
       target = self._TEN_BIT_PROFILE_TO_EIGHT_BIT.get(key)
       reason = "requires 10-bit input but output is %d-bit" % output_bit_depth
       verb = "downgrading"
+      # The direct sibling keeps the operator's quality tier (high10 -> high, not main).
+      listed = target if target and target in self._listed_profile_tokens() else None
+      listed = listed or self._first_listed_profile(family, self._EIGHT_BIT_PROFILES)
     else:
-      target = self._EIGHT_BIT_PROFILE_TO_TEN_BIT.get(key)
+      target = self._TEN_BIT_PROFILE_BY_FAMILY[family] if key in self._EIGHT_BIT_PROFILE_TO_TEN_BIT else None
       reason = "caps at 8-bit but output is %d-bit" % output_bit_depth
       verb = "upgrading"
+      listed = self._first_listed_profile(family, self._TEN_BIT_PROFILES)
     if not target:
-      return vprofile
+      return key
+    if listed:
+      # A listed profile already matches the output depth: pick it, nothing to repair.
+      self.log.debug("Profile %s %s; using listed profile %s for %d-bit output." % (vprofile, reason, listed, output_bit_depth))
+      return listed
     replacement = target
-    for candidate in self.settings.vprofile or []:
-      if isinstance(candidate, str) and candidate.strip().lower() == target:
-        replacement = candidate
-        break
     self.log.info("Profile %s %s; %s to %s to avoid encoder_init_failed [adaptive-profile-bit-depth]." % (vprofile, reason, verb, replacement))
     return replacement
 
@@ -4653,6 +5036,20 @@ class MediaProcessor:
       blob = getattr(err, "output", "") or ""
       return parse_ffmpeg_failure(blob[-TAIL_BYTES:] if isinstance(blob, str) else blob)
 
+    def _stop_reason(err: FFMpegConvertError) -> str | None:
+      """Why no further tier can help (signal exit or output-side filesystem
+      error), or ``None`` to keep climbing."""
+      rc = getattr(err, "returncode", None)
+      if not isinstance(rc, int):
+        m = re.match(r"Exited with code (-?\d+)", str(getattr(err, "message", "") or ""))
+        rc = int(m.group(1)) if m else None
+      outfile = outputfile
+      cmd = getattr(err, "cmd", None)
+      if outfile is None and isinstance(cmd, (list, tuple)) and cmd:
+        outfile = str(cmd[-1])
+      blob = getattr(err, "output", "") or ""
+      return ladder_stop_reason(rc, blob[-TAIL_BYTES:] if isinstance(blob, str) else blob, outfile=outfile)
+
     hw_err: FFMpegConvertError | None = None
     hw_alt_err: FFMpegConvertError | None = None
     sw_decode_err: FFMpegConvertError | None = None
@@ -4699,21 +5096,26 @@ class MediaProcessor:
         records.append(AttemptRecord(tier="sw_decode_hw_encode", failure_class=_classify(err), duration_ms=_ms(t_rescue)))
         return False
 
-    # Tier 1: hardware
+    # Tier 1: labelled copy / sw / hw from the options it runs
+    first_tier = _first_attempt_tier(preopts, options)
     t0 = time.monotonic()
     try:
       _run(preopts, options)
-      records.append(AttemptRecord(tier="hw", failure_class=None, duration_ms=_ms(t0)))
+      records.append(AttemptRecord(tier=first_tier, failure_class=None, duration_ms=_ms(t0)))
       self._emit_attempt_log(records, "ok")
       return
     except FFMpegConvertError as err:
       hw_err = err
       cls = _classify(err)
-      records.append(AttemptRecord(tier="hw", failure_class=cls, duration_ms=_ms(t0)))
+      records.append(AttemptRecord(tier=first_tier, failure_class=cls, duration_ms=_ms(t0)))
+      if (stop := _stop_reason(err)) is not None:
+        self.log.warning("[attempt-ladder] stop: %s; no further tiers" % stop)
+        self._emit_attempt_log(records, "failed")
+        raise
       if policy == FallbackPolicy.HW_ONLY:
         # Carve-out: a decode-side failure can still be rescued with software
         # decode + hardware encode without violating "no software encode".
-        if _try_decode_side_rescue("hw", cls):
+        if _try_decode_side_rescue(first_tier, cls):
           return
         self.log.warning(
           "Conversion failed with hardware decoder and fallback-policy=hw_only; surfacing original error (cause=%s)." % cls.value,
@@ -4735,7 +5137,7 @@ class MediaProcessor:
         "Conversion failed with hw QSV (cause=%s); retrying with hw_alt (swap encoder %s -> %s, preserve QSV decoder via hwmap bridge). Original error: %s"
         % (cls_hw.value if cls_hw else "unknown", original_codec_alt, retry_options_alt["video"]["codec"], str(hw_err)[:300]),
       )
-      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("hw", "hw_alt", cls_hw.value if cls_hw else "other")
+      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)(first_tier, "hw_alt", cls_hw.value if cls_hw else "other")
       if outputfile is not None and os.path.isfile(outputfile):
         self.removeFile(outputfile)
       t_alt = time.monotonic()
@@ -4748,6 +5150,10 @@ class MediaProcessor:
         hw_alt_err = err
         cls = _classify(err)
         records.append(AttemptRecord(tier="hw_alt", failure_class=cls, duration_ms=_ms(t_alt)))
+        if (stop := _stop_reason(err)) is not None:
+          self.log.warning("[attempt-ladder] stop: %s; no further tiers" % stop)
+          self._emit_attempt_log(records, "failed")
+          raise
         if policy == FallbackPolicy.HW_ALT:
           # The VAAPI encoder swap re-used the broken QSV decoder; a decode-side
           # failure here means software decode (keeping the QSV encoder) is the
@@ -4763,7 +5169,7 @@ class MediaProcessor:
       if policy == FallbackPolicy.HW_ALT:
         # No VAAPI tier possible (source wasn't QSV-encoded). Try a decode-side
         # rescue off the original hw failure before surfacing.
-        if cls_hw is not None and _try_decode_side_rescue("hw", cls_hw):
+        if cls_hw is not None and _try_decode_side_rescue(first_tier, cls_hw):
           return
         self._emit_attempt_log(records, "failed")
         assert hw_err is not None
@@ -4781,13 +5187,13 @@ class MediaProcessor:
         assert (hw_alt_err or hw_err) is not None
         raise hw_alt_err or hw_err
       sw_decode_err = hw_alt_err or hw_err
-      from_tier = "hw" if hw_alt_err is None else "hw_alt"
+      from_tier = first_tier if hw_alt_err is None else "hw_alt"
     else:
       cls_prev = records[-1].failure_class
       self.log.warning(
         "Conversion failed (cause=%s); retrying with software decode (stripping `-vcodec` from preopts). Last error: %s" % (cls_prev.value if cls_prev else "unknown", str(hw_alt_err or hw_err)[:300]),
       )
-      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("hw" if hw_alt_err is None else "hw_alt", "sw_decode", cls_prev.value if cls_prev else "other")
+      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)(first_tier if hw_alt_err is None else "hw_alt", "sw_decode", cls_prev.value if cls_prev else "other")
       if outputfile is not None and os.path.isfile(outputfile):
         self.removeFile(outputfile)
       t1 = time.monotonic()
@@ -4800,6 +5206,10 @@ class MediaProcessor:
         sw_decode_err = err
         cls = _classify(err)
         records.append(AttemptRecord(tier="sw_decode", failure_class=cls, duration_ms=_ms(t1)))
+        if (stop := _stop_reason(err)) is not None:
+          self.log.warning("[attempt-ladder] stop: %s; no further tiers" % stop)
+          self._emit_attempt_log(records, "failed")
+          raise
         if policy == FallbackPolicy.SW_DECODE_ONLY:
           self.log.warning(
             "Conversion failed with sw decode and fallback-policy=sw_decode_only; surfacing error (cause=%s)." % cls.value,
@@ -4890,6 +5300,10 @@ class MediaProcessor:
         for r in records
       ],
     }
+    if getattr(self, "_copy_fallback_active", False):
+      # The output-larger-than-input copy run: a failure here keeps the
+      # re-encode, so the worker must not attribute it to the job.
+      payload["copy_fallback"] = True
     self.log.info(json.dumps(payload, sort_keys=True))
 
   def _write_ffmpeg_stderr_sidecar(self, e):
@@ -4948,6 +5362,7 @@ class MediaProcessor:
         f.write(e.output)
         if not e.output.endswith("\n"):
           f.write("\n")
+      self._last_stderr_sidecar = sidecar
       return sidecar
     except Exception:
       self.log.debug("Could not write ffmpeg stderr sidecar.", exc_info=True)

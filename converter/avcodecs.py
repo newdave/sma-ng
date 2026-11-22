@@ -3,6 +3,7 @@
 
 import glob
 import os
+import platform
 
 
 class BaseCodec:
@@ -451,6 +452,26 @@ class VideoCodec(BaseCodec):
     "color_transfer": str,
     "color_space": str,
   }
+
+  # True for encoders with no constant-quality default (V4L2 M2M, OMX, mpeg4,
+  # theora, h263, flv, mpeg1/2): without a bitrate target they silently fall
+  # to FFmpeg's 200 kb/s default, so the planner must always give them one.
+  needs_bitrate_target = False
+  # True for encoders whose constant-quality mode honours maxrate/bufsize with
+  # no bitrate target (capped CRF: libx264, libx265). Every other encoder
+  # either rejects VBV without a target (libvpx-vp9, libaom-av1: EINVAL; QSV
+  # ICQ picks QVBR and fails init) or ignores it, so the planner drops it.
+  supports_capped_crf = False
+
+  @classmethod
+  def requires_bitrate_target(cls):
+    """True when this encoder needs a bitrate target to avoid FFmpeg's default rate."""
+    return cls.needs_bitrate_target
+
+  @classmethod
+  def keeps_vbv_without_target(cls):
+    """True when maxrate/bufsize may ride along with no bitrate target (capped CRF)."""
+    return cls.supports_capped_crf and not cls.requires_bitrate_target()
 
   def _aspect_corrections(self, sw, sh, w, h, mode):
     # If we don't have source info, we don't try to calculate
@@ -1047,6 +1068,7 @@ class TheoraCodec(VideoCodec):
   codec_name = "theora"
   ffmpeg_codec_name = "libtheora"
   ffprobe_codec_name = "theora"
+  needs_bitrate_target = True
   encoder_options = VideoCodec.encoder_options.copy()
   encoder_options.update(
     {
@@ -1069,6 +1091,7 @@ class H264Codec(VideoCodec):
   codec_name = "h264"
   ffmpeg_codec_name = "libx264"
   ffprobe_codec_name = "h264"
+  supports_capped_crf = True
   codec_params = "x264-params"
   levels = [1, 1.1, 1.2, 1.3, 2, 2.1, 2.2, 3, 3.1, 3.2, 4, 4.1, 4.2, 5, 5.1, 5.2, 6, 6.1, 6.2]
   encoder_options = VideoCodec.encoder_options.copy()
@@ -1319,6 +1342,9 @@ class HWAccelVideoCodec:
   hw_profiles = None
   hw_extbrc = False
   hw_forbidden_flags: frozenset[str] = frozenset()
+  # Hardware quality modes (QSV ICQ, NVENC/VAAPI CQP) take no VBV without a
+  # bitrate target; overrides the software H264Codec/H265Codec capped CRF.
+  supports_capped_crf = False
   # Flags this codec class emits via dedicated code paths (hw_extbrc,
   # the look-ahead block, b_frames, ref_frames, etc.). They MUST be
   # stripped from safe['params'] before `_emit_filtered_params` emits
@@ -1547,7 +1573,40 @@ class NVEncH264CodecCuda(NVEncH264Codec):
   scale_filter = "scale_cuda"
 
 
-class VideotoolboxEncH264(H264Codec):
+# VideoToolbox constant-quality level (-q:v, 1-100, higher is better) used
+# when no bitrate target is set; without it FFmpeg's 200 kb/s default applies.
+VIDEOTOOLBOX_QUALITY_DEFAULT = 65
+
+
+def videotoolbox_qscale_available():
+  """VideoToolbox -q:v exists only in arm64 FFmpeg builds (vtenc_qscale_enabled()
+  is TARGET_CPU_ARM64); x86_64 fails init with "qscale not available for encoder"."""
+  return platform.machine() == "arm64"
+
+
+class VideotoolboxVideoCodec:
+  """VideoToolbox mixin: constant quality (-q:v) when no bitrate target is set
+  on Apple Silicon; on x86_64 the planner must supply a bitrate target."""
+
+  vt_quality_default = VIDEOTOOLBOX_QUALITY_DEFAULT
+
+  @classmethod
+  def requires_bitrate_target(cls):
+    return not videotoolbox_qscale_available()
+
+  @classmethod
+  def keeps_vbv_without_target(cls):
+    # -q:v honours the max-bitrate data-rate limit.
+    return videotoolbox_qscale_available()
+
+  def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
+    optlist = super()._codec_specific_produce_ffmpeg_list(safe, stream)
+    if "bitrate" not in safe and videotoolbox_qscale_available():
+      optlist.extend(["-q:v", str(self.vt_quality_default)])
+    return optlist
+
+
+class VideotoolboxEncH264(VideotoolboxVideoCodec, H264Codec):
   """
   Videotoolbox H.264/AVC video codec.
   """
@@ -1564,6 +1623,7 @@ class OMXH264Codec(H264Codec):
 
   codec_name = "h264_omx"
   ffmpeg_codec_name = "h264_omx"
+  needs_bitrate_target = True
 
 
 class VAAPIVideoCodec(HWAccelVideoCodec):
@@ -1730,6 +1790,7 @@ class H264V4l2m2mCodec(H264Codec):
 
   codec_name = "h264_v4l2m2m"
   ffmpeg_codec_name = "h264_v4l2m2m"
+  needs_bitrate_target = True
 
   def _codec_specific_parse_options(self, safe, stream=0):
     safe["pix_fmt"] = "yuv420p"
@@ -1751,6 +1812,7 @@ class H265Codec(VideoCodec):
   codec_name = "h265"
   ffmpeg_codec_name = "libx265"
   ffprobe_codec_name = "hevc"
+  supports_capped_crf = True
   codec_params = "x265-params"
   levels = [1, 2, 2.1, 3, 3.1, 4, 4.1, 5, 5.1, 5.2, 6, 6.1, 6.2]  # 8.5 excluded
   encoder_options = VideoCodec.encoder_options.copy()
@@ -2052,6 +2114,7 @@ class H265V4l2m2mCodec(H265Codec):
 
   codec_name = "hevc_v4l2m2m"
   ffmpeg_codec_name = "hevc_v4l2m2m"
+  needs_bitrate_target = True
 
 
 class H265V4l2m2mDecoder(BaseDecoder):
@@ -2197,7 +2260,7 @@ class H265CuvidDecoder(BaseDecoder):
   max_depth = 10
 
 
-class VideotoolboxEncH265(H265Codec):
+class VideotoolboxEncH265(VideotoolboxVideoCodec, H265Codec):
   """
   Videotoolbox H.265/HEVC video codec.
   """
@@ -2215,6 +2278,7 @@ class DivxCodec(VideoCodec):
   codec_name = "divx"
   ffmpeg_codec_name = "mpeg4"
   ffprobe_codec_name = "mpeg4"
+  needs_bitrate_target = True
 
 
 class Vp8Codec(VideoCodec):
@@ -2247,7 +2311,7 @@ class Vp9Codec(VideoCodec):
   color_space = {"bt2020nc": 9, "bt709": 1}
 
   def _codec_specific_parse_options(self, safe, stream=0):
-    framedata = safe["framedata"]
+    framedata = safe.get("framedata") or {}
     if "color_primaries" in framedata and self.color_primaries.get(framedata["color_primaries"]):
       safe["color_primaries"] = self.color_primaries.get(framedata["color_primaries"])
     if "color_transfer" in framedata and self.color_transfer.get(framedata["color_transfer"]):
@@ -2386,26 +2450,43 @@ class AV1QSVCodec(QSVVideoCodec, AV1Codec):
     return optlist
 
 
+def av1_qindex_from_global_quality(gq: int) -> int:
+  """Map a global-quality value (shared 1-51 ICQ scale) to the AV1 0-255 qindex scale."""
+  return max(1, min(255, int(gq) * 5))
+
+
 class AV1VAAPICodec(VAAPIVideoCodec, AV1Codec):
   """
   AV1 VAAPI Codec
+
+  av1_vaapi has no private ``-qp`` option (FFmpeg drops it unused); constant
+  quality comes from ``-global_quality`` on the AV1 0-255 qindex scale. With
+  no bitrate target, ``-rc_mode CQP`` is pinned, because rc_mode auto picks
+  ICQ where the driver supports it and ICQ clips quality to 1-51.
   """
 
   codec_name = "av1vaapi"
   ffmpeg_codec_name = "av1_vaapi"
   scale_filter = "scale_vaapi"
+  hw_quality_key = "gq"
+  hw_quality_flag = "-global_quality"
   hw_quality_range = (0, 255)
+  # 110 is about CRF 25-30 (same qindex as av1_nvenc); 23 would be near-lossless.
+  hw_quality_default = 110
   encoder_options = AV1Codec.encoder_options.copy()
   encoder_options.update(
     {
       "decode_device": str,
       "device": str,
+      "global_quality": int,
     }
   )
 
   def _codec_specific_parse_options(self, safe, stream=0):
     safe = super()._codec_specific_parse_options(safe, stream)
     self._hw_parse_scale(safe)
+    if safe.get("global_quality") and safe["global_quality"] > 0:
+      safe["global_quality"] = av1_qindex_from_global_quality(safe["global_quality"])
     self._hw_parse_quality(safe)
     self._hw_parse_pix_fmt(safe)
     return safe
@@ -2414,6 +2495,8 @@ class AV1VAAPICodec(VAAPIVideoCodec, AV1Codec):
     optlist = []
     if "preset" in safe:
       optlist.extend(["-preset", str(safe["preset"])])
+    if self.hw_quality_key in safe and "bitrate" not in safe:
+      optlist.extend(["-rc_mode", "CQP"])
     optlist.extend(self._hw_quality_opts(safe))
     optlist.extend(self._hw_device_opts(safe))
     optlist.extend(self._hw_vaapi_scale_opts(safe))
@@ -2421,13 +2504,29 @@ class AV1VAAPICodec(VAAPIVideoCodec, AV1Codec):
     return optlist
 
 
-class NVEncAV1Codec(AV1Codec):
+class NVEncAV1Codec(HWAccelVideoCodec, AV1Codec):
   """
   NVEnc AV1 Codec
   """
 
   codec_name = "av1nvenc"
   ffmpeg_codec_name = "av1_nvenc"
+  hw_prefix = "nvenc"
+  # av1_nvenc -qp is on the AV1 0-255 qindex scale; 110 is about CRF 25-30
+  # (23 would be near-lossless). Without it a target-less encode falls to
+  # av1_nvenc's built-in 2 Mb/s VBR.
+  hw_quality_range = (0, 255)
+  hw_quality_default = 110
+
+  def _codec_specific_parse_options(self, safe, stream=0):
+    safe = super()._codec_specific_parse_options(safe, stream)
+    self._hw_parse_quality(safe)
+    return safe
+
+  def _codec_specific_produce_ffmpeg_list(self, safe, stream=0):
+    optlist = super()._codec_specific_produce_ffmpeg_list(safe, stream)
+    optlist.extend(self._hw_quality_opts(safe))
+    return optlist
 
 
 class Vp9QSVCodec(QSVVideoCodec, Vp9Codec):
@@ -2502,6 +2601,7 @@ class H263Codec(VideoCodec):
   codec_name = "h263"
   ffmpeg_codec_name = "h263"
   ffprobe_codec_name = "h263"
+  needs_bitrate_target = True
 
 
 class FlvCodec(VideoCodec):
@@ -2512,12 +2612,15 @@ class FlvCodec(VideoCodec):
   codec_name = "flv"
   ffmpeg_codec_name = "flv"
   ffprobe_codec_name = "flv1"
+  needs_bitrate_target = True
 
 
 class MpegCodec(VideoCodec):
   """
   Base MPEG video codec.
   """
+
+  needs_bitrate_target = True
 
   # Workaround for a bug in ffmpeg in which aspect ratio
   # is not correctly preserved, so we have to set it

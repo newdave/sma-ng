@@ -870,6 +870,15 @@ class TestFallbackEventParsing:
     worker._record_fallback_event(line)
     assert calls == [("hw", "failed", "runtime_error")]
 
+  def test_copy_fallback_failure_not_attributed_to_job(self):
+    # A failed output-larger-than-input copy run keeps the re-encode and the
+    # job succeeds; its failure class must not label a later job failure.
+    worker, calls = self._worker_with_cb()
+    worker._record_fallback_event('{"attempts": [{"tier": "sw", "failure_class": null, "duration_ms": 9}], "event": "ffmpeg.attempts", "result": "ok"}')
+    line = '{"attempts": [{"tier": "copy", "failure_class": "muxer_error", "duration_ms": 9}], "copy_fallback": true, "event": "ffmpeg.attempts", "result": "failed"}'
+    worker._record_fallback_event(line)
+    assert worker._last_attempt_failure_class is None
+
   def test_no_callback_is_safe(self):
     worker = _make_worker()
     worker._fallback_counter_callback = None

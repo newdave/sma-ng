@@ -325,3 +325,108 @@ class TestDiagnoseFfmpegFailure:
     stderr = "ffmpeg version 8.1 boilerplate\n[hevc_qsv @ 0xff] width 1920 height 872 not aligned to 16\nmore noise after\n"
     d = diagnose_ffmpeg_failure(stderr)
     assert d.signal_line == "[hevc_qsv @ 0xff] width 1920 height 872 not aligned to 16"
+
+
+class TestLadderStopReason:
+  @pytest.mark.parametrize("rc", [-15, -2, -9, 143, 130, 137, 129])
+  def test_signal_codes_stop(self, rc):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(rc, "").startswith("signal ")
+
+  @pytest.mark.parametrize(
+    "stderr",
+    [
+      "No space left on device",
+      "Disk quota exceeded",
+      "Read-only file system",
+      "Could not write header: Permission denied",
+      "write_frame(): Input/output error",
+    ],
+  )
+  def test_filesystem_stderr_stops(self, stderr):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(1, stderr).startswith("filesystem ")
+
+  # A crash (driver segfault, abort) is not a cancel: the software tiers may
+  # still succeed, so the ladder must climb (golden rule).
+  @pytest.mark.parametrize("rc", [-11, -6, -7, -4, -8, 139, 134])
+  def test_crash_signals_climb(self, rc):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(rc, "Segmentation fault") is None
+
+  # ffmpeg traps SIGTERM/SIGINT itself and exits 255 with this line.
+  @pytest.mark.parametrize("n,name", [(15, "SIGTERM"), (2, "SIGINT"), (1, "SIGHUP"), (9, "SIGKILL")])
+  def test_received_signal_exit_255_stops(self, n, name):
+    from resources.processor.failures import ladder_stop_reason
+
+    stderr = "frame=  100 fps=50\nExiting normally, received signal %d.\n" % n
+    assert ladder_stop_reason(255, stderr) == "signal " + name
+
+  @pytest.mark.parametrize("n", [11, 6])
+  def test_received_crash_signal_exit_255_climbs(self, n):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(255, "Exiting normally, received signal %d.\n" % n) is None
+
+  @pytest.mark.parametrize("rc,stderr", [(1, "Segmentation fault"), (1, ""), (None, "Error while decoding stream"), (1, "Error reading: Input/output error")])
+  def test_other_failures_climb(self, rc, stderr):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(rc, stderr) is None
+
+  # An HDR stream dump or a channel-layout warning earlier in the tail must not
+  # hide the filesystem cause behind a first-match diagnosis.
+  HDR_DUMP = "Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084), 3840x2160\n"
+  LAYOUT_WARN = "[aac @ 0x1] Guessed Channel Layout for Input Stream #0.1 : 7.1\n"
+
+  @pytest.mark.parametrize(
+    "stderr,reason",
+    [
+      (HDR_DUMP + "av_interleaved_write_frame(): No space left on device", "filesystem enospc"),
+      (HDR_DUMP + "Error writing trailer: Read-only file system", "filesystem erofs"),
+      (HDR_DUMP + "Error writing trailer: Disk quota exceeded", "filesystem edquota"),
+      (LAYOUT_WARN + "av_interleaved_write_frame(): No space left on device", "filesystem enospc"),
+    ],
+  )
+  def test_filesystem_cause_found_behind_earlier_pattern(self, stderr, reason):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(1, stderr) == reason
+
+  @pytest.mark.parametrize(
+    "stderr",
+    [
+      "[AVHWDeviceContext @ 0x1] Failed to open /dev/dri/renderD128: Permission denied",
+      "Failed to set value 'vaapi=va:/dev/dri/renderD128' for option 'init_hw_device': Permission denied",
+      "Device creation failed: -13.\nFailed to set value 'cuda' for option 'hwaccel': Permission denied",
+      "[AVHWDeviceContext @ 0x1] cu->cuInit(0) failed -> /dev/nvidia0: Permission denied",
+      "Error opening input file /media/in.mkv.\n/media/in.mkv: Permission denied",
+      "/media/in.mkv: Input/output error",
+    ],
+  )
+  def test_device_and_input_side_errors_climb(self, stderr):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(1, stderr) is None
+
+  def test_eio_inside_a_word_climbs(self):
+    from resources.processor.failures import ladder_stop_reason
+
+    stderr = "[in#0 @ 0x1] Error opening input: /media/O Torneio (2020).mkv\nError while decoding stream #0:0: Invalid data found when processing input"
+    assert ladder_stop_reason(1, stderr) is None
+
+  @pytest.mark.parametrize(
+    "stderr,reason",
+    [
+      ("[out#0/mp4 @ 0x1] Error opening output /out/movie.mp4: Permission denied", "filesystem permission_denied"),
+      ("/out/movie.mp4: Permission denied", "filesystem permission_denied"),
+      ("/out/movie.mp4: Input/output error", "filesystem eio"),
+    ],
+  )
+  def test_output_side_permission_and_eio_stop(self, stderr, reason):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(1, stderr, outfile="/out/movie.mp4") == reason

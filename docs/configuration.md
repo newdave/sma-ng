@@ -191,7 +191,7 @@ hardware tier to `full_sw`.
 | `crf-profiles-hd`           | string       |         | Same format as `crf-profiles`, applied to sources above 1080p height. Falls back to `crf-profiles` when empty.                                                                                                                                                                                                                                                                                                                    |
 | `crf-profiles-uhd`          | string       |         | Same format as `crf-profiles`, applied to 4K/UHD sources. Falls back to `crf-profiles-hd`, then `crf-profiles`, when empty. Malformed entries are skipped with a WARNING                                                                                                                                                                                                                                                          |
 | `preset`                    | string       |         | Encoder preset: `ultrafast` to `veryslow`                                                                                                                                                                                                                                                                                                                                                                                         |
-| `profile`                   | list         |         | Video profile: `main`, `high`, `main10`                                                                                                                                                                                                                                                                                                                                                                                           |
+| `profile`                   | list         |         | Approved video profiles, e.g. `main`, `high`, `main10`. On a re-encode the first listed profile valid for the target codec family (H.264 or HEVC) and output bit depth wins; for an 8-bit output the direct sibling (`high10` -> `high`) is preferred. Names are emitted lowercase without spaces (`Main 10` -> `main10`); `constrained *` names are never emitted. No listed profile fits: no `-profile:v` is set.               |
 | `max-level`                 | float        |         | Maximum H.264/H.265 level (e.g., `5.2`)                                                                                                                                                                                                                                                                                                                                                                                           |
 | `max-width`                 | int          | `0`     | Maximum output width (0 = no limit). On the QSV full-GPU pipeline the downscale is folded into the single `vpp_qsv` filter: the width is floored to even (it is a cap, never rounded up) and the height is derived from the source aspect ratio, so the picture is never stretched. Logged as `[adaptive-qsv-downscale]`.                                                                                                         |
 | `max-fps`                   | float        | `0`     | Highest output frame rate (0 = keep the source rate). A source more than 0.2 % faster is re-encoded at a standard rate of its own family that fits under the cap, frames dropped evenly by ffmpeg (`-r:v`), logged as `[video-max-fps]`. With `max-fps: 25`: 23.976, 24 and 25 fps are kept; 50 becomes 25; 29.97, 47.95 and 59.94 become 23.976 (24000/1001); 30, 48 and 60 become 24. Halving (50 to 25, 47.95 to 23.976) is clean; 29.97 or 59.94 to 23.976 drops frames unevenly, which can judder on motion, and telecined content is not inverse-telecined. Dolby Vision profile 5 is never re-encoded, so it keeps its rate. A non-CFR `-fps_mode`/`-vsync` in `postopts` contradicts the cap and is dropped with a warning. |
@@ -203,7 +203,7 @@ hardware tier to `full_sw`.
 | `codec-parameters`          | string\|list |         | Encoder-agnostic FFmpeg flags (e.g. `-x265-params <opts>` for libx265, free-form fallback flags). Accepts a YAML list of flag fragments for readability; the schema joins entries with spaces. Encoder-specific flags belong under `base.video.qsv.codec-parameters` or `base.video.vaapi.codec-parameters` — anything QSV- or VAAPI-specific written here is automatically lifted into the right subblock by the migration shim. |
 | `look-ahead-depth`          | int          | `0`     | Look-ahead frames for rate control (QSV: `la_depth`). `0` = encoder default. SMA-NG auto-sizes `-extra_hw_frames` to `look-ahead-depth + 4` (floor `20`, cap `100`) to keep the device frame pool from running dry.                                                                                                                                                                                                               |
 | `extra-hw-frames`           | int          | `0`     | QSV `-extra_hw_frames` pool size (input/device scope). `0` = auto: derived from `look-ahead-depth`. Any positive value overrides the auto-derived pool, clamped to ffmpeg's QSV ceiling of `100`. Profiles can override per path (`profiles.<name>.video.extra-hw-frames`). Only emitted when `gpu: qsv`.                                                                                                                         |
-| `global-quality`            | int          | `0`     | ICQ quality target for QSV encodes (lower = better, typical `21-25` for 1080p HEVC). `0` = codec default. Replaces the computed bitrate target when a re-encode is not bitrate-driven (see Bitrate Calculation); bitrate-driven re-encodes keep their VBR target and ignore this.                                                                                                                                                 |
+| `global-quality`            | int          | `0`     | ICQ quality target for QSV encodes (lower = better, typical `21-25` for 1080p HEVC). `0` = codec default. Replaces the computed bitrate target when a re-encode is not bitrate-driven (see Bitrate Calculation); bitrate-driven re-encodes keep their VBR target and ignore this. `av1_vaapi` scales it ×5 onto the AV1 0-255 qindex (see the VAAPI bullet in Bitrate Calculation).                                               |
 | `b-frames`                  | int          | `-1`    | Number of B-frames. `-1` = encoder default.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `ref-frames`                | int          | `-1`    | Number of reference frames. `-1` = encoder default.                                                                                                                                                                                                                                                                                                                                                                               |
 
@@ -292,10 +292,13 @@ can never leak onto a non-VAAPI command line. Unset fields inherit from
 | `compression-level` | int    | `0`     | `-compression_level` (VAAPI-specific quality/speed tuning). `0` = don't emit.                                                                          |
 | `low-power`         | int    | `-1`    | `-low_power` for VAAPI (semantics differ from QSV's flag of the same name). `-1` = don't emit.                                                         |
 | `look-ahead-depth`  | int    | `0`     | Override `base.video.look-ahead-depth` for VAAPI. `0` = inherit. Mapped to VAAPI's own look-ahead control where supported.                             |
-| `global-quality`    | int    | `0`     | Quality target for VAAPI. `0` = inherit. Translated to `-rc_mode CQP -qp <N>` because VAAPI has no direct equivalent of QSV's ICQ `-global_quality`.   |
+| `global-quality`    | int    | `0`     | Quality target for VAAPI. `0` = inherit. Translated to `-rc_mode CQP -qp <N>` because VAAPI has no direct equivalent of QSV's ICQ `-global_quality`; `av1_vaapi` gets `-rc_mode CQP -global_quality <N×5>` instead of `-qp`. |
 | `b-frames`          | int    | `-1`    | B-frame override. `-1` = inherit from `base.video.b-frames`.                                                                                           |
 | `ref-frames`        | int    | `-1`    | Reference frame override. `-1` = inherit from `base.video.ref-frames`.                                                                                 |
 | `max-level`         | float  | `0.0`   | Profile level cap override. `0.0` = inherit from `base.video.max-level`.                                                                               |
+
+`av1_vaapi` has no `-qp` option, so for it `global-quality` becomes `-rc_mode CQP -global_quality <N x 5>` on the
+AV1 0-255 qindex scale instead.
 
 > **VAAPI vs QSV flag names diverge.** `-global_quality` is QSV-only; on
 > VAAPI use `-rc_mode CQP -qp <N>` for quality-targeted, or `-rc_mode VBR
@@ -364,7 +367,7 @@ from `base.hdr.*` (not `base.video.*`).
 | `compression-level` | int    | `0`     | `-compression_level` for HDR. `0` = don't emit.                                                      |
 | `low-power`         | int    | `-1`    | `-low_power` for HDR VAAPI. `-1` = don't emit.                                                       |
 | `look-ahead-depth`  | int    | `0`     | HDR look-ahead override. `0` = inherit from `base.hdr.look-ahead-depth`.                             |
-| `global-quality`    | int    | `0`     | HDR quality target. `0` = inherit. Mapped to `-rc_mode CQP -qp <N>`.                                 |
+| `global-quality`    | int    | `0`     | HDR quality target. `0` = inherit. Mapped to `-rc_mode CQP -qp <N>`; `av1_vaapi` gets `-rc_mode CQP -global_quality <N×5>` instead of `-qp`. |
 | `b-frames`          | int    | `-1`    | HDR B-frame override. `-1` = inherit.                                                                |
 | `ref-frames`        | int    | `-1`    | HDR reference frame override. `-1` = inherit.                                                        |
 | `max-level`         | float  | `0.0`   | HDR profile level cap override. `0.0` = inherit.                                                     |
@@ -980,7 +983,9 @@ corresponding Python config block in `sma-ng.yml`. See
 
 1. `estimateVideoBitrate()` computes source video bitrate from container total minus audio
 2. `bitrate-ratio` scales the estimate per source codec (e.g., H.264 at 0.65x for HEVC target)
-3. `crf-profiles` selects CRF/maxrate/bufsize tier based on scaled bitrate
+3. `crf-profiles` selects CRF/maxrate/bufsize tier based on scaled bitrate. A matched tier only forces a re-encode
+   when its target is below the source estimate; otherwise it is ignored.
+   A same-codec-family re-encode is capped at the source estimate.
 4. `max-bitrate` caps the final result. When the source exceeded it (the cap forced the re-encode), the cap
    becomes the average target and the VBV `maxrate` is 1.5x the cap (`bufsize` 2x that), so complex scenes can
    peak above it. When the re-encode happened for another reason, `max-bitrate` stays the `maxrate` ceiling.
@@ -992,6 +997,25 @@ corresponding Python config block in `sma-ng.yml`. See
    otherwise `min-bitrate` (if set) raises any remaining VBR target to the floor, lifting `maxrate`/
    `bufsize` with it (`[video-min-bitrate]`). On the software-encoder tier (libx264/libx265) the ICQ
    path falls back to the encoder's default CRF since `global-quality` is a hardware-encoder option.
+6. Unknown source bitrate: when neither the container nor the video stream reports a usable bitrate (missing, or
+   negative after subtracting assumed audio), steps 1-4, `crf-profiles` and the same-family clamp are skipped. No
+   bitrate target is set and the encode runs at constant quality instead of failing. `video.debug` gains
+   `.bitrate-unknown` (`[video-bitrate-unknown]`); the marker never blocks the copy fallback. Per encoder family:
+   - Capped CRF (only libx264, libx265 and VideoToolbox on Apple Silicon): `max-bitrate`, `hdr.max-bitrate` and the
+     analyzer ceiling still apply as VBV `maxrate`/`bufsize`. libx264/libx265 use their default CRF; VideoToolbox
+     uses constant quality `-q:v 65`.
+   - Every other encoder drops VBV, so these caps do **not** apply. libvpx-vp9 and libaom-av1 reject `maxrate`
+     without a bitrate at encoder init; QSV picks QVBR and fails init; NVENC, VAAPI and SVT-AV1 ignore it.
+   - Software VP9/AV1 (libvpx-vp9, libaom-av1, SVT-AV1, rav1e): the encoder's default CRF.
+   - QSV (`-global_quality`): ICQ at `global-quality` (or the encoder default).
+   - NVENC and VAAPI: constant QP (`-qp`). H.264/HEVC default 23 (0-51 scale). `av1_nvenc` defaults to 110 on the
+     AV1 0-255 qindex scale (about CRF 25-30). `av1_vaapi` has no `-qp`: it gets `-rc_mode CQP -global_quality`,
+     with `global-quality` multiplied by 5 onto the qindex scale (22 becomes 110), or 110 when unset.
+   - Encoders with no usable quality mode: `h264_v4l2m2m`, `hevc_v4l2m2m`, `h264_omx`, `mpeg4` (divx), `libtheora`,
+     `h263`, `flv`, `mpeg1video`, `mpeg2video`, and VideoToolbox on Intel (x86_64 FFmpeg has no `-q:v`). They get a
+     fallback bitrate by output height (2160p 20000k, 1440p 10000k, 1080p 6000k, 720p 3000k, smaller 1500k). The
+     fallback never exceeds `max-bitrate` (`[video-bitrate-fallback]`), and `min-bitrate` still raises it to the
+     floor (`[video-min-bitrate]`).
 
 When `[Analyzer]` is enabled, the analyzer may additionally:
 

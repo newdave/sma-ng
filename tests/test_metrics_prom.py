@@ -270,3 +270,10 @@ def test_register_output_dir_source_callback_exception_yields_zeros():
   rendered = metrics_prom.render_exposition().decode()
   assert 'sma_output_dir_total_bytes{node_id="output-boom"} 0.0' in rendered
   assert 'sma_output_dir_free_bytes{node_id="output-boom"} 0.0' in rendered
+
+
+@pytest.mark.parametrize("from_tier", ["copy", "sw", "hw"])
+def test_record_fallback_transition_accepts_first_attempt_tiers(from_tier):
+  metrics_prom.record_fallback_transition(from_tier, "failed", "runtime_error")
+  series = metrics_prom.FALLBACK_TRANSITIONS_TOTAL.labels(from_tier=from_tier, to_tier="failed", failure_class="runtime_error")
+  assert series._value.get() >= 1.0
