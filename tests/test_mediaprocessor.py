@@ -9955,3 +9955,34 @@ class TestOutputLargerThanInputMarkers:
     assert out == str(big)
     assert mp._run_ffmpeg.call_count == (1 if falls_back else 0)
     assert big.read_bytes() == (b"z" * 80 if falls_back else b"y" * 120)
+
+
+class TestProfileMatchesBitDepth:
+  """The first listed profile matching the output depth is chosen, within the target codec family."""
+
+  def test_listed_10bit_profile_picked_without_adaptive_log(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main", "main10"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 10) == "main10"
+    mp.log.info.assert_not_called()
+
+  def test_derived_sibling_still_logs_adaptive(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 10) == "main10"
+    assert "adaptive-profile-bit-depth" in mp.log.info.call_args[0][0]
+
+  def test_hevc_ignores_h264_only_profiles(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["high10", "main", "main10"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 10) == "main10"
+
+  def test_h264_ignores_hevc_only_profiles(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main10", "high", "high10"]
+    assert mp._reconcile_profile_to_bit_depth("h264_vaapi", "high", 10) == "high10"
+
+  def test_first_matching_listed_profile_wins(self):
+    mp = _make_mp()
+    mp.settings.vprofile = ["main10", "main", "Main 10"]
+    assert mp._reconcile_profile_to_bit_depth("hevc_qsv", "main", 10) == "main10"

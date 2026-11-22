@@ -2502,8 +2502,13 @@ class MediaProcessor:
         vcodec = vcodecs[0]
     else:
       if len(self.settings.vprofile) > 0:
-        if info.video.profile in self.settings.vprofile:
+        target_family = self._codec_family(info.video.codec if vcodec == "copy" else vcodec)
+        if info.video.profile in self.settings.vprofile and self._codec_family(info.video.codec) == target_family:
           vprofile = info.video.profile
+        elif info.video.profile in self.settings.vprofile:
+          # Same profile name, different codec family (H.264 "Main" is not HEVC "main"): the stream is being
+          # re-encoded anyway, so take the first listed profile and let the bit-depth step pick the match.
+          vprofile = self.settings.vprofile[0]
         else:
           vprofile = self.settings.vprofile[0] if len(self.settings.vprofile) > 0 else None
           self.log.debug("Video profile is not supported. Video stream can no longer be copied [video-profile].")
@@ -4225,6 +4230,22 @@ class MediaProcessor:
     "high": "high10",
   }
 
+  # Profile names by bit-depth class and codec family, used to pick the first listed profile that matches the
+  # output depth. "main" is shared by H.264 and HEVC, so it fits either family.
+  _TEN_BIT_PROFILES = frozenset(["main10", "main 10", "high10", "high 10"])
+  _EIGHT_BIT_PROFILES = frozenset(["main", "high", "baseline", "constrained baseline", "constrained high"])
+  _H264_ONLY_PROFILES = frozenset(["baseline", "constrained baseline", "constrained high", "high", "high10", "high 10", "extended"])
+  _HEVC_ONLY_PROFILES = frozenset(["main10", "main 10", "main444", "main 4:4:4"])
+
+  @classmethod
+  def _profile_fits_family(cls, candidate, family):
+    """True when profile name *candidate* is valid for codec *family* (shared names such as main fit both)."""
+    if family == "h264":
+      return candidate not in cls._HEVC_ONLY_PROFILES
+    if family == "h265":
+      return candidate not in cls._H264_ONLY_PROFILES
+    return True
+
   # Encoders with a native max sample rate. Sources above the cap need to be
   # downsampled on the encode pass or the encoder refuses to initialise.
   _AUDIO_ENCODER_MAX_SAMPLERATE = {
@@ -4367,19 +4388,25 @@ class MediaProcessor:
     key = vprofile.strip().lower()
     if output_bit_depth <= 8:
       target = self._TEN_BIT_PROFILE_TO_EIGHT_BIT.get(key)
+      wanted = self._EIGHT_BIT_PROFILES
       reason = "requires 10-bit input but output is %d-bit" % output_bit_depth
       verb = "downgrading"
     else:
       target = self._EIGHT_BIT_PROFILE_TO_TEN_BIT.get(key)
+      wanted = self._TEN_BIT_PROFILES
       reason = "caps at 8-bit but output is %d-bit" % output_bit_depth
       verb = "upgrading"
     if not target:
       return vprofile
-    replacement = target
     for candidate in self.settings.vprofile or []:
-      if isinstance(candidate, str) and candidate.strip().lower() == target:
-        replacement = candidate
-        break
+      if not isinstance(candidate, str):
+        continue
+      ckey = candidate.strip().lower()
+      if ckey in wanted and self._profile_fits_family(ckey, self._codec_family(vcodec)):
+        # A listed profile already matches the output depth: pick it, nothing to repair.
+        self.log.debug("Profile %s %s; using listed profile %s for %d-bit output." % (vprofile, reason, candidate, output_bit_depth))
+        return candidate
+    replacement = target
     self.log.info("Profile %s %s; %s to %s to avoid encoder_init_failed [adaptive-profile-bit-depth]." % (vprofile, reason, verb, replacement))
     return replacement
 
