@@ -9353,7 +9353,9 @@ class TestStripQsvOnlyFlags:
 
   def test_strips_rdo(self):
     # Behaviour change (SMANG-32): the hw_alt strip list had drifted from
-    # converter.avcodecs and let the QSV-only typed field `rdo` reach hevc_vaapi.
+    # converter.avcodecs and kept `-rdo`. The VAAPI codec's hw_forbidden_flags
+    # already filtered it (with a WARNING), so ffmpeg never saw it; stripping it
+    # here is defence in depth and avoids that warning.
     from resources.mediaprocessor import _strip_qsv_only_flags as f
 
     assert f("-rdo 1 -preset slow") == "-preset slow"
