@@ -542,3 +542,66 @@ class TestSQLiteJobDatabase:
     assert first["id"] == legacy
     assert second["id"] == weighted
     db.close()
+
+
+class TestJobTelemetryPersistence:
+  _TEL = {
+    "source_video_codec": "hevc",
+    "source_video_width": 3840,
+    "source_video_height": 2160,
+    "source_audio_codec": "eac3",
+    "source_audio_channels": 6,
+    "source_hdr": "hdr10",
+    "dest_video_codec": "h264",
+    "dest_video_width": 1920,
+    "dest_video_height": 1080,
+    "dest_audio_codec": "aac",
+    "dest_audio_channels": 2,
+    "dest_hdr": "sdr",
+    "not_a_column": "ignored",
+  }
+
+  def test_complete_job_writes_every_telemetry_column(self, tmp_path):
+    db = _db(tmp_path)
+    jid = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    assert db.complete_job(jid, 10, 5, 90.0, "qsv", "h265qsv", node_id="n", telemetry=self._TEL)
+    row = db.get_job(jid)
+    for col, val in self._TEL.items():
+      if col != "not_a_column":
+        assert row[col] == val
+    assert row["encoder_backend"] == "qsv"
+    assert row["encoder_name"] == "h265qsv"
+    assert row["source_duration_seconds"] == 90.0
+    db.close()
+
+  def test_complete_job_without_telemetry_leaves_columns_null(self, tmp_path):
+    db = _db(tmp_path)
+    jid = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    db.complete_job(jid, 10, 5)
+    assert db.get_job(jid)["source_video_codec"] is None
+    db.close()
+
+  def test_fail_job_records_source_telemetry_on_terminal_failure_and_requeue(self, tmp_path):
+    db = _db(tmp_path)
+    jid = db.add_job("/m/a.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    with db._conn() as conn:
+      conn.execute("UPDATE jobs SET max_retries = 0 WHERE id = ?", (jid,))
+    assert db.fail_job(jid, "boom", node_id="n", telemetry=self._TEL, source_duration_seconds=90.0)
+    row = db.get_job(jid)
+    assert row["status"] == STATUS_FAILED
+    assert row["source_video_codec"] == "hevc"
+    assert row["source_hdr"] == "hdr10"
+    assert row["source_duration_seconds"] == 90.0
+
+    jid2 = db.add_job("/m/b.mkv", "/c.yml")
+    db.claim_next_job(worker_id=1, node_id="n")
+    with db._conn() as conn:
+      conn.execute("UPDATE jobs SET max_retries = 2 WHERE id = ?", (jid2,))
+    assert db.fail_job(jid2, "boom", node_id="n", telemetry={"source_video_codec": "av1"})
+    row2 = db.get_job(jid2)
+    assert row2["status"] == STATUS_PENDING
+    assert row2["source_video_codec"] == "av1"
+    db.close()

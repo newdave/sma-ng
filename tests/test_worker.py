@@ -186,7 +186,7 @@ class TestConversionWorkerProcessJob:
     worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
     job = {"id": 5, "path": str(media), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(5, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id)
+    db.fail_job.assert_called_once_with(5, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id, telemetry={}, source_duration_seconds=None)
     db.complete_job.assert_not_called()
 
   def test_does_not_overwrite_cancelled_status_after_failed_conversion(self, tmp_path):
@@ -363,7 +363,7 @@ class TestIngestFfmpegStderrSidecars:
     worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
     worker.process_job({"id": 8, "path": str(media), "config": "/cfg.ini", "args": None})
 
-    db.fail_job.assert_called_once_with(8, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id)
+    db.fail_job.assert_called_once_with(8, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id, telemetry={}, source_duration_seconds=None)
     db.update_job_ffmpeg_stderr.assert_called_once()
     args, _ = db.update_job_ffmpeg_stderr.call_args
     assert args[0] == 8
@@ -1150,3 +1150,97 @@ class TestChildLogLevels:
         h.close()
     assert any("careful" in m for m in msgs)
     assert not any("fine" in m for m in msgs)
+
+
+_SUMMARY_SOURCE = '{"duration_seconds":5400.5,"event":"sma.job.summary","source":{"audio_channels":6,"audio_codec":"eac3","hdr":"hdr10","video_codec":"hevc","video_height":2160,"video_width":3840}}'
+_SUMMARY_DEST = '{"dest":{"audio_channels":2,"audio_codec":"aac","hdr":"sdr","video_codec":"h264","video_height":1080,"video_width":1920},"event":"sma.job.summary"}'
+
+
+class TestJobSummaryTelemetry:
+  """The worker parses manual.py's sma.job.summary event into job telemetry."""
+
+  def test_summary_events_merge_into_telemetry(self):
+    worker = _make_worker()
+    worker._record_job_summary(_SUMMARY_SOURCE)
+    worker._record_job_summary("INFO [t job:1] " + _SUMMARY_DEST)
+    t = worker._job_telemetry
+    assert t["source_video_codec"] == "hevc"
+    assert t["source_video_width"] == 3840
+    assert t["source_video_height"] == 2160
+    assert t["source_audio_codec"] == "eac3"
+    assert t["source_audio_channels"] == 6
+    assert t["source_hdr"] == "hdr10"
+    assert t["dest_video_codec"] == "h264"
+    assert t["dest_video_width"] == 1920
+    assert t["dest_audio_channels"] == 2
+    assert t["dest_hdr"] == "sdr"
+    assert t["source_duration_seconds"] == 5400.5
+
+  def test_malformed_and_foreign_records_ignored(self):
+    worker = _make_worker()
+    worker._record_job_summary("no json here sma.job.summary")
+    worker._record_job_summary("{not json} sma.job.summary")
+    worker._record_job_summary('{"event":"other","source":{"video_codec":"x"}}')
+    worker._record_job_summary('{"event":"sma.job.summary","source":{"bogus_key":1,"video_codec":null},"dest":"x","duration_seconds":"n"}')
+    assert worker._job_telemetry == {}
+
+  def test_run_conversion_feeds_progress_and_duration_from_summary(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    worker.progress_log_interval = 0
+    proc = _make_fake_process(
+      ["SMA_LEVEL=INFO [t job:1] " + _SUMMARY_SOURCE, "frame=  100 fps= 25 speed=1.00x time=00:09:00 size=  5000kB"],
+      returncode=0,
+    )
+    with mock.patch("subprocess.Popen", return_value=proc):
+      ok, _final, duration = worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    assert ok is True
+    assert duration == 5400.5
+    assert worker._job_telemetry["source_video_codec"] == "hevc"
+
+  def test_progress_percent_uses_summary_duration(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    worker.progress_log_interval = 0
+    seen = []
+    original = worker._build_progress_payload
+
+    def spy(*args, **kwargs):
+      payload = original(*args, **kwargs)
+      seen.append(payload)
+      return payload
+
+    worker._build_progress_payload = spy
+    proc = _make_fake_process([_SUMMARY_SOURCE, "frame=  100 fps= 25 speed=1.00x time=00:09:00 size=  5000kB"], returncode=0)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    assert seen and seen[0]["percent"] == 10.0
+
+  def test_process_job_persists_telemetry_on_success_and_failure(self, tmp_path):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    db = mock.MagicMock()
+    db.get_job.return_value = {"status": "running"}
+    worker = _make_worker(job_db=db)
+
+    def fake_run(*_a, **_k):
+      worker._job_telemetry = {"source_video_codec": "hevc", "dest_video_codec": "h264"}
+      return (True, None, 90.0)
+
+    worker._run_conversion = mock.MagicMock(side_effect=fake_run)
+    worker.process_job({"id": 4, "path": str(media), "config": "/cfg.ini", "args": None})
+    kwargs = db.complete_job.call_args.kwargs
+    assert kwargs["telemetry"] == {"source_video_codec": "hevc", "dest_video_codec": "h264"}
+    assert kwargs["source_duration_seconds"] == 90.0
+
+    def fake_fail(*_a, **_k):
+      worker._job_telemetry = {"source_video_codec": "hevc"}
+      return (False, None, 90.0)
+
+    worker._run_conversion = mock.MagicMock(side_effect=fake_fail)
+    worker.process_job({"id": 5, "path": str(media), "config": "/cfg.ini", "args": None})
+    kwargs = db.fail_job.call_args.kwargs
+    assert kwargs["telemetry"] == {"source_video_codec": "hevc"}
+    assert kwargs["source_duration_seconds"] == 90.0

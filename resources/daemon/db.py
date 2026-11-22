@@ -102,6 +102,35 @@ _METRICS_EXPANSION_COLUMNS: tuple[tuple[str, str, str], ...] = (
   ("request_profile", "TEXT", "TEXT"),
 )
 
+# Per-job media telemetry columns written by complete_job/fail_job from the
+# worker's parsed ``sma.job.summary`` event. Whitelisted: names are spliced
+# into SQL, so only these may ever be assigned.
+TELEMETRY_COLUMNS: tuple[str, ...] = (
+  "source_video_codec",
+  "source_video_width",
+  "source_video_height",
+  "source_audio_codec",
+  "source_audio_channels",
+  "source_hdr",
+  "dest_video_codec",
+  "dest_video_width",
+  "dest_video_height",
+  "dest_audio_codec",
+  "dest_audio_channels",
+  "dest_hdr",
+)
+
+
+def _telemetry_sets(telemetry, placeholder):
+  """Return ``(sql_fragment, params)`` assigning the non-None telemetry values.
+
+  The fragment is empty or starts with ``", "`` so it can be appended to an
+  existing ``SET`` list. Unknown keys are ignored.
+  """
+  cols = [c for c in TELEMETRY_COLUMNS if telemetry and telemetry.get(c) is not None]
+  return "".join(", %s = %s" % (c, placeholder) for c in cols), [telemetry[c] for c in cols]
+
+
 # Job kinds and captured tool output (docs/prps/sma-cli-container-runtime.md).
 # Kept apart from _METRICS_EXPANSION_COLUMNS, whose tests pin its exact list.
 _JOB_KIND_COLUMNS: tuple[tuple[str, str, str], ...] = (
@@ -637,11 +666,13 @@ class SQLiteJobDatabase:
     encoder_backend=None,
     encoder_name=None,
     node_id=None,
+    telemetry=None,
   ):
     """Mark a running job completed. Returns False if the row was no longer
     running (cancelled/requeued) or, when *node_id* is given, is now owned
     by a different node — the caller's result is then discarded."""
     owner_sql, owner_params = _owner_guard(node_id, "?")
+    tel_sql, tel_params = _telemetry_sets(telemetry, "?")
     with self._conn() as conn:
       cur = conn.execute(
         """UPDATE jobs
@@ -651,7 +682,9 @@ class SQLiteJobDatabase:
                   output_size_bytes = ?,
                   source_duration_seconds = ?,
                   encoder_backend = ?,
-                  encoder_name = ?
+                  encoder_name = ?"""
+        + tel_sql
+        + """
             WHERE id = ? AND status = ?"""
         + owner_sql,
         (
@@ -662,6 +695,7 @@ class SQLiteJobDatabase:
           source_duration_seconds,
           encoder_backend,
           encoder_name,
+          *tel_params,
           job_id,
           STATUS_RUNNING,
           *owner_params,
@@ -731,7 +765,7 @@ class SQLiteJobDatabase:
       )
     self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay_seconds, reason or ""))
 
-  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None):
+  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None, telemetry=None, source_duration_seconds=None):
     """Fail (or requeue with backoff) a running job.
 
     Returns False without touching the row when it is no longer running
@@ -770,6 +804,13 @@ class SQLiteJobDatabase:
           (STATUS_FAILED, error, now.isoformat(), failure_category, failure_cause, job_id),
         )
         self.log.debug("Job %d failed: %s" % (job_id, error))
+      # Keep what is known about the source even though the job failed.
+      tel_sql, tel_params = _telemetry_sets(telemetry, "?")
+      if source_duration_seconds is not None:
+        tel_sql += ", source_duration_seconds = ?"
+        tel_params.append(source_duration_seconds)
+      if tel_sql:
+        conn.execute("UPDATE jobs SET " + tel_sql[2:] + " WHERE id = ?", (*tel_params, job_id))
     return True
 
   def get_job(self, job_id):
@@ -1535,6 +1576,7 @@ class PostgreSQLJobDatabase:
     encoder_backend=None,
     encoder_name=None,
     node_id=None,
+    telemetry=None,
   ):
     """Mark a running job completed, optionally recording size + duration + encoder.
 
@@ -1542,6 +1584,7 @@ class PostgreSQLJobDatabase:
     or, when *node_id* is given, now belongs to another node.
     """
     owner_sql, owner_params = _owner_guard(node_id, "%s")
+    tel_sql, tel_params = _telemetry_sets(telemetry, "%s")
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
@@ -1552,7 +1595,9 @@ class PostgreSQLJobDatabase:
                     output_size_bytes = %s,
                     source_duration_seconds = %s,
                     encoder_backend = %s,
-                    encoder_name = %s
+                    encoder_name = %s"""
+          + tel_sql
+          + """
               WHERE id = %s AND status = %s"""
           + owner_sql,
           (
@@ -1562,6 +1607,7 @@ class PostgreSQLJobDatabase:
             source_duration_seconds,
             encoder_backend,
             encoder_name,
+            *tel_params,
             job_id,
             STATUS_RUNNING,
             *owner_params,
@@ -1648,7 +1694,7 @@ class PostgreSQLJobDatabase:
         )
     self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay, reason or ""))
 
-  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None):
+  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None, telemetry=None, source_duration_seconds=None):
     """Mark a running job as failed, or requeue with exponential backoff if retries remain.
 
     The row is locked and must still be running (and owned by *node_id*
@@ -1689,6 +1735,13 @@ class PostgreSQLJobDatabase:
             (STATUS_FAILED, error, failure_category, failure_cause, job_id),
           )
           self.log.debug("Job %d failed: %s" % (job_id, error))
+        # Keep what is known about the source even though the job failed.
+        tel_sql, tel_params = _telemetry_sets(telemetry, "%s")
+        if source_duration_seconds is not None:
+          tel_sql += ", source_duration_seconds = %s"
+          tel_params.append(source_duration_seconds)
+        if tel_sql:
+          cur.execute("UPDATE jobs SET " + tel_sql[2:] + " WHERE id = %s", (*tel_params, job_id))
       if requeued:
         _backfill_one_request_profile(conn, job_id, is_sqlite=False)
     return True

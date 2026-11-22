@@ -13,6 +13,7 @@ import time
 from resources.daemon import job_kinds, metrics_prom
 from resources.daemon.constants import FFMPEG_STDERR_DIR, SCRIPT_DIR, resolve_node_id
 from resources.daemon.context import clear_job_id, set_job_id
+from resources.daemon.db import TELEMETRY_COLUMNS
 from resources.log import LEVEL_TOKEN_RE, getLogger
 from resources.processor.failures import (
   WORKER_SENTINEL_DISK_PRESSURE,
@@ -287,6 +288,7 @@ class ConversionWorker(threading.Thread):
     self.current_job_id = None
     self._job_processes = job_processes if job_processes is not None else {}
     self._job_progress = job_progress if job_progress is not None else {}
+    self._job_telemetry: dict = {}
     self._last_approval_log = 0.0
     self._stop_event = threading.Event()
     # Abort bookkeeping for the job currently being converted. The reason
@@ -439,6 +441,7 @@ class ConversionWorker(threading.Thread):
     self._last_attempt_failure_class: str | None = None
     self._last_encoder_name: str | None = None
     self._last_encoder_backend: str | None = None
+    self._job_telemetry: dict = {}
     path = job["path"]
     config_file = job["config"]
     try:
@@ -571,6 +574,7 @@ class ConversionWorker(threading.Thread):
           encoder_backend=self._last_encoder_backend,
           encoder_name=self._last_encoder_name,
           node_id=self.node_id,
+          telemetry=self._job_telemetry,
         )
         if updated is False:
           self._log_discarded(job_id, updated, "completion")
@@ -596,7 +600,15 @@ class ConversionWorker(threading.Thread):
           cause = self._last_attempt_failure_class or WORKER_SENTINEL_PROCESS_FAILED
           cat = categorize_failure(cause).value
           message = "Conversion process failed" if is_convert else "%s process failed" % kind.name.capitalize()
-          updated = self.job_db.fail_job(job_id, message, failure_category=cat, failure_cause=cause, node_id=self.node_id)
+          updated = self.job_db.fail_job(
+            job_id,
+            message,
+            failure_category=cat,
+            failure_cause=cause,
+            node_id=self.node_id,
+            telemetry=self._job_telemetry,
+            source_duration_seconds=source_duration_secs,
+          )
           self._log_discarded(job_id, updated, "failure")
           self._ingest_ffmpeg_stderr_sidecars(job_id)
           metrics_prom.record_job_terminal("failed", elapsed)
@@ -848,6 +860,14 @@ class ConversionWorker(threading.Thread):
         # (the callback is gated inside _record_fallback_event).
         if "ffmpeg.attempts" in line:
           self._record_fallback_event(line)
+        # manual.py's sma.job.summary event carries the source/output media
+        # facts and the source duration (ffmpeg's own "Duration:" banner is
+        # never printed to this pipe, so it is the only progress-percent
+        # denominator).
+        if "sma.job.summary" in line:
+          self._record_job_summary(line)
+          if total_duration_secs is None:
+            total_duration_secs = self._job_telemetry.get("source_duration_seconds")
 
       # EOF reached; the watchdog still guards this wait.
       process.wait()
@@ -878,6 +898,35 @@ class ConversionWorker(threading.Thread):
         watchdog.finish()
       self._job_processes.pop(job_id, None)
       self._job_progress.pop(job_id, None)
+
+  def _record_job_summary(self, line: str) -> None:
+    """Merge a single-line ``sma.job.summary`` JSON record into ``_job_telemetry``.
+
+    The record may carry ``source``, ``dest`` (dicts of video_codec,
+    video_width, video_height, audio_codec, audio_channels, hdr) and
+    ``duration_seconds``. Several records per job merge; later non-null
+    values win. Malformed records are ignored.
+    """
+    start = line.find("{")
+    if start < 0:
+      return
+    try:
+      payload = json.loads(line[start:])
+    except ValueError:
+      return
+    if not isinstance(payload, dict) or payload.get("event") != "sma.job.summary":
+      return
+    for prefix in ("source", "dest"):
+      facts = payload.get(prefix)
+      if not isinstance(facts, dict):
+        continue
+      for key, value in facts.items():
+        column = "%s_%s" % (prefix, key)
+        if value is not None and column in TELEMETRY_COLUMNS:
+          self._job_telemetry[column] = value
+    duration = payload.get("duration_seconds")
+    if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
+      self._job_telemetry["source_duration_seconds"] = float(duration)
 
   def _record_fallback_event(self, line: str) -> None:
     """Parse a single-line ffmpeg.attempts JSON record and bump daemon counters.

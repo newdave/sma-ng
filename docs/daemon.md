@@ -177,6 +177,13 @@ kind that are already pending or running return `200 {"status": "duplicate"}`; a
 `202 {"status": "queued", "job_id": ..., "kind": ...}`. Jobs on the same config still run one at a time, so a queued
 preview waits for the running job on its config, then goes first.
 
+**Telemetry.** Before converting, `manual.py` logs a single-line `sma.job.summary` JSON event with the source video and
+audio facts and duration; after converting it logs one for the output. The worker stores them on the job as
+`source_*` and `dest_*` columns (video codec, width, height, audio codec, channels, `sdr`/`hdr10`/`hlg`) plus
+`source_duration_seconds`, on success and on failure (source side only if the conversion failed). The `ffmpeg.attempts`
+event also carries `encoder_name` and `encoder_backend`, stored on success. The source duration drives the
+`progress` percent of a running job. All fields appear in `GET /jobs/<id>`.
+
 **Output.** The daemon stores each job's tool output (without FFmpeg progress lines), keeping the newest 1 MiB, and
 deletes it with the job. Read it while the job runs:
 

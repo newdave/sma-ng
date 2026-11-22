@@ -4188,3 +4188,44 @@ class TestPathConfigManagerLoadErrors:
     with pytest.raises(ConfigError):
       pcm.load_config(str(cfg))
     pcm.log.error.assert_called()
+
+
+class TestPostgreSQLTelemetryWrites:
+  """Fake-cursor checks that the Postgres path mirrors SQLite telemetry writes."""
+
+  def test_complete_job_writes_telemetry_columns(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.rowcount = 1
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    tel = {"source_video_codec": "hevc", "dest_video_width": 1920, "dest_hdr": "sdr", "not_a_column": "x"}
+    assert db.complete_job(8, 10, 5, 90.0, "qsv", "h265qsv", telemetry=tel) is True
+    sql, params = cur.execute.call_args[0]
+    assert "source_video_codec = %s" in sql
+    assert "dest_video_width = %s" in sql
+    assert "dest_hdr = %s" in sql
+    assert "not_a_column" not in sql
+    assert sql.count("%s") == len(params)
+    assert params.index("hevc") < params.index(8)
+    assert 1920 in params and "sdr" in params
+
+  def test_fail_job_writes_telemetry_columns(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchone.return_value = {"retry_count": 3, "max_retries": 3}
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    assert db.fail_job(8, "boom", telemetry={"source_video_codec": "hevc"}, source_duration_seconds=90.0) is True
+    sql, params = cur.execute.call_args[0]
+    assert sql.startswith("UPDATE jobs SET source_video_codec = %s, source_duration_seconds = %s WHERE id = %s")
+    assert params == ("hevc", 90.0, 8)
+
+  def test_fail_job_without_telemetry_adds_no_extra_update(self):
+    from unittest.mock import MagicMock
+
+    cur = MagicMock()
+    cur.fetchone.return_value = {"retry_count": 3, "max_retries": 3}
+    db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
+    db.fail_job(8, "boom")
+    assert cur.execute.call_count == 2  # SELECT ... FOR UPDATE + terminal UPDATE

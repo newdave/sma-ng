@@ -182,6 +182,31 @@ _HW_DEINTERLACE_TO_SW = {
 }
 
 
+_ENCODER_BACKEND_MARKERS = ("qsv", "vaapi", "nvenc", "videotoolbox", "amf")
+
+
+def _resolve_encoder(options):
+  """Return ``(encoder_name, encoder_backend)`` for a convert *options* dict.
+
+  The name is the configured video codec (head of a fallback chain); the
+  backend is one of the ``metrics_prom.ENCODER_BACKENDS`` labels. Both are
+  ``None`` when *options* carries no video codec.
+  """
+  video = options.get("video") if isinstance(options, dict) else None
+  codec = video.get("codec") if isinstance(video, dict) else None
+  if isinstance(codec, list):
+    codec = codec[0] if codec else None
+  if not codec or not isinstance(codec, str):
+    return None, None
+  if codec == "copy":
+    return codec, "copy"
+  lowered = codec.lower()
+  for backend in _ENCODER_BACKEND_MARKERS:
+    if backend in lowered:
+      return codec, backend
+  return codec, "software"
+
+
 def _swap_hw_codec_to_sw(options):
   """Swap a hardware video encoder in *options* to its software equivalent.
 
@@ -4400,6 +4425,13 @@ class MediaProcessor:
     """
     policy = getattr(self.settings, "fallback_policy", FallbackPolicy.AGGRESSIVE)
     records: list[AttemptRecord] = []
+    self._attempt_options = options
+
+    def _run(run_preopts, run_options):
+      # Remember the options of the latest run so the attempts event names
+      # the encoder that actually ran (after any hw_alt / full_sw swap).
+      self._attempt_options = run_options
+      run_fn(run_preopts, run_options)
 
     def _ms(start: float) -> int:
       return int((time.monotonic() - start) * 1000)
@@ -4446,7 +4478,7 @@ class MediaProcessor:
         self.removeFile(outputfile)
       t_rescue = time.monotonic()
       try:
-        run_fn(rescue_preopts, rescue_options)
+        _run(rescue_preopts, rescue_options)
         records.append(AttemptRecord(tier="sw_decode_hw_encode", failure_class=None, duration_ms=_ms(t_rescue)))
         self._emit_attempt_log(records, "ok")
         return True
@@ -4457,7 +4489,7 @@ class MediaProcessor:
     # Tier 1: hardware
     t0 = time.monotonic()
     try:
-      run_fn(preopts, options)
+      _run(preopts, options)
       records.append(AttemptRecord(tier="hw", failure_class=None, duration_ms=_ms(t0)))
       self._emit_attempt_log(records, "ok")
       return
@@ -4495,7 +4527,7 @@ class MediaProcessor:
         self.removeFile(outputfile)
       t_alt = time.monotonic()
       try:
-        run_fn(retry_preopts_alt, retry_options_alt)
+        _run(retry_preopts_alt, retry_options_alt)
         records.append(AttemptRecord(tier="hw_alt", failure_class=None, duration_ms=_ms(t_alt)))
         self._emit_attempt_log(records, "ok")
         return
@@ -4547,7 +4579,7 @@ class MediaProcessor:
         self.removeFile(outputfile)
       t1 = time.monotonic()
       try:
-        run_fn(retry_preopts, options)
+        _run(retry_preopts, options)
         records.append(AttemptRecord(tier="sw_decode", failure_class=None, duration_ms=_ms(t1)))
         self._emit_attempt_log(records, "ok")
         return
@@ -4589,7 +4621,7 @@ class MediaProcessor:
       self.removeFile(outputfile)
     t2 = time.monotonic()
     try:
-      run_fn(sw_preopts, options)
+      _run(sw_preopts, options)
       records.append(AttemptRecord(tier="full_sw", failure_class=None, duration_ms=_ms(t2)))
       self._emit_attempt_log(records, "ok")
       return
@@ -4630,9 +4662,12 @@ class MediaProcessor:
     Single-line per :doc:`brainstorming/2026-04-27-logging-refactor`; new
     structured fields go in the JSON payload, not multiple log records.
     """
+    encoder_name, encoder_backend = _resolve_encoder(getattr(self, "_attempt_options", None))
     payload = {
       "event": "ffmpeg.attempts",
       "result": result,
+      "encoder_name": encoder_name,
+      "encoder_backend": encoder_backend,
       "attempts": [
         {
           "tier": r.tier,
