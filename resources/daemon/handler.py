@@ -228,12 +228,16 @@ _SKIP_MESSAGES = {
 }
 
 
+# Upper bound for GET /jobs `limit`.
+MAX_JOBS_LIMIT = 500
+
+
 def _public_job(job):
   """Shape a job row for API responses: always a kind, never the stored output."""
   job.setdefault("kind", job_kinds.DEFAULT_KIND)
   if not job.get("kind"):
     job["kind"] = job_kinds.DEFAULT_KIND
-  for column in JOB_OUTPUT_COLUMNS:
+  for column in (*JOB_OUTPUT_COLUMNS, "ffmpeg_stderr"):
     job.pop(column, None)
   return job
 
@@ -469,6 +473,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     if search:
       offset = 0
       limit = max(limit, 200)
+    limit = min(limit, MAX_JOBS_LIMIT)
     jobs = self.server.job_db.get_jobs(
       status=status,
       config=config,
@@ -946,7 +951,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
   def _post_cleanup(self, query):
     days = self._query_int(query, "days", 30)
-    deleted = self.server.job_db.cleanup_old_jobs(days)
+    # Never prune a finished job that still blocks re-queueing its path.
+    protect = self.server.path_config_manager.job_dedupe_window_seconds
+    deleted = self.server.job_db.cleanup_old_jobs(days, protect_seconds=protect)
     self.send_json_response(200, {"deleted": deleted, "days": days})
 
   def _parse_job_id(self, path, segment=-2):

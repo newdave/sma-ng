@@ -20,6 +20,7 @@ from resources.daemon.constants import (
   AUDIT_UNIT_ERROR,
   AUDIT_UNIT_PENDING,
   SECRET_KEYS,
+  STATUS_CANCELLED,
   STATUS_COMPLETED,
   STATUS_FAILED,
   STATUS_OPEN,
@@ -117,6 +118,32 @@ _JOB_OUTPUT_MAX_BYTES = 1024 * 1024
 
 # Never returned by job list/detail responses; read through GET /jobs/{id}/output.
 JOB_OUTPUT_COLUMNS = ("output", "output_dropped")
+
+# Columns returned by job list responses. Explicit so the large text blobs
+# (ffmpeg_stderr, output; up to 1 MiB each) never travel with a list query;
+# read them through GET /jobs/{id}/ffmpeg-stderr and /jobs/{id}/output.
+JOB_LIST_COLUMNS = (
+  "id",
+  "path",
+  "config",
+  "args",
+  "status",
+  "worker_id",
+  "node_id",
+  "error",
+  "created_at",
+  "started_at",
+  "completed_at",
+  "retry_count",
+  "max_retries",
+  "next_attempt_at",
+  "priority",
+  "input_size_bytes",
+  "output_size_bytes",
+  "kind",
+  *(name for name, _sqlite, _pg in _METRICS_EXPANSION_COLUMNS),
+)
+_JOB_LIST_SELECT = ", ".join(JOB_LIST_COLUMNS)
 
 
 def _append_output_tail(old, text, dropped):
@@ -801,7 +828,7 @@ class SQLiteJobDatabase:
       return dict(row) if row else None
 
   def get_jobs(self, status=None, config=None, path=None, profile=None, sort=None, limit=100, offset=0):
-    query = "SELECT * FROM jobs WHERE 1=1"
+    query = "SELECT " + _JOB_LIST_SELECT + " FROM jobs WHERE 1=1"
     params = []
     if status:
       query += " AND status = ?"
@@ -833,13 +860,26 @@ class SQLiteJobDatabase:
     with self._conn() as conn:
       return [dict(r) for r in conn.execute("SELECT * FROM jobs WHERE status = ?", (STATUS_RUNNING,)).fetchall()]
 
-  def cleanup_old_jobs(self, days=30):
-    cutoff = (datetime.now(UTC) - timedelta(days=days)).replace(microsecond=0).isoformat()
+  def cleanup_old_jobs(self, days=30, protect_seconds=0):
+    """Delete completed, failed and cancelled jobs older than *days*, and stale scanned_files rows.
+
+    *protect_seconds* is a floor on the age cutoff (the dedupe window), so a
+    finished job that still blocks re-queueing is never removed. Returns the
+    number of jobs deleted.
+    """
+    age = timedelta(seconds=max(days * 86400, protect_seconds))
+    cutoff_dt = datetime.now(UTC) - age
+    cutoff = cutoff_dt.replace(microsecond=0).isoformat()
+    scan_cutoff = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
     with self._conn() as conn:
-      cur = conn.execute("DELETE FROM jobs WHERE status IN (?, ?) AND completed_at < ?", (STATUS_COMPLETED, STATUS_FAILED, cutoff))
+      cur = conn.execute(
+        "DELETE FROM jobs WHERE status IN (?, ?, ?) AND completed_at < ?",
+        (STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED, cutoff),
+      )
       deleted = cur.rowcount
-    if deleted > 0:
-      self.log.info("Cleaned up %d old jobs" % deleted)
+      scanned = conn.execute("DELETE FROM scanned_files WHERE scanned_at < ?", (scan_cutoff,)).rowcount
+    if deleted > 0 or scanned > 0:
+      self.log.info("Cleaned up %d old jobs and %d scanned file records" % (deleted, max(scanned, 0)))
     return deleted
 
   def pending_count(self):
@@ -1749,7 +1789,7 @@ class PostgreSQLJobDatabase:
 
   def get_jobs(self, status=None, config=None, path=None, profile=None, sort=None, limit=100, offset=0):
     """Get jobs with optional filtering and sort order."""
-    query = "SELECT * FROM jobs WHERE 1=1"
+    query = "SELECT " + _JOB_LIST_SELECT + " FROM jobs WHERE 1=1"
     params = []
     if status:
       query += " AND status = %s"
@@ -1997,21 +2037,29 @@ class PostgreSQLJobDatabase:
         cur.execute("SELECT * FROM jobs WHERE status = %s", (STATUS_RUNNING,))
         return [dict(r) for r in cur.fetchall()]
 
-  def cleanup_old_jobs(self, days=30):
-    """Remove completed/failed jobs older than specified days."""
+  def cleanup_old_jobs(self, days=30, protect_seconds=0):
+    """Delete completed, failed and cancelled jobs older than *days*, and stale scanned_files rows.
+
+    *protect_seconds* is a floor on the age cutoff (the dedupe window), so a
+    finished job that still blocks re-queueing is never removed. Returns the
+    number of jobs deleted.
+    """
+    seconds = max(days * 86400, protect_seconds)
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
           """
                     DELETE FROM jobs
-                    WHERE status IN (%s, %s)
-                    AND completed_at < NOW() - make_interval(days => %s)
+                    WHERE status IN (%s, %s, %s)
+                    AND completed_at < NOW() - make_interval(secs => %s)
                 """,
-          (STATUS_COMPLETED, STATUS_FAILED, days),
+          (STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED, seconds),
         )
         deleted = cur.rowcount
-    if deleted > 0:
-      self.log.info("Cleaned up %d old jobs" % deleted)
+        cur.execute("DELETE FROM scanned_files WHERE scanned_at < NOW() - make_interval(secs => %s)", (seconds,))
+        scanned = cur.rowcount
+    if deleted > 0 or scanned > 0:
+      self.log.info("Cleaned up %d old jobs and %d scanned file records" % (deleted, max(scanned or 0, 0)))
     return deleted
 
   def pending_count(self):

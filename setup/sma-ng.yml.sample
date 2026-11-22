@@ -19,6 +19,7 @@ daemon:
   recycle-bin-max-age-days: 30
   recycle-bin-min-free-gb: 50
   job-dedupe-window-seconds: 21600
+  job-retention-days: 30
   log-ttl-days: 30
   node-expiry-days: 7
   log-archive-dir: ''

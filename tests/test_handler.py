@@ -829,13 +829,15 @@ class TestGetStatus:
 class TestPostCleanup:
   def test_default_days_is_30(self):
     h = _make_handler(method="POST", path="/cleanup")
+    h.server.path_config_manager.job_dedupe_window_seconds = 0
     h._post_cleanup({})
-    h.server.job_db.cleanup_old_jobs.assert_called_once_with(30)
+    h.server.job_db.cleanup_old_jobs.assert_called_once_with(30, protect_seconds=0)
 
   def test_custom_days(self):
     h = _make_handler(method="POST", path="/cleanup")
+    h.server.path_config_manager.job_dedupe_window_seconds = 0
     h._post_cleanup({"days": ["7"]})
-    h.server.job_db.cleanup_old_jobs.assert_called_once_with(7)
+    h.server.job_db.cleanup_old_jobs.assert_called_once_with(7, protect_seconds=0)
 
   def test_returns_deleted_count(self):
     h = _make_handler(method="POST", path="/cleanup")

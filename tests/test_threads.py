@@ -521,7 +521,9 @@ class TestHeartbeatThread:
     db = mock.MagicMock()
     db.is_distributed = False
     ht = _make_heartbeat(job_db=db)
+    ht.running = False
     ht.run()  # should return without blocking
+    db.heartbeat.assert_not_called()
 
   def test_run_calls_heartbeat_each_iteration(self):
     db = mock.MagicMock()
@@ -728,8 +730,10 @@ class TestHeartbeatThread:
     db.heartbeat.return_value = None
     db.recover_stale_nodes.return_value = []
     ht = _make_heartbeat(job_db=db)
-    ht.run()  # exits immediately
+    ht._stop_event.wait = lambda timeout=None: setattr(ht, "running", False)
+    ht.run()  # one maintenance-only tick
     db.poll_node_command.assert_not_called()
+    db.heartbeat.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1181,9 +1185,36 @@ class TestHeartbeatMaintenanceThrottle:
     server.path_config_manager.log_archive_dir = "/archive"
     server.path_config_manager.log_archive_after_days = 7
     server.path_config_manager.log_delete_after_days = 30
+    server.path_config_manager.job_retention_days = 30
+    server.path_config_manager.job_dedupe_window_seconds = 21600
     ht = _make_heartbeat(job_db=db, server=server)
     ht.log_ttl_days = 14
     return ht
+
+  def test_maintenance_prunes_jobs_with_dedupe_protection(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    ht = self._ht(db)
+    with mock.patch("resources.daemon.threads.LogArchiver"):
+      ht._maybe_run_maintenance()
+    db.cleanup_old_jobs.assert_called_once_with(30, protect_seconds=21600)
+
+  def test_maintenance_skips_job_pruning_when_retention_zero(self):
+    db = mock.MagicMock()
+    db.is_distributed = True
+    ht = self._ht(db)
+    ht.server.path_config_manager.job_retention_days = 0
+    with mock.patch("resources.daemon.threads.LogArchiver"):
+      ht._maybe_run_maintenance()
+    db.cleanup_old_jobs.assert_not_called()
+
+  def test_sqlite_backend_still_runs_maintenance(self):
+    db = mock.MagicMock()
+    db.is_distributed = False
+    ht = self._ht(db)
+    self._run_ticks(ht, 2)
+    db.heartbeat.assert_not_called()
+    db.cleanup_old_jobs.assert_called_once_with(30, protect_seconds=21600)
 
   def test_maintenance_runs_once_across_many_heartbeats(self):
     db = mock.MagicMock()

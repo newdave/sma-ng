@@ -16,6 +16,7 @@ STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
+STATUS_CANCELLED = "cancelled"
 
 # Library-audit finding lifecycle (see resources/library_audit/).
 STATUS_OPEN = "open"

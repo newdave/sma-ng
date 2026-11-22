@@ -54,9 +54,14 @@ class HeartbeatThread(_StoppableThread):
     self._last_maintenance = None
 
   def run(self):
-    if not self.job_db.is_distributed:
-      return  # Heartbeat only meaningful for the shared PG backend
+    # Heartbeat and stale-node recovery only mean something for the shared PG
+    # backend; the SQLite backend still needs the housekeeping sweeps.
+    distributed = self.job_db.is_distributed
     while self.running:
+      if not distributed:
+        self._maybe_run_maintenance()
+        self._stop_event.wait(timeout=self.interval)
+        continue
       try:
         self.job_db.heartbeat(
           self.node_id,
@@ -87,7 +92,7 @@ class HeartbeatThread(_StoppableThread):
       self._stop_event.wait(timeout=self.interval)
 
   def _maybe_run_maintenance(self):
-    """Run log TTL cleanup, offline-node expiry and log archival at most hourly.
+    """Run job retention, log TTL cleanup, offline-node expiry and log archival at most hourly.
 
     These are housekeeping sweeps over whole tables; running them on every
     30s heartbeat on every node only adds DB load. The first heartbeat runs
@@ -114,6 +119,13 @@ class HeartbeatThread(_StoppableThread):
           archiver.run(self.job_db)
     except Exception:
       self.log.exception("Heartbeat maintenance error")
+    try:
+      pcm = self.server.path_config_manager
+      if pcm.job_retention_days > 0:
+        # cleanup_old_jobs never deletes a job younger than the dedupe window.
+        self.job_db.cleanup_old_jobs(pcm.job_retention_days, protect_seconds=pcm.job_dedupe_window_seconds)
+    except Exception:
+      self.log.exception("Job retention error")
 
   def _execute_command(self, cmd: dict) -> bool:
     """Execute a cluster command. Returns True if the heartbeat loop should exit."""
