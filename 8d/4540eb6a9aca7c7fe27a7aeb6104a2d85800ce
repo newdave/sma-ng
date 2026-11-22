@@ -1,0 +1,29 @@
+.claude/settings.json
+  s_0dfbaafa8a9096::t_efa4e29112d071 57-58,60-70
+  s_4390c29f4f2c35::t_9849556a722bd0 59
+  s_0dfbaafa8a9096::t_9df640ce20a953 71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "8d4540eb6a9aca7c7fe27a7aeb6104a2d85800ce",
+  "prompts": {},
+  "sessions": {
+    "s_0dfbaafa8a9096": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c5fdd10-eba3-494c-834e-f80b063163f4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": null
+    },
+    "s_4390c29f4f2c35": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef08ae31-b5d1-44d2-8994-dda5e608a571",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
