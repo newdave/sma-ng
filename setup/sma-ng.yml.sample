@@ -12,6 +12,7 @@ daemon:
   username: ''
   password: ''
   job-timeout-seconds: 7200
+  shutdown-grace-seconds: 100
   heartbeat-interval: 30
   stale-seconds: 120
   progress-log-interval: 30

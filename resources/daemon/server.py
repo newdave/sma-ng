@@ -528,6 +528,11 @@ class DaemonServer(ThreadingHTTPServer):
 
   def _drain_deadline_seconds(self):
     """Upper bound on how long shutdown/restart waits for in-flight jobs."""
+    grace = getattr(getattr(self, "path_config_manager", None), "shutdown_grace_seconds", 0)
+    if isinstance(grace, int) and not isinstance(grace, bool) and grace > 0:
+      # Operator cap, kept below the compose stop_grace_period so jobs are
+      # requeued before Docker's SIGKILL.
+      return grace
     timeouts = [getattr(w, "job_timeout_seconds", 0) for w in getattr(self.worker_pool, "_workers", [])]
     timeouts = [t for t in timeouts if isinstance(t, int) and t > 0]
     if timeouts:
@@ -568,7 +573,9 @@ class DaemonServer(ThreadingHTTPServer):
   def _stop_and_drain(self, action):
     """Shared shutdown/restart sequence: stop threads, drain workers, go offline."""
     self.worker_pool.stop()
-    self.heartbeat_thread.stop()
+    # The heartbeat keeps running through the drain: stopping it first let
+    # other nodes declare this node stale and requeue jobs that were still
+    # converting. It is stopped once the workers have exited.
     self.scanner_thread.stop()
     self.recycle_cleaner_thread.stop()
     self.storage_janitor_thread.stop()
@@ -579,6 +586,7 @@ class DaemonServer(ThreadingHTTPServer):
 
     self._drain_workers(self._drain_deadline_seconds())
     self.logger.info("All workers finished, %s." % action)
+    self.heartbeat_thread.stop()
 
     # Mark this node offline in the cluster table. Do NOT remove the row —
     # that drops approval_status and the operator would have to re-approve

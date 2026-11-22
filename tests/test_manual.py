@@ -473,6 +473,38 @@ class TestProcessFile:
           result = processFile("/file.mp4", mp, info=MagicMock())
     assert result is True
 
+  def test_emits_source_and_dest_job_summary_events(self):
+    mp = self._make_mp()
+    out_info = TestJobSummaryEvent._info(codec="h264", transfer="bt709", duration=60.0)
+    mp.converter.probe.return_value = out_info
+    mp.process.return_value = {
+      "output": "/out/file.mp4",
+      "input": "/file.mp4",
+      "input_deleted": False,
+      "delete": False,
+      "external_subs": [],
+      "options": {},
+      "x": 1920,
+      "y": 1080,
+      "cues_to_front": False,
+    }
+    mp.replicate.return_value = ["/out/file.mp4"]
+    mp.getDefaultAudioLanguage.return_value = None
+    mp.restoreFromOutput.return_value = "/out/file.mp4"
+    with patch("manual.getInfo", return_value=None), patch("manual._find_arr_instance", return_value=(None, None)), patch("manual.triggerRescan", return_value=None):
+      with patch("manual.emit_job_summary") as emit:
+        processFile("/file.mp4", mp, info=TestJobSummaryEvent._info())
+    assert emit.call_args_list[0].args[0].video.codec == "hevc"
+    assert emit.call_args_list[1].kwargs["dest_info"] is out_info
+    mp.converter.probe.assert_called_once_with("/out/file.mp4")
+
+  def test_failed_conversion_still_emits_source_summary(self):
+    mp = self._make_mp()
+    mp.process.return_value = None
+    with patch("manual.getInfo", return_value=None), patch("manual.emit_job_summary") as emit:
+      assert processFile("/file.mp4", mp, info=MagicMock()) is False
+    emit.assert_called_once()
+
   def test_tagonly_writes_tags(self):
     mp = self._make_mp()
     mock_tagdata = MagicMock()
@@ -785,10 +817,12 @@ class TestMain:
 
     token = _job_id.set("-")
     try:
+      # Patched so the process-wide SMA_LEVEL= flag does not leak into later tests.
       with patch("sys.argv", ["manual.py", "-cl", "--job-id", "42"]):
-        with patch("manual.showCodecs"):
+        with patch("manual.showCodecs"), patch("manual.enable_level_token") as enable:
           main()
       assert _job_id.get() == "42"
+      enable.assert_called_once_with()
     finally:
       _job_id.reset(token)
 
@@ -1108,6 +1142,75 @@ class TestPromptsWithoutInput:
 
     with patch("builtins.input", side_effect=["maybe", "y"]):
       assert manual.getYesNo() is True
+
+
+class TestJobSummaryEvent:
+  @staticmethod
+  def _info(codec="hevc", transfer="smpte2084", duration=60.0):
+    from converter.ffmpeg import MediaInfo, MediaStreamInfo
+
+    info = MediaInfo()
+    v = MediaStreamInfo()
+    v.type = "video"
+    v.codec = codec
+    v.video_width = 3840
+    v.video_height = 2160
+    v.color = {"transfer": transfer}
+    a = MediaStreamInfo()
+    a.type = "audio"
+    a.codec = "eac3"
+    a.audio_channels = 6
+    info.streams = [v, a]
+    info.format.duration = duration
+    return info
+
+  def test_media_facts_maps_streams_and_hdr(self):
+    from manual import media_facts
+
+    assert media_facts(self._info()) == {
+      "video_codec": "hevc",
+      "video_width": 3840,
+      "video_height": 2160,
+      "audio_codec": "eac3",
+      "audio_channels": 6,
+      "hdr": "hdr10",
+    }
+    assert media_facts(self._info(transfer="arib-std-b67"))["hdr"] == "hlg"
+    assert media_facts(self._info(transfer="bt709"))["hdr"] == "sdr"
+    assert media_facts(None) is None
+
+  def test_emit_job_summary_logs_single_line_compact_json(self):
+    from manual import emit_job_summary
+
+    with patch("manual.log") as log:
+      emit_job_summary(self._info(), self._info(codec="h264", transfer="bt709"))
+    line = log.info.call_args[0][0]
+    assert "\n" not in line
+    payload = json.loads(line)
+    assert payload["event"] == "sma.job.summary"
+    assert payload["source"]["video_codec"] == "hevc"
+    assert payload["dest"]["video_codec"] == "h264"
+    assert payload["duration_seconds"] == 60.0
+    assert '"event":"sma.job.summary"' in line
+
+  def test_emit_job_summary_skips_empty_event(self):
+    from manual import emit_job_summary
+
+    with patch("manual.log") as log:
+      emit_job_summary()
+    log.info.assert_not_called()
+
+  def test_worker_parses_what_manual_emits(self):
+    from manual import emit_job_summary
+    from tests.test_worker import _make_worker
+
+    with patch("manual.log") as log:
+      emit_job_summary(self._info(), self._info(codec="h264", transfer="bt709"))
+    worker = _make_worker()
+    worker._record_job_summary(log.info.call_args[0][0])
+    assert worker._job_telemetry["source_video_codec"] == "hevc"
+    assert worker._job_telemetry["dest_video_codec"] == "h264"
+    assert worker._job_telemetry["source_duration_seconds"] == 60.0
 
 
 # ---------------------------------------------------------------------------

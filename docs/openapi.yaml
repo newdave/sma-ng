@@ -130,6 +130,66 @@ components:
           type: string
           nullable: true
           description: Log file stem for the config used by this job (e.g. "sma-ng")
+        encoder_backend:
+          type: string
+          nullable: true
+          description: "Encoder backend that produced the output: qsv, vaapi, nvenc, videotoolbox, amf, software or copy"
+        encoder_name:
+          type: string
+          nullable: true
+          description: Video encoder (codec name) that produced the output, after any fallback swap
+        source_duration_seconds:
+          type: number
+          nullable: true
+          description: Source duration in seconds
+        source_video_codec:
+          type: string
+          nullable: true
+          description: Source video codec (ffprobe name)
+        source_video_width:
+          type: integer
+          nullable: true
+          description: Source video width in pixels
+        source_video_height:
+          type: integer
+          nullable: true
+          description: Source video height in pixels
+        source_audio_codec:
+          type: string
+          nullable: true
+          description: First source audio stream codec
+        source_audio_channels:
+          type: integer
+          nullable: true
+          description: First source audio stream channel count
+        source_hdr:
+          type: string
+          nullable: true
+          description: "Source dynamic range: sdr, hdr10, hdr10plus, dolby_vision or hlg. Dolby Vision and HDR10+ show only when the probe exposes their side data, otherwise hdr10"
+        dest_video_codec:
+          type: string
+          nullable: true
+          description: Output video codec
+        dest_video_width:
+          type: integer
+          nullable: true
+          description: Output video width in pixels
+        dest_video_height:
+          type: integer
+          nullable: true
+          description: Output video height in pixels
+        dest_audio_codec:
+          type: string
+          nullable: true
+          description: First output audio stream codec
+        dest_audio_channels:
+          type: integer
+          nullable: true
+          description: First output audio stream channel count
+        dest_hdr:
+          type: string
+          nullable: true
+          description: "Output dynamic range: sdr, hdr10, hdr10plus, dolby_vision or hlg. Dolby Vision and HDR10+ show only when the probe exposes their side data, otherwise hdr10"
 
     JobStats:
       type: object

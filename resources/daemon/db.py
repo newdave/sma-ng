@@ -3,6 +3,7 @@ import json
 import os
 import sqlite3
 import threading
+import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote, urlparse
@@ -104,6 +105,35 @@ _METRICS_EXPANSION_COLUMNS: tuple[tuple[str, str, str], ...] = (
   ("request_profile", "TEXT", "TEXT"),
 )
 
+# Per-job media telemetry columns written by complete_job/fail_job from the
+# worker's parsed ``sma.job.summary`` event. Whitelisted: names are spliced
+# into SQL, so only these may ever be assigned.
+TELEMETRY_COLUMNS: tuple[str, ...] = (
+  "source_video_codec",
+  "source_video_width",
+  "source_video_height",
+  "source_audio_codec",
+  "source_audio_channels",
+  "source_hdr",
+  "dest_video_codec",
+  "dest_video_width",
+  "dest_video_height",
+  "dest_audio_codec",
+  "dest_audio_channels",
+  "dest_hdr",
+)
+
+
+def _telemetry_sets(telemetry, placeholder):
+  """Return ``(sql_fragment, params)`` assigning the non-None telemetry values.
+
+  The fragment is empty or starts with ``", "`` so it can be appended to an
+  existing ``SET`` list. Unknown keys are ignored.
+  """
+  cols = [c for c in TELEMETRY_COLUMNS if telemetry and telemetry.get(c) is not None]
+  return "".join(", %s = %s" % (c, placeholder) for c in cols), [telemetry[c] for c in cols]
+
+
 # Job kinds and captured tool output (docs/prps/sma-cli-container-runtime.md).
 # Kept apart from _METRICS_EXPANSION_COLUMNS, whose tests pin its exact list.
 _JOB_KIND_COLUMNS: tuple[tuple[str, str, str], ...] = (
@@ -111,6 +141,8 @@ _JOB_KIND_COLUMNS: tuple[tuple[str, str, str], ...] = (
   ("kind", "TEXT DEFAULT 'convert'", "TEXT DEFAULT 'convert'"),
   ("output", "TEXT", "TEXT"),
   ("output_dropped", "INTEGER DEFAULT 0", "BIGINT DEFAULT 0"),
+  # Random token set on every claim; a stale run of a requeued job cannot finalise a later claim.
+  ("claim_token", "TEXT", "TEXT"),
 )
 
 # Keep the newest 1 MiB of a job's stdout (same budget as ffmpeg_stderr).
@@ -324,6 +356,17 @@ def _budget_exhausted_profiles(conn, profile_costs, budget, *, is_sqlite):
   return {name for name, cost in profile_costs.items() if int(cost) > remaining}
 
 
+def _with_claim_token(job, claim_token):
+  """Stamp the token this claim wrote onto the re-read row.
+
+  The re-read happens after the claim commits, so a requeue plus re-claim in
+  between would hand this worker the other claim's token.
+  """
+  if job is not None:
+    job["claim_token"] = claim_token
+  return job
+
+
 def _priority_weight_sql_clause(profile_weights, *, is_sqlite):
   """Return ``(sql_expression, [bound_params])`` for the additive
   priority-weight expression used in the ``claim_next_job`` ORDER BY.
@@ -423,14 +466,33 @@ def _backfill_request_profile(conn, *, is_sqlite, logger=None):
   return len(updates)
 
 
-def _owner_guard(node_id, placeholder):
+# claim_token value meaning "this run holds no token": the row must carry none either.
+# None (the default) means the caller does not check the token at all (admin cancel, node recovery).
+NO_CLAIM_TOKEN = ""  # nosec B105 - sentinel, not a credential
+
+
+def _owner_guard(node_id, placeholder, claim_token=None):
   """SQL fragment restricting an UPDATE to rows still claimed by *node_id*.
 
-  Rows with a NULL node_id (legacy start_job path) are accepted.
+  Rows with a NULL node_id (legacy start_job path) are accepted. When
+  *claim_token* is given the row must also carry exactly that token, so a
+  stale run cannot finalise a job another worker on the same node re-claimed
+  after a requeue. NO_CLAIM_TOKEN requires the row to carry no token; None
+  skips the token check.
   """
-  if not node_id:
-    return "", ()
-  return " AND (node_id IS NULL OR node_id = %s)" % placeholder, (node_id,)
+  sql = ""
+  params = ()
+  if node_id:
+    sql += " AND (node_id IS NULL OR node_id = %s)" % placeholder
+    params += (node_id,)
+  if claim_token is None:
+    pass
+  elif claim_token == NO_CLAIM_TOKEN:
+    sql += " AND claim_token IS NULL"
+  else:
+    sql += " AND claim_token = %s" % placeholder
+    params += (claim_token,)
+  return sql, params
 
 
 class SQLiteJobDatabase:
@@ -631,6 +693,7 @@ class SQLiteJobDatabase:
     kinds=None,
   ):
     now = _utc_now()
+    claim_token = uuid.uuid4().hex
     with self._conn() as conn:
       over_capped = _profiles_at_cap(conn, profile_caps, is_sqlite=True)
       over_budget = _budget_exhausted_profiles(conn, profile_costs, concurrency_budget, is_sqlite=True)
@@ -658,11 +721,14 @@ class SQLiteJobDatabase:
       if row is None:
         return None
       job_id = row["id"]
-      conn.execute(
-        "UPDATE jobs SET status = ?, worker_id = ?, node_id = ?, started_at = ? WHERE id = ?",
-        (STATUS_RUNNING, worker_id, node_id, now, job_id),
+      # Conditional claim: only a still-pending row is taken, and the rowcount proves it.
+      cur = conn.execute(
+        "UPDATE jobs SET status = ?, worker_id = ?, node_id = ?, started_at = ?, claim_token = ? WHERE id = ? AND status = ?",
+        (STATUS_RUNNING, worker_id, node_id, now, claim_token, job_id, STATUS_PENDING),
       )
-    return self.get_job(job_id)
+      if cur.rowcount == 0:
+        return None
+    return _with_claim_token(self.get_job(job_id), claim_token)
 
   def get_pending_jobs(self):
     with self._conn() as conn:
@@ -687,11 +753,14 @@ class SQLiteJobDatabase:
     encoder_backend=None,
     encoder_name=None,
     node_id=None,
+    telemetry=None,
+    claim_token=None,
   ):
     """Mark a running job completed. Returns False if the row was no longer
     running (cancelled/requeued) or, when *node_id* is given, is now owned
     by a different node — the caller's result is then discarded."""
-    owner_sql, owner_params = _owner_guard(node_id, "?")
+    owner_sql, owner_params = _owner_guard(node_id, "?", claim_token)
+    tel_sql, tel_params = _telemetry_sets(telemetry, "?")
     with self._conn() as conn:
       cur = conn.execute(
         """UPDATE jobs
@@ -701,7 +770,9 @@ class SQLiteJobDatabase:
                   output_size_bytes = ?,
                   source_duration_seconds = ?,
                   encoder_backend = ?,
-                  encoder_name = ?
+                  encoder_name = ?"""
+        + tel_sql
+        + """
             WHERE id = ? AND status = ?"""
         + owner_sql,
         (
@@ -712,6 +783,7 @@ class SQLiteJobDatabase:
           source_duration_seconds,
           encoder_backend,
           encoder_name,
+          *tel_params,
           job_id,
           STATUS_RUNNING,
           *owner_params,
@@ -761,34 +833,85 @@ class SQLiteJobDatabase:
     """Single-node SQLite deployments have no peers to gate on."""
     return []
 
-  def defer_job(self, job_id, delay_seconds, reason=None):
+  def defer_job(self, job_id, delay_seconds, reason=None, node_id=None, claim_token=None):
     """Push a running job back to pending with a delay, without bumping retry_count.
 
     Used by the worker's pre-ffmpeg gates (e.g. output-filesystem pressure)
-    that want to defer the job instead of consuming a retry slot.
+    that want to defer the job instead of consuming a retry slot. Returns
+    False without writing when the row is no longer running under the given
+    node/claim token (a stale run must not reset a re-claimed row).
     """
     now = datetime.now(UTC).replace(microsecond=0)
     next_attempt = (now + timedelta(seconds=max(int(delay_seconds), 0))).isoformat()
+    owner_sql, owner_params = _owner_guard(node_id, "?", claim_token)
     with self._conn() as conn:
-      conn.execute(
+      cur = conn.execute(
         """
         UPDATE jobs
         SET status = ?, next_attempt_at = ?, error = ?,
-            started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
-        WHERE id = ?
-        """,
-        (STATUS_PENDING, next_attempt, reason, job_id),
+            started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL, claim_token = NULL
+        WHERE id = ? AND status = ?
+        """
+        + owner_sql,
+        (STATUS_PENDING, next_attempt, reason, job_id, STATUS_RUNNING, *owner_params),
       )
-    self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay_seconds, reason or ""))
+      deferred = cur.rowcount > 0
+    if deferred:
+      self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay_seconds, reason or ""))
+    return deferred
 
-  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None):
+  def requeue_interrupted_job(self, job_id, reason, node_id=None, claim_token=None):
+    """Return a running job to pending after the daemon (or a signal) killed its conversion.
+
+    Does not bump retry_count and applies no delay: the job did not fail, it was
+    interrupted. *reason* (the exit code / signal) is kept in jobs.error for the
+    operator. Returns False without writing when the row is no longer running on
+    this node (cancelled, or already requeued by node recovery).
+    """
+    owner_sql, owner_params = _owner_guard(node_id, "?", claim_token)
+    with self._conn() as conn:
+      cur = conn.execute(
+        """
+        UPDATE jobs
+        SET status = ?, error = ?, started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL,
+            claim_token = NULL
+        WHERE id = ? AND status = ?
+        """
+        + owner_sql,
+        (STATUS_PENDING, reason, job_id, STATUS_RUNNING, *owner_params),
+      )
+      requeued = cur.rowcount > 0
+      if requeued:
+        _backfill_one_request_profile(conn, job_id, is_sqlite=True)
+    if requeued:
+      self.log.info("Job %d requeued after interruption: %s" % (job_id, reason))
+    return requeued
+
+  def find_orphaned_running_jobs(self, node_id, exclude_ids, older_than_seconds):
+    """Running rows claimed by *node_id* that no local worker holds, started over *older_than_seconds* ago.
+
+    Returns ``[{"id", "claim_token"}]``. Rows of other nodes, rows in *exclude_ids*
+    and rows with no started_at are never returned.
+    """
+    cutoff = (datetime.now(UTC) - timedelta(seconds=older_than_seconds)).replace(microsecond=0).isoformat()
+    sql = "SELECT id, claim_token FROM jobs WHERE status = ? AND node_id = ? AND started_at IS NOT NULL AND started_at < ?"
+    params = [STATUS_RUNNING, node_id, cutoff]
+    exclude = sorted(exclude_ids or ())
+    if exclude:
+      sql += " AND id NOT IN (%s)" % ", ".join("?" for _ in exclude)
+      params.extend(exclude)
+    with self._conn() as conn:
+      rows = conn.execute(sql, params).fetchall()
+    return [{"id": r["id"], "claim_token": r["claim_token"]} for r in rows]
+
+  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None, telemetry=None, source_duration_seconds=None, claim_token=None):
     """Fail (or requeue with backoff) a running job.
 
     Returns False without touching the row when it is no longer running
     (cancelled/requeued) or, when *node_id* is given, owned by another node.
     """
     now = datetime.now(UTC).replace(microsecond=0)
-    owner_sql, owner_params = _owner_guard(node_id, "?")
+    owner_sql, owner_params = _owner_guard(node_id, "?", claim_token)
     with self._conn() as conn:
       row = conn.execute(
         "SELECT retry_count, max_retries FROM jobs WHERE id = ? AND status = ?" + owner_sql,
@@ -820,6 +943,13 @@ class SQLiteJobDatabase:
           (STATUS_FAILED, error, now.isoformat(), failure_category, failure_cause, job_id),
         )
         self.log.debug("Job %d failed: %s" % (job_id, error))
+      # Keep what is known about the source even though the job failed.
+      tel_sql, tel_params = _telemetry_sets(telemetry, "?")
+      if source_duration_seconds is not None:
+        tel_sql += ", source_duration_seconds = ?"
+        tel_params.append(source_duration_seconds)
+      if tel_sql:
+        conn.execute("UPDATE jobs SET " + tel_sql[2:] + " WHERE id = ?", (*tel_params, job_id))
     return True
 
   def get_job(self, job_id):
@@ -1521,6 +1651,7 @@ class PostgreSQLJobDatabase:
     a single transaction. Any other node/worker that tries to claim the same row
     will skip it instantly due to SKIP LOCKED, preventing duplicate processing.
     """
+    claim_token = uuid.uuid4().hex
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
@@ -1574,16 +1705,19 @@ class PostgreSQLJobDatabase:
         if row is None:
           return None
         job_id = row["id"]
+        # The row is locked by FOR UPDATE; the status guard and rowcount make the claim conditional anyway.
         cur.execute(
           """
                     UPDATE jobs
-                    SET status = %s, worker_id = %s, node_id = %s, started_at = NOW()
-                    WHERE id = %s
+                    SET status = %s, worker_id = %s, node_id = %s, started_at = NOW(), claim_token = %s
+                    WHERE id = %s AND status = %s
                 """,
-          (STATUS_RUNNING, worker_id, node_id, job_id),
+          (STATUS_RUNNING, worker_id, node_id, claim_token, job_id, STATUS_PENDING),
         )
+        if cur.rowcount == 0:
+          return None
     # Fetch the full job row outside the transaction for the caller
-    return self.get_job(job_id)
+    return _with_claim_token(self.get_job(job_id), claim_token)
 
   def get_pending_jobs(self):
     """Get all pending jobs ordered by creation time."""
@@ -1621,13 +1755,16 @@ class PostgreSQLJobDatabase:
     encoder_backend=None,
     encoder_name=None,
     node_id=None,
+    telemetry=None,
+    claim_token=None,
   ):
     """Mark a running job completed, optionally recording size + duration + encoder.
 
     Returns False when the row is no longer running (cancelled or requeued)
     or, when *node_id* is given, now belongs to another node.
     """
-    owner_sql, owner_params = _owner_guard(node_id, "%s")
+    owner_sql, owner_params = _owner_guard(node_id, "%s", claim_token)
+    tel_sql, tel_params = _telemetry_sets(telemetry, "%s")
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
@@ -1638,7 +1775,9 @@ class PostgreSQLJobDatabase:
                     output_size_bytes = %s,
                     source_duration_seconds = %s,
                     encoder_backend = %s,
-                    encoder_name = %s
+                    encoder_name = %s"""
+          + tel_sql
+          + """
               WHERE id = %s AND status = %s"""
           + owner_sql,
           (
@@ -1648,6 +1787,7 @@ class PostgreSQLJobDatabase:
             source_duration_seconds,
             encoder_backend,
             encoder_name,
+            *tel_params,
             job_id,
             STATUS_RUNNING,
             *owner_params,
@@ -1713,13 +1853,16 @@ class PostgreSQLJobDatabase:
         )
         return [row["name"] for row in cur.fetchall()]
 
-  def defer_job(self, job_id, delay_seconds, reason=None):
+  def defer_job(self, job_id, delay_seconds, reason=None, node_id=None, claim_token=None):
     """Push a running job back to pending with a delay, without bumping retry_count.
 
     Used by the worker's pre-ffmpeg gates (e.g. output-filesystem pressure)
-    that want to defer the job instead of consuming a retry slot.
+    that want to defer the job instead of consuming a retry slot. Returns
+    False without writing when the row is no longer running under the given
+    node/claim token (a stale run must not reset a re-claimed row).
     """
     delay = max(int(delay_seconds), 0)
+    owner_sql, owner_params = _owner_guard(node_id, "%s", claim_token)
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
@@ -1727,20 +1870,72 @@ class PostgreSQLJobDatabase:
           UPDATE jobs
           SET status = %s, error = %s,
               next_attempt_at = NOW() + interval '%s seconds',
-              started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
-          WHERE id = %s
-          """,
-          (STATUS_PENDING, reason, delay, job_id),
+              started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL, claim_token = NULL
+          WHERE id = %s AND status = %s
+          """
+          + owner_sql,
+          (STATUS_PENDING, reason, delay, job_id, STATUS_RUNNING, *owner_params),
         )
-    self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay, reason or ""))
+        deferred = cur.rowcount > 0
+    if deferred:
+      self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay, reason or ""))
+    return deferred
 
-  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None):
+  def requeue_interrupted_job(self, job_id, reason, node_id=None, claim_token=None):
+    """Return a running job to pending after the daemon (or a signal) killed its conversion.
+
+    Does not bump retry_count and applies no delay: the job did not fail, it was
+    interrupted. *reason* (the exit code / signal) is kept in jobs.error for the
+    operator. Returns False without writing when the row is no longer running on
+    this node (cancelled, or already requeued by node recovery).
+    """
+    owner_sql, owner_params = _owner_guard(node_id, "%s", claim_token)
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+          UPDATE jobs
+          SET status = %s, error = %s, started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL,
+              claim_token = NULL
+          WHERE id = %s AND status = %s
+          """
+          + owner_sql,
+          (STATUS_PENDING, reason, job_id, STATUS_RUNNING, *owner_params),
+        )
+        requeued = cur.rowcount > 0
+      if requeued:
+        _backfill_one_request_profile(conn, job_id, is_sqlite=False)
+    if requeued:
+      self.log.info("Job %d requeued after interruption: %s" % (job_id, reason))
+    return requeued
+
+  def find_orphaned_running_jobs(self, node_id, exclude_ids, older_than_seconds):
+    """Running rows claimed by *node_id* that no local worker holds, started over *older_than_seconds* ago.
+
+    Returns ``[{"id", "claim_token"}]``. Rows of other nodes, rows in *exclude_ids*
+    and rows with no started_at are never returned.
+    """
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+          SELECT id, claim_token FROM jobs
+          WHERE status = %s AND node_id = %s
+            AND started_at IS NOT NULL AND started_at < NOW() - make_interval(secs => %s)
+            AND id != ALL(%s)
+          """,
+          (STATUS_RUNNING, node_id, older_than_seconds, sorted(exclude_ids or ())),
+        )
+        rows = cur.fetchall()
+    return [{"id": r["id"], "claim_token": r["claim_token"]} for r in rows]
+
+  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None, telemetry=None, source_duration_seconds=None, claim_token=None):
     """Mark a running job as failed, or requeue with exponential backoff if retries remain.
 
     The row is locked and must still be running (and owned by *node_id*
     when given); otherwise nothing is written and False is returned.
     """
-    owner_sql, owner_params = _owner_guard(node_id, "%s")
+    owner_sql, owner_params = _owner_guard(node_id, "%s", claim_token)
     with self._conn() as conn:
       requeued = False
       with conn.cursor() as cur:
@@ -1775,6 +1970,13 @@ class PostgreSQLJobDatabase:
             (STATUS_FAILED, error, failure_category, failure_cause, job_id),
           )
           self.log.debug("Job %d failed: %s" % (job_id, error))
+        # Keep what is known about the source even though the job failed.
+        tel_sql, tel_params = _telemetry_sets(telemetry, "%s")
+        if source_duration_seconds is not None:
+          tel_sql += ", source_duration_seconds = %s"
+          tel_params.append(source_duration_seconds)
+        if tel_sql:
+          cur.execute("UPDATE jobs SET " + tel_sql[2:] + " WHERE id = %s", (*tel_params, job_id))
       if requeued:
         _backfill_one_request_profile(conn, job_id, is_sqlite=False)
     return True

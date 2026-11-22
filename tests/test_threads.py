@@ -517,12 +517,12 @@ def _make_heartbeat(job_db=None, server=None, interval=5, stale_seconds=60):
 
 
 class TestHeartbeatThread:
-  def test_run_exits_immediately_when_not_distributed(self):
+  def test_run_only_sweeps_when_not_distributed(self):
     db = mock.MagicMock()
     db.is_distributed = False
     ht = _make_heartbeat(job_db=db)
-    ht.running = False
-    ht.run()  # should return without blocking
+    ht.stop()  # stopped before run: returns without blocking
+    ht.run()
     db.heartbeat.assert_not_called()
 
   def test_run_calls_heartbeat_each_iteration(self):
@@ -730,9 +730,12 @@ class TestHeartbeatThread:
     db.heartbeat.return_value = None
     db.recover_stale_nodes.return_value = []
     ht = _make_heartbeat(job_db=db)
+    ht.sweep_orphaned_jobs = mock.MagicMock()
     ht._stop_event.wait = lambda timeout=None: setattr(ht, "running", False)
-    ht.run()  # one maintenance-only tick
+    ht.run()  # one sweep + maintenance-only tick
+    ht.sweep_orphaned_jobs.assert_called_once()
     db.poll_node_command.assert_not_called()
+    db.recover_stale_nodes.assert_not_called()
     db.heartbeat.assert_not_called()
 
 

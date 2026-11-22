@@ -387,11 +387,53 @@ conversion process tree and failed the job with cause `timeout` (category `syste
 unionfs reads, a hung GPU) or the encode is genuinely slow (4K software encode); raise the timeout or set it to `0`
 to disable it. See [Job timeout](daemon.md#job-timeout).
 
+### Job returned to pending with "Interrupted by SIGTERM (exit code -15); requeued"
+
+The conversion was killed by SIGTERM or SIGINT, usually the daemon's own shutdown during a deploy restart, so the job
+was requeued instead of failed and runs again on the next start. When `manual.py` exits on the signal itself the
+message reads `Interrupted by daemon shutdown (exit code 143); requeued` (`130` for SIGINT) and is handled the same
+way. Raise `daemon.shutdown-grace-seconds` (and the compose
+`STOP_GRACE_PERIOD`) to let long conversions finish before the restart, or run `cluster:drain` first. If a job
+keeps coming back with this message without a restart, an operator or another process is sending SIGTERM to ffmpeg.
+Deaths from other signals (the OOM killer's SIGKILL, a SIGSEGV crash) are not requeued: the job fails with
+`Conversion process failed: killed by signal 9 (exit code -9)` and goes through the normal retry/backoff; check
+`dmesg` and the container memory limit.
+
 ### "Job N completion discarded: job is no longer running on this node"
 
 The job finished, but its row had already been cancelled, requeued by stale-node recovery, or claimed by another
 node, so this node's result was dropped instead of overwriting the newer state. This is expected after a cancel
 or a network partition. A cancelled job's output may still exist on disk if ffmpeg finished before the kill landed.
+
+### Job returned to pending with "Interrupted by ErrorName before the job started; requeued"
+
+The database failed between claiming the job and starting the conversion, so the worker freed its slot and put the
+job back to pending without burning a retry. The write is retried with backoff. If it still fails, the log shows
+`Job N requeue write failed after 4 attempts` and the worker retries it after each job and on every loop pass, even
+while the node is paused or draining (`Job N pending requeue still failing`). Fix the database connection (see the
+surrounding error) rather than the job.
+
+A job is requeued this way at most 3 times in a row. If its start fails a fourth time, the log shows
+`Job N start failed 4 times in a row (ErrorName); failing it instead of requeuing` and the job goes through the
+normal failure path (it fails, or retries with backoff if it has retries left). Its error reads
+`Job start failed 4 times in a row (ErrorName: detail); giving up`. A successful start resets the count.
+
+### "Job N completion write failed after 4 attempts"
+
+The conversion ended, but the database refused the write that records the result (`completion`, `failure` or
+`timeout failure`). The worker retried it with backoff, then parked it and retries it after each job and on every
+loop pass (`Job N pending completion still failing`). Until the write lands the row stays `running`. The job is not
+re-run, and its result is not replaced by the database error: a finished conversion still ends `completed`, and a
+failed one keeps its own failure cause and exit code. Fix the database connection (see the surrounding error).
+
+### Job returned to pending with "Running on this node with no live worker; requeued by orphan sweep"
+
+Every heartbeat interval each node (SQLite and PostgreSQL) checks its own running rows. A row is requeued when it
+has been running for more than 120 seconds and no local worker, ffmpeg process or parked write holds it, for
+example after a lost write during a database outage. The log shows
+`Job N was running on this node with no live worker; orphan sweep requeued it`. The sweep never touches another
+node's rows (stale-node recovery handles those) or a row re-claimed since it was checked. One such line after a
+database outage is expected; repeated lines without an outage point to a worker bug worth reporting.
 
 ### Conversion produces larger output file
 

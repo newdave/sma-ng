@@ -5229,6 +5229,66 @@ class TestConvert:
     assert payload["attempts"][0]["tier"] == "hw"
     assert payload["attempts"][0]["failure_class"] == "device_open_failed"
 
+  def test_resolve_encoder_maps_backends(self):
+    from resources.mediaprocessor import _resolve_encoder
+
+    assert _resolve_encoder({"video": {"codec": "h265qsv"}}) == ("h265qsv", "qsv")
+    assert _resolve_encoder({"video": {"codec": ["hevc_vaapi", "x"]}}) == ("hevc_vaapi", "vaapi")
+    assert _resolve_encoder({"video": {"codec": "h265_nvenc"}}) == ("h265_nvenc", "nvenc")
+    assert _resolve_encoder({"video": {"codec": "h265_videotoolbox"}}) == ("h265_videotoolbox", "videotoolbox")
+    assert _resolve_encoder({"video": {"codec": "copy"}}) == ("copy", "copy")
+    assert _resolve_encoder({"video": {"codec": "x265"}}) == ("x265", "software")
+    assert _resolve_encoder({"video": {}}) == (None, None)
+    assert _resolve_encoder(None) == (None, None)
+
+  def _attempts_payloads(self, mp):
+    import json as _json
+
+    lines = [c.args[0] for c in mp.log.info.call_args_list if c.args]
+    return [_json.loads(x) for x in lines if isinstance(x, str) and x.startswith("{") and "ffmpeg.attempts" in x]
+
+  def test_attempts_event_carries_encoder_on_hw_success(self, tmp_path):
+    mp = self._make_mp(tmp_path)
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"x")
+    options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {"codec": "h265qsv"}, "subtitle": []}
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      yield None, ["ffmpeg"]
+      yield 100, ""
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    mp.convert(options, ["-hwaccel", "qsv"], [], False, None)
+    payload = self._attempts_payloads(mp)[0]
+    assert payload["result"] == "ok"
+    assert payload["encoder_name"] == "h265qsv"
+    assert payload["encoder_backend"] == "qsv"
+
+  def test_attempts_event_names_software_encoder_after_full_sw_fallback(self, tmp_path):
+    from converter import FFMpegConvertError
+
+    mp = self._make_mp(tmp_path)
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"x")
+    options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {"codec": "h265qsv"}, "subtitle": []}
+    calls = []
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+      calls.append(opts["video"]["codec"])
+      yield None, ["ffmpeg"]
+      if opts["video"]["codec"] != "h265":
+        raise FFMpegConvertError("cmd", "output", 1)
+      yield 100, ""
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    mp.convert(options, ["-hwaccel", "qsv", "-vcodec", "hevc_qsv"], [], False, None)
+    payload = self._attempts_payloads(mp)[-1]
+    assert payload["result"] == "ok"
+    assert payload["encoder_name"] == "h265"
+    assert payload["encoder_backend"] == "software"
+
   def test_input_same_as_output_renames_input(self, tmp_path):
     mp = self._make_mp(tmp_path)
     # Create an mp4 input so output extension matches

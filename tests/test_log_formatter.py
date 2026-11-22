@@ -212,3 +212,18 @@ class TestEndToEndViaLogger:
 def _reset_env(monkeypatch):
   """Default the width cap so tests with their own caps remain isolated."""
   monkeypatch.delenv("SMA_LOG_MAX_WIDTH", raising=False)
+
+
+class TestLevelToken:
+  def test_prefix_only_when_enabled(self):
+    from resources import log as logmod
+
+    fmt = SingleLineFormatter("%(message)s")
+    assert fmt.format(_record("m", level=logging.WARNING)) == "m"
+    logmod.enable_level_token()
+    try:
+      out = fmt.format(_record("m", level=logging.WARNING))
+    finally:
+      logmod.enable_level_token(False)
+    assert out == "SMA_LEVEL=WARNING m"
+    assert logmod.LEVEL_TOKEN_RE.match(out)

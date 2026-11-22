@@ -118,6 +118,32 @@ HDR_DISPLAY = {
   "bt2020": "HDR10",
 }
 
+_HDR_CLASS_TRANSFERS = {"smpte2084": "hdr10", "arib-std-b67": "hlg"}
+
+
+def classify_hdr(video):
+  """Return the dynamic-range class of a probed video stream (None-safe).
+
+  One of ``sdr``, ``hdr10``, ``hdr10plus``, ``dolby_vision`` or ``hlg``.
+  Dolby Vision comes from the container's DOVI configuration record
+  (``dv_profile``) or Dolby Vision frame side data; HDR10+ from SMPTE 2094-40
+  dynamic-metadata frame side data. Both are only visible when the probe
+  exposes them, otherwise such a stream is reported as plain ``hdr10``.
+  This is separate from ``HDR_DISPLAY``, which only feeds file names.
+  """
+  if video is None:
+    return None
+  framedata = video.framedata or {}
+  side_types = [str(x.get("side_data_type", "")).lower() for x in framedata.get("side_data_list") or [] if isinstance(x, dict)]
+  if isinstance(getattr(video, "dv_profile", None), int) or any("dolby vision" in t for t in side_types):
+    return "dolby_vision"
+  transfer = (framedata.get("color_transfer", "") or (video.color or {}).get("transfer", "") or "").lower()
+  hdr = _HDR_CLASS_TRANSFERS.get(transfer, "sdr")
+  if hdr == "hdr10" and any("smpte2094-40" in t or "hdr10+" in t for t in side_types):
+    return "hdr10plus"
+  return hdr
+
+
 # Default naming templates
 DEFAULT_TV_TEMPLATE = "{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle} [{Quality Full}][{AudioCodec} {AudioChannels}][{VideoCodec}]{-ReleaseGroup}"
 DEFAULT_TV_AIRDATE_TEMPLATE = "{Series TitleYear} - {Air-Date} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}"
