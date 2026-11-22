@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.43](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.42...sma-ng-v3.2.43) (2026-11-22)
+
+
+### Bug Fixes
+
+* encode planning (copy fallback, unknown-bitrate quality modes, profile selection, attempt tiers, ladder stops) ([#235](https://github.com/newdave/sma-ng/issues/235)) ([dccb04d](https://github.com/newdave/sma-ng/commit/dccb04d4c0499f97707910d6fd3897e19d6de968))
+
 ## [3.2.42](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.41...sma-ng-v3.2.42) (2026-11-22)
 
 
