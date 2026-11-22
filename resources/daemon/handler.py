@@ -237,8 +237,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
   if TYPE_CHECKING:
     server: "DaemonServer"
 
-  # Endpoints that don't require authentication (prefix-matched for /docs/*)
-  PUBLIC_ENDPOINTS = ["/", "/dashboard", "/admin", "/health", "/status", "/docs", "/favicon.png"]
+  # Endpoints that don't require authentication (prefix-matched for /docs/*). HTML shells fetch their data from
+  # authenticated APIs (/dashboard/metrics reads /api/metrics).
+  PUBLIC_ENDPOINTS = ["/", "/dashboard", "/dashboard/metrics", "/admin", "/health", "/status", "/docs", "/favicon.png"]
 
   def log_message(self, format, *args):
     self.server.logger.debug("%s - %s" % (self.address_string(), format % args))
@@ -315,6 +316,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
     """Return True if the request carries valid credentials (or none are required). Sends no response."""
     if not self.server.api_key and not self.server.basic_auth:
       return True
+    if not self.headers.get("X-API-Key") and not self.headers.get("Authorization"):
+      return False  # keyless probe (Docker HEALTHCHECK): minimal view, no Unauthorized warning
     saved = (self.send_response, self.send_header, self.end_headers, self.wfile)
     try:
       self.send_response = lambda *a, **k: None

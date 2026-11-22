@@ -62,6 +62,7 @@ every docs page shows the running version.
 | ------ | -------------------------------- | ------ | ----------------------------------------------------------------------- |
 | `GET`  | `/`                              | No     | Redirects to `/dashboard`                                               |
 | `GET`  | `/dashboard`                     | No     | Web dashboard (HTML shell; prompts for the API key)                     |
+| `GET`  | `/dashboard/metrics`             | No     | Metrics page (HTML shell; its data comes from keyed `/api/metrics`)     |
 | `GET`  | `/admin`                         | No     | Admin panel (destructive actions)                                       |
 | `GET`  | `/health`                        | Partly | Public: minimal liveness. With a key: jobs, GPU capabilities, fallbacks |
 | `GET`  | `/status`                        | Partly | Public: minimal status. With a key: cluster-wide node and job detail    |

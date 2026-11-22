@@ -3140,6 +3140,32 @@ class TestSecurityHardening:
     h._get_health()
     assert "node" in _get_response_body(h)
 
+  def test_metrics_dashboard_page_is_public(self):
+    """The HTML shell loads without a key; its data comes from /api/metrics, which stays authenticated."""
+    h = _make_handler(path="/dashboard/metrics", api_key="k", headers={})
+    assert h.is_public_endpoint("/dashboard/metrics") is True
+    h.do_GET()
+    assert h._response_code == 200
+    h = _make_handler(path="/api/metrics", api_key="k", headers={})
+    h.do_GET()
+    assert h._response_code == 401
+
+  @pytest.mark.parametrize("path", ["/health", "/status"])
+  def test_keyless_minimal_probe_logs_no_warning(self, path):
+    """Docker HEALTHCHECK probes /health keyless every 30 s; that must not log an Unauthorized warning."""
+    h = _make_handler(path=path, api_key="k", headers={})
+    h.do_GET()
+    assert h._response_code == 200
+    h.server.logger.warning.assert_not_called()
+
+  @pytest.mark.parametrize("headers", [{"X-API-Key": "wrong"}, {"Authorization": "Bearer wrong"}])
+  def test_wrong_key_on_health_still_warns(self, headers):
+    h = _make_handler(path="/health", api_key="k", headers=headers)
+    h.do_GET()
+    assert h._response_code == 200
+    assert "test-node-1" not in json.dumps(_get_response_body(h))
+    h.server.logger.warning.assert_called_once()
+
   def test_prometheus_metrics_accepts_bearer(self):
     h = _make_handler(path="/metrics", api_key="k", headers={"Authorization": "Bearer k"})
     h.do_GET()

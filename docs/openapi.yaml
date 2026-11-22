@@ -4,7 +4,7 @@ info:
   description: |
     HTTP webhook server for media conversion automation.
     Authentication is optional; when an API key is configured all endpoints
-    except `/health`, `/status`, `/`, `/dashboard`, and `/docs` require it.
+    except `/health`, `/status`, `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, and `/docs` require it.
   version: "1.0.0"
 
 servers:
