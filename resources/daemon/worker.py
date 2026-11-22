@@ -292,6 +292,7 @@ class ConversionWorker(threading.Thread):
     self._fallback_counter_callback = fallback_counter_callback
     self.worker_id = worker_id
     self.node_id = resolve_node_id()
+    self._claim_token = None  # token of the claim for the job this worker is running
     self.pool = pool
     self.job_db = job_db
     self.job_event = threading.Event()  # per-worker event; set by notify_workers()
@@ -347,6 +348,13 @@ class ConversionWorker(threading.Thread):
       watchdog.wake.set()
     return True
 
+  def _owner_kwargs(self):
+    """Ownership arguments for fail/complete/requeue: node, plus the claim token when this run has one."""
+    kwargs = {"node_id": self.node_id}
+    if self._claim_token:
+      kwargs["claim_token"] = self._claim_token
+    return kwargs
+
   def _check_job_ownership(self, job_id):
     """Return an abort reason when the job row no longer belongs to this run.
 
@@ -368,6 +376,10 @@ class ConversionWorker(threading.Thread):
       return self._set_abort_reason(ABORT_CANCELLED)
     owner = row.get("node_id")
     if status in ("pending", "completed", "failed") or (status == "running" and isinstance(owner, str) and owner and owner != self.node_id):
+      return self._set_abort_reason(ABORT_REASSIGNED)
+    # Same node, new claim: the job was requeued and another worker took it.
+    token = row.get("claim_token")
+    if status == "running" and self._claim_token and isinstance(token, str) and token != self._claim_token:
       return self._set_abort_reason(ABORT_REASSIGNED)
     return None
 
@@ -453,6 +465,7 @@ class ConversionWorker(threading.Thread):
 
   def process_job(self, job):
     job_id = job["id"]
+    self._claim_token = job.get("claim_token")
     with self._abort_lock:
       self.current_job_id = job_id
       self._abort_reason = None
@@ -479,7 +492,7 @@ class ConversionWorker(threading.Thread):
     except (TypeError, ValueError) as e:
       self.log.error("Job %d has invalid args payload: %s" % (job_id, e))
       cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
-      self.job_db.fail_job(job_id, "Invalid job args", failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, node_id=self.node_id)
+      self.job_db.fail_job(job_id, "Invalid job args", failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, **self._owner_kwargs())
       metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
       metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
       in_flight.dec()
@@ -489,7 +502,7 @@ class ConversionWorker(threading.Thread):
     if kind is None:
       self.log.error("Job %d has unsupported kind %r" % (job_id, job.get("kind")))
       cat = categorize_failure(WORKER_SENTINEL_INVALID_ARGS).value
-      self.job_db.fail_job(job_id, "Unsupported job kind %r" % job.get("kind"), failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, node_id=self.node_id)
+      self.job_db.fail_job(job_id, "Unsupported job kind %r" % job.get("kind"), failure_category=cat, failure_cause=WORKER_SENTINEL_INVALID_ARGS, **self._owner_kwargs())
       metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
       metrics_prom.record_failure(cat, WORKER_SENTINEL_INVALID_ARGS)
       in_flight.dec()
@@ -500,7 +513,7 @@ class ConversionWorker(threading.Thread):
     if not os.path.exists(path):
       self.log.error("Job %d: Path does not exist: %s" % (job_id, path))
       cat = categorize_failure(WORKER_SENTINEL_PATH_MISSING).value
-      self.job_db.fail_job(job_id, "Path does not exist", failure_category=cat, failure_cause=WORKER_SENTINEL_PATH_MISSING, node_id=self.node_id)
+      self.job_db.fail_job(job_id, "Path does not exist", failure_category=cat, failure_cause=WORKER_SENTINEL_PATH_MISSING, **self._owner_kwargs())
       metrics_prom.record_job_terminal("failed", time.monotonic() - job_started_at)
       metrics_prom.record_failure(cat, WORKER_SENTINEL_PATH_MISSING)
       in_flight.dec()
@@ -571,7 +584,7 @@ class ConversionWorker(threading.Thread):
         # next startup (SQLite) requeues it.
         self.log.warning("Job %d interrupted by daemon shutdown or signal (exit code %s); requeuing: %s" % (job_id, returncode, path))
         try:
-          requeued = self.job_db.requeue_interrupted_job(job_id, self._interrupt_reason(returncode), node_id=self.node_id)
+          requeued = self.job_db.requeue_interrupted_job(job_id, self._interrupt_reason(returncode), **self._owner_kwargs())
           if requeued is False:
             self._log_discarded(job_id, False, "requeue")
         except Exception:
@@ -588,7 +601,7 @@ class ConversionWorker(threading.Thread):
           "Job timed out after %ds" % self.job_timeout_seconds,
           failure_category=cat,
           failure_cause=WORKER_CAUSE_TIMEOUT,
-          node_id=self.node_id,
+          **self._owner_kwargs(),
           telemetry=self._job_telemetry,
           source_duration_seconds=source_duration_secs,
         )
@@ -613,7 +626,7 @@ class ConversionWorker(threading.Thread):
           source_duration_seconds=source_duration_secs,
           encoder_backend=self._last_encoder_backend,
           encoder_name=self._last_encoder_name,
-          node_id=self.node_id,
+          **self._owner_kwargs(),
           telemetry=self._job_telemetry,
         )
         if updated is False:
@@ -649,7 +662,7 @@ class ConversionWorker(threading.Thread):
             message,
             failure_category=cat,
             failure_cause=cause,
-            node_id=self.node_id,
+            **self._owner_kwargs(),
             telemetry=self._job_telemetry,
             source_duration_seconds=source_duration_secs,
           )
@@ -665,7 +678,7 @@ class ConversionWorker(threading.Thread):
         metrics_prom.record_job_terminal("cancelled", elapsed)
       else:
         cat = categorize_failure(WORKER_SENTINEL_EXCEPTION).value
-        updated = self.job_db.fail_job(job_id, str(e), failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION, node_id=self.node_id)
+        updated = self.job_db.fail_job(job_id, str(e), failure_category=cat, failure_cause=WORKER_SENTINEL_EXCEPTION, **self._owner_kwargs())
         self._log_discarded(job_id, updated, "failure")
         self._ingest_ffmpeg_stderr_sidecars(job_id)
         metrics_prom.record_job_terminal("failed", elapsed)
