@@ -45,7 +45,7 @@ repos:
       - id: ruff-format        # consistent formatting
 
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.10
+    rev: 1.9.4
     hooks:
       - id: bandit
         # Mirror the scope of `mise run test:lint`: daemon HTTP surface,
