@@ -1,0 +1,39 @@
+CLAUDE.md
+  s_0dfbaafa8a9096::t_237f12ebff8a7a 248-264
+.claude/skills/plane-tasks/SKILL.md
+  s_0dfbaafa8a9096::t_237f12ebff8a7a 1-87
+.agents/skills/plane-tasks/SKILL.md
+  s_0dfbaafa8a9096::t_237f12ebff8a7a 1-87
+config/.gitignore
+  s_0dfbaafa8a9096::t_237f12ebff8a7a 1-8
+.plane/install.json
+  s_0dfbaafa8a9096::t_237f12ebff8a7a 1-51
+.claude/settings.json
+  s_0dfbaafa8a9096::t_237f12ebff8a7a 59-69,71-74
+.codex/hooks.json
+  s_0dfbaafa8a9096::t_237f12ebff8a7a 25-35
+.mcp.json
+  s_0dfbaafa8a9096::t_237f12ebff8a7a 1-11
+.codex/config.toml
+  s_0dfbaafa8a9096::t_237f12ebff8a7a 21-26
+.plane/plane.sh
+  s_0dfbaafa8a9096::t_237f12ebff8a7a 1-79
+AGENTS.md
+  s_0dfbaafa8a9096::t_237f12ebff8a7a 145-161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "86314e5a9647e6000073f887aea35ac84a03912f",
+  "prompts": {},
+  "sessions": {
+    "s_0dfbaafa8a9096": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c5fdd10-eba3-494c-834e-f80b063163f4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
