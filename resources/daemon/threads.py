@@ -6,7 +6,7 @@ import time
 from resources.daemon import job_kinds, metrics_prom, storage
 from resources.daemon.db import NO_CLAIM_TOKEN
 from resources.daemon.log_archiver import LogArchiver
-from resources.daemon.queueing import SKIP_RECENTLY_COMPLETED, duplicate_outcome, queue_job, skip_reason
+from resources.daemon.queueing import QUEUED, REFUSED, SKIP_RECENTLY_COMPLETED, SKIPPED, queue_media_path
 from resources.library_audit.engine import AuditEngine
 from resources.library_audit.enumerator import enumerate_paths
 from resources.log import getLogger
@@ -315,51 +315,29 @@ class ScannerThread(_StoppableThread):
     # recorded as scanned. Files skipped by strict-routing stay unrecorded
     # so they are picked up once a matching routing rule is added.
     handled = []
-    strict = getattr(self.path_config_manager, "strict_routing", False)
-    has_match = getattr(self.path_config_manager, "has_routing_match", None)
     for filepath in unscanned:
       # Apply path rewrite before config resolution and job submission
       submit_path = filepath
       if rewrite_from and rewrite_to and filepath.startswith(rewrite_from):
         submit_path = rewrite_to + filepath[len(rewrite_from) :]
 
-      if strict and callable(has_match) and not has_match(submit_path):
-        self.log.warning("Scanner skipped %s under strict-routing — no daemon.routing rule matched [routing-miss]." % submit_path)
+      result = queue_media_path(self.job_db, self.path_config_manager, submit_path, request_source="scan")
+      if result.status == REFUSED:
+        self.log.warning("Scanner skipped %s under strict-routing — no daemon.routing rule matched [routing-miss]." % result.path)
         continue
-
-      reason = skip_reason(self.path_config_manager, submit_path)
-      if reason:
+      if result.status == SKIPPED and result.reason != SKIP_RECENTLY_COMPLETED:
         # Left unrecorded, like strict-routing skips, so a config change can pick the file up later.
-        self.log.debug("Scanner skipped %s (%s)" % (submit_path, reason))
+        self.log.debug("Scanner skipped %s (%s)" % (result.path, result.reason))
         continue
 
-      resolved_config = self.path_config_manager.get_config_for_path(submit_path)
-      try:
-        scan_profile = self.path_config_manager.get_profile_for_path(submit_path)
-      except Exception:
-        scan_profile = None
-      scan_args = ["--profile", scan_profile] if scan_profile else []
-      job_id = queue_job(
-        self.job_db,
-        self.path_config_manager,
-        submit_path,
-        resolved_config,
-        scan_args,
-        request_source="scan",
-        request_profile=scan_profile,
-      )
-      # add_job returns None when a pending/running job already exists for
-      # the path or one completed within the dedupe window (recently_completed);
-      # that file is handled too, so record it either way.
+      # A pending/running job for the path, or one completed within the dedupe
+      # window (recently_completed), means the file is handled too, so record it either way.
       handled.append(filepath)
-      if job_id is not None:
-        self.log.info("Scanner queued job %d: %s" % (job_id, submit_path))
+      if result.status == QUEUED:
+        self.log.info("Scanner queued job %d: %s" % (result.job_id, result.path))
         queued += 1
-        metrics_prom.record_job_enqueued("scan", scan_profile)
-      else:
-        outcome, existing_id = duplicate_outcome(self.job_db, self.path_config_manager, submit_path)
-        if outcome == SKIP_RECENTLY_COMPLETED:
-          self.log.info("Scanner skipped %s (%s, job %s)" % (submit_path, outcome, existing_id))
+      elif result.status == SKIPPED:
+        self.log.info("Scanner skipped %s (%s, job %s)" % (result.path, result.reason, result.job_id))
 
     if handled:
       self.job_db.record_scanned(handled)
