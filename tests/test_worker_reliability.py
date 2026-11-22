@@ -253,7 +253,7 @@ class TestProcessJobAbortOutcomes:
 
   def test_timeout_fails_job_with_timeout_cause(self, tmp_path):
     worker, db = self._run(tmp_path, ABORT_TIMEOUT)
-    db.fail_job.assert_called_once_with(21, "Job timed out after 42s", failure_category="system", failure_cause="timeout", node_id=worker.node_id)
+    db.fail_job.assert_called_once_with(21, "Job timed out after 42s", failure_category="system", failure_cause="timeout", node_id=worker.node_id, telemetry={}, source_duration_seconds=None)
     db.complete_job.assert_not_called()
 
   def test_shutdown_leaves_row_for_requeue(self, tmp_path):

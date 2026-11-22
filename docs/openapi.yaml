@@ -163,7 +163,7 @@ components:
         source_hdr:
           type: string
           nullable: true
-          description: "Source dynamic range: sdr, hdr10 or hlg"
+          description: "Source dynamic range: sdr, hdr10, hdr10plus, dolby_vision or hlg. Dolby Vision and HDR10+ show only when the probe exposes their side data, otherwise hdr10"
         dest_video_codec:
           type: string
           nullable: true
@@ -187,7 +187,7 @@ components:
         dest_hdr:
           type: string
           nullable: true
-          description: "Output dynamic range: sdr, hdr10 or hlg"
+          description: "Output dynamic range: sdr, hdr10, hdr10plus, dolby_vision or hlg. Dolby Vision and HDR10+ show only when the probe exposes their side data, otherwise hdr10"
 
     JobStats:
       type: object

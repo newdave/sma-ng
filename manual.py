@@ -28,6 +28,7 @@ from resources.log import enable_level_token, getLogger
 from resources.media_repair import STATUS_REPAIRED, RepairProcessor
 from resources.mediaprocessor import InsufficientOutputSpace, MediaProcessor
 from resources.metadata import MediaType, Metadata
+from resources.naming import classify_hdr
 from resources.readsettings import ReadSettings
 from resources.version import version_string
 
@@ -482,15 +483,13 @@ def addtoProcessedArchive(files, processedList, processedArchive):
   log.debug("Adding %s to processed archive %s" % (files, processedArchive))
 
 
-_HDR_TRANSFERS = {"smpte2084": "hdr10", "arib-std-b67": "hlg"}
-
-
 def media_facts(info):
   """Return the telemetry facts for a probed ``MediaInfo`` (None-safe).
 
   Keys match the daemon ``jobs`` telemetry columns minus their ``source_`` /
   ``dest_`` prefix: video_codec, video_width, video_height, audio_codec,
-  audio_channels and hdr (``sdr``, ``hdr10`` or ``hlg`` from the colour transfer).
+  audio_channels and hdr (``sdr``, ``hdr10``, ``hdr10plus``, ``dolby_vision``
+  or ``hlg``, see ``resources.naming.classify_hdr``).
   """
   if info is None:
     return None
@@ -502,19 +501,23 @@ def media_facts(info):
     "video_height": video.video_height if video else None,
     "audio_codec": audio.codec if audio else None,
     "audio_channels": audio.audio_channels if audio else None,
-    "hdr": _HDR_TRANSFERS.get((video.color or {}).get("transfer"), "sdr") if video else None,
+    "hdr": classify_hdr(video),
   }
   return facts
 
 
-def emit_job_summary(info=None, dest_info=None):
+def emit_job_summary(info=None, dest_info=None, encoder=None):
   """Log one single-line ``sma.job.summary`` JSON event for the daemon worker.
 
   The worker parses it to fill the job telemetry columns and the progress
   percent denominator. Either side may be omitted; empty events are skipped.
+  *encoder* is an optional ``(name, backend)`` pair for jobs where no video
+  encoder ran (``("copy", "copy")``); encoding jobs report it in ``ffmpeg.attempts``.
   """
   try:
     payload = {"event": "sma.job.summary"}
+    if encoder:
+      payload["encoder_name"], payload["encoder_backend"] = encoder
     source = media_facts(info)
     if source:
       payload["source"] = source
@@ -647,7 +650,7 @@ def processFile(
   output = mp.process(inputfile, True, info=info, original=original, tagdata=tagdata)
   if output:
     try:
-      emit_job_summary(dest_info=mp.converter.probe(output["output"]))
+      emit_job_summary(dest_info=mp.converter.probe(output["output"]), encoder=("copy", "copy") if output.get("bypassed") else None)
     except Exception:
       log.debug("Could not probe output for the job summary event", exc_info=True)
     if not language:

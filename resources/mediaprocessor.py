@@ -996,7 +996,9 @@ class MediaProcessor:
     if options and tagdata and getattr(tagdata, "title", None):
       options["title"] = tagdata.title
 
+    bypassed = False
     if self.canBypassConvert(inputfile, info, options):
+      bypassed = True
       outputfile = inputfile
       self.log.info("Bypassing conversion and setting outputfile to inputfile.")
     else:
@@ -1035,6 +1037,7 @@ class MediaProcessor:
       "output": outputfile,
       "output_extension": output_extension,
       "options": options,
+      "bypassed": bypassed,
       "preopts": preopts,
       "postopts": postopts,
       "external_subs": (downloaded_subs or []) + ripped_subs,

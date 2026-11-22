@@ -239,6 +239,25 @@ def _load_settings_for_preflight(config_file, profile, logger):
     return None
 
 
+def _parse_event(line: str, event: str):
+  """Return the JSON object of the *event* record embedded in a log *line*, or None.
+
+  The daemon log formatter may prefix the record (the prefix can itself hold
+  braces), so every ``{`` is tried as the start of the payload.
+  """
+  decoder = json.JSONDecoder()
+  start = line.find("{")
+  while start >= 0:
+    try:
+      payload, _end = decoder.raw_decode(line, start)
+    except ValueError:
+      payload = None
+    if isinstance(payload, dict) and payload.get("event") == event:
+      return payload
+    start = line.find("{", start + 1)
+  return None
+
+
 def _hms_to_seconds(h, m, s):
   return int(h) * 3600 + int(m) * 60 + float(s)
 
@@ -289,6 +308,8 @@ class ConversionWorker(threading.Thread):
     self._job_processes = job_processes if job_processes is not None else {}
     self._job_progress = job_progress if job_progress is not None else {}
     self._job_telemetry: dict = {}
+    self._last_encoder_name: str | None = None
+    self._last_encoder_backend: str | None = None
     self._last_approval_log = 0.0
     self._stop_event = threading.Event()
     # Abort bookkeeping for the job currently being converted. The reason
@@ -551,6 +572,8 @@ class ConversionWorker(threading.Thread):
           failure_category=cat,
           failure_cause=WORKER_CAUSE_TIMEOUT,
           node_id=self.node_id,
+          telemetry=self._job_telemetry,
+          source_duration_seconds=source_duration_secs,
         )
         self._log_discarded(job_id, updated, "timeout failure")
         self._ingest_ffmpeg_stderr_sidecars(job_id)
@@ -907,15 +930,18 @@ class ConversionWorker(threading.Thread):
     ``duration_seconds``. Several records per job merge; later non-null
     values win. Malformed records are ignored.
     """
-    start = line.find("{")
-    if start < 0:
+    payload = _parse_event(line, "sma.job.summary")
+    if payload is None:
       return
-    try:
-      payload = json.loads(line[start:])
-    except ValueError:
-      return
-    if not isinstance(payload, dict) or payload.get("event") != "sma.job.summary":
-      return
+    # A job where no video encoder ran (stream copy, bypassed conversion)
+    # never emits ffmpeg.attempts, so manual.py names the encoder here. An
+    # encoder reported by the ladder wins.
+    name = payload.get("encoder_name")
+    backend = payload.get("encoder_backend")
+    if isinstance(name, str) and name and self._last_encoder_name is None:
+      self._last_encoder_name = name
+    if isinstance(backend, str) and backend and self._last_encoder_backend is None:
+      self._last_encoder_backend = backend
     for prefix in ("source", "dest"):
       facts = payload.get(prefix)
       if not isinstance(facts, dict):
@@ -936,14 +962,8 @@ class ConversionWorker(threading.Thread):
     Tolerate both the bare-JSON case and the wrapped case by locating the
     first ``{`` and parsing from there.
     """
-    start = line.find("{")
-    if start < 0:
-      return
-    try:
-      payload = json.loads(line[start:])
-    except (ValueError, json.JSONDecodeError):
-      return
-    if payload.get("event") != "ffmpeg.attempts":
+    payload = _parse_event(line, "ffmpeg.attempts")
+    if payload is None:
       return
     attempts = payload.get("attempts") or []
     if not isinstance(attempts, list):
