@@ -18,3 +18,9 @@ enabled = false
 
 [plugins."rust-analyzer-lsp@claude-plugins-official"]
 enabled = false
+
+# plane-toolchain:begin
+[mcp_servers.plane]
+command = "bash"
+args = [".plane/plane.sh", "mcp"]
+# plane-toolchain:end

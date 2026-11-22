@@ -1,0 +1,8 @@
+# plane-toolchain:begin
+# Local Plane values, secrets and switch state; never commit them.
+local.env
+*.enc.env
+enable-backup.json
+.plane-*
+.backup-*
+# plane-toolchain:end

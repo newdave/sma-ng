@@ -56,6 +56,20 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$(git rev-parse --show-toplevel)/.plane/plane.sh\"; [ ! -f \"$f\" ] || bash \"$f\" session",
+            "timeout": 5
+          }
+        ]
+      }
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "plane"
+  ]
 }

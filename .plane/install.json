@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "directories": [
+    ".plane",
+    ".claude/skills/plane-tasks",
+    ".agents/skills/plane-tasks"
+  ],
+  "entries": {
+    ".plane/plane.sh": {
+      "kind": "shim",
+      "created": true
+    },
+    "config/.gitignore": {
+      "kind": "ignore",
+      "created": true
+    },
+    "AGENTS.md": {
+      "kind": "block",
+      "created": false
+    },
+    "CLAUDE.md": {
+      "kind": "block",
+      "created": false
+    },
+    ".mcp.json": {
+      "kind": "mcp-json",
+      "created": true
+    },
+    ".claude/settings.json": {
+      "kind": "settings-json",
+      "created": false,
+      "approval": "added"
+    },
+    ".codex/config.toml": {
+      "kind": "codex-toml",
+      "created": false
+    },
+    ".codex/hooks.json": {
+      "kind": "hooks-json",
+      "created": false
+    },
+    ".claude/skills/plane-tasks/SKILL.md": {
+      "kind": "skill",
+      "created": true
+    },
+    ".agents/skills/plane-tasks/SKILL.md": {
+      "kind": "skill",
+      "created": true
+    }
+  }
+}

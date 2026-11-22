@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "plane": {
+      "command": "bash",
+      "args": [
+        ".plane/plane.sh",
+        "mcp"
+      ]
+    }
+  }
+}
