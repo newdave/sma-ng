@@ -1,0 +1,22 @@
+# Gitignored files Claude Code copies from the main checkout into each new worktree
+# (gitignore syntax; a file must match here AND be gitignored to be copied).
+# Keep this to operator config and local helpers that agents need to run tasks and tests.
+# Never list logs, caches, venv/, build output or .claude/worktrees/.
+
+# Deploy and daemon configuration (deploy:* tasks, cluster:* tasks)
+setup/local.yml
+config/local.env
+config/daemon.env
+config/sma-ng.yml
+config/logging.ini
+config/plane.enc.env
+
+# Local-only mise tasks and scripts
+.mise/tasks/local/
+scripts/local/
+
+# Personal Claude Code permissions for this project
+.claude/settings.local.json
+
+# Media fixture used by tests
+tests/fixtures/test1.mkv
