@@ -59,6 +59,24 @@ class TestWorkerClassification:
     db.fail_job.assert_not_called()
     db.complete_job.assert_not_called()
 
+  @pytest.mark.parametrize("rc", [-9, -11])
+  def test_other_signal_on_running_worker_fails_via_normal_path(self, tmp_path, rc):
+    _worker, db = self._run(tmp_path, rc)
+    db.requeue_interrupted_job.assert_not_called()
+    message = db.fail_job.call_args.args[1]
+    assert "killed by signal %d (exit code %d)" % (-rc, rc) in message
+
+  def test_sigint_on_running_worker_requeues(self, tmp_path):
+    worker, db = self._run(tmp_path, -signal.SIGINT)
+    db.requeue_interrupted_job.assert_called_once_with(31, "Interrupted by SIGINT (exit code -2); requeued", node_id=worker.node_id)
+    db.fail_job.assert_not_called()
+
+  @pytest.mark.parametrize("rc", [-9, -11, 1])
+  def test_any_rc_while_stopping_requeues(self, tmp_path, rc):
+    _worker, db = self._run(tmp_path, rc, stopping=True)
+    db.requeue_interrupted_job.assert_called_once()
+    db.fail_job.assert_not_called()
+
   def test_stopping_worker_requeues_ordinary_failure(self, tmp_path):
     worker, db = self._run(tmp_path, 1, stopping=True)
     db.requeue_interrupted_job.assert_called_once_with(31, "Interrupted by daemon shutdown (exit code 1); requeued", node_id=worker.node_id)
@@ -306,3 +324,20 @@ class TestShutdownGraceSetting:
     assert DaemonConfig.model_validate({"shutdown-grace-seconds": 45}).shutdown_grace_seconds == 45
     with pytest.raises(ValueError):
       DaemonConfig.model_validate({"shutdown-grace-seconds": -1})
+
+
+class TestShutdownGraceProjection:
+  def test_yaml_value_reaches_path_config_manager(self, tmp_path):
+    import yaml
+
+    from resources.daemon.config import PathConfigManager
+
+    cfg = tmp_path / "sma-ng.yml"
+    cfg.write_text(yaml.safe_dump({"daemon": {"shutdown-grace-seconds": 45}}))
+    assert PathConfigManager(str(cfg)).shutdown_grace_seconds == 45
+
+  def test_init_default_matches_schema(self):
+    from resources.config_schema import DaemonConfig
+    from resources.daemon.config import PathConfigManager
+
+    assert PathConfigManager().shutdown_grace_seconds == DaemonConfig().shutdown_grace_seconds

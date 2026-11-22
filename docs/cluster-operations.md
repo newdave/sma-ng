@@ -173,7 +173,9 @@ mise run cluster:restart    # anything else (worker count, bind address/port)
 ```
 
 `cluster:restart` gives the daemon `STOP_GRACE_PERIOD` (default `2m`) to drain before SIGKILL; jobs still
-running at the deadline are requeued. Both tasks honour `HOST=` / `HOSTS=`.
+running at the deadline are requeued. The effective drain is the smaller of `daemon.shutdown-grace-seconds`
+(default `100`) and `STOP_GRACE_PERIOD`: raise both together and keep `shutdown-grace-seconds` below
+`STOP_GRACE_PERIOD`. Both tasks honour `HOST=` / `HOSTS=`.
 
 For zero-loss restarts, use the upgrade runbook below.
 

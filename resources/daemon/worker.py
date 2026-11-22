@@ -557,10 +557,12 @@ class ConversionWorker(threading.Thread):
       # success; the DB guard discards it if the row was cancelled.
       abort_reason = None if success else self._abort_reason
       returncode = self._last_returncode
-      if abort_reason is None and not success and (not self.running or (returncode is not None and returncode < 0)):
-        # A conversion killed by a signal (negative return code) or that ended
-        # while this worker is stopping was interrupted, not broken: the
-        # daemon's shutdown SIGTERM reaches manual.py and ffmpeg directly.
+      if abort_reason is None and not success and (not self.running or returncode in (-signal.SIGTERM, -signal.SIGINT)):
+        # A conversion that ended while this worker is stopping, or that died
+        # from SIGTERM/SIGINT (the daemon's shutdown signal reaches manual.py
+        # and ffmpeg directly), was interrupted, not broken. Other signals
+        # (SIGKILL/OOM, SIGSEGV) take the normal retry/backoff failure path so
+        # a deterministic crash cannot requeue forever.
         abort_reason = ABORT_SHUTDOWN
       if abort_reason == ABORT_SHUTDOWN:
         # Interrupted by shutdown / a signal: put the job back to pending
@@ -638,7 +640,9 @@ class ConversionWorker(threading.Thread):
           cause = self._last_attempt_failure_class or WORKER_SENTINEL_PROCESS_FAILED
           cat = categorize_failure(cause).value
           message = "Conversion process failed" if is_convert else "%s process failed" % kind.name.capitalize()
-          if returncode is not None:
+          if returncode is not None and returncode < 0:
+            message += ": killed by signal %d (exit code %d)" % (-returncode, returncode)
+          elif returncode is not None:
             message += " (exit code %d)" % returncode
           updated = self.job_db.fail_job(
             job_id,
@@ -674,13 +678,18 @@ class ConversionWorker(threading.Thread):
         self._watchdog = None
 
   @staticmethod
+  def _signal_name(returncode):
+    """Human name for a negative (signal) return code: 'SIGTERM' or 'signal 250'."""
+    try:
+      return signal.Signals(-returncode).name
+    except ValueError:
+      return "signal %d" % -returncode
+
+  @staticmethod
   def _interrupt_reason(returncode):
     """Operator-facing jobs.error text for a conversion interrupted by shutdown or a signal."""
     if returncode is not None and returncode < 0:
-      try:
-        name = signal.Signals(-returncode).name
-      except ValueError:
-        name = "signal %d" % -returncode
+      name = ConversionWorker._signal_name(returncode)
       return "Interrupted by %s (exit code %d); requeued" % (name, returncode)
     if returncode is None:
       return "Interrupted by daemon shutdown; requeued"
