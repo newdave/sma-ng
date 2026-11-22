@@ -15,7 +15,7 @@
 # updates literal FROM references, not ARG-substituted ones. Keep the three
 # FROM lines on the same digest.
 
-FROM ubuntu:24.04@sha256:9c7f200c07e3d4a03e7249d2c16bf66a51120fb876aa2242cf31451412543289 AS ffmpeg-builder
+FROM ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db AS ffmpeg-builder
 
 ARG FFMPEG_VERSION=8.1.2
 # nv-codec-headers must match the NVENC API that FFMPEG_VERSION compiles
@@ -135,7 +135,7 @@ RUN VPL_FLAG=$([ "$TARGETARCH" = "amd64" ] && echo "--enable-libvpl" || true); \
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 2: Python dependency builder
 # ──────────────────────────────────────────────────────────────────────────────
-FROM ubuntu:24.04@sha256:9c7f200c07e3d4a03e7249d2c16bf66a51120fb876aa2242cf31451412543289 AS python-builder
+FROM ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db AS python-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -157,7 +157,7 @@ RUN python3 -m venv /venv \
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 3: Runtime image
 # ──────────────────────────────────────────────────────────────────────────────
-FROM ubuntu:24.04@sha256:9c7f200c07e3d4a03e7249d2c16bf66a51120fb876aa2242cf31451412543289 AS runtime
+FROM ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db AS runtime
 
 # Injected automatically by Docker Buildx for multi-arch builds
 ARG TARGETARCH
