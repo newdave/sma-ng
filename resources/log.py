@@ -114,6 +114,19 @@ _NEWLINE_MARKER = " ⏎ "
 _TRACEBACK_PREFIX = "  | "
 _REDACTED = "***"
 
+# Child-to-daemon level channel. When a conversion child runs with --job-id its
+# formatter prefixes each record with "SMA_LEVEL=<LEVELNAME> " so the worker can
+# re-log the line at the original level instead of flattening it to INFO.
+LEVEL_TOKEN_PREFIX = "SMA_LEVEL="
+LEVEL_TOKEN_RE = re.compile(r"^" + LEVEL_TOKEN_PREFIX + r"(DEBUG|INFO|WARNING|ERROR|CRITICAL) ")
+_level_token_enabled = False
+
+
+def enable_level_token(enabled=True):
+  """Turn the SMA_LEVEL= prefix on or off for every SingleLineFormatter."""
+  global _level_token_enabled
+  _level_token_enabled = bool(enabled)
+
 
 def _redact_keys():
   """Return the union of secret-bearing field names. Imported lazily so the
@@ -331,6 +344,9 @@ class SingleLineFormatter(logging.Formatter):
       # Reserve room for the marker so the final string is at most max_width.
       marker = "…+%d" % trimmed
       base = base[: max(0, self._max_width - len(marker))] + marker
+
+    if _level_token_enabled:
+      base = "%s%s %s" % (LEVEL_TOKEN_PREFIX, record.levelname, base)
 
     if saved_exc_info:
       tb = self.formatException(saved_exc_info)

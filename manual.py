@@ -24,7 +24,7 @@ from converter.avcodecs import attachment_codec_list, audio_codec_list, subtitle
 from resources.config_loader import ConfigError, ConfigLoader
 from resources.daemon.context import set_job_id
 from resources.extensions import tmdb_api_key
-from resources.log import getLogger
+from resources.log import enable_level_token, getLogger
 from resources.media_repair import STATUS_REPAIRED, RepairProcessor
 from resources.mediaprocessor import InsufficientOutputSpace, MediaProcessor
 from resources.metadata import MediaType, Metadata
@@ -1009,6 +1009,8 @@ def main():
   # worker finds and ingests it by that name after this process exits.
   if args.get("job_id"):
     set_job_id(args["job_id"])
+    # Daemon-launched child: tag each record with its level for the worker.
+    enable_level_token()
 
   # Setup the silent mode
   silent = args["auto"]

@@ -1064,3 +1064,40 @@ class TestPreflightDiskPressureIntegration:
     worker.process_job({"id": 103, "path": str(media), "config": "/cfg.ini", "args": None})
     db.defer_job.assert_called_once()
     worker._run_conversion.assert_not_called()
+
+
+class TestChildLogLevels:
+  """Child records carry SMA_LEVEL=<LEVEL>; the worker re-logs at that level (SMANG-13)."""
+
+  def _run(self, tmp_path, lines):
+    media = tmp_path / "movie.mkv"
+    media.write_bytes(b"")
+    worker = _make_worker()
+    config_logger = mock.MagicMock()
+    worker.config_log_manager.get_logger.return_value = config_logger
+    proc = _make_fake_process(lines, returncode=0)
+    with mock.patch("subprocess.Popen", return_value=proc):
+      worker._run_conversion_inner(1, str(media), "/cfg.ini", [])
+    return config_logger
+
+  def test_levels_preserved_and_token_stripped(self, tmp_path):
+    cl = self._run(
+      tmp_path,
+      [
+        "SMA_LEVEL=WARNING [t job:1] careful",
+        "SMA_LEVEL=ERROR [t job:1] boom",
+        "SMA_LEVEL=ERROR [t job:1] Traceback",
+        "| ValueError: x",
+        "raw ffmpeg line",
+      ],
+    )
+    calls = [c.args for c in cl.log.call_args_list]
+    assert (logging.WARNING, "[t job:1] careful") in calls
+    assert (logging.ERROR, "[t job:1] boom") in calls
+    assert (logging.ERROR, "| ValueError: x") in calls
+    assert (logging.INFO, "raw ffmpeg line") in calls
+    assert not any("SMA_LEVEL" in str(c) for c in cl.method_calls)
+
+  def test_no_empty_separator_record(self, tmp_path):
+    cl = self._run(tmp_path, ["hello"])
+    assert not [c for c in cl.method_calls if c.args and c.args[-1] == ""]

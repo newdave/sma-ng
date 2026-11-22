@@ -1,5 +1,6 @@
 import glob
 import json
+import logging
 import os
 import re as _re
 import shutil
@@ -12,7 +13,7 @@ import time
 from resources.daemon import job_kinds, metrics_prom
 from resources.daemon.constants import FFMPEG_STDERR_DIR, SCRIPT_DIR, resolve_node_id
 from resources.daemon.context import clear_job_id, set_job_id
-from resources.log import getLogger
+from resources.log import LEVEL_TOKEN_RE, getLogger
 from resources.processor.failures import (
   WORKER_SENTINEL_DISK_PRESSURE,
   WORKER_SENTINEL_EXCEPTION,
@@ -768,6 +769,7 @@ class ConversionWorker(threading.Thread):
     total_duration_secs = None
     _last_progress_log: float = 0.0
     final_output: str | None = None
+    line_level = logging.INFO
 
     watchdog = None
     try:
@@ -797,6 +799,19 @@ class ConversionWorker(threading.Thread):
         line = line.strip()
         if not line:
           continue
+        # Child records carry "SMA_LEVEL=<LEVEL> "; strip it and keep the
+        # level. Traceback continuation lines inherit the previous level;
+        # anything else (raw ffmpeg output) stays INFO.
+        level_match = LEVEL_TOKEN_RE.match(line)
+        if level_match:
+          line_level = getattr(logging, level_match.group(1))
+          line = line[level_match.end() :].strip()
+          if not line:
+            continue
+        elif line.startswith("| ") and line_level > logging.INFO:
+          pass
+        else:
+          line_level = logging.INFO
         # Capture the final-output marker emitted by manual.py:processFile
         # so completion logs can show the post-rename output path instead
         # of the original input path. Last marker wins (covers batched
@@ -821,7 +836,7 @@ class ConversionWorker(threading.Thread):
               config_logger.info("Progress: %s" % json.dumps(progress))
             _last_progress_log = now
         else:
-          config_logger.info(line)
+          config_logger.log(line_level, line)
           output.add(line)
         # Capture MediaProcessor's structured ffmpeg.attempts event so the
         # daemon's /health fallback counters reflect work done in worker
@@ -863,7 +878,6 @@ class ConversionWorker(threading.Thread):
         watchdog.finish()
       self._job_processes.pop(job_id, None)
       self._job_progress.pop(job_id, None)
-      config_logger.info("")  # blank line separates jobs in the per-config log
 
   def _record_fallback_event(self, line: str) -> None:
     """Parse a single-line ffmpeg.attempts JSON record and bump daemon counters.
