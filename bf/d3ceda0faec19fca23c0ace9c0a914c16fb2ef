@@ -1,0 +1,23 @@
+tests/test_worker.py
+  s_d73ac5e457a585::t_bc32b1cbc14183 1122,1144
+  s_d73ac5e457a585::t_d5ba464ca4b1d6 1069-1077,1085-1090,1092-1097,1100,1110-1115,1118-1121,1123-1143,1145-1152
+docs/daemon.md
+  s_d73ac5e457a585::t_cb14e80a7e50f0 409-410,414-417
+  s_d73ac5e457a585::t_a251e15dcc04a6 411-413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "bfd3ceda0faec19fca23c0ace9c0a914c16fb2ef",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
