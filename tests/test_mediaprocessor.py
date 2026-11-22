@@ -3417,6 +3417,25 @@ class TestFullProcess:
     assert gn.call_args.kwargs["guess_data"] == {"source": "Web"}
     assert gn.call_args.kwargs["video_copied"] is expected_copy
 
+  def test_rename_guessit_failure_falls_back_to_no_guess(self):
+    mp = self._make_mp()
+    mp.settings.naming_enabled = True
+    mp.isValidSource = MagicMock(return_value=MagicMock())
+    output = {"output": "/fake/file.mp4", "external_subs": [], "options": {"video": {"action": "copy"}}, "x": 1, "y": 1, "cues_to_front": False}
+    mp.process = MagicMock(return_value=output)
+    mp.restoreFromOutput = MagicMock(side_effect=lambda i, o: o)
+    mp.replicate = MagicMock(return_value=["/fake/file.mp4"])
+    mp.setPermissions = MagicMock()
+    mp.getDefaultAudioLanguage = MagicMock(return_value="eng")
+    with (
+      patch("guessit.guessit", side_effect=ValueError("boom")),
+      patch("resources.naming.generate_name", return_value=None) as gn,
+    ):
+      mp.fullprocess("/fake/file.mkv", "movie", tagdata=MagicMock(), original="Orig.2020.h264.mkv", post=False)
+    gn.assert_called_once()
+    assert gn.call_args.kwargs["guess_data"] is None
+    assert gn.call_args.kwargs["original"] == "Orig.2020.h264.mkv"
+
   def test_post_false_skips_post(self):
     mp = self._make_mp()
     info = MagicMock()
