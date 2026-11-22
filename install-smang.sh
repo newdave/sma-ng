@@ -6,7 +6,7 @@
 # Needs only Docker: no source checkout, Compose, mise or Python. It pulls the
 # SMA-NG image, installs `sma` from that image, pins the image for `sma`, and
 # creates $SMA_HOME/{config,logs,data} with a sample sma-ng.yml. Safe to re-run:
-# existing config is never overwritten. See docs/sma-cli-quickstart.md.
+# existing config is never overwritten. See docs/docker-quickstart.md.
 #
 # Options (or environment variables, e.g. `| SMA_IMAGE_TAG=3.2.23 sh`):
 #   --tag TAG       image tag (SMA_IMAGE_TAG; default: latest, or the latest

@@ -29,12 +29,12 @@ Full documentation is in [docs/](docs/) and served at `http://localhost:8585/doc
 | [Getting Started](docs/getting-started.md) | Installation, quick start, CLI usage, supported codecs |
 | [Configuration](docs/configuration.md) | `sma-ng.yml` settings reference |
 | [Daemon Mode](docs/daemon.md) | HTTP server, API endpoints, dashboard, clustering, persistence |
-| [Docker Compose Quick Start](docs/docker-compose-quickstart.md) | Fastest path to running SMA-NG with Docker Compose |
-| [Environment Architecture](docs/environment-architecture.md) | Deployment-specific storage and virtualization design notes |
+| [Docker Quick Start](docs/docker-quickstart.md) | The `sma` host command and Docker Compose profiles |
 | [Integrations](docs/integrations.md) | Sonarr, Radarr, Plex, NZBGet, SABnzbd, qBittorrent, Deluge |
 | [Hardware Acceleration](docs/hardware-acceleration.md) | QSV, VAAPI, NVENC, VideoToolbox, auto-detection |
 | [Deployment](docs/deployment.md) | mise tasks, remote deploy, Docker, CI/release |
-| [Multi-Instance Deployment](docs/multi-instance-deployment.md) | Running multiple SMA-NG daemons on one host or across multiple hosts |
+| [Cluster Operations](docs/cluster-operations.md) | Multi-instance and multi-host patterns, cluster runbooks |
+| [Architecture](docs/architecture.md) | Components, data flow, module reference |
 | [Troubleshooting](docs/troubleshooting.md) | Logs, common issues, environment variables |
 
 ## Default Settings
@@ -54,8 +54,8 @@ sma preview /path/to/file.mkv
 ```
 
 Each `sma` command runs in a throwaway container that mounts the paths you name; see the
-[`sma` CLI Quick Start](docs/sma-cli-quickstart.md). To run the daemon (webhooks, job queue, dashboard), use
-[Docker Compose](docs/docker-compose-quickstart.md) or:
+[Docker Quick Start](docs/docker-quickstart.md#the-sma-host-command). To run the daemon (webhooks, job queue, dashboard), use
+[Docker Compose](docs/docker-quickstart.md#docker-compose) or:
 
 ```bash
 docker run --rm -p 8585:8585 \

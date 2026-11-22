@@ -1,4 +1,4 @@
-"""Client errors and the exit codes they map to (see docs/sma-cli-quickstart.md)."""
+"""Client errors and the exit codes they map to (see docs/docker-quickstart.md)."""
 
 
 class CliError(Exception):
