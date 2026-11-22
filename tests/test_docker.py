@@ -87,7 +87,7 @@ class TestDockerfileStages:
     assert re.search(r"^FROM ubuntu:24\.04@sha256:[0-9a-f]{64} AS ffmpeg-builder$", dockerfile_raw, re.M)
 
   def test_base_image_pinned_by_digest(self, dockerfile_raw):
-    # Literal digest in every FROM (Dependabot cannot update ARG-substituted bases),
+    # Literal digest in every FROM (Renovate cannot update ARG-substituted bases),
     # and the same digest in all three stages.
     digests = re.findall(r"^FROM ubuntu:24\.04@(sha256:[0-9a-f]{64}) AS ", dockerfile_raw, re.M)
     assert len(digests) == 3 and len(set(digests)) == 1

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helper for cluster:drain / cluster:pause / cluster:resume — POSTs to
+# Shared helper for `cluster drain` / `cluster pause` / `cluster resume` — POSTs to
 # /admin/nodes/<host>/<action> on each selected host's local daemon.
 #
 # The daemon writes the requested status into cluster_nodes.status (see

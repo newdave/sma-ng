@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from wiki_sync import ROOT, task_names  # noqa: E402
 
-DOC_GLOBS = ["README.md", "CONTRIBUTING.md", "docs/*.md", "post_process/*.md"]
+DOC_GLOBS = ["README.md", "CONTRIBUTING.md", "docs/*.md"]
 
 _LINK_RE = re.compile(r"!?\[(?:[^\[\]]|\[[^\[\]]*\])*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")

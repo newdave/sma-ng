@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for the cluster:* tasks. Source after lib.sh.
+# Shared helpers for the `cluster` task. Source after lib.sh.
 #
 #   select_cluster_hosts        # sets DEPLOY_HOSTS from HOSTS, HOST or deploy.hosts
 #   cluster_compose start started

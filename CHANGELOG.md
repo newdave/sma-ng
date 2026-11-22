@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.47](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.46...sma-ng-v3.2.47) (2026-11-22)
+
+
+### Bug Fixes
+
+* **deps:** sync requirements files with pyproject after the python-runtime bump ([#247](https://github.com/newdave/sma-ng/issues/247)) ([1a29f3b](https://github.com/newdave/sma-ng/commit/1a29f3b6957d72b284499f33e3251a88841474c2))
+
 ## [3.2.46](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.45...sma-ng-v3.2.46) (2026-11-22)
 
 

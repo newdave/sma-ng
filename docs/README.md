@@ -61,8 +61,6 @@ Optional extras (`pip install ".[extra]"`, or `mise run setup:deps:all` for ever
 | Extra         | Adds                                                                       |
 | ------------- | -------------------------------------------------------------------------- |
 | `postgres`    | `psycopg2-binary` for PostgreSQL job persistence and cluster mode          |
-| `qbittorrent` | qBittorrent client library                                                 |
-| `deluge`      | Deluge client library                                                      |
 | `openvino`    | OpenVINO runtime for the analyzer                                          |
 | `dev`         | pytest, ruff, pre-commit, and other lint/test tooling (`setup:deps:dev`)   |
 
@@ -818,7 +816,8 @@ Language code conversion (ISO 639 alpha2/alpha3) via babelfish.
 
 ### resources/custom.py
 
-Optional hook points loaded from `config/custom.py`: `validation()`, `blockVideoCopy()`, `blockAudioCopy()`,
+Optional hook points loaded from `config/custom.py` (an untracked operator file; copy `setup/custom.py.sample`, or let
+the Docker entrypoint seed it): `validation()`, `blockVideoCopy()`, `blockAudioCopy()`,
 `skipStream()`, `streamTitle()`.
 
 ### autoprocess/plex.py
@@ -882,7 +881,7 @@ There are two different things with similar names.
 
 ### Hook scripts (`post_process/`)
 
-After each conversion, SMA-NG can run every script in the repository's `post_process/` directory. Enable it with
+After each conversion, SMA-NG can run every script in the `post_process/` directory next to `manual.py` (create it; it is not shipped). Enable it with
 `base.converter.post-process: true`; set `wait-post-process: true` to wait for each script to exit, and pass `-np` to
 `manual.py` to skip them for one run.
 
@@ -935,10 +934,10 @@ Runnable tasks are executable scripts under `.mise/tasks/`; `mise.toml` only def
 ```bash
 mise run setup:deps              # Create venv and install base dependencies
 mise run setup:deps:dev          # Install dev + test dependencies
-mise run test                    # Run the test suite (alias of test:run)
+mise run test                    # Run the test suite (extra args go to pytest after `--`)
 mise run test:cov                # Tests with coverage and the per-module floor
-mise run test:daemon             # Focused daemon/API worker tests
-mise run test:deploy             # Focused deploy/config task tests
+mise run test -- tests/test_daemon.py tests/test_handler.py tests/test_worker.py tests/test_server.py  # Daemon/API worker tests
+mise run test -- tests/test_deploy_tasks.py  # Deploy/config task tests
 mise run test:lint               # Ruff linter and bandit scan
 mise run test:openapi            # Validate docs/openapi.yaml
 mise run dev:lint                # Auto-fix lint issues
@@ -1042,8 +1041,8 @@ mise run deploy:remote
 IMAGE=ghcr.io/newdave/sma-ng:main mise run deploy:remote
 
 # Stop Docker services on one host (or many)
-HOST=sma-master mise run cluster:stop
-HOSTS="sma-master sma-worker-1" mise run cluster:stop
+HOST=sma-master mise run cluster -- stop
+HOSTS="sma-master sma-worker-1" mise run cluster -- stop
 ```
 
 Production images are built in CI on push to `main`. Once the GitHub Actions
@@ -1066,7 +1065,7 @@ For each host it:
 
 - **Creates missing configs** from `setup/sma-ng.yml.sample` (auto-detects GPU on first creation)
 - **Backs up** `config/` to `.backup/<timestamp>/` before any mutation
-- **Merges new keys** from the sample via `yaml_merge.py` (non-destructive)
+- **Merges new keys** from the sample (non-destructive)
 - **Deep-merges `base:` and `profiles:`** from `setup/local.yml` into the same blocks of
   `sma-ng.yml`. Dicts recurse, lists/scalars overwrite, anything you omit inherits from
   the sample.
@@ -1097,8 +1096,8 @@ hosts:
 #### Restarting and reloading without deploying
 
 ```bash
-mise run cluster:restart   # docker compose restart; daemon gets STOP_GRACE_PERIOD (default 2m) to drain
-mise run cluster:reload    # POST /reload; hot-reloadable config changes only
+mise run cluster -- restart   # docker compose restart; daemon gets STOP_GRACE_PERIOD (default 2m) to drain
+mise run cluster -- reload    # POST /reload; hot-reloadable config changes only
 ```
 
 Jobs still running when the grace period ends are requeued.
@@ -1113,8 +1112,8 @@ Jobs still running when the grace period ends are requeued.
 | `deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry     |
 | `deploy:docker`   | Push docker-compose.yml, pull image, `docker compose down` + `up -d --force-recreate`|
 
-Cluster lifecycle: `cluster:start`, `cluster:stop`, `cluster:restart`, `cluster:reload`, `cluster:status`,
-`cluster:drain`, `cluster:pause`, `cluster:resume`, `cluster:upgrade` — see
+Cluster lifecycle: `mise run cluster -- <verb>` with verbs `start`, `stop`, `restart`, `reload`, `status`,
+`drain`, `pause`, `resume` and `upgrade` — see
 [Cluster Operations](cluster-operations.md).
 
 ---

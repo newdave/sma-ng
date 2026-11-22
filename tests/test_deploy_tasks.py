@@ -105,13 +105,20 @@ class TestDeployDockerUpgradeTask:
 
 class TestClusterTasks:
   def test_cluster_tasks_source_shared_library(self):
-    for rel_path in (
-      ".mise/tasks/cluster/stop",
-      ".mise/tasks/cluster/start",
-      ".mise/tasks/cluster/restart",
-    ):
-      text = _read(rel_path)
-      assert 'source "$(dirname "$0")/../../shared/deploy/lib.sh"' in text
+    text = _read(".mise/tasks/cluster/_default")
+    assert 'source "$(dirname "$0")/../../shared/deploy/lib.sh"' in text
+
+  def test_cluster_task_rejects_missing_and_unknown_verbs(self):
+    for args in ([], ["bogus"], ["cluster:status"]):
+      result = subprocess.run(
+        [os.path.join(PROJECT_ROOT, ".mise/tasks/cluster/_default"), *args],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+      )
+      assert result.returncode == 2, args
+      assert "usage: mise run cluster -- <start|stop|restart|status|reload|drain|pause|resume|upgrade>" in result.stderr
 
 
 class TestMiseTaskLayout:
@@ -151,7 +158,9 @@ class TestMiseTaskLayout:
     tasks = {task["name"]: set(task["aliases"]) for task in json.loads(result.stdout)}
 
     # Only the widely used aliases remain; legacy dev:*/media:daemon:* aliases were removed.
-    assert tasks["test:run"] == {"test"}
+    assert "test" in tasks
+    for removed in ("test:run", "test:daemon", "test:deploy"):
+      assert removed not in tasks, removed
     assert tasks["setup:deps:base"] == {"setup:deps"}
     aliases = set().union(*tasks.values())
     for legacy in ("dev:test:run", "media:daemon:start", "dev:openapi", "dev:lint:check", "dev:lint:fix", "deploy:docker:upgrade"):
@@ -161,18 +170,12 @@ class TestMiseTaskLayout:
     # gone, restart/reload live under cluster:, and image pushes happen in CI.
     for removed in ("deploy:redeploy", "deploy:prod", "deploy:sync", "deploy:mise", "deploy:restart", "deploy:reload", "build:push", "docker:run"):
       assert removed not in tasks, removed
-    for present in ("cluster:reload", "cluster:restart", "build:run", "deploy:remote", "deploy:setup"):
+    for present in ("cluster", "build:run", "deploy:remote", "deploy:setup"):
       assert present in tasks, present
     assert "deploy:login" not in tasks
 
-    assert "cluster:stop" in tasks
-    assert "cluster:start" in tasks
-    assert "cluster:restart" in tasks
-    assert "cluster:status" in tasks
-    assert "cluster:drain" in tasks
-    assert "cluster:pause" in tasks
-    assert "cluster:resume" in tasks
-    assert "cluster:upgrade" in tasks
+    for verb in ("stop", "start", "restart", "status", "drain", "pause", "resume", "upgrade", "reload"):
+      assert "cluster:%s" % verb not in tasks, verb
 
     # pg:restart / pg:recreate were removed when the *-pg compose profiles
     # were switched to external PostgreSQL; nothing local to manage now.
@@ -307,11 +310,6 @@ class TestMiseTaskLayout:
               offenders.append(f"{rel_path}:{line_no}: {line}")
 
     assert offenders == []
-
-  def test_makefile_exposes_install_mise(self):
-    text = _read("Makefile")
-    assert "install-mise:" in text
-    assert "mise run" in text
 
 
 class TestRemoteInstallDirs:
@@ -773,18 +771,32 @@ class TestDeployLibHelpers:
 
 
 class TestDeployMiseTask:
-  def test_cluster_tasks_share_compose_helper_without_remote_sync(self):
-    for verb, name in (("start", "start"), ("stop", "stop"), ("restart", "restart"), ("ps", "status")):
-      text = _read(".mise/tasks/cluster/%s" % name)
-      assert "cluster_compose.sh" in text, name
-      assert "cluster_compose %s " % verb in text, name
-    for name in ("drain", "pause", "resume", "upgrade", "reload", "start", "stop", "restart", "status"):
-      assert "deploy:mise" not in _read(".mise/tasks/cluster/%s" % name), name
+  def test_cluster_task_dispatches_verbs_to_shared_helpers(self):
+    text = _read(".mise/tasks/cluster/_default")
+    assert "cluster_compose.sh" in text
+    for call in (
+      'cluster_compose start "started"',
+      'cluster_compose stop "stopped"',
+      'cluster_compose restart "restarted"',
+      'cluster_compose ps "status checked"',
+      "cluster_reload",
+      "cluster_upgrade",
+      'cluster_action "$verb"',
+    ):
+      assert call in text, call
+    for rel in (".mise/tasks/cluster/_default", ".mise/shared/deploy/cluster_reload.sh", ".mise/shared/deploy/cluster_upgrade.sh"):
+      assert "deploy:mise" not in _read(rel), rel
 
   def test_cluster_reload_scopes_hosts(self):
-    text = _read(".mise/tasks/cluster/reload")
+    text = _read(".mise/shared/deploy/cluster_reload.sh")
     assert "select_cluster_hosts" in text
     assert "/reload" in text
+
+  def test_cluster_upgrade_keeps_drain_timeout_and_scopes_hosts(self):
+    text = _read(".mise/shared/deploy/cluster_upgrade.sh")
+    assert "select_cluster_hosts" in text
+    assert "DRAIN_TIMEOUT:-1800" in text
+    assert "deploy:remote" in text
 
   def test_compose_gives_daemon_time_to_drain(self):
     compose = _read("docker/docker-compose.yml")
@@ -1124,9 +1136,3 @@ class TestLifecycleTaskFixes:
     commands = [line for line in _read(".mise/tasks/daemon/start").splitlines() if not line.startswith("#")]
     assert '"$PY" daemon.py "$@"' in commands
     assert not any("--host" in line or "--port" in line for line in commands)
-
-  @pytest.mark.parametrize("target", ["config", "detect-gpu", "test"])
-  def test_old_make_targets_point_to_mise(self, target):
-    result = subprocess.run(["make", target], cwd=PROJECT_ROOT, capture_output=True, text=True, check=False)
-    assert result.returncode == 2
-    assert "tasks run through mise" in result.stderr

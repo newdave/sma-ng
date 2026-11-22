@@ -27,8 +27,6 @@ def test_extra_requirement_files_match_extras():
   for name, extra in [
     ("requirements-dev.txt", "dev"),
     ("requirements-openvino.txt", "openvino"),
-    ("requirements-qbittorrent.txt", "qbittorrent"),
-    ("requirements-deluge.txt", "deluge"),
   ]:
     assert _requirements(name) == set(extras[extra]), name
 
