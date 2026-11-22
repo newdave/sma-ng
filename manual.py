@@ -428,8 +428,8 @@ def triggerRescan(filepath, settings):
     # movie shows as missing.
     if rescan_id:
       if not wait_for_command(base_url, headers, rescan_id, log):
-        log.warning("%s [%s] rescan command did not complete; skipping import." % (arr_type.title(), instance["section"]))
-        return None
+        # Still import: skipping leaves the file unlinked and Sonarr/Radarr re-grabs the release.
+        log.warning("%s [%s] rescan command did not complete; importing anyway." % (arr_type.title(), instance["section"]))
 
     import_id = downloaded_scan_via_arr(base_url, headers, arr_type, filepath, log)
     if import_id and not wait_for_command(base_url, headers, import_id, log):

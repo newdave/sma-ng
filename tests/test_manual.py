@@ -22,6 +22,7 @@ from manual import (
   movieInfo,
   processFile,
   showCodecs,
+  triggerRescan,
   tvInfo,
 )
 from resources.media_repair import STATUS_FAILED, STATUS_REPAIRED, RepairResult
@@ -946,3 +947,42 @@ class TestPromptsWithoutInput:
 
     with patch("builtins.input", side_effect=["maybe", "y"]):
       assert manual.getYesNo() is True
+
+
+# ---------------------------------------------------------------------------
+# triggerRescan
+# ---------------------------------------------------------------------------
+
+
+class TestTriggerRescan:
+  INSTANCE = {"section": "main", "host": "h", "port": 8989, "webroot": "", "apikey": "k", "rescan": True}
+
+  def _run(self, wait_results, rename=False):
+    inst = dict(self.INSTANCE, rename=rename)
+    with (
+      patch("manual._find_arr_instance", return_value=(inst, "sonarr")),
+      patch("resources.mediamanager.rescan_via_arr", return_value=7),
+      patch("resources.mediamanager.downloaded_scan_via_arr", return_value=8) as scan,
+      patch("resources.mediamanager.rename_via_arr", return_value="/new.mp4") as ren,
+      patch("resources.mediamanager.wait_for_command", side_effect=wait_results) as wait,
+      patch("manual.log") as mlog,
+    ):
+      result = triggerRescan("/tv/show/ep.mkv", MagicMock())
+    return result, scan, ren, wait, mlog
+
+  def test_rescan_timeout_still_imports(self):
+    result, scan, _, wait, mlog = self._run([False, True])
+    scan.assert_called_once()
+    assert wait.call_count == 2
+    assert any("importing anyway" in c.args[0] for c in mlog.warning.call_args_list)
+    assert result is None
+
+  def test_rescan_timeout_then_rename(self):
+    result, scan, ren, _, _ = self._run([False, True], rename=True)
+    scan.assert_called_once()
+    assert result == "/new.mp4"
+
+  def test_import_timeout_skips_rename(self):
+    result, _, ren, _, _ = self._run([True, False], rename=True)
+    ren.assert_not_called()
+    assert result is None

@@ -2,6 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+import requests
+
 from resources.mediamanager import (
   REQUEST_TIMEOUT,
   api_command,
@@ -85,15 +88,66 @@ class TestWaitForCommand:
       {"status": "completed"},
     ]
     log = MagicMock()
-    assert wait_for_command("http://localhost:8989", {}, 42, log, retries=5, delay=1) is True
+    assert wait_for_command("http://localhost:8989", {}, 42, log, delay=1) is True
     assert mock_sleep.call_count == 2
 
   @patch("resources.mediamanager.time.sleep")
   @patch("resources.mediamanager.requests.get")
-  def test_returns_false_on_timeout(self, mock_get, mock_sleep):
+  def test_backoff_doubles_up_to_max(self, mock_get, mock_sleep):
+    mock_get.return_value.json.side_effect = [{"status": "started"}] * 5 + [{"status": "completed"}]
+    wait_for_command("http://localhost:8989", {}, 42, MagicMock(), timeout=1000, delay=2, max_delay=10)
+    assert [c.args[0] for c in mock_sleep.call_args_list] == [2, 4, 8, 10, 10]
+
+  def _fake_clock(self):
+    now = [0.0]
+    return now, (lambda: now[0]), (lambda s: now.__setitem__(0, now[0] + s))
+
+  @patch("resources.mediamanager.requests.get")
+  def test_returns_false_on_timeout_and_logs_last_status(self, mock_get):
+    now, clock, sleep = self._fake_clock()
     mock_get.return_value.json.return_value = {"status": "started"}
     log = MagicMock()
-    assert wait_for_command("http://localhost:8989", {}, 42, log, retries=2, delay=0) is False
+    with patch("resources.mediamanager.time.monotonic", clock), patch("resources.mediamanager.time.sleep", sleep):
+      assert wait_for_command("http://localhost:8989", {}, 42, log, timeout=300) is False
+    assert now[0] == 300
+    assert "started" in log.warning.call_args.args[0]
+    assert "300" in log.warning.call_args.args[0]
+
+  @patch("resources.mediamanager.requests.get")
+  def test_slow_command_completing_within_budget(self, mock_get):
+    now, clock, sleep = self._fake_clock()
+    mock_get.return_value.json.side_effect = lambda: {"status": "completed" if now[0] >= 120 else "started"}
+    with patch("resources.mediamanager.time.monotonic", clock), patch("resources.mediamanager.time.sleep", sleep):
+      assert wait_for_command("http://localhost:8989", {}, 42, MagicMock()) is True
+
+  @pytest.mark.parametrize("state", ["failed", "aborted", "cancelled", "orphaned", "Failed"])
+  @patch("resources.mediamanager.time.sleep")
+  @patch("resources.mediamanager.requests.get")
+  def test_terminal_state_stops_early_and_logs_status(self, mock_get, mock_sleep, state):
+    mock_get.return_value.json.return_value = {"status": state}
+    log = MagicMock()
+    assert wait_for_command("http://localhost:8989", {}, 42, log) is False
+    mock_sleep.assert_not_called()
+    assert state.lower() in log.warning.call_args.args[0]
+
+  @patch("resources.mediamanager.time.sleep")
+  @patch("resources.mediamanager.requests.get")
+  def test_http_error_on_poll_is_retried(self, mock_get, mock_sleep):
+    ok = MagicMock()
+    ok.json.return_value = {"status": "completed"}
+    mock_get.side_effect = [requests.ConnectionError("boom"), ValueError("bad json"), ok]
+    log = MagicMock()
+    assert wait_for_command("http://localhost:8989", {}, 42, log) is True
+    assert log.warning.call_count == 2
+
+  @patch("resources.mediamanager.requests.get")
+  def test_persistent_http_error_times_out_false(self, mock_get):
+    now, clock, sleep = self._fake_clock()
+    mock_get.side_effect = requests.ConnectionError("down")
+    log = MagicMock()
+    with patch("resources.mediamanager.time.monotonic", clock), patch("resources.mediamanager.time.sleep", sleep):
+      assert wait_for_command("http://localhost:8989", {}, 42, log, timeout=60) is False
+    assert "unknown" in log.warning.call_args.args[0]
 
 
 class TestApiGet:

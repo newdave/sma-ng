@@ -33,18 +33,38 @@ def api_command(base_url, headers, payload, log):
   return rstate
 
 
-def wait_for_command(base_url, headers, command_id, log, retries=6, delay=10):
-  """Poll /api/v3/command/{id} until completed or retries exhausted."""
+# Command states after which Sonarr/Radarr will never report "completed".
+TERMINAL_FAILURE_STATES = ("failed", "aborted", "cancelled", "canceled", "orphaned")
+
+
+def wait_for_command(base_url, headers, command_id, log, timeout=300, delay=2, max_delay=15):
+  """Poll /api/v3/command/{id} until completed, a terminal failure state, or the time budget runs out.
+
+  The poll interval starts at ``delay`` seconds and doubles up to ``max_delay``. A transient
+  HTTP/JSON error on one poll is logged and retried rather than aborting the wait. Returns True
+  only when the command completed; the last seen status is logged on any other outcome.
+  """
   url = base_url + "/api/v3/command/" + str(command_id)
-  r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-  command = r.json()
-  attempts = 0
-  while command["status"].lower() not in ["complete", "completed"] and attempts < retries:
-    time.sleep(delay)
-    r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-    command = r.json()
-    attempts += 1
-  return command["status"].lower() in ["complete", "completed"]
+  deadline = time.monotonic() + timeout
+  status = "unknown"
+  while True:
+    try:
+      r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+      status = str(r.json().get("status", "unknown")).lower()
+    except Exception as e:
+      log.warning("Command %s poll failed (%s); will retry." % (command_id, type(e).__name__))
+    else:
+      if status in ("complete", "completed"):
+        return True
+      if status in TERMINAL_FAILURE_STATES:
+        log.warning("Command %s ended with status '%s'." % (command_id, status))
+        return False
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+      log.warning("Command %s did not complete within %ss; last status '%s'." % (command_id, timeout, status))
+      return False
+    time.sleep(min(delay, remaining))
+    delay = min(delay * 2, max_delay)
 
 
 def api_get(base_url, headers, endpoint, log):
