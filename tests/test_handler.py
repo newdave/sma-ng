@@ -1029,6 +1029,32 @@ class TestParseWebhookBody:
     assert h._response_code == 400
     assert "set by the daemon" in _get_response_body(h)["error"]
 
+  @pytest.mark.parametrize("bad", ["-c/evil", "-i/evil", "-ac", "-aai/x", "--conf", "--conf=/evil", "--inp=/evil", "--job", "--job=9"])
+  def test_json_body_forbidden_arg_bypass_forms_rejected(self, bad):
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": ["-tmdb", "603", bad]}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    path, args, config, retries = h._parse_webhook_body()
+    assert path is None
+    assert h._response_code == 400
+    assert "set by the daemon" in _get_response_body(h)["error"]
+
+  @pytest.mark.parametrize("bad_path", [5, ["x"], {}, {"a": 1}, True])
+  def test_json_body_non_string_path_rejected(self, bad_path):
+    data = json.dumps({"path": bad_path}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    path, args, config, retries = h._parse_webhook_body()
+    assert path is None
+    assert h._response_code == 400
+    assert "path" in _get_response_body(h)["error"]
+
+  def test_json_body_unbalanced_quote_args_rejected(self):
+    data = json.dumps({"path": "/mnt/movie.mkv", "args": "-tmdb 'unclosed"}).encode()
+    h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    path, args, config, retries = h._parse_webhook_body()
+    assert path is None
+    assert h._response_code == 400
+    assert _get_response_body(h)["error"] == "Invalid webhook body"
+
   def test_handle_webhook_forbidden_arg_queues_nothing(self):
     data = json.dumps({"path": "/mnt/movie.mkv", "args": ["-i", "/etc/shadow"]}).encode()
     h = _make_handler(body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})

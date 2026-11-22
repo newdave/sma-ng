@@ -96,6 +96,9 @@ def parse_generic_webhook_body(body_text, content_type, send_json_response):
   else:
     path = body_text
 
+  if path and not isinstance(path, str):
+    send_json_response(400, {"error": "path must be a string"})
+    return None, [], None, 0
   if not path:
     send_json_response(400, {"error": "No path provided"})
     return None, [], None, 0

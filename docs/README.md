@@ -475,11 +475,11 @@ curl -X POST http://localhost:8585/webhook/generic \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/movie.mkv", "args": ["-tmdb", "603"]}'
 
-# JSON with config override (bypasses path matching)
+# JSON naming the daemon's own config (any other config path is refused with 400)
 curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: SECRET" \
   -H "Content-Type: application/json" \
-  -d '{"path": "/path/to/movie.mkv", "config": "/custom/sma-ng.yml"}'
+  -d '{"path": "/path/to/movie.mkv", "config": "/config/sma-ng.yml"}'
 ```
 
 ### Authentication

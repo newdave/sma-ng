@@ -98,6 +98,13 @@ class TestPostJobs:
     assert match in _get_response_body(h)["error"]
     server.job_db.add_job.assert_not_called()
 
+  @pytest.mark.parametrize("arg", ["-c/evil", "-i/evil", "-ac", "--conf", "--conf=/evil", "--inp=/evil", "--job", "--job=9"])
+  def test_forbidden_arg_bypass_forms_rejected(self, server, arg):
+    h = _post(server, {"kind": "repair", "path": "/", "args": ["-n", arg]})
+    assert h._response_code == 400
+    assert "set by the daemon" in _get_response_body(h)["error"]
+    server.job_db.add_job.assert_not_called()
+
   def test_not_json(self, server):
     h = _post(server, b"/just/a/path")
     assert h._response_code == 400

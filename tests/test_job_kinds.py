@@ -56,7 +56,45 @@ def test_forbidden_args(args, bad):
 
 
 def test_allowed_args():
-  assert job_kinds.forbidden_arg(["-n", "--no-plex", "-tmdb", "603", "-config-ish"]) is None
+  assert job_kinds.forbidden_arg(["-n", "--no-plex", "-tmdb", "603", "-tmdb603"]) is None
+
+
+BYPASS_ARGS = ["-c/evil", "-i/evil", "-ci", "-ac", "-aai/x", "--conf", "--conf=/evil", "--inp=/evil", "--job", "--job=9", "--c", "--in", "--config", "--input=/x"]
+
+
+@pytest.mark.parametrize("arg", BYPASS_ARGS)
+def test_forbidden_arg_abbreviations_and_attached_values(arg):
+  assert job_kinds.forbidden_arg(["-tmdb", "603", arg]) == arg
+
+
+@pytest.mark.parametrize(
+  "args",
+  [
+    ["-cl"],
+    ["-imdb", "tt1"],
+    ["-imdb=tt1"],
+    ["-nc", "-nd", "-np", "-pr", "-pse", "-oo"],
+    ["-pcinema"],
+    ["-sc"],
+    ["-a", "-fc", "-fr", "-tmdb603"],
+    ["--codeclist", "--imdbid", "tt1", "--tmdbid=1", "--profile", "x", "--forceconvert"],
+    ["--audit", "--no-plex", "--notag", "--nocopy"],
+  ],
+)
+def test_legitimate_args_still_allowed(args):
+  assert job_kinds.forbidden_arg(args) is None
+
+
+def test_every_manual_option_is_allowed_unless_protected():
+  import ast
+  import pathlib
+
+  tree = ast.parse(pathlib.Path(job_kinds.__file__).resolve().parents[2].joinpath("manual.py").read_text())
+  opts = [a.value for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "add_argument" for a in n.args if isinstance(a, ast.Constant) and str(a.value).startswith("-")]
+  assert "-cl" in opts and "--config" in opts
+  for opt in opts:
+    expected = opt in job_kinds.FORBIDDEN_ARGS
+    assert (job_kinds.forbidden_arg([opt]) is not None) == expected, opt
 
 
 def test_script_path_override():

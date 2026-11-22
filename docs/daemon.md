@@ -144,8 +144,9 @@ The generic webhook validates its JSON body the same way as `POST /jobs` and ans
 for any of these:
 
 - `args` is not a list of strings (or one string, which is split like a shell).
-- `args` contains `-c`, `--config`, `-i`, `--input` or `--job-id` (also as `--config=...`). The daemon sets these
-  itself.
+- `args` contains `-c`, `--config`, `-i`, `--input` or `--job-id`, written in any form argparse accepts: `--config=...`,
+  attached values (`-c/x`), bundles (`-ac`) or abbreviations (`--conf`, `--job`). The daemon sets these itself.
+- `path` is present but not a string.
 - `config` is not a string, or is not the daemon's loaded config file (compared by resolved path). Any other path is
   refused, so a caller cannot point the daemon at an arbitrary file.
 
@@ -182,7 +183,8 @@ curl -X POST http://localhost:8585/jobs \
 | `rename` | `rename.py PATH` | One job for the directory | exit `0` |
 
 Every kind runs with the daemon's config (`-c`), chosen by path routing when the job is queued. `-c`, `--config`,
-`-i`, `--input` and `--job-id` are set by the daemon and rejected in `args` (400). `convert` behaves exactly like
+`-i`, `--input` and `--job-id` are set by the daemon and rejected in `args` (400), including attached values (`-c/x`),
+bundles (`-ac`) and abbreviations (`--conf`, `--inp=x`, `--job`). `convert` behaves exactly like
 `POST /webhook/generic`: default args, the same-extension skip and per-file expansion apply only to it. A path and
 kind that are already pending or running return `200 {"status": "duplicate"}`; a new job returns
 `202 {"status": "queued", "job_id": ..., "kind": ...}`. Jobs on the same config still run one at a time, so a queued

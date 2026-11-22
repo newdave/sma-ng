@@ -67,11 +67,31 @@ def get(name):
   return JOB_KINDS[name or DEFAULT_KIND]
 
 
+# Short flags that take no value; argparse lets them bundle with a following flag (``-ac`` is ``-a -c``).
+_BOOL_SHORT_FLAGS = frozenset("a")
+# manual.py options that start like a protected short flag but are separate options (exact match wins in argparse).
+_SHORT_LOOKALIKES = frozenset({"-cl", "-imdb"})
+_FORBIDDEN_SHORT = frozenset(f[1] for f in FORBIDDEN_ARGS if len(f) == 2)
+_FORBIDDEN_LONG = tuple(f for f in FORBIDDEN_ARGS if f.startswith("--"))
+
+
 def forbidden_arg(args):
-  """First argument the daemon sets itself (``-c``, ``--config=x``, ...), or None."""
+  """First argument that would set a value the daemon sets itself, or None.
+
+  The tools parse with argparse, where the last occurrence wins and a flag can be written in many ways:
+  ``-c/x`` (attached value), ``-ac`` (bundle), ``--conf`` / ``--conf=x`` (abbreviation of ``--config``).
+  """
   for arg in args:
     if arg in FORBIDDEN_ARGS:
       return arg
-    if arg.startswith("--") and arg.split("=", 1)[0] in FORBIDDEN_ARGS:
-      return arg
+    if arg.startswith("--"):
+      name = arg[2:].split("=", 1)[0]
+      if name and any(f[2:].startswith(name) for f in _FORBIDDEN_LONG):
+        return arg
+    elif arg.startswith("-") and len(arg) > 1 and arg.split("=", 1)[0] not in _SHORT_LOOKALIKES:
+      for ch in arg[1:]:
+        if ch in _FORBIDDEN_SHORT:
+          return arg
+        if ch not in _BOOL_SHORT_FLAGS:
+          break  # the rest is this flag's value, or a different option
   return None
