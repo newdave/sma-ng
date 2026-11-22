@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.40](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.39...sma-ng-v3.2.40) (2026-11-22)
+
+
+### Bug Fixes
+
+* daemon HTTP security (reload route, health/metrics auth views, webhook arg validation) ([#228](https://github.com/newdave/sma-ng/issues/228)) ([c1753c9](https://github.com/newdave/sma-ng/commit/c1753c96465e8519ed0d10cfee6e932ae0ef3ce9))
+
 ## [3.2.39](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.38...sma-ng-v3.2.39) (2026-11-22)
 
 
