@@ -13,7 +13,7 @@ import time
 from resources.daemon import job_kinds, metrics_prom
 from resources.daemon.constants import FFMPEG_STDERR_DIR, SCRIPT_DIR, resolve_node_id
 from resources.daemon.context import clear_job_id, set_job_id
-from resources.daemon.db import TELEMETRY_COLUMNS
+from resources.daemon.db import NO_CLAIM_TOKEN, TELEMETRY_COLUMNS
 from resources.log import LEVEL_TOKEN_RE, getLogger
 from resources.processor.failures import (
   WORKER_SENTINEL_DISK_PRESSURE,
@@ -349,11 +349,8 @@ class ConversionWorker(threading.Thread):
     return True
 
   def _owner_kwargs(self):
-    """Ownership arguments for fail/complete/requeue: node, plus the claim token when this run has one."""
-    kwargs = {"node_id": self.node_id}
-    if self._claim_token:
-      kwargs["claim_token"] = self._claim_token
-    return kwargs
+    """Ownership arguments for fail/complete/requeue/defer: node plus the claim token (NO_CLAIM_TOKEN when this run holds none)."""
+    return {"node_id": self.node_id, "claim_token": self._claim_token or NO_CLAIM_TOKEN}
 
   def _check_job_ownership(self, job_id):
     """Return an abort reason when the job row no longer belongs to this run.
@@ -378,8 +375,7 @@ class ConversionWorker(threading.Thread):
     if status in ("pending", "completed", "failed") or (status == "running" and isinstance(owner, str) and owner and owner != self.node_id):
       return self._set_abort_reason(ABORT_REASSIGNED)
     # Same node, new claim: the job was requeued and another worker took it.
-    token = row.get("claim_token")
-    if status == "running" and self._claim_token and isinstance(token, str) and token != self._claim_token:
+    if status == "running" and "claim_token" in row and (row["claim_token"] or None) != (self._claim_token or None):
       return self._set_abort_reason(ABORT_REASSIGNED)
     return None
 
@@ -735,7 +731,9 @@ class ConversionWorker(threading.Thread):
       if ok:
         return False
       try:
-        self.job_db.defer_job(job_id, PREFLIGHT_DEFER_SECONDS, reason=WORKER_SENTINEL_DISK_PRESSURE)
+        if self.job_db.defer_job(job_id, PREFLIGHT_DEFER_SECONDS, reason=WORKER_SENTINEL_DISK_PRESSURE, **self._owner_kwargs()) is False:
+          self.log.warning("Job %d no longer owned by this run; disk-pressure deferral discarded" % job_id)
+          return False
       except Exception:
         self.log.exception("Failed to defer job %d after disk-pressure preflight; failing open" % job_id)
         return False

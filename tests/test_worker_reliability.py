@@ -11,6 +11,7 @@ import unittest.mock as mock
 import pytest
 
 from resources.daemon import worker as worker_mod
+from resources.daemon.db import NO_CLAIM_TOKEN
 from resources.daemon.worker import (
   ABORT_CANCELLED,
   ABORT_REASSIGNED,
@@ -253,14 +254,16 @@ class TestProcessJobAbortOutcomes:
 
   def test_timeout_fails_job_with_timeout_cause(self, tmp_path):
     worker, db = self._run(tmp_path, ABORT_TIMEOUT)
-    db.fail_job.assert_called_once_with(21, "Job timed out after 42s", failure_category="system", failure_cause="timeout", node_id=worker.node_id, telemetry={}, source_duration_seconds=None)
+    db.fail_job.assert_called_once_with(
+      21, "Job timed out after 42s", failure_category="system", failure_cause="timeout", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN, telemetry={}, source_duration_seconds=None
+    )
     db.complete_job.assert_not_called()
 
   def test_shutdown_requeues_row(self, tmp_path):
     worker, db = self._run(tmp_path, ABORT_SHUTDOWN)
     db.fail_job.assert_not_called()
     db.complete_job.assert_not_called()
-    db.requeue_interrupted_job.assert_called_once_with(21, "Interrupted by daemon shutdown; requeued", node_id=worker.node_id)
+    db.requeue_interrupted_job.assert_called_once_with(21, "Interrupted by daemon shutdown; requeued", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN)
 
   @pytest.mark.parametrize("reason", [ABORT_CANCELLED, ABORT_REASSIGNED])
   def test_cancel_or_reassign_writes_nothing(self, tmp_path, reason):

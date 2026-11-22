@@ -13,7 +13,7 @@ import pytest
 import manual
 from converter.ffmpeg import FFMpeg, TerminatedBySignal
 from resources.daemon.constants import STATUS_PENDING, STATUS_RUNNING
-from resources.daemon.db import PostgreSQLJobDatabase, SQLiteJobDatabase
+from resources.daemon.db import NO_CLAIM_TOKEN, PostgreSQLJobDatabase, SQLiteJobDatabase
 from resources.daemon.worker import ABORT_CANCELLED, ConversionWorker
 
 from .test_db_job_kinds import _pg, _pg_db
@@ -55,7 +55,7 @@ class TestWorkerClassification:
 
   def test_sigterm_exit_requeues_without_failing(self, tmp_path):
     worker, db = self._run(tmp_path, -signal.SIGTERM)
-    db.requeue_interrupted_job.assert_called_once_with(31, "Interrupted by SIGTERM (exit code -15); requeued", node_id=worker.node_id)
+    db.requeue_interrupted_job.assert_called_once_with(31, "Interrupted by SIGTERM (exit code -15); requeued", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN)
     db.fail_job.assert_not_called()
     db.complete_job.assert_not_called()
 
@@ -68,7 +68,7 @@ class TestWorkerClassification:
 
   def test_sigint_on_running_worker_requeues(self, tmp_path):
     worker, db = self._run(tmp_path, -signal.SIGINT)
-    db.requeue_interrupted_job.assert_called_once_with(31, "Interrupted by SIGINT (exit code -2); requeued", node_id=worker.node_id)
+    db.requeue_interrupted_job.assert_called_once_with(31, "Interrupted by SIGINT (exit code -2); requeued", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN)
     db.fail_job.assert_not_called()
 
   @pytest.mark.parametrize("rc", [-9, -11, 1])
@@ -79,7 +79,7 @@ class TestWorkerClassification:
 
   def test_stopping_worker_requeues_ordinary_failure(self, tmp_path):
     worker, db = self._run(tmp_path, 1, stopping=True)
-    db.requeue_interrupted_job.assert_called_once_with(31, "Interrupted by daemon shutdown (exit code 1); requeued", node_id=worker.node_id)
+    db.requeue_interrupted_job.assert_called_once_with(31, "Interrupted by daemon shutdown (exit code 1); requeued", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN)
     db.fail_job.assert_not_called()
 
   def test_real_failure_is_failed_with_exit_code(self, tmp_path):

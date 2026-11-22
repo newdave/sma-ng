@@ -6,6 +6,7 @@ import unittest.mock as mock
 
 import pytest
 
+from resources.daemon.db import NO_CLAIM_TOKEN
 from resources.daemon.worker import (
   ConversionWorker,
   WorkerPool,
@@ -134,7 +135,7 @@ class TestConversionWorkerProcessJob:
     worker = _make_worker(job_db=db)
     job = {"id": 1, "path": str(tmp_path / "missing.mkv"), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(1, "Path does not exist", failure_category="source_media", failure_cause="path_missing", node_id=worker.node_id)
+    db.fail_job.assert_called_once_with(1, "Path does not exist", failure_category="source_media", failure_cause="path_missing", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN)
 
   def test_skips_cancelled_job_before_start(self, tmp_path):
     media = tmp_path / "movie.mkv"
@@ -186,7 +187,9 @@ class TestConversionWorkerProcessJob:
     worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
     job = {"id": 5, "path": str(media), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(5, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id, telemetry={}, source_duration_seconds=None)
+    db.fail_job.assert_called_once_with(
+      5, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN, telemetry={}, source_duration_seconds=None
+    )
     db.complete_job.assert_not_called()
 
   def test_does_not_overwrite_cancelled_status_after_failed_conversion(self, tmp_path):
@@ -244,7 +247,7 @@ class TestConversionWorkerProcessJob:
     worker._run_conversion = mock.MagicMock()
     job = {"id": 8, "path": str(media), "config": "/cfg.ini", "args": '["-tmdb", '}
     worker.process_job(job)
-    db.fail_job.assert_called_once_with(8, "Invalid job args", failure_category="config", failure_cause="invalid_args", node_id=worker.node_id)
+    db.fail_job.assert_called_once_with(8, "Invalid job args", failure_category="config", failure_cause="invalid_args", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN)
     worker._run_conversion.assert_not_called()
     assert worker.current_job_id is None
 
@@ -363,7 +366,9 @@ class TestIngestFfmpegStderrSidecars:
     worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
     worker.process_job({"id": 8, "path": str(media), "config": "/cfg.ini", "args": None})
 
-    db.fail_job.assert_called_once_with(8, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id, telemetry={}, source_duration_seconds=None)
+    db.fail_job.assert_called_once_with(
+      8, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN, telemetry={}, source_duration_seconds=None
+    )
     db.update_job_ffmpeg_stderr.assert_called_once()
     args, _ = db.update_job_ffmpeg_stderr.call_args
     assert args[0] == 8

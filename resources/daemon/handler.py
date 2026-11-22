@@ -228,6 +228,7 @@ def _public_job(job):
     job["kind"] = job_kinds.DEFAULT_KIND
   for column in JOB_OUTPUT_COLUMNS:
     job.pop(column, None)
+  job.pop("claim_token", None)  # internal ownership state
   return job
 
 

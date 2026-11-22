@@ -427,20 +427,30 @@ def _backfill_request_profile(conn, *, is_sqlite, logger=None):
   return len(updates)
 
 
+# claim_token value meaning "this run holds no token": the row must carry none either.
+# None (the default) means the caller does not check the token at all (admin cancel, node recovery).
+NO_CLAIM_TOKEN = ""  # nosec B105 - sentinel, not a credential
+
+
 def _owner_guard(node_id, placeholder, claim_token=None):
   """SQL fragment restricting an UPDATE to rows still claimed by *node_id*.
 
   Rows with a NULL node_id (legacy start_job path) are accepted. When
   *claim_token* is given the row must also carry exactly that token, so a
   stale run cannot finalise a job another worker on the same node re-claimed
-  after a requeue.
+  after a requeue. NO_CLAIM_TOKEN requires the row to carry no token; None
+  skips the token check.
   """
   sql = ""
   params = ()
   if node_id:
     sql += " AND (node_id IS NULL OR node_id = %s)" % placeholder
     params += (node_id,)
-  if claim_token:
+  if claim_token is None:
+    pass
+  elif claim_token == NO_CLAIM_TOKEN:
+    sql += " AND claim_token IS NULL"
+  else:
     sql += " AND claim_token = %s" % placeholder
     params += (claim_token,)
   return sql, params
@@ -762,25 +772,32 @@ class SQLiteJobDatabase:
     """Single-node SQLite deployments have no peers to gate on."""
     return []
 
-  def defer_job(self, job_id, delay_seconds, reason=None):
+  def defer_job(self, job_id, delay_seconds, reason=None, node_id=None, claim_token=None):
     """Push a running job back to pending with a delay, without bumping retry_count.
 
     Used by the worker's pre-ffmpeg gates (e.g. output-filesystem pressure)
-    that want to defer the job instead of consuming a retry slot.
+    that want to defer the job instead of consuming a retry slot. Returns
+    False without writing when the row is no longer running under the given
+    node/claim token (a stale run must not reset a re-claimed row).
     """
     now = datetime.now(UTC).replace(microsecond=0)
     next_attempt = (now + timedelta(seconds=max(int(delay_seconds), 0))).isoformat()
+    owner_sql, owner_params = _owner_guard(node_id, "?", claim_token)
     with self._conn() as conn:
-      conn.execute(
+      cur = conn.execute(
         """
         UPDATE jobs
         SET status = ?, next_attempt_at = ?, error = ?,
-            started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
-        WHERE id = ?
-        """,
-        (STATUS_PENDING, next_attempt, reason, job_id),
+            started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL, claim_token = NULL
+        WHERE id = ? AND status = ?
+        """
+        + owner_sql,
+        (STATUS_PENDING, next_attempt, reason, job_id, STATUS_RUNNING, *owner_params),
       )
-    self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay_seconds, reason or ""))
+      deferred = cur.rowcount > 0
+    if deferred:
+      self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay_seconds, reason or ""))
+    return deferred
 
   def requeue_interrupted_job(self, job_id, reason, node_id=None, claim_token=None):
     """Return a running job to pending after the daemon (or a signal) killed its conversion.
@@ -795,7 +812,8 @@ class SQLiteJobDatabase:
       cur = conn.execute(
         """
         UPDATE jobs
-        SET status = ?, error = ?, started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
+        SET status = ?, error = ?, started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL,
+            claim_token = NULL
         WHERE id = ? AND status = ?
         """
         + owner_sql,
@@ -1721,13 +1739,16 @@ class PostgreSQLJobDatabase:
         )
         return [row["name"] for row in cur.fetchall()]
 
-  def defer_job(self, job_id, delay_seconds, reason=None):
+  def defer_job(self, job_id, delay_seconds, reason=None, node_id=None, claim_token=None):
     """Push a running job back to pending with a delay, without bumping retry_count.
 
     Used by the worker's pre-ffmpeg gates (e.g. output-filesystem pressure)
-    that want to defer the job instead of consuming a retry slot.
+    that want to defer the job instead of consuming a retry slot. Returns
+    False without writing when the row is no longer running under the given
+    node/claim token (a stale run must not reset a re-claimed row).
     """
     delay = max(int(delay_seconds), 0)
+    owner_sql, owner_params = _owner_guard(node_id, "%s", claim_token)
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
@@ -1735,12 +1756,16 @@ class PostgreSQLJobDatabase:
           UPDATE jobs
           SET status = %s, error = %s,
               next_attempt_at = NOW() + interval '%s seconds',
-              started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
-          WHERE id = %s
-          """,
-          (STATUS_PENDING, reason, delay, job_id),
+              started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL, claim_token = NULL
+          WHERE id = %s AND status = %s
+          """
+          + owner_sql,
+          (STATUS_PENDING, reason, delay, job_id, STATUS_RUNNING, *owner_params),
         )
-    self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay, reason or ""))
+        deferred = cur.rowcount > 0
+    if deferred:
+      self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay, reason or ""))
+    return deferred
 
   def requeue_interrupted_job(self, job_id, reason, node_id=None, claim_token=None):
     """Return a running job to pending after the daemon (or a signal) killed its conversion.
@@ -1756,7 +1781,8 @@ class PostgreSQLJobDatabase:
         cur.execute(
           """
           UPDATE jobs
-          SET status = %s, error = %s, started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
+          SET status = %s, error = %s, started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL,
+              claim_token = NULL
           WHERE id = %s AND status = %s
           """
           + owner_sql,
