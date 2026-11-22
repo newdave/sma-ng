@@ -438,3 +438,89 @@ class TestFirstAttemptTierLabel:
     payload = json.loads(mp.log.info.call_args_list[-1].args[0])
     assert payload["attempts"][0]["tier"] == "copy"
     assert payload["result"] == "failed"
+
+
+class TestAttemptLadderStopRules:
+  """A signal exit or filesystem failure repeats on every tier: no further tier runs."""
+
+  PREOPTS = ["-vcodec", "hevc_qsv", "-hwaccel", "qsv", "-i", "in.mkv"]
+
+  def _run(self, first_err):
+    mp = _make_mp(FallbackPolicy.AGGRESSIVE)
+    attempts = []
+
+    def run_fn(preopts, options=None):
+      attempts.append(list(preopts))
+      raise first_err
+
+    options = {"video": {"codec": "h265qsv"}}
+    with pytest.raises(FFMpegConvertError) as exc:
+      mp._attempt_ladder(list(self.PREOPTS), options, None, run_fn)
+    assert exc.value is first_err
+    return mp, attempts
+
+  @staticmethod
+  def _rc_err(rc, output="Conversion failed!"):
+    return FFMpegConvertError("Exited with code %d" % rc, "ffmpeg", output, returncode=rc)
+
+  def _logged(self, mp):
+    return [c.args[0] for c in mp.log.warning.call_args_list if "[attempt-ladder] stop" in c.args[0]]
+
+  def test_negative_returncode_stops(self):
+    mp, attempts = self._run(self._rc_err(-15))
+    assert len(attempts) == 1
+    assert self._logged(mp) == ["[attempt-ladder] stop: signal SIGTERM; no further tiers"]
+
+  @pytest.mark.parametrize("rc,name", [(143, "SIGTERM"), (130, "SIGINT"), (137, "SIGKILL"), (129, "SIGHUP")])
+  def test_shell_style_returncode_stops(self, rc, name):
+    mp, attempts = self._run(self._rc_err(rc))
+    assert len(attempts) == 1
+    assert "stop: signal %s" % name in self._logged(mp)[0]
+
+  def test_returncode_parsed_from_message_when_attribute_missing(self):
+    mp, attempts = self._run(FFMpegConvertError("Exited with code -9", "ffmpeg", "x"))
+    assert len(attempts) == 1
+    assert "signal SIGKILL" in self._logged(mp)[0]
+
+  @pytest.mark.parametrize(
+    "stderr,reason",
+    [
+      ("av_interleaved_write_frame(): No space left on device", "filesystem enospc"),
+      ("Error writing trailer: Disk quota exceeded", "filesystem edquota"),
+      ("Could not write header: Read-only file system", "filesystem erofs"),
+      ("Could not write header: Permission denied", "filesystem permission_denied"),
+      ("av_interleaved_write_frame(): Input/output error", "filesystem eio"),
+    ],
+  )
+  def test_filesystem_failure_stops(self, stderr, reason):
+    mp, attempts = self._run(self._rc_err(1, stderr))
+    assert len(attempts) == 1
+    assert "stop: %s;" % reason in self._logged(mp)[0]
+
+  def test_stop_on_later_tier_runs_no_more_tiers(self):
+    mp = _make_mp(FallbackPolicy.AGGRESSIVE)
+    attempts = []
+
+    def run_fn(preopts, options=None):
+      attempts.append(options["video"]["codec"])
+      if len(attempts) == 1:
+        raise _err("hw fail")
+      raise self._rc_err(1, "No space left on device")
+
+    with pytest.raises(FFMpegConvertError):
+      mp._attempt_ladder(list(self.PREOPTS), {"video": {"codec": "h265qsv"}}, None, run_fn)
+    assert len(attempts) == 2
+
+  def test_runtime_error_still_climbs(self):
+    mp = _make_mp(FallbackPolicy.AGGRESSIVE)
+    attempts = []
+
+    def run_fn(preopts, options=None):
+      attempts.append(list(preopts))
+      if len(attempts) < 4:
+        raise self._rc_err(1, "Error muxing a packet")
+      return None
+
+    mp._attempt_ladder(list(self.PREOPTS), {"video": {"codec": "h265qsv"}}, None, run_fn)
+    assert len(attempts) == 4
+    assert self._logged(mp) == []

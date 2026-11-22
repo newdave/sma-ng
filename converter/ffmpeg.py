@@ -28,7 +28,7 @@ class FFMpegError(Exception):
 
 
 class FFMpegConvertError(Exception):
-  def __init__(self, message, cmd, output, details=None, pid=0):
+  def __init__(self, message, cmd, output, details=None, pid=0, returncode=None):
     """
     @param    message: Error message.
     @type     message: C{str}
@@ -49,6 +49,7 @@ class FFMpegConvertError(Exception):
     self.output = output
     self.details = details
     self.pid = pid
+    self.returncode = returncode
 
   def __repr__(self):
     error = self.details if self.details else self.message
@@ -928,7 +929,7 @@ class FFMpeg:
     if p.returncode != 0:
       # Use the last non-empty line of output as the error detail.
       last_line = next((l for l in reversed(total_output.split("\n")) if l.strip()), "")
-      raise FFMpegConvertError("Exited with code %d" % p.returncode, cmd, total_output, last_line, pid=p.pid)
+      raise FFMpegConvertError("Exited with code %d" % p.returncode, cmd, total_output, last_line, pid=p.pid, returncode=p.returncode)
 
   def thumbnail(self, fname, time, outfile, size=None, quality=DEFAULT_JPEG_QUALITY):
     """

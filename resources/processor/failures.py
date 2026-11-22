@@ -15,6 +15,7 @@ or `resources.daemon` to keep import order simple.
 from __future__ import annotations
 
 import re
+import signal
 from dataclasses import dataclass
 from enum import Enum
 
@@ -222,6 +223,8 @@ class FfmpegFailureCause(str, Enum):
   # Environment
   DISK_FULL = "disk_full"
   PERMISSION_DENIED = "permission_denied"
+  DISK_QUOTA = "disk_quota"
+  READ_ONLY_FS = "read_only_fs"
   SOURCE_UNAVAILABLE = "source_unavailable"
   # Catch-all
   UNKNOWN = "unknown"
@@ -373,6 +376,16 @@ _CAUSE_PATTERNS: tuple[tuple[re.Pattern[str], FfmpegFailureCause, str], ...] = (
     re.compile(r"No space left|ENOSPC", re.IGNORECASE),
     FfmpegFailureCause.DISK_FULL,
     "Output filesystem is full. Free space or change output_directory.",
+  ),
+  (
+    re.compile(r"Disk quota exceeded|EDQUOT", re.IGNORECASE),
+    FfmpegFailureCause.DISK_QUOTA,
+    "Output filesystem quota exceeded. Free space for this user or raise the quota.",
+  ),
+  (
+    re.compile(r"Read-only file system|EROFS", re.IGNORECASE),
+    FfmpegFailureCause.READ_ONLY_FS,
+    "Output filesystem is mounted read-only. Check the mount, container volume flags and systemd ReadWritePaths.",
   ),
   (
     re.compile(r"Permission denied|EACCES", re.IGNORECASE),
@@ -533,6 +546,8 @@ _FAILURE_CATEGORY_MAP: dict[str, FailureCategory] = {
   # ── FfmpegFailureCause: filesystem ────────────────────────────────
   FfmpegFailureCause.DISK_FULL.value: FailureCategory.DISK,
   FfmpegFailureCause.PERMISSION_DENIED.value: FailureCategory.DISK,
+  FfmpegFailureCause.DISK_QUOTA.value: FailureCategory.DISK,
+  FfmpegFailureCause.READ_ONLY_FS.value: FailureCategory.DISK,
   # ── FfmpegFailureCause: catch-all ─────────────────────────────────
   FfmpegFailureCause.UNKNOWN.value: FailureCategory.SYSTEM,
   # ── Worker sentinels ──────────────────────────────────────────────
@@ -559,7 +574,48 @@ def categorize_failure(cause_or_class: str | None) -> FailureCategory:
   return _FAILURE_CATEGORY_MAP.get(str(cause_or_class), FailureCategory.UNKNOWN)
 
 
+# Exit codes a shell reports for a signal-killed child (128 + N): HUP, INT, KILL, TERM.
+_SIGNAL_EXIT_CODES = {129: "SIGHUP", 130: "SIGINT", 137: "SIGKILL", 143: "SIGTERM"}
+# A write-side I/O error (as opposed to a read error on the source).
+_OUTPUT_IO_ERROR = re.compile(
+  r"Input/output error.*(?:write|trailer|muxing|header)|(?:write|trailer|muxing|header).*Input/output error|EIO",
+  re.IGNORECASE,
+)
+_STOP_CAUSES = {
+  FfmpegFailureCause.DISK_FULL: "enospc",
+  FfmpegFailureCause.DISK_QUOTA: "edquota",
+  FfmpegFailureCause.READ_ONLY_FS: "erofs",
+  FfmpegFailureCause.PERMISSION_DENIED: "permission_denied",
+}
+
+
+def ladder_stop_reason(returncode: int | None, stderr: str | bytes | None) -> str | None:
+  """Return why the encode fallback ladder must stop, or ``None`` to keep climbing.
+
+  A signal-killed ffmpeg (negative return code, or 128+N for HUP/INT/KILL/TERM)
+  and filesystem failures (disk full, quota, read-only fs, permission denied or
+  an I/O error writing the output) fail identically on every tier, so retrying
+  only wastes encodes.
+  """
+  if returncode is not None:
+    if returncode < 0:
+      try:
+        return "signal " + signal.Signals(-returncode).name
+      except ValueError:
+        return "signal %d" % -returncode
+    if returncode in _SIGNAL_EXIT_CODES:
+      return "signal " + _SIGNAL_EXIT_CODES[returncode]
+  cause = diagnose_ffmpeg_failure(stderr).cause
+  if cause in _STOP_CAUSES:
+    return "filesystem " + _STOP_CAUSES[cause]
+  text = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else (stderr if isinstance(stderr, str) else "")
+  if _OUTPUT_IO_ERROR.search(text[-TAIL_BYTES:]):
+    return "filesystem eio"
+  return None
+
+
 __all__ = [
+  "ladder_stop_reason",
   "TAIL_BYTES",
   "WORKER_SENTINEL_DISK_PRESSURE",
   "WORKER_SENTINEL_EXCEPTION",

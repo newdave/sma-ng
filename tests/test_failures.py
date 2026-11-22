@@ -325,3 +325,30 @@ class TestDiagnoseFfmpegFailure:
     stderr = "ffmpeg version 8.1 boilerplate\n[hevc_qsv @ 0xff] width 1920 height 872 not aligned to 16\nmore noise after\n"
     d = diagnose_ffmpeg_failure(stderr)
     assert d.signal_line == "[hevc_qsv @ 0xff] width 1920 height 872 not aligned to 16"
+
+
+class TestLadderStopReason:
+  @pytest.mark.parametrize("rc", [-15, -2, -9, 143, 130, 137, 129])
+  def test_signal_codes_stop(self, rc):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(rc, "").startswith("signal ")
+
+  @pytest.mark.parametrize(
+    "stderr",
+    ["No space left on device", "Disk quota exceeded", "Read-only file system", "Permission denied", "write_frame(): Input/output error"],
+  )
+  def test_filesystem_stderr_stops(self, stderr):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(1, stderr).startswith("filesystem ")
+
+  @pytest.mark.parametrize("rc,stderr", [(1, "Segmentation fault"), (1, ""), (None, "Error while decoding stream"), (1, "Error reading: Input/output error")])
+  def test_other_failures_climb(self, rc, stderr):
+    from resources.processor.failures import ladder_stop_reason
+
+    assert ladder_stop_reason(rc, stderr) is None
+
+  def test_quota_and_readonly_causes(self):
+    assert diagnose_ffmpeg_failure("Disk quota exceeded").cause == FfmpegFailureCause.DISK_QUOTA
+    assert diagnose_ffmpeg_failure("Read-only file system").cause == FfmpegFailureCause.READ_ONLY_FS
