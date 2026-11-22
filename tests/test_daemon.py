@@ -147,6 +147,21 @@ class TestJobDedupeWindowProjection:
     assert PathConfigManager(cfg).job_dedupe_window_seconds == 0
 
 
+class TestJobRetentionProjection:
+  def test_default_when_unset(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {})
+    assert PathConfigManager(cfg).job_retention_days == 30
+
+  def test_projects_from_yaml(self, tmp_path):
+    cfg = str(tmp_path / "sma-ng.yml")
+    _dump_daemon_yaml(cfg, {"job-retention-days": 7})
+    assert PathConfigManager(cfg).job_retention_days == 7
+
+  def test_init_default_without_config_file(self):
+    assert PathConfigManager().job_retention_days == 30
+
+
 class TestShouldSkipSameExtension:
   """``PathConfigManager.should_skip_same_extension`` filters directory
   submissions so files already at the configured output extension don't

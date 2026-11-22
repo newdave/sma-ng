@@ -41,15 +41,15 @@ class TestSQLiteRetention:
     assert db.get_job(young) is not None
     assert db.get_job(old) is None
 
-  def test_scanned_files_pruned_with_jobs(self, tmp_path):
+  def test_scanned_files_are_never_pruned(self, tmp_path):
     db = _db(tmp_path)
     with db._conn() as conn:
       conn.execute("INSERT INTO scanned_files (path, scanned_at) VALUES ('/old', datetime('now', '-40 days'))")
       conn.execute("INSERT INTO scanned_files (path, scanned_at) VALUES ('/new', datetime('now', '-1 days'))")
     db.cleanup_old_jobs(days=30)
     with db._conn() as conn:
-      paths = [r["path"] for r in conn.execute("SELECT path FROM scanned_files").fetchall()]
-    assert paths == ["/new"]
+      paths = sorted(r["path"] for r in conn.execute("SELECT path FROM scanned_files").fetchall())
+    assert paths == ["/new", "/old"]
 
   def test_get_jobs_omits_blob_columns(self, tmp_path):
     db = _db(tmp_path)
@@ -63,7 +63,7 @@ class TestSQLiteRetention:
 
 
 class TestPostgresRetention:
-  def test_cleanup_includes_cancelled_protects_window_and_prunes_scanned(self):
+  def test_cleanup_includes_cancelled_protects_window_and_keeps_scanned(self):
     cur = MagicMock()
     cur.rowcount = 2
     db, _, _, _ = _make_db_with_mock_pool(mock_cursor=cur)
@@ -73,8 +73,8 @@ class TestPostgresRetention:
     assert "DELETE FROM jobs" in job_sql
     assert job_params == ("completed", "failed", "cancelled", 3600)
     assert "make_interval(secs" in job_sql
-    assert "DELETE FROM scanned_files" in calls[1][0][0]
-    assert calls[1][0][1] == (3600,)
+    assert len(calls) == 1
+    assert not any("scanned_files" in c[0][0] for c in calls)
 
   def test_get_jobs_selects_explicit_columns(self):
     cur = MagicMock()

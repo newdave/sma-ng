@@ -861,25 +861,25 @@ class SQLiteJobDatabase:
       return [dict(r) for r in conn.execute("SELECT * FROM jobs WHERE status = ?", (STATUS_RUNNING,)).fetchall()]
 
   def cleanup_old_jobs(self, days=30, protect_seconds=0):
-    """Delete completed, failed and cancelled jobs older than *days*, and stale scanned_files rows.
+    """Delete completed, failed and cancelled jobs older than *days*.
+
+    scanned_files is deliberately left alone: it records every path the scanner
+    has handled, and pruning it would make the next scan re-queue the library.
 
     *protect_seconds* is a floor on the age cutoff (the dedupe window), so a
     finished job that still blocks re-queueing is never removed. Returns the
     number of jobs deleted.
     """
     age = timedelta(seconds=max(days * 86400, protect_seconds))
-    cutoff_dt = datetime.now(UTC) - age
-    cutoff = cutoff_dt.replace(microsecond=0).isoformat()
-    scan_cutoff = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = (datetime.now(UTC) - age).replace(microsecond=0).isoformat()
     with self._conn() as conn:
       cur = conn.execute(
         "DELETE FROM jobs WHERE status IN (?, ?, ?) AND completed_at < ?",
         (STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED, cutoff),
       )
       deleted = cur.rowcount
-      scanned = conn.execute("DELETE FROM scanned_files WHERE scanned_at < ?", (scan_cutoff,)).rowcount
-    if deleted > 0 or scanned > 0:
-      self.log.info("Cleaned up %d old jobs and %d scanned file records" % (deleted, max(scanned, 0)))
+    if deleted > 0:
+      self.log.info("Cleaned up %d old jobs" % deleted)
     return deleted
 
   def pending_count(self):
@@ -2038,7 +2038,10 @@ class PostgreSQLJobDatabase:
         return [dict(r) for r in cur.fetchall()]
 
   def cleanup_old_jobs(self, days=30, protect_seconds=0):
-    """Delete completed, failed and cancelled jobs older than *days*, and stale scanned_files rows.
+    """Delete completed, failed and cancelled jobs older than *days*.
+
+    scanned_files is deliberately left alone: it records every path the scanner
+    has handled, and pruning it would make the next scan re-queue the library.
 
     *protect_seconds* is a floor on the age cutoff (the dedupe window), so a
     finished job that still blocks re-queueing is never removed. Returns the
@@ -2056,10 +2059,8 @@ class PostgreSQLJobDatabase:
           (STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED, seconds),
         )
         deleted = cur.rowcount
-        cur.execute("DELETE FROM scanned_files WHERE scanned_at < NOW() - make_interval(secs => %s)", (seconds,))
-        scanned = cur.rowcount
-    if deleted > 0 or scanned > 0:
-      self.log.info("Cleaned up %d old jobs and %d scanned file records" % (deleted, max(scanned or 0, 0)))
+    if deleted > 0:
+      self.log.info("Cleaned up %d old jobs" % deleted)
     return deleted
 
   def pending_count(self):

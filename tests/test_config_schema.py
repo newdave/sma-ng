@@ -87,6 +87,16 @@ class TestSchemaDefaultsContract:
     with pytest.raises(ValidationError):
       SmaConfig(daemon={"job_dedupe_window_seconds": -1})
 
+  def test_job_retention_days_default_and_bounds(self):
+    assert SmaConfig().daemon.job_retention_days == 30
+    assert SmaConfig(daemon={"job_retention_days": 0}).daemon.job_retention_days == 0
+    with pytest.raises(ValidationError):
+      SmaConfig(daemon={"job_retention_days": -1})
+
+  def test_job_retention_days_kebab_alias_parses(self):
+    cfg = SmaConfig.model_validate({"daemon": {"job-retention-days": 7}})
+    assert cfg.daemon.job_retention_days == 7
+
   def test_job_dedupe_window_kebab_alias_parses(self):
     cfg = SmaConfig.model_validate({"daemon": {"job-dedupe-window-seconds": 90}})
     assert cfg.daemon.job_dedupe_window_seconds == 90

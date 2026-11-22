@@ -111,6 +111,10 @@ Node admin API route:
 
 - `POST /admin/nodes/<node_id>/<action>` where action is one of `approve`, `reject`, `restart`, `shutdown`, `delete`
 
+**`GET /jobs` response size:** rows use an explicit column list that omits `ffmpeg_stderr` and the captured `output`
+(up to 1 MiB each per job). Read them with `GET /jobs/<id>/ffmpeg-stderr` and `GET /jobs/<id>/output`. `limit`
+values above `500` are clamped to `500`.
+
 ---
 
 ## Webhook Request Formats
@@ -343,7 +347,7 @@ auto-profile selection happens for one-shot conversions. Pass
 | `recycle-bin-max-age-days`         | Delete recycle-bin media files older than this many days (default: `30`, `0` = disabled)                                                                                                         |
 | `recycle-bin-min-free-gb`          | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled)                                                                           |
 | `job-dedupe-window-seconds`        | Skip a path whose job completed within this many seconds, for the scanner and webhooks alike (default: `21600`, `0` = disabled). See [Duplicate Suppression](#duplicate-suppression).            |
-| `job-retention-days`               | Delete completed, failed and cancelled jobs and `scanned_files` records older than this many days (default: `30`, `0` = keep forever). See [Job Retention](#job-retention). |
+| `job-retention-days`               | Delete completed, failed and cancelled jobs older than this many days (default: `30`, `0` = keep forever)                                                                                        |
 | `log-ttl-days`                     | Cluster-mode: retention for log entries in PostgreSQL                                                                                                                                            |
 | `node-expiry-days`                 | Cluster-mode: hard-delete offline nodes after this many days (`0` = disabled)                                                                                                                    |
 | `log-archive-dir`                  | Cluster-mode: directory for gzipped JSONL archive of cluster logs                                                                                                                                |
@@ -541,8 +545,8 @@ daemon:
 | `rewrite-to`   | Replacement prefix                                   |
 | `enabled`      | Set to `false` to disable without removing the entry |
 
-Files already in the `scanned_files` database table are skipped on subsequent scans (records are pruned after
-`job-retention-days`, see [Job Retention](#job-retention)). A file is
+Files already in the `scanned_files` database table are skipped on subsequent scans (job retention never
+prunes it). A file is
 recorded there only once it has been queued (or already has a pending/running job); files skipped
 by `strict-routing` stay unrecorded, so they are queued on a later scan once a matching routing
 rule is added. Any file whose extension matches `media-extensions` is eligible for submission. `.mp4` is excluded from the default list to avoid re-processing already-converted output; add it explicitly if you want scanning to pick it up.
@@ -722,15 +726,11 @@ curl -X POST "http://localhost:8585/cleanup?days=7"
 
 Every node prunes finished jobs automatically, on the first heartbeat after startup and then at most once an
 hour, on SQLite and PostgreSQL alike. Rows with status `completed`, `failed` or `cancelled` whose `completed_at`
-is older than `daemon.job-retention-days` (default `30`) are deleted, together with `scanned_files` records older
-than the same age. Set `job-retention-days: 0` to keep everything.
+is older than `daemon.job-retention-days` (default `30`) are deleted; `scanned_files` is never pruned.
+Set `job-retention-days: 0` to keep everything.
 
 A job completed within `job-dedupe-window-seconds` is never deleted, so retention (and `POST /cleanup?days=0`)
 cannot reopen the duplicate-suppression window. `POST /cleanup` runs the same pass on demand with the given `days`.
-
-`GET /jobs` returns an explicit column list: it omits `ffmpeg_stderr` and the captured `output`, which can each
-reach 1 MiB per job. Read them with `GET /jobs/<id>/ffmpeg-stderr` and `GET /jobs/<id>/output`. `limit` is capped
-at `500`.
 
 **Database schema:**
 

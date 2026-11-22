@@ -376,11 +376,10 @@ paths:
             type: string
         - name: limit
           in: query
-          description: Page size, capped at 500. Job rows omit ffmpeg_stderr and output (use the per-job endpoints).
+          description: Page size. Values above 500 are clamped to 500. Job rows omit ffmpeg_stderr and output (use the per-job endpoints).
           schema:
             type: integer
             default: 100
-            maximum: 500
         - name: offset
           in: query
           schema:
@@ -1144,8 +1143,7 @@ paths:
     post:
       summary: Remove old completed, failed and cancelled jobs
       description: >-
-        Also prunes scanned_files records of the same age. Jobs completed within daemon.job-dedupe-window-seconds
-        are never removed. The daemon runs the same pass hourly using daemon.job-retention-days.
+        Jobs completed within daemon.job-dedupe-window-seconds are never removed; scanned_files is not touched. The daemon runs the same pass hourly using daemon.job-retention-days.
       operationId: cleanup
       tags: [jobs]
       parameters:
