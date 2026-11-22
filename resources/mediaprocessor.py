@@ -724,6 +724,7 @@ from collections.abc import Callable
 
 from converter import Converter, FFMpegConvertError
 from converter.avcodecs import QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments
+from converter.ffmpeg import TerminatedBySignal
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
 from resources.analyzer import AnalyzerRecommendations, build_recommendations
@@ -4952,7 +4953,13 @@ class MediaProcessor:
       self.log.error("Error converting file, FFMPEG error (pid=%s, msg=%s). Full cmd + stderr in sidecar: %s" % (getattr(e, "pid", "?"), getattr(e, "message", "?"), sidecar_path or "<unavailable>"))
       self._emit_failure_diagnosis(e, options, sidecar_path)
       return _restore_after_failure(outputfile)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, TerminatedBySignal) as e:
+      # Interrupted (daemon shutdown SIGTERM or Ctrl-C): keep what stderr ffmpeg
+      # produced, drop the partial output and restore the input so a retry
+      # starts clean, then keep unwinding.
+      self._write_ffmpeg_stderr_sidecar(e)
+      self.log.warning("Conversion interrupted by %s; removed partial output and restored the input" % type(e).__name__)
+      _restore_after_failure(outputfile)
       raise
     except Exception:
       self.log.exception("Unexpected exception during conversion.")

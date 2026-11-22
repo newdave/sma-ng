@@ -348,6 +348,7 @@ auto-profile selection happens for one-shot conversions. Pass
 | `default-args`                     | Args prepended to every conversion regardless of which routing rule matched                                                                                                                      |
 | `smoke-test`                       | Run option-generation dry-run against the loaded config at startup. Exits 1 on failure.                                                                                                          |
 | `job-timeout-seconds`              | Maximum seconds a conversion may run before its process tree is killed and the job failed (0 = no timeout). CLI `--job-timeout` overrides.                                                       |
+| `shutdown-grace-seconds`           | Longest shutdown/restart waits for in-flight conversions before killing and requeuing them (default `100`, keep below the compose `stop_grace_period`; `0` = job timeout + 5 minutes).           |
 | `heartbeat-interval`               | Seconds between cluster heartbeat updates (PostgreSQL only, default `30`). CLI `--heartbeat-interval` overrides.                                                                                 |
 | `stale-seconds`                    | Seconds without a heartbeat before a node is declared stale and its running jobs requeued (PostgreSQL only, default `120`). CLI `--stale-seconds` overrides.                                     |
 | `progress-log-interval`            | Seconds between progress log lines for in-flight conversions                                                                                                                                     |
@@ -813,10 +814,17 @@ The auto-watcher and `POST /reload` share a lock so they cannot race on the scan
 ## Graceful Shutdown / Restart
 
 Both operations drain in-progress conversions before stopping or re-execing. The drain is bounded:
-it waits up to the job timeout plus 5 minutes (or 24 hours when `job-timeout-seconds` is `0`). At
-that deadline any conversion still running is killed and left `running` so it is requeued — by
-`mark_node_offline` in cluster mode, or on the next start for SQLite — then the daemon proceeds.
-If marking the node offline fails, a warning is logged and shutdown continues.
+it waits up to `shutdown-grace-seconds` (default `100`, deliberately below the compose
+`stop_grace_period` of 2 minutes so the requeue happens before Docker's SIGKILL). Set it to `0` to wait up to the
+job timeout plus 5 minutes instead (24 hours when `job-timeout-seconds` is `0`). At that deadline any conversion
+still running is killed and its job is returned to `pending` (no retry used, no failure recorded); `jobs.error`
+keeps the reason, for example `Interrupted by SIGTERM (exit code -15); requeued`. A conversion that dies from a
+signal (negative exit code) or ends while the worker is stopping is requeued the same way. If the requeue write
+fails the row stays `running` and is requeued by `mark_node_offline` in cluster mode, or on the next start for
+SQLite. The cluster heartbeat keeps running during the drain so other nodes do not requeue live jobs.
+The killed `manual.py` handles `SIGTERM` by stopping ffmpeg, writing the ffmpeg stderr sidecar and removing the
+partial output, so the retry starts clean. A real failure records its exit code, for example
+`Conversion process failed (exit code 1)`.
 
 ```bash
 # Shutdown (waits for all active jobs to finish)

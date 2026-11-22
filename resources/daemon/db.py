@@ -765,6 +765,32 @@ class SQLiteJobDatabase:
       )
     self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay_seconds, reason or ""))
 
+  def requeue_interrupted_job(self, job_id, reason, node_id=None):
+    """Return a running job to pending after the daemon (or a signal) killed its conversion.
+
+    Does not bump retry_count and applies no delay: the job did not fail, it was
+    interrupted. *reason* (the exit code / signal) is kept in jobs.error for the
+    operator. Returns False without writing when the row is no longer running on
+    this node (cancelled, or already requeued by node recovery).
+    """
+    owner_sql, owner_params = _owner_guard(node_id, "?")
+    with self._conn() as conn:
+      cur = conn.execute(
+        """
+        UPDATE jobs
+        SET status = ?, error = ?, started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
+        WHERE id = ? AND status = ?
+        """
+        + owner_sql,
+        (STATUS_PENDING, reason, job_id, STATUS_RUNNING, *owner_params),
+      )
+      requeued = cur.rowcount > 0
+      if requeued:
+        _backfill_one_request_profile(conn, job_id, is_sqlite=True)
+    if requeued:
+      self.log.info("Job %d requeued after interruption: %s" % (job_id, reason))
+    return requeued
+
   def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None, telemetry=None, source_duration_seconds=None):
     """Fail (or requeue with backoff) a running job.
 
@@ -1693,6 +1719,33 @@ class PostgreSQLJobDatabase:
           (STATUS_PENDING, reason, delay, job_id),
         )
     self.log.debug("Job %d deferred for %ds (%s)" % (job_id, delay, reason or ""))
+
+  def requeue_interrupted_job(self, job_id, reason, node_id=None):
+    """Return a running job to pending after the daemon (or a signal) killed its conversion.
+
+    Does not bump retry_count and applies no delay: the job did not fail, it was
+    interrupted. *reason* (the exit code / signal) is kept in jobs.error for the
+    operator. Returns False without writing when the row is no longer running on
+    this node (cancelled, or already requeued by node recovery).
+    """
+    owner_sql, owner_params = _owner_guard(node_id, "%s")
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        cur.execute(
+          """
+          UPDATE jobs
+          SET status = %s, error = %s, started_at = NULL, completed_at = NULL, worker_id = NULL, node_id = NULL
+          WHERE id = %s AND status = %s
+          """
+          + owner_sql,
+          (STATUS_PENDING, reason, job_id, STATUS_RUNNING, *owner_params),
+        )
+        requeued = cur.rowcount > 0
+      if requeued:
+        _backfill_one_request_profile(conn, job_id, is_sqlite=False)
+    if requeued:
+      self.log.info("Job %d requeued after interruption: %s" % (job_id, reason))
+    return requeued
 
   def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None, telemetry=None, source_duration_seconds=None):
     """Mark a running job as failed, or requeue with exponential backoff if retries remain.

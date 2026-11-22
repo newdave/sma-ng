@@ -463,6 +463,7 @@ class ConversionWorker(threading.Thread):
     self._last_encoder_name: str | None = None
     self._last_encoder_backend: str | None = None
     self._job_telemetry: dict = {}
+    self._last_returncode: int | None = None
     path = job["path"]
     config_file = job["config"]
     try:
@@ -555,11 +556,25 @@ class ConversionWorker(threading.Thread):
       # A conversion that exited 0 before the kill landed is still a
       # success; the DB guard discards it if the row was cancelled.
       abort_reason = None if success else self._abort_reason
+      returncode = self._last_returncode
+      if abort_reason is None and not success and (not self.running or (returncode is not None and returncode < 0)):
+        # A conversion killed by a signal (negative return code) or that ended
+        # while this worker is stopping was interrupted, not broken: the
+        # daemon's shutdown SIGTERM reaches manual.py and ffmpeg directly.
+        abort_reason = ABORT_SHUTDOWN
       if abort_reason == ABORT_SHUTDOWN:
-        # Killed at the shutdown deadline: leave the row 'running' so
-        # mark_node_offline (cluster) or the next startup (SQLite)
-        # requeues it instead of burning a retry or failing it.
-        self.log.warning("Job %d interrupted by daemon shutdown; it will be requeued: %s" % (job_id, path))
+        # Interrupted by shutdown / a signal: put the job back to pending
+        # without burning a retry or recording a failure. If this write is
+        # lost the row stays 'running' and mark_node_offline (cluster) or the
+        # next startup (SQLite) requeues it.
+        self.log.warning("Job %d interrupted by daemon shutdown or signal (exit code %s); requeuing: %s" % (job_id, returncode, path))
+        try:
+          requeued = self.job_db.requeue_interrupted_job(job_id, self._interrupt_reason(returncode), node_id=self.node_id)
+          if requeued is False:
+            self._log_discarded(job_id, False, "requeue")
+        except Exception:
+          self.log.exception("Failed to requeue interrupted job %d; leaving it for node recovery" % job_id)
+        self._ingest_ffmpeg_stderr_sidecars(job_id)
         metrics_prom.record_job_terminal("cancelled", elapsed)
       elif abort_reason in (ABORT_CANCELLED, ABORT_REASSIGNED):
         self.log.info("Job %d stopped: job was %s while converting: %s" % (job_id, "cancelled" if abort_reason == ABORT_CANCELLED else "requeued or claimed elsewhere", path))
@@ -623,6 +638,8 @@ class ConversionWorker(threading.Thread):
           cause = self._last_attempt_failure_class or WORKER_SENTINEL_PROCESS_FAILED
           cat = categorize_failure(cause).value
           message = "Conversion process failed" if is_convert else "%s process failed" % kind.name.capitalize()
+          if returncode is not None:
+            message += " (exit code %d)" % returncode
           updated = self.job_db.fail_job(
             job_id,
             message,
@@ -655,6 +672,19 @@ class ConversionWorker(threading.Thread):
       with self._abort_lock:
         self.current_job_id = None
         self._watchdog = None
+
+  @staticmethod
+  def _interrupt_reason(returncode):
+    """Operator-facing jobs.error text for a conversion interrupted by shutdown or a signal."""
+    if returncode is not None and returncode < 0:
+      try:
+        name = signal.Signals(-returncode).name
+      except ValueError:
+        name = "signal %d" % -returncode
+      return "Interrupted by %s (exit code %d); requeued" % (name, returncode)
+    if returncode is None:
+      return "Interrupted by daemon shutdown; requeued"
+    return "Interrupted by daemon shutdown (exit code %d); requeued" % returncode
 
   def _log_discarded(self, job_id, updated, what):
     """Log when complete_job/fail_job reported that no row was updated.
@@ -896,6 +926,7 @@ class ConversionWorker(threading.Thread):
       process.wait()
 
       report_path = final_output or path
+      self._last_returncode = process.returncode
       reason = self._abort_reason
       if reason == ABORT_TIMEOUT and process.returncode != 0:
         msg = "Job %d timed out after %ds; killed conversion process tree: %s" % (job_id, self.job_timeout_seconds, path)

@@ -959,6 +959,10 @@ class DaemonConfig(_Base):
   username: str = ""
   password: str = ""
   job_timeout_seconds: int = 7200
+  # Longest shutdown/restart waits for in-flight conversions before killing and
+  # requeuing them. Keep it below the compose stop_grace_period (default 2m) so
+  # the requeue happens before Docker's SIGKILL. 0 = job timeout + 5 minutes.
+  shutdown_grace_seconds: int = Field(default=100, ge=0)
   # Cluster (PostgreSQL) heartbeat cadence and stale-node threshold.
   # CLI --heartbeat-interval / --stale-seconds override these.
   heartbeat_interval: int = Field(default=30, ge=1)

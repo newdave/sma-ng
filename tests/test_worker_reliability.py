@@ -256,10 +256,11 @@ class TestProcessJobAbortOutcomes:
     db.fail_job.assert_called_once_with(21, "Job timed out after 42s", failure_category="system", failure_cause="timeout", node_id=worker.node_id, telemetry={}, source_duration_seconds=None)
     db.complete_job.assert_not_called()
 
-  def test_shutdown_leaves_row_for_requeue(self, tmp_path):
-    _worker, db = self._run(tmp_path, ABORT_SHUTDOWN)
+  def test_shutdown_requeues_row(self, tmp_path):
+    worker, db = self._run(tmp_path, ABORT_SHUTDOWN)
     db.fail_job.assert_not_called()
     db.complete_job.assert_not_called()
+    db.requeue_interrupted_job.assert_called_once_with(21, "Interrupted by daemon shutdown; requeued", node_id=worker.node_id)
 
   @pytest.mark.parametrize("reason", [ABORT_CANCELLED, ABORT_REASSIGNED])
   def test_cancel_or_reassign_writes_nothing(self, tmp_path, reason):

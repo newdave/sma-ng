@@ -14,6 +14,7 @@ import glob
 import json
 import logging
 import os
+import signal
 import struct
 import sys
 
@@ -21,6 +22,7 @@ import guessit
 import tmdbsimple as tmdb
 
 from converter.avcodecs import attachment_codec_list, audio_codec_list, subtitle_codec_list, video_codec_list
+from converter.ffmpeg import TerminatedBySignal
 from resources.config_loader import ConfigError, ConfigLoader
 from resources.daemon.context import set_job_id
 from resources.extensions import tmdb_api_key
@@ -980,6 +982,23 @@ def _resolve_effective_profile(config_arg, input_path, cli_profile):
   return resolved.profile
 
 
+def _on_sigterm(signum, frame):
+  """Unwind the running conversion so ffmpeg is stopped and partial output is removed."""
+  raise TerminatedBySignal(signum)
+
+
+def run():
+  """Run main(); on SIGTERM exit by that signal so the daemon sees a signal death, not a failure."""
+  signal.signal(signal.SIGTERM, _on_sigterm)
+  try:
+    main()
+  except TerminatedBySignal:
+    log.warning("Terminated by SIGTERM; conversion stopped and cleaned up")
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    os.kill(os.getpid(), signal.SIGTERM)
+    sys.exit(128 + signal.SIGTERM)  # only reached if the signal is somehow ignored
+
+
 def main():
   """Parse CLI arguments and drive the manual conversion/tagging workflow.
 
@@ -1252,4 +1271,4 @@ def main():
 
 
 if __name__ == "__main__":
-  main()
+  run()

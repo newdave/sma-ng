@@ -357,6 +357,14 @@ conversion process tree and failed the job with cause `timeout` (category `syste
 unionfs reads, a hung GPU) or the encode is genuinely slow (4K software encode); raise the timeout or set it to `0`
 to disable it. See [Job timeout](daemon.md#job-timeout).
 
+### Job returned to pending with "Interrupted by SIGTERM (exit code -15); requeued"
+
+The conversion was killed by a signal, usually the daemon's own shutdown during a deploy restart, so the job was
+requeued instead of failed and runs again on the next start. Raise `daemon.shutdown-grace-seconds` (and the compose
+`STOP_GRACE_PERIOD`) to let long conversions finish before the restart, or run `cluster:drain` first. If a job
+keeps coming back with this message without a restart, something else (the OOM killer, an operator) is killing
+ffmpeg; check `dmesg` and the container memory limit.
+
 ### "Job N completion discarded: job is no longer running on this node"
 
 The job finished, but its row had already been cancelled, requeued by stale-node recovery, or claimed by another
