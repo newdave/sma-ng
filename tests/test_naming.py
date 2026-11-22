@@ -3,6 +3,8 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from converter.ffmpeg import MediaInfo
 from resources.metadata import MediaType, update_plexmatch
 from resources.naming import (
@@ -1343,3 +1345,55 @@ class TestTrailingYearStripped:
     data._apply_radarr_data({"movie": {"title": "Dune (2021)", "year": 2021}}, MagicMock())
     assert data.movie_title == "Dune"
     assert data.movie_cleantitle == "Dune"
+
+
+class TestReleaseSourceAndCodecTags:
+  """SMANG-16: keep release source and codec tags on rename."""
+
+  def _guess(self, name):
+    import guessit
+
+    return guessit.guessit(name)
+
+  @pytest.mark.parametrize(
+    "name,expected",
+    [
+      ("Show.S01E01.1080p.WEBRip.x265-GRP.mkv", "WEBRip"),
+      ("Show.S01E01.1080p.WEB-DL.h264-GRP.mkv", "WEB-DL"),
+      ("Movie.2020.BDRip.x264-G.mkv", "BluRay"),
+      ("Movie.2020.1080p.BluRay.x264-G.mkv", "BluRay"),
+      ("Movie.2020.1080p.BluRay.Remux.AVC-G.mkv", "Remux"),
+      ("Movie.2020.DVDRip-G.mkv", "DVDRip"),
+      ("Show.S01E01.720p.HDTV.x264-G.mkv", "HDTV"),
+    ],
+  )
+  def test_source_mapping(self, name, expected):
+    from resources.naming import _get_source
+
+    assert _get_source(self._guess(name)) == expected
+
+  def test_no_source_does_not_fall_back_to_resolution(self, make_media_info):
+    from resources.naming import _get_source
+
+    guess = self._guess("Movie.2020.1080p.x264-G.mkv")
+    assert _get_source(guess) == ""
+    data = NamingData()
+    data.from_mediainfo(make_media_info(video_width=1920), guess_data=guess)
+    assert data.source == ""
+    assert data.quality_full == "1080p"
+
+  @pytest.mark.parametrize(
+    "src_codec,name,expected",
+    [
+      ("h264", "Show.S01E01.1080p.WEB-DL.h264-GRP.mkv", "h264"),
+      ("hevc", "Show.S01E01.1080p.WEB-DL.H.265-GRP.mkv", "H.265"),
+      ("h264", "Show.S01E01.1080p.WEB-DL.x264-GRP.mkv", "x264"),
+      ("hevc", "Show.S01E01.1080p.WEB-DL.h264-GRP.mkv", "x265"),
+      ("h264", "Show.S01E01.1080p.WEB-DL-GRP.mkv", "x264"),
+    ],
+  )
+  def test_keep_source_codec(self, make_media_info, src_codec, name, expected):
+    data = NamingData()
+    data.from_mediainfo(make_media_info(video_codec=src_codec))
+    data.keep_source_codec(name)
+    assert data.video_codec == expected

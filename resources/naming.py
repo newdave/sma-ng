@@ -106,6 +106,12 @@ SOURCE_MAP = {
   "remux": "Remux",
 }
 
+# guessit source + other 'Rip' combinations that change the display name
+_RIP_SOURCE_MAP = {"web": "WEBRip", "dvd": "DVDRip"}
+
+# Video codec tokens as written in release names
+_SOURCE_CODEC_RE = re.compile(r"(?<![A-Za-z0-9])(h[.\s]?26[45]|x26[45]|hevc|avc|av1|xvid|divx)(?![A-Za-z0-9])", re.IGNORECASE)
+
 HDR_DISPLAY = {
   "smpte2084": "HDR",
   "arib-std-b67": "HLG",
@@ -171,9 +177,19 @@ def _get_quality_label(width):
 
 def _get_source(guess_data):
   """Extract source type from guessit data."""
-  source = guess_data.get("source", "") or guess_data.get("screen_size", "")
-  if isinstance(source, str):
-    return SOURCE_MAP.get(source.lower(), source)
+  source = guess_data.get("source", "")
+  other = guess_data.get("other", "") or []
+  flags = {o.lower() for o in ([other] if isinstance(other, str) else other) if isinstance(o, str)}
+  if isinstance(source, str) and source:
+    key = source.lower()
+    # guessit reports WEBRip as source 'Web' + other 'Rip'; DVDRip likewise.
+    if "rip" in flags and key in _RIP_SOURCE_MAP:
+      return _RIP_SOURCE_MAP[key]
+    if "remux" in flags and key in ("blu-ray", "bluray"):
+      return "Remux"
+    return SOURCE_MAP.get(key, source)
+  if not source and "remux" in flags:
+    return "Remux"
   return ""
 
 
@@ -275,6 +291,20 @@ class NamingData:
       self.release_group = _get_release_group(guess_data)
 
     self.quality_full = ("%s-%s" % (self.source, self.quality)) if self.source else self.quality
+
+  def keep_source_codec(self, source_name):
+    """Keep the codec token written in the source name when the output codec family matches it.
+
+    The probed codec only says h264/hevc, so a stream copy would otherwise be
+    renamed [h264] -> [x264]. A differing family (a real transcode) keeps the probed token.
+    """
+    if not self.video_codec:
+      return
+    for m in _SOURCE_CODEC_RE.finditer(os.path.basename(source_name or "")):
+      token = m.group(1)
+      if VIDEO_CODEC_DISPLAY.get(token.lower().replace(".", "").replace(" ", "")) == self.video_codec:
+        self.video_codec = token
+        return
 
   def from_tagdata(self, tagdata):
     """Populate from TMDB Metadata object."""
@@ -643,6 +673,7 @@ def generate_name(filepath, info, tagdata, settings, guess_data=None, log=None, 
   # Populate from local sources
   data.from_mediainfo(info, guess_data)
   data.from_tagdata(tagdata)
+  data.keep_source_codec(lookup_path or filepath)
 
   # Use lookup_path for API matching when the output file is in a temp dir
   api_path = lookup_path or filepath

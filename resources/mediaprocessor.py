@@ -821,7 +821,10 @@ class MediaProcessor:
               # Re-probe the converted output so codec/quality tokens reflect
               # the encoded file, not the source (e.g. x265 instead of x264).
               output_info = self.converter.probe(output["output"], posters_as_video=False) or info
-              new_name = generate_name(output["output"], output_info, tagdata, self.settings, log=self.log, lookup_path=inputfile)
+              import guessit as _guessit
+
+              guess_data = _guessit.guessit(os.path.basename(inputfile))
+              new_name = generate_name(output["output"], output_info, tagdata, self.settings, guess_data=guess_data, log=self.log, lookup_path=inputfile)
               if new_name:
                 output["output"] = rename_file(output["output"], new_name, log=self.log)
             except Exception:
