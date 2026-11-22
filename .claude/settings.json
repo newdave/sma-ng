@@ -17,22 +17,6 @@
     ],
     "deny": []
   },
-  "ignorePaths": [
-    "venv/**",
-    "**/__pycache__/**",
-    "*.pyc",
-    "config/autoProcess.ini",
-    "config/sma-ng.yml"
-  ],
-  "enabledPlugins": {
-    "pyright-lsp@claude-plugins-official": true,
-    "bp@cc-blueprint-toolkit": true,
-    "superpowers@claude-plugins-official": true,
-    "codex@openai-codex": false,
-    "code-simplifier@claude-plugins-official": false,
-    "frontend-design@claude-plugins-official": false,
-    "rust-analyzer-lsp@claude-plugins-official": false
-  },
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -70,6 +54,21 @@
       }
     ]
   },
+  "enabledPlugins": {
+    "pyright-lsp@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true,
+    "codex@openai-codex": false,
+    "code-simplifier@claude-plugins-official": false,
+    "frontend-design@claude-plugins-official": false,
+    "rust-analyzer-lsp@claude-plugins-official": false
+  },
+  "ignorePaths": [
+    "venv/**",
+    "**/__pycache__/**",
+    "*.pyc",
+    "config/autoProcess.ini",
+    "config/sma-ng.yml"
+  ],
   "enabledMcpjsonServers": [
     "plane"
   ]
