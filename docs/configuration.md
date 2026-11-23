@@ -290,8 +290,8 @@ can never leak onto a non-VAAPI command line. Unset fields inherit from
 | `codec-parameters`  | string | `''`    | Free-form VAAPI-only flag string appended to the assembled command line.                                                                               |
 | `rc-mode`           | string | `''`    | VAAPI rate-control mode (`VBR`, `CBR`, `CQP`). `''` = inherit from `codec-parameters` if `-rc_mode` is set there, otherwise the encoder default fires. |
 | `compression-level` | int    | `0`     | `-compression_level` (VAAPI-specific quality/speed tuning). `0` = don't emit.                                                                          |
-| `low-power`         | int    | `-1`    | `-low_power` for VAAPI (shared with QSV; semantics differ). `-1` = don't emit. Also kept by the `hw_alt` QSV to VAAPI swap.                            |
-| `async-depth`       | int    | `0`     | `-async_depth` for VAAPI (shared with QSV). `0` = don't emit.                                                                                          |
+| `low-power`         | int    | `-1`    | `-low_power` for VAAPI (shared with QSV; semantics differ). `-1` = don't emit. The `hw_alt` QSV to VAAPI swap drops the QSV values and uses only this one. |
+| `async-depth`       | int    | `0`     | `-async_depth` for VAAPI (shared with QSV). `0` = don't emit. Same `hw_alt` swap rule as `low-power`.                                                  |
 | `look-ahead-depth`  | int    | `0`     | Override `base.video.look-ahead-depth` for VAAPI. `0` = inherit. Mapped to VAAPI's own look-ahead control where supported.                             |
 | `global-quality`    | int    | `0`     | Quality target for VAAPI. `0` = inherit. Translated to `-rc_mode CQP -qp <N>` because VAAPI has no direct equivalent of QSV's ICQ `-global_quality`; `av1_vaapi` gets `-rc_mode CQP -global_quality <N×5>` instead of `-qp`. |
 | `b-frames`          | int    | `-1`    | B-frame override. `-1` = inherit from `base.video.b-frames`.                                                                                           |

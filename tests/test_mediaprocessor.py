@@ -9363,10 +9363,10 @@ class TestStripQsvOnlyFlags:
 
     assert f("-extbrc 1 -global_quality 23 -preset slow") == "-preset slow"
 
-  def test_keeps_shared_low_power_and_async_depth(self):
+  def test_strips_qsv_tuned_low_power_and_async_depth(self):
     from resources.mediaprocessor import _strip_qsv_only_flags as f
 
-    assert f("-low_power 1 -async_depth 4 -extbrc 1") == "-low_power 1 -async_depth 4"
+    assert f("-low_power 1 -async_depth 4 -extbrc 1 -preset slow") == "-preset slow"
 
   def test_flag_followed_by_flag_keeps_second(self):
     from resources.mediaprocessor import _strip_qsv_only_flags as f
@@ -9409,19 +9409,26 @@ class TestStripQsvOnlyFlags:
     from converter.avcodecs import QSV_ONLY_HW_FLAGS
     from resources.mediaprocessor import _QSV_ONLY_CODEC_FLAGS
 
-    assert QSV_ONLY_HW_FLAGS == _QSV_ONLY_CODEC_FLAGS - {"-global_quality"}
+    assert QSV_ONLY_HW_FLAGS == _QSV_ONLY_CODEC_FLAGS - {"-global_quality", "-low_power", "-async_depth"}
     assert "-global_quality" in _QSV_ONLY_CODEC_FLAGS
     assert "-global_quality" not in QSV_ONLY_HW_FLAGS
 
 
 class TestSwapQsvCodecToVaapi:
-  def test_swap_keeps_low_power_and_async_depth(self):
+  def test_swap_without_vaapi_config_drops_qsv_low_power_and_async_depth(self):
     from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
 
     opts = {"video": {"codec": "hevc_qsv", "params": "-low_power 1 -async_depth 4 -extbrc 1"}}
-    f(opts, {"codec_parameters": "-low_power 0"})
-    # Overlay wins and the flag is not emitted twice.
-    assert opts["video"]["params"] == "-async_depth 4 -low_power 0"
+    f(opts, {})
+    assert not opts["video"]["params"]
+
+  def test_swap_vaapi_overlay_sets_single_low_power(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv", "params": "-low_power 1 -async_depth 4 -extbrc 1"}}
+    f(opts, {"codec_parameters": "-low_power 0 -async_depth 2"})
+    assert opts["video"]["params"] == "-low_power 0 -async_depth 2"
+    assert opts["video"]["params"].count("-low_power") == 1
 
   def test_basic_codec_swap(self):
     from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f

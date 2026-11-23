@@ -380,8 +380,11 @@ _QSV_TO_VAAPI_CODEC_MAP = {
 
 # QSV-only flags stripped from the parent params before the hw_alt VAAPI swap:
 # ``_QSV_ONLY_CODEC_FLAGS`` is ``converter.avcodecs.QSV_ONLY_HW_FLAGS`` plus
-# ``-global_quality``, assigned below the converter import. -global_quality is
-# valid on VAAPI, but the swap re-maps the QSV ICQ value itself.
+# ``-global_quality``, ``-low_power`` and ``-async_depth``, assigned below the
+# converter import. Those three are valid on VAAPI, but the parent values were
+# tuned for QSV: the swap re-maps the ICQ value itself and lets only the
+# explicit ``vaapi.*`` overlay set ``-low_power`` / ``-async_depth`` (hw_alt has
+# no fallback after it, so an unsupported flag would fail the transcode).
 
 
 # Name of the VAAPI hardware device context shared between the hw_alt tier's
@@ -396,8 +399,8 @@ def _strip_qsv_only_flags(params_str):
   """Return *params_str* with QSV-only encoder flags (and their values) removed.
 
   The hevc_vaapi / h264_vaapi encoders reject several flags that are only
-  valid for the QSV encoder family (e.g. ``-extbrc``, ``-global_quality``,
-  ``-look_ahead_depth``). Strip them before passing the parent
+  valid for, or tuned for, the QSV encoder family (e.g. ``-extbrc``,
+  ``-global_quality``, ``-low_power``, ``-look_ahead_depth``). Strip them before passing the parent
   ``codec-parameters`` string through to a VAAPI encoder in the hw_alt tier.
 
   Returns the cleaned string (whitespace-collapsed). Empty input returns ``""``.
@@ -750,7 +753,7 @@ from converter.avcodecs import QSV_ONLY_HW_FLAGS, QSV_SURFACE_FMT_MAP, BaseCodec
 from converter.ffmpeg import TerminatedBySignal, is_unknown_stream
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
-_QSV_ONLY_CODEC_FLAGS = QSV_ONLY_HW_FLAGS | {"-global_quality"}
+_QSV_ONLY_CODEC_FLAGS = QSV_ONLY_HW_FLAGS | {"-global_quality", "-low_power", "-async_depth"}
 
 # Post-conversion output verification (see MediaProcessor._verify_output): the output duration may
 # differ from the source by 2% (never less than 1 second), and conversion writes one video stream.

@@ -54,7 +54,7 @@ base:
 
 Supported QSV codecs: `h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`
 
-`codec-parameters` accepts raw FFmpeg encoder flags. The defaults in `setup/sma-ng.yml.sample` enable QSV low-power mode and extended rate control (`-low_power 1 -async_depth 1 -extbrc 1`). `-extbrc` is QSV-only and is cleared at runtime when `gpu` is not `qsv`; `-low_power` and `-async_depth` are also valid VAAPI encoder options and are kept.
+`codec-parameters` accepts raw FFmpeg encoder flags. The defaults in `setup/sma-ng.yml.sample` enable QSV low-power mode and extended rate control (`-low_power 1 -async_depth 1 -extbrc 1`). `-extbrc` is QSV-only and is cleared at runtime when `gpu` is not `qsv`; `-low_power` and `-async_depth` are also valid VAAPI encoder options, so they stay on a `gpu: vaapi` encode. On the `hw_alt` QSV to VAAPI fallback the QSV-tuned values are dropped (an unsupported flag would fail the transcode); set `video.vaapi.low-power` / `async-depth` to send them to the VAAPI encoder.
 
 ### Auto-populated QSV decoders
 
