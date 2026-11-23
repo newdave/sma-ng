@@ -1,0 +1,28 @@
+.pre-commit-config.yaml
+  s_bb9afa71bee21f::t_da6df429a1ee58 42
+docs/library-audit.md
+  s_bb9afa71bee21f::t_df1331bebf4c06 12,14-20,199,201-204
+docs/test-coverage.md
+  s_bb9afa71bee21f::t_df1331bebf4c06 54,69
+docs/metrics.md
+  s_bb9afa71bee21f::t_9383972e271992 45,51,97,107,122,129
+  s_bb9afa71bee21f::t_df1331bebf4c06 49,167,169-172
+resources/daemon/docs_ui.py
+  s_bb9afa71bee21f::t_da6df429a1ee58 33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "cc1a6343fe14a08f28ab860ddadf63ac93ff7592",
+  "prompts": {},
+  "sessions": {
+    "s_bb9afa71bee21f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11944d23-c69e-4bdd-b6ea-a53dcb231d65",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
