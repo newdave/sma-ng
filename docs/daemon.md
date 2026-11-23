@@ -51,7 +51,8 @@ Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features
 - Header shows the running SMA-NG version (hover for the build commit)
 
 The docs pages at `/docs` are rendered from the operator docs shipped in the
-image, including the release changelog at `/docs/changelog`; the footer of
+image, including the release changelog at `/docs/changelog`, plus the generated `/docs/api-reference`
+(from `docs/openapi.yaml`) and `/docs/mise-tasks` (from `.mise/tasks/`) pages; the footer of
 every docs page shows the running version.
 
 ---
