@@ -4989,25 +4989,25 @@ class TestAdaptiveStrictExperimentalAudio:
 
 
 class TestSwapQsvCodecToSw:
-  """`_swap_qsv_codec_to_sw` swaps QSV encoders in the options dict to
+  """`_swap_hw_codec_to_sw` swaps QSV encoders in the options dict to
   their software counterparts for the second-tier full-software fallback."""
 
   def test_returns_none_for_no_video(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     assert f({}) is None
     assert f({"video": None}) is None
     assert f({"video": {}}) is None
 
   def test_returns_none_for_non_qsv_codec(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     options = {"video": {"codec": "h265"}}
     assert f(options) is None
     assert options["video"]["codec"] == "h265"
 
   def test_swaps_hevc_qsv_to_h265(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     options = {"video": {"codec": "hevc_qsv", "qsv_pix_fmt": "p010le"}}
     assert f(options) == "hevc_qsv"
@@ -5015,21 +5015,21 @@ class TestSwapQsvCodecToSw:
     assert "qsv_pix_fmt" not in options["video"]
 
   def test_swaps_h264qsv_to_h264(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     options = {"video": {"codec": "h264qsv"}}
     assert f(options) == "h264qsv"
     assert options["video"]["codec"] == "h264"
 
   def test_swaps_av1qsv_to_svtav1(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     options = {"video": {"codec": "av1qsv"}}
     assert f(options) == "av1qsv"
     assert options["video"]["codec"] == "svtav1"
 
   def test_swaps_first_entry_in_codec_list(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     options = {"video": {"codec": ["hevc_qsv", "h265"]}}
     assert f(options) == "hevc_qsv"
@@ -7584,25 +7584,25 @@ class TestStripQsvInputPipelineFromPreoptsDup:
 
 
 class TestSwapQsvCodecToSwDup:
-  """`_swap_qsv_codec_to_sw` swaps QSV encoders in the options dict to
+  """`_swap_hw_codec_to_sw` swaps QSV encoders in the options dict to
   their software counterparts for the second-tier full-software fallback."""
 
   def test_returns_none_for_no_video(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     assert f({}) is None
     assert f({"video": None}) is None
     assert f({"video": {}}) is None
 
   def test_returns_none_for_non_qsv_codec(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     options = {"video": {"codec": "h265"}}
     assert f(options) is None
     assert options["video"]["codec"] == "h265"
 
   def test_swaps_hevc_qsv_to_h265(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     options = {"video": {"codec": "hevc_qsv", "qsv_pix_fmt": "p010le"}}
     assert f(options) == "hevc_qsv"
@@ -7610,21 +7610,21 @@ class TestSwapQsvCodecToSwDup:
     assert "qsv_pix_fmt" not in options["video"]
 
   def test_swaps_h264qsv_to_h264(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     options = {"video": {"codec": "h264qsv"}}
     assert f(options) == "h264qsv"
     assert options["video"]["codec"] == "h264"
 
   def test_swaps_av1qsv_to_svtav1(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     options = {"video": {"codec": "av1qsv"}}
     assert f(options) == "av1qsv"
     assert options["video"]["codec"] == "svtav1"
 
   def test_swaps_first_entry_in_codec_list(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     options = {"video": {"codec": ["hevc_qsv", "h265"]}}
     assert f(options) == "hevc_qsv"
