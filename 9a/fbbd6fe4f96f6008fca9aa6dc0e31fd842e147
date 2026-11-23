@@ -1,0 +1,24 @@
+.github/workflows/ci.yml
+  s_bb9afa71bee21f::t_c364a9ec072d43 218
+  s_bb9afa71bee21f::t_efabe1d6153cac 5-7,25-64,75,82-101,110-115,118-121,191-193,195,199,208-217,220,223-224
+.github/actions/setup-python/action.yml
+  s_bb9afa71bee21f::t_efabe1d6153cac 17-21,26
+scripts/ci-image-changed.sh
+  s_bb9afa71bee21f::t_efabe1d6153cac 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "9afbbd6fe4f96f6008fca9aa6dc0e31fd842e147",
+  "prompts": {},
+  "sessions": {
+    "s_bb9afa71bee21f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11944d23-c69e-4bdd-b6ea-a53dcb231d65",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
