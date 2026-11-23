@@ -88,7 +88,7 @@ class TestSchemaDefaultsContract:
       SmaConfig(daemon={"job_dedupe_window_seconds": -1})
 
   def test_job_retention_days_default_and_bounds(self):
-    assert SmaConfig().daemon.job_retention_days == 30
+    assert SmaConfig().daemon.job_retention_days == 0
     assert SmaConfig(daemon={"job_retention_days": 0}).daemon.job_retention_days == 0
     with pytest.raises(ValidationError):
       SmaConfig(daemon={"job_retention_days": -1})

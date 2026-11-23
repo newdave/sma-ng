@@ -1202,6 +1202,17 @@ class TestHeartbeatMaintenanceThrottle:
       ht._maybe_run_maintenance()
     db.cleanup_old_jobs.assert_called_once_with(30, protect_seconds=21600)
 
+  def test_default_config_never_prunes_jobs(self):
+    from resources.daemon.config import PathConfigManager
+
+    db = mock.MagicMock()
+    db.is_distributed = True
+    ht = self._ht(db)
+    ht.server.path_config_manager = PathConfigManager()
+    with mock.patch("resources.daemon.threads.LogArchiver"):
+      ht._maybe_run_maintenance()
+    db.cleanup_old_jobs.assert_not_called()
+
   def test_maintenance_skips_job_pruning_when_retention_zero(self):
     db = mock.MagicMock()
     db.is_distributed = True

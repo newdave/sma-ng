@@ -1232,16 +1232,19 @@ paths:
     post:
       summary: Remove old completed, failed and cancelled jobs
       description: >-
-        Jobs completed within daemon.job-dedupe-window-seconds are never removed; scanned_files is not touched. The daemon runs the same pass hourly using daemon.job-retention-days.
+        Jobs completed within daemon.job-dedupe-window-seconds are never removed; scanned_files is not touched. The daemon runs the same pass hourly only when daemon.job-retention-days is above 0 (default 0 keeps jobs forever). The days parameter is required; a request without it returns 400. This permanently deletes job history and its stats.
       operationId: cleanup
       tags: [jobs]
       parameters:
         - name: days
           in: query
+          required: true
           schema:
             type: integer
-            default: 30
+            minimum: 0
       responses:
+        "400":
+          description: Missing or invalid days parameter
         "200":
           description: Cleanup result
           content:

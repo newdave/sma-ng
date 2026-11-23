@@ -151,7 +151,7 @@ class TestJobRetentionProjection:
   def test_default_when_unset(self, tmp_path):
     cfg = str(tmp_path / "sma-ng.yml")
     _dump_daemon_yaml(cfg, {})
-    assert PathConfigManager(cfg).job_retention_days == 30
+    assert PathConfigManager(cfg).job_retention_days == 0
 
   def test_projects_from_yaml(self, tmp_path):
     cfg = str(tmp_path / "sma-ng.yml")
@@ -159,7 +159,7 @@ class TestJobRetentionProjection:
     assert PathConfigManager(cfg).job_retention_days == 7
 
   def test_init_default_without_config_file(self):
-    assert PathConfigManager().job_retention_days == 30
+    assert PathConfigManager().job_retention_days == 0
 
 
 class TestShouldSkipSameExtension:

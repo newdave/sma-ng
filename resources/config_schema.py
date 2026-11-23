@@ -963,7 +963,7 @@ class DaemonConfig(_Base):
   # Seconds a completed job blocks re-queueing the same path (scanner and webhooks); 0 disables.
   job_dedupe_window_seconds: int = Field(default=21600, ge=0)
   # Days a finished job (completed, failed, cancelled) is kept; 0 disables automatic pruning.
-  job_retention_days: int = Field(default=30, ge=0)
+  job_retention_days: int = Field(default=0, ge=0)
   log_ttl_days: int = 30
   node_expiry_days: int = 7
   log_archive_dir: str = ""
