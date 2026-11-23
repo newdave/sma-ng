@@ -1007,7 +1007,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
   # ------------------------------------------------------------------
 
   def _post_cleanup(self, query):
-    days = self._query_int(query, "days", 30)
+    # No default: an on-demand prune must name its age, so it can never delete history by accident.
+    if "days" not in query:
+      raise _BadRequest(400, "Missing 'days' parameter: POST /cleanup?days=N deletes finished jobs older than N days")
+    days = self._query_int(query, "days", None)
     # Never prune a finished job that still blocks re-queueing its path.
     protect = self.server.path_config_manager.job_dedupe_window_seconds
     deleted = self.server.job_db.cleanup_old_jobs(days, protect_seconds=protect)

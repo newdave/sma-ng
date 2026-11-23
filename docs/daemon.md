@@ -86,7 +86,7 @@ every docs page shows the running version.
 | `POST` | `/convert`, `/`                  | Yes    | Aliases of `/webhook/generic`                                           |
 | `POST` | `/webhook/sonarr`                | Yes    | Native Sonarr webhook; Download queues, other events go to Autoscan     |
 | `POST` | `/webhook/radarr`                | Yes    | Native Radarr webhook; Download queues, other events go to Autoscan     |
-| `POST` | `/cleanup`                       | Yes    | Remove old finished jobs now. Query: `?days=30`                         |
+| `POST` | `/cleanup`                       | Yes    | Remove old finished jobs now. Query: `?days=N` (required; 400 without it)                         |
 | `POST` | `/reload`                        | Yes    | Reload `daemon:` section in `sma-ng.yml` without restarting             |
 | `POST` | `/restart`                       | Yes    | Graceful restart. Query: `?node=<id>` for remote node (PostgreSQL)      |
 | `POST` | `/shutdown`                      | Yes    | Graceful shutdown. Query: `?node=<id>` for remote node (PostgreSQL)     |
@@ -376,7 +376,7 @@ auto-profile selection happens for one-shot conversions. Pass
 | `recycle-bin-max-age-days`         | Delete recycle-bin media files older than this many days (default: `30`, `0` = disabled)                                                                                                                                                                                                                                                            |
 | `recycle-bin-min-free-gb`          | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled)                                                                                                                                                                                                                              |
 | `job-dedupe-window-seconds`        | Skip a path whose job completed within this many seconds, for the scanner and webhooks alike (default: `21600`, `0` = disabled). See [Duplicate Suppression](#duplicate-suppression).                                                                                                                                                               |
-| `job-retention-days`               | Delete completed, failed and cancelled jobs older than this many days (default: `30`, `0` = keep forever)                                                                                                                                                                                                                                           |
+| `job-retention-days`               | Opt-in: delete completed, failed and cancelled jobs older than this many days (default: `0` = keep forever; a positive value permanently deletes job history and its stats)                                                                                                                                                                                                                                           |
 | `log-ttl-days`                     | Cluster-mode: retention for log entries in PostgreSQL                                                                                                                                                                                                                                                                                               |
 | `node-expiry-days`                 | Cluster-mode: hard-delete offline nodes after this many days (`0` = disabled)                                                                                                                                                                                                                                                                       |
 | `log-archive-dir`                  | Cluster-mode: directory for gzipped JSONL archive of cluster logs                                                                                                                                                                                                                                                                                   |
@@ -782,13 +782,17 @@ curl -X POST "http://localhost:8585/cleanup?days=7"
 
 ### Job Retention
 
-Every node prunes finished jobs automatically, on the first heartbeat after startup and then at most once an
-hour, on SQLite and PostgreSQL alike. Rows with status `completed`, `failed` or `cancelled` whose `completed_at`
-is older than `daemon.job-retention-days` (default `30`) are deleted; `scanned_files` is never pruned.
-Set `job-retention-days: 0` to keep everything.
+Job history is kept forever by default (`daemon.job-retention-days: 0`); nothing prunes jobs automatically.
+Retention is opt-in. Set `job-retention-days` to a positive number and every node deletes finished jobs
+(status `completed`, `failed` or `cancelled`) whose `completed_at` is older than that many days, on the first
+heartbeat after startup and then at most once an hour, on SQLite and PostgreSQL alike. `scanned_files` is
+never pruned.
+
+**Warning:** a positive value permanently deletes job history and the statistics computed from it
+(`/stats`, the dashboard totals). It cannot be undone. Leave it at `0` unless you want that.
 
 A job completed within `job-dedupe-window-seconds` is never deleted, so retention (and `POST /cleanup?days=0`)
-cannot reopen the duplicate-suppression window. `POST /cleanup` runs the same pass on demand with the given `days`.
+cannot reopen the duplicate-suppression window. `POST /cleanup?days=N` runs the same pass on demand; `days` is required and the request returns 400 without it.
 
 **Database schema:**
 

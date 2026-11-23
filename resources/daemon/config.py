@@ -305,7 +305,7 @@ class PathConfigManager:
     self.smoke_test = False
     self.recycle_bin_max_age_days = 3
     self.job_dedupe_window_seconds = 21600
-    self.job_retention_days = 30
+    self.job_retention_days = 0
     self.recycle_bin_min_free_gb = 50.0
     self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
     self.scan_paths = []
