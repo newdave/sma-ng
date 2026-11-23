@@ -42,13 +42,13 @@ to enable. In standalone (in-memory) mode the metrics page shows an
 
 Returns aggregated job metrics as JSON.
 
-**Query parameters**
+#### Query parameters
 
 | Parameter | Values | Default | Description |
 | --------- | ------ | ------- | ----------- |
-| `window`  | `24h` \| `7d` \| `30d` \| `all` | `24h` | Time window for completed/failed counts |
+| `window` | `24h` \| `7d` \| `30d` \| `all` | `24h` | Time window for completed/failed counts |
 
-**Response (PostgreSQL available)**
+#### Response (PostgreSQL available)
 
 ```json
 {
@@ -94,7 +94,7 @@ Returns aggregated job metrics as JSON.
 }
 ```
 
-**Response (standalone mode)**
+#### Response (standalone mode)
 
 ```json
 {
@@ -104,7 +104,7 @@ Returns aggregated job metrics as JSON.
 }
 ```
 
-**KPI field notes**
+#### KPI field notes
 
 | Field | Description |
 | ----- | ----------- |
@@ -119,14 +119,14 @@ Returns aggregated job metrics as JSON.
 | `minutes_transcoded_total` | Sum of source container duration in minutes (rounded to 0.01) across completed jobs in the window |
 | `throughput_per_hour` | `completed / window_hours`; `null` for the `all` window |
 
-**Breakdowns**
+#### Breakdowns
 
 | Key | Shape | Description |
 | --- | ----- | ----------- |
 | `encoders` | `{backend: {count, bytes_saved, minutes}}` | Per-encoder-backend rollup. Backend is one of `qsv` / `vaapi` / `nvenc` / `videotoolbox` / `amf` / `software` / `copy` / `unknown` |
 | `failures` | `{category: {count}}` | Per-failure-category rollup of failed jobs. Category is one of `config` / `source_media` / `hardware` / `disk` / `system` / `unknown` |
 
-**Timeseries**
+#### Timeseries
 
 Zero-filled buckets (no gaps):
 
@@ -164,12 +164,12 @@ output-directory capacity and the orphan-sweep janitor (see
 [`docs/daemon.md`](daemon.md#storage-management--janitor) for the
 janitor itself).
 
-| Instrument                              | Type    | Labels             | Meaning                                                        |
+| Instrument | Type | Labels | Meaning |
 | --------------------------------------- | ------- | ------------------ | -------------------------------------------------------------- |
-| `sma_output_dir_total_bytes`            | Gauge   | `node_id`          | Total bytes on the filesystem hosting `output-directory`.      |
-| `sma_output_dir_used_bytes`             | Gauge   | `node_id`          | Used bytes on that filesystem (sampled at scrape).             |
-| `sma_output_dir_free_bytes`             | Gauge   | `node_id`          | Free bytes on that filesystem (sampled at scrape).             |
-| `sma_output_orphan_files_swept_total`   | Counter | `node_id`, `kind`  | Files removed by the janitor, by kind (`sma`/`smatmp`/`empty_mp4`). |
+| `sma_output_dir_total_bytes` | Gauge | `node_id` | Total bytes on the filesystem hosting `output-directory`. |
+| `sma_output_dir_used_bytes` | Gauge | `node_id` | Used bytes on that filesystem (sampled at scrape). |
+| `sma_output_dir_free_bytes` | Gauge | `node_id` | Free bytes on that filesystem (sampled at scrape). |
+| `sma_output_orphan_files_swept_total` | Counter | `node_id`, `kind` | Files removed by the janitor, by kind (`sma`/`smatmp`/`empty_mp4`). |
 
 Capacity gauges are populated via `Gauge.set_function()` — the scrape
 calls `shutil.disk_usage()` lazily, so there is no background poller.

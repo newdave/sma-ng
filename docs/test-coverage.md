@@ -51,7 +51,7 @@ One module is excluded from coverage measurement because it requires
 hardware that isn't available in CI:
 
 | Module | Why excluded |
-|---|---|
+| --- | --- |
 | `resources/openvino_analyzer.py` | Requires Intel OpenVINO runtime + GPU; the daemon's integration with this module is exercised via the analyzer-not-available fallback path on every dev box, but unit-testing the analyzer itself needs hardware not available in CI. |
 
 `resources/library_audit/probes.py` used to be excluded; its probes are now unit-tested against real
@@ -66,7 +66,7 @@ The 80% target floor is a stretch goal; the enforced floor is 70%. Every product
 statements now clears 80%. The lowest are:
 
 | Module | Cover % | Statements | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `resources/mediaprocessor.py` | 82.1% | 2 837 | The transcoding pipeline. Remaining misses are scattered across HDR detection edges, audio downmix matrices, subtitle burn-in fallbacks and codec mixing. **Next target.** |
 | `resources/daemon/config.py` | 85.2% | 485 | Path config manager and routing. |
 | `resources/daemon/storage.py` | 86.8% | 114 | Storage janitor sweeps. |
