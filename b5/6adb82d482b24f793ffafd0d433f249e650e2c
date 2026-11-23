@@ -1,0 +1,31 @@
+tests/test_docker.py
+  s_bb9afa71bee21f::t_fc1b5f6e70864f 7,821,823-838
+  s_bb9afa71bee21f::t_efabe1d6153cac 10,174-186,554-555,557,561-562,591-651
+  s_bb9afa71bee21f::t_7fbb399745703d 839
+.github/workflows/docker.yml
+  s_bb9afa71bee21f::t_c9c606071bf79c 142-149,156-161,163,165,167,173-178,180,182,189-194,196
+  s_bb9afa71bee21f::t_efabe1d6153cac 3-12
+docker/Dockerfile
+  s_bb9afa71bee21f::t_efabe1d6153cac 32-36,39-41,83,168-173,175-177,179,187-188,250-255,300,336
+docs/deployment.md
+  s_bb9afa71bee21f::t_fc1b5f6e70864f 539
+  s_bb9afa71bee21f::t_05cf012ec405b6 522-524,540-559
+  s_bb9afa71bee21f::t_181428eb07d69f 511-513
+  s_bb9afa71bee21f::t_efabe1d6153cac 525-536
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "b56adb82d482b24f793ffafd0d433f249e650e2c",
+  "prompts": {},
+  "sessions": {
+    "s_bb9afa71bee21f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11944d23-c69e-4bdd-b6ea-a53dcb231d65",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
