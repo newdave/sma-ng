@@ -20,6 +20,8 @@ tests/test_worker.py
   s_952875ef110281::t_537dd394bcfcec 191,194,196-204,979,1018
 docs/openapi.yaml
   s_952875ef110281::t_7affcf48bc1e0d 141-160
+docs/metrics.md
+  s_952875ef110281::t_b2b9bce81ae498 132
 ---
 {
   "schema_version": "authorship/3.0.0",
