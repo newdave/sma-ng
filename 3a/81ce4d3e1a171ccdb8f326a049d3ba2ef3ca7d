@@ -1,0 +1,31 @@
+CLAUDE.md
+  s_bb9afa71bee21f::t_071da02d675422 198-199
+.cursor/rules/caveman.mdc
+  s_bb9afa71bee21f::t_64d03bd30f7379 1-25
+.windsurf/rules/caveman.md
+  s_bb9afa71bee21f::t_9751ab405640aa 1-27
+.opencode/AGENTS.md
+  s_bb9afa71bee21f::t_c3ceccd2228f56 1-25
+tests/test_agent_mirrors.py
+  s_bb9afa71bee21f::t_5fe14dfe438125 65-80
+.clinerules/caveman.md
+  s_bb9afa71bee21f::t_931811f87c8749 1-23
+scripts/sync_agent_mirrors.py
+  s_bb9afa71bee21f::t_89916e931e222d 90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "3a81ce4d3e1a171ccdb8f326a049d3ba2ef3ca7d",
+  "prompts": {},
+  "sessions": {
+    "s_bb9afa71bee21f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11944d23-c69e-4bdd-b6ea-a53dcb231d65",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
