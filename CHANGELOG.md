@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.53](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.52...sma-ng-v3.2.53) (2026-11-23)
+
+
+### Documentation
+
+* bring configuration and migration guides in line with the schema ([#281](https://github.com/newdave/sma-ng/issues/281)) ([a807f74](https://github.com/newdave/sma-ng/commit/a807f74567169a586aadec976763985409d1ecbb))
+* prune shipped planning docs and move open plans to Plane ([#280](https://github.com/newdave/sma-ng/issues/280)) ([cd21be4](https://github.com/newdave/sma-ng/commit/cd21be4695ed1cc796ca7299255a7d3dd5cd8070))
+
 ## [3.2.52](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.51...sma-ng-v3.2.52) (2026-11-23)
 
 
