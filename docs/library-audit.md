@@ -1,20 +1,22 @@
 # Library Audit
 
-The library auditor locates problems in your media library that scheduled
-conversion runs cannot surface on their own — corrupt files, orphan sidecars,
-leftover transcoder artifacts, leftover pre-conversion originals, and
-TMDB/TVDB-id duplicates. Findings are persisted in PostgreSQL with an
-ack/dismiss/resolve workflow. The probe workload is distributed across every
-live cluster node.
+The library auditor finds problems in your media library that scheduled conversion runs cannot surface on
+their own: corrupt files, orphan sidecars, leftover transcoder artifacts, leftover pre-conversion originals,
+TMDB/TVDB-id duplicates, stretched (hybrid-aspect) outputs and files that carry streams SMA-NG never keeps.
+
+The daemon audit stores its findings in PostgreSQL, with an ack/dismiss/resolve workflow, and spreads the probe
+workload across every live cluster node. It therefore needs PostgreSQL cluster mode (`daemon.db-url`): on a
+daemon that uses the local SQLite database, the scheduled audit does not run and `POST /library/audit` answers
+`409`. The command-line audit (`manual.py --audit`) works everywhere.
 
 ## Finding kinds
 
 | Kind                | Trigger                                                                      |
 | ------------------- | ---------------------------------------------------------------------------- |
 | `ffprobe_failed`    | FFprobe cannot read the file (corrupt, truncated, empty, or zero-byte).      |
-| `orphan_sidecar`    | A `.srt`/`.nfo`/`.jpg`/`.sub`/`.idx`/`.ass`/`.ssa`/`.vtt` with no matching parent media file in the same directory. |
-| `leftover_tmp`      | A `.tmp`/`.partial` file or a recycle-bin collision artifact (`*.2.mp4`, `*.3.mp4`, …) (reason `leftover_artifact`), or in-transit SMA output left by an interrupted conversion or repair: the configured `temp-extension` (`.sma` by default) or a `.smatmp` atomic-copy partial (reason `in_transit_leftover`). In-transit files are only reported once older than `storage-janitor-max-age-seconds` (6 hours by default), so a file still being written is never flagged. |
-| `preconv_original`  | A non-MP4 (`.mkv`/`.avi`/etc.) sitting next to a same-stem `.mp4` that probes cleanly — the original was never deleted (`delete-original: false`). |
+| `orphan_sidecar`    | A `.srt`/`.sub`/`.idx`/`.ass`/`.ssa`/`.vtt`/`.nfo`/`.jpg`/`.jpeg`/`.png` with no matching parent media file in the same directory. A language suffix such as `Movie.en.srt` still matches `Movie.mkv`. |
+| `leftover_tmp`      | A `.tmp`/`.partial`/`.tag` file or a recycle-bin collision artifact (`*.2.mp4` to `*.5.mp4`) (reason `leftover_artifact`), or in-transit SMA output left by an interrupted conversion or repair: the configured `temp-extension` (`.sma` by default) or a `.smatmp` atomic-copy partial (reason `in_transit_leftover`). In-transit files are only reported once older than `storage-janitor-max-age-seconds` (6 hours by default), so a file still being written is never flagged. |
+| `preconv_original`  | A non-MP4 video file (`.mkv`, `.avi`, `.mov`, `.m4v`, `.ts`, `.m2ts`, `.wmv`, `.flv`, `.webm`) sitting next to a same-stem `.mp4` that probes cleanly. The original was never deleted (for example `delete-original: false`). |
 | `duplicate_id`      | The same TMDB/TVDB id appears at two or more paths within the same audit run. |
 | `stream_damage`     | An `.mp4`/`.m4v`/`.mov`/`.mkv` carrying streams SMA never keeps: data streams (`tmcd`, stray `bin_data`), unknown streams, or artwork (attached pictures, cover art demoted to a real `mp4v` video track, image attachments). The `repair` detail lists the affected stream indexes, as `repair.py -n` reports them. The MP4 chapter track is not damage. |
 | `hybrid_aspect`     | An MP4, M4V, MOV or MKV whose picture was stretched by the former QSV alignment bug (e.g. a 1080p source shipped as 1920x1088, or a max-width downscale as 1920x1072) and that carries no corrective display aspect ratio. Detection matches a fixed signature table (1920x1088/1072/1056, 3840x2176/2144, 1280x736/704) with a square pixel aspect (reason `stretched_dims`), so correctly repaired or genuinely anamorphic files are not flagged. A file that already carries a corrective pixel aspect is still flagged (reason `demoted_poster`) when an older repair remux turned its cover art into a real `mp4v` video track; re-running the repair drops that track. |
@@ -56,8 +58,11 @@ daemon:
       stream-damage: false      # stream-copy away data, unknown and artwork streams (as repair.py)
 ```
 
-`paths` is a separate list from `daemon.scan-paths`; the auditor and the
-conversion scanner can target different roots.
+`paths` is a separate list from `daemon.scan-paths`; the auditor and the conversion scanner can target different
+roots. The auditor never walks a recycle-bin directory.
+
+Findings use the snake_case kind names above (`ffprobe_failed`), while the `auto-fix` keys use kebab-case
+(`ffprobe-failed`).
 
 ## Distributed workload
 
@@ -157,27 +162,31 @@ curl -X POST -H "X-API-Key: $KEY" http://localhost:8585/library/findings/123/dis
 curl -X POST -H "X-API-Key: $KEY" http://localhost:8585/library/findings/123/resolve
 ```
 
-The `POST /library/audit` endpoint returns `202` immediately and runs
-enumeration in a detached thread. Probing is then performed by every node's
-worker thread.
+The `POST /library/audit` endpoint returns `202` immediately and runs enumeration in a detached thread. Probing
+is then performed by every node's worker thread. The request body is optional: `paths` defaults to the enabled
+`daemon.audit.paths`, and the endpoint answers `400` when neither is set. See the daemon API reference in
+[Daemon Mode](daemon.md) for the full endpoint list.
 
 ### Scheduled
 
-When `daemon.audit.enabled` is `true` and `daemon.audit.paths` is non-empty,
-each node's `LibraryAuditThread` wakes every `interval-seconds` and (if it
-wins the advisory lock) starts a new run. Workers on every node — including
-the enumerator — drain the queue concurrently.
+When `daemon.audit.enabled` is `true` and `daemon.audit.paths` has at least one enabled entry, each node's
+`LibraryAuditThread` wakes every `interval-seconds` (at least 60) and, if it wins the advisory lock and no run is
+still in progress, starts a new run. Workers on every node, including the enumerator, drain the queue
+concurrently. Changes to the `daemon.audit` block take effect on the next cycle after a config reload, without a
+restart.
 
 ## Auto-fix safety semantics
 
-Auto-fix is opt-in per finding kind and is a no-op while `dry-run: true`.
-When enabled:
+Auto-fix is opt-in per finding kind (`daemon.audit.auto-fix.*`). While `dry-run` is `true`, which is the default,
+the auditor records findings but changes no file. To let auto-fix act, set `dry-run: false` and enable the kinds
+you want. A finding whose auto-fix fails or cannot run stays open. When enabled:
 
 - `ffprobe-failed` → calls `add_job(...)` exactly like a webhook, so the
   per-path advisory lock and existing duplicate-suppression apply.
-- `orphan-sidecar`, `leftover-tmp`, `preconv-original` → atomic copy to
-  `base.converter.recycle-bin` (collision-safe with `.2`/`.3` suffix),
-  followed by `os.remove` on the source. Files are never deleted directly.
+- `orphan-sidecar`, `leftover-tmp`, `preconv-original` → atomic copy to the default config's
+  `base.converter.recycle-bin` (collision-safe with a `.2`, `.3`, ... suffix), followed by `os.remove` on the
+  source. Files are never deleted directly. Because the same suffix scheme names recycle-bin collisions, a
+  `*.2.mp4` file outside the recycle bin is reported as a `leftover_tmp` finding.
 - `hybrid-aspect` and `stream-damage` → the same lossless repair as
   `repair.py` (see [Troubleshooting](troubleshooting.md#repairing-damaged-media-without-transcoding)),
   using the settings the daemon would convert the file with (its routed
@@ -190,9 +199,8 @@ When enabled:
   aspect. To instead rebuild the video stream at its true dimensions, use
   `manual.py --repair-hybrid reencode` per file.
 
-When `base.converter.recycle-bin` is empty the recycle path returns
-`skipped` for cleanup actions — the finding stays open until either an
-operator manually addresses it or a recycle bin is configured.
+When `base.converter.recycle-bin` is empty, the cleanup actions are skipped. The finding stays open until you
+handle it yourself or configure a recycle bin.
 
 ## Schema
 
@@ -211,9 +219,10 @@ migration step required.
 - TMDB/TVDB-id duplicate detection only sees files written by SMA-NG's
   current tagger (which writes dedicated `----:com.apple.iTunes:{TMDB,TVDB,IMDB}`
   atoms). Re-tag older files to bring them into duplicate-id scope.
-- The auditor never traverses paths under any configured
-  `base.converter.recycle-bin` directory, so files quarantined for review
-  do not produce findings.
+- The auditor never traverses paths under any configured `base.converter.recycle-bin` directory, so files
+  quarantined for review do not produce findings. Directories listed in `skip-dirs` (default `Extras`,
+  `Plex Versions`, `Trailers` and similar) are skipped too, and an explicit `skip-dirs` list replaces the
+  defaults.
 - Audit work runs in addition to conversion work on every node. Tune
   `concurrency` so it does not starve real conversions on small machines —
   the default of `2` is conservative.
