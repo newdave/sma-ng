@@ -513,6 +513,11 @@ See also:
 | `release.yml` | Push to main; manual with `tag`          | release-please PR + version bump; on release: wheel/sdist + release image   |
 | `codeql.yml`  | PR (Python changes) / weekly             | CodeQL static analysis (results in the Security tab)                        |
 
+Every job installs Python through the shared `.github/actions/setup-python` action, which reads `.python-version`;
+workflows never name a Python version, so Renovate cannot move CI off the project runtime. Concurrency: a new push
+to a PR cancels that PR's running checks; runs on `main` and release runs queue instead, so every `main` commit gets
+a result and a release is never interrupted.
+
 Docker images are built and pushed only by `docker.yml`; there is no local push task. A push to `main` builds the
 image only after CI passes on that commit, and every image is smoke-tested before it is pushed, so `latest` never
 carries code that failed CI. Hosts then pick the image up with `mise run deploy:remote`. Trivy findings are

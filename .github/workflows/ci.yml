@@ -28,17 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      - uses: ./.github/actions/setup-python
         with:
-          python-version: "3.15"
-          cache: pip
+          mise: "true"
           cache-dependency-path: |
             pyproject.toml
             setup/requirements*.txt
-
-      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
-        with:
-          install: false
 
       # apt mirrors occasionally stall (one run hung 24 minutes here); bound
       # each attempt and retry. The apt install runs in the background while the
@@ -117,11 +112,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Pin the hook environments to the same Python the project uses; the
-      # runner default moves ahead of what bandit and friends support.
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.15"
+      # Hooks pin python3.12 (default_language_version); the runner default
+      # moves ahead of what bandit and friends support.
+      - uses: ./.github/actions/setup-python
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

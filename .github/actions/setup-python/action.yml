@@ -1,0 +1,29 @@
+name: Set up Python
+description: >-
+  Install the project Python from .python-version (the single source of truth,
+  shared with mise.toml and the Docker image) and, optionally, mise for
+  `mise run` tasks. Run actions/checkout first.
+
+inputs:
+  cache-dependency-path:
+    description: "Files hashed for the pip cache key; empty disables the pip cache"
+    required: false
+    default: ""
+  mise:
+    description: "Install mise (tasks only; tools are not installed)"
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version-file: .python-version
+        cache: ${{ inputs.cache-dependency-path != '' && 'pip' || '' }}
+        cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+    - if: inputs.mise == 'true'
+      uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+      with:
+        install: false

@@ -558,6 +558,20 @@ class TestDockerWorkflow:
     release = _load_yaml(".github/workflows/release.yml")
     assert release["jobs"]["docker"]["uses"] == "./.github/workflows/docker.yml"
 
+  def test_ci_python_comes_from_python_version_file(self):
+    # A literal python-version in a workflow is a Renovate target: a bump to
+    # 3.15 broke pre-commit (hooks pin python3.12). Every job goes through
+    # the shared action, which reads .python-version.
+    workflows = os.path.join(PROJECT_ROOT, ".github", "workflows")
+    for name in os.listdir(workflows):
+      text = _read(os.path.join(".github", "workflows", name))
+      assert "actions/setup-python@" not in text, name
+      assert "python-version:" not in text, name
+    action = _load_yaml(".github/actions/setup-python/action.yml")
+    setup = action["runs"]["steps"][0]
+    assert setup["uses"].startswith("actions/setup-python@")
+    assert setup["with"]["python-version-file"] == ".python-version"
+
   def test_triggers_on_pull_request(self, docker_workflow):
     triggers = docker_workflow[True]
     assert "pull_request" in triggers
