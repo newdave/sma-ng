@@ -1,14 +1,13 @@
 # Cluster Operations
 
 Deployment patterns and operator runbooks for running SMA-NG on one host with several daemons, or as a cluster of
-nodes managed remotely via `mise` and `docker compose`. Each runbook is a self-contained scenario — the steps to
-run when something happens.
+nodes managed from your workstation with `mise` and `docker compose`. Each runbook is a self-contained scenario: the
+steps to follow when a particular thing happens.
 
-For the underlying *reference* material see:
+For the underlying reference material, see:
 
-- [Deployment](deployment.md) — every mise task in detail
-- [Daemon Mode](daemon.md) — cluster-mode internals (heartbeats, approval flow,
-  job queue, admin API)
+- [Deployment](deployment.md) for every mise task, the `setup/local.yml` schema and the CI and release flow.
+- [Daemon Mode](daemon.md) for cluster internals: heartbeats, node approval, the job queue and the admin API.
 
 ---
 
@@ -16,10 +15,10 @@ For the underlying *reference* material see:
 
 ```mermaid
 graph LR
-    O[Operator workstation<br/>mise run …] -->|ssh| M[sma-master<br/>sma daemon]
+    O[Operator workstation<br/>mise run ...] -->|ssh| M[sma-master<br/>sma daemon]
     O -->|ssh| S0[sma-slave0<br/>sma daemon]
     O -->|ssh| S1[sma-slave1<br/>sma daemon]
-    M -->|SQL| P[(PostgreSQL<br/>jobs, cluster_nodes,<br/>node_commands, …)]
+    M -->|SQL| P[(PostgreSQL<br/>jobs, cluster_nodes,<br/>node_commands, ...)]
     S0 -->|SQL| P
     S1 -->|SQL| P
     M -->|webhook| EXT[Sonarr / Radarr<br/>Plex / Autoscan]
@@ -27,67 +26,66 @@ graph LR
     S1 -->|webhook| EXT
 ```
 
-- One node uses the `*-pg` Docker profile against an external PostgreSQL server
-  (`daemon.db-url`); compose does not bundle PostgreSQL. All other nodes connect
-  to the same database.
-- Every node runs an identical `sma` container reading `config/sma-ng.yml` and
-  `config/daemon.env`. Both are stamped per-host by `mise run deploy:config`.
-- Cluster identity comes from `SMA_NODE_NAME` (stamped into `daemon.env`,
-  defaults to the host key in `setup/local.yml`). The same string is what every
-  cluster API and `mise run cluster` command uses as `node_id`.
+- Every node runs an identical `sma-ng` container that reads `config/sma-ng.yml`. `mise run deploy:config` generates
+  that file per host from `setup/local.yml`.
+- All nodes point `daemon.db-url` at the same external PostgreSQL server. Compose does not bundle PostgreSQL.
+- Cluster identity is `daemon.node-id`. `deploy:config` sets it to the host key from `setup/local.yml`, and the same
+  string is the `<host>` in every `/admin/nodes/<host>/...` call and every `mise run cluster` command. If you run
+  nodes without `deploy:config`, set `daemon.node-id` yourself. Otherwise the daemon generates a UUID and saves it
+  into `sma-ng.yml`.
+- `config/daemon.env` holds only container settings (such as `SMA_WORKERS`, `LIBVA_DRIVER_NAME` and `NVIDIA_*`).
+  `deploy:setup` seeds it once from `setup/daemon.env.sample`, and `deploy:config` does not touch it.
 
 ---
 
 ## Quick reference: cluster control surface
 
-| Action | Mise task | Admin API | DB effect |
-| --- | --- | --- | --- |
-| List node status | `mise run cluster -- status` | `GET /admin/nodes` | reads `cluster_nodes` |
-| Drain (finish active jobs, stop accepting new) | `HOST=<host> mise run cluster -- drain` | `POST /admin/nodes/<host>/drain` | `status='draining'` |
-| Pause (immediately stop pickup; active jobs continue) | `HOST=<host> mise run cluster -- pause` | `POST /admin/nodes/<host>/pause` | `status='paused'` |
-| Resume from drain or pause | `HOST=<host> mise run cluster -- resume` | `POST /admin/nodes/<host>/resume` | `status='online'` |
-| Graceful restart (drain → reexec) | — (use admin UI or curl) | `POST /admin/nodes/<host>/restart` | `status='restarting'` → `online` |
-| Graceful shutdown (drain → exit) | — (use admin UI or curl) | `POST /admin/nodes/<host>/shutdown` | `status='offline'` |
-| Approve pending node | — (use admin UI or curl) | `POST /admin/nodes/<host>/approve` | `approval_status='approved'` |
-| Hard-delete an offline node row | — (use admin UI or curl) | `POST /admin/nodes/<host>/delete` | row removed |
-| Stop / start / restart container | `HOST=<host> mise run cluster -- {stop,start,restart}` | — | docker compose |
-| Rolling cluster upgrade | `mise run cluster -- upgrade` | — | drain → deploy:docker, per host |
+Run every `mise run cluster` verb with `HOST=<one>`, `HOSTS='<a> <b>'`, or neither (all of `deploy.hosts`).
 
-The `cluster` mise task (every verb) accepts `HOST=<one>`, `HOSTS='<a> <b>'`, or default
-to `deploy.hosts` from `setup/local.yml`.
+| Action | Mise task | Admin API | Node status |
+| --- | --- | --- | --- |
+| Show container state | `mise run cluster -- status` | `GET /status` lists every node in `cluster` | none |
+| Drain (finish active jobs, accept no new ones) | `HOST=<host> mise run cluster -- drain` | `POST /admin/nodes/<host>/drain` | `draining` |
+| Pause (stop picking up jobs; active jobs continue) | `HOST=<host> mise run cluster -- pause` | `POST /admin/nodes/<host>/pause` | `paused` |
+| Resume from drain or pause | `HOST=<host> mise run cluster -- resume` | `POST /admin/nodes/<host>/resume` | `online` |
+| Reload `sma-ng.yml` without a restart | `mise run cluster -- reload` | `POST /reload` | unchanged |
+| Start, stop or restart the container | `HOST=<host> mise run cluster -- start` (or `stop`, `restart`) | none | `offline` while stopped |
+| Rolling upgrade | `mise run cluster -- upgrade` | none | drained, then `online` |
+| Graceful daemon restart (drain, then re-exec) | the admin UI or `curl` | `POST /admin/nodes/<host>/restart` | `restarting`, then `online` |
+| Graceful daemon shutdown (drain, then exit) | the admin UI or `curl` | `POST /admin/nodes/<host>/shutdown` | `offline` |
+| Approve a pending node | the admin UI or `curl` | `POST /admin/nodes/<host>/approve` | approval `approved` |
+| Remove an offline node's row | the admin UI or `curl` | `POST /admin/nodes/<host>/delete` | row removed |
+
+The admin API calls need the `X-API-Key` header when `daemon.api-key` is set.
 
 ---
 
 ## Deployment patterns
 
 The key requirement for more than one daemon is a shared PostgreSQL database. When `daemon.db-url` points at the same
-PostgreSQL instance, all SMA-NG nodes coordinate through the job table and heartbeat system:
+instance, all nodes coordinate through the job table and the heartbeat system:
 
-- pending jobs are visible to every node
-- only one node can claim a given job
-- stale running jobs are requeued if a node disappears
-- `/status` shows the full cluster, not just the local process
+- Pending jobs are visible to every node.
+- Only one node can claim a given job.
+- Stale running jobs are requeued if a node disappears.
+- `/status` shows the whole cluster, not only the local process.
 
-### Deployment Models
+### Deployment models
 
 #### 1. One host, one instance
 
-Use this when you just want a single daemon with one worker pool.
+Use this for a single daemon with one worker pool. SQLite is enough; PostgreSQL is optional.
 
 ```text
 Host A
-└─ sma-ng daemon
-   └─ PostgreSQL
+└─ sma-ng daemon (SQLite or PostgreSQL)
 ```
 
 #### 2. One host, multiple instances
 
-Use this when one machine needs separate SMA daemons, usually because:
-
-- different media trees need different path mappings
-- different ports or API keys are required
-- you want process isolation between workloads
-- you want to dedicate different instances to different GPUs or configs
+Use this when one machine needs separate daemons, usually because different media trees need different path mappings,
+different ports or API keys are required, you want process isolation, or you want to dedicate instances to different
+GPUs or configs.
 
 ```text
 Host A
@@ -98,28 +96,27 @@ Host A
 
 #### 3. Multiple hosts, shared cluster
 
-Use this when you want to scale out conversion work across multiple machines.
+Use this to scale conversion work across machines.
 
 ```text
 Host A               Host B               Host C
 ├─ sma-ng daemon     ├─ sma-ng daemon     ├─ sma-ng daemon
-└─ shared mounts?    └─ shared mounts?    └─ shared mounts?
+└─ shared mounts     └─ shared mounts     └─ shared mounts
          \               |               /
           \              |              /
            └──── shared PostgreSQL ────┘
 ```
 
-### Non-Negotiable Requirements
+### Requirements for multi-instance setups
 
-For multi-instance or multi-host setups:
+- Every instance uses the same PostgreSQL database through `daemon.db-url`.
+- Every instance sees the same effective media paths for any job it can claim.
+- Path rewriting normalizes host-specific mount differences.
+- API keys and ports do not conflict on the same host.
+- Each instance has its own config and logs directory, unless you intend to share them.
 
-- every instance must use the same PostgreSQL database via `daemon.db-url`
-- every instance must have access to the same effective media paths for any jobs it can claim
-- path rewriting must normalize host-specific mount differences
-- API keys and daemon ports must not conflict on the same host
-- each instance should have its own config directory and logs directory unless intentional sharing is required
-
-If two nodes see the same file under different paths, fix that first with `daemon.path-rewrites` and consistent mount layout.
+If two nodes see the same file under different paths, fix that first with `daemon.path-rewrites` and a consistent
+mount layout. See [Shared storage and paths](deployment.md#shared-storage-and-paths) for one worked layout.
 
 ### Shared PostgreSQL
 
@@ -130,17 +127,13 @@ daemon:
   db-url: postgresql://sma:password@db-host:5432/sma
 ```
 
-Database URLs are intentionally read only from `sma-ng.yml`; environment variables are ignored for this setting.
+The daemon reads the database URL only from `sma-ng.yml`; environment variables are ignored for this setting. Put
+PostgreSQL on the same machine for a small single-host setup, and on a stable host or managed service for a
+multi-host cluster. SQLite suits only a single daemon on one host.
 
-#### Recommended PostgreSQL Placement
+### Path strategy
 
-- small single-host setup: PostgreSQL on the same machine
-- multi-host cluster: PostgreSQL on a stable host or managed service
-- SQLite is suitable for a single SMA-NG daemon on one host. Use PostgreSQL when multiple daemons or hosts share work.
-
-### Path Strategy
-
-The safest clustered layout is for all nodes to see the same media roots under the same paths:
+The safest layout gives every node the same media roots under the same paths:
 
 ```text
 /mnt/unionfs/Media/TV
@@ -159,26 +152,14 @@ daemon:
       to: /mnt/unionfs/Media
 ```
 
-The shipped compose file no longer mounts `/downloads`. Download clients in other containers that report
-`/downloads/...` need a `daemon.path-rewrites` entry with `from: /downloads` and `to: /mnt/unionfs/downloads`.
+The shipped compose file does not mount `/downloads`. A download client in another container that reports
+`/downloads/...` needs a rewrite with `from: /downloads` and `to: /mnt/unionfs/downloads`. Rewrites matter most when
+Sonarr or Radarr webhooks come from another host, when one machine uses local disks and another NFS or SMB, and when
+containers see different paths than the host.
 
-This is especially important when:
+### One host, multiple instances
 
-- Sonarr/Radarr webhooks come from a different host than SMA-NG
-- one machine uses local disks and another uses NFS/SMB mounts
-- Docker containers see different inside-container paths than the host
-
-### One Host, Multiple Instances
-
-On a single machine, run each instance with its own:
-
-- `sma-ng.yml` (its `daemon:` block)
-- `daemon.env`
-- port
-- logs directory
-- container name
-
-Example layout:
+Give each instance its own `sma-ng.yml`, port, logs directory and container name (and `daemon.env` for containers):
 
 ```text
 /opt/sma-tv/
@@ -194,7 +175,7 @@ Example layout:
 └─ logs/
 ```
 
-Example `daemon:` block in `sma-ng.yml` values:
+The `daemon:` block of the TV instance, for example:
 
 ```yaml
 daemon:
@@ -205,136 +186,24 @@ daemon:
       profile: rq
 ```
 
-```yaml
-daemon:
-  api-key: movies-secret
-  db-url: postgresql://sma:password@127.0.0.1:5432/sma
-  routing:
-    - match: /mnt/unionfs/Media/Movies
-      profile: rq
-```
-
-Start them on different ports:
+Start the instances on different ports:
 
 ```bash
 python daemon.py --port 8585 --daemon-config /opt/sma-tv/config/sma-ng.yml --logs-dir /opt/sma-tv/logs
 python daemon.py --port 8586 --daemon-config /opt/sma-movies/config/sma-ng.yml --logs-dir /opt/sma-movies/logs
 ```
 
-### Multiple Hosts
+Do not point independent daemons at the same logs directory unless you want mixed daemon-level logs. Per-config logs
+are named from config stems, so separate directories keep the log API and dashboard clean.
 
-For multiple hosts, keep these values aligned:
+### Multiple hosts
 
-- shared `daemon.db-url`
-- compatible `daemon.routing`
-- identical API behavior and webhook expectations
+Keep these values aligned across hosts: the shared `daemon.db-url`, compatible `daemon.routing`, and the same image
+version. Host-specific differences belong in mount paths plus `daemon.path-rewrites`, `ffmpeg_dir`, the GPU settings
+and the worker count. With `deploy:config`, these come from `setup/local.yml` (see
+[Deployment](deployment.md#configuration)).
 
-Typical pattern:
-
-1. mount media on every node
-2. deploy the same code version everywhere
-3. give each node its own `daemon:` block in `sma-ng.yml` and `daemon.env`
-4. point all nodes at the same PostgreSQL
-5. set per-node `ffmpeg_dir`, GPU config, and worker count as needed
-
-Host-specific differences usually belong in:
-
-- mount paths plus `daemon.path-rewrites`
-- `ffmpeg_dir`
-- hardware-specific `sma-ng.yml`
-- worker count
-
-### Worker Count and Capacity Planning
-
-Each daemon process has its own `--workers` pool.
-
-Examples:
-
-- 3 hosts × 2 workers each = up to 6 concurrent conversions cluster-wide
-- 1 host with 2 daemon instances × 3 workers each = up to 6 concurrent conversions on that host
-
-Be realistic about hardware contention:
-
-- software encodes compete for CPU
-- QSV instances compete for the same iGPU
-- NVENC sessions compete for the same NVIDIA card
-- too many workers will usually reduce throughput, not improve it
-
-Start conservative:
-
-- software: `1-2` workers per host
-- Intel QSV: `1-2` workers per iGPU
-- NVIDIA: depends on model and session limits; start with `1-2`
-
-### Logging
-
-Each instance should have its own `--logs-dir`.
-
-On one host, do not point multiple independent daemons at the same logs directory unless you explicitly want mixed daemon-level logs. Per-config logs are named from config stems, so separate directories keep the log API and dashboard cleaner.
-
-Recommended:
-
-```text
-/opt/sma-tv/logs
-/opt/sma-movies/logs
-/opt/sma-node-a/logs
-/opt/sma-node-b/logs
-```
-
-### Docker / Compose Pattern
-
-For Docker-based clusters:
-
-- run one compose project per host
-- point every `sma-ng` container at the same PostgreSQL if clustering across hosts
-- publish a distinct port per instance on the same host
-- mount the same media paths into the container on every node
-- set a distinct `daemon.node_id` for every daemon instance in its
-  `sma-ng.yml`
-
-If you want a quick starting point, see [Docker Quick Start](docker-quickstart.md#docker-compose).
-
-### Verification Checklist
-
-After bringing nodes up:
-
-1. `GET /health` on each node should succeed
-2. `GET /status` should show all nodes when PostgreSQL is enabled
-3. submit one job and verify exactly one node claims it
-4. stop one node mid-job and confirm stale recovery works after `stale_seconds`
-5. check `/logs` and `/jobs/<id>` on each instance
-
-For the day-2 procedures (drain, rolling upgrade, recover a stale node, read cluster logs), see the runbooks below.
-
-### Common Failure Modes
-
-#### Jobs never get picked up
-
-- `daemon.db-url` not set or not shared
-- PostgreSQL connectivity broken
-- all nodes excluded by locked configs or no workers available
-
-#### Jobs fail only on some nodes
-
-- mismatched mount paths
-- missing FFmpeg binaries or GPU access on one host
-- different config files or stale deployment version
-
-#### Same webhook path works on one node but not another
-
-- inconsistent `daemon.path-rewrites`
-- different container bind mounts
-
-#### Dashboard only shows one node
-
-- instance is not using PostgreSQL mode
-- heartbeat not reaching the database
-- multiple Docker daemon containers are sharing the same hostname / node ID
-- nodes are using different `daemon.db-url` values
-
-### Minimal Multi-Host Example
-
-Node A and Node B both run:
+Two nodes that share a queue need only the same database and working media paths:
 
 ```yaml
 daemon:
@@ -342,41 +211,66 @@ daemon:
   path-rewrites:
     - from: /downloads
       to: /mnt/unionfs/downloads
-  routing:
-    - match: /mnt/unionfs/Media/TV
-      profile: rq
-    - match: /mnt/unionfs/Media/Movies
-      profile: lq
 ```
 
-Node A:
+### Docker and compose pattern
 
-```bash
-python daemon.py --host 0.0.0.0 --port 8585 --workers 2
-```
+- Run one compose project per host, and point every `sma-ng` container at the same PostgreSQL when clustering.
+- Publish a distinct port per instance on one host, and mount the same media paths into the container on every node.
+- Give each daemon a distinct `daemon.node-id`. The compose service uses the fixed hostname `sma-ng`, so nodes that
+  rely on the hostname for identity would collide.
 
-Node B:
+For a starting point, see [Docker Quick Start](docker-quickstart.md#docker-compose). The compose profile table is in
+[Deployment](deployment.md#docker-compose-profile-reference).
 
-```bash
-python daemon.py --host 0.0.0.0 --port 8585 --workers 2
-```
+### Worker count and capacity
 
-Both nodes will participate in the same queue as long as the media paths resolve correctly on both machines.
+Each daemon has its own worker pool (`daemon.workers`, or `--workers`). Three hosts with two workers each allow six
+concurrent conversions cluster-wide, and one host with two instances of three workers allows six on that host. More
+workers do not always mean more throughput, because software encodes compete for CPU, QSV instances share one
+iGPU, and NVENC sessions share one card. Start with one or two workers per host or GPU, and raise the number only
+while throughput improves. Set a per-host value with `workers:` under `hosts.<host>` in `setup/local.yml`.
+
+### Job history and node rows
+
+Finished jobs are kept indefinitely: `daemon.job-retention-days` defaults to `0`, which disables automatic pruning.
+Set it only when you want history deleted, and note that lifetime job totals survive pruning. Offline node rows are
+removed after `daemon.node-expiry-days` (default `7`).
+
+### Verification checklist
+
+After bringing nodes up:
+
+1. `GET /health` succeeds on each node.
+2. `GET /status` lists every node in `cluster`.
+3. Submit one job and confirm that exactly one node claims it.
+4. Stop one node during a job and confirm that stale recovery requeues the job after `stale-seconds`.
+5. Check `/logs` and `/jobs/<id>` on each instance.
+
+### Common failure modes
+
+| Symptom | Likely causes |
+| --- | --- |
+| Jobs are never picked up | `daemon.db-url` is not set or not shared; PostgreSQL is unreachable; the node is still pending approval; no workers are available |
+| Jobs fail only on some nodes | Mismatched mount paths; missing FFmpeg or GPU access on one host; a stale config or image version |
+| The same webhook works on one node only | Inconsistent `daemon.path-rewrites`; different container bind mounts |
+| The dashboard shows only one node | The instance uses SQLite; heartbeats do not reach the database; several containers share a `node-id`; nodes use different `db-url` values |
 
 ---
 
 ## Runbook: first-time cluster bootstrap
 
-Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
+Local prerequisites: `mise`, `python3`, `rsync` and `ssh`. Each host needs only SSH access; `deploy:setup` installs
+Docker.
 
-1. **Copy the sample local config and fill it in:**
+1. Copy the sample local config and fill it in:
 
    ```bash
    cp setup/local.yml.sample setup/local.yml
    $EDITOR setup/local.yml
    ```
 
-   Minimum viable shape (one master with bundled Postgres, two slaves):
+   A minimal shape for three nodes that share an external PostgreSQL server:
 
    ```yaml
    deploy:
@@ -385,17 +279,11 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
      ssh_port: 22
      ssh_key: ~/.ssh/id_ed25519_sma
      use_sudo: true
-     db_host: 10.30.10.40   # the master's IP
-     db_port: 5432
-     db_user: iadmin
-     db_password: <strong-pw>
-     db_name: sma
      docker_profile: intel
    hosts:
      sma-master:
        address: 10.30.10.40
        user: iadmin
-       docker_profile: intel-pg   # this host runs the bundled Postgres
      sma-slave0:
        address: 10.30.0.50
        user: iadmin
@@ -404,40 +292,37 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
        user: iadmin
    daemon:
      api_key: <random-string>
+     db_url: postgresql://sma:<strong-pw>@10.30.10.5:5432/sma
    ```
 
-2. **Bootstrap each host (once)** — installs Docker, creates the
-   `/opt/sma` layout (config, logs, data, seeded `daemon.env`), and sets up an ssh key:
+2. Prepare each host once. This creates an SSH key if needed, installs Docker, creates the `/opt/sma` layout (`config`,
+   `logs`, `data`) and seeds `config/daemon.env`:
 
    ```bash
    mise run deploy:setup
    ```
 
-3. **Stamp configs and credentials:** writes `config/sma-ng.yml` and
-   `config/daemon.env` on every host, with `SMA_NODE_NAME=<host-key>` baked
-   into the env file:
+3. Build and push each host's `config/sma-ng.yml`:
 
    ```bash
    mise run deploy:config
    ```
 
-4. **Bring up the containers:**
+4. Bring up the containers and check them:
 
    ```bash
-   mise run cluster -- start
-   mise run cluster -- status   # confirm sma healthy on every node
+   mise run deploy:docker
+   mise run cluster -- status
    ```
 
-5. **Approve every pending node** in the master's `/admin` UI (or via
-   `POST /admin/nodes/<host>/approve` with `X-API-Key`). Until a node is
-   approved its workers wait without claiming jobs — see
-   [Daemon Mode → Node approval](daemon.md#node-approval).
+5. Approve every pending node in the `/admin` page (or with `POST /admin/nodes/<host>/approve` and `X-API-Key`).
+   Until a node is approved, its workers wait without claiming jobs. See [Daemon Mode](daemon.md#node-management).
 
 ---
 
-## Runbook: add a new node to an existing cluster
+## Runbook: add a node to an existing cluster
 
-1. **Add the host entry to `setup/local.yml`:**
+1. Add the host to `setup/local.yml`:
 
    ```yaml
    deploy:
@@ -448,73 +333,64 @@ Local prereqs: `mise`, `python3`, `rsync`, `ssh`, GitHub CLI (`gh`) optional.
        user: iadmin
    ```
 
-2. **Bootstrap that host only:**
+2. Bootstrap only that host:
 
    ```bash
-   mise run deploy:setup HOST=sma-slave2
-   mise run deploy:config   HOST=sma-slave2
-   HOST=sma-slave2 mise run cluster -- start
+   HOST=sma-slave2 mise run deploy:setup
+   HOST=sma-slave2 mise run deploy:remote
    ```
 
-3. **Approve the node** in the master `/admin` UI. The node will start
-   claiming jobs on its next heartbeat (≤30s).
+3. Approve the node in the `/admin` page. It starts claiming jobs on its next heartbeat (within `heartbeat-interval`,
+   30 seconds by default).
 
 ---
 
 ## Runbook: roll a config change to all nodes
 
-Edit `setup/local.yml` (or any file deep-merged into the rendered
-`config/sma-ng.yml` — `base.*`, `profiles.*`, `services.*`), then:
+Edit `setup/local.yml`, then rebuild and push every host's config:
 
 ```bash
 mise run deploy:config
 ```
 
-`deploy:config` is non-destructive: it merges new keys into the existing
-`config/sma-ng.yml` on each host, leaving operator-tuned values in place. It
-does **not** restart the daemon. Apply it with:
+`deploy:config` regenerates each host's `sma-ng.yml` from the sample plus `setup/local.yml` and replaces the file on
+the host, so keep durable settings in `setup/local.yml` rather than editing the file on a host. It does not restart the
+daemon. Apply the change with one of:
 
 ```bash
-mise run cluster -- reload     # hot-reloadable changes (routing, scan paths, codec lists, profile overlays)
-mise run cluster -- restart    # anything else (worker count, bind address/port)
+mise run cluster -- reload     # hot-reloadable: routing, scan paths, codec lists, profile overlays
+mise run cluster -- restart    # everything else: worker count, bind address and port
 ```
 
-`cluster restart` gives the daemon `STOP_GRACE_PERIOD` (default `2m`) to drain before SIGKILL; jobs still
-running at the deadline are requeued. The effective drain is the smaller of `daemon.shutdown-grace-seconds`
-(default `100`) and `STOP_GRACE_PERIOD`: raise both together and keep `shutdown-grace-seconds` below
-`STOP_GRACE_PERIOD`. Both tasks honour `HOST=` / `HOSTS=`.
-
-For zero-loss restarts, use the upgrade runbook below.
+`cluster restart` gives the daemon `STOP_GRACE_PERIOD` (default `2m`) to drain before SIGKILL, and jobs still running
+at the deadline are requeued; see [Graceful stop and restart](deployment.md#graceful-stop-and-restart). For restarts
+that lose no work, use the upgrade runbook below.
 
 ---
 
 ## Runbook: cluster-wide image upgrade with no queued-job loss
 
-`cluster upgrade` does this for you, one node at a time, in `deploy.hosts`
-order:
+After CI publishes a new image (see [Deployment](deployment.md#deployment-workflow)), `cluster upgrade` updates the
+nodes one at a time, in `deploy.hosts` order:
 
 ```bash
 mise run cluster -- upgrade
-# DRAIN_TIMEOUT=3600 mise run cluster -- upgrade   # raise the per-host wait
+DRAIN_TIMEOUT=3600 mise run cluster -- upgrade   # raise the per-host wait
 ```
 
-For each host it:
+For each host, it:
 
-1. Sends `POST /admin/nodes/<host>/drain` (workers finish active jobs, stop
-   accepting new ones).
-2. Polls `GET /admin/nodes/<host>` for `running_jobs == 0` (default timeout
-   1800s; override with `DRAIN_TIMEOUT=<seconds>`).
-3. Runs `mise run deploy:remote HOST=<host>` (config push, `docker compose pull`,
-   `docker compose up -d --force-recreate sma`, healthcheck).
-4. The new daemon starts fresh and heartbeats `online` automatically — no
-   explicit resume needed.
+1. Sends `POST /admin/nodes/<host>/drain`, so workers finish active jobs and accept no new ones.
+2. Polls the node until `running_jobs` is `0`. The default timeout is 1800 seconds (`DRAIN_TIMEOUT`), and the poll
+   interval is 10 seconds (`POLL_INTERVAL`).
+3. Runs `deploy:remote` for that host: config push, then image pull and recreate if the image changed, then a health
+   check.
+4. Leaves the new daemon to heartbeat `online` by itself. Drain state is not persisted, so no explicit resume is
+   needed.
 
-While one node is draining/upgrading, the other nodes keep claiming new jobs,
-so the queue stays serviced.
-
-If a host fails to drain within `DRAIN_TIMEOUT`, the task issues a `resume`
-for that host (so it doesn't stay drained forever) and skips it; you can
-re-run `HOST=<host> mise run cluster -- upgrade` after the slow conversion completes.
+The other nodes keep claiming jobs while one drains, so the queue stays serviced. If a host does not drain in time, or
+`deploy:remote` fails for it, the task resumes that host, skips it and continues. The task exits non-zero and lists the
+failed hosts. Re-run `HOST=<host> mise run cluster -- upgrade` once the slow conversion has finished.
 
 ---
 
@@ -522,58 +398,46 @@ re-run `HOST=<host> mise run cluster -- upgrade` after the slow conversion compl
 
 ```bash
 HOST=sma-slave1 mise run cluster -- drain
-# Wait for cluster status to show running_jobs=0 on that node
-HOST=sma-slave1 mise run cluster -- stop   # docker compose stop
+# Wait until /status shows no running jobs on that node
+HOST=sma-slave1 mise run cluster -- stop
 # Do the maintenance
 HOST=sma-slave1 mise run cluster -- start
-# Heartbeat will flip status back to 'online' on its own
+# The heartbeat sets the status back to online by itself
 ```
 
-Use `cluster pause` instead of `cluster drain` only when you want active jobs
-to continue but new pickups halted (e.g. while you investigate a slow job).
+Use `cluster pause` instead of `cluster drain` when you want active jobs to continue but no new pickups, for example
+while you investigate a slow job.
 
 ---
 
 ## Runbook: recover from a crashed or unreachable node
 
-When a node misses heartbeats for `--stale-seconds` / `daemon.stale-seconds`
-(default 120s), the next heartbeat of any live node runs
-`recover_stale_nodes`, which in a single transaction:
+When a node misses heartbeats for `daemon.stale-seconds` (default `120`), the next heartbeat of any live node runs
+stale-node recovery. In a single transaction, it:
 
-- Locks the stale `cluster_nodes` rows with `FOR UPDATE SKIP LOCKED`, so two
-  live nodes never recover the same node twice
-- Re-queues every job that node had marked `running` so another node can claim
-  it on its next poll
-- Marks the row `status='offline'`
+- locks the stale `cluster_nodes` rows with `FOR UPDATE SKIP LOCKED`, so two live nodes never recover the same node;
+- requeues every job that the node had marked `running`, so another node can claim it;
+- marks the node row `offline`.
 
-The daemon log shows `Recovered N jobs from M stale node(s)` (node IDs are not
-logged). If the stale node was only partitioned and comes back, its workers
-notice within about 10 seconds that their jobs were requeued, kill the local
-ffmpeg, and discard their results instead of overwriting the new owner's row.
+The daemon log shows `Recovered N jobs from M stale node(s)`; node IDs are not logged. If the node was only
+partitioned and comes back, its workers notice that their jobs were requeued, stop the local FFmpeg and discard the
+results instead of overwriting the new owner's row.
 
-If the node never comes back, eventually `daemon.node-expiry-days` (default 7) will
-delete the row. To force it sooner:
+If the node never comes back, its row is deleted after `daemon.node-expiry-days` (default `7`). To remove it sooner,
+the delete call works only while the node is offline:
 
 ```bash
-# Check status first
-curl -sf -H "X-API-Key: $SMA_DAEMON_API_KEY" \
-    http://<master>:8585/admin/nodes/sma-slave2
-
-# Hard-delete (only allowed when status='offline')
-curl -sf -X POST -H "X-API-Key: $SMA_DAEMON_API_KEY" \
-    http://<master>:8585/admin/nodes/sma-slave2/delete
+curl -sf -X POST -H "X-API-Key: $SMA_DAEMON_API_KEY" http://<master>:8585/admin/nodes/sma-slave2/delete
 ```
 
-If the node is alive but stuck (e.g. hung ffmpeg), restart its container:
+If the node is alive but stuck (for example, a hung FFmpeg), restart its container:
 
 ```bash
 HOST=sma-slave2 mise run cluster -- restart
 ```
 
-To trace what happened to the requeued jobs: every job carries the original
-`node_id` in its DB row, and the per-config log file
-(`/opt/sma/logs/sma-ng.log` on the offending host) holds the FFmpeg output.
-See "Read logs across the cluster" below.
+To trace the requeued jobs, look at the job's `node_id` in `GET /jobs/<id>`, and at the node's log file for the FFmpeg
+output (see the next runbook).
 
 ---
 
@@ -581,51 +445,35 @@ See "Read logs across the cluster" below.
 
 Three log surfaces exist:
 
-1. **Per-node file log** — `/opt/sma/logs/sma-ng.log` on each host. Worker
-   output, FFmpeg stdout, conversion result, the final-output marker
-   (`SMA_FINAL_OUTPUT:`) and the per-job summary line all land here.
+1. **Per-node file log.** `/opt/sma/logs/sma-ng.log` on each host holds worker output, FFmpeg output, conversion
+   results, the final-output marker (`SMA_FINAL_OUTPUT:`) and the per-job summary line.
 
    ```bash
    ssh iadmin@10.30.10.40 'tail -F /opt/sma/logs/sma-ng.log'
    ```
 
-2. **Centralised cluster log** — every node also writes its log records to the
-   `logs` table in the shared Postgres so the master's `/admin/logs` UI can
-   show a unified view filterable by node, config, job, and level. The CLI
-   equivalent is `GET /admin/logs?node=<host>&job=<id>&level=ERROR`.
+2. **Centralized cluster log.** Every node also writes its log records to the shared PostgreSQL `logs` table. Read
+   them from any node with `GET /cluster/logs`, which accepts `node_id`, `level`, `limit` (up to 500) and `offset`:
 
-3. **Archived per-config files** — when `daemon.log_archive_after_days` is set,
-   per-config `.log` files older than that are gzipped into
-   `daemon.log_archive_dir`. Read the
-   [Daemon Mode → Log archival](daemon.md#log-archival) section for retention
-   tuning.
+   ```bash
+   curl -sf -H "X-API-Key: $SMA_DAEMON_API_KEY" \
+     "http://<master>:8585/cluster/logs?node_id=sma-slave1&level=ERROR&limit=50"
+   ```
+
+3. **Archived per-config files.** When `daemon.log-archive-after-days` is set, older per-config `.log` files are
+   compressed into `daemon.log-archive-dir`. See [Daemon Mode](daemon.md#log-archival) for retention tuning.
 
 ---
 
 ## Runbook: PostgreSQL lifecycle
 
-`*-pg` Docker profiles point `daemon.db-url` at an **external** PostgreSQL
-instance (production reality on every host we run today). Restart and
-recovery are handled out-of-band against that database — there is no
-mise task that touches it. If you ever bring back a bundled `sma-pgsql`
-service you'll want to reintroduce dedicated lifecycle tasks for it.
-
-After any database reset (planned or recovery), every node's heartbeat
-registers a fresh row; re-approve them via `/admin`.
-
----
-
-## Docker compose profiles
-
-The profile table lives in [Deployment](deployment.md#docker-compose-profile-reference).
-Only one node should run a `*-pg` profile. Set it in `hosts.<that-host>.docker_profile`; leave the cluster-wide
-`deploy.docker_profile` as the non-pg variant for the slaves.
+The `-pg` profiles use an external PostgreSQL server. Restart, backup and recovery happen outside SMA-NG, and no mise
+task touches the database. After any database reset, every node registers a fresh row at its next heartbeat, so
+approve the nodes again in `/admin`.
 
 ---
 
 ## See also
 
-- [Deployment](deployment.md) — task-by-task reference and the full
-  `setup/local.yml` schema
-- [Daemon Mode](daemon.md) — admin API, heartbeats, approval flow,
-  drain/pause/resume internals, log archival
+- [Deployment](deployment.md) for task reference, the full `setup/local.yml` schema and the compose profile table.
+- [Daemon Mode](daemon.md) for the admin API, heartbeats, node approval, drain, pause and resume, and log archival.
