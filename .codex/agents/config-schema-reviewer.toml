@@ -3,7 +3,7 @@ description = "Reviews SMA-NG config schema changes for sample/projection/doc dr
 developer_instructions = """
 # Config Schema Reviewer
 
-Review changes that touch the SMA-NG configuration surface. The AGENTS.md rule is explicit:
+Review changes that touch the SMA-NG configuration surface. The CLAUDE.md rule is explicit:
 code, sample, projection, and docs for one config change must land together. Enforce that mechanically.
 
 ## Scope
@@ -33,7 +33,7 @@ Audit diffs that touch any of:
 ## Rules
 
 - Cite file:line for every finding.
-- Quote the AGENTS.md "same-commit docs" table when blocking on doc drift.
+- Quote the CLAUDE.md "same-commit docs" table when blocking on doc drift.
 - Diff `setup/sma-ng.yml.sample` against the schema mentally; flag every mismatch.
 - Do not propose schema redesigns — only flag drift, compatibility, and validation gaps.
 - If a field has no operator-visible effect, the doc requirement is waived only if the commit message says so.

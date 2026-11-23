@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Regenerate .agents/skills and .codex/agents/*.toml from .claude/skills and .claude/agents (--check reports drift)"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+"$PY" scripts/sync_agent_mirrors.py "$@"

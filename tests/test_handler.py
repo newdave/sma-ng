@@ -621,6 +621,7 @@ class TestGetLogs:
     log_file.write_text('{"level": "INFO", "message": "test"}\n')
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "sma-ng", "path": str(log_file)}]
+    h.server.config_log_manager.logs_dir = os.path.dirname(str(log_file))
     h._get_logs()
     body = _get_response_body(h)
     assert len(body) == 1
@@ -640,6 +641,7 @@ class TestGetLogs:
     log_file.write_text('{"level": "INFO", "message": "test"}\n')
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "sma-ng", "path": str(log_file)}]
+    h.server.config_log_manager.logs_dir = os.path.dirname(str(log_file))
     local_tz = timezone(timedelta(hours=-5))
     with patch("resources.daemon.handler._LOCAL_TIMEZONE", local_tz):
       h._get_logs()
@@ -683,6 +685,7 @@ class TestGetLogContent:
     log_file.write_text(json.dumps(entry) + "\n")
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "sma-ng", "path": str(log_file)}]
+    h.server.config_log_manager.logs_dir = os.path.dirname(str(log_file))
     h._get_log_content("/logs/sma-ng", {})
     body = _get_response_body(h)
     assert len(body["entries"]) == 1
@@ -697,6 +700,7 @@ class TestGetLogContent:
     log_file.write_text("\n".join(lines) + "\n")
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h.server.config_log_manager.logs_dir = os.path.dirname(str(log_file))
     h._get_log_content("/logs/test", {"job_id": ["1"]})
     body = _get_response_body(h)
     assert len(body["entries"]) == 1
@@ -711,6 +715,7 @@ class TestGetLogContent:
     log_file.write_text("\n".join([mid] + noise) + "\n")
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h.server.config_log_manager.logs_dir = os.path.dirname(str(log_file))
     h._get_log_content("/logs/test", {"job_id": ["7"]})
     body = _get_response_body(h)
     assert [e["message"] for e in body["entries"]] == ["rotated", "scrolled"]
@@ -721,6 +726,7 @@ class TestGetLogContent:
     log_file.write_text("\n".join(rows) + "\n")
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h.server.config_log_manager.logs_dir = os.path.dirname(str(log_file))
     h._get_log_content("/logs/test", {"job_id": ["7"], "lines": ["3"]})
     body = _get_response_body(h)
     assert [e["message"] for e in body["entries"]] == ["m7", "m8", "m9"]
@@ -734,6 +740,7 @@ class TestGetLogContent:
     log_file.write_text("\n".join(lines) + "\n")
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h.server.config_log_manager.logs_dir = os.path.dirname(str(log_file))
     h._get_log_content("/logs/test", {"level": ["ERROR"]})
     body = _get_response_body(h)
     assert len(body["entries"]) == 1
@@ -744,6 +751,7 @@ class TestGetLogContent:
     log_file.write_text("")
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h.server.config_log_manager.logs_dir = os.path.dirname(str(log_file))
     h._get_log_content("/logs/test/tail", {})
     assert h._response_code == 400
 
@@ -754,6 +762,7 @@ class TestGetLogContent:
     offset = 0
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h.server.config_log_manager.logs_dir = os.path.dirname(str(log_file))
     h._get_log_content("/logs/test/tail", {"offset": [str(offset)]})
     body = _get_response_body(h)
     assert len(body["entries"]) == 1
@@ -764,6 +773,7 @@ class TestGetLogContent:
     log_file.write_text(entry + "\n")
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h.server.config_log_manager.logs_dir = os.path.dirname(str(log_file))
     h._get_log_content("/logs/test/tail", {"offset": ["999999"]})
     body = _get_response_body(h)
     assert "entries" in body
@@ -771,6 +781,7 @@ class TestGetLogContent:
   def test_returns_empty_entries_for_nonexistent_file(self):
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "gone", "path": "/nonexistent/gone.log"}]
+    h.server.config_log_manager.logs_dir = "/nonexistent"
     h._get_log_content("/logs/gone", {})
     body = _get_response_body(h)
     assert body["entries"] == []
@@ -781,6 +792,7 @@ class TestGetLogContent:
     log_file.write_text("not json\n" + json.dumps({"level": "INFO", "message": "ok"}) + "\n")
     h = _make_handler()
     h.server.config_log_manager.get_all_log_files.return_value = [{"name": "test", "path": str(log_file)}]
+    h.server.config_log_manager.logs_dir = os.path.dirname(str(log_file))
     h._get_log_content("/logs/test", {})
     body = _get_response_body(h)
     assert len(body["entries"]) == 1
@@ -1594,6 +1606,7 @@ class TestQueueDirectory:
     cfg = tmp_path / "alt.ini"
     cfg.write_text("")
     h = _make_handler()
+    h.server.path_config_manager.default_config = str(cfg)
     resolved = resolve_config(h.server.path_config_manager, "/media/movie.mkv", str(cfg))
     assert resolved == str(cfg)
     h.server.path_config_manager.get_config_for_path.assert_not_called()
@@ -3393,4 +3406,74 @@ class TestQueueSharedRules:
     h._queue_directory(str(tmp_path), [], None)
     body = _get_response_body(h)
     assert body["skipped"][0]["reason"] == "recycle_bin"
+    h.server.job_db.add_job.assert_not_called()
+
+
+class TestPathContainment:
+  """Request paths and log files are resolved with realpath and confined to configured roots."""
+
+  def _handler(self, root, **kwargs):
+    h = _make_handler(**kwargs)
+    pcm = h.server.path_config_manager
+    pcm.routing_match_paths.return_value = [str(root)]
+    pcm.scan_paths = []
+    pcm.path_rewrites = []
+    return h
+
+  def _setup(self, tmp_path):
+    root = tmp_path / "media"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.mkv").write_text("")
+    return root, outside
+
+  def test_dispatch_rejects_dotdot_traversal(self, tmp_path):
+    root, _ = self._setup(tmp_path)
+    h = self._handler(root)
+    h._dispatch_path(str(root / ".." / "outside" / "a.mkv"), [])
+    assert "outside configured media roots" in _get_response_body(h)["error"]
+    h.server.job_db.add_job.assert_not_called()
+
+  def test_dispatch_rejects_symlink_escape(self, tmp_path):
+    root, outside = self._setup(tmp_path)
+    (root / "esc").symlink_to(outside)
+    h = self._handler(root)
+    h._dispatch_path(str(root / "esc" / "a.mkv"), [])
+    assert "outside configured media roots" in _get_response_body(h)["error"]
+    h.server.job_db.add_job.assert_not_called()
+
+  def test_walk_media_files_rejects_outside_root(self, tmp_path):
+    root, outside = self._setup(tmp_path)
+    h = self._handler(root)
+    h.server.path_config_manager.media_extensions = {".mkv"}
+    assert list(h._walk_media_files(str(outside))) == []
+
+  def test_walk_media_files_inside_root(self, tmp_path):
+    root, _ = self._setup(tmp_path)
+    (root / "b.mkv").write_text("")
+    h = self._handler(root)
+    h.server.path_config_manager.media_extensions = {".mkv"}
+    assert [os.path.basename(p) for p in h._walk_media_files(str(root))] == ["b.mkv"]
+
+  def test_log_symlink_escape_not_served(self, tmp_path):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    secret = tmp_path / "secret.log"
+    secret.write_text('{"level": "INFO", "message": "x"}\n')
+    link = logs / "evil.log"
+    link.symlink_to(secret)
+    h = _make_handler()
+    h.server.config_log_manager.logs_dir = str(logs)
+    h.server.config_log_manager.get_all_log_files.return_value = [{"name": "evil", "path": str(link)}]
+    h._get_log_content("/logs/evil", {})
+    assert _get_response_body(h)["error"] == "Log not found"
+
+  def test_jobs_post_rejects_traversal(self, tmp_path):
+    root, _ = self._setup(tmp_path)
+    data = json.dumps({"kind": "preview", "path": str(root / ".." / "outside" / "a.mkv")}).encode()
+    h = self._handler(root, body=data, headers={"Content-Length": str(len(data)), "Content-Type": "application/json"})
+    h.server.job_db.is_distributed = False
+    h._post_jobs()
+    assert "outside configured media roots" in _get_response_body(h)["error"]
     h.server.job_db.add_job.assert_not_called()

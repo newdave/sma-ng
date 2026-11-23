@@ -106,8 +106,9 @@ Say explicitly when the relevant validation could not be run.
 Codex treats `.claude/` as active compatibility configuration.
 When workflow rules change, update `CLAUDE.md` first, then sync this file and any Codex mirrors under `.codex/`.
 
-Codex loads project skills from `.agents/skills/`, copies of `.claude/skills/`; keep them identical. The
-`UserPromptSubmit` hook in `.codex/hooks.json` (`.claude/hooks/codex/skill-reminder.sh`) detects FFmpeg work with
+Codex loads project skills from `.agents/skills/` and agents from `.codex/agents/`. Both are generated from
+`.claude/skills/` and `.claude/agents/` by `mise run dev:agents`; never hand-edit them (a test fails on drift). The
+`UserPromptSubmit` hook in `.codex/hooks.json` (`.claude/hooks/skill-reminder.sh codex`) detects FFmpeg work with
 `.claude/hooks/ffmpeg-prompt-match.sh`. On a match it tells Codex to read `.agents/skills/ffmpeg-cli/SKILL.md` and
 `.agents/skills/ffmpeg-hardware-acceleration/SKILL.md`, and to run the `ffmpeg-args-auditor` agent for
 `converter/*.py`, `resources/mediaprocessor.py` and `resources/media_repair.py` edits.

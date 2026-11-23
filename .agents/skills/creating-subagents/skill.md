@@ -1,6 +1,6 @@
 ---
 name: creating-subagents
-description: Add or update a Codex subagent under .Codex/agents/. Activate when the user asks to "create/add a subagent" or when a recurring review/audit (FFmpeg args, schema drift, security, performance) deserves a focused context window separate from the main thread.
+description: Add or update a Claude subagent under .claude/agents/. Activate when the user asks to "create/add a subagent" or when a recurring review/audit (FFmpeg args, schema drift, security, performance) deserves a focused context window separate from the main thread.
 ---
 
 # Creating Subagents

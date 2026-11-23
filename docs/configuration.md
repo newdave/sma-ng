@@ -81,7 +81,7 @@ then the default below; the daemon reads no `SMA_*` environment variables (the D
 | `recycle-bin-max-age-days` | int | `30` | Delete recycle-bin media older than this many days (`0` = disabled) |
 | `recycle-bin-min-free-gb` | int | `50` | Delete oldest recycle-bin media when free space drops below this many GiB (`0` = disabled) |
 | `job-dedupe-window-seconds` | int | `21600` | Skip a path whose job completed within this many seconds (`0` = disabled); pending and running duplicates are always skipped |
-| `job-retention-days` | int | `0` | Opt-in: delete finished jobs older than this many days, hourly. `0` (default) keeps job history forever. A positive value permanently deletes job history and its stats; spares the dedupe window |
+| `job-retention-days` | int | `0` | Opt-in: delete finished jobs older than this many days, hourly. `0` (default) keeps job history forever. A positive value permanently deletes job rows (lifetime `/stats` totals are kept); spares the dedupe window |
 | `log-ttl-days` | int | `30` | Cluster mode: retention of log rows in PostgreSQL (`0` = never clean up) |
 | `node-expiry-days` | int | `7` | Cluster mode: hard-delete offline nodes after this many days (`0` = disabled) |
 | `log-archive-dir` | path | empty | Cluster mode: directory for gzipped JSONL log archives (empty = archival disabled) |

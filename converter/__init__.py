@@ -311,7 +311,7 @@ class Converter:
         except OSError:
           pass
 
-  def convert(self, outfile, options, twopass=False, timeout=10, preopts=None, postopts=None, strip_metadata=False):
+  def convert(self, outfile, options, twopass=False, timeout=10, preopts=None, postopts=None, strip_metadata=False, info=None):
     """
     Convert media file (infile) according to specified options, and
     save it to outfile. For two-pass encoding, specify the pass (1 or 2)
@@ -333,6 +333,9 @@ class Converter:
     conversion process. The generator will periodically yield timecode
     of currently processed part of the file (ie. at which second in the
     content is the conversion process currently).
+
+    The optional info argument is an existing MediaInfo for the source; when
+    given, the source is not probed again.
 
     The optional timeout argument specifies how long should the operation
     be blocked in case ffmpeg gets stuck and doesn't report back. This
@@ -365,7 +368,10 @@ class Converter:
     # Probe without posters so src_width/src_height below come from the real
     # video stream, never from an attached_pic cover-art stream that happens
     # to precede it.
-    info = self.ffmpeg.probe(infile, posters_as_video=False)
+    # A caller that already probed this source (e.g. the fallback ladder) can pass its
+    # MediaInfo (probed with posters_as_video=False) to skip the re-probe.
+    if info is None:
+      info = self.ffmpeg.probe(infile, posters_as_video=False)
     if info is None:
       raise ConverterError("Can't get information about source file")
 
