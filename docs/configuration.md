@@ -413,22 +413,34 @@ Current implementation scope:
 - bounded recommendation plumbing in the planner for codec ordering, bitrate ceilings, presets, filters, and force-reencode decisions
 - preview output integration via `manual.py -oo`
 
-Current backend status:
+Current backend behavior:
 
-- the OpenVINO backend currently validates runtime availability and requested device selection
-- the current OpenVINO backend returns placeholder observations, so analyzer-driven recommendation payloads will usually be empty until richer model-backed inference is added
-- `model-dir`, `cache-dir`, `max-frames`, and `target-width` are forward-compatible analyzer settings; they are reserved for richer model-backed inference as the backend grows
-- if the backend is unavailable or a requested device such as `NPU` is missing, SMA-NG logs a warning and falls back to normal planning
+- The OpenVINO backend first validates that the runtime is installed and that the requested device is available.
+- It then extracts up to `max-frames` sampled frames from the source with FFmpeg, scaled to `target-width`, and
+  computes heuristic signals from them: a motion score (frame-to-frame difference), a noise score (Laplacian
+  variance), letterbox crop detection (with a suggested `crop` filter), and interlace confidence. Interlace comes
+  from the FFprobe field order of the source, not from the frames.
+- Without a model, the content type is a coarse heuristic: `sports_high_motion` when the motion score is high,
+  otherwise `general_live_action`.
+- When a model is available, the backend also runs a scene classifier over the sampled frames and uses the averaged
+  result to set the content type. The model is an OpenVINO IR file named `scene_classifier.xml`. The backend looks
+  for it in `model-dir` first, then in the `resources/models` directory of the SMA-NG install. SMA-NG does not ship a
+  model in that directory, so supply your own in `model-dir` if you want model-based classification. If the model
+  is missing or inference fails, the heuristic content type is used.
+- The planner turns these observations into bounded recommendations (codec order, bitrate ceilings, presets,
+  filters and force-reencode), subject to the `allow-*` options below.
+- If the backend is unavailable or a requested device such as `NPU` is missing, SMA-NG logs a warning and falls back
+  to normal planning.
 
 | Option | Type | Default | Description |
 | --------------------------- | ------ | ---------- | ------------------------------------------------------------------------------------------------------------- |
 | `enabled` | bool | `false` | Enable analyzer-assisted planning |
 | `backend` | string | `openvino` | Analyzer backend runtime. Current supported value: `openvino` |
 | `device` | string | `AUTO` | OpenVINO target device selector. Valid examples: `AUTO`, `CPU`, `GPU`, `NPU`, `AUTO:NPU,CPU`, `MULTI:NPU,GPU` |
-| `model-dir` | path | | Optional directory containing analyzer models (reserved for richer future inference) |
-| `cache-dir` | path | | Optional cache directory for compiled analyzer artifacts |
-| `max-frames` | int | `12` | Reserved sampling limit for future model-backed inference |
-| `target-width` | int | `960` | Reserved downscale width for future model-backed inference |
+| `model-dir` | path | | Optional directory containing the `scene_classifier.xml` model used for content classification |
+| `cache-dir` | path | | Optional cache directory for compiled OpenVINO models |
+| `max-frames` | int | `12` | Maximum number of frames sampled from the source for analysis |
+| `target-width` | int | `960` | Width in pixels that sampled frames are scaled to before analysis |
 | `allow-codec-reorder` | bool | `true` | Allow analyzer to reorder the configured video codec pool |
 | `allow-bitrate-adjustments` | bool | `true` | Allow analyzer to change bitrate multipliers / ceilings |
 | `allow-preset-adjustments` | bool | `true` | Allow analyzer to override encoder preset |
