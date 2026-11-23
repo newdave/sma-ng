@@ -1,0 +1,48 @@
+tests/test_avcodecs.py
+  s_bb9afa71bee21f::t_2343ce3146d77f 2385,2390-2392,2398
+resources/readsettings.py
+  s_bb9afa71bee21f::t_720c5807776b6d 320-326,357-358,368-379
+resources/config_schema.py
+  s_bb9afa71bee21f::t_720c5807776b6d 317-318,335-337,362-364,383
+tests/test_mediaprocessor.py
+  s_bb9afa71bee21f::t_be941f7cb2616a 9448,9450
+  s_bb9afa71bee21f::t_25bb0174b72015 9354-9365
+  s_bb9afa71bee21f::t_16790e94dfa073 1159-1180
+  s_bb9afa71bee21f::t_6942f16d19c588 9408-9414
+tests/test_vaapi_overlay.py
+  s_bb9afa71bee21f::t_be941f7cb2616a 54,283-284,294-295,508,517-518,537,544,547,557,565,581,589
+  s_bb9afa71bee21f::t_6942f16d19c588 638-644,646-650
+  s_bb9afa71bee21f::t_11cfb88a0bf4f5 645
+resources/mediaprocessor.py
+  s_bb9afa71bee21f::t_16790e94dfa073 5703-5717,5738,5761
+  s_bb9afa71bee21f::t_720c5807776b6d 399,413-415
+docs/configuration.md
+  s_bb9afa71bee21f::t_85561fea8d2565 206
+  s_bb9afa71bee21f::t_3547a0fb8f12a7 243-244,293-294,304-306,372
+setup/sma-ng.yml.sample
+  s_bb9afa71bee21f::t_425843ecf23cb9 188,236
+converter/avcodecs.py
+  s_bb9afa71bee21f::t_720c5807776b6d 1177-1179
+tests/test_validate_config.py
+  s_bb9afa71bee21f::t_be941f7cb2616a 69
+scripts/validate-config.py
+  s_bb9afa71bee21f::t_720c5807776b6d 147,184
+docs/hardware-acceleration.md
+  s_bb9afa71bee21f::t_3547a0fb8f12a7 57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "80cead5a999edab8fef9b6af5a824d74b670ec9c",
+  "prompts": {},
+  "sessions": {
+    "s_bb9afa71bee21f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11944d23-c69e-4bdd-b6ea-a53dcb231d65",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
