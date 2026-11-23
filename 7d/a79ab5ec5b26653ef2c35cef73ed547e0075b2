@@ -1,0 +1,22 @@
+docs/deployment.md
+  s_d73ac5e457a585::t_29e7802e3964dc 93
+.mise/tasks/wiki/publish
+  s_d73ac5e457a585::t_14f4c914ccdfbe 27-31
+  s_d73ac5e457a585::t_25fbcbf186f5c0 2,11,16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "7da79ab5ec5b26653ef2c35cef73ed547e0075b2",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
