@@ -526,6 +526,16 @@ Trivy findings are report-only (Security tab) for now. Each platform builds and 
 `ubuntu-24.04-arm`, not QEMU emulation) and is pushed untagged by digest; a final job publishes one multi-arch
 manifest under the tags.
 
+The FFmpeg compile is the slowest part of the build, and Docker layer caching only helps while nothing above it
+changes (a base-image or apt change rebuilds it). The `ffmpeg-builder` stage therefore keeps two BuildKit cache mounts
+per architecture: `ffmpeg-src-<arch>` (the FFmpeg source tarball, checked with `xz -t` and re-downloaded if corrupt,
+plus the nv-codec-headers checkout, both keyed by version) and `ffmpeg-ccache-<arch>` (ccache objects; FFmpeg is
+configured with `--cc="ccache gcc" --cxx="ccache g++"` and the build log ends with `ccache -s` statistics).
+`docker.yml` persists both across runs with `actions/cache` and `buildkit-cache-dance`, under the key
+`ffmpeg-<arch>-<hash of docker/Dockerfile>` with a `ffmpeg-<arch>-` prefix fallback, so an older cache still seeds a
+changed Dockerfile. Only `main` and release builds save the cache; PR builds restore it read-only to protect the
+10 GB cache budget. A plain `docker build` without these caches still works, it just downloads and compiles everything.
+
 Releases are driven by [release-please](https://github.com/googleapis/release-please). **Do not manually create `v*` tags** — this causes duplicate releases.
 
 This repository pins release-please to the `always-bump-patch` versioning strategy, so releases default to point releases and patch numbers are not capped. Versions such as `1.2.12323` are valid.
