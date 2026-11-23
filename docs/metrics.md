@@ -129,7 +129,7 @@ Workers record these values on each `jobs` row when a job finishes, and the metr
 
 | Column | Meaning |
 | ------ | ------- |
-| `input_size_bytes`, `output_size_bytes` | Source and output file sizes. |
+| `input_size_bytes`, `output_size_bytes` | Source and output file sizes. Failed jobs keep the source size. |
 | `source_duration_seconds` | Source container duration. |
 | `encoder_backend`, `encoder_name` | The backend and encoder that produced the output. |
 | `failure_category`, `failure_cause` | The operator-facing category and the raw cause of a failure. |

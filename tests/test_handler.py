@@ -10,6 +10,7 @@ import pytest
 
 from resources.daemon.handler import (
   WebhookHandler,
+  _public_job,
 )
 from resources.daemon.queueing import resolve_config
 
@@ -3477,3 +3478,20 @@ class TestPathContainment:
     h._post_jobs()
     assert "outside configured media roots" in _get_response_body(h)["error"]
     h.server.job_db.add_job.assert_not_called()
+
+
+class TestPublicJobSizeChange:
+  @pytest.mark.parametrize(
+    ("src", "dest", "delta", "change"),
+    [
+      (1000, 600, -400, "shrunk"),
+      (1000, 1500, 500, "grew"),
+      (1000, 1000, 0, "unchanged"),
+      (1000, None, None, None),
+      (None, None, None, None),
+    ],
+  )
+  def test_size_change(self, src, dest, delta, change):
+    job = _public_job({"id": 1, "input_size_bytes": src, "output_size_bytes": dest})
+    assert job["size_delta_bytes"] == delta
+    assert job["size_change"] == change

@@ -263,7 +263,25 @@ def _public_job(job):
   for column in (*JOB_OUTPUT_COLUMNS, "ffmpeg_stderr"):
     job.pop(column, None)
   job.pop("claim_token", None)  # internal ownership state
+  _add_size_change(job)
   return job
+
+
+def _add_size_change(job):
+  """Add size_delta_bytes (output minus input) and size_change (shrunk/grew/unchanged).
+
+  Both are None until the job has a source and an output size, so failed,
+  pending and non-convert jobs report no change rather than a guess.
+  """
+  src = job.get("input_size_bytes")
+  dest = job.get("output_size_bytes")
+  if src is None or dest is None:
+    job["size_delta_bytes"] = None
+    job["size_change"] = None
+    return
+  delta = int(dest) - int(src)
+  job["size_delta_bytes"] = delta
+  job["size_change"] = "shrunk" if delta < 0 else "grew" if delta > 0 else "unchanged"
 
 
 class WebhookHandler(BaseHTTPRequestHandler):

@@ -188,10 +188,20 @@ class TestConversionWorkerProcessJob:
     db.get_job.return_value = {"status": "running"}
     worker = _make_worker(job_db=db)
     worker._run_conversion = mock.MagicMock(return_value=(False, None, None))
+    media.write_bytes(b"x" * 1234)
     job = {"id": 5, "path": str(media), "config": "/cfg.ini", "args": None}
     worker.process_job(job)
+    # The source size is kept on failure so the job still shows what it started from.
     db.fail_job.assert_called_once_with(
-      5, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN, telemetry={}, source_duration_seconds=None
+      5,
+      "Conversion process failed",
+      failure_category="system",
+      failure_cause="process_failed",
+      node_id=worker.node_id,
+      claim_token=NO_CLAIM_TOKEN,
+      telemetry={},
+      source_duration_seconds=None,
+      input_size=1234,
     )
     db.complete_job.assert_not_called()
 
@@ -370,7 +380,15 @@ class TestIngestFfmpegStderrSidecars:
     worker.process_job({"id": 8, "path": str(media), "config": "/cfg.ini", "args": None})
 
     db.fail_job.assert_called_once_with(
-      8, "Conversion process failed", failure_category="system", failure_cause="process_failed", node_id=worker.node_id, claim_token=NO_CLAIM_TOKEN, telemetry={}, source_duration_seconds=None
+      8,
+      "Conversion process failed",
+      failure_category="system",
+      failure_cause="process_failed",
+      node_id=worker.node_id,
+      claim_token=NO_CLAIM_TOKEN,
+      telemetry={},
+      source_duration_seconds=None,
+      input_size=0,
     )
     db.update_job_ffmpeg_stderr.assert_called_once()
     args, _ = db.update_job_ffmpeg_stderr.call_args
@@ -958,6 +976,7 @@ class TestOutputVerifyEvent:
       claim_token="",
       telemetry={},
       source_duration_seconds=None,
+      input_size=0,
     )
 
 
@@ -996,6 +1015,7 @@ class TestRealFormatterEventLines:
       claim_token="",
       telemetry={},
       source_duration_seconds=None,
+      input_size=0,
     )
 
   def test_ffmpeg_attempts_line_from_real_formatter_bumps_counters(self, tmp_path):

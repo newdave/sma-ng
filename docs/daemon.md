@@ -113,6 +113,12 @@ Node admin API route:
 
 - `POST /admin/nodes/<node_id>/<action>` where action is one of `approve`, `reject`, `restart`, `shutdown`, `delete`
 
+**Job file sizes:** convert jobs record the source size (`input_size_bytes`) when they start, and the output size
+(`output_size_bytes`) when they complete. Failed jobs keep the source size. `GET /jobs` and `GET /jobs/<id>` also return
+`size_delta_bytes` (output minus source) and `size_change` (`shrunk`, `grew` or `unchanged`); both are `null` until
+the job has both sizes. Other job kinds (preview, repair, audit, rename) record no sizes. The dashboard job table
+shows both sizes in its Size column, with a green ▼ when the file shrank and a red ▲ when it grew.
+
 **`GET /jobs` response size:** rows use an explicit column list that omits `ffmpeg_stderr` and the captured `output`
 (up to 1 MiB each per job). Read them with `GET /jobs/<id>/ffmpeg-stderr` and `GET /jobs/<id>/output`. `limit`
 values above `500` are clamped to `500`.
