@@ -14,10 +14,16 @@ inputs:
     required: false
     default: "false"
 
+outputs:
+  python-version:
+    description: "Exact Python version installed (for cache keys)"
+    value: ${{ steps.python.outputs.python-version }}
+
 runs:
   using: composite
   steps:
     - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      id: python
       with:
         python-version-file: .python-version
         cache: ${{ inputs.cache-dependency-path != '' && 'pip' || '' }}
