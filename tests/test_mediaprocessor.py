@@ -4057,7 +4057,7 @@ class TestProcess:
     mp.subtitles.ripSubs = MagicMock(return_value=[])
     mp.converter.probe = MagicMock(return_value=out_info)
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       with open(outputfile, "wb") as f:
         f.write(b"truncated")
       yield None, ["ffmpeg"]
@@ -5312,7 +5312,7 @@ class TestConvert:
 
     options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {}, "subtitle": []}
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       out.write_bytes(b"output")
       yield None, ["ffmpeg", "-i", str(src), str(out)]
       yield 100, ""
@@ -5333,7 +5333,7 @@ class TestConvert:
 
     options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {}, "subtitle": []}
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       yield None, ["ffmpeg"]
       raise FFMpegConvertError("cmd", "output", 1)
 
@@ -5368,7 +5368,7 @@ class TestConvert:
 
     call_count = 0
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       nonlocal call_count
       call_count += 1
       yield None, ["ffmpeg"]
@@ -5405,7 +5405,7 @@ class TestConvert:
 
     call_count = 0
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       nonlocal call_count
       call_count += 1
       yield None, ["ffmpeg"]
@@ -5441,7 +5441,7 @@ class TestConvert:
       "subtitle": [],
     }
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       yield None, ["ffmpeg"]
       raise FFMpegConvertError("cmd", "output", "VA-API failed to initialize")
 
@@ -5487,7 +5487,7 @@ class TestConvert:
     src.write_bytes(b"x")
     options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {"codec": "h265qsv"}, "subtitle": []}
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       yield None, ["ffmpeg"]
       yield 100, ""
 
@@ -5508,7 +5508,7 @@ class TestConvert:
     options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {"codec": "h265qsv"}, "subtitle": []}
     calls = []
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       calls.append(opts["video"]["codec"])
       yield None, ["ffmpeg"]
       if opts["video"]["codec"] != "h265":
@@ -5534,7 +5534,7 @@ class TestConvert:
 
     results = []
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       out.write_bytes(b"output")
       yield None, ["ffmpeg"]
       yield 100, ""
@@ -5554,7 +5554,7 @@ class TestConvert:
     options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {}, "subtitle": []}
     progress_calls = []
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       out.write_bytes(b"output")
       yield None, ["ffmpeg"]
       yield 50, "frame=100"
@@ -7767,7 +7767,7 @@ class TestConvertDup:
 
     options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {}, "subtitle": []}
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       out.write_bytes(b"output")
       yield None, ["ffmpeg", "-i", str(src), str(out)]
       yield 100, ""
@@ -7788,7 +7788,7 @@ class TestConvertDup:
 
     options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {}, "subtitle": []}
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       yield None, ["ffmpeg"]
       raise FFMpegConvertError("cmd", "output", 1)
 
@@ -7823,7 +7823,7 @@ class TestConvertDup:
 
     call_count = 0
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       nonlocal call_count
       call_count += 1
       yield None, ["ffmpeg"]
@@ -7860,7 +7860,7 @@ class TestConvertDup:
 
     call_count = 0
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       nonlocal call_count
       call_count += 1
       yield None, ["ffmpeg"]
@@ -7896,7 +7896,7 @@ class TestConvertDup:
       "subtitle": [],
     }
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       yield None, ["ffmpeg"]
       raise FFMpegConvertError("cmd", "output", "VA-API failed to initialize")
 
@@ -7929,7 +7929,7 @@ class TestConvertDup:
 
     results = []
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       out.write_bytes(b"output")
       yield None, ["ffmpeg"]
       yield 100, ""
@@ -7949,7 +7949,7 @@ class TestConvertDup:
     options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {}, "subtitle": []}
     progress_calls = []
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       out.write_bytes(b"output")
       yield None, ["ffmpeg"]
       yield 50, "frame=100"
@@ -9710,7 +9710,7 @@ class TestConvertHwAltPolicy:
 
     calls = []
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       calls.append({"codec": opts["video"]["codec"], "preopts": list(preopts or [])})
       if opts["video"]["codec"] == "h265qsv":
         yield None, ["ffmpeg"]
@@ -9729,6 +9729,40 @@ class TestConvertHwAltPolicy:
     assert calls[1]["codec"] == "hevc_vaapi"
     # Outer options must remain unchanged (hw_alt operates on deep copy).
     assert options["video"]["codec"] == "h265qsv"
+
+  def test_ladder_tiers_probe_source_once_and_share_info(self, tmp_path):
+    """Every ladder tier gets the same pre-probed MediaInfo; the source is probed once."""
+    from converter import FFMpegConvertError
+    from resources.config_schema import FallbackPolicy
+
+    mp = self._make_mp(tmp_path)
+    mp.settings.fallback_policy = FallbackPolicy.HW_ALT
+    mp.settings.vaapi = {}
+    mp.settings.hdr = {}
+    src = tmp_path / "input.mkv"
+    src.write_bytes(b"x")
+    out = tmp_path / "input.mp4"
+    options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {"codec": "h265qsv"}, "subtitle": []}
+    preopts = ["-hwaccel", "qsv", "-qsv_device", "/dev/dri/renderD128", "-vcodec", "hevc_qsv"]
+    probed = object()
+    mp.converter.probe = MagicMock(return_value=probed)
+    seen = []
+
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
+      seen.append(info)
+      if opts["video"]["codec"] == "h265qsv":
+        yield None, ["ffmpeg"]
+        raise FFMpegConvertError("cmd", "output", 1)
+      out.write_bytes(b"output")
+      yield None, ["ffmpeg"]
+      yield 100, ""
+
+    mp.converter.convert = fake_convert
+    mp.setPermissions = MagicMock()
+    mp.convert(options, preopts, [], False, None)
+    assert len(seen) == 2
+    assert all(i is probed for i in seen)
+    assert mp.converter.probe.call_count == 1
 
   def test_hw_alt_policy_stops_when_both_tiers_fail(self, tmp_path):
     """When fallback-policy=hw_alt and both tiers fail, no sw_decode runs."""
@@ -9752,7 +9786,7 @@ class TestConvertHwAltPolicy:
 
     call_count = 0
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       nonlocal call_count
       call_count += 1
       yield None, ["ffmpeg"]
@@ -9791,7 +9825,7 @@ class TestConvertHwAltPolicy:
 
     seen = []
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       seen.append({"codec": opts["video"]["codec"], "filter": opts["video"].get("filter"), "preopts": list(preopts or [])})
       yield None, ["ffmpeg"]
       # hw (QSV decode+encode) and hw_alt (QSV decode + VAAPI encode) both keep
@@ -9840,7 +9874,7 @@ class TestConvertHwAltPolicy:
 
     seen = []
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       seen.append(list(preopts or []))
       yield None, ["ffmpeg"]
       if "-hwaccel" in (preopts or []):
@@ -9881,7 +9915,7 @@ class TestConvertHwAltPolicy:
 
     call_count = 0
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       nonlocal call_count
       call_count += 1
       yield None, ["ffmpeg"]

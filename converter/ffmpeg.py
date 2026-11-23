@@ -7,6 +7,7 @@ parsing FFprobe output, and the FFMpeg class for invoking FFmpeg conversions
 with progress reporting.
 """
 
+import codecs
 import json
 import locale
 import os
@@ -19,6 +20,48 @@ from typing import overload
 from converter.avcodecs import BaseCodec, video_codec_list
 
 console_encoding = locale.getencoding() or "UTF-8"
+
+STDERR_CHUNK = 4096
+
+# Retained ffmpeg stderr for error reporting: the head keeps the banner, input and stream-mapping
+# lines; the tail keeps the failure itself. Progress lines in between are the only thing dropped.
+STDERR_HEAD_CHARS = 64 * 1024
+STDERR_TAIL_CHARS = 192 * 1024
+STDERR_TRUNCATED_MARKER = "\n[... ffmpeg stderr truncated ...]\n"
+
+
+class _BoundedCapture:
+  """Accumulate text, keeping only a bounded head and tail."""
+
+  def __init__(self, head_chars=STDERR_HEAD_CHARS, tail_chars=STDERR_TAIL_CHARS):
+    self.head_chars = head_chars
+    self.tail_chars = tail_chars
+    self.head = ""
+    self.tail = ""
+    self.dropped = False
+    self.seen = False
+
+  def add(self, text):
+    if not text:
+      return
+    self.seen = True
+    if len(self.head) < self.head_chars:
+      room = self.head_chars - len(self.head)
+      self.head += text[:room]
+      text = text[room:]
+    if text:
+      self.tail += text
+      if len(self.tail) > 2 * self.tail_chars:
+        self.tail = self.tail[-self.tail_chars :]
+        self.dropped = True
+
+  def text(self):
+    tail = self.tail
+    if len(tail) > self.tail_chars:
+      tail = tail[-self.tail_chars :]
+      self.dropped = True
+    return self.head + (STDERR_TRUNCATED_MARKER if self.dropped else "") + tail
+
 
 STRICT = {"very": 2, "strict": 1, "normal": 0, "unofficial": -1, "experimental": -2}
 
@@ -891,14 +934,15 @@ class FFMpeg:
 
     yielded = False
     buf = ""
-    total_output = ""
+    capture = _BoundedCapture()
+    decoder = codecs.getincrementaldecoder(console_encoding)(errors="replace")
     pat = re.compile(r"time=([0-9.:]+) ")
     try:
       while True:
         if timeout:
           signal.alarm(timeout)
 
-        ret = p.stderr.read(10)
+        ret = p.stderr.read1(STDERR_CHUNK)  # type: ignore[attr-defined]  # returns what is available; read(n) would block for n bytes
         if isinstance(ret, str):
           ret = ret.encode(console_encoding, errors="ignore")
 
@@ -907,23 +951,17 @@ class FFMpeg:
 
         if not ret:
           # For small or very fast jobs, ffmpeg may never output a '\r'.  When EOF is reached, yield if we haven't yet.
+          capture.add(decoder.decode(b"", final=True))
           if not yielded:
             yielded = True
             yield 10, ""
           break
 
-        decoded: str
-        try:
-          decoded = ret.decode(console_encoding)
-        except UnicodeDecodeError:
-          try:
-            decoded = ret.decode(console_encoding, errors="ignore")
-          except Exception:
-            decoded = ""
+        decoded = decoder.decode(ret)
 
-        total_output += decoded
+        capture.add(decoded)
         buf += decoded
-        if "\r" in buf:
+        while "\r" in buf:
           line, buf = buf.split("\r", 1)
 
           tmp = pat.findall(line)
@@ -939,13 +977,15 @@ class FFMpeg:
             debug = line.strip()
             debug = debug if debug.startswith("frame") else ""
             yield timecode, debug
+        if len(buf) > STDERR_TAIL_CHARS:
+          buf = buf[-STDERR_TAIL_CHARS:]  # no "\r" seen (e.g. -nostats): keep the pending line bounded
     except BaseException as interrupt:
       # SIGTERM/SIGINT (or generator close) mid-encode: do not orphan ffmpeg. Stop it and
       # hand the captured stderr to the caller so it can write the stderr sidecar.
       self._stop_child(p)
       if not isinstance(interrupt, GeneratorExit):
         interrupt.cmd = " ".join(cmds)  # type: ignore[attr-defined]
-        interrupt.output = total_output  # type: ignore[attr-defined]
+        interrupt.output = capture.text()  # type: ignore[attr-defined]
       raise
 
     if timeout:
@@ -953,7 +993,8 @@ class FFMpeg:
 
     p.communicate()  # wait for process to exit
 
-    if total_output == "":
+    total_output = capture.text()
+    if not capture.seen:
       raise FFMpegError("Error while calling ffmpeg binary")
 
     cmd = " ".join(cmds)

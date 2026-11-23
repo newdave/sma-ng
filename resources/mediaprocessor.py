@@ -5490,6 +5490,8 @@ class MediaProcessor(FileOpsMixin):
       self.log.error("Unable to determine output file path, aborting conversion.")
       return None, inputfile
 
+    _probe_cache = {}
+
     def _run_convert(_preopts, _options=None):
       """Drive the convert generator end-to-end. Returns True on success,
       raises FFMpegConvertError on failure (for retry consideration).
@@ -5499,6 +5501,11 @@ class MediaProcessor(FileOpsMixin):
       Defaults to the closed-over ``options`` for backwards compatibility.
       """
       _opts = _options if _options is not None else options
+      # Probe the source once; later ladder tiers reuse it. A failed probe (None) is passed on so
+      # convert() probes (and reports) it itself.
+      _src = _opts["source"][0] if _opts.get("source") else None
+      if _src is not None and _src not in _probe_cache:
+        _probe_cache[_src] = self.converter.probe(_src, posters_as_video=False)
       conv = self.converter.convert(
         outputfile,
         _opts,
@@ -5506,6 +5513,7 @@ class MediaProcessor(FileOpsMixin):
         preopts=_preopts,
         postopts=postopts,
         strip_metadata=self.settings.strip_metadata and not _opts.get("_keep_metadata"),
+        info=_probe_cache.get(_src),
       )
       _, _cmds = next(conv)
       self.log.info("FFmpeg command:")

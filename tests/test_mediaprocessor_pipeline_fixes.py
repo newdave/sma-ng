@@ -396,7 +396,7 @@ def _convert_mp(tmp_path, temp_extension=None, delete=True):
 
 
 def _fake_convert(written):
-  def fake(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+  def fake(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
     written.append((outputfile, strip_metadata))
     with open(outputfile, "wb") as fh:
       fh.write(b"new")
@@ -447,7 +447,7 @@ class TestOutputCollision:
     src.write_bytes(b"src")
     mp.removeFile = MagicMock(side_effect=lambda p, *a, **k: os.remove(p) or True)
 
-    def boom(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def boom(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       with open(outputfile, "wb") as fh:
         fh.write(b"partial")
       yield None, ["ffmpeg"]
