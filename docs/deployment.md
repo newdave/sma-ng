@@ -562,7 +562,9 @@ daemon's `/health` endpoint is baked into the image from the latest tag at build
 
 To rebuild a release's wheel, sdist and image (for example after a failed run), dispatch the Release workflow
 with the tag: `gh workflow run release.yml -f tag=sma-ng-vX.Y.Z`. Events created with the default `GITHUB_TOKEN`
-never start other workflows, so the Release PR gets no CI checks. Adding a `RELEASE_PLEASE_TOKEN` repository
+never start other workflows, so the Release PR gets no CI checks. When its events do start them, a patch Release
+PR is merged before they begin, so CI, Docker and CodeQL show a failed run with no jobs on the
+`release-please--…` branch; that is expected and needs no action. Adding a `RELEASE_PLEASE_TOKEN` repository
 secret (a GitHub App or fine-grained token with contents and pull-requests write) lets release-please's PRs and
 tags trigger CI normally.
 
