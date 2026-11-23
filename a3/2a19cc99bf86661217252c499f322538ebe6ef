@@ -1,0 +1,19 @@
+pyproject.toml
+  s_093eab565c8dae::t_65aeec0d19e82c 89-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "a32a19cc99bf86661217252c499f322538ebe6ef",
+  "prompts": {},
+  "sessions": {
+    "s_093eab565c8dae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fa6d3cb2-cdf1-4b4a-be68-2a40e32e7137",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
