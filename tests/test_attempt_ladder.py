@@ -168,7 +168,7 @@ class TestAttemptLadderTier3FullSoftware:
       raise _err("fail")
 
     preopts = ["-vcodec", "hevc_qsv", "-hwaccel", "qsv"]
-    # Encoder is some non-QSV name -> _swap_qsv_codec_to_sw and
+    # Encoder is some non-QSV name -> _swap_hw_codec_to_sw and
     # _swap_qsv_codec_to_vaapi both return None.
     options = {"video": {"codec": "libx264"}}
     with pytest.raises(FFMpegConvertError):
@@ -191,7 +191,7 @@ class TestStripHelpers:
     assert f(None) is None
 
   def test_swap_qsv_codec_list_variant(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     opts = {"video": {"codec": ["hevc_qsv", "libx265"]}}
     original = f(opts)
@@ -200,14 +200,14 @@ class TestStripHelpers:
     assert opts["video"]["codec"] == ["h265", "libx265"]
 
   def test_swap_qsv_codec_no_video_block(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     assert f({}) is None
     assert f({"video": {}}) is None
     assert f({"video": "not a dict"}) is None
 
   def test_swap_qsv_codec_unknown_codec(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     opts = {"video": {"codec": "libx264"}}
     assert f(opts) is None
@@ -215,7 +215,7 @@ class TestStripHelpers:
     assert opts["video"]["codec"] == "libx264"
 
   def test_swap_qsv_codec_removes_qsv_pix_fmt(self):
-    from resources.mediaprocessor import _swap_qsv_codec_to_sw as f
+    from resources.mediaprocessor import _swap_hw_codec_to_sw as f
 
     opts = {"video": {"codec": "hevc_qsv", "qsv_pix_fmt": "nv12"}}
     f(opts)
