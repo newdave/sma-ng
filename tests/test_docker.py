@@ -4,8 +4,10 @@
 All tests are static — no Docker daemon required.
 """
 
+import json
 import os
 import re
+import subprocess
 
 import pytest
 import yaml
@@ -169,9 +171,19 @@ class TestDockerfileFFmpegBuild:
     vpl_idx = dockerfile_raw.index("libvpl-dev")
     assert ppa_idx < vpl_idx
 
-  def test_build_cache_cleaned(self, dockerfile_raw):
-    # Each RUN that calls apt-get should clean the lists
-    assert "rm -rf /var/lib/apt/lists/*" in dockerfile_raw
+  def test_apt_state_lives_in_cache_mounts(self, dockerfile_raw):
+    # Every RUN that calls apt-get mounts the package lists and .deb cache, so
+    # neither lands in a layer and rebuilds reuse the downloads.
+    runs = [r for r in re.split(r"\n(?=RUN )", dockerfile_raw) if r.startswith("RUN ") and "apt-get update" in r]
+    assert len(runs) == 3
+    for run in runs:
+      assert "--mount=type=cache,id=apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked" in run
+      assert "target=/var/lib/apt/lists,sharing=locked" in run
+    # The shipped image keeps Ubuntu's docker-clean apt config.
+    runtime = dockerfile_raw[dockerfile_raw.index("AS runtime") :]
+    assert "rm -f /etc/apt/apt.conf.d/docker-clean" not in runtime
+    assert "mv /tmp/docker-clean /etc/apt/apt.conf.d/docker-clean" in runtime
+    assert "pip install --no-cache-dir --no-deps" in runtime
 
 
 class TestDockerfileRuntime:
@@ -539,15 +551,15 @@ def docker_workflow():
 class TestDockerWorkflow:
   def test_main_image_waits_for_passing_ci(self, docker_workflow):
     # PyYAML parses bare 'on' key as boolean True. The main image is built only
-    # by ci.yml calling this workflow on a push, after test and lint passed.
+    # by ci.yml calling this workflow on a push, after test and lint passed and
+    # only when image-affecting files changed.
     triggers = docker_workflow[True]
-    assert "push" not in triggers
-    assert "workflow_run" not in triggers
+    assert set(triggers) == {"workflow_call", "workflow_dispatch"}
     ci = _load_yaml(".github/workflows/ci.yml")
     image = ci["jobs"]["image"]
     assert image["uses"] == "./.github/workflows/docker.yml"
-    assert image["needs"] == ["test", "lint"]
-    assert image["if"] == "github.event_name == 'push'"
+    assert image["needs"] == ["changes", "test", "lint"]
+    assert image["if"] == "github.event_name == 'push' && needs.changes.outputs.image == 'true'"
     assert ci[True]["push"]["branches"] == ["main"]
     script = next(s for s in docker_workflow["jobs"]["plan"]["steps"] if s.get("id") == "plan")["run"]
     assert '"$EVENT" = "push" ]; then\n  push=true; channel=main' in script
@@ -576,9 +588,67 @@ class TestDockerWorkflow:
     assert setup["uses"].startswith("actions/setup-python@")
     assert setup["with"]["python-version-file"] == ".python-version"
 
-  def test_triggers_on_pull_request(self, docker_workflow):
-    triggers = docker_workflow[True]
-    assert "pull_request" in triggers
+  def test_pr_image_built_only_when_image_files_change(self):
+    # PR images build in parallel with the checks (needs only the change
+    # detection), never wait for test/lint, and are gated on the same script.
+    ci = _load_yaml(".github/workflows/ci.yml")
+    pr = ci["jobs"]["image-pr"]
+    assert pr["uses"] == "./.github/workflows/docker.yml"
+    assert pr["needs"] == "changes"
+    assert pr["if"] == "github.event_name == 'pull_request' && needs.changes.outputs.image == 'true'"
+    diff = next(s for s in ci["jobs"]["changes"]["steps"] if s.get("id") == "diff")["run"]
+    assert "scripts/ci-image-changed.sh" in diff
+    assert "image=true" in diff  # unknown base: build
+
+
+IMAGE_FILES = [
+  "resources/mediaprocessor.py",
+  "converter/ffmpeg.py",
+  "daemon.py",
+  "resources/daemon/static/app.js",
+  "triggers/usenet/sabnzbd.sh",
+  "setup/requirements.txt",
+  "setup/sma-ng.yml.sample",
+  "docker/Dockerfile",
+  "docker/docker-entrypoint.sh",
+  "scripts/detect-gpu.sh",
+  "sma-webhook.sh",
+  "pyproject.toml",
+  ".dockerignore",
+  ".github/workflows/docker.yml",
+]
+NON_IMAGE_FILES = [
+  "tests/test_docker.py",
+  "docs/deployment.md",
+  "docs/prps/plan.md",
+  "README.md",
+  "CHANGELOG.md",
+  ".github/workflows/ci.yml",
+  ".github/actions/setup-python/action.yml",
+  ".claude/hooks/x.py",
+  ".mise/tasks/test/cov",
+  "mise.toml",
+  "renovate.json",
+]
+
+
+class TestImageChangeDetection:
+  def _changed(self, *files):
+    script = os.path.join(PROJECT_ROOT, "scripts", "ci-image-changed.sh")
+    result = subprocess.run([script], input="\n".join(files) + "\n", text=True, check=False)  # noqa: S603
+    return result.returncode == 0
+
+  @pytest.mark.parametrize("path", IMAGE_FILES)
+  def test_image_files_trigger_a_build(self, path):
+    assert self._changed(path)
+    assert self._changed("docs/daemon.md", path, "tests/test_x.py")
+
+  @pytest.mark.parametrize("path", NON_IMAGE_FILES)
+  def test_other_files_do_not(self, path):
+    assert not self._changed(path)
+
+  def test_empty_diff_does_not_build(self):
+    assert not self._changed()
 
   def test_every_platform_builds_on_a_native_runner(self, docker_workflow):
     # arm64 under QEMU exceeded the 90-minute job timeout; no emulation allowed.
@@ -748,6 +818,22 @@ class TestFFmpegBuildCaching:
     assert len(saves) == 1 and len(restores) == 1
     assert saves[0]["if"] == "github.event_name != 'pull_request'"  # PRs never save
     assert restores[0]["if"] == "github.event_name == 'pull_request'"
+    mounts = ["ffmpeg-src", "ffmpeg-ccache", "apt-cache", "apt-lists-ffmpeg", "apt-lists-python", "apt-lists-runtime", "pip"]
     for step in (saves[0], restores[0]):
-      assert "hashFiles('docker/Dockerfile')" in step["with"]["key"]
-      assert "ffmpeg-${{ matrix.arch }}-" in step["with"]["restore-keys"]
+      assert step["with"]["path"].split() == mounts
+      key = step["with"]["key"]
+      assert key.startswith("buildkit-mounts-${{ matrix.arch }}-")
+      for f in ("docker/Dockerfile", "setup/requirements*.txt", "pyproject.toml"):
+        assert f in key
+      assert "buildkit-mounts-${{ matrix.arch }}-" in step["with"]["restore-keys"]
+
+  def test_cache_dance_map_matches_dockerfile_mounts(self, docker_workflow, dockerfile_raw):
+    steps = docker_workflow["jobs"]["build"]["steps"]
+    dance = next(s for s in steps if s.get("uses", "").startswith("reproducible-containers/buildkit-cache-dance@"))
+    cache_map = json.loads(dance["with"]["cache-map"].replace("${{ matrix.arch }}", "${TARGETARCH}"))
+    assert len(cache_map) == 7
+    for entry in cache_map.values():
+      mount = f"id={entry['id']},target={entry['target']}"
+      assert mount in dockerfile_raw, mount
+    saves = [s for s in steps if s.get("uses", "").startswith("actions/cache@")]
+    assert saves[0]["id"] in dance["with"]["skip-extraction"]

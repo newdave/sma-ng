@@ -2,7 +2,9 @@ name: CI
 
 # No path filters: setup/**, *.yml.sample, docker/**, mise.toml and workflow
 # changes all affect the checks below, and a skipped required check blocks merges.
-# On a push to main the image job calls docker.yml once test and lint pass, so
+# Images build only when the changes job finds image-affecting files
+# (scripts/ci-image-changed.sh): on a PR, build and smoke test in parallel with
+# the checks; on a push to main, build and push once test and lint pass, so
 # `latest` never carries code that failed CI.
 on:
   push:
@@ -20,6 +22,46 @@ permissions:
   contents: read
 
 jobs:
+  # PRs compare the merge commit with its base. Pushes compare with the last
+  # main commit whose CI passed, so a push whose own run was superseded while
+  # queued is still covered. Unknown base: build.
+  changes:
+    name: Detect image changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    if: ${{ github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--') }}
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      image: ${{ steps.diff.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Compare with the last built commit
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            base=$(git rev-parse HEAD^1)
+          else
+            base=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push \
+              --status success --limit 1 --json headSha --jq '.[0].headSha // ""' || true)
+            base=${base:-$BEFORE}
+          fi
+          image=true
+          if [ -n "$base" ] && git fetch -q --depth=1 origin "$base" \
+            && ! git diff --name-only "$base" HEAD | scripts/ci-image-changed.sh; then
+            image=false
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Image build needed: $image (compared with ${base:-nothing})"
+
   test:
     name: Test (Python 3.12)
     runs-on: ubuntu-latest
@@ -30,11 +72,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/setup-python
+        id: python
         with:
           mise: "true"
           cache-dependency-path: |
             pyproject.toml
             setup/requirements*.txt
+
+      # The whole dev venv, keyed on the exact Python build and every file that
+      # pins its contents; setup:deps:dev then only verifies it.
+      - name: Cache venv
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: venv
+          key: venv-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('pyproject.toml', 'setup/requirements*.txt') }}
+
+      # ffmpeg's .deb files for this runner image: a hit installs them without
+      # touching the apt mirrors at all.
+      - name: Runner image
+        id: image
+        run: echo "id=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache ffmpeg packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/apt-ffmpeg
+          key: apt-ffmpeg-${{ runner.arch }}-${{ steps.image.outputs.id }}
 
       # apt mirrors occasionally stall (one run hung 24 minutes here); bound
       # each attempt and retry. The apt install runs in the background while the
@@ -44,9 +107,18 @@ jobs:
         timeout-minutes: 7
         run: |
           (
+            debs="$HOME/.cache/apt-ffmpeg"
+            if ls "$debs"/*.deb >/dev/null 2>&1 \
+              && timeout 90 sudo apt-get install -y --no-install-recommends "$debs"/*.deb; then
+              exit 0
+            fi
+            mkdir -p "$debs/partial"
             for attempt in 1 2 3; do
               if timeout 90 sudo apt-get -o Acquire::Retries=3 update -qq \
-                && timeout 90 sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg; then
+                && timeout 90 sudo apt-get -o Acquire::Retries=3 -o Dir::Cache::Archives="$debs" \
+                  install -y --no-install-recommends ffmpeg; then
+                sudo rm -rf "$debs/partial" "$debs/lock"
+                sudo chown -R "$(id -u):$(id -g)" "$debs"
                 exit 0
               fi
               echo "::warning::ffmpeg install attempt $attempt failed; retrying"
@@ -116,11 +188,15 @@ jobs:
       # Hooks pin python3.12 (default_language_version); the runner default
       # moves ahead of what bandit and friends support.
       - uses: ./.github/actions/setup-python
+        id: python
+        with:
+          cache-dependency-path: .pre-commit-config.yaml
 
+      # Hook environments are virtualenvs bound to the interpreter path.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('.pre-commit-config.yaml') }}
 
       # pre-commit runs ruff, bandit, markdownlint and shellcheck (one pinned
       # shellcheck-py version, the same one `mise run test:shell` uses).
@@ -129,12 +205,23 @@ jobs:
           python -m pip install --disable-pip-version-check pre-commit
           pre-commit run --show-diff-on-failure --color=always --all-files
 
+  # PR image: build and smoke test only (never pushed), alongside the checks.
+  image-pr:
+    name: PR image
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.image == 'true'
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    uses: ./.github/workflows/docker.yml
+
   # Main image: build, smoke test and push latest/main/sha-<short> only after
-  # every check on this main commit passed. PR images build in docker.yml.
+  # every check on this main commit passed.
   image:
     name: Main image
-    needs: [test, lint]
-    if: github.event_name == 'push'
+    needs: [changes, test, lint]
+    if: github.event_name == 'push' && needs.changes.outputs.image == 'true'
     permissions:
       contents: read
       packages: write
