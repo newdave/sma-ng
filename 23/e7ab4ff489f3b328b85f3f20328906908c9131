@@ -1,0 +1,19 @@
+docs/metrics.md
+  s_bb9afa71bee21f::t_acff6327a245f0 27-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "23e7ab4ff489f3b328b85f3f20328906908c9131",
+  "prompts": {},
+  "sessions": {
+    "s_bb9afa71bee21f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11944d23-c69e-4bdd-b6ea-a53dcb231d65",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
