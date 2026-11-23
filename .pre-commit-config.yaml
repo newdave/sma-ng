@@ -41,7 +41,7 @@ repos:
         files: ^(README\.md|CONTRIBUTING\.md|docs/(README|architecture|cluster-operations|configuration|daemon|deployment|docker-quickstart|getting-started|hardware-acceleration|integrations|migration|troubleshooting)\.md|triggers/README\.md)$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.4
+    rev: v0.17.6
     hooks:
       - id: ruff               # lint + auto-fix safe rules
         args: [--fix]
