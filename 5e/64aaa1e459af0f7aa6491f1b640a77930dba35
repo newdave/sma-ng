@@ -1,0 +1,40 @@
+tests/test_handler.py
+  s_d73ac5e457a585::t_6c309083146d46 2058
+  s_d73ac5e457a585::t_8001af77a6d267 854-859,870,876
+docs/configuration.md
+  s_d73ac5e457a585::t_6210664d3b3b61 84
+tests/test_threads.py
+  s_d73ac5e457a585::t_8001af77a6d267 1205-1215
+resources/config_schema.py
+  s_d73ac5e457a585::t_47b820dee8dade 966
+resources/daemon/config.py
+  s_d73ac5e457a585::t_47b820dee8dade 308
+resources/daemon/handler.py
+  s_d73ac5e457a585::t_47b820dee8dade 1010-1013
+tests/test_daemon.py
+  s_d73ac5e457a585::t_47b820dee8dade 154,162
+docs/openapi.yaml
+  s_d73ac5e457a585::t_6210664d3b3b61 1235,1241,1244,1246-1247
+tests/test_config_schema.py
+  s_d73ac5e457a585::t_47b820dee8dade 91
+setup/sma-ng.yml.sample
+  s_d73ac5e457a585::t_8001af77a6d267 23
+docs/daemon.md
+  s_d73ac5e457a585::t_6210664d3b3b61 89,379,785-792,795
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "5e64aaa1e459af0f7aa6491f1b640a77930dba35",
+  "prompts": {},
+  "sessions": {
+    "s_d73ac5e457a585": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff3323c0-431e-4fd1-b4e7-2408d0e88d8a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
