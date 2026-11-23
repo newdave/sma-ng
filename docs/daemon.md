@@ -197,7 +197,7 @@ returns more detail when credentials are supplied.
 | `POST` | `/admin/delete-failed` | Yes | Delete every failed job |
 | `POST` | `/admin/delete-offline-nodes` | Yes | Delete every node that is not online |
 | `POST` | `/admin/delete-all-jobs` | Yes | Delete every job |
-| `POST` | `/library/audit` | Yes | Trigger an audit. Body: `{"paths": [...], "dry_run": true}` (both optional) |
+| `POST` | `/library/audit` | Yes | Trigger an audit. Body: `{"paths": [...]}` (optional; default `daemon.audit.paths`) |
 | `POST` | `/library/findings/<id>/ack` | Yes | Acknowledge a finding |
 | `POST` | `/library/findings/<id>/dismiss` | Yes | Dismiss a finding |
 | `POST` | `/library/findings/<id>/resolve` | Yes | Mark a finding resolved |
@@ -207,6 +207,9 @@ Any other path returns `404 {"error": "Not found"}`.
 See [Library Audit](library-audit.md) for the distributed-workload model, finding kinds, configuration knobs, and
 auto-fix safety semantics. The library audit endpoints need the PostgreSQL backend: on SQLite the two `GET` list
 endpoints answer `200` with `"available": false`, and the `POST` endpoints answer `409`.
+
+`POST /library/audit` reads only `paths` from its body. A `dry_run` field is accepted but ignored: whether findings
+are auto-fixed is set by `daemon.audit.dry_run` (default `true`).
 
 The node actions are described under [Node Management](#node-management). The `delete-*` admin routes and
 `/jobs/bulk` count the deleted finished jobs toward the lifetime totals. Node commands and admin writes record the

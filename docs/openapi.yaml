@@ -2278,8 +2278,8 @@ paths:
       description: |
         Creates a new audit run and returns immediately (202). Path enumeration
         and per-file probing happen asynchronously across every cluster node.
-        Body fields are all optional; omit `paths` to use the configured
-        `daemon.audit.paths`.
+        The body is optional; omit `paths` (or the body) to use the enabled entries of
+        `daemon.audit.paths`. Returns 409 on a SQLite daemon.
       operationId: triggerLibraryAudit
       tags: [library-audit]
       requestBody:
@@ -2295,6 +2295,9 @@ paths:
                     type: string
                 dry_run:
                   type: boolean
+                  deprecated: true
+                  description: >
+                    Accepted but ignored. Auto-fix behaviour is set by daemon.audit.dry_run (default true).
       responses:
         "202":
           description: Audit run queued
