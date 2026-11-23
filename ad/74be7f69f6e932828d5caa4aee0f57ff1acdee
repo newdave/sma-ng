@@ -1,0 +1,31 @@
+.github/workflows/ci.yml
+  s_bb9afa71bee21f::t_493416b3cf7873 5-7,25-64,75,82-101,110-115,118-121,191-193,195,199,208-218,220,223-224
+docs/deployment.md
+  s_bb9afa71bee21f::t_493416b3cf7873 512,517-522,529-545
+.github/workflows/docker.yml
+  s_bb9afa71bee21f::t_493416b3cf7873 3-12
+.github/actions/setup-python/action.yml
+  s_bb9afa71bee21f::t_493416b3cf7873 17-21,26
+docker/Dockerfile
+  s_bb9afa71bee21f::t_493416b3cf7873 32-36,39-41,83,168-173,175-177,179,187-188,250-255,300,336
+scripts/ci-image-changed.sh
+  s_bb9afa71bee21f::t_493416b3cf7873 1-13
+tests/test_docker.py
+  s_bb9afa71bee21f::t_493416b3cf7873 9,173-185,553-554,556,560-561,590-650
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "ad74be7f69f6e932828d5caa4aee0f57ff1acdee",
+  "prompts": {},
+  "sessions": {
+    "s_bb9afa71bee21f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11944d23-c69e-4bdd-b6ea-a53dcb231d65",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
