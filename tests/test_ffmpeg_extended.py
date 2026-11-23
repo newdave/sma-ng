@@ -364,7 +364,7 @@ class TestConvertMainLoop:
   def _fake_proc(self, stderr_chunks):
     """Return a mock Popen process emitting the given stderr chunks."""
     mock_proc = MagicMock()
-    mock_proc.stderr.read.side_effect = [c.encode() if isinstance(c, str) else c for c in stderr_chunks] + [b""]
+    mock_proc.stderr.read1.side_effect = [c.encode() if isinstance(c, str) else c for c in stderr_chunks] + [b""]
     mock_proc.communicate.return_value = (b"", b"")
     mock_proc.returncode = 0
     return mock_proc
@@ -425,7 +425,7 @@ class TestConvertMainLoop:
     src = tmp_path / "in.mkv"
     src.write_bytes(b"x")
     mock_proc = MagicMock()
-    mock_proc.stderr.read.return_value = b""
+    mock_proc.stderr.read1.return_value = b""
     mock_proc.communicate.return_value = (b"", b"")
     mock_proc.returncode = 0
     with (
@@ -540,3 +540,93 @@ class TestMediaInfoParsing:
     att = make_stream(type="attachment", codec="ttf", index=3)
     info.streams.append(att)
     assert len(info.attachment) == 1
+
+
+class TestConvertStderrChunking:
+  """Chunked stderr reads: UTF-8 and progress-line parsing across chunk boundaries."""
+
+  def _run(self, chunks, returncode=0):
+    ff = _make_ffmpeg()
+    proc = MagicMock()
+    proc.stderr.read1.side_effect = list(chunks) + [b""]
+    proc.communicate.return_value = (b"", b"")
+    proc.returncode = returncode
+    with (
+      patch("os.path.exists", return_value=True),
+      patch.object(ff, "_spawn", return_value=proc),
+      patch.object(ff, "generateCommands", return_value=["ffmpeg", "-i", "in.mkv", "out.mp4"]),
+    ):
+      return list(ff.convert("out.mp4", ["-i", "in.mkv"], timeout=0))
+
+  def test_progress_line_split_across_chunks(self):
+    line = b"frame=  10 fps=25 time=00:00:07.50 bitrate=1000kbits/s\r"
+    results = self._run([line[:20], line[20:35], line[35:]])
+    assert [r[0] for r in results if r[0] > 0] == [7.5]
+    assert results[1][1].startswith("frame=")
+
+  def test_multiple_progress_lines_in_one_chunk(self):
+    data = b"frame=1 time=00:00:01.00 x\rframe=2 time=00:00:02.00 x\rframe=3 time=00:00:03.00 x\r"
+    results = self._run([data])
+    assert [r[0] for r in results[1:]] == [1.0, 2.0, 3.0]
+
+  def test_multibyte_char_split_across_chunks_is_not_corrupted(self):
+    from converter.ffmpeg import FFMpegConvertError
+
+    text = "Error opening \u00e9\u4e2d\U0001f600.mkv\n".encode()
+    # Split inside the 2-, 3- and 4-byte sequences.
+    cuts = [text.index("\u00e9".encode()) + 1, text.index("\u4e2d".encode()) + 2, text.index("\U0001f600".encode()) + 3]
+    chunks = [text[: cuts[0]], text[cuts[0] : cuts[1]], text[cuts[1] : cuts[2]], text[cuts[2] :]]
+    with pytest.raises(FFMpegConvertError) as exc:
+      self._run(chunks, returncode=1)
+    assert exc.value.output == text.decode()
+    assert "\ufffd" not in exc.value.output
+
+  def test_stderr_read_in_large_chunks(self):
+    from converter.ffmpeg import STDERR_CHUNK
+
+    assert STDERR_CHUNK >= 4096
+
+
+class TestBoundedCapture:
+  def test_small_output_kept_verbatim(self):
+    from converter.ffmpeg import _BoundedCapture
+
+    c = _BoundedCapture(head_chars=10, tail_chars=10)
+    c.add("hello ")
+    c.add("world")
+    assert c.text() == "hello world"
+
+  def test_large_output_bounded_with_head_and_tail(self):
+    from converter.ffmpeg import STDERR_TRUNCATED_MARKER, _BoundedCapture
+
+    c = _BoundedCapture(head_chars=10, tail_chars=20)
+    for i in range(1000):
+      c.add("line%04d\n" % i)
+    text = c.text()
+    assert text.startswith("line0000\nl")
+    assert STDERR_TRUNCATED_MARKER in text
+    assert text.endswith("line0999\n")
+    assert len(text) <= 10 + 20 + len(STDERR_TRUNCATED_MARKER)
+    assert len(c.tail) <= 40
+
+  def test_convert_error_output_is_bounded(self):
+    from converter.ffmpeg import STDERR_HEAD_CHARS, STDERR_TAIL_CHARS, STDERR_TRUNCATED_MARKER, FFMpegConvertError
+
+    ff = _make_ffmpeg()
+    proc = MagicMock()
+    progress = b"frame=1 fps=1 time=00:00:01.00 bitrate=1\r" * 20000
+    proc.stderr.read1.side_effect = [progress[i : i + 4096] for i in range(0, len(progress), 4096)] + [b"fatal: boom\n", b""]
+    proc.communicate.return_value = (b"", b"")
+    proc.returncode = 1
+    with (
+      patch("os.path.exists", return_value=True),
+      patch.object(ff, "_spawn", return_value=proc),
+      patch.object(ff, "generateCommands", return_value=["ffmpeg"]),
+      pytest.raises(FFMpegConvertError) as exc,
+    ):
+      list(ff.convert("out.mp4", ["-i", "in.mkv"], timeout=0))
+    out = exc.value.output
+    assert len(out) <= STDERR_HEAD_CHARS + STDERR_TAIL_CHARS + len(STDERR_TRUNCATED_MARKER)
+    assert STDERR_TRUNCATED_MARKER in out
+    assert out.rstrip().endswith("fatal: boom")
+    assert exc.value.details.endswith("fatal: boom")
