@@ -508,8 +508,8 @@ See also:
 
 | Workflow      | Trigger                                  | Description                                                                 |
 | ------------- | ---------------------------------------- | --------------------------------------------------------------------------- |
-| `ci.yml`      | PR / push to main                        | Tests + coverage gates, pre-commit lint, OpenAPI/docs/config checks, runtime `pip-audit` |
-| `docker.yml`  | PR (image paths); CI passed on main; called by release | Build and smoke test the image; Trivy scan and push only for main and releases |
+| `ci.yml`      | PR / push to main                        | Tests + coverage gates, pre-commit lint, OpenAPI/docs/config checks, runtime `pip-audit`; on main, the main image |
+| `docker.yml`  | PR (image paths); called by CI and release | Build and smoke test the image; Trivy scan and push only for main and releases |
 | `release.yml` | Push to main; manual with `tag`          | release-please PR + version bump; on release: wheel/sdist + release image   |
 | `codeql.yml`  | PR (Python changes) / weekly             | CodeQL static analysis (results in the Security tab)                        |
 
@@ -519,9 +519,9 @@ to a PR cancels that PR's running checks; runs on `main` and release runs queue 
 a result and a release is never interrupted.
 
 Docker images are built and pushed only by `docker.yml`; there is no local push task. A push to `main` builds the
-image only after CI passes on that commit, and every image is smoke-tested before it is pushed, so `latest` never
-carries code that failed CI. Hosts then pick the image up with `mise run deploy:remote`. Trivy findings are
-report-only (Security tab) for now. Each platform builds and is smoke-tested on a native runner (arm64 on
+image in the same CI run, only after its test and lint jobs pass, and every image is smoke-tested before it is
+pushed, so `latest` never carries code that failed CI. Hosts then pick the image up with `mise run deploy:remote`.
+Trivy findings are report-only (Security tab) for now. Each platform builds and is smoke-tested on a native runner (arm64 on
 `ubuntu-24.04-arm`, not QEMU emulation) and is pushed untagged by digest; a final job publishes one multi-arch
 manifest under the tags.
 

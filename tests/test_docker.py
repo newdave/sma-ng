@@ -539,24 +539,28 @@ def docker_workflow():
 class TestDockerWorkflow:
   def test_main_image_waits_for_passing_ci(self, docker_workflow):
     # PyYAML parses bare 'on' key as boolean True. The main image is built only
-    # after CI completes on main, and the plan job (which every other job needs)
-    # only runs when CI succeeded on a push.
+    # by ci.yml calling this workflow on a push, after test and lint passed.
     triggers = docker_workflow[True]
     assert "push" not in triggers
-    assert triggers["workflow_run"]["workflows"] == ["CI"]
-    assert triggers["workflow_run"]["branches"] == ["main"]
-    job_if = docker_workflow["jobs"]["plan"]["if"]
-    assert "workflow_run.conclusion == 'success'" in job_if
-    assert "workflow_run.event == 'push'" in job_if
+    assert "workflow_run" not in triggers
+    ci = _load_yaml(".github/workflows/ci.yml")
+    image = ci["jobs"]["image"]
+    assert image["uses"] == "./.github/workflows/docker.yml"
+    assert image["needs"] == ["test", "lint"]
+    assert image["if"] == "github.event_name == 'push'"
+    assert ci[True]["push"]["branches"] == ["main"]
+    script = next(s for s in docker_workflow["jobs"]["plan"]["steps"] if s.get("id") == "plan")["run"]
+    assert '"$EVENT" = "push" ]; then\n  push=true; channel=main' in script
     assert docker_workflow["jobs"]["build"]["needs"] == "plan"
 
   def test_release_images_built_via_workflow_call(self, docker_workflow):
     # Tags created by release-please (sma-ng-vX.Y.Z, via GITHUB_TOKEN) start no
     # workflow, so release.yml calls this workflow with the tag and version.
     call = docker_workflow[True]["workflow_call"]["inputs"]
-    assert call["ref"]["required"] and call["version"]["required"]
+    assert set(call) == {"ref", "version"}
     release = _load_yaml(".github/workflows/release.yml")
     assert release["jobs"]["docker"]["uses"] == "./.github/workflows/docker.yml"
+    assert set(release["jobs"]["docker"]["with"]) == {"ref", "version"}
 
   def test_ci_python_comes_from_python_version_file(self):
     # A literal python-version in a workflow is a Renovate target: a bump to
