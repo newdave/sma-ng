@@ -1156,6 +1156,16 @@ class TestAtomicFileOps:
       mp.replicate(str(src))
     mock_move.assert_called_once_with(str(src), str(dest_dir / "movie.mp4"))
 
+  def test_number_on_collision_skips_taken_numbers(self, tmp_path):
+    mp = self._make_processor()
+    src = tmp_path / "in" / "movie.mp4"
+    dst = tmp_path / "out" / "movie.mp4"
+    dst.parent.mkdir()
+    for name in ("movie.mp4", "movie.2.mp4", "movie.3.mp4"):
+      (dst.parent / name).write_bytes(b"x")
+    assert mp._number_on_collision(str(src), str(dst)) == str(dst.parent / "movie.4.mp4")
+    assert mp._number_on_collision(str(src), str(dst.parent / "fresh.mp4")) == str(dst.parent / "fresh.mp4")
+
   def test_replicate_numbers_on_collision(self, tmp_path):
     mp = self._make_processor()
     src = tmp_path / "movie.mp4"
@@ -9410,7 +9420,8 @@ class TestSwapQsvCodecToVaapi:
 
     opts = {"video": {"codec": "hevc_qsv", "params": "-low_power 1 -async_depth 4 -extbrc 1"}}
     f(opts, {"codec_parameters": "-low_power 0"})
-    assert opts["video"]["params"] == "-low_power 1 -async_depth 4 -low_power 0"
+    # Overlay wins and the flag is not emitted twice.
+    assert opts["video"]["params"] == "-async_depth 4 -low_power 0"
 
   def test_basic_codec_swap(self):
     from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f

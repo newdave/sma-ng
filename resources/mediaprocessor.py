@@ -475,6 +475,9 @@ def _swap_qsv_codec_to_vaapi(options, vaapi_overlay):
   cleaned = _strip_qsv_only_flags(parent_params)
   overlay_params = overlay.get("codec_parameters", "") or ""
   if overlay_params:
+    # The overlay wins: drop parent flags it re-sets so none is emitted twice.
+    overlay_flags = frozenset(t for t in overlay_params.split() if t.startswith("-") and not t[1:2].isdigit())
+    cleaned = " ".join(_drop_flag_pairs(cleaned.split(), overlay_flags))
     cleaned = ((cleaned.rstrip() + " " + overlay_params.lstrip()).strip()) if cleaned else overlay_params.strip()
 
   # global_quality (QSV ICQ) → -rc_mode CQP -qp N on VAAPI (if not already overridden).
@@ -743,7 +746,7 @@ from collections.abc import Callable
 from mutagen.mp4 import MP4
 
 from converter import Converter, FFMpegConvertError
-from converter.avcodecs import QSV_ONLY_HW_FLAGS, QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments, video_codec_list
+from converter.avcodecs import QSV_ONLY_HW_FLAGS, QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, _drop_flag_pairs, parse_filter_segments, video_codec_list
 from converter.ffmpeg import TerminatedBySignal, is_unknown_stream
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
