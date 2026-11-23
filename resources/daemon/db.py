@@ -81,7 +81,7 @@ _METRICS_WINDOW_MAP = {
 # Additive `jobs` columns introduced by the metrics-expansion PRP. Both
 # backends migrate idempotently using their backend-specific helpers; the
 # Postgres type column accepts any text the backend understands.
-# See docs/prps/metrics-expansion.md for the full design rationale.
+# See docs/metrics.md for the operator-facing metrics reference.
 _METRICS_EXPANSION_COLUMNS: tuple[tuple[str, str, str], ...] = (
   # (name,                        sqlite_type, postgres_type)
   ("encoder_backend", "TEXT", "TEXT"),
@@ -134,7 +134,7 @@ def _telemetry_sets(telemetry, placeholder):
   return "".join(", %s = %s" % (c, placeholder) for c in cols), [telemetry[c] for c in cols]
 
 
-# Job kinds and captured tool output (docs/prps/sma-cli-container-runtime.md).
+# Job kinds and captured tool output for the sma CLI container runtime.
 # Kept apart from _METRICS_EXPANSION_COLUMNS, whose tests pin its exact list.
 _JOB_KIND_COLUMNS: tuple[tuple[str, str, str], ...] = (
   # (name,           sqlite_type,              postgres_type)
