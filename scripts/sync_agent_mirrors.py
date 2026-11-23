@@ -87,7 +87,7 @@ def sync():
 
 
 def main(argv=None):
-  parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+  parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
   parser.add_argument("--check", action="store_true", help="report drift without writing")
   args = parser.parse_args(argv)
   changed, extra = drift()

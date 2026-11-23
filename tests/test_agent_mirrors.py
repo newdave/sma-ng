@@ -62,3 +62,19 @@ def test_hook_codex_json():
 def test_hook_configs_reference_shared_script():
   assert "hooks/skill-reminder.sh claude" in (ROOT / ".claude" / "settings.json").read_text()
   assert "hooks/skill-reminder.sh codex" in (ROOT / ".codex" / "hooks.json").read_text()
+
+
+@pytest.mark.parametrize("host", ["claude", "codex"])
+@pytest.mark.parametrize(
+  ("prompt", "matches"),
+  [
+    ("check the hwaccel setup", True),
+    ("why does qsv fail", True),
+    ("convert to hevc", True),
+    ("output as mp4", True),
+    ("this is necessary and standard", False),
+  ],
+)
+def test_hook_ffmpeg_prompt_match(host, prompt, matches):
+  out = _run_hook(host, prompt).stdout
+  assert ("ffmpeg-cli" in out) is matches
