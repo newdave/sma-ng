@@ -314,8 +314,8 @@ class QSVSettings(_Base):
 
   Every field is sentinel-defaulted; unset values inherit from the parent
   ``VideoSettings`` (for shared keys like ``preset`` / ``b_frames``) or
-  are simply not emitted (for QSV-only flags like ``low_power`` /
-  ``async_depth``).
+  are simply not emitted (for QSV-only flags like ``extbrc`` /
+  ``rdo``).
 
   The runtime never reads from this block when the active encoder is
   NOT a QSV encoder — so a misconfigured ``video.qsv.low-power`` under
@@ -332,8 +332,9 @@ class QSVSettings(_Base):
   look_ahead_depth: int = 0
   extra_hw_frames: int = 0
 
-  # QSV-only flags (no VAAPI equivalent or different semantics on VAAPI).
-  # All optional; -1 / "" / negative sentinels mean "don't emit".
+  # Encoder flags. low_power / async_depth also exist on VAAPI (see
+  # VAAPISettings); the rest are QSV-only. All optional; -1 / "" / negative
+  # sentinels mean "don't emit".
   low_power: int = -1
   async_depth: int = 0
   extbrc: int = -1
@@ -358,9 +359,9 @@ class VAAPISettings(_Base):
   (same sentinel-fallback shape as the HDR → video overlay).
 
   VAAPI's encoder accepts different flags from QSV. ``-global_quality``
-  (QSV ICQ) has no direct VAAPI equivalent — use ``-rc_mode CQP -qp <N>``
-  for quality-targeted, or ``-rc_mode VBR -b:v <rate> -maxrate <max>``
-  for capped-VBR.
+  (QSV ICQ) maps to ``-rc_mode CQP -qp <N>`` on ``hevc_vaapi`` /
+  ``h264_vaapi`` (``av1_vaapi`` takes ``-global_quality`` itself); use
+  ``-rc_mode VBR -b:v <rate> -maxrate <max>`` for capped-VBR.
 
   The runtime never reads from this block when the active encoder is
   NOT a VAAPI encoder — so a misconfigured ``video.vaapi.rc-mode``
@@ -379,6 +380,7 @@ class VAAPISettings(_Base):
   rc_mode: str = ""
   compression_level: int = 0
   low_power: int = -1
+  async_depth: int = 0
 
   # Free-form VAAPI-only extras.
   codec_parameters: CodecParameters = ""

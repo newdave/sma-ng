@@ -373,8 +373,11 @@ _QSV_TO_VAAPI_CODEC_MAP = {
 
 # QSV-only flags stripped from the parent params before the hw_alt VAAPI swap:
 # ``_QSV_ONLY_CODEC_FLAGS`` is ``converter.avcodecs.QSV_ONLY_HW_FLAGS`` plus
-# ``-global_quality``, assigned below the converter import. -global_quality is
-# valid on VAAPI, but the swap re-maps the QSV ICQ value itself.
+# ``-global_quality``, ``-low_power`` and ``-async_depth``, assigned below the
+# converter import. Those three are valid on VAAPI, but the parent values were
+# tuned for QSV: the swap re-maps the ICQ value itself and lets only the
+# explicit ``vaapi.*`` overlay set ``-low_power`` / ``-async_depth`` (hw_alt has
+# no fallback after it, so an unsupported flag would fail the transcode).
 
 
 # Name of the VAAPI hardware device context shared between the hw_alt tier's
@@ -389,8 +392,8 @@ def _strip_qsv_only_flags(params_str):
   """Return *params_str* with QSV-only encoder flags (and their values) removed.
 
   The hevc_vaapi / h264_vaapi encoders reject several flags that are only
-  valid for the QSV encoder family (e.g. ``-low_power``, ``-global_quality``,
-  ``-look_ahead_depth``). Strip them before passing the parent
+  valid for, or tuned for, the QSV encoder family (e.g. ``-extbrc``,
+  ``-global_quality``, ``-low_power``, ``-look_ahead_depth``). Strip them before passing the parent
   ``codec-parameters`` string through to a VAAPI encoder in the hw_alt tier.
 
   Returns the cleaned string (whitespace-collapsed). Empty input returns ``""``.
@@ -403,8 +406,9 @@ def _strip_qsv_only_flags(params_str):
   while i < len(tokens):
     tok = tokens[i]
     if tok in _QSV_ONLY_CODEC_FLAGS:
-      # Skip this flag and its following value (if any).
-      i += 2
+      # Skip this flag and its value, but only when the next token is a
+      # value: a following flag (``-extbrc -preset slow``) must survive.
+      i += 2 if i + 1 < len(tokens) and not tokens[i + 1].startswith("-") else 1
       continue
     out.append(tok)
     i += 1
@@ -467,6 +471,9 @@ def _swap_qsv_codec_to_vaapi(options, vaapi_overlay):
   cleaned = _strip_qsv_only_flags(parent_params)
   overlay_params = overlay.get("codec_parameters", "") or ""
   if overlay_params:
+    # The overlay wins: drop parent flags it re-sets so none is emitted twice.
+    overlay_flags = frozenset(t for t in overlay_params.split() if t.startswith("-") and not t[1:2].isdigit())
+    cleaned = " ".join(_drop_flag_pairs(cleaned.split(), overlay_flags))
     cleaned = ((cleaned.rstrip() + " " + overlay_params.lstrip()).strip()) if cleaned else overlay_params.strip()
 
   # global_quality (QSV ICQ) → -rc_mode CQP -qp N on VAAPI (if not already overridden).
@@ -733,11 +740,11 @@ def _resolve_hdr_color_tags(hdr_input, hdr_output, hdr_settings):
 from mutagen.mp4 import MP4
 
 from converter import Converter, FFMpegConvertError
-from converter.avcodecs import QSV_ONLY_HW_FLAGS, QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, parse_filter_segments, video_codec_list
+from converter.avcodecs import QSV_ONLY_HW_FLAGS, QSV_SURFACE_FMT_MAP, BaseCodec, _default_vaapi_render_node, _drop_flag_pairs, parse_filter_segments, video_codec_list
 from converter.ffmpeg import TerminatedBySignal, is_unknown_stream
 
 _QSV_SURFACE_FMT_MAP = QSV_SURFACE_FMT_MAP
-_QSV_ONLY_CODEC_FLAGS = QSV_ONLY_HW_FLAGS | {"-global_quality"}
+_QSV_ONLY_CODEC_FLAGS = QSV_ONLY_HW_FLAGS | {"-global_quality", "-low_power", "-async_depth"}
 
 # Post-conversion output verification (see MediaProcessor._verify_output): the output duration may
 # differ from the source by 2% (never less than 1 second), and conversion writes one video stream.
@@ -5689,6 +5696,21 @@ class MediaProcessor(FileOpsMixin):
     except OSError:
       self.log.debug("Unable to remove QTFS temp file %s." % path)
 
+  @staticmethod
+  def _number_on_collision(src, dst):
+    """Return *dst*, or ``name.N.ext`` (N = 2, 3, ...) when *dst* already exists.
+
+    An existing destination is never overwritten. When *dst* is the same file
+    as *src* it is returned unchanged (nothing to replicate).
+    """
+    if not os.path.lexists(dst) or os.path.abspath(dst) == os.path.abspath(src):
+      return dst
+    base, ext = os.path.splitext(dst)
+    n = 2
+    while os.path.lexists("%s.%d%s" % (base, n, ext)):
+      n += 1
+    return "%s.%d%s" % (base, n, ext)
+
   # Makes additional copies of the input file in each directory specified in the copy_to option
   def replicate(self, inputfile, relativePath=None):
     """
@@ -5709,7 +5731,7 @@ class MediaProcessor(FileOpsMixin):
           d = os.path.join(d, relativePath)
         if not os.path.exists(d):
           os.makedirs(d)
-        dst_path = os.path.join(d, os.path.split(inputfile)[1])
+        dst_path = self._number_on_collision(inputfile, os.path.join(d, os.path.split(inputfile)[1]))
         try:
           self._atomic_copy(inputfile, dst_path)
           self.log.info("%s copied to %s." % (inputfile, d))
@@ -5732,7 +5754,7 @@ class MediaProcessor(FileOpsMixin):
       moveto = os.path.join(self.settings.moveto, relativePath) if relativePath else self.settings.moveto
       if not os.path.exists(moveto):
         os.makedirs(moveto)
-      moveto_path = os.path.join(moveto, os.path.basename(inputfile))
+      moveto_path = self._number_on_collision(inputfile, os.path.join(moveto, os.path.basename(inputfile)))
       try:
         self._atomic_move(inputfile, moveto_path)
         self.log.info("%s moved to %s." % (inputfile, moveto))
