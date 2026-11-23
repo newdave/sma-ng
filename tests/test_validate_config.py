@@ -66,7 +66,7 @@ def test_qsv_only_token_in_video_codec_parameters_warns(tmp_path: Path) -> None:
   cfg = SmaConfig.model_validate({"base": {"video": {"codec-parameters": "-encoder_agnostic 1"}}})
   # Force-inject a QSV-only token into the resolved string to simulate the
   # post-migration stale state.
-  cfg.base.video.codec_parameters = "-encoder_agnostic 1 -low_power 0"
+  cfg.base.video.codec_parameters = "-encoder_agnostic 1 -extbrc 1"
   findings: list = []
   validate_config._check_encoder_flag_leaks(cfg, findings)
   assert any(f.level == "warn" and "QSV-only" in f.message for f in findings)

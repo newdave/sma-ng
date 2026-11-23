@@ -203,7 +203,7 @@ hardware tier to `full_sw`.
 | `codec-parameters`          | string\|list |         | Encoder-agnostic FFmpeg flags (e.g. `-x265-params <opts>` for libx265, free-form fallback flags). Accepts a YAML list of flag fragments for readability; the schema joins entries with spaces. Encoder-specific flags belong under `base.video.qsv.codec-parameters` or `base.video.vaapi.codec-parameters` — anything QSV- or VAAPI-specific written here is automatically lifted into the right subblock by the migration shim. |
 | `look-ahead-depth`          | int          | `0`     | Look-ahead frames for rate control (QSV: `la_depth`). `0` = encoder default. SMA-NG auto-sizes `-extra_hw_frames` to `look-ahead-depth + 4` (floor `20`, cap `100`) to keep the device frame pool from running dry.                                                                                                                                                                                                               |
 | `extra-hw-frames`           | int          | `0`     | QSV `-extra_hw_frames` pool size (input/device scope). `0` = auto: derived from `look-ahead-depth`. Any positive value overrides the auto-derived pool, clamped to ffmpeg's QSV ceiling of `100`. Profiles can override per path (`profiles.<name>.video.extra-hw-frames`). Only emitted when `gpu: qsv`.                                                                                                                         |
-| `global-quality`            | int          | `0`     | ICQ quality target for QSV encodes (lower = better, typical `21-25` for 1080p HEVC). `0` = codec default. Replaces the computed bitrate target when a re-encode is not bitrate-driven (see Bitrate Calculation); bitrate-driven re-encodes keep their VBR target and ignore this. `av1_vaapi` scales it ×5 onto the AV1 0-255 qindex (see the VAAPI bullet in Bitrate Calculation).                                               |
+| `global-quality`            | int          | `0`     | ICQ quality target for QSV encodes (`av1_vaapi` also takes `-global_quality`, see below) (lower = better, typical `21-25` for 1080p HEVC). `0` = codec default. Replaces the computed bitrate target when a re-encode is not bitrate-driven (see Bitrate Calculation); bitrate-driven re-encodes keep their VBR target and ignore this. `av1_vaapi` scales it ×5 onto the AV1 0-255 qindex (see the VAAPI bullet in Bitrate Calculation).                                               |
 | `b-frames`                  | int          | `-1`    | Number of B-frames. `-1` = encoder default.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `ref-frames`                | int          | `-1`    | Number of reference frames. `-1` = encoder default.                                                                                                                                                                                                                                                                                                                                                                               |
 
@@ -240,8 +240,8 @@ and vice versa. This is the "never pass wrong options to ffmpeg" guarantee:
 a QSV-only flag in this block can never leak onto a `hevc_vaapi` command
 line.
 
-Use this for QSV-specific knobs that have no VAAPI equivalent or that you
-want to tune independently of VAAPI. Operators can also write per-encoder
+Use this for QSV-specific knobs (`extbrc`, `rdo`, ...) or to tune shared knobs (`low-power`,
+`async-depth`) independently of VAAPI. Operators can also write per-encoder
 overrides for the shared fields (`preset`, `b-frames`, etc.) here; unset
 values inherit from `base.video.*` at runtime.
 
@@ -290,7 +290,8 @@ can never leak onto a non-VAAPI command line. Unset fields inherit from
 | `codec-parameters`  | string | `''`    | Free-form VAAPI-only flag string appended to the assembled command line.                                                                               |
 | `rc-mode`           | string | `''`    | VAAPI rate-control mode (`VBR`, `CBR`, `CQP`). `''` = inherit from `codec-parameters` if `-rc_mode` is set there, otherwise the encoder default fires. |
 | `compression-level` | int    | `0`     | `-compression_level` (VAAPI-specific quality/speed tuning). `0` = don't emit.                                                                          |
-| `low-power`         | int    | `-1`    | `-low_power` for VAAPI (semantics differ from QSV's flag of the same name). `-1` = don't emit.                                                         |
+| `low-power`         | int    | `-1`    | `-low_power` for VAAPI (shared with QSV; semantics differ). `-1` = don't emit. Also kept by the `hw_alt` QSV to VAAPI swap.                            |
+| `async-depth`       | int    | `0`     | `-async_depth` for VAAPI (shared with QSV). `0` = don't emit.                                                                                          |
 | `look-ahead-depth`  | int    | `0`     | Override `base.video.look-ahead-depth` for VAAPI. `0` = inherit. Mapped to VAAPI's own look-ahead control where supported.                             |
 | `global-quality`    | int    | `0`     | Quality target for VAAPI. `0` = inherit. Translated to `-rc_mode CQP -qp <N>` because VAAPI has no direct equivalent of QSV's ICQ `-global_quality`; `av1_vaapi` gets `-rc_mode CQP -global_quality <N×5>` instead of `-qp`. |
 | `b-frames`          | int    | `-1`    | B-frame override. `-1` = inherit from `base.video.b-frames`.                                                                                           |
@@ -300,8 +301,9 @@ can never leak onto a non-VAAPI command line. Unset fields inherit from
 `av1_vaapi` has no `-qp` option, so for it `global-quality` becomes `-rc_mode CQP -global_quality <N x 5>` on the
 AV1 0-255 qindex scale instead.
 
-> **VAAPI vs QSV flag names diverge.** QSV takes quality as ICQ `-global_quality`. On
-> `hevc_vaapi` / `h264_vaapi` use `-rc_mode CQP -qp <N>` for quality-targeted; `av1_vaapi` has no `-qp` and uses
+> **VAAPI vs QSV flags.** `-low_power`, `-async_depth` and `-global_quality` are valid on both encoders.
+> QSV takes quality as ICQ `-global_quality`. On `hevc_vaapi` / `h264_vaapi` use
+> `-rc_mode CQP -qp <N>` for quality-targeted; `av1_vaapi` has no `-qp` and takes
 > `-rc_mode CQP -global_quality <N x 5>` (0-255 qindex scale). For capped-VBR use `-rc_mode VBR
 > -b:v <rate> -maxrate <max>`. Either write the encoder
 > tunings as typed fields here and let the runtime translate, or stuff
@@ -367,6 +369,7 @@ from `base.hdr.*` (not `base.video.*`).
 | `rc-mode`           | string | `''`    | VAAPI rate-control mode for HDR encodes (`VBR`, `CBR`, `CQP`).                                       |
 | `compression-level` | int    | `0`     | `-compression_level` for HDR. `0` = don't emit.                                                      |
 | `low-power`         | int    | `-1`    | `-low_power` for HDR VAAPI. `-1` = don't emit.                                                       |
+| `async-depth`       | int    | `0`     | `-async_depth` for HDR VAAPI. `0` = don't emit.                                                      |
 | `look-ahead-depth`  | int    | `0`     | HDR look-ahead override. `0` = inherit from `base.hdr.look-ahead-depth`.                             |
 | `global-quality`    | int    | `0`     | HDR quality target. `0` = inherit. Mapped to `-rc_mode CQP -qp <N>`; `av1_vaapi` gets `-rc_mode CQP -global_quality <N×5>` instead of `-qp`. |
 | `b-frames`          | int    | `-1`    | HDR B-frame override. `-1` = inherit.                                                                |

@@ -144,6 +144,7 @@ _VAAPI_FLAG_TO_TYPED_FIELD = {
   "-rc_mode": "rc_mode",
   "-compression_level": "compression_level",
   "-low_power": "low_power",
+  "-async_depth": "async_depth",
 }
 
 
@@ -180,7 +181,7 @@ def _check_typed_vs_string_conflicts(cfg: SmaConfig, findings: list[Finding]) ->
         )
 
   qsv_zero_fields = {"async_depth"}
-  vaapi_zero_fields = {"compression_level"}
+  vaapi_zero_fields = {"compression_level", "async_depth"}
 
   for label_prefix, video_block in (("base.video", cfg.base.video), ("base.hdr", cfg.base.hdr)):
     _scan(f"{label_prefix}.qsv", video_block.qsv, _QSV_FLAG_TO_TYPED_FIELD, qsv_zero_fields)

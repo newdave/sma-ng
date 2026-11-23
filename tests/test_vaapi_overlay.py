@@ -51,6 +51,7 @@ def test_vaapi_settings_model_dump_is_stable() -> None:
     "rc_mode",
     "compression_level",
     "low_power",
+    "async_depth",
   }
 
 
@@ -279,8 +280,8 @@ def test_codec_parameters_accepts_list_and_flattens() -> None:
       "base": {
         "video": {
           "codec-parameters": [
-            "-low_power 0",
-            "-async_depth 4",
+            "-extbrc 1",
+            "-b_strategy 1",
             "-adaptive_i 1",
             "-adaptive_b 1",
           ],
@@ -290,8 +291,8 @@ def test_codec_parameters_accepts_list_and_flattens() -> None:
   )
   # All QSV-only tokens — migrated off the parent into video.qsv.
   assert cfg.base.video.codec_parameters == ""
-  assert "-low_power 0" in cfg.base.video.qsv.codec_parameters
-  assert "-async_depth 4" in cfg.base.video.qsv.codec_parameters
+  assert "-extbrc 1" in cfg.base.video.qsv.codec_parameters
+  assert "-b_strategy 1" in cfg.base.video.qsv.codec_parameters
 
 
 def test_codec_parameters_string_form_still_works() -> None:
@@ -504,7 +505,7 @@ def test_migration_lifts_qsv_flags_out_of_codec_parameters() -> None:
     {
       "base": {
         "video": {
-          "codec-parameters": "-low_power 0 -async_depth 4 -adaptive_i 1 -adaptive_b 1 -p_strategy 1",
+          "codec-parameters": "-extbrc 1 -b_strategy 1 -adaptive_i 1 -adaptive_b 1 -p_strategy 1",
         },
       },
     }
@@ -513,8 +514,8 @@ def test_migration_lifts_qsv_flags_out_of_codec_parameters() -> None:
   assert cfg.base.video.codec_parameters == ""
   # And landed in qsv.codec-parameters as a single string.
   qsv_params = cfg.base.video.qsv.codec_parameters
-  assert "-low_power 0" in qsv_params
-  assert "-async_depth 4" in qsv_params
+  assert "-extbrc 1" in qsv_params
+  assert "-b_strategy 1" in qsv_params
   assert "-adaptive_i 1" in qsv_params
   assert "-p_strategy 1" in qsv_params
 
@@ -533,17 +534,17 @@ def test_migration_preserves_encoder_agnostic_flags() -> None:
     {
       "base": {
         "video": {
-          "codec-parameters": "-low_power 0 -mystery-flag 42 -compression_level 4",
+          "codec-parameters": "-extbrc 1 -mystery-flag 42 -compression_level 4",
         },
       },
     }
   )
   # Encoder-agnostic remainder stays on parent.
   assert "-mystery-flag 42" in cfg.base.video.codec_parameters
-  assert "-low_power" not in cfg.base.video.codec_parameters
+  assert "-extbrc" not in cfg.base.video.codec_parameters
   assert "-compression_level" not in cfg.base.video.codec_parameters
   # QSV-only flags lifted.
-  assert "-low_power 0" in cfg.base.video.qsv.codec_parameters
+  assert "-extbrc 1" in cfg.base.video.qsv.codec_parameters
   # VAAPI-only flags lifted.
   assert "-compression_level 4" in cfg.base.video.vaapi.codec_parameters
 
@@ -553,7 +554,7 @@ def test_migration_appends_to_existing_subblock_codec_parameters() -> None:
     {
       "base": {
         "video": {
-          "codec-parameters": "-low_power 0",
+          "codec-parameters": "-extbrc 1",
           "qsv": {"codec-parameters": "-rdo 1"},
         },
       },
@@ -561,7 +562,7 @@ def test_migration_appends_to_existing_subblock_codec_parameters() -> None:
   )
   qsv_params = cfg.base.video.qsv.codec_parameters
   assert "-rdo 1" in qsv_params
-  assert "-low_power 0" in qsv_params
+  assert "-extbrc 1" in qsv_params
 
 
 def test_migration_is_a_noop_when_codec_parameters_is_already_typed_only() -> None:
@@ -577,7 +578,7 @@ def test_migration_runs_on_hdr_block_too() -> None:
     {
       "base": {
         "hdr": {
-          "codec-parameters": "-low_power 0 -color_primaries bt2020",
+          "codec-parameters": "-extbrc 1 -color_primaries bt2020",
         },
       },
     }
@@ -585,7 +586,7 @@ def test_migration_runs_on_hdr_block_too() -> None:
   # Color metadata is encoder-agnostic, stays on hdr.codec-parameters.
   assert "-color_primaries bt2020" in cfg.base.hdr.codec_parameters
   # QSV-only lifted.
-  assert "-low_power 0" in cfg.base.hdr.qsv.codec_parameters
+  assert "-extbrc 1" in cfg.base.hdr.qsv.codec_parameters
 
 
 # ---------------------------------------------------------------------------
@@ -634,3 +635,16 @@ def test_readsettings_does_not_leak_wrong_subblock_into_codec_params(tmp_path: P
   assert "-low_power 0" in s.codec_params
   assert "-rc_mode" not in s.codec_params
   assert "-compression_level" not in s.codec_params
+
+
+def test_readsettings_vaapi_typed_low_power_async_depth_projected(tmp_path: Path) -> None:
+  from resources.readsettings import ReadSettings
+
+  yaml_path = _write_yaml(
+    tmp_path,
+    "daemon:\n  host: 127.0.0.1\nbase:\n  video:\n    gpu: vaapi\n    codec: ['h265']\n    vaapi:\n      low-power: 1\n      async-depth: 2\n      codec-parameters: '-compression_level 4'\n",
+  )
+  s = ReadSettings(str(yaml_path))
+  assert s.vaapi["codec_parameters"] == "-compression_level 4 -low_power 1 -async_depth 2"
+  assert "-low_power 1" in s.codec_params
+  assert "-async_depth 2" in s.codec_params

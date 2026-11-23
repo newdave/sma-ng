@@ -1156,6 +1156,28 @@ class TestAtomicFileOps:
       mp.replicate(str(src))
     mock_move.assert_called_once_with(str(src), str(dest_dir / "movie.mp4"))
 
+  def test_replicate_numbers_on_collision(self, tmp_path):
+    mp = self._make_processor()
+    src = tmp_path / "movie.mp4"
+    src.write_bytes(b"new")
+    copy_dir = tmp_path / "copy"
+    move_dir = tmp_path / "move"
+    copy_dir.mkdir()
+    move_dir.mkdir()
+    (copy_dir / "movie.mp4").write_bytes(b"old-copy")
+    (copy_dir / "movie.2.mp4").write_bytes(b"old-copy-2")
+    (move_dir / "movie.mp4").write_bytes(b"old-move")
+    mp.settings.copyto = [str(copy_dir)]
+    mp.settings.moveto = str(move_dir)
+    mp.settings.permissions = {}
+    result = mp.replicate(str(src))
+    assert (copy_dir / "movie.mp4").read_bytes() == b"old-copy"
+    assert (copy_dir / "movie.2.mp4").read_bytes() == b"old-copy-2"
+    assert (copy_dir / "movie.3.mp4").read_bytes() == b"new"
+    assert (move_dir / "movie.mp4").read_bytes() == b"old-move"
+    assert (move_dir / "movie.2.mp4").read_bytes() == b"new"
+    assert result == [str(move_dir / "movie.2.mp4"), str(copy_dir / "movie.3.mp4")]
+
   def test_restore_from_output_uses_atomic_move(self, tmp_path):
     mp = self._make_processor()
     output_dir = tmp_path / "output"
@@ -9329,7 +9351,18 @@ class TestStripQsvOnlyFlags:
   def test_strips_qsv_only_flag_and_value(self):
     from resources.mediaprocessor import _strip_qsv_only_flags as f
 
-    assert f("-low_power 0 -global_quality 23 -preset slow") == "-preset slow"
+    assert f("-extbrc 1 -global_quality 23 -preset slow") == "-preset slow"
+
+  def test_keeps_shared_low_power_and_async_depth(self):
+    from resources.mediaprocessor import _strip_qsv_only_flags as f
+
+    assert f("-low_power 1 -async_depth 4 -extbrc 1") == "-low_power 1 -async_depth 4"
+
+  def test_flag_followed_by_flag_keeps_second(self):
+    from resources.mediaprocessor import _strip_qsv_only_flags as f
+
+    assert f("-extbrc -preset slow") == "-preset slow"
+    assert f("-preset slow -extbrc") == "-preset slow"
 
   def test_preserves_non_qsv_flags(self):
     from resources.mediaprocessor import _strip_qsv_only_flags as f
@@ -9372,6 +9405,13 @@ class TestStripQsvOnlyFlags:
 
 
 class TestSwapQsvCodecToVaapi:
+  def test_swap_keeps_low_power_and_async_depth(self):
+    from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
+
+    opts = {"video": {"codec": "hevc_qsv", "params": "-low_power 1 -async_depth 4 -extbrc 1"}}
+    f(opts, {"codec_parameters": "-low_power 0"})
+    assert opts["video"]["params"] == "-low_power 1 -async_depth 4 -low_power 0"
+
   def test_basic_codec_swap(self):
     from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
 
@@ -9405,9 +9445,9 @@ class TestSwapQsvCodecToVaapi:
   def test_strips_qsv_only_flags_from_params(self):
     from resources.mediaprocessor import _swap_qsv_codec_to_vaapi as f
 
-    opts = {"video": {"codec": "hevc_qsv", "params": "-low_power 0 -preset slow"}}
+    opts = {"video": {"codec": "hevc_qsv", "params": "-extbrc 1 -preset slow"}}
     f(opts, {})
-    assert "-low_power" not in opts["video"]["params"]
+    assert "-extbrc" not in opts["video"]["params"]
     assert "-preset slow" in opts["video"]["params"]
 
   def test_pops_qsv_pix_fmt(self):

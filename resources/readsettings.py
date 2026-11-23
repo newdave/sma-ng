@@ -317,6 +317,13 @@ class ReadSettings:
     ("rdo", "-rdo", -1),
   )
 
+  # Same for VAAPISettings. low_power / async_depth are valid VAAPI encoder
+  # options; rc_mode / compression_level are emitted by the codec class.
+  _VAAPI_TYPED_FLAG_MAP: tuple[tuple[str, str, int], ...] = (
+    ("low_power", "-low_power", -1),
+    ("async_depth", "-async_depth", 0),
+  )
+
   @classmethod
   def _project_qsv(cls, cfg) -> dict[str, Any]:
     """Flatten a QSVSettings model into a snake_case dict.
@@ -347,8 +354,8 @@ class ReadSettings:
       out["codec_parameters"] = (existing + " " + typed_str).strip() if existing else typed_str
     return out
 
-  @staticmethod
-  def _project_vaapi(cfg) -> dict[str, Any]:
+  @classmethod
+  def _project_vaapi(cls, cfg) -> dict[str, Any]:
     """Flatten a VAAPISettings model into a snake_case dict.
 
     Returned dict is consumed by the runtime hw_alt overlay reader
@@ -358,7 +365,18 @@ class ReadSettings:
     """
     if cfg is None:
       return {}
-    return cfg.model_dump(by_alias=False)
+    out = cfg.model_dump(by_alias=False)
+    typed_parts: list[str] = []
+    for field, flag, sentinel in cls._VAAPI_TYPED_FLAG_MAP:
+      val = out.get(field)
+      if val is None or val == sentinel:
+        continue
+      typed_parts.append(f"{flag} {val}")
+    typed_str = " ".join(typed_parts)
+    existing = (out.get("codec_parameters") or "").strip()
+    if typed_str:
+      out["codec_parameters"] = (existing + " " + typed_str).strip() if existing else typed_str
+    return out
 
   @staticmethod
   def _as_list(value, separator=",", lower=True, replace=None):

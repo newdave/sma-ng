@@ -396,7 +396,7 @@ def _strip_qsv_only_flags(params_str):
   """Return *params_str* with QSV-only encoder flags (and their values) removed.
 
   The hevc_vaapi / h264_vaapi encoders reject several flags that are only
-  valid for the QSV encoder family (e.g. ``-low_power``, ``-global_quality``,
+  valid for the QSV encoder family (e.g. ``-extbrc``, ``-global_quality``,
   ``-look_ahead_depth``). Strip them before passing the parent
   ``codec-parameters`` string through to a VAAPI encoder in the hw_alt tier.
 
@@ -410,8 +410,9 @@ def _strip_qsv_only_flags(params_str):
   while i < len(tokens):
     tok = tokens[i]
     if tok in _QSV_ONLY_CODEC_FLAGS:
-      # Skip this flag and its following value (if any).
-      i += 2
+      # Skip this flag and its value, but only when the next token is a
+      # value: a following flag (``-extbrc -preset slow``) must survive.
+      i += 2 if i + 1 < len(tokens) and not tokens[i + 1].startswith("-") else 1
       continue
     out.append(tok)
     i += 1
@@ -5699,6 +5700,21 @@ class MediaProcessor(FileOpsMixin):
     except OSError:
       self.log.debug("Unable to remove QTFS temp file %s." % path)
 
+  @staticmethod
+  def _number_on_collision(src, dst):
+    """Return *dst*, or ``name.N.ext`` (N = 2, 3, ...) when *dst* already exists.
+
+    An existing destination is never overwritten. When *dst* is the same file
+    as *src* it is returned unchanged (nothing to replicate).
+    """
+    if not os.path.lexists(dst) or os.path.abspath(dst) == os.path.abspath(src):
+      return dst
+    base, ext = os.path.splitext(dst)
+    n = 2
+    while os.path.lexists("%s.%d%s" % (base, n, ext)):
+      n += 1
+    return "%s.%d%s" % (base, n, ext)
+
   # Makes additional copies of the input file in each directory specified in the copy_to option
   def replicate(self, inputfile, relativePath=None):
     """
@@ -5719,7 +5735,7 @@ class MediaProcessor(FileOpsMixin):
           d = os.path.join(d, relativePath)
         if not os.path.exists(d):
           os.makedirs(d)
-        dst_path = os.path.join(d, os.path.split(inputfile)[1])
+        dst_path = self._number_on_collision(inputfile, os.path.join(d, os.path.split(inputfile)[1]))
         try:
           self._atomic_copy(inputfile, dst_path)
           self.log.info("%s copied to %s." % (inputfile, d))
@@ -5742,7 +5758,7 @@ class MediaProcessor(FileOpsMixin):
       moveto = os.path.join(self.settings.moveto, relativePath) if relativePath else self.settings.moveto
       if not os.path.exists(moveto):
         os.makedirs(moveto)
-      moveto_path = os.path.join(moveto, os.path.basename(inputfile))
+      moveto_path = self._number_on_collision(inputfile, os.path.join(moveto, os.path.basename(inputfile)))
       try:
         self._atomic_move(inputfile, moveto_path)
         self.log.info("%s moved to %s." % (inputfile, moveto))

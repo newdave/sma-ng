@@ -185,6 +185,7 @@ base:
       rc-mode: ''
       compression-level: 0
       low-power: -1
+      async-depth: 0
       codec-parameters: ''
   hdr:
     codec: []
@@ -232,6 +233,7 @@ base:
       rc-mode: ''
       compression-level: 0
       low-power: -1
+      async-depth: 0
       codec-parameters: ''
   analyzer:
     enabled: false

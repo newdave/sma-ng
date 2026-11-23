@@ -1174,12 +1174,11 @@ import logging as _logging
 #
 # Single source of truth: config_schema's migration shim, the hw_alt
 # QSV->VAAPI swap in resources/mediaprocessor.py and scripts/validate-config.py
-# all import these sets. -global_quality is deliberately absent: av1_vaapi
-# takes its quality from it (AV1VAAPICodec.hw_quality_flag).
+# all import these sets. -global_quality, -low_power and -async_depth are
+# deliberately absent: they are shared QSV/VAAPI encoder options
+# (av1_vaapi takes its quality from -global_quality, AV1VAAPICodec.hw_quality_flag).
 QSV_ONLY_HW_FLAGS = frozenset(
   {
-    "-low_power",
-    "-async_depth",
     "-extbrc",
     "-b_strategy",
     "-look_ahead",

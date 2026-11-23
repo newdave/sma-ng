@@ -2382,18 +2382,20 @@ def test_vaapi_codec_strips_qsv_only_flags_from_params(caplog):
   from converter.avcodecs import H265VAAPICodec
 
   codec = H265VAAPICodec()
-  safe = {"params": "-low_power 0 -rc_mode VBR -extbrc 1"}
+  safe = {"params": "-low_power 1 -async_depth 4 -rc_mode VBR -extbrc 1"}
   with caplog.at_level("WARNING"):
     out = codec._emit_filtered_params(safe)
   # Wrong-encoder tokens stripped.
-  assert "-low_power" not in out
   assert "-extbrc" not in out
+  # Shared QSV/VAAPI flags survive.
+  assert out[out.index("-low_power") + 1] == "1"
+  assert out[out.index("-async_depth") + 1] == "4"
   # Valid VAAPI token survives.
   assert "-rc_mode" in out
   assert "VBR" in out
   # WARNING emitted for each stripped flag.
   msgs = [rec.message for rec in caplog.records]
-  assert any("low_power" in m for m in msgs)
+  assert not any("low_power" in m for m in msgs)
   assert any("extbrc" in m for m in msgs)
 
 
