@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.52](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.51...sma-ng-v3.2.52) (2026-11-23)
+
+
+### Bug Fixes
+
+* treat low_power and async_depth as shared QSV/VAAPI flags ([#275](https://github.com/newdave/sma-ng/issues/275)) ([040ce02](https://github.com/newdave/sma-ng/commit/040ce021d71739c3d290709f929a09accfd4248e))
+
 ## [3.2.51](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.50...sma-ng-v3.2.51) (2026-11-23)
 
 
