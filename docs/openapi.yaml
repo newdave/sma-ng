@@ -193,6 +193,11 @@ components:
 
     JobStats:
       type: object
+      description: >-
+        Lifetime job counts per status plus total. Each count is the live rows in the jobs table plus
+        the job_stats_archive table, which keeps finished jobs (completed, failed, cancelled) that were
+        deleted by retention, POST /cleanup, the admin delete actions or bulk delete, and any baseline
+        added with POST /stats/archive. Deleted pending and running jobs are not counted.
       additionalProperties:
         type: integer
       example:
@@ -436,6 +441,7 @@ paths:
   /stats:
     get:
       summary: Job statistics
+      description: Lifetime counts. Deleting finished jobs does not lower them (see JobStats).
       operationId: getStats
       tags: [jobs]
       responses:
@@ -445,6 +451,91 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/JobStats"
+
+  /stats/archive:
+    post:
+      summary: Add a baseline to the lifetime job totals
+      description: >-
+        One-off seeding for jobs deleted before lifetime totals existed. Adds each count to
+        job_stats_archive, so /stats, /health job counts and /api/metrics?window=all include it.
+        Counts are added, not replaced: send each baseline once. Every key is optional, but the
+        body must hold at least one. Values must be non-negative integers; unknown keys,
+        negatives, decimals, strings, booleans and invalid JSON return 400.
+      operationId: addArchivedJobCounts
+      tags: [jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                completed:
+                  type: integer
+                  minimum: 0
+                failed:
+                  type: integer
+                  minimum: 0
+                cancelled:
+                  type: integer
+                  minimum: 0
+            example:
+              completed: 19000
+              failed: 120
+              cancelled: 15
+      responses:
+        "200":
+          description: Counts added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  added:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                  stats:
+                    $ref: "#/components/schemas/JobStats"
+        "400":
+          description: Invalid JSON, unknown status key, or a value that is not a non-negative integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid credentials
+
+  /api/metrics:
+    get:
+      summary: Cluster job metrics (JSON)
+      description: >-
+        PostgreSQL only; SQLite returns 503. With window=all, kpis.completed, kpis.failed,
+        kpis.cancelled, kpis.total and kpis.failure_rate_pct include the archived counts of deleted
+        finished jobs (job_stats_archive). The 24h, 7d and 30d windows, and the duration, size,
+        encoder, failure-category, time-series and per-node figures, count live rows only.
+      operationId: getMetricsJson
+      tags: [monitoring]
+      parameters:
+        - name: window
+          in: query
+          schema:
+            type: string
+            enum: ["24h", "7d", "30d", "all"]
+            default: 24h
+      responses:
+        "200":
+          description: Metrics for the window (available, window, kpis, timeseries, nodes, encoders, failures)
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Missing or invalid credentials
+        "503":
+          description: Not in distributed (PostgreSQL) mode
 
   /jobs:
     get:
@@ -1232,7 +1323,7 @@ paths:
     post:
       summary: Remove old completed, failed and cancelled jobs
       description: >-
-        Jobs completed within daemon.job-dedupe-window-seconds are never removed; scanned_files is not touched. The daemon runs the same pass hourly only when daemon.job-retention-days is above 0 (default 0 keeps jobs forever). The days parameter is required; a request without it returns 400. This permanently deletes job history and its stats.
+        Jobs completed within daemon.job-dedupe-window-seconds are never removed; scanned_files is not touched. The daemon runs the same pass hourly only when daemon.job-retention-days is above 0 (default 0 keeps jobs forever). The days parameter is required; a request without it returns 400. This permanently deletes job rows; their counts move to the lifetime totals (job_stats_archive), so /stats does not drop.
       operationId: cleanup
       tags: [jobs]
       parameters:

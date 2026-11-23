@@ -495,6 +495,89 @@ def _owner_guard(node_id, placeholder, claim_token=None):
   return sql, params
 
 
+# Lifetime job totals (SMANG-45). Every path that deletes finished jobs adds the
+# deleted rows, per status, to job_stats_archive in the same transaction, so
+# /stats, /health and /api/metrics?window=all never go down when history is pruned.
+# Pending and running rows are never archived: they did not finish.
+ARCHIVED_STATUSES = (STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED)
+_ARCHIVED_STATUS_SQL = "(%s)" % ", ".join("'%s'" % s for s in ARCHIVED_STATUSES)
+
+_JOB_STATS_ARCHIVE_DDL = """
+  CREATE TABLE IF NOT EXISTS job_stats_archive (
+    status TEXT PRIMARY KEY,
+    count BIGINT NOT NULL DEFAULT 0
+  )
+"""
+
+_ARCHIVE_UPSERT_SQL = "INSERT INTO job_stats_archive (status, count) VALUES ({p}, {p}) ON CONFLICT (status) DO UPDATE SET count = job_stats_archive.count + excluded.count"
+
+# Live counts plus archived counts per status, and the combined total.
+_STATS_BY_STATUS_SQL = """
+  SELECT status, CAST(SUM(count) AS BIGINT) AS count FROM (
+    SELECT status, COUNT(*) AS count FROM jobs GROUP BY status
+    UNION ALL
+    SELECT status, count FROM job_stats_archive
+  ) combined
+  GROUP BY status
+"""
+_STATS_TOTAL_SQL = """
+  SELECT CAST((SELECT COUNT(*) FROM jobs)
+    + COALESCE((SELECT SUM(count) FROM job_stats_archive), 0) AS BIGINT) AS total
+"""
+
+
+def _sqlite_archiving_delete(conn, where_sql, params=()):
+  """Archive the finished rows matching *where_sql*, then delete every matching row.
+
+  Both statements run inside the caller's transaction (and the database lock),
+  so the archive and the DELETE commit or roll back together. Returns the
+  number of rows deleted.
+  """
+  where = " WHERE %s" % where_sql if where_sql else ""
+  conn.execute(
+    "INSERT INTO job_stats_archive (status, count) "
+    "SELECT status, COUNT(*) FROM jobs%s%s status IN %s GROUP BY status "
+    "ON CONFLICT (status) DO UPDATE SET count = job_stats_archive.count + excluded.count" % (where, " AND" if where else " WHERE", _ARCHIVED_STATUS_SQL),
+    params,
+  )
+  return conn.execute("DELETE FROM jobs%s" % where, params).rowcount
+
+
+def _pg_archiving_delete_sql(where_sql):
+  """One PostgreSQL statement that deletes jobs and archives the finished ones.
+
+  The archive INSERT reads the DELETE's RETURNING rows, so it counts exactly
+  the rows this statement removed, atomically. The statement returns one row
+  per deleted job (column ``id``), so ``cursor.rowcount`` is the delete count.
+  """
+  where = " WHERE %s" % where_sql if where_sql else ""
+  return (
+    "WITH deleted AS (DELETE FROM jobs%s RETURNING id, status), "
+    "archived AS (INSERT INTO job_stats_archive (status, count) "
+    "SELECT status, COUNT(*) FROM deleted WHERE status IN %s GROUP BY status "
+    "ON CONFLICT (status) DO UPDATE SET count = job_stats_archive.count + EXCLUDED.count) "
+    "SELECT id FROM deleted" % (where, _ARCHIVED_STATUS_SQL)
+  )
+
+
+def validate_archive_counts(counts):
+  """Return *counts* as {status: int} or raise ValueError.
+
+  Accepts only a non-empty dict whose keys are finished statuses and whose
+  values are non-negative integers (bools rejected).
+  """
+  if not isinstance(counts, dict) or not counts:
+    raise ValueError('body must be a non-empty JSON object such as {"completed": 100}')
+  clean = {}
+  for status, value in counts.items():
+    if status not in ARCHIVED_STATUSES:
+      raise ValueError("unknown status %r: allowed keys are %s" % (status, ", ".join(ARCHIVED_STATUSES)))
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+      raise ValueError("%s must be a non-negative integer" % status)
+    clean[status] = value
+  return clean
+
+
 class SQLiteJobDatabase:
   """SQLite-backed job queue for single-node deployments.
 
@@ -610,6 +693,7 @@ class SQLiteJobDatabase:
       node_cols = {row["name"] for row in conn.execute("PRAGMA table_info(cluster_nodes)").fetchall()}
       if "capabilities" not in node_cols:
         conn.execute("ALTER TABLE cluster_nodes ADD COLUMN capabilities TEXT")
+      conn.execute(_JOB_STATS_ARCHIVE_DDL)
       _backfill_request_profile(conn, is_sqlite=True, logger=self.log)
     self._reset_running_jobs()
 
@@ -978,10 +1062,20 @@ class SQLiteJobDatabase:
       return [dict(r) for r in conn.execute(query, params).fetchall()]
 
   def get_stats(self):
+    """Job counts per status and in total: live rows plus job_stats_archive."""
     with self._conn() as conn:
-      stats = {r["status"]: r["count"] for r in conn.execute("SELECT status, COUNT(*) AS count FROM jobs GROUP BY status").fetchall()}
-      stats["total"] = conn.execute("SELECT COUNT(*) AS total FROM jobs").fetchone()["total"]
+      stats = {r["status"]: r["count"] for r in conn.execute(_STATS_BY_STATUS_SQL).fetchall()}
+      stats["total"] = conn.execute(_STATS_TOTAL_SQL).fetchone()["total"]
     return stats
+
+  def add_archived_counts(self, counts):
+    """Add operator-supplied counts to job_stats_archive (baseline seeding)."""
+    counts = validate_archive_counts(counts)
+    with self._conn() as conn:
+      for status, value in counts.items():
+        conn.execute(_ARCHIVE_UPSERT_SQL.format(p="?"), (status, value))
+    self.log.info("Added archived job counts: %s" % ", ".join("%s=%d" % kv for kv in counts.items()))
+    return counts
 
   def get_metrics(self, window: str = "24h") -> dict:
     return {"available": False, "reason": "Metrics require PostgreSQL cluster mode.", "window": window}
@@ -1003,11 +1097,11 @@ class SQLiteJobDatabase:
     age = timedelta(seconds=max(days * 86400, protect_seconds))
     cutoff = (datetime.now(UTC) - age).replace(microsecond=0).isoformat()
     with self._conn() as conn:
-      cur = conn.execute(
-        "DELETE FROM jobs WHERE status IN (?, ?, ?) AND completed_at < ?",
+      deleted = _sqlite_archiving_delete(
+        conn,
+        "status IN (?, ?, ?) AND completed_at < ?",
         (STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED, cutoff),
       )
-      deleted = cur.rowcount
     if deleted > 0:
       self.log.info("Cleaned up %d old jobs" % deleted)
     return deleted
@@ -1183,8 +1277,7 @@ class SQLiteJobDatabase:
 
   def delete_failed_jobs(self):
     with self._conn() as conn:
-      cur = conn.execute("DELETE FROM jobs WHERE status = ?", (STATUS_FAILED,))
-      deleted = cur.rowcount
+      deleted = _sqlite_archiving_delete(conn, "status = ?", (STATUS_FAILED,))
     if deleted > 0:
       self.log.info("Deleted %d failed jobs" % deleted)
     return deleted
@@ -1197,7 +1290,7 @@ class SQLiteJobDatabase:
     with self._conn() as conn:
       existing = [row["id"] for row in conn.execute("SELECT id FROM jobs WHERE id IN (%s)" % placeholders, ids).fetchall()]
       if existing:
-        conn.execute("DELETE FROM jobs WHERE id IN (%s)" % placeholders, ids)
+        _sqlite_archiving_delete(conn, "id IN (%s)" % placeholders, ids)
     if existing:
       self.log.info("Deleted %d jobs by id" % len(existing))
     return existing
@@ -1212,8 +1305,7 @@ class SQLiteJobDatabase:
 
   def delete_all_jobs(self):
     with self._conn() as conn:
-      cur = conn.execute("DELETE FROM jobs")
-      deleted = cur.rowcount
+      deleted = _sqlite_archiving_delete(conn, "")
     self.log.info("Deleted all jobs (%d rows)" % deleted)
     return deleted
 
@@ -1453,6 +1545,7 @@ class PostgreSQLJobDatabase:
           cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS %s %s" % (col_name, pg_type))
         cur.execute("ALTER TABLE cluster_nodes ADD COLUMN IF NOT EXISTS capabilities TEXT")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status_completed ON jobs(status, completed_at)")
+        cur.execute(_JOB_STATS_ARCHIVE_DDL)
         # ---- library audit ---------------------------------------------------
         cur.execute("""
                     CREATE TABLE IF NOT EXISTS library_audit_runs (
@@ -2013,14 +2106,24 @@ class PostgreSQLJobDatabase:
         return [dict(r) for r in cur.fetchall()]
 
   def get_stats(self):
-    """Get job statistics."""
+    """Job counts per status and in total: live rows plus job_stats_archive."""
     with self._conn() as conn:
       with conn.cursor() as cur:
-        cur.execute("SELECT status, COUNT(*) AS count FROM jobs GROUP BY status")
+        cur.execute(_STATS_BY_STATUS_SQL)
         stats = {r["status"]: r["count"] for r in cur.fetchall()}
-        cur.execute("SELECT COUNT(*) AS total FROM jobs")
+        cur.execute(_STATS_TOTAL_SQL)
         stats["total"] = cur.fetchone()["total"]
     return stats
+
+  def add_archived_counts(self, counts):
+    """Add operator-supplied counts to job_stats_archive (baseline seeding)."""
+    counts = validate_archive_counts(counts)
+    with self._conn() as conn:
+      with conn.cursor() as cur:
+        for status, value in counts.items():
+          cur.execute(_ARCHIVE_UPSERT_SQL.format(p="%s"), (status, value))
+    self.log.info("Added archived job counts: %s" % ", ".join("%s=%d" % kv for kv in counts.items()))
+    return counts
 
   def get_metrics(self, window: str = "24h") -> dict:
     """Return cluster-wide job metrics for the requested time window.
@@ -2038,7 +2141,13 @@ class PostgreSQLJobDatabase:
                     SELECT
                         COUNT(*) FILTER (WHERE status = 'pending')  AS pending,
                         COUNT(*) FILTER (WHERE status = 'running')  AS running,
-                        COUNT(*)                                     AS total
+                        COUNT(*)                                     AS total,
+                        (SELECT COALESCE(SUM(count), 0) FROM job_stats_archive WHERE status = 'completed')::BIGINT
+                                                                     AS archived_completed,
+                        (SELECT COALESCE(SUM(count), 0) FROM job_stats_archive WHERE status = 'failed')::BIGINT
+                                                                     AS archived_failed,
+                        (SELECT COALESCE(SUM(count), 0) FROM job_stats_archive WHERE status = 'cancelled')::BIGINT
+                                                                     AS archived_cancelled
                     FROM jobs
                 """)
         snap = cur.fetchone()
@@ -2205,15 +2314,30 @@ class PostgreSQLJobDatabase:
         ]
 
     completed = int(kpi_row["completed"] or 0)
+    failed = int(kpi_row["failed"] or 0)
+    cancelled = int(kpi_row["cancelled"] or 0)
+    total = int(snap["total"] or 0)
+    failure_rate_pct = float(kpi_row["failure_rate_pct"]) if kpi_row["failure_rate_pct"] is not None else None
+    if not wdef:
+      # All-time totals include jobs whose rows were deleted (job_stats_archive);
+      # windowed figures stay live-only because archived rows carry no timestamps.
+      archived = {s: int(snap.get("archived_%s" % s) or 0) for s in ARCHIVED_STATUSES}
+      if any(archived.values()):
+        completed += archived[STATUS_COMPLETED]
+        failed += archived[STATUS_FAILED]
+        cancelled += archived[STATUS_CANCELLED]
+        total += sum(archived.values())
+        finished = completed + failed
+        failure_rate_pct = round(failed / finished * 100, 2) if finished else None
     th_hours = wdef["throughput_hours"] if wdef else None
     kpis = {
       "completed": completed,
-      "failed": int(kpi_row["failed"] or 0),
-      "cancelled": int(kpi_row["cancelled"] or 0),
+      "failed": failed,
+      "cancelled": cancelled,
       "pending": int(snap["pending"] or 0),
       "running": int(snap["running"] or 0),
-      "total": int(snap["total"] or 0),
-      "failure_rate_pct": float(kpi_row["failure_rate_pct"]) if kpi_row["failure_rate_pct"] is not None else None,
+      "total": total,
+      "failure_rate_pct": failure_rate_pct,
       "avg_duration_seconds": float(kpi_row["avg_duration_seconds"]) if kpi_row["avg_duration_seconds"] is not None else None,
       "p95_duration_seconds": float(kpi_row["p95_duration_seconds"]) if kpi_row["p95_duration_seconds"] is not None else None,
       "avg_compression_pct": float(kpi_row["avg_compression_pct"]) if kpi_row["avg_compression_pct"] is not None else None,
@@ -2253,11 +2377,7 @@ class PostgreSQLJobDatabase:
     with self._conn() as conn:
       with conn.cursor() as cur:
         cur.execute(
-          """
-                    DELETE FROM jobs
-                    WHERE status IN (%s, %s, %s)
-                    AND completed_at < NOW() - make_interval(secs => %s)
-                """,
+          _pg_archiving_delete_sql("status IN (%s, %s, %s) AND completed_at < NOW() - make_interval(secs => %s)"),
           (STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED, seconds),
         )
         deleted = cur.rowcount
@@ -2747,7 +2867,7 @@ class PostgreSQLJobDatabase:
     """Delete all jobs with status 'failed'. Returns count deleted."""
     with self._conn() as conn:
       with conn.cursor() as cur:
-        cur.execute("DELETE FROM jobs WHERE status = %s", (STATUS_FAILED,))
+        cur.execute(_pg_archiving_delete_sql("status = %s"), (STATUS_FAILED,))
         deleted = cur.rowcount
     if deleted > 0:
       self.log.info("Deleted %d failed jobs" % deleted)
@@ -2764,7 +2884,7 @@ class PostgreSQLJobDatabase:
       return []
     with self._conn() as conn:
       with conn.cursor() as cur:
-        cur.execute("DELETE FROM jobs WHERE id = ANY(%s) RETURNING id", (ids,))
+        cur.execute(_pg_archiving_delete_sql("id = ANY(%s)"), (ids,))
         deleted = [row["id"] for row in cur.fetchall()]
     if deleted:
       self.log.info("Deleted %d jobs by id" % len(deleted))
@@ -2784,7 +2904,7 @@ class PostgreSQLJobDatabase:
     """Delete every row from the jobs table. Returns count deleted."""
     with self._conn() as conn:
       with conn.cursor() as cur:
-        cur.execute("DELETE FROM jobs")
+        cur.execute(_pg_archiving_delete_sql(""))
         deleted = cur.rowcount
     self.log.info("Deleted all jobs (%d rows)" % deleted)
     return deleted
