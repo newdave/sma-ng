@@ -16,7 +16,7 @@ from resources.daemon import metrics_prom
 from resources.daemon.config import _strip_secrets
 from resources.daemon.constants import MAX_REQUEST_BODY_BYTES, SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
-from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase
+from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase, validate_archive_counts
 from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html, doc_file_for_slug
 from resources.daemon.queueing import (
   DUPLICATE,
@@ -1015,6 +1015,25 @@ class WebhookHandler(BaseHTTPRequestHandler):
     protect = self.server.path_config_manager.job_dedupe_window_seconds
     deleted = self.server.job_db.cleanup_old_jobs(days, protect_seconds=protect)
     self.send_json_response(200, {"deleted": deleted, "days": days})
+
+  def _post_stats_archive(self):
+    """POST /stats/archive: add a baseline to the lifetime job totals.
+
+    Body: {"completed": N, "failed": M, "cancelled": K}, each optional, non-negative integers.
+    """
+    content_length = self._content_length()
+    try:
+      body = json.loads(self.rfile.read(content_length) if content_length else b"")
+    except (json.JSONDecodeError, ValueError):
+      self.send_json_response(400, {"error": "Invalid JSON body"})
+      return
+    try:
+      counts = validate_archive_counts(body)
+    except ValueError as exc:
+      self.send_json_response(400, {"error": str(exc)})
+      return
+    added = self.server.job_db.add_archived_counts(counts)
+    self.send_json_response(200, {"added": added, "stats": self.server.job_db.get_stats()})
 
   def _parse_job_id(self, path, segment=-2):
     """Extract an integer job ID from a URL path segment.

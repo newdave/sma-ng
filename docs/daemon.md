@@ -75,7 +75,7 @@ every docs page shows the running version.
 | `GET`  | `/configs`                       | Yes    | Config mappings and status                                              |
 | `GET`  | `/metrics`                       | Yes    | Prometheus text (`X-API-Key`/Bearer; Basic needs `daemon.basic-auth`)  |
 | `GET`  | `/api/metrics`                   | Yes    | Metrics JSON. Query: `?window=24h\|7d\|30d\|all` (PostgreSQL required)  |
-| `GET`  | `/stats`                         | Yes    | Job statistics by status                                                |
+| `GET`  | `/stats`                         | Yes    | Lifetime job counts by status (live plus archived; see Job Retention)   |
 | `GET`  | `/scan`                          | Yes    | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv`               |
 | `GET`  | `/browse`                        | Yes    | List filesystem dirs/files within configured paths. Query: `?path=/dir` |
 | `GET`  | `/logs`                          | Yes    | List all log files with metadata                                        |
@@ -87,6 +87,7 @@ every docs page shows the running version.
 | `POST` | `/webhook/sonarr`                | Yes    | Native Sonarr webhook; Download queues, other events go to Autoscan     |
 | `POST` | `/webhook/radarr`                | Yes    | Native Radarr webhook; Download queues, other events go to Autoscan     |
 | `POST` | `/cleanup`                       | Yes    | Remove old finished jobs now. Query: `?days=N` (required; 400 without it)                         |
+| `POST` | `/stats/archive`                 | Yes    | Add a baseline to lifetime job totals. Body: `{"completed": N, "failed": M, "cancelled": K}` |
 | `POST` | `/reload`                        | Yes    | Reload `daemon:` section in `sma-ng.yml` without restarting             |
 | `POST` | `/restart`                       | Yes    | Graceful restart. Query: `?node=<id>` for remote node (PostgreSQL)      |
 | `POST` | `/shutdown`                      | Yes    | Graceful shutdown. Query: `?node=<id>` for remote node (PostgreSQL)     |
@@ -376,7 +377,7 @@ auto-profile selection happens for one-shot conversions. Pass
 | `recycle-bin-max-age-days`         | Delete recycle-bin media files older than this many days (default: `30`, `0` = disabled)                                                                                                                                                                                                                                                            |
 | `recycle-bin-min-free-gb`          | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled)                                                                                                                                                                                                                              |
 | `job-dedupe-window-seconds`        | Skip a path whose job completed within this many seconds, for the scanner and webhooks alike (default: `21600`, `0` = disabled). See [Duplicate Suppression](#duplicate-suppression).                                                                                                                                                               |
-| `job-retention-days`               | Opt-in: delete completed, failed and cancelled jobs older than this many days (default: `0` = keep forever; a positive value permanently deletes job history and its stats)                                                                                                                                                                                                                                           |
+| `job-retention-days`               | Opt-in: delete completed, failed and cancelled jobs older than this many days (default: `0` = keep forever; a positive value permanently deletes job rows; lifetime `/stats` totals are kept)                                                                                                                                                                                                                                           |
 | `log-ttl-days`                     | Cluster-mode: retention for log entries in PostgreSQL                                                                                                                                                                                                                                                                                               |
 | `node-expiry-days`                 | Cluster-mode: hard-delete offline nodes after this many days (`0` = disabled)                                                                                                                                                                                                                                                                       |
 | `log-archive-dir`                  | Cluster-mode: directory for gzipped JSONL archive of cluster logs                                                                                                                                                                                                                                                                                   |
@@ -788,17 +789,43 @@ Retention is opt-in. Set `job-retention-days` to a positive number and every nod
 heartbeat after startup and then at most once an hour, on SQLite and PostgreSQL alike. `scanned_files` is
 never pruned.
 
-**Warning:** a positive value permanently deletes job history and the statistics computed from it
-(`/stats`, the dashboard totals). It cannot be undone. Leave it at `0` unless you want that.
+**Warning:** a positive value permanently deletes job rows (paths, errors, timings, sizes). It cannot be undone.
+Leave it at `0` unless you want that.
 
 A job completed within `job-dedupe-window-seconds` is never deleted, so retention (and `POST /cleanup?days=0`)
 cannot reopen the duplicate-suppression window. `POST /cleanup?days=N` runs the same pass on demand; `days` is required and the request returns 400 without it.
+
+### Lifetime Job Totals
+
+Job counts survive job deletion. Every path that deletes jobs (retention, `POST /cleanup`, the admin
+"delete failed" and "delete all" actions, and bulk delete via `POST /jobs/bulk`) adds the deleted
+`completed`, `failed` and `cancelled` rows, per status, to the `job_stats_archive` table in the same
+transaction as the delete. Deleted `pending` and `running` jobs are not counted: they never finished.
+
+- `GET /stats` and the `/health` and `/status` job counts report live rows plus the archive, per status
+  and in `total`.
+- `GET /api/metrics?window=all` adds the archive to `kpis.completed`, `kpis.failed`, `kpis.cancelled`,
+  `kpis.total` and `kpis.failure_rate_pct`.
+- The `24h`, `7d` and `30d` windows, and the duration, size, encoder and per-node figures, use live rows
+  only: archived counts carry no timestamps or sizes.
+
+Jobs deleted before this table existed are gone for good. To restore the headline numbers, seed a
+baseline once with `POST /stats/archive` (same API key as other admin calls). Counts are added, not
+replaced, so send each baseline once. Values must be non-negative integers; anything else returns 400.
+
+```bash
+curl -X POST http://localhost:8585/stats/archive \
+  -H "X-API-Key: $SMA_API_KEY" -H "Content-Type: application/json" \
+  -d '{"completed": 19000, "failed": 120, "cancelled": 15}'
+# Returns: {"added": {...}, "stats": {"completed": ..., "total": ...}}
+```
 
 **Database schema:**
 
 ```sql
 jobs(id, path, config, args, status, priority, worker_id, node_id, error, created_at, started_at, completed_at)
 scanned_files(path, scanned_at)
+job_stats_archive(status, count)
 ```
 
 ---
