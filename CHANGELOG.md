@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.50](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.49...sma-ng-v3.2.50) (2026-11-23)
+
+
+### Features
+
+* keep lifetime job totals across job deletion ([#268](https://github.com/newdave/sma-ng/issues/268)) ([43fd820](https://github.com/newdave/sma-ng/commit/43fd820092e9cc0323327e6df5b305c56bc40568))
+
 ## [3.2.49](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.48...sma-ng-v3.2.49) (2026-11-23)
 
 
