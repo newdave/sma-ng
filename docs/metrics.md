@@ -24,7 +24,8 @@ an "unavailable" notice. The Prometheus endpoint works in both modes and describ
 - **Prometheus.** `GET /metrics` returns the Prometheus text exposition format. When an API key or basic auth is
   configured, the endpoint requires credentials, because its series carry the node id. Without any auth configured it
   is open. A daemon with only an API key accepts a Bearer token or `X-API-Key`; use `basic_auth` in the scrape
-  configuration only when `daemon.basic-auth` is set. See [Daemon Mode](daemon.md) for the authentication rules.
+  configuration only when both `daemon.username` and `daemon.password` are set, because Basic authentication is
+  enabled only by that pair. See [Daemon Mode](daemon.md) for the authentication rules.
 
 ```yaml
 scrape_configs:
