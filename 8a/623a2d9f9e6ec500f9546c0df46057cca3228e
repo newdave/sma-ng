@@ -1,0 +1,29 @@
+.github/workflows/docker.yml
+  s_bb9afa71bee21f::t_4d9b08e429c5da 152,155-192
+  s_bb9afa71bee21f::t_2db2d202dba682 193
+tests/test_docker.py
+  s_bb9afa71bee21f::t_3f5201e9902d6b 728-753
+docs/deployment.md
+  s_bb9afa71bee21f::t_1fbced10c255fb 529-538
+docker/Dockerfile
+  s_bb9afa71bee21f::t_9f97214ef41941 80-91,94-102
+  s_bb9afa71bee21f::t_38732afdd97c52 152
+  s_bb9afa71bee21f::t_4b49d5acb282c4 107-112,114-115
+  s_bb9afa71bee21f::t_6ded09367ae395 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "8a623a2d9f9e6ec500f9546c0df46057cca3228e",
+  "prompts": {},
+  "sessions": {
+    "s_bb9afa71bee21f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11944d23-c69e-4bdd-b6ea-a53dcb231d65",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
