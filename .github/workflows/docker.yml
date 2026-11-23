@@ -3,11 +3,13 @@ name: Docker
 # Three ways in:
 #   pull_request   build + smoke test the PR's image (no Trivy scan); never pushes.
 #                  Only runs when image-affecting paths change.
-#   workflow_run   after CI passes on a push to main: build, smoke test, push
-#                  ghcr.io/<repo>:latest, :main and :sha-<short> (linux/amd64).
-#                  latest therefore always tracks main HEAD that passed CI.
-#   workflow_call  from release.yml when a release is created: build the tag,
-#                  smoke test, push X.Y.Z, X.Y and X (linux/amd64 + linux/arm64).
+#   workflow_call  from ci.yml after test and lint pass on a push to main: build,
+#                  smoke test, push ghcr.io/<repo>:latest, :main and :sha-<short>
+#                  (linux/amd64). latest therefore always tracks main HEAD that
+#                  passed CI.
+#                  From release.yml (with ref + version) when a release is
+#                  created: build the tag, smoke test, push X.Y.Z, X.Y and X
+#                  (linux/amd64 + linux/arm64).
 # workflow_dispatch builds the current ref and pushes when `push` is checked.
 #
 # Every platform builds on a native runner (arm64 under QEMU exceeds the job
@@ -16,7 +18,7 @@ name: Docker
 on:
   pull_request:
     branches: [main]
-    # Allow-list of image-affecting paths; the workflow_run build on main is unconditional.
+    # Allow-list of image-affecting paths; the build on main (from ci.yml) is unconditional.
     paths:
       - "Dockerfile*"
       - "docker/**"
@@ -25,20 +27,16 @@ on:
       - "**/*.py"
       - "setup/**"
       - ".github/workflows/docker.yml"
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
   workflow_call:
     inputs:
       ref:
-        description: "Git ref (release tag) to build"
+        description: "Git ref (release tag) to build; empty builds the caller's commit"
         type: string
-        required: true
+        default: ""
       version:
-        description: "Release version (X.Y.Z) for the semver image tags"
+        description: "Release version (X.Y.Z) for the semver image tags; empty builds the main image"
         type: string
-        required: true
+        default: ""
   workflow_dispatch:
     inputs:
       push:
@@ -57,16 +55,11 @@ env:
 jobs:
   plan:
     name: Plan image build
-    # workflow_run fires for every CI completion on main; only a passing CI on
-    # a push (not a PR merge-queue or a failed run) builds the main image.
     # Release-please PRs only bump versions and the changelog: no image build.
-    if: >-
-      (github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')) &&
-      (github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 3
-    # Job-level so a call from release.yml does not share the caller's group.
+    # Job-level so a call from ci.yml or release.yml does not share the caller's group.
     concurrency:
       group: docker-${{ inputs.version || github.event.pull_request.number || github.ref }}-plan
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -83,19 +76,18 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           CALL_REF: ${{ inputs.ref }}
-          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           DISPATCH_PUSH: ${{ inputs.push }}
           EVENT: ${{ github.event_name }}
         run: |
           release=false; push=false; channel=none
-          ref="${CALL_REF:-${RUN_SHA:-$GITHUB_SHA}}"
+          ref="${CALL_REF:-$GITHUB_SHA}"
           amd64='{"arch":"amd64","platform":"linux/amd64","runner":"ubuntu-latest","cache":"main","regcache":"buildcache"}'
           arm64='{"arch":"arm64","platform":"linux/arm64","runner":"ubuntu-24.04-arm","cache":"main-arm64","regcache":"buildcache-arm64"}'
           matrix="{\"include\":[$amd64]}"
           if [ -n "$VERSION" ]; then
             release=true; push=true; channel=release
             matrix="{\"include\":[$amd64,$arm64]}"
-          elif [ "$EVENT" = "workflow_run" ]; then
+          elif [ "$EVENT" = "push" ]; then
             push=true; channel=main
           elif [ "$EVENT" = "workflow_dispatch" ] && [ "$DISPATCH_PUSH" = "true" ]; then
             push=true; channel=dispatch

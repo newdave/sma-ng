@@ -86,6 +86,9 @@ indent-width = 2
 
 [tool.ruff.format]
 indent-style = "space"
+# ruff 0.17 formats Python code blocks in Markdown with the 2-space project
+# indent; docs and vendored skills keep the conventional 4-space examples.
+exclude = ["*.md"]
 
 [tool.ruff.lint]
 # Phase 1 (T7) of the QSV refactor program: expanded ruleset for security,

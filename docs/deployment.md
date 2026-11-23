@@ -508,15 +508,20 @@ See also:
 
 | Workflow      | Trigger                                  | Description                                                                 |
 | ------------- | ---------------------------------------- | --------------------------------------------------------------------------- |
-| `ci.yml`      | PR / push to main                        | Tests + coverage gates, pre-commit lint, OpenAPI/docs/config checks, runtime `pip-audit` |
-| `docker.yml`  | PR (image paths); CI passed on main; called by release | Build and smoke test the image; Trivy scan and push only for main and releases |
+| `ci.yml`      | PR / push to main                        | Tests + coverage gates, pre-commit lint, OpenAPI/docs/config checks, runtime `pip-audit`; on main, the main image |
+| `docker.yml`  | PR (image paths); called by CI and release | Build and smoke test the image; Trivy scan and push only for main and releases |
 | `release.yml` | Push to main; manual with `tag`          | release-please PR + version bump; on release: wheel/sdist + release image   |
 | `codeql.yml`  | PR (Python changes) / weekly             | CodeQL static analysis (results in the Security tab)                        |
 
+Every job installs Python through the shared `.github/actions/setup-python` action, which reads `.python-version`;
+workflows never name a Python version, so Renovate cannot move CI off the project runtime. Concurrency: a new push
+to a PR cancels that PR's running checks; runs on `main` and release runs queue instead, so every `main` commit gets
+a result and a release is never interrupted.
+
 Docker images are built and pushed only by `docker.yml`; there is no local push task. A push to `main` builds the
-image only after CI passes on that commit, and every image is smoke-tested before it is pushed, so `latest` never
-carries code that failed CI. Hosts then pick the image up with `mise run deploy:remote`. Trivy findings are
-report-only (Security tab) for now. Each platform builds and is smoke-tested on a native runner (arm64 on
+image in the same CI run, only after its test and lint jobs pass, and every image is smoke-tested before it is
+pushed, so `latest` never carries code that failed CI. Hosts then pick the image up with `mise run deploy:remote`.
+Trivy findings are report-only (Security tab) for now. Each platform builds and is smoke-tested on a native runner (arm64 on
 `ubuntu-24.04-arm`, not QEMU emulation) and is pushed untagged by digest; a final job publishes one multi-arch
 manifest under the tags.
 
@@ -557,7 +562,9 @@ daemon's `/health` endpoint is baked into the image from the latest tag at build
 
 To rebuild a release's wheel, sdist and image (for example after a failed run), dispatch the Release workflow
 with the tag: `gh workflow run release.yml -f tag=sma-ng-vX.Y.Z`. Events created with the default `GITHUB_TOKEN`
-never start other workflows, so the Release PR gets no CI checks. Adding a `RELEASE_PLEASE_TOKEN` repository
+never start other workflows, so the Release PR gets no CI checks. When its events do start them, a patch Release
+PR is merged before they begin, so CI, Docker and CodeQL show a failed run with no jobs on the
+`release-please--…` branch; that is expected and needs no action. Adding a `RELEASE_PLEASE_TOKEN` repository
 secret (a GitHub App or fine-grained token with contents and pull-requests write) lets release-please's PRs and
 tags trigger CI normally.
 
