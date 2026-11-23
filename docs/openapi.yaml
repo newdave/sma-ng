@@ -3,8 +3,15 @@ info:
   title: SMA-NG Daemon API
   description: |
     HTTP webhook server for media conversion automation.
-    Authentication is optional; when an API key is configured all endpoints
-    except `/health`, `/status`, `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, and `/docs` require it.
+
+    Authentication is optional. When an API key (or HTTP Basic credentials) is configured, every endpoint
+    requires it except the public ones: `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, `/docs` and
+    `/docs/{page}`, `/favicon.png`, `/health` and `/status`. `/health` and `/status` answer without credentials
+    with a minimal view that hides node ids and job paths. Send the key as `X-API-Key: <key>` or
+    `Authorization: Bearer <key>`.
+
+    Request bodies larger than 1 MiB are rejected with `413`. A non-integer or negative `limit`, `offset`, `days`
+    or `lines` value returns `400`. Any unknown path returns `404`.
   version: "1.0.0"
 
 servers:
@@ -119,9 +126,27 @@ components:
           format: date-time
           nullable: true
         progress:
-          type: string
+          type: object
           nullable: true
-          description: Current timecode (e.g. "00:12:34") when status is running
+          description: Live conversion progress, present only on GET /jobs/{id} while the job is running
+          properties:
+            elapsed:
+              type: string
+              description: Time spent on the conversion, as HH:MM:SS
+            timecode:
+              type: string
+              description: Output position reached, as HH:MM:SS
+            percent:
+              type: number
+              description: Percent complete, when the source duration is known
+            fps:
+              type: number
+            speed:
+              type: string
+              example: 1.25x
+            bitrate:
+              type: string
+              example: 4210.5k
         priority:
           type: integer
           default: 0
@@ -205,6 +230,7 @@ components:
         running: 1
         completed: 150
         failed: 2
+        cancelled: 0
         total: 156
 
     Error:
@@ -328,8 +354,9 @@ paths:
     get:
       summary: Daemon health check
       description: >-
-        Without credentials returns a minimal liveness view (status, version, uptime_seconds, jobs). With a
-        valid API key returns the full detail (node, commit, workers, active and waiting jobs, hardware).
+        Without credentials, or with a wrong key, returns a minimal liveness view (status, version, uptime_seconds,
+        jobs) and never a 401. With a valid API key returns the full detail (node, commit, workers, active and
+        waiting jobs, hardware). The minimal view hides the node id and every job path.
       security:
         - {}
         - apiKey: []
@@ -376,6 +403,20 @@ paths:
                   waiting:
                     type: object
                     description: Map of config path → waiting job count
+                  gpu_status:
+                    type: string
+                    description: Authenticated callers only. Hardware acceleration health, or "unknown"
+                  selected_backend:
+                    type: string
+                    description: Authenticated callers only. Encoder backend in use, for example qsv or software
+                  capabilities:
+                    type: object
+                    description: Authenticated callers only. Detected encoder capabilities
+                  fallback:
+                    type: array
+                    description: Authenticated callers only. Per-tier hardware fallback counters
+                    items:
+                      type: object
 
   /metrics:
     get:
@@ -400,8 +441,8 @@ paths:
     get:
       summary: Cluster status
       description: >-
-        Without credentials returns a minimal view (status, version, job counts). With a valid
-        API key returns full cluster detail (nodes, hosts, active jobs).
+        Without credentials, or with a wrong key, returns a minimal view (status, version, job counts). With a
+        valid API key returns full cluster detail (nodes, hosts, active jobs).
       security:
         - {}
         - apiKey: []
@@ -552,6 +593,28 @@ paths:
           in: query
           schema:
             type: string
+        - name: search
+          in: query
+          description: Match part of the job path. A search ignores offset and returns at least 200 rows.
+          schema:
+            type: string
+        - name: profile
+          in: query
+          description: Only jobs queued with this routing profile. `library` is an alias.
+          schema:
+            type: string
+        - name: library
+          in: query
+          description: Alias of `profile`.
+          schema:
+            type: string
+        - name: sort
+          in: query
+          description: Sort order. An unknown value falls back to `created`.
+          schema:
+            type: string
+            enum: [created, created_asc, priority, profile, library, status]
+            default: created
         - name: limit
           in: query
           description: Page size. Values above 500 are clamped to 500. Job rows omit ffmpeg_stderr and output (use the per-job endpoints).
@@ -628,6 +691,14 @@ paths:
                 $ref: "#/components/schemas/Error"
         "409":
           description: A cluster node does not support job kinds yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: Request body is larger than 1 MiB
+        "500":
+          description: Internal error, for example a failing routing-profile lookup. The caller should retry.
           content:
             application/json:
               schema:
@@ -794,6 +865,12 @@ paths:
                     type: boolean
                   job_id:
                     type: integer
+        "400":
+          description: Invalid job ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "404":
           description: Job not found
           content:
@@ -839,6 +916,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Job cannot be cancelled (only pending or running jobs can be)
           content:
             application/json:
               schema:
@@ -989,7 +1072,9 @@ paths:
   /webhook/generic:
     post:
       summary: Submit a conversion job (file or directory)
-      description: Plain-text body (the path) or JSON. A directory queues one job per media file.
+      description: >
+        Plain-text body (the path) or JSON. A directory queues one job per media file. The path must lie inside
+        a configured media root. An optional `X-SMA-Request-Source` header labels the request in the metrics.
       operationId: submitGeneric
       tags: [jobs]
       requestBody:
@@ -1033,11 +1118,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "413":
+          description: Request body is larger than 1 MiB
+        "500":
+          description: Unexpected error, such as a failing routing-profile lookup. The caller should retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /convert:
     post:
-      summary: Submit a conversion job (file or directory)
-      description: Plain-text body (the path) or JSON. A directory queues one job per media file.
+      summary: Submit a conversion job (alias of /webhook/generic)
+      description: Same behaviour as POST /webhook/generic. POST / is a second alias.
       operationId: submitConvert
       tags: [jobs]
       requestBody:
@@ -1068,11 +1161,168 @@ paths:
                   job_id:
                     type: integer
         "400":
+          description: >
+            Invalid request or path, forbidden args, a config that is not the daemon's own, or a path with no
+            routing match while daemon.strict-routing is true
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Path is outside the configured media roots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /:
+    get:
+      summary: Redirect to the dashboard
+      operationId: getRoot
+      tags: [web]
+      security:
+        - {}
+      responses:
+        "301":
+          description: Redirects to /dashboard
+    post:
+      summary: Submit a conversion job (alias of /webhook/generic)
+      description: Same behaviour as POST /webhook/generic.
+      operationId: submitRoot
+      tags: [jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenericSubmit"
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "202":
+          description: Queued
+        "200":
+          description: Duplicate or skipped
+        "400":
           description: Invalid request or path
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          description: Path is outside the configured media roots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /dashboard:
+    get:
+      summary: Web dashboard
+      description: HTML shell. It loads its data from the authenticated API and asks for the API key in a dialog.
+      operationId: getDashboard
+      tags: [web]
+      security:
+        - {}
+      responses:
+        "200":
+          description: Dashboard page
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /dashboard/metrics:
+    get:
+      summary: Metrics page
+      description: HTML shell. Its data comes from the authenticated GET /api/metrics.
+      operationId: getMetricsPage
+      tags: [web]
+      security:
+        - {}
+      responses:
+        "200":
+          description: Metrics page
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /admin:
+    get:
+      summary: Admin page
+      description: HTML shell for node management, cluster logs, the shared base config and destructive actions.
+      operationId: getAdminPage
+      tags: [web]
+      security:
+        - {}
+      responses:
+        "200":
+          description: Admin page
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /docs:
+    get:
+      summary: Documentation index
+      description: The operator documentation, rendered from the files shipped with the daemon.
+      operationId: getDocsIndex
+      tags: [web]
+      security:
+        - {}
+      responses:
+        "200":
+          description: Documentation page
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /docs/{page}:
+    get:
+      summary: Documentation page
+      description: Renders docs/<page>.md. `changelog` renders the release changelog.
+      operationId: getDocsPage
+      tags: [web]
+      security:
+        - {}
+      parameters:
+        - name: page
+          in: path
+          required: true
+          schema:
+            type: string
+            example: daemon
+      responses:
+        "200":
+          description: Documentation page
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          description: No such page
+
+  /favicon.png:
+    get:
+      summary: Logo image
+      operationId: getFavicon
+      tags: [web]
+      security:
+        - {}
+      responses:
+        "200":
+          description: PNG image
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Logo file not found
 
   /webhook/sonarr:
     post:
@@ -1175,6 +1425,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          description: Path is outside the configured media roots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Unexpected error. Sonarr or Radarr retries the webhook.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "502":
           description: Event forwarded to Autoscan but every instance failed or rejected it
           content:
@@ -1271,6 +1533,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          description: Path is outside the configured media roots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Unexpected error. Sonarr or Radarr retries the webhook.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "502":
           description: Event forwarded to Autoscan but every instance failed or rejected it
           content:
@@ -1306,28 +1580,21 @@ paths:
                     type: array
                   default_pending_jobs:
                     type: integer
-                  path_configs:
+                  routing:
                     type: array
+                    description: The daemon.routing rules, longest match first
                     items:
                       type: object
                       properties:
-                        path:
+                        match:
                           type: string
-                        config:
+                        profile:
                           type: string
-                        default_args:
+                          nullable: true
+                        services:
                           type: array
                           items:
                             type: string
-                        log_file:
-                          type: string
-                        log_name:
-                          type: string
-                          description: Log name for this config (e.g. "sma-ng")
-                        active_jobs:
-                          type: array
-                        pending_jobs:
-                          type: integer
                   logs_directory:
                     type: string
 
@@ -1363,7 +1630,10 @@ paths:
   /reload:
     post:
       summary: Reload daemon configuration in-place
-      description: Re-reads the Daemon section from sma-ng.yml without restarting workers or active conversions.
+      description: >
+        Re-reads sma-ng.yml in the background without restarting workers or active conversions. The response
+        is immediate. A config that fails validation keeps the previous settings. The daemon also reloads
+        automatically when the file changes (daemon.config-watch).
       operationId: reload
       tags: [management]
       responses:
@@ -1381,12 +1651,22 @@ paths:
   /restart:
     post:
       summary: Gracefully restart the daemon
-      description: Waits for active conversions to finish, then re-execs the process.
+      description: >
+        Waits for active conversions to finish (up to daemon.shutdown-grace-seconds, then they are requeued),
+        then re-execs the process. In PostgreSQL mode the request queues a command instead: with `node` it targets
+        that node, without it every online node restarts.
       operationId: restart
       tags: [management]
+      parameters:
+        - name: node
+          in: query
+          required: false
+          description: Node id to restart (PostgreSQL mode only)
+          schema:
+            type: string
       responses:
         "202":
-          description: Restart initiated
+          description: Restart initiated, or queued for the targeted nodes
           content:
             application/json:
               schema:
@@ -1394,19 +1674,36 @@ paths:
                 properties:
                   status:
                     type: string
+                    description: "`restarting` for this daemon, `restart_requested` when queued for nodes"
                     example: restarting
                   active_jobs:
                     type: integer
+                    description: Jobs running on this daemon (local restart only)
+                  nodes:
+                    type: array
+                    description: Nodes that received the command (queued restart only)
+                    items:
+                      type: string
 
   /shutdown:
     post:
       summary: Gracefully shut down the daemon
-      description: Waits for active conversions to finish, then exits.
+      description: >
+        Waits for active conversions to finish (up to daemon.shutdown-grace-seconds, then they are requeued),
+        then exits. In PostgreSQL mode the request queues a command instead: with `node` it targets that node,
+        without it every online node shuts down.
       operationId: shutdown
       tags: [management]
+      parameters:
+        - name: node
+          in: query
+          required: false
+          description: Node id to shut down (PostgreSQL mode only)
+          schema:
+            type: string
       responses:
         "202":
-          description: Shutdown initiated
+          description: Shutdown initiated, or queued for the targeted nodes
           content:
             application/json:
               schema:
@@ -1414,16 +1711,25 @@ paths:
                 properties:
                   status:
                     type: string
+                    description: "`shutting_down` for this daemon, `shutdown_requested` when queued for nodes"
                     example: shutting_down
                   active_jobs:
                     type: integer
+                    description: Jobs running on this daemon (local shutdown only)
+                  nodes:
+                    type: array
+                    description: Nodes that received the command (queued shutdown only)
+                    items:
+                      type: string
 
   /admin/nodes/{nodeId}/{action}:
     post:
       summary: Perform an admin action on a cluster node
       description: |
-        Distributed-mode node management endpoint used by the admin UI.
-        Actions: approve, reject, restart, shutdown, delete.
+        Distributed-mode node management endpoint used by the admin page.
+        `approve` and `reject` set the approval state. `drain`, `pause`, `resume`, `restart` and `shutdown`
+        queue a command that the node runs on its next heartbeat. `delete` removes the node from the registry.
+        `push-config` stores this daemon's config (secrets stripped) as the shared cluster base config.
       operationId: adminNodeAction
       tags: [management]
       parameters:
@@ -1437,7 +1743,13 @@ paths:
           required: true
           schema:
             type: string
-            enum: [approve, reject, restart, shutdown, delete]
+            enum: [approve, reject, drain, pause, resume, restart, shutdown, delete, push-config]
+        - name: X-Actor
+          in: header
+          required: false
+          description: Name recorded as the requester (default `admin-ui`)
+          schema:
+            type: string
       requestBody:
         required: false
         content:
@@ -1450,19 +1762,211 @@ paths:
                   description: Optional approval or rejection note
       responses:
         "200":
-          description: Approval/rejection/delete completed
+          description: Approval, rejection, delete or push-config completed
           content:
             application/json:
               schema:
                 type: object
         "202":
-          description: Restart/shutdown command queued for the target node
+          description: Drain, pause, resume, restart or shutdown command queued for the target node
           content:
             application/json:
               schema:
                 type: object
+                properties:
+                  status:
+                    type: string
+                    example: drain_requested
+                  nodes:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: Invalid JSON body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "404":
           description: Node not found or unknown action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: push-config on a daemon that has no config file loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/config:
+    get:
+      summary: Read the shared cluster base config
+      description: Returns the base config stored in the database, or an empty object when none is stored.
+      operationId: getClusterConfig
+      tags: [management]
+      responses:
+        "200":
+          description: Stored base config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  config:
+                    type: object
+                    additionalProperties: true
+        "503":
+          description: Not in distributed (PostgreSQL) mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      summary: Store the shared cluster base config
+      description: >
+        Secrets (api-key, db-url, username, password, node-id and service credentials) are stripped before the
+        config is stored. The body may be `{"config": {...}}` or the config object itself.
+      operationId: setClusterConfig
+      tags: [management]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Config saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: saved
+        "400":
+          description: Invalid JSON, or the config is not an object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Not in distributed (PostgreSQL) mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/delete-failed:
+    post:
+      summary: Delete every failed job
+      description: Permanent. The deleted jobs still count toward the lifetime totals.
+      operationId: deleteFailedJobs
+      tags: [management]
+      responses:
+        "200":
+          description: Jobs deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+
+  /admin/delete-offline-nodes:
+    post:
+      summary: Delete every node that is not online
+      operationId: deleteOfflineNodes
+      tags: [management]
+      responses:
+        "200":
+          description: Nodes deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+
+  /admin/delete-all-jobs:
+    post:
+      summary: Delete every job
+      description: Permanent. Finished jobs still count toward the lifetime totals. Running jobs are not counted.
+      operationId: deleteAllJobs
+      tags: [management]
+      responses:
+        "200":
+          description: Jobs deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+
+  /cluster/logs:
+    get:
+      summary: Aggregated cluster logs
+      description: Log entries from every node, newest first. PostgreSQL only.
+      operationId: getClusterLogs
+      tags: [logs]
+      parameters:
+        - name: node_id
+          in: query
+          schema:
+            type: string
+        - name: level
+          in: query
+          schema:
+            type: string
+            enum: [DEBUG, INFO, WARNING, ERROR, CRITICAL]
+        - name: limit
+          in: query
+          description: Page size, capped at 500
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        node_id:
+                          type: string
+                        level:
+                          type: string
+                        logger:
+                          type: string
+                        message:
+                          type: string
+                        timestamp:
+                          type: string
+                          format: date-time
+                  total:
+                    type: integer
+                    description: Number of entries returned
+        "503":
+          description: Not in distributed (PostgreSQL) mode
           content:
             application/json:
               schema:
@@ -1633,8 +2137,9 @@ paths:
           in: query
           schema:
             type: integer
-            default: 200
-          description: Maximum lines to return (tail of file)
+            default: 500
+            maximum: 2000
+          description: Maximum entries to return (newest first kept; ignored when offset is given)
         - name: level
           in: query
           schema:
@@ -1645,7 +2150,7 @@ paths:
           in: query
           schema:
             type: integer
-          description: Filter entries to a specific job; scans the live log and rotated backups (.1 to .5), keeping the newest `lines` matches
+          description: Filter entries to a specific job. Scans the live log and the rotated backups (.1 to .5), so jobs that scrolled out of the tail still return their entries (oldest first, newest `lines` kept)
         - name: offset
           in: query
           schema:
@@ -1665,8 +2170,14 @@ paths:
                       $ref: "#/components/schemas/LogEntry"
                   file_size:
                     type: integer
+        "400":
+          description: Invalid lines or offset value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "404":
-          description: Log file not found
+          description: Unknown log name, or a file that resolves outside the logs directory
           content:
             application/json:
               schema:
@@ -1713,8 +2224,14 @@ paths:
                       $ref: "#/components/schemas/LogEntry"
                   file_size:
                     type: integer
+        "400":
+          description: The offset parameter is missing or invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "404":
-          description: Log file not found
+          description: Unknown log name, or a file that resolves outside the logs directory
           content:
             application/json:
               schema:
@@ -1738,7 +2255,9 @@ paths:
             default: 0
       responses:
         "200":
-          description: Paginated list of audit runs (most recent first)
+          description: >
+            Paginated list of audit runs (most recent first). On a SQLite daemon the list is empty and the body
+            carries `available: false` with a reason.
           content:
             application/json:
               schema:
@@ -1795,6 +2314,12 @@ paths:
                       type: string
         "400":
           description: No audit paths supplied or configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Library audit needs PostgreSQL cluster mode
           content:
             application/json:
               schema:
@@ -1857,7 +2382,9 @@ paths:
             default: 0
       responses:
         "200":
-          description: Paginated findings list
+          description: >
+            Paginated findings list. On a SQLite daemon the list is empty and the body carries
+            `available: false` with a reason.
           content:
             application/json:
               schema:
@@ -1925,6 +2452,8 @@ paths:
                     type: integer
         "404":
           description: Finding not found
+        "409":
+          description: Library audit needs PostgreSQL cluster mode
 
   /library/findings/{id}/dismiss:
     post:
@@ -1952,6 +2481,8 @@ paths:
                     type: integer
         "404":
           description: Finding not found
+        "409":
+          description: Library audit needs PostgreSQL cluster mode
 
   /library/findings/{id}/resolve:
     post:
@@ -1979,3 +2510,5 @@ paths:
                     type: integer
         "404":
           description: Finding not found
+        "409":
+          description: Library audit needs PostgreSQL cluster mode
