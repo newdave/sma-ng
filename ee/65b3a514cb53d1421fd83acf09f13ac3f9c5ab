@@ -1,0 +1,90 @@
+tests/test_mediaprocessor_pipeline_fixes.py
+  s_bb9afa71bee21f::t_4a219312b40971 399,450
+resources/daemon/db.py
+  s_bb9afa71bee21f::t_4a219312b40971 498-580,696,1065,1067-1068,1071-1079,1100-1102,1280,1293,1308,1548,2109,2112,2114,2118-2127,2144-2150,2317-2331,2335-2336,2339-2340,2380,2870,2887,2907
+scripts/sync_agent_mirrors.py
+  s_bb9afa71bee21f::t_4a219312b40971 1-106
+.agents/skills/creating-subagents/skill.md
+  s_bb9afa71bee21f::t_4a219312b40971 3
+resources/daemon/handler.py
+  s_bb9afa71bee21f::t_4a219312b40971 19,30,35,204-211,760-764,1030-1048,1518-1522,1561,1864-1868,1966-1970
+tests/js_helpers/auth_shim_harness.js
+  s_bb9afa71bee21f::t_4a219312b40971 1-39
+tests/test_queueing.py
+  s_bb9afa71bee21f::t_4a219312b40971 1,18,23,128,200,205-265
+docs/deployment.md
+  s_bb9afa71bee21f::t_66f92d47586793 32
+resources/daemon/queueing.py
+  s_bb9afa71bee21f::t_4a219312b40971 78-124,126-129
+resources/mediaprocessor.py
+  s_bb9afa71bee21f::t_4a219312b40971 5493-5494,5504-5508,5516
+.codex/hooks.json
+  s_bb9afa71bee21f::t_4a219312b40971 8
+tests/test_interrupted_requeue.py
+  s_bb9afa71bee21f::t_4a219312b40971 274,305
+tests/test_webui_auth_shim.py
+  s_bb9afa71bee21f::t_4a219312b40971 1-49
+pyproject.toml
+  s_bb9afa71bee21f::t_4a219312b40971 7
+converter/__init__.py
+  s_bb9afa71bee21f::t_4a219312b40971 314,337-339,371-374
+.release-please-manifest.json
+  s_bb9afa71bee21f::t_4a219312b40971 2
+tests/test_mediaprocessor.py
+  s_bb9afa71bee21f::t_4a219312b40971 4060,5315,5336,5371,5408,5444,5490,5511,5537,5557,7770,7791,7826,7863,7899,7932,7952,9713,9733-9766,9789,9828,9877,9918
+.codex/agents/config-schema-reviewer.toml
+  s_bb9afa71bee21f::t_4a219312b40971 6,36
+AGENTS.md
+  s_bb9afa71bee21f::t_4a219312b40971 109-111
+docs/configuration.md
+  s_bb9afa71bee21f::t_66f92d47586793 84
+.pre-commit-config.yaml
+  s_bb9afa71bee21f::t_4a219312b40971 6
+tests/test_handler.py
+  s_bb9afa71bee21f::t_4a219312b40971 624,644,688,703,718,729,743,754,765,776,784,795,1609,3410-3479
+docs/openapi.yaml
+  s_bb9afa71bee21f::t_4a219312b40971 196-200,444,455-539,623-628,1030-1035,1338
+.mise/tasks/dev/agents
+  s_bb9afa71bee21f::t_4a219312b40971 1-7
+CHANGELOG.md
+  s_bb9afa71bee21f::t_4a219312b40971 3-22
+tests/test_agent_mirrors.py
+  s_bb9afa71bee21f::t_4a219312b40971 1-80
+docs/daemon.md
+  s_bb9afa71bee21f::t_66f92d47586793 78,90,386
+  s_bb9afa71bee21f::t_4a219312b40971 162-167,798-799,804-828,834
+.claude/hooks/skill-reminder.sh
+  s_bb9afa71bee21f::t_4a219312b40971 1-37
+tests/test_ffmpeg_extended.py
+  s_bb9afa71bee21f::t_4a219312b40971 367,428,543-632
+CLAUDE.md
+  s_bb9afa71bee21f::t_4a219312b40971 196-199,204-205,208
+.claude/settings.json
+  s_bb9afa71bee21f::t_4a219312b40971 26
+converter/ffmpeg.py
+  s_bb9afa71bee21f::t_4a219312b40971 10,24-65,937-938,945,954,960,962,964,980-981,988,996-997
+tests/test_job_stats_archive.py
+  s_bb9afa71bee21f::t_4a219312b40971 1-315
+tests/test_worker.py
+  s_bb9afa71bee21f::t_4a219312b40971 5,1259
+.agents/skills/creating-skills/skill.md
+  s_bb9afa71bee21f::t_4a219312b40971 3,13
+resources/daemon/routes.py
+  s_bb9afa71bee21f::t_4a219312b40971 127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "ee65b3a514cb53d1421fd83acf09f13ac3f9c5ab",
+  "prompts": {},
+  "sessions": {
+    "s_bb9afa71bee21f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11944d23-c69e-4bdd-b6ea-a53dcb231d65",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
