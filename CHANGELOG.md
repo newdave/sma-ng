@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.54](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.53...sma-ng-v3.2.54) (2026-11-23)
+
+
+### Features
+
+* show source/output file sizes and shrink or growth per job ([f6e1cc1](https://github.com/newdave/sma-ng/commit/f6e1cc1d07c1914d4f2c47cafd4ce947842b8a8a))
+
 ## [3.2.53](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.52...sma-ng-v3.2.53) (2026-11-23)
 
 
