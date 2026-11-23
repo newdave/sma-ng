@@ -5,27 +5,27 @@ Configuration lives in `config/sma-ng.yml` (YAML). Copy from
 `mise run config:generate`. Use command-specific `-c/--config` flags where
 available to load a different file.
 
-INI-format configs and flat-shape YAML are not supported. Pointing
-SMA-NG at a `.ini` file or a flat-shape YAML (top-level `converter:`,
-`video:`, etc.) fails fast at startup with a pointer to this document.
+INI-format configs and flat-shape YAML (top-level `converter:`, `video:` and so on) are not supported. Pointing
+SMA-NG at either one fails at startup with an error that refers to this document. If you are coming from the
+original sickbeard_mp4_automator, see the [Migration Guide](migration.md).
 
 ## Four-bucket layout
 
 `sma-ng.yml` has exactly four top-level keys:
 
 ```yaml
-daemon:    # daemon-only runtime settings (host, port, db-url, routing, …)
-base:      # default media-conversion settings (converter, video, audio, …)
+daemon:    # daemon-only runtime settings (host, port, db-url, routing, ...)
+base:      # default media-conversion settings (converter, video, audio, ...)
 profiles:  # named per-section overlays applied on top of base
-services:  # Sonarr / Radarr / Plex / Emby / Jellyfin / Autoscan instances, keyed by name
+services:  # Sonarr, Radarr, Plex, Emby, Jellyfin and Autoscan instances, keyed by name
 ```
 
-`manual.py` reads only `base`, `profiles`, and `services` (it ignores
-the `daemon` block). The daemon reads everything.
+`manual.py` reads only `base`, `profiles` and `services`, and ignores the `daemon` block. The daemon reads
+everything. All keys use kebab-case.
 
-Routing rules under `daemon.routing` map a file's path to a profile name
-and to one or more service instances; full semantics are in the
-[Daemon Mode reference](daemon.md#path-routing). Quick example:
+The daemon routes each job by its file path. Rules under `daemon.routing` map a path prefix to a profile name and to
+the service instances to notify; the full semantics are in the [Daemon Mode reference](daemon.md#path-routing).
+Example:
 
 ```yaml
 daemon:
@@ -38,28 +38,34 @@ daemon:
       services: [sonarr.kids]
 ```
 
-The longest matching prefix wins; an unmatched path falls through to
-`base` with no profile and no service notification.
+The longest matching prefix wins. A path that matches no rule falls through to `base` with no profile and no service
+notification, unless `daemon.strict-routing` is set, in which case the job is refused.
 
-The schema is the single source of truth for defaults and types; every
-YAML key is validated by pydantic at load. Unknown keys are accepted
-but logged as `WARNING Unknown config key: <dotted.path>` so typos
-surface immediately. Sample regeneration (`mise run config:sample`)
-and the `config-sample-consistency` CI job keep the committed sample
-locked to the schema.
+`daemon.routing` is the only place the daemon reads routes from. Service instances carry no `path` or `profile`
+field in `sma-ng.yml`. If you deploy with `mise run deploy:config`, you instead declare `path` and `profile` (or a
+`routes` list) on each service instance in `setup/local.yml`, and the task generates `daemon.routing` for you; a
+`daemon.routing` block written in `setup/local.yml` only adds rules for plain folders that no service manages. See
+the [deployment configuration reference](deployment.md#configuration).
 
-The downloader sections (`SABNZBD`, `Deluge`, `qBittorrent`, `uTorrent`)
-that used to live here are removed — those integrations are now
-shell-trigger-only and configured in `triggers/`. See
-[Integrations](integrations.md).
+The schema in `resources/config_schema.py` is the single source of truth for defaults and types, and pydantic
+validates every key at load. Unknown keys are accepted but logged as `WARNING Unknown config key: <dotted.path>`, so
+typos surface immediately; `mise run config:validate` reports them as well. `mise run config:sample` regenerates
+`setup/sma-ng.yml.sample` from the schema, and the `config-sample-consistency` CI job keeps the committed sample in
+step with it.
+
+The daemon never reads `SMA_*` environment variables for runtime configuration. Daemon settings resolve from a CLI
+flag, then `sma-ng.yml`, then the default.
+
+Downloader integrations (SABnzbd, NZBGet, Deluge, qBittorrent, uTorrent) have no configuration block. They are shell
+triggers under `triggers/`; see [Integrations](integrations.md).
 
 ---
 
 ## daemon
 
 Daemon-only runtime settings. `manual.py` ignores this block. Resolution order is CLI flag, then `sma-ng.yml`,
-then the default below; the daemon reads no `SMA_*` environment variables (the Docker image's CMD shim maps
-`SMA_WORKERS` to `--workers`; see [Daemon Mode](daemon.md#environment-variables)). The full behavioural reference is in
+then the default below. The daemon reads no `SMA_*` environment variables; the only exception is in the Docker
+image, whose CMD shim maps `SMA_WORKERS` to `--workers` (see [Daemon Mode](daemon.md#environment-variables)). The full behavioural reference is in
 [Daemon Mode](daemon.md).
 
 | Option | Type | Default | Description |
@@ -81,7 +87,7 @@ then the default below; the daemon reads no `SMA_*` environment variables (the D
 | `recycle-bin-max-age-days` | int | `30` | Delete recycle-bin media older than this many days (`0` = disabled) |
 | `recycle-bin-min-free-gb` | int | `50` | Delete oldest recycle-bin media when free space drops below this many GiB (`0` = disabled) |
 | `job-dedupe-window-seconds` | int | `21600` | Skip a path whose job completed within this many seconds (`0` = disabled); pending and running duplicates are always skipped |
-| `job-retention-days` | int | `0` | Opt-in: delete finished jobs older than this many days, hourly. `0` (default) keeps job history forever. A positive value permanently deletes job rows (lifetime `/stats` totals are kept); spares the dedupe window |
+| `job-retention-days` | int | `0` | Opt-in: delete finished jobs older than this many days, checked hourly. `0` (the default) keeps job history forever. A positive value permanently deletes job rows, but the lifetime job totals reported by `/stats` are kept; jobs inside the dedupe window are never deleted |
 | `log-ttl-days` | int | `30` | Cluster mode: retention of log rows in PostgreSQL (`0` = never clean up) |
 | `node-expiry-days` | int | `7` | Cluster mode: hard-delete offline nodes after this many days (`0` = disabled) |
 | `log-archive-dir` | path | empty | Cluster mode: directory for gzipped JSONL log archives (empty = archival disabled) |
@@ -96,13 +102,23 @@ then the default below; the daemon reads no `SMA_*` environment variables (the D
 | `strict-routing` | bool | `false` | Refuse jobs whose path matches no `routing` rule |
 | `scan-paths` | list | `[]` | Scheduled scans. Entries: `path`, `interval` (seconds, must be `>= 1`, default `3600`), `enabled`, `rewrite-from`, `rewrite-to` |
 | `path-rewrites` | list | `[]` | Prefix substitutions (`from`, `to`) applied before routing. A prefix matches only at a directory boundary (`/mnt/tv` rewrites `/mnt/tv/x` but not `/mnt/tvshows/x`) |
-| `routing` | list | `[]` | Path rules (`match`, `profile`, `services`). `match` must not be empty or `/` (it would match every path and defeat `strict-routing`); an explicit glob catch-all such as `**` is still accepted |
+| `routing` | list | `[]` | Path rules (`match`, `profile`, `services`). `match` must not be empty or `/` (it would match every path and defeat `strict-routing`); an explicit glob catch-all such as `**` is still accepted. Every `profile` and every `<type>.<instance>` in `services` must exist, or the daemon refuses to start. Routing rules, scan paths and path-rewrite targets also define the media roots (see below) |
 | `config-watch.enabled` | bool | `true` | Reload the config automatically when the file changes |
 | `config-watch.interval-seconds` | int | `5` | Polling interval (`0` disables the watcher) |
 | `config-watch.debounce-seconds` | int | `2` | Quiet period after a change before reloading |
 | `audit.*` | block | disabled | Library audit: `enabled`, `paths`, `interval-seconds`, `skip-dirs`, `concurrency`, `batch-size`, `claim-stale-seconds`, `dry-run`, `auto-fix.*`. See [Library Audit](library-audit.md#configuration-sma-ngyml) |
 
 Values outside the documented ranges are rejected at load with a validation error naming the offending key.
+
+**Media roots.** The daemon accepts a submitted path (`POST /jobs` and every `/webhook/*` endpoint) only when its
+real path lies inside a configured media root: a `routing` match, a `scan-paths` entry, or either end of a
+`path-rewrites` entry. A request for a path outside every root, including one that escapes through `..` or a symlink,
+is refused with HTTP `403` and `Path is outside configured media roots`. A daemon with no roots configured accepts
+any path. See [Daemon Mode](daemon.md) for details.
+
+**Lifetime totals.** Deleting finished jobs (retention, `POST /cleanup`, or the dashboard) does not reset the job
+counts: deleted `completed`, `failed` and `cancelled` rows are added to an archive that `/stats`, `/health` and the
+`all` metrics window include.
 
 ---
 
@@ -280,6 +296,12 @@ permits `hw_alt`, SMA-NG swaps `hevc_qsv`/`h264_qsv`/`av1_qsv` for the same-vend
 VAAPI encoder while preserving the (working) QSV decoder via a zero-copy
 `hwmap=derive_device=vaapi` bridge.
 
+On that swap, QSV-only flags are dropped, and so are the QSV-tuned `-low_power` and `-async_depth` values, because
+the same number can mean something different to the VAAPI encoder. Only the typed `video.vaapi.low-power` and
+`video.vaapi.async-depth` fields (or the HDR equivalents) send those two flags to the VAAPI encoder. When the
+configured encoder is VAAPI from the start (`gpu: vaapi`), `-low_power` and `-async_depth` in the encoder-agnostic
+`codec-parameters` are kept.
+
 Same operator promise as the QSV block: a VAAPI-only flag in this block
 can never leak onto a non-VAAPI command line. Unset fields inherit from
 `base.video.*` at runtime.
@@ -291,6 +313,7 @@ can never leak onto a non-VAAPI command line. Unset fields inherit from
 | `rc-mode` | string | `''` | VAAPI rate-control mode (`VBR`, `CBR`, `CQP`). `''` = inherit from `codec-parameters` if `-rc_mode` is set there, otherwise the encoder default fires. |
 | `compression-level` | int | `0` | `-compression_level` (VAAPI-specific quality/speed tuning). `0` = don't emit. |
 | `low-power` | int | `-1` | `-low_power` for VAAPI (semantics differ from QSV's flag of the same name). `-1` = don't emit. |
+| `async-depth` | int | `0` | `-async_depth` pipeline depth for VAAPI. `0` = don't emit. |
 | `look-ahead-depth` | int | `0` | Override `base.video.look-ahead-depth` for VAAPI. `0` = inherit. Mapped to VAAPI's own look-ahead control where supported. |
 | `global-quality` | int | `0` | Quality target for VAAPI. `0` = inherit. Translated to `-rc_mode CQP -qp <N>` because VAAPI has no direct equivalent of QSV's ICQ `-global_quality`; `av1_vaapi` gets `-rc_mode CQP -global_quality <N×5>` instead of `-qp`. |
 | `b-frames` | int | `-1` | B-frame override. `-1` = inherit from `base.video.b-frames`. |
@@ -318,9 +341,9 @@ Override video settings for HDR content (detected automatically).
 | ------------------ | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `codec` | list | Video codec for HDR content |
 | `pix-fmt` | list | Pixel format for HDR (e.g., `p010le`) |
-| `space` | list | Color space: `bt2020nc` |
-| `transfer` | list | Transfer function: `smpte2084` |
-| `primaries` | list | Color primaries: `bt2020` |
+| `space` | list | Color space. Default: `[bt2020nc]` |
+| `transfer` | list | Transfer function. Default: `[smpte2084]` |
+| `primaries` | list | Color primaries. Default: `[bt2020]` |
 | `preset` | string | Encoder preset override for HDR |
 | `profile` | string | Profile override for HDR |
 | `codec-parameters` | string | Extra params for HDR encoding |
@@ -368,6 +391,7 @@ from `base.hdr.*` (not `base.video.*`).
 | `rc-mode` | string | `''` | VAAPI rate-control mode for HDR encodes (`VBR`, `CBR`, `CQP`). |
 | `compression-level` | int | `0` | `-compression_level` for HDR. `0` = don't emit. |
 | `low-power` | int | `-1` | `-low_power` for HDR VAAPI. `-1` = don't emit. |
+| `async-depth` | int | `0` | `-async_depth` for HDR VAAPI. `0` = don't emit. |
 | `look-ahead-depth` | int | `0` | HDR look-ahead override. `0` = inherit from `base.hdr.look-ahead-depth`. |
 | `global-quality` | int | `0` | HDR quality target. `0` = inherit. Mapped to `-rc_mode CQP -qp <N>`; `av1_vaapi` gets `-rc_mode CQP -global_quality <N×5>` instead of `-qp`. |
 | `b-frames` | int | `-1` | HDR B-frame override. `-1` = inherit. |
@@ -470,9 +494,9 @@ base:
 
 | Option | Type | Description |
 | ----------------- | ---- | -------------------------------------------------- |
-| `sorting` | list | Sort order: `language, channels.d, map, d.comment` |
-| `default-sorting` | list | Sort order for default stream selection |
-| `codecs` | list | Codec priority for sorting |
+| `sorting` | list | Sort order. Default: `[language, channels.d, map, d.comment]` |
+| `default-sorting` | list | Sort order for default stream selection. Default: `[channels.d, map, d.comment]` |
+| `codecs` | list | Codec priority for sorting. Default: empty |
 
 ### base.audio.universal
 
@@ -647,7 +671,7 @@ daily show's broadcast year).
 
 | Option | Type | Default | Description |
 | ------- | ----- | ------- | --------------------------- |
-| `chmod` | octal | `0664` | File permissions for output |
+| `chmod` | octal string | `0664` | File permissions for output. Three or four octal digits; `mode` is accepted as an alias. A bare YAML integer such as `664` is read as those octal digits. An invalid string logs a warning and falls back to `0664` |
 | `uid` | int | `-1` | Owner UID (-1 = no change) |
 | `gid` | int | `-1` | Group GID (-1 = no change) |
 
@@ -838,12 +862,11 @@ services:
 ## services.sonarr / services.radarr
 
 Each service type is a map keyed by instance name. The instance name is
-referenced from `daemon.routing[].services` as `<type>.<instance>` —
-e.g. `sonarr.kids`, `radarr.4k`. The path-prefix derivation that drove
-multi-instance matching in the old INI shape is now expressed
-explicitly in routing rules. One instance can serve any number of
-routing rules — multiple library paths (each with its own profile) can
-point at the same Sonarr/Radarr server without duplicating instances.
+referenced from `daemon.routing[].services` as `<type>.<instance>`, for example
+`sonarr.kids` or `radarr.4k`. The path an instance serves comes from the routing
+rules that reference it. One instance can serve any number of routing rules, so
+several library paths (each with its own profile) can point at the same
+Sonarr or Radarr server without duplicating the instance.
 When deploying via `mise run deploy:config`, declare those paths as a
 `routes:` list on the instance in `setup/local.yml` and the rules are
 generated for you (see the
@@ -891,9 +914,8 @@ daemon:
       services: [radarr.4k]
 ```
 
-A service instance not referenced from any routing rule is still loaded
-and addressable from CLI tools, but no automatic notify happens for it
-(routing is the trigger).
+A service instance that no routing rule references is still loaded, but it has no path, so it is never selected by
+a path match and receives no automatic notification.
 
 Validation: every `<type>.<instance>` reference in routing must resolve
 to an existing entry in `services.<type>.<instance>`. A typo
@@ -903,19 +925,19 @@ to an existing entry in `services.<type>.<instance>`. A typo
 
 ## services.plex
 
-Plex instances follow the same map-by-name shape. The first instance
-named `main` (or otherwise the first defined) is what the conversion
-pipeline notifies.
+Plex instances follow the same map-by-name shape. Every instance with `refresh` or `plexmatch` enabled is
+used after a conversion. Plex instances are not selected by routing path. Instances with both options off are
+ignored.
 
-| Option | Type | Description |
-| ------------------------- | ------ | --------------------------------------------------------------------------------- |
-| `url` | string | Full base URL including scheme and port (e.g. `http://plex.local:32400`) |
-| `token` | string | Plex authentication token |
-| `refresh` | bool | Trigger library refresh after processing |
-| `ignore-certs` | bool | Skip SSL certificate verification |
-| `path-mapping` | string | Map SMA-NG paths to Plex library paths (`local=remote`, comma-separated) |
-| `plexmatch` | bool | Write `.plexmatch` files for matched media |
-| `username` / `servername` | string | Legacy username/password auth fields, kept so older configs load without warnings |
+| Option | Type | Default | Description |
+| ------------------------- | ------ | -------- | ------------------------------------------------------------------------------ |
+| `url` | string | required | Full base URL including scheme and port (e.g. `http://plex.local:32400`) |
+| `token` | string | | Plex authentication token |
+| `refresh` | bool | `false` | Trigger library refresh after processing |
+| `ignore-certs` | bool | `false` | Skip SSL certificate verification |
+| `path-mapping` | string | | Map SMA-NG paths to Plex library paths (`local=remote`, comma-separated) |
+| `plexmatch` | bool | `true` | Write `.plexmatch` files for matched media |
+| `username` / `servername` | string | | Legacy username/password auth fields, kept so older configs load without warnings |
 
 ```yaml
 services:
@@ -962,10 +984,9 @@ Notifies an [Autoscan](https://github.com/Cloudbox/autoscan) instance, including
 
 ## Downloader integrations
 
-Downloader integration (SABnzbd / Deluge / qBittorrent / uTorrent) is
-shell-trigger-only and configured under `triggers/`. There is no
-corresponding Python config block in `sma-ng.yml`. See
-[Integrations](integrations.md) for the trigger setup.
+Downloader integration (SABnzbd, NZBGet, Deluge, qBittorrent and uTorrent) works only through the shell scripts
+under `triggers/`. There is no corresponding block in `sma-ng.yml`. See [Integrations](integrations.md) for the
+trigger setup.
 
 ---
 
@@ -1019,16 +1040,16 @@ corresponding Python config block in `sma-ng.yml`. See
      fallback never exceeds `max-bitrate` (`[video-bitrate-fallback]`), and `min-bitrate` still raises it to the
      floor (`[video-min-bitrate]`).
 
-When `[Analyzer]` is enabled, the analyzer may additionally:
+When `base.analyzer` is enabled, the analyzer may additionally:
 
 1. reorder the configured codec pool before copy/transcode selection
 2. scale the planned bitrate with `bitrate_ratio_multiplier`
-3. apply a stricter bitrate ceiling than `[Video].max-bitrate`
+3. apply a stricter bitrate ceiling than `base.video.max-bitrate`
 4. append bounded filters and force re-encode when those filters require it
 
 ### Preview Output (`manual.py -oo`)
 
-The JSON preview now includes an `analyzer` object. It may be empty when the analyzer is disabled or produces no bounded recommendations. When populated, it lets you inspect proposed codec ordering, filters, presets, and force-reencode decisions before any conversion runs.
+The JSON preview includes an `analyzer` object. It may be empty when the analyzer is disabled or produces no bounded recommendations. When populated, it lets you inspect proposed codec ordering, filters, presets, and force-reencode decisions before any conversion runs.
 
 ### Audio Decision Tree
 
@@ -1036,6 +1057,6 @@ The JSON preview now includes an `analyzer` object. It may be empty when the ana
 2. Filter by `ignored-dispositions`
 3. Source codec in allowed list → **copy**; otherwise → **re-encode** to first codec
 4. Apply channel limits (`max-channels`), bitrate limits (`max-bitrate`)
-5. Sort by `[Audio.Sorting]` rules
+5. Sort by the `base.audio.sorting` rules
 6. Select default stream
 7. Optionally generate Universal Audio stream (stereo compatibility)
