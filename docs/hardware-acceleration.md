@@ -72,8 +72,9 @@ All hardware encoders use constant-quality rate control when no bitrate target a
 | VideoToolbox | `-q:v` (Apple Silicon only) | 65 |
 
 `global-quality` sets the value for the QSV encoders and for VAAPI AV1. For VAAPI AV1, the 1 to 51 value is
-converted to the encoder's 0 to 255 scale. The VAAPI H.264 and HEVC encoders and the NVENC encoders always use
-the default in the table. A bitrate target (VBR) and constant quality are mutually exclusive: if a bitrate target
+converted to the encoder's 0 to 255 scale. The VAAPI H.264 and HEVC encoders and the NVENC encoders ignore
+`global-quality` and start from the default in the table. A `-qp` value in `base.video.codec-parameters` reaches
+`h264_vaapi` and `hevc_vaapi` after that default, and FFmpeg uses the last `-qp` it sees. A bitrate target (VBR) and constant quality are mutually exclusive: if a bitrate target
 is set, `global-quality` is ignored.
 
 When `global-quality` is set, a re-encode that is not driven by bitrate (for example a pixel-format change, a
@@ -86,8 +87,8 @@ bitrate target and lets constant quality drive the encode:
 
 - Software x264 and x265, and VideoToolbox on Apple Silicon, keep a `max-bitrate` ceiling as a capped CRF.
 - Other encoders drop the VBV `maxrate` and `bufsize` values, because they reject or ignore VBV without a bitrate.
-- Encoders that have no constant-quality mode (VideoToolbox on Intel Macs, V4L2 M2M, OMX) get a conservative
-  target by output height: 20000 kbps for 2160p, 10000 for 1440p, 6000 for 1080p, 3000 for 720p and 1500 below
+- Encoders that have no constant-quality mode (for example VideoToolbox on Intel Macs, V4L2 M2M, OMX, and the
+  software `mpeg4`/`divx`, `theora`, `h263` and `flv` encoders) get a conservative target by output height: 20000 kbps for 2160p, 10000 for 1440p, 6000 for 1080p, 3000 for 720p and 1500 below
   that, never above `max-bitrate`.
 
 ## Bit Depth and Profile Matching
@@ -140,7 +141,10 @@ default value is not sent to FFmpeg, and `setup/sma-ng.yml.sample` leaves all of
 | `codec-parameters` | raw flags, QSV only | empty |
 
 The `qsv` block also accepts `preset`, `b-frames`, `ref-frames`, `global-quality`, `look-ahead-depth` and
-`extra-hw-frames`, which override the same fields on `base.video` when set.
+`extra-hw-frames`, but these fields do not currently override `base.video`: SMA-NG ignores them. Under `gpu: qsv`,
+only the typed flags in the table above, folded into `qsv.codec-parameters`, take effect. Set `preset`,
+`b-frames`, `ref-frames`, `global-quality`, `look-ahead-depth` and `extra-hw-frames` on `base.video` (or
+`base.hdr`) instead.
 
 ```yaml
 base:
@@ -162,8 +166,8 @@ Details about the flags:
 - SMA-NG adds `-extbrc 1` automatically for bitrate targets, because it is what makes `-look_ahead_depth` work on
   `hevc_qsv`.
 - `look-ahead-depth: N` emits `-look_ahead 1 -look_ahead_depth N`. When it is 0, `-look_ahead 0` is sent.
-- An encoder drops flags that belong to the other hardware family and logs one warning, instead of failing the
-  encode.
+- An encoder drops flags that belong to the other hardware family and logs one warning for each dropped flag,
+  instead of failing the encode.
 
 ### Auto-populated QSV decoders
 
@@ -187,7 +191,8 @@ An explicit list always wins over the automatic one.
 
 QSV needs spare hardware frames for look-ahead. SMA-NG passes `-extra_hw_frames` at input scope, using
 `max(20, look-ahead-depth + 4)`, capped at 100. Set `extra-hw-frames` on `base.video` (or `base.hdr`) to choose a
-value yourself.
+value yourself; an explicit value is capped at 100 as well. The pool is computed from `base.video` and `base.hdr`
+only, so `qsv.extra-hw-frames` has no effect.
 
 ### Tuning QSV HEVC for ICQ and HDR
 
@@ -240,13 +245,17 @@ Tune the encoder with `base.video.vaapi` (and `base.hdr.vaapi`):
 | --- | --- | --- |
 | `low-power` | `-low_power` (shared with QSV) | `-1` |
 | `async-depth` | `-async_depth` (shared with QSV) | `0` |
-| `rc-mode` | `-rc_mode` (for example `VBR`) | empty |
-| `compression-level` | `-compression_level` | `0` |
 | `codec-parameters` | raw flags, VAAPI only | empty |
 
-The block also accepts `preset`, `b-frames`, `ref-frames`, `global-quality`, `max-level` and `look-ahead-depth`.
+Under `gpu: vaapi`, only `low-power`, `async-depth` and `codec-parameters` of the `vaapi` block take effect.
+The block also accepts `rc-mode` and `compression-level`, but SMA-NG never sends them to FFmpeg. To set
+`-rc_mode` or `-compression_level`, write them in `vaapi.codec-parameters`, for example
+`codec-parameters: '-rc_mode VBR'`. The `max-level` field is not read at all. The fields `preset`, `b-frames`,
+`ref-frames`, `global-quality` and `look-ahead-depth` of the `vaapi` block apply only in the `hw_alt` fallback tier
+described below.
+
 SMA-NG reads the `vaapi` block only when the encoder that runs is a VAAPI encoder. A `vaapi:` block under
-`gpu: qsv` therefore has no effect until the `hw_alt` fallback tier swaps the encoder (see below).
+`gpu: qsv` therefore has no effect until the `hw_alt` fallback tier swaps the encoder.
 
 ---
 
@@ -262,7 +271,11 @@ base:
 Supported NVENC encoders: `h264_nvenc`, `h265_nvenc`, `av1nvenc`. With `gpu: nvenc`, SMA-NG uses the `cuda`
 hwaccel and the `cuvid` decoders (`hevc_cuvid`, `h264_cuvid`, `vp9_cuvid`, `av1_cuvid`, `vc1_cuvid`).
 `h264_nvenc_cuda` and `h265_nvenc_cuda` are variants that scale with `scale_cuda` instead of `scale_npp`.
-NVENC takes constant quality through `-qp`. It has no `qsv:` or `vaapi:` subblock.
+NVENC takes constant quality through `-qp`. It has no `qsv:` or `vaapi:` subblock. The NVENC encoders never emit
+`codec-parameters`, so raw FFmpeg flags that you put there are silently dropped for NVENC.
+
+With `gpu: nvenc`, the generic codec name `av1` currently fails, because it maps to an encoder name that SMA-NG
+does not register. Use `av1nvenc` explicitly: `codec: [av1nvenc]`.
 
 ---
 
@@ -285,22 +298,27 @@ bitrate target. On Intel Macs FFmpeg does not support `-q:v`, so SMA-NG always s
 
 - The first entry of `codec` is the encoder; later entries allow stream copy without re-encoding.
 - Generic names (`h265`, `hevc`, `h264`, `av1`) are mapped to the encoder of the selected backend, and the
-  original name stays in the list.
+  original name stays in the list. The one exception that does not work today is `av1` under `gpu: nvenc` (see
+  the NVENC section).
 - Hardware decode is used only when the decoder is in `hwaccel-decoders` and supports the source bit depth.
 
 ---
 
 ## Startup Validation
 
-When the daemon starts, it runs a short test encode for each hardware backend that a loaded config uses (the
-H.264 encoder of that backend). A failed test logs a warning, and startup continues:
+The daemon is designed to run a short test encode for each hardware backend that a loaded config uses (the H.264
+encoder of that backend). A failed test logs a warning, and startup continues. This check does not currently run
+for configs written in YAML, so you will not see these lines today; use `GET /health` and the capability probe
+below to check the hardware instead. The messages are:
 
 ```text
 Hardware encoder 'h264_qsv' validated OK
 Hardware encoder 'h264_qsv' (from config sma-ng.yml) does not appear to be available. Conversions may fail. Check driver/SDK installation.
 ```
 
-The test runs in the background and does not delay accepting connections.
+When it does run, the check is synchronous: it starts after the daemon logs that it is ready to accept
+connections and before the server begins serving, with a timeout of 15 seconds per probe, so it can delay the
+first request.
 
 Use `python daemon.py --smoke-test` to verify that every configured `sma-ng.yml` loads and generates options
 before you start the server.
@@ -440,8 +458,9 @@ base:
 
 Some rungs behave in special ways:
 
-- `hw_alt` exists only for QSV encoders (`h264qsv`, `h265qsv`, `av1qsv`). `vp9qsv` has no VAAPI counterpart. The
-  QSV decoder is kept, and its frames reach the VAAPI encoder through a zero-copy `hwmap=derive_device=vaapi`
+- `hw_alt` is meant for QSV encoders (`h264qsv`, `h265qsv`, `av1qsv`), and `vp9qsv` has no VAAPI counterpart. It
+  currently works only for HEVC (`h265qsv`): for `h264qsv` and `av1qsv` the swap maps to an encoder name that SMA-NG
+  does not register, and the attempt fails before FFmpeg runs. The QSV decoder is kept, and its frames reach the VAAPI encoder through a zero-copy `hwmap=derive_device=vaapi`
   bridge. This recovers from errors such as `Invalid FrameType:0` on Main10 sources without a software encode.
   For other encoders the rung is skipped.
 - A decode-side failure (`decoder_init_failed`) or a hardware filter failure (`filter_init_failed`) is also
@@ -461,8 +480,8 @@ The VAAPI encoder rejects some QSV options, so the swap rewrites the encoder set
 - Only the `vaapi` block can set them again. To keep `-low_power` or `-async_depth` on the VAAPI encode, set
   `base.video.vaapi.low-power` and `base.video.vaapi.async-depth`. The `preset`, `b-frames`, `ref-frames`,
   `look-ahead-depth`, `global-quality` and `codec-parameters` values of the `vaapi` block are applied as well.
-- A QSV `global-quality` becomes `-rc_mode CQP -qp N`. For AV1 it becomes `-rc_mode CQP -global_quality` on the
-  0 to 255 scale. This does not happen when a bitrate target is set or `-rc_mode` is already given.
+- A QSV `global-quality` becomes `-rc_mode CQP -qp N`. For AV1 the intended result is `-rc_mode CQP
+  -global_quality` on the 0 to 255 scale, but the AV1 swap does not currently work (see above). This does not happen when a bitrate target is set or `-rc_mode` is already given.
 
 #### When the ladder stops
 
@@ -478,8 +497,8 @@ The ladder stops at once, with no further tier, when another attempt cannot succ
 
 The log then shows `[attempt-ladder] stop: <reason>; no further tiers`.
 
-The deprecated boolean form still works, with one warning per daemon start. It will be removed in a future
-release:
+The deprecated boolean form still works. It logs a deprecation warning every time a job loads the config, not
+only once per daemon start. It will be removed in a future release:
 
 | Legacy YAML | Equivalent policy |
 | --- | --- |
