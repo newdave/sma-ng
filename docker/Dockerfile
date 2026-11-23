@@ -40,6 +40,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     # Build tools
     build-essential \
+    ccache \
     cmake \
     git \
     nasm \
@@ -76,23 +77,42 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # ── nv-codec-headers (NVENC/NVDEC — headers only, no CUDA needed at build time)
-RUN git clone --depth 1 --branch "${NV_CODEC_HEADERS_VERSION}" \
-    https://github.com/FFmpeg/nv-codec-headers /tmp/nv-codec-headers \
-    && cd /tmp/nv-codec-headers \
-    && make install PREFIX=/usr \
-    && rm -rf /tmp/nv-codec-headers
+# Sources live in BuildKit cache mounts (persisted across CI runs by
+# buildkit-cache-dance) so a layer-cache miss does not re-download them. Each
+# checkout/tarball is keyed by version and re-fetched when it fails validation.
+# An empty cache mount (plain build without a cache) just downloads.
+RUN --mount=type=cache,id=ffmpeg-src-${TARGETARCH},target=/var/cache/ffmpeg-src,sharing=locked \
+    src="/var/cache/ffmpeg-src/nv-codec-headers-${NV_CODEC_HEADERS_VERSION}" \
+    && if ! git -C "$src" rev-parse --verify HEAD >/dev/null 2>&1; then \
+    rm -rf "$src" \
+    && git clone --depth 1 --branch "${NV_CODEC_HEADERS_VERSION}" \
+    https://github.com/FFmpeg/nv-codec-headers "$src"; \
+    fi \
+    && make -C "$src" install PREFIX=/usr
 
 # ── FFmpeg 8.x ────────────────────────────────────────────────────────────────
-RUN wget -q "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -O /tmp/ffmpeg.tar.xz \
-    && tar -xf /tmp/ffmpeg.tar.xz -C /tmp \
-    && rm /tmp/ffmpeg.tar.xz \
+RUN --mount=type=cache,id=ffmpeg-src-${TARGETARCH},target=/var/cache/ffmpeg-src,sharing=locked \
+    tarball="/var/cache/ffmpeg-src/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
+    && if ! xz -t "$tarball" 2>/dev/null; then \
+    rm -f "$tarball" \
+    && wget -q "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -O "$tarball.part" \
+    && xz -t "$tarball.part" \
+    && mv "$tarball.part" "$tarball"; \
+    fi \
+    && tar -xf "$tarball" -C /tmp \
     && mv /tmp/ffmpeg-${FFMPEG_VERSION} /tmp/ffmpeg
 
 WORKDIR /tmp/ffmpeg
 
-# Build FFmpeg; --enable-libvpl (Intel QSV) is amd64-only
-RUN VPL_FLAG=$([ "$TARGETARCH" = "amd64" ] && echo "--enable-libvpl" || true); \
+# Build FFmpeg; --enable-libvpl (Intel QSV) is amd64-only.
+# Objects are cached by ccache in a BuildKit cache mount (persisted across CI
+# runs by buildkit-cache-dance), so a layer-cache miss recompiles only what changed.
+RUN --mount=type=cache,id=ffmpeg-ccache-${TARGETARCH},target=/var/cache/ccache,sharing=locked \
+    export CCACHE_DIR=/var/cache/ccache CCACHE_BASEDIR=/tmp/ffmpeg CCACHE_COMPILERCHECK=content; \
+    VPL_FLAG=$([ "$TARGETARCH" = "amd64" ] && echo "--enable-libvpl" || true); \
     ./configure \
+    --cc="ccache gcc" \
+    --cxx="ccache g++" \
     --prefix=/usr/local \
     --extra-cflags="-I/usr/local/include" \
     --extra-ldflags="-L/usr/local/lib" \
@@ -129,6 +149,7 @@ RUN VPL_FLAG=$([ "$TARGETARCH" = "amd64" ] && echo "--enable-libvpl" || true); \
     --enable-openssl \
     --enable-protocol=https \
     && make -j$(nproc) \
+    && ccache -s \
     && make install \
     && strip /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
 

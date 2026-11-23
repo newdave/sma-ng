@@ -725,3 +725,29 @@ class TestComposeOnePathPerFile:
         assert src == dst, (name, src, dst)
         seen += 1
     assert seen > 0
+
+
+class TestFFmpegBuildCaching:
+  def test_sources_use_cache_mount(self, dockerfile_raw):
+    assert "--mount=type=cache,id=ffmpeg-src-${TARGETARCH},target=/var/cache/ffmpeg-src" in dockerfile_raw
+    assert "xz -t" in dockerfile_raw  # cached tarball is validated before reuse
+
+  def test_ccache_wired_into_configure(self, dockerfile_raw):
+    assert "    ccache \\" in dockerfile_raw
+    assert "--mount=type=cache,id=ffmpeg-ccache-${TARGETARCH},target=/var/cache/ccache" in dockerfile_raw
+    assert '--cc="ccache gcc"' in dockerfile_raw
+    assert '--cxx="ccache g++"' in dockerfile_raw
+    assert "ccache -s" in dockerfile_raw
+
+  def test_workflow_persists_cache_mounts(self, docker_workflow):
+    steps = docker_workflow["jobs"]["build"]["steps"]
+    uses = [s.get("uses", "") for s in steps]
+    assert any(u.startswith("reproducible-containers/buildkit-cache-dance@") for u in uses)
+    saves = [s for s in steps if s.get("uses", "").startswith("actions/cache@")]
+    restores = [s for s in steps if s.get("uses", "").startswith("actions/cache/restore@")]
+    assert len(saves) == 1 and len(restores) == 1
+    assert saves[0]["if"] == "github.event_name != 'pull_request'"  # PRs never save
+    assert restores[0]["if"] == "github.event_name == 'pull_request'"
+    for step in (saves[0], restores[0]):
+      assert "hashFiles('docker/Dockerfile')" in step["with"]["key"]
+      assert "ffmpeg-${{ matrix.arch }}-" in step["with"]["restore-keys"]
