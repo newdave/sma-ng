@@ -224,13 +224,13 @@ routing rule when one converted file should refresh both servers.
 
 ### Emby / Jellyfin troubleshooting
 
-| Symptom                         | Likely cause                                                                                                                      |
+| Symptom | Likely cause |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| 401 returned                    | Wrong `apikey`, or apikey not granted access in admin                                                                             |
-| 404 returned                    | `webroot` mismatch — server is mounted under a path prefix                                                                        |
-| No POST issued                  | File's directory isn't a prefix of any `daemon.routing[].match` that lists `emby.<name>` / `jellyfin.<name>`, OR `refresh: false` |
-| Library not updated despite 204 | Path mismatch — the server doesn't recognise the directory; add a `path-mapping` entry                                            |
-| `apikey not configured` warning | The instance is reachable but the apikey field is empty                                                                           |
+| 401 returned | Wrong `apikey`, or apikey not granted access in admin |
+| 404 returned | `webroot` mismatch — server is mounted under a path prefix |
+| No POST issued | File's directory isn't a prefix of any `daemon.routing[].match` that lists `emby.<name>` / `jellyfin.<name>`, OR `refresh: false` |
+| Library not updated despite 204 | Path mismatch — the server doesn't recognise the directory; add a `path-mapping` entry |
+| `apikey not configured` warning | The instance is reachable but the apikey field is empty |
 
 ### Autoscan
 
@@ -320,14 +320,14 @@ is back in place.
 
 #### Autoscan troubleshooting
 
-| Symptom           | Likely cause                                                                                 |
+| Symptom | Likely cause |
 | ----------------- | -------------------------------------------------------------------------------------------- |
-| 401 returned      | Wrong `username` / `password`, or Autoscan instance has no auth configured                   |
-| 404 returned      | `webroot` mismatch, or Autoscan running on a different path prefix                           |
-| No POST issued    | File's directory isn't a prefix of any `daemon.routing[].match` that lists `autoscan.<name>` |
-| Wrong `dir` sent  | Add a `path-mapping` entry rewriting SMA's path to Autoscan's                                |
-| `status: ignored` | Forwarded event's paths don't match any routing rule listing `autoscan.<name>`               |
-| 502 from webhook  | Every forward failed; check `sonarr-trigger`/`radarr-trigger` match Autoscan's trigger names |
+| 401 returned | Wrong `username` / `password`, or Autoscan instance has no auth configured |
+| 404 returned | `webroot` mismatch, or Autoscan running on a different path prefix |
+| No POST issued | File's directory isn't a prefix of any `daemon.routing[].match` that lists `autoscan.<name>` |
+| Wrong `dir` sent | Add a `path-mapping` entry rewriting SMA's path to Autoscan's |
+| `status: ignored` | Forwarded event's paths don't match any routing rule listing `autoscan.<name>` |
+| 502 from webhook | Every forward failed; check `sonarr-trigger`/`radarr-trigger` match Autoscan's trigger names |
 
 ### Integration Flow
 
@@ -384,12 +384,12 @@ All download client integrations use bash scripts in `triggers/` that submit job
 The scripts read no `sma-ng.yml` sections. They take daemon connection settings from environment variables
 (set them in the download client's script environment):
 
-| Variable                           | Default     | Description                                   |
+| Variable | Default | Description |
 | ---------------------------------- | ----------- | --------------------------------------------- |
-| `DAEMON_HOST`                      | `127.0.0.1` | Daemon hostname or IP                         |
-| `DAEMON_PORT`                      | `8585`      | Daemon port                                   |
-| `DAEMON_API_KEY`                   | none        | Sent as `X-API-Key` when authentication is on |
-| `DAEMON_USERNAME` / `DAEMON_PASSWORD` | none     | HTTP Basic auth alternative to the API key    |
+| `DAEMON_HOST` | `127.0.0.1` | Daemon hostname or IP |
+| `DAEMON_PORT` | `8585` | Daemon port |
+| `DAEMON_API_KEY` | none | Sent as `X-API-Key` when authentication is on |
+| `DAEMON_USERNAME` / `DAEMON_PASSWORD` | none | HTTP Basic auth alternative to the API key |
 
 Which profile a download uses is decided on the daemon by `daemon.routing` rules matching the file path (see
 [Multiple Instances](#multiple-instances)); translate client-side paths with `daemon.path-rewrites`. Per-script
