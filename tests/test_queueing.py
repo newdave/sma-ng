@@ -1,3 +1,4 @@
+import os
 from unittest import mock
 
 import pytest
@@ -14,10 +15,12 @@ from resources.daemon.queueing import (
   SKIPPED,
   dedupe_window_seconds,
   duplicate_outcome,
+  known_config,
   normalise_job_path,
   queue_job,
   queue_media_path,
   resolve_config,
+  resolve_media_path,
   skip_reason,
 )
 
@@ -122,6 +125,7 @@ class TestQueueMediaPath:
     db.add_job.assert_not_called()
     override = tmp_path / "o.yml"
     override.write_text("")
+    pcm.default_config = str(override)
     out = queue_media_path(db, pcm, "/m/a.mkv", config_override=str(override))
     assert (out.status, out.config, out.profile) == (QUEUED, str(override), None)
 
@@ -193,7 +197,69 @@ def test_resolve_config_override_and_fallback(tmp_path):
   pcm.get_config_for_path.return_value = "/c.yml"
   override = tmp_path / "o.yml"
   override.write_text("")
+  pcm.default_config = str(override)
   assert resolve_config(pcm, "/m/a.mkv", str(override)) == str(override)
   pcm.get_config_for_path.assert_not_called()
   assert resolve_config(pcm, "/m/a.mkv", "/missing.yml") == "/c.yml"
   assert resolve_config(pcm, "/m/a.mkv") == "/c.yml"
+
+
+def test_resolve_config_rejects_traversal_and_symlink_override(tmp_path):
+  real = tmp_path / "sma-ng.yml"
+  real.write_text("")
+  other = tmp_path / "evil.yml"
+  other.write_text("")
+  link = tmp_path / "link.yml"
+  link.symlink_to(other)
+  pcm = mock.Mock(default_config=str(real))
+  pcm.get_config_for_path.return_value = "/c.yml"
+  assert known_config(pcm, str(tmp_path / "sub" / ".." / "sma-ng.yml")) == str(real)
+  assert resolve_config(pcm, "/m/a.mkv", str(tmp_path / ".." / "evil.yml")) == "/c.yml"
+  assert resolve_config(pcm, "/m/a.mkv", str(link)) == "/c.yml"
+  assert known_config(pcm, str(link)) is None
+
+
+class TestResolveMediaPath:
+  def _pcm(self, root):
+    return mock.Mock(routing_match_paths=lambda: [str(root)], scan_paths=[], path_rewrites=[])
+
+  def test_inside_root_and_exact_root(self, tmp_path):
+    (tmp_path / "a.mkv").write_text("")
+    pcm = self._pcm(tmp_path)
+    assert resolve_media_path(pcm, str(tmp_path / "a.mkv")) == os.path.realpath(tmp_path / "a.mkv")
+    assert resolve_media_path(pcm, str(tmp_path)) == os.path.realpath(tmp_path)
+
+  def test_rejects_dotdot_traversal(self, tmp_path):
+    root = tmp_path / "media"
+    root.mkdir()
+    (tmp_path / "secret.mkv").write_text("")
+    assert resolve_media_path(self._pcm(root), str(root / ".." / "secret.mkv")) is None
+
+  def test_rejects_sibling_prefix(self, tmp_path):
+    root = tmp_path / "media"
+    root.mkdir()
+    (tmp_path / "media2").mkdir()
+    assert resolve_media_path(self._pcm(root), str(tmp_path / "media2" / "a.mkv")) is None
+
+  def test_rejects_symlink_escape(self, tmp_path):
+    root = tmp_path / "media"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.mkv").write_text("")
+    (root / "esc").symlink_to(outside)
+    assert resolve_media_path(self._pcm(root), str(root / "esc" / "a.mkv")) is None
+
+  def test_scan_and_rewrite_roots_count(self, tmp_path):
+    pcm = mock.Mock(routing_match_paths=lambda: [], scan_paths=[{"path": str(tmp_path / "s")}], path_rewrites=[{"from": "/x", "to": str(tmp_path / "r")}])
+    assert resolve_media_path(pcm, str(tmp_path / "s" / "a.mkv"))
+    assert resolve_media_path(pcm, str(tmp_path / "r" / "a.mkv"))
+    assert resolve_media_path(pcm, str(tmp_path / "other" / "a.mkv")) is None
+
+  def test_no_roots_configured_allows_any(self, tmp_path):
+    pcm = mock.Mock(routing_match_paths=lambda: [], scan_paths=[], path_rewrites=[])
+    assert resolve_media_path(pcm, str(tmp_path / "a.mkv")) == os.path.realpath(tmp_path / "a.mkv")
+
+  def test_empty_or_non_string(self):
+    assert resolve_media_path(mock.Mock(), "") is None
+    assert resolve_media_path(mock.Mock(), None) is None

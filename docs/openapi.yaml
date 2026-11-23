@@ -620,6 +620,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          description: Path is outside the configured media roots (checked after resolving `..` and symlinks)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "409":
           description: A cluster node does not support job kinds yet
           content:
@@ -1017,6 +1023,12 @@ paths:
           description: >
             Invalid request or path; args not a list of strings; args containing -c, --config, -i, --input or
             --job-id; config not the daemon's loaded config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Path is outside the configured media roots (checked after resolving `..` and symlinks)
           content:
             application/json:
               schema:

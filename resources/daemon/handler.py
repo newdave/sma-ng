@@ -27,10 +27,12 @@ from resources.daemon.queueing import (
   SKIP_RECYCLE_BIN,
   SKIP_SAME_EXTENSION,
   SKIPPED,
+  known_config,
   merge_default_args,
   merge_profile_arg,
   queue_media_path,
   resolve_config,
+  resolve_media_path,
   resolve_profile,
 )
 from resources.log import LOG_BACKUP_COUNT
@@ -755,7 +757,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
       self.send_json_response(404, {"error": "Log not found"})
       return
 
-    log_path = known[logname]
+    logs_dir = os.path.realpath(self.server.config_log_manager.logs_dir)
+    log_path = os.path.realpath(known[logname])
+    if not log_path.startswith(logs_dir + os.sep):
+      self.send_json_response(404, {"error": "Log not found"})
+      return
 
     # Parse query params
     job_id_filter = query.get("job_id", [None])[0]
@@ -1509,7 +1515,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
     and peak memory low on large or slow (e.g. unionfs/NFS) mounts.
     Hidden directories and dotfiles (names starting with '.') are skipped.
     """
-    allowed = self.server.path_config_manager.media_extensions
+    pcm = self.server.path_config_manager
+    allowed = pcm.media_extensions
+    directory = resolve_media_path(pcm, directory)
+    if directory is None:
+      return
     stack = [directory]
     while stack:
       current = stack.pop()
@@ -1548,10 +1558,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
   def _is_known_config(self, config_override):
     """True when *config_override* is the daemon's loaded config (compared by resolved path)."""
-    known = getattr(self.server.path_config_manager, "default_config", None)
-    if not isinstance(known, str) or not known:
-      return False
-    return os.path.realpath(config_override) == os.path.realpath(known)
+    return known_config(self.server.path_config_manager, config_override) is not None
 
   def _merge_args(self, path, extra_args):
     """Merge per-path default_args with request args (see ``queueing.merge_default_args``)."""
@@ -1854,7 +1861,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
     submission walks the original (local) path while each discovered file
     is queued under its rewritten (e.g. union-mount) path.
     """
-    path = os.path.abspath(path)
+    path = resolve_media_path(self.server.path_config_manager, path)
+    if path is None:
+      self.server.logger.warning("Rejected path outside configured media roots")
+      self.send_json_response(403, {"error": "Path is outside configured media roots"})
+      return
     if not os.path.exists(path):
       self.send_json_response(400, {"error": "Path does not exist", "path": path})
       return
@@ -1952,7 +1963,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
         )
         return
     pcm = self.server.path_config_manager
-    path = os.path.abspath(req["path"])
+    path = resolve_media_path(pcm, req["path"])
+    if path is None:
+      self.server.logger.warning("Rejected path outside configured media roots")
+      self.send_json_response(403, {"error": "Path is outside configured media roots"})
+      return
     if not os.path.exists(path):
       self.send_json_response(400, {"error": "Path does not exist", "path": path})
       return
