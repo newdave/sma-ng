@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Regenerate the wiki from committed docs and push it to GitHub (usage: mise run wiki:publish [-- --dry-run] [--allow-dirty])"
+#MISE description="Regenerate the wiki from committed docs and push it to GitHub (usage: mise run wiki:publish [-- --dry-run] [--allow-dirty] [--prune])"
 #MISE depends=["wiki:build"]
 set -euo pipefail
 
@@ -8,10 +8,12 @@ cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
 WIKI_DIR="${SMA_WIKI_DIR:-/tmp/sma-wiki}"
 dry_run=0
 allow_dirty=0
+prune=0
 for arg in "$@"; do
   case "$arg" in
     --dry-run) dry_run=1 ;;
     --allow-dirty) allow_dirty=1 ;;
+    --prune) prune=1 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -20,6 +22,11 @@ done
 if [ "$allow_dirty" -eq 0 ] && [ -n "$(git status --porcelain -- docs .mise/tasks)" ]; then
   echo "docs/ or .mise/tasks/ has uncommitted changes; commit them first or pass --allow-dirty" >&2
   exit 1
+fi
+
+# Rerun the build with pruning so pages renamed in docs/ do not linger in the wiki.
+if [ "$prune" -eq 1 ]; then
+  "$PY" scripts/wiki_sync.py build --out "$WIKI_DIR" --prune
 fi
 
 git -C "$WIKI_DIR" add --all
