@@ -90,7 +90,7 @@ Use `HOST=<host>` for one node or `HOSTS="<host1> <host2>"` for multiple nodes.
 | `mise run wiki:pull`     | Clone or fast-forward the GitHub wiki checkout (`SMA_WIKI_DIR`, default `/tmp/sma-wiki`)      |
 | `mise run wiki:build`    | Regenerate every wiki page from `docs/`, `openapi.yaml` and task descriptions (`--prune`)     |
 | `mise run wiki:diff`     | Show what `wiki:publish` would change                                                         |
-| `mise run wiki:publish`  | Rebuild from committed docs, commit and push the wiki (`--dry-run`, `--allow-dirty`)          |
+| `mise run wiki:publish`  | Rebuild from committed docs, commit and push the wiki (`--dry-run`, `--allow-dirty`, `--prune`) |
 | `mise run wiki:check`    | Verify every doc maps to a wiki page and every relative link renders (no network)             |
 | `mise run release:status`| Manifest version, latest GitHub release, open release-please PR, recent CI runs on `main`     |
 | `mise run release:notes` | Conventional commits since the latest `sma-ng-v*` tag, grouped by type (`-- <ref>`)           |
