@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.2.51](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.50...sma-ng-v3.2.51) (2026-11-23)
+
+
+### Bug Fixes
+
+* confine request paths and config override to trusted roots (CodeQL py/path-injection) ([#273](https://github.com/newdave/sma-ng/issues/273)) ([03ea714](https://github.com/newdave/sma-ng/commit/03ea714853ceac47e6d14c8f9639c4c86d201b92))
+* reuse an API key saved by another page instead of prompting again ([#269](https://github.com/newdave/sma-ng/issues/269)) ([2989704](https://github.com/newdave/sma-ng/commit/29897046f6393fa53a2001916916a0201af00df1))
+
+
+### Performance Improvements
+
+* bound ffmpeg stderr capture, read in chunks, probe source once per ladder ([#272](https://github.com/newdave/sma-ng/issues/272)) ([ce3a033](https://github.com/newdave/sma-ng/commit/ce3a03375a796ead267f2da3e53f55d983f6e2c9))
+
 ## [3.2.50](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.49...sma-ng-v3.2.50) (2026-11-23)
 
 
