@@ -1,0 +1,22 @@
+docs/daemon.md
+  s_bb9afa71bee21f::t_9c6dd9f30cee2f 200,211-212
+  s_bb9afa71bee21f::t_57f1be629a8270 213
+docs/openapi.yaml
+  s_bb9afa71bee21f::t_9c6dd9f30cee2f 2281-2282,2298-2300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "17011fd8a40b7c427c8d407a3a247e5380204d1c",
+  "prompts": {},
+  "sessions": {
+    "s_bb9afa71bee21f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11944d23-c69e-4bdd-b6ea-a53dcb231d65",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
