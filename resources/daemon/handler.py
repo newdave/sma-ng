@@ -199,9 +199,14 @@ _AUTH_SHIM = """<script>
     var used = window.SMA_API_KEY;
     return origFetch(input, withKey(input, init, used)).then(function (resp) {
       if (resp.status !== 401) { return resp; }
-      // A key was entered while this request was in flight: retry with it.
-      if (window.SMA_API_KEY && window.SMA_API_KEY !== used) {
-        return origFetch(input, withKey(input, init, window.SMA_API_KEY));
+      // A key was entered while this request was in flight, or saved by another tab or page: retry with it
+      // instead of asking again (and never wipe a key another page has just saved).
+      var current = window.SMA_API_KEY;
+      var stored = load();
+      if (stored && stored !== used) { current = stored; }
+      if (current && current !== used) {
+        window.SMA_API_KEY = current;
+        return origFetch(input, withKey(input, init, current));
       }
       if (dismissed) { return resp; }
       if (used) { save(''); }  // the stored key is wrong: forget it
