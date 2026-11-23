@@ -75,10 +75,58 @@ def duplicate_outcome(job_db, path_config_manager, path, kind="convert"):
   return DUPLICATE, None
 
 
+def known_config(path_config_manager, config_override):
+  """The daemon's own config path when *config_override* resolves to it, else None.
+
+  Both sides go through ``os.path.realpath`` so ``..`` segments and symlinks cannot
+  smuggle in another file. The trusted configured value is returned, never the request string.
+  """
+  known = getattr(path_config_manager, "default_config", None)
+  if not config_override or not isinstance(config_override, str) or not isinstance(known, str) or not known:
+    return None
+  if os.path.realpath(config_override) == os.path.realpath(known):
+    return known
+  return None
+
+
+def configured_roots(path_config_manager):
+  """Real paths of every configured media root: scan paths, routing matches and path-rewrite endpoints.
+
+  With none configured the filesystem root is returned, so a daemon without routing keeps accepting any path.
+  """
+  raw = []
+  try:
+    raw.extend(path_config_manager.routing_match_paths())
+    raw.extend(sp.get("path") for sp in path_config_manager.scan_paths if isinstance(sp, dict))
+    for rw in path_config_manager.path_rewrites:
+      if isinstance(rw, dict):
+        raw.extend((rw.get("from"), rw.get("to")))
+  except (AttributeError, TypeError):
+    pass
+  roots = {os.path.realpath(r) for r in raw if isinstance(r, str) and r}
+  return sorted(roots) or [os.sep]
+
+
+def resolve_media_path(path_config_manager, path):
+  """Real path of *path* when it lies inside a configured media root, else None.
+
+  ``..`` traversal and symlinks leading outside every root are rejected because
+  containment is checked on the ``os.path.realpath`` result.
+  """
+  if not path or not isinstance(path, str):
+    return None
+  real = os.path.realpath(path)
+  for root in configured_roots(path_config_manager):
+    if real == root or real.startswith(root.rstrip(os.sep) + os.sep):
+      return real
+  return None
+
+
 def resolve_config(path_config_manager, path, config_override=None):
-  """Config file for *path*: an existing *config_override* wins, otherwise the routing match."""
-  if config_override and os.path.exists(config_override):
-    return config_override
+  """Config file for *path*: the daemon's own config when named as *config_override*, otherwise the routing match."""
+  trusted = known_config(path_config_manager, config_override)
+  if trusted and os.path.exists(trusted):
+    return trusted
   return path_config_manager.get_config_for_path(path)
 
 

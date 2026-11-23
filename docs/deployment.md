@@ -12,89 +12,90 @@ curl https://mise.run | sh
 
 ### Setup
 
-| Task                           | Description                                                                      |
+| Task | Description |
 | ------------------------------ | -------------------------------------------------------------------------------- |
-| `mise run setup:venv`          | Create the Python virtual environment                                            |
-| `mise run setup:deps`          | Alias of `setup:deps:base`                                                       |
-| `mise run setup:deps:base`     | Install base runtime dependencies from `setup/requirements.txt`                  |
-| `mise run setup:deps:dev`      | Install dev dependencies (`pip install -e '.[dev]'`: lint, test, build tools)    |
-| `mise run setup:deps:all`      | Install dev, qBittorrent and Deluge extras (`pip install -e '.[dev,qbittorrent,deluge]'`) |
-| `mise run setup:clean`         | Remove build artifacts, caches, and compiled bytecode                            |
+| `mise run setup:venv` | Create the Python virtual environment |
+| `mise run setup:deps` | Alias of `setup:deps:base` |
+| `mise run setup:deps:base` | Install base runtime dependencies from `setup/requirements.txt` |
+| `mise run setup:deps:dev` | Install dev dependencies (`pip install -e '.[dev]'`: lint, test, build tools) |
+| `mise run setup:deps:all` | Install dev, qBittorrent and Deluge extras (`pip install -e '.[dev,qbittorrent,deluge]'`) |
+| `mise run setup:clean` | Remove build artifacts, caches, and compiled bytecode |
 
 ### Development
 
-| Task                     | Description                                              |
+| Task | Description |
 | ------------------------ | -------------------------------------------------------- |
-| `mise run test:lint`     | Run ruff and the bandit security scan, report issues     |
-| `mise run dev:lint`      | Run the ruff linter and auto-fix issues                  |
-| `mise run dev:format`    | Format Python code with ruff                             |
-| `mise run dev:precommit` | Run pre-commit checks against all files                  |
-| `mise run dev:agent`     | Start a Claude Code session through omnigent (`omni`) with smart routing; extra arguments go to `omni claude` |
-| `mise run dev:team`      | Start the omnigent team in `.omnigent/agents/team/`: a manager delegates to a read-only architect and two Claude engineers, who cross-review each other; changes land as PRs |
-| `mise run test:openapi`  | Validate `docs/openapi.yaml`                             |
-| `mise run test`          | Run the test suite (daemon tests require `TEST_DB_URL`); extra args go to pytest after `--` |
+| `mise run test:lint` | Run ruff and the bandit security scan, report issues |
+| `mise run dev:lint` | Run the ruff linter and auto-fix issues |
+| `mise run dev:format` | Format Python code with ruff |
+| `mise run dev:precommit` | Run pre-commit checks against all files |
+| `mise run dev:agents` | Regenerate `.agents/skills` and `.codex/agents/*.toml` from `.claude/skills` and `.claude/agents`; `-- --check` reports drift |
+| `mise run dev:agent` | Start a Claude Code session through omnigent (`omni`) with smart routing; extra arguments go to `omni claude` |
+| `mise run dev:team` | Start the omnigent team in `.omnigent/agents/team/`: a manager delegates to a read-only architect and two Claude engineers, who cross-review each other; changes land as PRs |
+| `mise run test:openapi` | Validate `docs/openapi.yaml` |
+| `mise run test` | Run the test suite (daemon tests require `TEST_DB_URL`); extra args go to pytest after `--` |
 | `mise run test -- tests/test_daemon.py tests/test_handler.py tests/test_worker.py tests/test_server.py` | Focused daemon/API worker tests (replaces `test:daemon`) |
 | `mise run test -- tests/test_deploy_tasks.py` | Focused deploy/config task tests (replaces `test:deploy`) |
-| `mise run test:shell`    | Run `shellcheck -x` over tracked shell scripts and `.mise/tasks` entrypoints |
-| `mise run test:cov`      | Run tests with coverage (HTML, JSON) and enforce the per-module coverage floor |
-| `mise run build:dist`    | Build wheel and sdist artifacts into `dist/`             |
+| `mise run test:shell` | Run `shellcheck -x` over tracked shell scripts and `.mise/tasks` entrypoints |
+| `mise run test:cov` | Run tests with coverage (HTML, JSON) and enforce the per-module coverage floor |
+| `mise run build:dist` | Build wheel and sdist artifacts into `dist/` |
 
 ### Media Tools
 
-| Task                                            | Description                                          |
+| Task | Description |
 | ----------------------------------------------- | ---------------------------------------------------- |
-| `mise run daemon:start`                         | Start the daemon; bind, port, workers come from `daemon:` (flags after `--`) |
-| `mise run media:convert -- /path/to/file.mkv`   | Convert a media file with auto-tagging               |
-| `mise run media:preview -- /path/to/file.mkv`   | Preview FFmpeg conversion options without converting |
-| `mise run media:codecs`                         | List all supported video and audio codecs            |
-| `mise run media:rename -- /path/to/file-or-dir` | Rename media files using naming templates            |
-| `mise run media:repair -- /path/to/file-or-dir` | Repair damaged media by stream copy, no transcoding  |
+| `mise run daemon:start` | Start the daemon; bind, port, workers come from `daemon:` (flags after `--`) |
+| `mise run media:convert -- /path/to/file.mkv` | Convert a media file with auto-tagging |
+| `mise run media:preview -- /path/to/file.mkv` | Preview FFmpeg conversion options without converting |
+| `mise run media:codecs` | List all supported video and audio codecs |
+| `mise run media:rename -- /path/to/file-or-dir` | Rename media files using naming templates |
+| `mise run media:repair -- /path/to/file-or-dir` | Repair damaged media by stream copy, no transcoding |
 
 ### GPU and Configuration
 
-| Task                       | Description                                                                        |
+| Task | Description |
 | -------------------------- | ---------------------------------------------------------------------------------- |
-| `mise run config:gpu`      | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
-| `mise run config:generate` | Generate `config/sma-ng.yml` with GPU auto-detection                               |
-| `mise run config:sample`   | Regenerate `setup/sma-ng.yml.sample` from the schema (`-- --check` fails on drift) |
-| `mise run config:show`     | Render the effective resolved config for a profile (`-- --profile rq --section video --diff`). With `-- --input <file>`: print the full FFmpeg command for a real source without transcoding. |
+| `mise run config:gpu` | Detect available GPU type (`nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `software`) |
+| `mise run config:generate` | Generate `config/sma-ng.yml` with GPU auto-detection |
+| `mise run config:sample` | Regenerate `setup/sma-ng.yml.sample` from the schema (`-- --check` fails on drift) |
+| `mise run config:show` | Render the effective resolved config for a profile (`-- --profile rq --section video --diff`). With `-- --input <file>`: print the full FFmpeg command for a real source without transcoding. |
 | `mise run config:validate` | Validate the effective config — schema, unknown keys, encoder-flag leaks, routing refs |
-| `mise run daemon:smoke`    | Run daemon smoke-test config validation and exit                                   |
+| `mise run daemon:smoke` | Run daemon smoke-test config validation and exit |
 
 ### Docker Tasks
 
-| Task                    | Description                                                                            |
+| Task | Description |
 | ----------------------- | -------------------------------------------------------------------------------------- |
-| `mise run build:docker` | Build the Docker image locally for the native platform                                 |
-| `mise run build:run`    | Run the locally-built image with SQLite by default                                     |
-| `mise run build:shell`  | Open an interactive shell inside the locally-built image                               |
-| `mise run build:smoke`  | Smoke-test the image: verify Python imports and FFmpeg binary                          |
+| `mise run build:docker` | Build the Docker image locally for the native platform |
+| `mise run build:run` | Run the locally-built image with SQLite by default |
+| `mise run build:shell` | Open an interactive shell inside the locally-built image |
+| `mise run build:smoke` | Smoke-test the image: verify Python imports and FFmpeg binary |
 
 ### Deploy Tasks
 
-| Task                       | Description                                                                                     |
+| Task | Description |
 | -------------------------- | ----------------------------------------------------------------------------------------------- |
-| `mise run deploy:check`    | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                       |
-| `mise run deploy:setup`    | First-time host prep: SSH key, Docker install, install dir with config/logs/data, `daemon.env`  |
-| `mise run deploy:remote`   | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker)                |
-| `mise run deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry                |
-| `mise run deploy:docker`   | Push `docker-compose.yml`. Compare the registry's current image digest against the running container; if they match, only `docker compose restart $service` to pick up bind-mounted config changes (~3–5s). Otherwise pull, `compose down`, `up -d --force-recreate` (~30s+). Either path ends with a freshness verification against the registry. Override with `FORCE_RECREATE=1` to always take the full path. |
+| `mise run deploy:check` | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set |
+| `mise run deploy:setup` | First-time host prep: SSH key, Docker install, install dir with config/logs/data, `daemon.env` |
+| `mise run deploy:remote` | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker) |
+| `mise run deploy:config` | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry |
+| `mise run deploy:docker` | Push `docker-compose.yml`. Compare the registry's current image digest against the running container; if they match, only `docker compose restart $service` to pick up bind-mounted config changes (~3–5s). Otherwise pull, `compose down`, `up -d --force-recreate` (~30s+). Either path ends with a freshness verification against the registry. Override with `FORCE_RECREATE=1` to always take the full path. |
 
 Use `HOST=<host>` for one node or `HOSTS="<host1> <host2>"` for multiple nodes.
 
 ### Docs, Wiki and Release
 
-| Task                     | Description                                                                                   |
+| Task | Description |
 | ------------------------ | --------------------------------------------------------------------------------------------- |
-| `mise run docs:check`    | Relative links resolve, every `mise run` reference is a real task, wiki renders, markdownlint |
-| `mise run wiki:pull`     | Clone or fast-forward the GitHub wiki checkout (`SMA_WIKI_DIR`, default `/tmp/sma-wiki`)      |
-| `mise run wiki:build`    | Regenerate every wiki page from `docs/`, `openapi.yaml` and task descriptions (`--prune`)     |
-| `mise run wiki:diff`     | Show what `wiki:publish` would change                                                         |
-| `mise run wiki:publish`  | Rebuild from committed docs, commit and push the wiki (`--dry-run`, `--allow-dirty`, `--prune`) |
-| `mise run wiki:check`    | Verify every doc maps to a wiki page and every relative link renders (no network)             |
-| `mise run release:status`| Manifest version, latest GitHub release, open release-please PR, recent CI runs on `main`     |
-| `mise run release:notes` | Conventional commits since the latest `sma-ng-v*` tag, grouped by type (`-- <ref>`)           |
-| `mise run deps:outdated` | List outdated Python packages in the project venv                                             |
+| `mise run docs:check` | Relative links resolve, every `mise run` reference is a real task, wiki renders, markdownlint |
+| `mise run wiki:pull` | Clone or fast-forward the GitHub wiki checkout (`SMA_WIKI_DIR`, default `/tmp/sma-wiki`) |
+| `mise run wiki:build` | Regenerate every wiki page from `docs/`, `openapi.yaml` and task descriptions (`--prune`) |
+| `mise run wiki:diff` | Show what `wiki:publish` would change |
+| `mise run wiki:publish` | Rebuild from committed docs, commit and push the wiki (`--dry-run`, `--allow-dirty`, `--prune`) |
+| `mise run wiki:check` | Verify every doc maps to a wiki page and every relative link renders (no network) |
+| `mise run release:status` | Manifest version, latest GitHub release, open release-please PR, recent CI runs on `main` |
+| `mise run release:notes` | Conventional commits since the latest `sma-ng-v*` tag, grouped by type (`-- <ref>`) |
+| `mise run deps:outdated` | List outdated Python packages in the project venv |
 
 The GitHub wiki is generated, never edited by hand: each page carries a "Generated by `mise run wiki:build`" note
 and is rebuilt from the canonical docs. Links between docs become wiki page links and other repository paths become
@@ -188,14 +189,14 @@ node should run a `*-pg` profile — that's the host that uses the external
 PostgreSQL server the rest of the cluster connects to. Non-`*-pg` profiles default
 to a local SQLite database at `/opt/sma/data/sma-ng.db` for single-node use.
 
-| Profile       | GPU stack         | Database                                   | Use on                                        |
+| Profile | GPU stack | Database | Use on |
 | ------------- | ----------------- | ------------------------------------------ | --------------------------------------------- |
-| `software`    | none (CPU only)   | SQLite                                     | single-node CPU deployment with SQLite        |
-| `software-pg` | none (CPU only)   | external PostgreSQL (`daemon.db-url`)      | single-node deployment, no GPU                |
-| `intel`       | Intel QSV / VAAPI | SQLite                                     | single-node Intel GPU deployment with SQLite  |
-| `intel-pg`    | Intel QSV / VAAPI | external PostgreSQL (`daemon.db-url`)      | the master in an Intel-GPU cluster            |
-| `nvidia`      | NVIDIA NVENC      | SQLite                                     | single-node NVIDIA GPU deployment with SQLite |
-| `nvidia-pg`   | NVIDIA NVENC      | external PostgreSQL (`daemon.db-url`)      | the master in an NVIDIA-GPU cluster           |
+| `software` | none (CPU only) | SQLite | single-node CPU deployment with SQLite |
+| `software-pg` | none (CPU only) | external PostgreSQL (`daemon.db-url`) | single-node deployment, no GPU |
+| `intel` | Intel QSV / VAAPI | SQLite | single-node Intel GPU deployment with SQLite |
+| `intel-pg` | Intel QSV / VAAPI | external PostgreSQL (`daemon.db-url`) | the master in an Intel-GPU cluster |
+| `nvidia` | NVIDIA NVENC | SQLite | single-node NVIDIA GPU deployment with SQLite |
+| `nvidia-pg` | NVIDIA NVENC | external PostgreSQL (`daemon.db-url`) | the master in an NVIDIA-GPU cluster |
 
 ### Configuration
 
@@ -210,13 +211,13 @@ that distinguishes this deployment from the upstream defaults — deploy targets
 per-host overrides, credentials, encoder defaults, and quality profiles. Each
 top-level section is consumed by `mise run deploy:config` as follows:
 
-| Section    | Effect on each host's `config/sma-ng.yml`                                                |
+| Section | Effect on each host's `config/sma-ng.yml` |
 | ---------- | ---------------------------------------------------------------------------------------- |
-| `deploy`   | Project-wide defaults read by `scripts/local-config.py` for any host-context lookup      |
-| `hosts`    | Per-host overrides for any `deploy:` key (`address` and `user` are required for SSH)     |
-| `daemon`   | Stamped into `daemon:` (kebab-cased)                                                     |
-| `base`     | Deep-merged into `base:` — locks encoder defaults (gpu, codec, crf-profiles, audio…)     |
-| `profiles` | Deep-merged into `profiles:` — overlay rules selected by routing                         |
+| `deploy` | Project-wide defaults read by `scripts/local-config.py` for any host-context lookup |
+| `hosts` | Per-host overrides for any `deploy:` key (`address` and `user` are required for SSH) |
+| `daemon` | Stamped into `daemon:` (kebab-cased) |
+| `base` | Deep-merged into `base:` — locks encoder defaults (gpu, codec, crf-profiles, audio…) |
+| `profiles` | Deep-merged into `profiles:` — overlay rules selected by routing |
 | `services` | Stamped into `services.<type>.<instance>` and auto-converted into `daemon.routing` rules |
 
 Minimal example with the four overlay sections:
@@ -381,24 +382,24 @@ For each remote host the staging build:
 
 ### Deploy Tasks Reference
 
-| Task              | Description                                                                               |
+| Task | Description |
 | ----------------- | ----------------------------------------------------------------------------------------- |
-| `deploy:check`    | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set                                 |
-| `deploy:setup`    | First-time host prep: SSH key, Docker install, install dir with config/logs/data          |
-| `deploy:remote`   | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker)          |
-| `deploy:config`   | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry          |
-| `config:show`     | Render the effective resolved config for a profile                                        |
-| `config:validate` | Validate effective config — schema, unknowns, encoder-flag leaks, routing refs            |
-| `deploy:docker`   | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate`   |
-| `mise run cluster -- start` | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`)                            |
-| `mise run cluster -- stop` | `docker compose stop` for selected hosts (graceful drain, see `STOP_GRACE_PERIOD`)        |
-| `mise run cluster -- restart` | `docker compose restart` for selected hosts (graceful drain, see `STOP_GRACE_PERIOD`)     |
-| `mise run cluster -- status` | `docker compose ps` for selected hosts                                                    |
-| `mise run cluster -- reload` | `POST /reload` on selected hosts so daemons re-read `sma-ng.yml` without a restart        |
-| `mise run cluster -- drain` | `POST /admin/nodes/<host>/drain`; workers finish active jobs then go idle                 |
-| `mise run cluster -- pause` | `POST /admin/nodes/<host>/pause`; workers stop picking up new jobs                        |
-| `mise run cluster -- resume` | `POST /admin/nodes/<host>/resume`; clear drain or pause                                   |
-| `mise run cluster -- upgrade` | Drain each host, wait for `running_jobs=0`, then run `deploy:remote HOST=<host>`          |
+| `deploy:check` | Verify `setup/local.yml` exists and `DEPLOY_HOSTS` is set |
+| `deploy:setup` | First-time host prep: SSH key, Docker install, install dir with config/logs/data |
+| `deploy:remote` | Run `deploy:config` then `deploy:docker` (build config locally, recreate Docker) |
+| `deploy:config` | Build `config/sma-ng.yml` locally per host and push to each `DEPLOY_HOSTS` entry |
+| `config:show` | Render the effective resolved config for a profile |
+| `config:validate` | Validate effective config — schema, unknowns, encoder-flag leaks, routing refs |
+| `deploy:docker` | Push `docker-compose.yml`, pull image, `docker compose down` + `up -d --force-recreate` |
+| `mise run cluster -- start` | `docker compose start` for selected hosts (`HOST=` / `HOSTS=`) |
+| `mise run cluster -- stop` | `docker compose stop` for selected hosts (graceful drain, see `STOP_GRACE_PERIOD`) |
+| `mise run cluster -- restart` | `docker compose restart` for selected hosts (graceful drain, see `STOP_GRACE_PERIOD`) |
+| `mise run cluster -- status` | `docker compose ps` for selected hosts |
+| `mise run cluster -- reload` | `POST /reload` on selected hosts so daemons re-read `sma-ng.yml` without a restart |
+| `mise run cluster -- drain` | `POST /admin/nodes/<host>/drain`; workers finish active jobs then go idle |
+| `mise run cluster -- pause` | `POST /admin/nodes/<host>/pause`; workers stop picking up new jobs |
+| `mise run cluster -- resume` | `POST /admin/nodes/<host>/resume`; clear drain or pause |
+| `mise run cluster -- upgrade` | Drain each host, wait for `running_jobs=0`, then run `deploy:remote HOST=<host>` |
 
 The nine rows above are verbs of one task: `mise run cluster -- <verb>`. A missing or unknown verb prints usage
 and exits 2. Set `HOST` or `HOSTS` in the environment (`HOST=sma-master mise run cluster -- status`), not after `--`.
@@ -506,12 +507,12 @@ See also:
 
 ## CI / Release
 
-| Workflow      | Trigger                                  | Description                                                                 |
+| Workflow | Trigger | Description |
 | ------------- | ---------------------------------------- | --------------------------------------------------------------------------- |
-| `ci.yml`      | PR / push to main                        | Tests + coverage gates, pre-commit lint, OpenAPI/docs/config checks, runtime `pip-audit`; on main, the main image |
-| `docker.yml`  | PR (image paths); called by CI and release | Build and smoke test the image; Trivy scan and push only for main and releases |
-| `release.yml` | Push to main; manual with `tag`          | release-please PR + version bump; on release: wheel/sdist + release image   |
-| `codeql.yml`  | PR (Python changes) / weekly             | CodeQL static analysis (results in the Security tab)                        |
+| `ci.yml` | PR / push to main | Tests + coverage gates, pre-commit lint, OpenAPI/docs/config checks, runtime `pip-audit`; on main, the main image |
+| `docker.yml` | PR (image paths); called by CI and release | Build and smoke test the image; Trivy scan and push only for main and releases |
+| `release.yml` | Push to main; manual with `tag` | release-please PR + version bump; on release: wheel/sdist + release image |
+| `codeql.yml` | PR (Python changes) / weekly | CodeQL static analysis (results in the Security tab) |
 
 Every job installs Python through the shared `.github/actions/setup-python` action, which reads `.python-version`;
 workflows never name a Python version, so Renovate cannot move CI off the project runtime. Concurrency: a new push
@@ -540,11 +541,11 @@ Conventional commit types still control changelog grouping and breaking-change s
 Every push to `main` containing a releasable commit (`fix:` / `feat:`) creates or updates a Release PR.
 The workflow classifies the PR by the version in its title and acts accordingly:
 
-| Version shape | Class | Action                                                                 |
+| Version shape | Class | Action |
 | ------------- | ----- | ---------------------------------------------------------------------- |
-| `x.y.Z` (Z>0) | patch | Auto-merged immediately (the default under `always-bump-patch`)        |
-| `x.Y.0` (Y>0) | minor | Labelled `type: minor-release`; requires manual approval before merge  |
-| `X.0.0`       | major | No automatic action; merge manually                                    |
+| `x.y.Z` (Z>0) | patch | Auto-merged immediately (the default under `always-bump-patch`) |
+| `x.Y.0` (Y>0) | minor | Labelled `type: minor-release`; requires manual approval before merge |
+| `X.0.0` | major | No automatic action; merge manually |
 
 Minor and major versions only occur via an explicit `release-as` override
 (e.g. a commit footer `Release-As: 4.0.0`); day-to-day pushes always produce auto-merged point releases.

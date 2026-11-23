@@ -1,6 +1,6 @@
 ---
 name: creating-skills
-description: Add or update a Codex skill in .Codex/skills/. Activate when the user asks to "create/add/update a skill", or when a recurring SMA-NG workflow (triggers, validation steps, doc updates) is worth packaging. Includes writing concrete trigger-rich descriptions so the skill actually fires.
+description: Add or update a Claude skill in .claude/skills/. Activate when the user asks to "create/add/update a skill", or when a recurring SMA-NG workflow (triggers, validation steps, doc updates) is worth packaging. Includes writing concrete trigger-rich descriptions so the skill actually fires.
 ---
 
 # Creating Skills
@@ -10,7 +10,7 @@ Keep them short and specific.
 
 ## Rules
 
-- Prefer updating `AGENTS.md` for repository policy.
+- Prefer updating `CLAUDE.md` for repository policy.
 - Prefer docs under `docs/` for user/operator reference.
 - A skill should include only trigger conditions, workflow, constraints, and compact output shape.
 - Avoid generic programming advice that is already covered by global tooling.

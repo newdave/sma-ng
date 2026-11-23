@@ -147,9 +147,6 @@ _HW_CODEC_TO_SW = {
   "h264_omx": "h264",
 }
 
-# Backwards-compatible alias (historical name; now covers all hw families).
-_QSV_CODEC_TO_SW = _HW_CODEC_TO_SW
-
 # Video option keys that only mean something to a hardware encoder. The
 # software codecs ignore unknown keys, but ``device``/``decode_device`` make
 # a VAAPI/NVENC codec emit ``-filter_hw_device``/``hwupload`` and
@@ -260,10 +257,6 @@ def _swap_hw_codec_to_sw(options):
   for key in _HW_ONLY_VIDEO_KEYS:
     video.pop(key, None)
   return original
-
-
-# Historical name kept for callers/tests; now handles every hw family.
-_swap_qsv_codec_to_sw = _swap_hw_codec_to_sw
 
 
 def _sw_pix_fmt(fmt):
@@ -425,7 +418,7 @@ def _strip_qsv_only_flags(params_str):
 def _swap_qsv_codec_to_vaapi(options, vaapi_overlay):
   """Swap a QSV video encoder in *options* to its VAAPI equivalent.
 
-  Mirrors :func:`_swap_qsv_codec_to_sw`. Returns the original codec name on
+  Mirrors :func:`_swap_hw_codec_to_sw`. Returns the original codec name on
   success (so the caller can log the swap), or ``None`` if the options dict
   didn't carry a known QSV encoder. Mutates *options* in place:
 
@@ -744,8 +737,6 @@ def _resolve_hdr_color_tags(hdr_input, hdr_output, hdr_settings):
   return primaries, transfer, space
 
 
-from collections.abc import Callable
-
 from mutagen.mp4 import MP4
 
 from converter import Converter, FFMpegConvertError
@@ -828,10 +819,6 @@ class MediaProcessor(FileOpsMixin):
     self.converter = Converter(settings.ffmpeg, settings.ffprobe)
     self.deletesubs = set()
     self.subtitles = SubtitleProcessor(self)
-    # Per-fallback-attempt telemetry hook. The daemon overrides this with a
-    # bound method of DaemonServer so per-tier counters land on /health.
-    # CLI/manual invocations leave the no-op in place.
-    self._increment_fallback_counter: Callable[[str, str, str], None] = lambda from_tier, to_tier, reason: None
 
   def fullprocess(self, inputfile, mediatype, reportProgress=False, original=None, info=None, tmdbid=None, tvdbid=None, imdbid=None, season=None, episode=None, language=None, tagdata=None, post=True):
     """
@@ -4988,7 +4975,7 @@ class MediaProcessor(FileOpsMixin):
 
     Tier transitions remain the historical helpers
     (``_strip_hw_decoder_from_preopts``,
-    ``_strip_qsv_input_pipeline_from_preopts``, ``_swap_qsv_codec_to_sw``)
+    ``_strip_qsv_input_pipeline_from_preopts``, ``_swap_hw_codec_to_sw``)
     — the typed-pipeline rewrite that retires them is Phase 2 work.
 
     Args:
@@ -5065,7 +5052,6 @@ class MediaProcessor(FileOpsMixin):
         "Decode-side hardware failure (cause=%s); retrying with software decode + hardware encode (drop -hwaccel, keep %s encoder + QSV device) [decode-side-rescue]."
         % (cls.value, (rescue_options.get("video") or {}).get("codec")),
       )
-      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)(from_tier, "sw_decode_hw_encode", cls.value)
       if outputfile is not None and os.path.isfile(outputfile):
         self.removeFile(outputfile)
       t_rescue = time.monotonic()
@@ -5119,7 +5105,6 @@ class MediaProcessor(FileOpsMixin):
         "Conversion failed with hw QSV (cause=%s); retrying with hw_alt (swap encoder %s -> %s, preserve QSV decoder via hwmap bridge). Original error: %s"
         % (cls_hw.value if cls_hw else "unknown", original_codec_alt, retry_options_alt["video"]["codec"], str(hw_err)[:300]),
       )
-      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)(first_tier, "hw_alt", cls_hw.value if cls_hw else "other")
       if outputfile is not None and os.path.isfile(outputfile):
         self.removeFile(outputfile)
       t_alt = time.monotonic()
@@ -5175,7 +5160,6 @@ class MediaProcessor(FileOpsMixin):
       self.log.warning(
         "Conversion failed (cause=%s); retrying with software decode (stripping `-vcodec` from preopts). Last error: %s" % (cls_prev.value if cls_prev else "unknown", str(hw_alt_err or hw_err)[:300]),
       )
-      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)(first_tier if hw_alt_err is None else "hw_alt", "sw_decode", cls_prev.value if cls_prev else "other")
       if outputfile is not None and os.path.isfile(outputfile):
         self.removeFile(outputfile)
       t1 = time.monotonic()
@@ -5221,7 +5205,6 @@ class MediaProcessor(FileOpsMixin):
         str(sw_decode_err)[:300],
       ),
     )
-    getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)(from_tier, "full_sw", cls1.value if cls1 else "other")
     if outputfile is not None and os.path.isfile(outputfile):
       self.removeFile(outputfile)
     t2 = time.monotonic()
@@ -5233,7 +5216,6 @@ class MediaProcessor(FileOpsMixin):
     except FFMpegConvertError as third_err:
       cls = _classify(third_err)
       records.append(AttemptRecord(tier="full_sw", failure_class=cls, duration_ms=_ms(t2)))
-      getattr(self, "_increment_fallback_counter", lambda *_a, **_kw: None)("full_sw", "failed", cls.value)
       self._emit_attempt_log(records, "failed")
       raise
 
@@ -5497,6 +5479,8 @@ class MediaProcessor(FileOpsMixin):
       self.log.error("Unable to determine output file path, aborting conversion.")
       return None, inputfile
 
+    _probe_cache = {}
+
     def _run_convert(_preopts, _options=None):
       """Drive the convert generator end-to-end. Returns True on success,
       raises FFMpegConvertError on failure (for retry consideration).
@@ -5506,6 +5490,11 @@ class MediaProcessor(FileOpsMixin):
       Defaults to the closed-over ``options`` for backwards compatibility.
       """
       _opts = _options if _options is not None else options
+      # Probe the source once; later ladder tiers reuse it. A failed probe (None) is passed on so
+      # convert() probes (and reports) it itself.
+      _src = _opts["source"][0] if _opts.get("source") else None
+      if _src is not None and _src not in _probe_cache:
+        _probe_cache[_src] = self.converter.probe(_src, posters_as_video=False)
       conv = self.converter.convert(
         outputfile,
         _opts,
@@ -5513,6 +5502,7 @@ class MediaProcessor(FileOpsMixin):
         preopts=_preopts,
         postopts=postopts,
         strip_metadata=self.settings.strip_metadata and not _opts.get("_keep_metadata"),
+        info=_probe_cache.get(_src),
       )
       _, _cmds = next(conv)
       self.log.info("FFmpeg command:")

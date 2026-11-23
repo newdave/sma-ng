@@ -16,7 +16,7 @@ from resources.daemon import metrics_prom
 from resources.daemon.config import _strip_secrets
 from resources.daemon.constants import MAX_REQUEST_BODY_BYTES, SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
-from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase
+from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase, validate_archive_counts
 from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html, doc_file_for_slug
 from resources.daemon.queueing import (
   DUPLICATE,
@@ -27,10 +27,12 @@ from resources.daemon.queueing import (
   SKIP_RECYCLE_BIN,
   SKIP_SAME_EXTENSION,
   SKIPPED,
+  known_config,
   merge_default_args,
   merge_profile_arg,
   queue_media_path,
   resolve_config,
+  resolve_media_path,
   resolve_profile,
 )
 from resources.log import LOG_BACKUP_COUNT
@@ -199,9 +201,14 @@ _AUTH_SHIM = """<script>
     var used = window.SMA_API_KEY;
     return origFetch(input, withKey(input, init, used)).then(function (resp) {
       if (resp.status !== 401) { return resp; }
-      // A key was entered while this request was in flight: retry with it.
-      if (window.SMA_API_KEY && window.SMA_API_KEY !== used) {
-        return origFetch(input, withKey(input, init, window.SMA_API_KEY));
+      // A key was entered while this request was in flight, or saved by another tab or page: retry with it
+      // instead of asking again (and never wipe a key another page has just saved).
+      var current = window.SMA_API_KEY;
+      var stored = load();
+      if (stored && stored !== used) { current = stored; }
+      if (current && current !== used) {
+        window.SMA_API_KEY = current;
+        return origFetch(input, withKey(input, init, current));
       }
       if (dismissed) { return resp; }
       if (used) { save(''); }  // the stored key is wrong: forget it
@@ -750,7 +757,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
       self.send_json_response(404, {"error": "Log not found"})
       return
 
-    log_path = known[logname]
+    logs_dir = os.path.realpath(self.server.config_log_manager.logs_dir)
+    log_path = os.path.realpath(known[logname])
+    if not log_path.startswith(logs_dir + os.sep):
+      self.send_json_response(404, {"error": "Log not found"})
+      return
 
     # Parse query params
     job_id_filter = query.get("job_id", [None])[0]
@@ -1015,6 +1026,25 @@ class WebhookHandler(BaseHTTPRequestHandler):
     protect = self.server.path_config_manager.job_dedupe_window_seconds
     deleted = self.server.job_db.cleanup_old_jobs(days, protect_seconds=protect)
     self.send_json_response(200, {"deleted": deleted, "days": days})
+
+  def _post_stats_archive(self):
+    """POST /stats/archive: add a baseline to the lifetime job totals.
+
+    Body: {"completed": N, "failed": M, "cancelled": K}, each optional, non-negative integers.
+    """
+    content_length = self._content_length()
+    try:
+      body = json.loads(self.rfile.read(content_length) if content_length else b"")
+    except (json.JSONDecodeError, ValueError):
+      self.send_json_response(400, {"error": "Invalid JSON body"})
+      return
+    try:
+      counts = validate_archive_counts(body)
+    except ValueError as exc:
+      self.send_json_response(400, {"error": str(exc)})
+      return
+    added = self.server.job_db.add_archived_counts(counts)
+    self.send_json_response(200, {"added": added, "stats": self.server.job_db.get_stats()})
 
   def _parse_job_id(self, path, segment=-2):
     """Extract an integer job ID from a URL path segment.
@@ -1485,7 +1515,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
     and peak memory low on large or slow (e.g. unionfs/NFS) mounts.
     Hidden directories and dotfiles (names starting with '.') are skipped.
     """
-    allowed = self.server.path_config_manager.media_extensions
+    pcm = self.server.path_config_manager
+    allowed = pcm.media_extensions
+    directory = resolve_media_path(pcm, directory)
+    if directory is None:
+      return
     stack = [directory]
     while stack:
       current = stack.pop()
@@ -1524,10 +1558,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
   def _is_known_config(self, config_override):
     """True when *config_override* is the daemon's loaded config (compared by resolved path)."""
-    known = getattr(self.server.path_config_manager, "default_config", None)
-    if not isinstance(known, str) or not known:
-      return False
-    return os.path.realpath(config_override) == os.path.realpath(known)
+    return known_config(self.server.path_config_manager, config_override) is not None
 
   def _merge_args(self, path, extra_args):
     """Merge per-path default_args with request args (see ``queueing.merge_default_args``)."""
@@ -1830,7 +1861,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
     submission walks the original (local) path while each discovered file
     is queued under its rewritten (e.g. union-mount) path.
     """
-    path = os.path.abspath(path)
+    path = resolve_media_path(self.server.path_config_manager, path)
+    if path is None:
+      self.server.logger.warning("Rejected path outside configured media roots")
+      self.send_json_response(403, {"error": "Path is outside configured media roots"})
+      return
     if not os.path.exists(path):
       self.send_json_response(400, {"error": "Path does not exist", "path": path})
       return
@@ -1928,7 +1963,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
         )
         return
     pcm = self.server.path_config_manager
-    path = os.path.abspath(req["path"])
+    path = resolve_media_path(pcm, req["path"])
+    if path is None:
+      self.server.logger.warning("Rejected path outside configured media roots")
+      self.send_json_response(403, {"error": "Path is outside configured media roots"})
+      return
     if not os.path.exists(path):
       self.send_json_response(400, {"error": "Path does not exist", "path": path})
       return

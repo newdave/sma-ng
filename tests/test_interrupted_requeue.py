@@ -271,7 +271,7 @@ class TestFfmpegInterrupt:
     src.write_bytes(b"x")
     proc = MagicMock()
     proc.poll.return_value = None
-    proc.stderr.read.side_effect = [b"Input #0 banner\r", TerminatedBySignal(15)]
+    proc.stderr.read1.side_effect = [b"Input #0 banner\r", TerminatedBySignal(15)]
     ff = self._ffmpeg()
     with patch.object(ff, "_spawn", return_value=proc), patch.object(ff, "generateCommands", return_value=["ffmpeg", "-i", str(src), "out.mp4"]):
       gen = ff.convert("out.mp4", ["-i", str(src)], timeout=0)
@@ -302,7 +302,7 @@ class TestMediaprocessorInterruptCleanup:
     out = tmp_path / "input.mp4"
     options = {"source": [str(src)], "audio": [{"codec": "aac"}], "video": {}, "subtitle": []}
 
-    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False):
+    def fake_convert(outputfile, opts, timeout=None, preopts=None, postopts=None, strip_metadata=False, info=None):
       out.write_bytes(b"partial")
       yield None, ["ffmpeg"]
       err = TerminatedBySignal(15)
