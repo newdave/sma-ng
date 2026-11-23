@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import threading
 import time
 import unittest.mock as mock
@@ -1255,6 +1256,7 @@ class TestChildLogLevels:
         h.flush()
       handler = _make_handler()
       handler.server.config_log_manager.get_all_log_files.return_value = [{"name": "test-lvl", "path": mgr.get_log_file("/cfg/test-lvl.yml")}]
+      handler.server.config_log_manager.logs_dir = os.path.dirname(mgr.get_log_file("/cfg/test-lvl.yml"))
       handler._get_log_content("/logs/test-lvl", {"level": ["WARNING"]})
       msgs = [e["message"] for e in _get_response_body(handler)["entries"]]
     finally:

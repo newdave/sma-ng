@@ -158,6 +158,12 @@ for any of these:
 
 A rejected request queues nothing; the daemon logs one line without the rejected value.
 
+Submitted paths (`POST /jobs` and every `/webhook/*` endpoint) are resolved with `realpath` and must lie inside a
+configured media root: a `daemon.routing` match, a scan path, or either end of a path rewrite. A path outside every root,
+including one that reaches outside through `..` or a symlink, is refused with `403`
+`Path is outside configured media roots` and queues nothing. A daemon with no roots configured accepts any path.
+Symlinks inside a root that point outside it are therefore refused; submit the real path or add its root.
+
 ---
 
 ## Job Kinds
