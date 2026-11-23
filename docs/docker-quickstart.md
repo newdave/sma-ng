@@ -497,14 +497,14 @@ daemon:
 
 From the repo root:
 
-| Profile       | Hardware          | Database                            |
+| Profile | Hardware | Database |
 | ------------- | ----------------- | ----------------------------------- |
-| `software`    | CPU only          | SQLite (`/opt/sma/data/sma-ng.db`)  |
-| `software-pg` | CPU only          | external PostgreSQL (`db_url`)      |
-| `intel`       | Intel QSV / VAAPI | SQLite                              |
-| `intel-pg`    | Intel QSV / VAAPI | external PostgreSQL (`db_url`)      |
-| `nvidia`      | NVIDIA NVENC      | SQLite                              |
-| `nvidia-pg`   | NVIDIA NVENC      | external PostgreSQL (`db_url`)      |
+| `software` | CPU only | SQLite (`/opt/sma/data/sma-ng.db`) |
+| `software-pg` | CPU only | external PostgreSQL (`db_url`) |
+| `intel` | Intel QSV / VAAPI | SQLite |
+| `intel-pg` | Intel QSV / VAAPI | external PostgreSQL (`db_url`) |
+| `nvidia` | NVIDIA NVENC | SQLite |
+| `nvidia-pg` | NVIDIA NVENC | external PostgreSQL (`db_url`) |
 
 ```bash
 docker compose --env-file docker/.env -f docker/docker-compose.yml --profile intel up -d

@@ -18,11 +18,11 @@ It focuses on the minimum you need to understand to get a successful first run. 
 
 Optional extras (`pip install ".[extra]"`, or `mise run setup:deps:all` for everything):
 
-| Extra      | Adds                                                                     |
+| Extra | Adds |
 | ---------- | ------------------------------------------------------------------------ |
-| `postgres` | `psycopg2-binary` for PostgreSQL job persistence and cluster mode        |
-| `openvino` | OpenVINO runtime for the analyzer                                        |
-| `dev`      | pytest, ruff, pre-commit, and other lint/test tooling (`setup:deps:dev`) |
+| `postgres` | `psycopg2-binary` for PostgreSQL job persistence and cluster mode |
+| `openvino` | OpenVINO runtime for the analyzer |
+| `dev` | pytest, ruff, pre-commit, and other lint/test tooling (`setup:deps:dev`) |
 
 `setup/requirements*.txt` still exist for `pip install -r` workflows; `setup/requirements.txt` mirrors the base
 dependencies plus the `postgres` extra and is kept in sync by a test.
@@ -84,11 +84,11 @@ If you do not know the answers yet, start with:
 
 `mise run config:generate` creates one base YAML config with named quality profiles:
 
-| Profile | Video                                  | Audio             |
+| Profile | Video | Audio |
 | ------- | -------------------------------------- | ----------------- |
-| base    | Regular-quality defaults               | EAC3, 128 kbps/ch |
-| `rq`    | Explicit regular-quality override      | EAC3/AAC          |
-| `lq`    | Lower bitrate, stereo-focused override | AAC, stereo       |
+| base | Regular-quality defaults | EAC3, 128 kbps/ch |
+| `rq` | Explicit regular-quality override | EAC3/AAC |
+| `lq` | Lower bitrate, stereo-focused override | AAC, stereo |
 
 Use the `lq` profile for bandwidth-limited destinations. Route files to it via `daemon.routing` in `sma-ng.yml`:
 
@@ -246,10 +246,10 @@ This runs the detection script. Compare the result with your chosen `base.video.
 
 The normal bootstrap path generates these files:
 
-| File                | Purpose                                               |
+| File | Purpose |
 | ------------------- | ----------------------------------------------------- |
 | `config/sma-ng.yml` | Main conversion config, profiles, and daemon settings |
-| `config/daemon.env` | Optional daemon environment variables                 |
+| `config/daemon.env` | Optional daemon environment variables |
 
 You can operate successfully with only:
 
@@ -430,37 +430,37 @@ python manual.py -i /path/to/file.mkv -a -c config/sma-ng.yml
 
 ### All Flags
 
-| Flag    | Long                      | Description                                |
+| Flag | Long | Description |
 | ------- | ------------------------- | ------------------------------------------ |
-| `-i`    | `--input`                 | Input file or directory                    |
-| `-c`    | `--config`                | Alternate config file                      |
-| `-a`    | `--auto`                  | Auto mode (no prompts, guesses metadata)   |
-| `-s`    | `--season`                | Season number                              |
-| `-e`    | `--episode`               | Episode number                             |
-| `-tvdb` | `--tvdbid`                | TVDB ID                                    |
-| `-imdb` | `--imdbid`                | IMDB ID                                    |
-| `-tmdb` | `--tmdbid`                | TMDB ID                                    |
-| `-nm`   | `--nomove`                | Disable move-to and output-directory       |
-| `-nc`   | `--nocopy`                | Disable copy-to                            |
-| `-nd`   | `--nodelete`              | Disable original file deletion             |
-| `-nt`   | `--notag`                 | Disable metadata tagging                   |
-| `-to`   | `--tagonly`               | Tag only, no conversion                    |
-| `-np`   | `--nopost`                | Disable post-process scripts               |
-| `-pr`   | `--preserverelative`      | Preserve relative directory structure      |
-| `-pse`  | `--processsameextensions` | Reprocess files already in target format   |
-| `-fc`   | `--forceconvert`          | Force conversion + process-same-extensions |
-| `-fr`   | `--forcereencode`         | Re-encode video (blocks copy)              |
-| `-m`    | `--moveto`                | Override move-to path                      |
-| `-oo`   | `--optionsonly`           | Show conversion options, don't convert     |
-| `-cl`   | `--codeclist`             | List all supported codecs                  |
-| `-o`    | `--original`              | Specify original filename for guessing     |
-| `-ms`   | `--minsize`               | Minimum file size in MB                    |
-| `-pa`   | `--processedarchive`      | Path to processed files archive JSON       |
-|         | `--job-id`                | Daemon job id (set by the daemon worker)   |
-|         | `--audit`                 | Audit the input path, print findings       |
-|         | `--recycle-failed`        | With `--audit`: move media that fails ffprobe to the configured recycle-bin |
-|         | `--repair-hybrid`         | Repair stretched (hybrid-aspect) MP4s: `remux` (default, lossless aspect fix) or `reencode` (rebuild at true dims); with `--audit`, remuxes hybrid findings during the audit |
-|         | `--version`               | Print version and exit                     |
+| `-i` | `--input` | Input file or directory |
+| `-c` | `--config` | Alternate config file |
+| `-a` | `--auto` | Auto mode (no prompts, guesses metadata) |
+| `-s` | `--season` | Season number |
+| `-e` | `--episode` | Episode number |
+| `-tvdb` | `--tvdbid` | TVDB ID |
+| `-imdb` | `--imdbid` | IMDB ID |
+| `-tmdb` | `--tmdbid` | TMDB ID |
+| `-nm` | `--nomove` | Disable move-to and output-directory |
+| `-nc` | `--nocopy` | Disable copy-to |
+| `-nd` | `--nodelete` | Disable original file deletion |
+| `-nt` | `--notag` | Disable metadata tagging |
+| `-to` | `--tagonly` | Tag only, no conversion |
+| `-np` | `--nopost` | Disable post-process scripts |
+| `-pr` | `--preserverelative` | Preserve relative directory structure |
+| `-pse` | `--processsameextensions` | Reprocess files already in target format |
+| `-fc` | `--forceconvert` | Force conversion + process-same-extensions |
+| `-fr` | `--forcereencode` | Re-encode video (blocks copy) |
+| `-m` | `--moveto` | Override move-to path |
+| `-oo` | `--optionsonly` | Show conversion options, don't convert |
+| `-cl` | `--codeclist` | List all supported codecs |
+| `-o` | `--original` | Specify original filename for guessing |
+| `-ms` | `--minsize` | Minimum file size in MB |
+| `-pa` | `--processedarchive` | Path to processed files archive JSON |
+| | `--job-id` | Daemon job id (set by the daemon worker) |
+| | `--audit` | Audit the input path, print findings |
+| | `--recycle-failed` | With `--audit`: move media that fails ffprobe to the configured recycle-bin |
+| | `--repair-hybrid` | Repair stretched (hybrid-aspect) MP4s: `remux` (default, lossless aspect fix) or `reencode` (rebuild at true dims); with `--audit`, remuxes hybrid findings during the audit |
+| | `--version` | Print version and exit |
 
 ---
 
@@ -603,12 +603,12 @@ order. Files are skipped (never run as hooks) when they:
 
 Put shared helper code in `_`-prefixed files. Hooks receive:
 
-| Variable       | Description                                                                                                       |
+| Variable | Description |
 | -------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `SMA_FILES`    | JSON array of output files. First entry is the primary file; additional entries are copies created by `copy-to`   |
-| `SMA_TMDBID`   | TMDB ID of the processed file                                                                                     |
-| `SMA_SEASON`   | Season number (TV only)                                                                                           |
-| `SMA_EPISODE`  | Episode number (TV only). For a multi-episode file, the first episode                                             |
+| `SMA_FILES` | JSON array of output files. First entry is the primary file; additional entries are copies created by `copy-to` |
+| `SMA_TMDBID` | TMDB ID of the processed file |
+| `SMA_SEASON` | Season number (TV only) |
+| `SMA_EPISODE` | Episode number (TV only). For a multi-episode file, the first episode |
 | `SMA_EPISODES` | Comma-separated list of every episode number (TV only, for example `1,2`; a single episode yields just that one) |
 
 `setup/post_process/` is different: it holds sample download-client
@@ -623,30 +623,30 @@ Run `python manual.py -cl` for the full list. Key codecs:
 
 ### Video
 
-| SMA-NG Name     | FFmpeg Encoder | Notes             |
+| SMA-NG Name | FFmpeg Encoder | Notes |
 | --------------- | -------------- | ----------------- |
-| `h264`          | libx264        | Software H.264    |
-| `h265` / `hevc` | libx265        | Software HEVC     |
-| `h264qsv`       | h264_qsv       | Intel QSV H.264   |
-| `h265qsv`       | hevc_qsv       | Intel QSV HEVC    |
-| `h264vaapi`     | h264_vaapi     | Intel VAAPI H.264 |
-| `h265vaapi`     | hevc_vaapi     | Intel VAAPI HEVC  |
-| `av1qsv`        | av1_qsv        | Intel QSV AV1     |
-| `av1vaapi`      | av1_vaapi      | Intel VAAPI AV1   |
-| `h265_nvenc`    | hevc_nvenc     | NVIDIA HEVC       |
-| `av1`           | libaom-av1     | Software AV1      |
-| `svtav1`        | libsvtav1      | SVT-AV1           |
-| `vp9`           | libvpx-vp9     | Software VP9      |
+| `h264` | libx264 | Software H.264 |
+| `h265` / `hevc` | libx265 | Software HEVC |
+| `h264qsv` | h264_qsv | Intel QSV H.264 |
+| `h265qsv` | hevc_qsv | Intel QSV HEVC |
+| `h264vaapi` | h264_vaapi | Intel VAAPI H.264 |
+| `h265vaapi` | hevc_vaapi | Intel VAAPI HEVC |
+| `av1qsv` | av1_qsv | Intel QSV AV1 |
+| `av1vaapi` | av1_vaapi | Intel VAAPI AV1 |
+| `h265_nvenc` | hevc_nvenc | NVIDIA HEVC |
+| `av1` | libaom-av1 | Software AV1 |
+| `svtav1` | libsvtav1 | SVT-AV1 |
+| `vp9` | libvpx-vp9 | Software VP9 |
 
 ### Audio
 
-| SMA-NG Name | FFmpeg Encoder   |
+| SMA-NG Name | FFmpeg Encoder |
 | ----------- | ---------------- |
-| `aac`       | aac / libfdk_aac |
-| `ac3`       | ac3              |
-| `eac3`      | eac3             |
-| `flac`      | flac             |
-| `opus`      | libopus          |
-| `mp3`       | libmp3lame       |
-| `dts`       | dca              |
-| `truehd`    | truehd           |
+| `aac` | aac / libfdk_aac |
+| `ac3` | ac3 |
+| `eac3` | eac3 |
+| `flac` | flac |
+| `opus` | libopus |
+| `mp3` | libmp3lame |
+| `dts` | dca |
+| `truehd` | truehd |

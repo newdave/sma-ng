@@ -289,19 +289,19 @@ base:
     # fallback-policy: hw_only          # surface hw failures immediately; no retries
 ```
 
-| Policy            | Ladder                                          | When to use                                                                                                                                                                                       |
+| Policy | Ladder | When to use |
 | ----------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hw_only`         | hw                                              | Production nodes that should fail loudly on hardware errors (lost `/dev/dri`, missing oneVPL runtime, kernel-driver mismatch). No silent CPU fallback masks the problem.                          |
-| `hw_alt`          | hw → hw_alt                                     | Stay on the iGPU: recover from transient QSV encoder bugs via VAAPI without ever paying the 10–20x wall-clock cost of libx265 software encode. Recommended starting point on iGPU-only nodes. |
-| `sw_decode_only`  | hw → hw_alt → sw_decode                         | Allow a software decoder swap if both hardware encoders fail, but never swap the encoder to software (preserves throughput on encoder bugs that ride on top of a hardware decode pipeline).        |
-| `aggressive`      | hw → hw_alt → sw_decode → full_sw               | Default. Maximises "actively try to not fail to transcode". Legacy `software-fallback: true` maps here.                                                                                            |
+| `hw_only` | hw | Production nodes that should fail loudly on hardware errors (lost `/dev/dri`, missing oneVPL runtime, kernel-driver mismatch). No silent CPU fallback masks the problem. |
+| `hw_alt` | hw → hw_alt | Stay on the iGPU: recover from transient QSV encoder bugs via VAAPI without ever paying the 10–20x wall-clock cost of libx265 software encode. Recommended starting point on iGPU-only nodes. |
+| `sw_decode_only` | hw → hw_alt → sw_decode | Allow a software decoder swap if both hardware encoders fail, but never swap the encoder to software (preserves throughput on encoder bugs that ride on top of a hardware decode pipeline). |
+| `aggressive` | hw → hw_alt → sw_decode → full_sw | Default. Maximises "actively try to not fail to transcode". Legacy `software-fallback: true` maps here. |
 
 The deprecated boolean form continues to work for one minor release:
 
-| Legacy YAML                 | Equivalent new policy |
+| Legacy YAML | Equivalent new policy |
 | --------------------------- | --------------------- |
-| `software-fallback: true`   | `fallback-policy: aggressive` |
-| `software-fallback: false`  | `fallback-policy: hw_only` |
+| `software-fallback: true` | `fallback-policy: aggressive` |
+| `software-fallback: false` | `fallback-policy: hw_only` |
 
 Loading a config with the deprecated key emits one `WARNING` log per
 daemon startup pointing operators at the new field.
@@ -321,14 +321,14 @@ the failure class so the alert path is observable.
 six stable buckets (the values are pinned by a regression test; external
 dashboards can rely on them):
 
-| Class                | Typical cause                                      |
+| Class | Typical cause |
 | -------------------- | -------------------------------------------------- |
 | `device_open_failed` | `/dev/dri` permissions, missing libva/oneVPL runtime |
-| `decoder_init_failed`| HW decoder rejects this codec/profile (e.g. AV1 on pre-Arc) |
-| `encoder_init_failed`| HW encoder rejects pix_fmt / profile / level         |
-| `filter_init_failed` | Filter graph build (e.g. `scale_qsv` unavailable)    |
-| `runtime_error`      | ffmpeg started OK then failed mid-encode             |
-| `other`              | Unrecognised stderr (drift in upstream ffmpeg messages) |
+| `decoder_init_failed` | HW decoder rejects this codec/profile (e.g. AV1 on pre-Arc) |
+| `encoder_init_failed` | HW encoder rejects pix_fmt / profile / level |
+| `filter_init_failed` | Filter graph build (e.g. `scale_qsv` unavailable) |
+| `runtime_error` | ffmpeg started OK then failed mid-encode |
+| `other` | Unrecognised stderr (drift in upstream ffmpeg messages) |
 
 A spike in `other` is the signal to update the classifier in
 `resources/processor/failures.py`.

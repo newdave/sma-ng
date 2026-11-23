@@ -229,12 +229,12 @@ python repair.py /path/to/file.mp4 /path/to/dir     # repair in place
 mise run media:repair -- /path/to/file-or-dir       # same via mise; `sma repair PATH` inside Docker
 ```
 
-| Flag              | Effect                                                         |
+| Flag | Effect |
 | ----------------- | -------------------------------------------------------------- |
-| `-n`, `--dry-run` | Report what would be repaired; change nothing                  |
-| `-c`, `--config`  | Alternate `sma-ng.yml` path (disables per-path routing)        |
-| `--no-plex`       | Skip the Plex refresh after repairs                            |
-| `-v`, `--verbose` | Debug logging                                                  |
+| `-n`, `--dry-run` | Report what would be repaired; change nothing |
+| `-c`, `--config` | Alternate `sma-ng.yml` path (disables per-path routing) |
+| `--no-plex` | Skip the Plex refresh after repairs |
+| `-v`, `--verbose` | Debug logging |
 
 Each file scanned gets one log line with its FFprobe summary, followed by its result (`Normal, skipped`,
 `Would repair`, `Repaired` or `Repair failed`). The summary shows the container, duration, size and overall
@@ -250,12 +250,12 @@ Normal, skipped: /mnt/media/TV/Show/S01E01.mkv
 
 What it fixes:
 
-| Damage       | Detected as                                                                                     | Fix                                    |
+| Damage | Detected as | Fix |
 | ------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------- |
-| Data streams | `tmcd` timecode tracks, stray `bin_data`                                                        | Dropped (`-write_tmcd 0` on MP4)       |
-| Unknown      | Streams FFprobe cannot classify or identify a codec for (`unknown`/`none`)                      | Dropped                                |
-| Artwork      | Attached pictures, cover art demoted to a real `mp4v` video track, image attachments in MKV     | Dropped; font attachments are kept     |
-| Aspect ratio | Stretched hybrid dims (see above) with square pixels                                            | Corrective display ratio (container and bitstream) |
+| Data streams | `tmcd` timecode tracks, stray `bin_data` | Dropped (`-write_tmcd 0` on MP4) |
+| Unknown | Streams FFprobe cannot classify or identify a codec for (`unknown`/`none`) | Dropped |
+| Artwork | Attached pictures, cover art demoted to a real `mp4v` video track, image attachments in MKV | Dropped; font attachments are kept |
+| Aspect ratio | Stretched hybrid dims (see above) with square pixels | Corrective display ratio (container and bitstream) |
 
 The MP4 chapter text track (`bin_data` tagged `text`, written whenever a file has chapters) is not damage and is
 kept. The

@@ -8,18 +8,18 @@ substantially re-architected. This guide covers the differences you will encount
 
 ## What Changed at a Glance
 
-| Area                    | Original SMA                                     | SMA-NG                                                |
+| Area | Original SMA | SMA-NG |
 | ----------------------- | ------------------------------------------------ | ----------------------------------------------------- |
-| Python requirement      | Python 3 (any 3.x)                               | Python **3.12+**                                      |
-| Execution model         | Synchronous Python scripts called directly       | Async HTTP daemon with job queue                      |
-| Sonarr/Radarr hook      | Custom Script (`postSonarr.py`, `postRadarr.py`) | Native webhook endpoint or bash trigger               |
-| Downloader hooks        | Python scripts (`SABPostProcess.py`, etc.)       | Bash scripts (`triggers/*.sh`) posting to daemon      |
-| Sickbeard/Sickrage      | Supported (`[Sickbeard]`, `[Sickrage]` sections) | **Removed**                                           |
-| Hardware acceleration   | Manual hwaccels/hwdevices config only            | Auto-detection (`mise run config:gpu`) + `gpu` key        |
-| Multi-instance managers | Single `[Sonarr]` / `[Radarr]` section           | Multiple sections (`[Sonarr-4K]`, `[Radarr-Kids]`, …) |
-| Multi-quality profiles  | Single config file                               | Three bundled quality profiles; path-based routing    |
-| Job tracking            | None                                             | REST API: `/jobs`, `/health`, `/status`               |
-| Docker                  | Separate `sonarr-sma` / `radarr-sma` images      | Single standalone image                               |
+| Python requirement | Python 3 (any 3.x) | Python **3.12+** |
+| Execution model | Synchronous Python scripts called directly | Async HTTP daemon with job queue |
+| Sonarr/Radarr hook | Custom Script (`postSonarr.py`, `postRadarr.py`) | Native webhook endpoint or bash trigger |
+| Downloader hooks | Python scripts (`SABPostProcess.py`, etc.) | Bash scripts (`triggers/*.sh`) posting to daemon |
+| Sickbeard/Sickrage | Supported (`[Sickbeard]`, `[Sickrage]` sections) | **Removed** |
+| Hardware acceleration | Manual hwaccels/hwdevices config only | Auto-detection (`mise run config:gpu`) + `gpu` key |
+| Multi-instance managers | Single `[Sonarr]` / `[Radarr]` section | Multiple sections (`[Sonarr-4K]`, `[Radarr-Kids]`, …) |
+| Multi-quality profiles | Single config file | Three bundled quality profiles; path-based routing |
+| Job tracking | None | REST API: `/jobs`, `/health`, `/status` |
+| Docker | Separate `sonarr-sma` / `radarr-sma` images | Single standalone image |
 
 ---
 
@@ -113,38 +113,38 @@ The config file is still named `sma-ng.yml` and lives in `config/`. Copy from `s
 
 These sections no longer exist in SMA-NG. Remove them from your config.
 
-| Section       | Reason                                           |
+| Section | Reason |
 | ------------- | ------------------------------------------------ |
 | `[Sickbeard]` | Sickbeard is no longer a supported media manager |
-| `[Sickrage]`  | Sickrage is no longer a supported media manager  |
+| `[Sickrage]` | Sickrage is no longer a supported media manager |
 
 ### New sections
 
-| Section      | Purpose                                                                            |
+| Section | Purpose |
 | ------------ | ---------------------------------------------------------------------------------- |
 | `[Analyzer]` | Optional OpenVINO-based per-job content analysis for codec/bitrate recommendations |
-| `[Naming]`   | Sonarr/Radarr-style file renaming templates for movies and TV episodes             |
+| `[Naming]` | Sonarr/Radarr-style file renaming templates for movies and TV episodes |
 
 ### `[Converter]` — new keys
 
-| New key                        | Default   | Description                                                                    |
+| New key | Default | Description |
 | ------------------------------ | --------- | ------------------------------------------------------------------------------ |
-| `recycle-bin`                  | _(blank)_ | Directory to copy originals into before deletion when `delete-original = True` |
-| `output-directory-space-ratio` | `0.0`     | Minimum free-space ratio before using `output-directory` as scratch space      |
+| `recycle-bin` | _(blank)_ | Directory to copy originals into before deletion when `delete-original = True` |
+| `output-directory-space-ratio` | `0.0` | Minimum free-space ratio before using `output-directory` as scratch space |
 
 ### `[Video]` — key changes
 
-| Original key                  | SMA-NG key           | Notes                                                                                                |
+| Original key | SMA-NG key | Notes |
 | ----------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------- |
-| `video-codec` _(legacy name)_ | `codec`              | Deprecated name is still accepted at startup with a warning; rename it                               |
-| `crf` _(single integer)_      | `crf-profiles`       | Now a multi-tier format: `src_kbps:quality:target_rate:max_rate`; multiple profiles separated by `,` |
-| _(none)_                      | `gpu`                | Hardware accelerator selector: `qsv`, `nvenc`, `vaapi`, `videotoolbox`, or blank for software        |
-| _(none)_                      | `crf-profiles-hd`    | Separate quality-tier profile applied to 4K and larger content                                       |
-| _(none)_                      | `b-frames`           | B-frame depth passed to the encoder                                                                  |
-| _(none)_                      | `ref-frames`         | Reference frame count passed to the encoder                                                          |
-| _(none)_                      | `look-ahead-depth`   | Encoder lookahead depth                                                                              |
-| _(none)_                      | `dynamic-parameters` | Auto-fill codec parameters by reading frame data at runtime                                          |
-| _(none)_                      | `bitrate-ratio`      | Per-source-codec bitrate multiplier dict, e.g. `h264:0.65, hevc:0.85`                                |
+| `video-codec` _(legacy name)_ | `codec` | Deprecated name is still accepted at startup with a warning; rename it |
+| `crf` _(single integer)_ | `crf-profiles` | Now a multi-tier format: `src_kbps:quality:target_rate:max_rate`; multiple profiles separated by `,` |
+| _(none)_ | `gpu` | Hardware accelerator selector: `qsv`, `nvenc`, `vaapi`, `videotoolbox`, or blank for software |
+| _(none)_ | `crf-profiles-hd` | Separate quality-tier profile applied to 4K and larger content |
+| _(none)_ | `b-frames` | B-frame depth passed to the encoder |
+| _(none)_ | `ref-frames` | Reference frame count passed to the encoder |
+| _(none)_ | `look-ahead-depth` | Encoder lookahead depth |
+| _(none)_ | `dynamic-parameters` | Auto-fill codec parameters by reading frame data at runtime |
+| _(none)_ | `bitrate-ratio` | Per-source-codec bitrate multiplier dict, e.g. `h264:0.65, hevc:0.85` |
 
 #### `crf` migration example
 
@@ -180,32 +180,32 @@ crf-profiles-hd = 0:22:20M:30M, 15000:21:25M:50M
 The following keys are deprecated in SMA-NG. They still parse but will log warnings. Replace them with
 entries in `[Audio.Sorting]`.
 
-| Deprecated key                 | Replacement                                             |
+| Deprecated key | Replacement |
 | ------------------------------ | ------------------------------------------------------- |
-| `prefer-more-channels = True`  | Add `channels.d` to `[Audio.Sorting] sorting =`         |
+| `prefer-more-channels = True` | Add `channels.d` to `[Audio.Sorting] sorting =` |
 | `default-more-channels = True` | Add `channels.d` to `[Audio.Sorting] default-sorting =` |
-| `copy-original-before = True`  | Reorder entries in `[Audio.Sorting]`                    |
+| `copy-original-before = True` | Reorder entries in `[Audio.Sorting]` |
 
 New keys in `[Audio]` with no original equivalent:
 
-| New key                | Default | Description                                                          |
+| New key | Default | Description |
 | ---------------------- | ------- | -------------------------------------------------------------------- |
-| `allow-language-relax` | `True`  | Fall back to any language if no stream matches the approved list     |
-| `relax-to-default`     | `False` | When relaxing language, prefer the default language over others      |
-| `ignore-trudhd`        | `True`  | Skip TrueHD streams for containers that cannot carry them (e.g. MP4) |
+| `allow-language-relax` | `True` | Fall back to any language if no stream matches the approved list |
+| `relax-to-default` | `False` | When relaxing language, prefer the default language over others |
+| `ignore-trudhd` | `True` | Skip TrueHD streams for containers that cannot carry them (e.g. MP4) |
 
 ### `[Universal Audio]` — activation change
 
-| Original behavior                 | SMA-NG behavior                                          |
+| Original behavior | SMA-NG behavior |
 | --------------------------------- | -------------------------------------------------------- |
-| Always active when `codec` is set | Requires `enabled = True` to activate                    |
-| `move-after` key _(deprecated)_   | Removed; use `[Audio.Sorting]` position ordering instead |
+| Always active when `codec` is set | Requires `enabled = True` to activate |
+| `move-after` key _(deprecated)_ | Removed; use `[Audio.Sorting]` position ordering instead |
 
 If you previously relied on Universal Audio being always-on, add `enabled = True` to your `[Universal Audio]` section.
 
 ### `[Subtitle.Sorting]` — new key
 
-| New key        | Description                                                        |
+| New key | Description |
 | -------------- | ------------------------------------------------------------------ |
 | `burn-sorting` | Sorting key list used when selecting which subtitle stream to burn |
 
@@ -214,12 +214,12 @@ If you previously relied on Universal Audio being always-on, add `enabled = True
 All four downloader sections (`[SABNZBD]`, `[Deluge]`, `[qBittorrent]`, `[uTorrent]`) previously had keys
 for routing completed downloads to Sickbeard and Sickrage. These keys have been removed.
 
-| Removed key          | Affected sections                         |
+| Removed key | Affected sections |
 | -------------------- | ----------------------------------------- |
-| `sickbeard-category` | `[SABNZBD]`                               |
-| `sickrage-category`  | `[SABNZBD]`                               |
-| `sickbeard-label`    | `[Deluge]`, `[qBittorrent]`, `[uTorrent]` |
-| `sickrage-label`     | `[Deluge]`, `[qBittorrent]`, `[uTorrent]` |
+| `sickbeard-category` | `[SABNZBD]` |
+| `sickrage-category` | `[SABNZBD]` |
+| `sickbeard-label` | `[Deluge]`, `[qBittorrent]`, `[uTorrent]` |
+| `sickrage-label` | `[Deluge]`, `[qBittorrent]`, `[uTorrent]` |
 
 Remove those keys from your config. All other downloader keys are unchanged.
 
@@ -249,11 +249,11 @@ instance handles which directories. The original single-instance config still wo
 
 ### Sonarr and Radarr
 
-| Original                                                    | SMA-NG                                                                        |
+| Original | SMA-NG |
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | Custom Script connection: `postSonarr.py` / `postRadarr.py` | **Native webhook** (recommended): `POST /webhook/sonarr` or `/webhook/radarr` |
-| —                                                           | **Or** bash trigger script: `triggers/media_managers/sonarr.sh`               |
-| Ran inline before Sonarr imported the file                  | Jobs queued and run asynchronously; Sonarr/Radarr rescanned after completion  |
+| — | **Or** bash trigger script: `triggers/media_managers/sonarr.sh` |
+| Ran inline before Sonarr imported the file | Jobs queued and run asynchronously; Sonarr/Radarr rescanned after completion |
 
 #### Setting up native webhooks (recommended)
 
@@ -281,13 +281,13 @@ If you prefer the old Custom Script connection style:
 All downloader integrations now use **bash wrapper scripts** instead of Python scripts.
 The bash scripts submit jobs to the daemon via HTTP and return immediately.
 
-| Download client | Original script             | SMA-NG script                      |
+| Download client | Original script | SMA-NG script |
 | --------------- | --------------------------- | ---------------------------------- |
-| SABnzbd         | `SABPostProcess.py`         | `triggers/usenet/sabnzbd.sh`       |
-| NZBGet          | `NZBGetPostProcess.py`      | `triggers/usenet/nzbget.sh`        |
-| qBittorrent     | `qBittorrentPostProcess.py` | `triggers/torrents/qbittorrent.sh` |
-| Deluge          | `delugePostProcess.py`      | `triggers/torrents/deluge.sh`      |
-| uTorrent        | `uTorrentPostProcess.py`    | `triggers/torrents/utorrent.sh`    |
+| SABnzbd | `SABPostProcess.py` | `triggers/usenet/sabnzbd.sh` |
+| NZBGet | `NZBGetPostProcess.py` | `triggers/usenet/nzbget.sh` |
+| qBittorrent | `qBittorrentPostProcess.py` | `triggers/torrents/qbittorrent.sh` |
+| Deluge | `delugePostProcess.py` | `triggers/torrents/deluge.sh` |
+| uTorrent | `uTorrentPostProcess.py` | `triggers/torrents/utorrent.sh` |
 
 The configuration in each downloader's UI is the same (point to the script). Only the script path changes.
 
@@ -314,16 +314,16 @@ SMA-NG stores daemon-specific settings in the `Daemon:` section of `sma-ng.yml` 
 
 Key options:
 
-| Key                   | Description                                                                    |
+| Key | Description |
 | --------------------- | ------------------------------------------------------------------------------ |
-| `default_config`      | Path to the fallback `sma-ng.yml`                                              |
-| `api_key`             | Authentication key for the HTTP API                                            |
-| `db_url`              | PostgreSQL connection URL for distributed/multi-node mode                      |
-| `path_configs`        | List of `{path, profile, default_args}` entries for path-based profile routing |
-| `path_rewrites`       | Path prefix substitutions applied before config matching                       |
-| `scan_paths`          | Scheduled background scanning definitions                                      |
-| `job_timeout_seconds` | Maximum runtime per job; `0` for unlimited                                     |
-| `ffmpeg_dir`          | Directory prepended to `PATH` for FFmpeg binaries                              |
+| `default_config` | Path to the fallback `sma-ng.yml` |
+| `api_key` | Authentication key for the HTTP API |
+| `db_url` | PostgreSQL connection URL for distributed/multi-node mode |
+| `path_configs` | List of `{path, profile, default_args}` entries for path-based profile routing |
+| `path_rewrites` | Path prefix substitutions applied before config matching |
+| `scan_paths` | Scheduled background scanning definitions |
+| `job_timeout_seconds` | Maximum runtime per job; `0` for unlimited |
+| `ffmpeg_dir` | Directory prepended to `PATH` for FFmpeg binaries |
 
 ### Path-based config routing
 
@@ -373,18 +373,18 @@ The container image is published at `ghcr.io/newdave/sma-ng:latest`.
 
 ## New Features Not in the Original
 
-| Feature                              | Description                                                                                            |
+| Feature | Description |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| Hardware acceleration auto-detection | `mise run config:gpu` identifies available GPU encoders                           |
-| Multi-quality config profiles        | Three bundled profiles: `sma-ng.yml`, `sma-ng.yml profile rq`, `sma-ng.yml profile lq`                 |
-| OpenVINO Analyzer                    | Optional `[Analyzer]` section for content-aware encoding decisions                                     |
-| File renaming templates              | `[Naming]` section with Sonarr/Radarr-style `{token}` templates                                        |
-| Recycle bin                          | `recycle-bin` key copies originals before deletion                                                     |
-| Per-config rotating logs             | Each config gets its own log file in `logs/`; rotates at 10 MB                                         |
-| Job queue REST API                   | `/jobs`, `/health`, `/status`, `/stats` endpoints for monitoring                                       |
-| Scheduled background scanning        | `scan_paths` in `Daemon:` section in `sma-ng.yml` periodically scans directories for unprocessed files |
-| Graceful shutdown and restart        | `POST /shutdown` and `POST /restart` drain active jobs before stopping                                 |
-| PostgreSQL clustering                | Optional `db_url` for multi-node distributed mode                                                      |
+| Hardware acceleration auto-detection | `mise run config:gpu` identifies available GPU encoders |
+| Multi-quality config profiles | Three bundled profiles: `sma-ng.yml`, `sma-ng.yml profile rq`, `sma-ng.yml profile lq` |
+| OpenVINO Analyzer | Optional `[Analyzer]` section for content-aware encoding decisions |
+| File renaming templates | `[Naming]` section with Sonarr/Radarr-style `{token}` templates |
+| Recycle bin | `recycle-bin` key copies originals before deletion |
+| Per-config rotating logs | Each config gets its own log file in `logs/`; rotates at 10 MB |
+| Job queue REST API | `/jobs`, `/health`, `/status`, `/stats` endpoints for monitoring |
+| Scheduled background scanning | `scan_paths` in `Daemon:` section in `sma-ng.yml` periodically scans directories for unprocessed files |
+| Graceful shutdown and restart | `POST /shutdown` and `POST /restart` drain active jobs before stopping |
+| PostgreSQL clustering | Optional `db_url` for multi-node distributed mode |
 
 ---
 

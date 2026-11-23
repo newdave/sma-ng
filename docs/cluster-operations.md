@@ -41,7 +41,7 @@ graph LR
 ## Quick reference: cluster control surface
 
 | Action | Mise task | Admin API | DB effect |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | List node status | `mise run cluster -- status` | `GET /admin/nodes` | reads `cluster_nodes` |
 | Drain (finish active jobs, stop accepting new) | `HOST=<host> mise run cluster -- drain` | `POST /admin/nodes/<host>/drain` | `status='draining'` |
 | Pause (immediately stop pickup; active jobs continue) | `HOST=<host> mise run cluster -- pause` | `POST /admin/nodes/<host>/pause` | `status='paused'` |
