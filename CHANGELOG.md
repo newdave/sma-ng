@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.49](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.48...sma-ng-v3.2.49) (2026-11-23)
+
+
+### Bug Fixes
+
+* keep job history forever unless retention is set explicitly ([#260](https://github.com/newdave/sma-ng/issues/260)) ([27dde48](https://github.com/newdave/sma-ng/commit/27dde485596ad4e8122f8578de9a2950b1c3a677))
+* let wiki:publish prune renamed pages ([#259](https://github.com/newdave/sma-ng/issues/259)) ([ce7e9f3](https://github.com/newdave/sma-ng/commit/ce7e9f398a0990adefb0d5ff391185149b6f3a7c))
+
 ## [3.2.48](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.47...sma-ng-v3.2.48) (2026-11-22)
 
 
