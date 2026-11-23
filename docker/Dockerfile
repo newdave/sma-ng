@@ -29,9 +29,16 @@ ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# BuildKit cache mounts keep downloaded .deb files and apt lists between
+# builds (outside the image layers); stop the base image deleting them.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
 # Intel oneVPL (QSV) is only available on amd64 — add the Intel graphics PPA
 # before installing any Intel iGPU-specific packages, and skip that path on arm64.
-RUN apt-get update \
+RUN --mount=type=cache,id=apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=apt-lists-ffmpeg-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends software-properties-common \
     && if [ "$TARGETARCH" = "amd64" ]; then \
     add-apt-repository ppa:kobuk-team/intel-graphics \
@@ -73,8 +80,7 @@ RUN apt-get update \
     && if [ "$TARGETARCH" = "amd64" ]; then \
     apt-get install -y --no-install-recommends libvpl-dev; \
     fi \
-    && apt-get purge -y --auto-remove software-properties-common \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get purge -y --auto-remove software-properties-common
 
 # ── nv-codec-headers (NVENC/NVDEC — headers only, no CUDA needed at build time)
 # Sources live in BuildKit cache mounts (persisted across CI runs by
@@ -159,11 +165,18 @@ RUN --mount=type=cache,id=ffmpeg-ccache-${TARGETARCH},target=/var/cache/ccache,s
 FROM ubuntu:24.04@sha256:9c7f200c07e3d4a03e7249d2c16bf66a51120fb876aa2242cf31451412543289 AS python-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
+ARG TARGETARCH
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# BuildKit cache mounts keep downloaded .deb files and apt lists between
+# builds (outside the image layers); stop the base image deleting them.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
+RUN --mount=type=cache,id=apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=apt-lists-python-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     python3 \
-    python3-venv \
-    && rm -rf /var/lib/apt/lists/*
+    python3-venv
 
 WORKDIR /build
 
@@ -171,7 +184,8 @@ COPY setup/requirements.txt ./requirements.txt
 COPY pyproject.toml ./
 COPY README.md ./
 
-RUN python3 -m venv /venv \
+RUN --mount=type=cache,id=pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
+    python3 -m venv /venv \
     && /venv/bin/pip install --upgrade pip setuptools wheel \
     && /venv/bin/pip install --no-warn-script-location -r requirements.txt
 
@@ -233,7 +247,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Intel oneVPL and Intel VA userspace packages are only available/useful on
 # amd64 here — add the Intel graphics PPA before installing any Intel iGPU
 # runtime packages and skip that path on arm64.
-RUN apt-get update \
+# Cache mounts as in the builder stages; the image keeps Ubuntu's docker-clean
+# apt behaviour, so it is only set aside for this step.
+RUN --mount=type=cache,id=apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=apt-lists-runtime-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    mv /etc/apt/apt.conf.d/docker-clean /tmp/docker-clean \
+    && apt-get update \
     && apt-get install -y --no-install-recommends software-properties-common \
     && if [ "$TARGETARCH" = "amd64" ]; then \
     add-apt-repository ppa:kobuk-team/intel-graphics \
@@ -278,7 +297,7 @@ RUN apt-get update \
     intel-gpu-tools; \
     fi \
     && apt-get purge -y --auto-remove software-properties-common \
-    && rm -rf /var/lib/apt/lists/*
+    && mv /tmp/docker-clean /etc/apt/apt.conf.d/docker-clean
 
 # Copy FFmpeg binaries from builder
 COPY --from=ffmpeg-builder /usr/local/bin/ffmpeg  /usr/local/bin/ffmpeg
@@ -314,7 +333,7 @@ RUN find /app -maxdepth 1 -type f \( \
 # the admin UI's per-node version column useless and hides image lag from
 # operators). --no-deps avoids reinstalling anything from requirements.txt;
 # --no-build-isolation reuses the already-installed setuptools.
-RUN /venv/bin/pip install --no-deps --no-build-isolation /app
+RUN /venv/bin/pip install --no-cache-dir --no-deps --no-build-isolation /app
 
 # Bake the source commit into the image so the running daemon can report it
 # via /health and /status. The semver alone (importlib.metadata) can't

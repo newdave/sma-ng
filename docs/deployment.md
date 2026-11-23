@@ -508,9 +508,9 @@ See also:
 ## CI / Release
 
 | Workflow | Trigger | Description |
-| ------------- | ---------------------------------------- | --------------------------------------------------------------------------- |
-| `ci.yml` | PR / push to main | Tests + coverage gates, pre-commit lint, OpenAPI/docs/config checks, runtime `pip-audit`; on main, the main image |
-| `docker.yml` | PR (image paths); called by CI and release | Build and smoke test the image; Trivy scan and push only for main and releases |
+| --- | --- | --- |
+| `ci.yml` | PR / push to main | Tests + coverage gates, pre-commit lint, OpenAPI/docs/config checks, runtime `pip-audit`; the image when image files change |
+| `docker.yml` | Called by CI and release; manual | Build and smoke test the image; Trivy scan and push only for main and releases |
 | `release.yml` | Push to main; manual with `tag` | release-please PR + version bump; on release: wheel/sdist + release image |
 | `codeql.yml` | PR (Python changes) / weekly | CodeQL static analysis (results in the Security tab) |
 
@@ -519,22 +519,44 @@ workflows never name a Python version, so Renovate cannot move CI off the projec
 to a PR cancels that PR's running checks; runs on `main` and release runs queue instead, so every `main` commit gets
 a result and a release is never interrupted.
 
-Docker images are built and pushed only by `docker.yml`; there is no local push task. A push to `main` builds the
-image in the same CI run, only after its test and lint jobs pass, and every image is smoke-tested before it is
-pushed, so `latest` never carries code that failed CI. Hosts then pick the image up with `mise run deploy:remote`.
-Trivy findings are report-only (Security tab) for now. Each platform builds and is smoke-tested on a native runner (arm64 on
-`ubuntu-24.04-arm`, not QEMU emulation) and is pushed untagged by digest; a final job publishes one multi-arch
+Test and lint caches: pip downloads (keyed on `pyproject.toml` and `setup/requirements*.txt`), the whole dev `venv`
+and the pre-commit hook environments (both keyed on the exact Python build), and ffmpeg's `.deb` files per runner
+image, so a cache hit installs ffmpeg without contacting the apt mirrors. Image build caches are described below.
+
+Docker images are built and pushed only by `docker.yml`; there is no local push task. CI builds an image only when
+`scripts/ci-image-changed.sh` finds an image-affecting file in the change: Python source, the package directories,
+`setup/`, `docker/`, `scripts/`, `sma-webhook.sh`, `pyproject.toml`, `.dockerignore` or `docker.yml`. Tests, docs
+(including the operator docs the daemon serves at `/docs`, which ship with the next image build), agent tooling and
+other workflows never build one. A PR compares its merge commit with the base branch and builds and smoke-tests
+alongside the checks without pushing. A push to `main` compares with the last `main` commit whose CI passed (or
+builds when that is unknown), and builds in the same CI run only after its test and lint jobs pass. Every image is
+smoke-tested before it is pushed, so `latest` never carries code that failed CI. To rebuild by hand, dispatch
+`docker.yml`. Hosts then pick the image up with `mise run deploy:remote`.
+Trivy findings are report-only (Security tab) for now. Each platform builds and is smoke-tested on a native runner
+(arm64 on `ubuntu-24.04-arm`, not QEMU emulation) and is pushed untagged by digest; a final job publishes one multi-arch
 manifest under the tags.
 
-The FFmpeg compile is the slowest part of the build, and Docker layer caching only helps while nothing above it
-changes (a base-image or apt change rebuilds it). The `ffmpeg-builder` stage therefore keeps two BuildKit cache mounts
-per architecture: `ffmpeg-src-<arch>` (the FFmpeg source tarball, checked with `xz -t` and re-downloaded if corrupt,
-plus the nv-codec-headers checkout, both keyed by version) and `ffmpeg-ccache-<arch>` (ccache objects; FFmpeg is
-configured with `--cc="ccache gcc" --cxx="ccache g++"` and the build log ends with `ccache -s` statistics).
-`docker.yml` persists both across runs with `actions/cache` and `buildkit-cache-dance`, under the key
-`ffmpeg-<arch>-<hash of docker/Dockerfile>` with a `ffmpeg-<arch>-` prefix fallback, so an older cache still seeds a
-changed Dockerfile. Only `main` and release builds save the cache; PR builds restore it read-only to protect the
-10 GB cache budget. A plain `docker build` without these caches still works, it just downloads and compiles everything.
+Image build caching has several layers. Docker layer caching (the GitHub Actions cache plus the `buildcache` registry
+tag) only helps while nothing above a layer changes. Below it, the Dockerfile keeps its downloads in BuildKit cache
+mounts per architecture, so a rebuilt layer does not start from nothing:
+
+- `apt-cache-<arch>` (`/var/cache/apt`, shared by all stages) and `apt-lists-{ffmpeg,python,runtime}-<arch>`: apt
+  `.deb` files and package lists. The builder stages stop the base image deleting them (`docker-clean` removed,
+  `Keep-Downloaded-Packages` set); the runtime stage only sets `docker-clean` aside for its install step, so the
+  shipped image keeps Ubuntu's apt cleaning.
+- `pip-<arch>`: pip downloads for the Python venv build.
+- `ffmpeg-src-<arch>`: the FFmpeg source tarball (checked with `xz -t` and re-downloaded if corrupt) and the
+  nv-codec-headers checkout, both keyed by version.
+- `ffmpeg-ccache-<arch>`: ccache objects. FFmpeg is configured with `--cc="ccache gcc" --cxx="ccache g++"` and the
+  build log ends with `ccache -s` statistics. The FFmpeg compile is the slowest part of the build, and a base-image
+  or apt change rebuilds it without this.
+
+CI runners start with empty mounts, so `docker.yml` persists all of them across runs with one `actions/cache` entry and
+`buildkit-cache-dance`, under the key `buildkit-mounts-<arch>-<hash of docker/Dockerfile, setup/requirements*.txt and
+pyproject.toml>` with a `buildkit-mounts-<arch>-` prefix fallback, so an older cache still seeds a changed input. Only
+`main` and release builds save the cache; PR builds restore it read-only to protect the 10 GB cache budget (inside the
+called workflow `github.event_name` is the caller's event). A plain `docker build` without these caches still works,
+it just downloads and compiles everything.
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please). **Do not manually create `v*` tags** — this causes duplicate releases.
 

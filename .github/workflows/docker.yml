@@ -1,32 +1,21 @@
 name: Docker
 
-# Three ways in:
-#   pull_request   build + smoke test the PR's image (no Trivy scan); never pushes.
-#                  Only runs when image-affecting paths change.
-#   workflow_call  from ci.yml after test and lint pass on a push to main: build,
-#                  smoke test, push ghcr.io/<repo>:latest, :main and :sha-<short>
-#                  (linux/amd64). latest therefore always tracks main HEAD that
-#                  passed CI.
-#                  From release.yml (with ref + version) when a release is
-#                  created: build the tag, smoke test, push X.Y.Z, X.Y and X
-#                  (linux/amd64 + linux/arm64).
+# Called, never triggered by repository events (plus manual dispatch):
+#   from ci.yml    when scripts/ci-image-changed.sh finds image-affecting files.
+#                  On a PR: build + smoke test the PR's image (no Trivy scan);
+#                  never pushes. On a push to main, after test and lint pass:
+#                  build, smoke test, push ghcr.io/<repo>:latest, :main and
+#                  :sha-<short> (linux/amd64). latest therefore always tracks
+#                  the newest main image that passed CI.
+#   from release.yml (with ref + version) when a release is created: build the
+#                  tag, smoke test, push X.Y.Z, X.Y and X (linux/amd64 +
+#                  linux/arm64).
 # workflow_dispatch builds the current ref and pushes when `push` is checked.
 #
 # Every platform builds on a native runner (arm64 under QEMU exceeds the job
 # timeout), is smoke-tested there and pushed by digest; the merge job then
 # publishes one multi-arch manifest under the tags.
 on:
-  pull_request:
-    branches: [main]
-    # Allow-list of image-affecting paths; the build on main (from ci.yml) is unconditional.
-    paths:
-      - "Dockerfile*"
-      - "docker/**"
-      - "setup/requirements*.txt"
-      - "pyproject.toml"
-      - "**/*.py"
-      - "setup/**"
-      - ".github/workflows/docker.yml"
   workflow_call:
     inputs:
       ref:
@@ -55,8 +44,6 @@ env:
 jobs:
   plan:
     name: Plan image build
-    # Release-please PRs only bump versions and the changelog: no image build.
-    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 3
     # Job-level so a call from ci.yml or release.yml does not share the caller's group.
@@ -152,44 +139,61 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      # Persist the Dockerfile's FFmpeg cache mounts (source tarball/headers and
-      # ccache objects) across runs. Layer caching alone recompiles FFmpeg from
-      # scratch whenever anything above it changes. Only main/release builds save
-      # (PRs restore only) to protect the 10 GB cache budget; the dance action
-      # injects the restored dirs before the build and extracts them afterwards.
-      - name: Restore FFmpeg build cache (PR, restore only)
+      # Persist the Dockerfile's BuildKit cache mounts (FFmpeg source tarball and
+      # headers, ccache objects, apt .debs and lists, pip downloads) across runs.
+      # Layer caching alone redownloads and recompiles everything above a changed
+      # layer. github.event_name is the caller's event inside a called workflow,
+      # so PR builds restore only and main/release builds save, which protects
+      # the 10 GB cache budget. The dance action injects the restored dirs before
+      # the build and extracts them afterwards. Mount ids embed the architecture.
+      - name: Restore BuildKit cache mounts (PR, restore only)
         if: github.event_name == 'pull_request'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ffmpeg-src
             ffmpeg-ccache
-          key: ffmpeg-${{ matrix.arch }}-${{ hashFiles('docker/Dockerfile') }}
+            apt-cache
+            apt-lists-ffmpeg
+            apt-lists-python
+            apt-lists-runtime
+            pip
+          key: buildkit-mounts-${{ matrix.arch }}-${{ hashFiles('docker/Dockerfile', 'setup/requirements*.txt', 'pyproject.toml') }}
           restore-keys: |
-            ffmpeg-${{ matrix.arch }}-
+            buildkit-mounts-${{ matrix.arch }}-
 
-      - name: Restore and save FFmpeg build cache
+      - name: Restore and save BuildKit cache mounts
         if: github.event_name != 'pull_request'
-        id: ffmpeg-cache
+        id: mounts-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ffmpeg-src
             ffmpeg-ccache
-          key: ffmpeg-${{ matrix.arch }}-${{ hashFiles('docker/Dockerfile') }}
+            apt-cache
+            apt-lists-ffmpeg
+            apt-lists-python
+            apt-lists-runtime
+            pip
+          key: buildkit-mounts-${{ matrix.arch }}-${{ hashFiles('docker/Dockerfile', 'setup/requirements*.txt', 'pyproject.toml') }}
           restore-keys: |
-            ffmpeg-${{ matrix.arch }}-
+            buildkit-mounts-${{ matrix.arch }}-
 
-      - name: Inject FFmpeg cache mounts
+      - name: Inject BuildKit cache mounts
         uses: reproducible-containers/buildkit-cache-dance@5422eac04292c961a382e0f584ea0f03ad9da723 # v3.4.0
         with:
           builder: ${{ steps.buildx.outputs.name }}
           cache-map: |
             {
               "ffmpeg-src": {"target": "/var/cache/ffmpeg-src", "id": "ffmpeg-src-${{ matrix.arch }}"},
-              "ffmpeg-ccache": {"target": "/var/cache/ccache", "id": "ffmpeg-ccache-${{ matrix.arch }}"}
+              "ffmpeg-ccache": {"target": "/var/cache/ccache", "id": "ffmpeg-ccache-${{ matrix.arch }}"},
+              "apt-cache": {"target": "/var/cache/apt", "id": "apt-cache-${{ matrix.arch }}"},
+              "apt-lists-ffmpeg": {"target": "/var/lib/apt/lists", "id": "apt-lists-ffmpeg-${{ matrix.arch }}"},
+              "apt-lists-python": {"target": "/var/lib/apt/lists", "id": "apt-lists-python-${{ matrix.arch }}"},
+              "apt-lists-runtime": {"target": "/var/lib/apt/lists", "id": "apt-lists-runtime-${{ matrix.arch }}"},
+              "pip": {"target": "/root/.cache/pip", "id": "pip-${{ matrix.arch }}"}
             }
-          skip-extraction: ${{ github.event_name == 'pull_request' || steps.ffmpeg-cache.outputs.cache-hit == 'true' }}
+          skip-extraction: ${{ github.event_name == 'pull_request' || steps.mounts-cache.outputs.cache-hit == 'true' }}
 
       # Build the native image first and load it for the smoke test and scan;
       # the push step below reuses these layers from the build cache.
