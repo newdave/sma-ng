@@ -1,132 +1,133 @@
 # Contributing
 
-This repository uses `CLAUDE.md` as the authoritative workflow and repo-convention document.
+Thank you for helping improve SMA-NG. This page explains how to set up a development environment, validate a change
+and submit it.
 
-For agent-specific guidance:
-
-- Codex: see [AGENTS.md](AGENTS.md)
-- Claude: see [CLAUDE.md](CLAUDE.md)
-
-## Source of Truth
-
-- **`CLAUDE.md` is authoritative for workflow rules, commit rules, and documentation-sync policy.**
-- `AGENTS.md` is the Codex-facing translation layer and should remain aligned to `CLAUDE.md`.
-- `.claude/` is an active configuration surface for Claude workflows and should not be treated as legacy or disposable.
+`CLAUDE.md` is the authoritative workflow document for this repository, and `AGENTS.md` is its Codex-facing
+counterpart. If this page and `CLAUDE.md` ever disagree, `CLAUDE.md` wins.
 
 ## Development Setup
 
-Preferred:
+SMA-NG needs Python 3.12 or newer and FFmpeg. The preferred setup uses [mise](https://mise.jdx.dev/), which installs
+the pinned Python version, creates `venv/` and installs the dependencies:
 
 ```bash
 mise install
-mise run setup:deps
+mise run setup:deps:dev
 ```
 
-Alternative manual setup:
+Without mise, create the virtual environment yourself:
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install -r setup/requirements.txt
+pip install -r setup/requirements.txt -r setup/requirements-dev.txt
 ```
+
+Activate the virtual environment (or use `venv/bin/python`) before running any Python command directly.
 
 Useful tasks:
 
 ```bash
-mise run setup:deps:dev
-mise run test
-mise run test:lint
-mise run config:gpu
-mise run config:generate
-mise run daemon:start
+mise run test            # the test suite
+mise run test:lint       # ruff linter
+mise run dev:lint        # ruff linter with auto-fix
+mise run test:cov        # tests with coverage; enforces the coverage gates
+mise run test:shell      # ShellCheck and shell-script tests
+mise run config:generate # create config/sma-ng.yml with the GPU auto-detected
+mise run daemon:start    # start the daemon
+mise run docs:check      # check documentation links, task references and markdownlint
 ```
 
-## Change Expectations
-
-Keep changes scoped and contextual:
-
-- fix code with the smallest sensible diff
-- add or update tests for behavior changes
-- update docs when user-facing or operator-facing behavior changes
-- avoid mixing unrelated work into one commit
-
-## Documentation Policy
-
-When functionality changes, keep documentation in sync.
-
-Required documentation surfaces:
-
-1. `docs/` in the main repo
-2. GitHub wiki copy under `/tmp/sma-wiki/`
-3. `resources/docs.html`
-
-If you are only updating one or two of these surfaces in a task, call out the remaining sync explicitly.
-
-## Commit Policy
-
-- use conventional commit prefixes such as `fix:`, `feat:`, `docs:`, `test:`, and `refactor:`
-- do not add AI attribution or `Co-Authored-By` lines
-- split unrelated work into separate commits
-- do not make a single mixed commit when the work spans multiple logical areas
-- commit the full worktree as a sequence of smaller commits grouped by logical function when multiple areas are touched
-- review the diff before committing and stage changes by area instead of bundling unrelated work together
-- if someone asks to "commit all changes", treat that as "commit the entire worktree using multiple logical commits"
-- do not create manual `v*` tags
-
-The repository’s Claude workflow also expects:
-
-1. commit the logical change
-2. run `git pull --rebase`
-3. run `git push`
+`mise tasks` lists every task, and the [Deployment](docs/deployment.md) page documents them.
 
 ## Validation
 
-Run the smallest useful validation set for the area changed.
-
-Examples:
+Run the smallest meaningful check for the area you changed, and the broad suite before you open a pull request.
 
 ```bash
 # Daemon changes
 venv/bin/python -m pytest tests/test_daemon.py tests/test_handler.py tests/test_worker.py -q
 
-# Media processor changes
-venv/bin/python -m pytest tests/test_mediaprocessor.py -q
+# Media processor and metadata changes
+venv/bin/python -m pytest tests/test_mediaprocessor.py tests/test_metadata.py -q
 
-# Docker/compose changes
-venv/bin/python -m pytest tests/test_docker.py -q
+# Docker, compose and host CLI changes
+venv/bin/python -m pytest tests/test_docker.py tests/test_sma_host.py -q
 
-# Broad suite
+# Broad suite, linter and coverage
 mise run test
-
-# Coverage report
+mise run test:lint
 mise run test:cov
 ```
 
-Docs-only changes usually do not require tests unless code changed in the same task.
+The coverage gates are 90% global line coverage and a 70% floor for every production module with at least 100
+statements. See [Test Coverage](docs/test-coverage.md). Do not lower the thresholds or hide logic with
+`# pragma: no cover`.
 
-## Repo Areas
+Daemon tests that need a database skip themselves unless `TEST_DB_URL` points at a PostgreSQL instance.
 
-- `manual.py` - CLI conversions
-- `daemon.py` - daemon entrypoint
-- `resources/daemon/` - daemon package
-- `resources/mediaprocessor.py` - conversion pipeline
-- `resources/readsettings.py` - INI config parsing/defaults
-- `converter/` - codec and FFmpeg abstractions
-- `docs/` - canonical documentation
+## Pre-commit Hooks
 
-## When Adding New Behavior
+The repository uses [pre-commit](https://pre-commit.com/) for whitespace checks, ShellCheck, markdownlint and ruff.
+The configuration pins Python 3.12 and Node 22 for the Node-based hooks, and pre-commit installs them itself.
 
-If you add:
+```bash
+pre-commit install
+mise run dev:precommit   # run every hook against all files
+```
 
-- new config options: update `resources/readsettings.py`, samples, and docs
-- new daemon options: update CLI/env/config handling and docs
-- new endpoint behavior: update handler/server docs and tests
-- new Docker behavior: update `docker/docker-compose.yml`, static tests, and docs
+## Change Expectations
 
-## Working With Tool-Specific Config
+- Keep changes small and aligned with the existing code. Do not add abstractions, settings or integrations the task
+  does not need.
+- Add or update tests for every behavior change.
+- Update the documentation in the same change when behavior that operators or users can see changes. The table in
+  `CLAUDE.md` lists which document to update for each kind of change.
+- Do not mix unrelated work in one commit.
 
-The repo contains Claude-specific structure under `.claude/`. If you add Codex-facing equivalents:
+When you add something new, update these places:
 
-- do not contradict `CLAUDE.md`
-- make the Claude authority explicit
-- keep the intent aligned across tools
+- A config option: `resources/config_schema.py`, then regenerate the sample with `mise run config:sample`, and update
+  `docs/configuration.md`. Add a `resources/readsettings.py` projection only for legacy `settings.*` consumers.
+- A daemon option: `daemon.py`, `resources/daemon/config.py`, `setup/sma-ng.yml.sample` and `docs/daemon.md`.
+- An HTTP endpoint: the route tables in `resources/daemon/handler.py`, the handler tests, `docs/daemon.md` and
+  `docs/openapi.yaml`.
+- A mise task: an executable script in `.mise/tasks/<group>/` with a `#MISE description=` header, and a row in
+  `docs/deployment.md`.
+- A trigger script for a downloader or media manager: `triggers/`, `triggers/README.md` and `docs/integrations.md`.
+
+## Documentation
+
+`docs/` is the canonical documentation. Two other surfaces are derived from it:
+
+- The GitHub wiki is generated from `docs/` by `mise run wiki:build`. Never edit wiki pages by hand. After a push to
+  `main` that changes `docs/` or `.mise/tasks/`, `mise run wiki:publish` updates the wiki (a hook does this
+  automatically for agent sessions).
+- The daemon serves `docs/` live at `/docs`. A new page needs an entry in `DOC_PAGES` in
+  `resources/daemon/docs_ui.py`, and a new top-level `docs/*.md` also needs an entry in `PAGES` in
+  `scripts/wiki_sync.py`.
+
+Run `mise run docs:check` before you submit. Markdown must pass markdownlint: ATX headings, fenced code blocks with a
+language, blank lines around blocks, and prose lines of at most 120 characters.
+
+## Commits and Releases
+
+- Use conventional commit prefixes such as `feat:`, `fix:`, `docs:`, `test:`, `refactor:` and `chore:`.
+- Split unrelated work into separate commits, grouped by behavior or operational outcome rather than by file type.
+- Do not add AI attribution or `Co-Authored-By` lines to commits or pull requests.
+- Do not create `v*` tags by hand. release-please reads the conventional commits, opens the release pull request and
+  owns versions, tags and `CHANGELOG.md`.
+
+## Agent Configuration
+
+The `.claude/` directory is active configuration for Claude Code. Edit skills and agents only in `.claude/skills/`
+and `.claude/agents/`. The Codex copies in `.agents/skills/` and `.codex/agents/` are generated; regenerate them
+after any change with:
+
+```bash
+mise run dev:agents
+```
+
+A test fails when the generated copies drift. Agent behavior changes belong in the project (`CLAUDE.md`,
+`AGENTS.md`, `.claude/`, `.codex/`), never in a user's global configuration.
