@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.2.55](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.54...sma-ng-v3.2.55) (2026-11-26)
+
+
+### Features
+
+* **daemon:** make the recycle-bin cleanup interval configurable ([7e9e569](https://github.com/newdave/sma-ng/commit/7e9e569d28a2c7610b6396c281caab825cd57ee9))
+
+
+### Bug Fixes
+
+* retry a failed Sonarr/Radarr rescan once before importing ([23e1e23](https://github.com/newdave/sma-ng/commit/23e1e233b76b587e02e1989c8cbaeee59779eefa))
+
 ## [3.2.54](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.53...sma-ng-v3.2.54) (2026-11-23)
 
 
