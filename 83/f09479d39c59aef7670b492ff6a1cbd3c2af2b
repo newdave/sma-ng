@@ -1,0 +1,42 @@
+docs/troubleshooting.md
+  s_4f004cb220f90c::t_f895b724eac3ae 506-512
+manual.py
+  s_4f004cb220f90c::t_f895b724eac3ae 20,46-47,423-429,431,433
+  s_4f004cb220f90c::t_4f153b767448d8 430
+resources/daemon/server.py
+  s_4f004cb220f90c::t_f895b724eac3ae 238,486
+docs/daemon.md
+  s_4f004cb220f90c::t_f895b724eac3ae 391,666,679
+tests/test_threads.py
+  s_4f004cb220f90c::t_f895b724eac3ae 53-76
+resources/daemon/config.py
+  s_4f004cb220f90c::t_f895b724eac3ae 310,418
+setup/sma-ng.yml.sample
+  s_4f004cb220f90c::t_f895b724eac3ae 22
+docs/configuration.md
+  s_4f004cb220f90c::t_f895b724eac3ae 89
+tests/test_manual.py
+  s_4f004cb220f90c::t_f895b724eac3ae 14,1238,1242,1246,1250,1253-1275,1281
+tests/test_daemon.py
+  s_4f004cb220f90c::t_f895b724eac3ae 3398-3402
+resources/daemon/threads.py
+  s_4f004cb220f90c::t_f895b724eac3ae 378,380,382,471-474,486
+resources/config_schema.py
+  s_4f004cb220f90c::t_f895b724eac3ae 965-967
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "83f09479d39c59aef7670b492ff6a1cbd3c2af2b",
+  "prompts": {},
+  "sessions": {
+    "s_4f004cb220f90c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66b5c7d8-0bef-46c6-bd44-70de488cb656",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
