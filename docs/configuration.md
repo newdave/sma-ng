@@ -86,6 +86,7 @@ image, whose CMD shim maps `SMA_WORKERS` to `--workers` (see [Daemon Mode](daemo
 | `smoke-test` | bool | `true` | Dry-run option generation against the loaded config at startup; exits `1` on failure |
 | `recycle-bin-max-age-days` | int | `30` | Delete recycle-bin media older than this many days (`0` = disabled) |
 | `recycle-bin-min-free-gb` | int | `50` | Delete oldest recycle-bin media when free space drops below this many GiB (`0` = disabled) |
+| `recycle-bin-interval-seconds` | int | `300` | Seconds between recycle-bin cleanup sweeps (minimum `60`) |
 | `job-dedupe-window-seconds` | int | `21600` | Skip a path whose job completed within this many seconds (`0` = disabled); pending and running duplicates are always skipped |
 | `job-retention-days` | int | `0` | Opt-in: delete finished jobs older than this many days, checked hourly. `0` (the default) keeps job history forever. A positive value permanently deletes job rows, but the lifetime job totals reported by `/stats` are kept; jobs inside the dedupe window are never deleted |
 | `log-ttl-days` | int | `30` | Cluster mode: retention of log rows in PostgreSQL (`0` = never clean up) |

@@ -388,6 +388,7 @@ auto-profile selection happens for one-shot conversions. Pass
 | `progress-log-interval` | Seconds between progress log lines for in-flight conversions |
 | `recycle-bin-max-age-days` | Delete recycle-bin media files older than this many days (default: `30`, `0` = disabled) |
 | `recycle-bin-min-free-gb` | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled) |
+| `recycle-bin-interval-seconds` | Seconds between recycle-bin cleanup sweeps (default: `300`, minimum `60`) |
 | `job-dedupe-window-seconds` | Skip a path whose job completed within this many seconds, for the scanner and webhooks alike (default: `21600`, `0` = disabled). See [Duplicate Suppression](#duplicate-suppression). |
 | `job-retention-days` | Opt-in: delete completed, failed and cancelled jobs older than this many days (default: `0` = keep forever; a positive value permanently deletes job rows; lifetime `/stats` totals are kept) |
 | `log-ttl-days` | Cluster-mode: retention for log entries in PostgreSQL |
@@ -662,7 +663,7 @@ replace an older pending job; only the same normalised path is deduplicated.
 
 ## Recycle Bin Cleanup
 
-The daemon automatically purges old media files from every `recycle-bin` directory configured in any `sma-ng.yml`. Two independent eviction triggers run once per hour:
+The daemon automatically purges old media files from every `recycle-bin` directory configured in any `sma-ng.yml`. Two independent eviction triggers run every `recycle-bin-interval-seconds` (default 5 minutes):
 
 | Trigger | Key | Default | Behaviour |
 | -------------- | -------------------------- | ------- | ------------------------------------------------------------------------------- |
@@ -675,6 +676,7 @@ Set either key to `0` to disable that trigger independently.
 daemon:
   recycle-bin-max-age-days: 30
   recycle-bin-min-free-gb: 50
+  recycle-bin-interval-seconds: 300
 ```
 
 Only recognised media file extensions are deleted (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ts`, `.m4v`, `.m2ts`, `.wmv`, `.flv`, `.webm`). NFO files, artwork, and other non-media files are never touched.

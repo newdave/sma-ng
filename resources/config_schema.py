@@ -962,6 +962,9 @@ class DaemonConfig(_Base):
   smoke_test: bool = True
   recycle_bin_max_age_days: int = 30
   recycle_bin_min_free_gb: int = 50
+  # Seconds between recycle-bin cleanup sweeps. Short enough that a burst of
+  # conversions cannot fill the bin between sweeps.
+  recycle_bin_interval_seconds: int = Field(default=300, ge=60)
   # Seconds a completed job blocks re-queueing the same path (scanner and webhooks); 0 disables.
   job_dedupe_window_seconds: int = Field(default=21600, ge=0)
   # Days a finished job (completed, failed, cancelled) is kept; 0 disables automatic pruning.
