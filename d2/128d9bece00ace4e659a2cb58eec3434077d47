@@ -1,0 +1,67 @@
+docs/openapi.yaml
+  s_4f004cb220f90c::t_6f2b291248e080 8
+tests/test_server.py
+  s_4f004cb220f90c::t_bc11e11e4cea68 644-652
+resources/daemon/server.py
+  s_4f004cb220f90c::t_af8d6843f71a13 125
+  s_4f004cb220f90c::t_67d3bd15108754 462
+tests/test_config_schema.py
+  s_4f004cb220f90c::t_94689c8a80318d 34-37
+  s_4f004cb220f90c::t_7f982ef77988e2 18-33,38
+resources/daemon/config.py
+  s_4f004cb220f90c::t_c48dcfd72c7232 299
+  s_4f004cb220f90c::t_ebb4745babd7ec 408
+  s_4f004cb220f90c::t_faad53bc069e72 2
+docs/configuration.md
+  s_4f004cb220f90c::t_dd5ab6ddd0670e 78
+daemon.py
+  s_4f004cb220f90c::t_af79628b6af4d3 252-253,255,257
+resources/daemon/handler.py
+  s_4f004cb220f90c::t_67d32bdd175e6b 401-412,418
+  s_4f004cb220f90c::t_df0a26009d47b9 11
+  s_4f004cb220f90c::t_d9712c11e9839c 337-347
+  s_4f004cb220f90c::t_491b49ede24dfe 2
+  s_4f004cb220f90c::t_7dd496b0bf3a4f 381-400,417
+  s_532f473f50f53d::t_0da349d1d8a570 348
+resources/config_schema.py
+  s_4f004cb220f90c::t_72ebee7b0de4ee 1017,1019-1026
+  s_4f004cb220f90c::t_2c1ce02b158d36 1018,1027-1034
+  s_4f004cb220f90c::t_891c954e044e31 20
+  s_4f004cb220f90c::t_fb99903b5b97e8 953-956
+tests/test_daemon.py
+  s_4f004cb220f90c::t_9bfb48e5eb68f5 3403-3413
+docs/daemon.md
+  s_4f004cb220f90c::t_8146e8447d09ee 403
+  s_4f004cb220f90c::t_f64f09fd286e07 277-278,286-298
+  s_4f004cb220f90c::t_90f99a53c11171 270-276,279-285
+  s_4f004cb220f90c::t_abaf7dc407621b 305-306
+tests/test_handler.py
+  s_4f004cb220f90c::t_94148b96ff3b01 282-316
+  s_4f004cb220f90c::t_318ac2b7dee1dc 243-281,317
+setup/sma-ng.yml.sample
+  s_4f004cb220f90c::t_cd4cbb45159a39 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "d2128d9bece00ace4e659a2cb58eec3434077d47",
+  "prompts": {},
+  "sessions": {
+    "s_4f004cb220f90c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66b5c7d8-0bef-46c6-bd44-70de488cb656",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    },
+    "s_532f473f50f53d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "044c2a97-110b-4071-9106-79ab5d327f89",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
