@@ -235,6 +235,7 @@ class DaemonServer(ThreadingHTTPServer):
       path_config_manager=path_config_manager,
       max_age_days=path_config_manager.recycle_bin_max_age_days,
       min_free_gb=path_config_manager.recycle_bin_min_free_gb,
+      interval_seconds=path_config_manager.recycle_bin_interval_seconds,
       logger=logger,
     )
     self.recycle_cleaner_thread.start()
@@ -482,6 +483,7 @@ class DaemonServer(ThreadingHTTPServer):
       path_config_manager=self.path_config_manager,
       max_age_days=self.path_config_manager.recycle_bin_max_age_days,
       min_free_gb=self.path_config_manager.recycle_bin_min_free_gb,
+      interval_seconds=self.path_config_manager.recycle_bin_interval_seconds,
       logger=self.logger,
     )
     self.recycle_cleaner_thread.start()

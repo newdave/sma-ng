@@ -11,6 +11,7 @@ import pytest
 # require TMDB or FFmpeg at import time.
 # ---------------------------------------------------------------------------
 from manual import (
+  RESCAN_RETRY_DELAY,
   SkipFileException,
   _tmdb_search,
   addtoProcessedArchive,
@@ -1234,28 +1235,50 @@ class TestJobSummaryEvent:
 class TestTriggerRescan:
   INSTANCE = {"section": "main", "host": "h", "port": 8989, "webroot": "", "apikey": "k", "rescan": True}
 
-  def _run(self, wait_results, rename=False):
+  def _run(self, wait_results, rename=False, rescan_ids=(7, 9)):
     inst = dict(self.INSTANCE, rename=rename)
     with (
       patch("manual.find_arr_instance", return_value=(inst, "sonarr")),
-      patch("resources.mediamanager.rescan_via_arr", return_value=7),
+      patch("resources.mediamanager.rescan_via_arr", side_effect=list(rescan_ids)) as resc,
       patch("resources.mediamanager.downloaded_scan_via_arr", return_value=8) as scan,
       patch("resources.mediamanager.rename_via_arr", return_value="/new.mp4") as ren,
       patch("resources.mediamanager.wait_for_command", side_effect=wait_results) as wait,
+      patch("manual.time.sleep") as sleep,
       patch("manual.log") as mlog,
     ):
       result = triggerRescan("/tv/show/ep.mkv", MagicMock())
+    self.rescan_mock, self.sleep_mock = resc, sleep
     return result, scan, ren, wait, mlog
 
-  def test_rescan_timeout_still_imports(self):
-    result, scan, _, wait, mlog = self._run([False, True])
+  def test_rescan_success_no_retry(self):
+    self._run([True, True])
+    assert self.rescan_mock.call_count == 1
+    self.sleep_mock.assert_not_called()
+
+  def test_rescan_failure_retries_once_and_succeeds(self):
+    result, scan, _, wait, mlog = self._run([False, True, True])
+    assert self.rescan_mock.call_count == 2
+    self.sleep_mock.assert_called_once_with(RESCAN_RETRY_DELAY)
+    assert [c.args[2] for c in wait.call_args_list] == [7, 9, 8]
+    scan.assert_called_once()
+    assert not any("importing anyway" in c.args[0] for c in mlog.warning.call_args_list)
+
+  def test_rescan_retry_also_fails_still_imports(self):
+    result, scan, _, wait, mlog = self._run([False, False, True])
+    assert self.rescan_mock.call_count == 2
+    scan.assert_called_once()
+    assert wait.call_count == 3
+    assert any("after retry; importing anyway" in c.args[0] for c in mlog.warning.call_args_list)
+    assert result is None
+
+  def test_rescan_retry_lookup_fails_still_imports(self):
+    _, scan, _, wait, mlog = self._run([False, True], rescan_ids=(7, None))
     scan.assert_called_once()
     assert wait.call_count == 2
     assert any("importing anyway" in c.args[0] for c in mlog.warning.call_args_list)
-    assert result is None
 
   def test_rescan_timeout_then_rename(self):
-    result, scan, ren, _, _ = self._run([False, True], rename=True)
+    result, scan, ren, _, _ = self._run([False, False, True], rename=True)
     scan.assert_called_once()
     assert result == "/new.mp4"
 

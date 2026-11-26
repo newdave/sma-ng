@@ -3395,6 +3395,11 @@ class TestPathConfigManagerExtendedYaml:
     assert pcm.storage_janitor_interval_seconds == 60
     assert pcm.storage_janitor_max_age_seconds == 120
 
+  def test_recycle_bin_interval_default_and_override(self, tmp_path):
+    assert PathConfigManager(self._yaml(tmp_path, {})).recycle_bin_interval_seconds == 300
+    pcm = PathConfigManager(self._yaml(tmp_path, {"recycle_bin_interval_seconds": 120}))
+    assert pcm.recycle_bin_interval_seconds == 120
+
 
 class TestRawLocalDaemonSection:
   def test_returns_dict_when_section_present(self, tmp_path):
