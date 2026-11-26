@@ -1,0 +1,32 @@
+docs/integrations.md
+  s_4f004cb220f90c::t_948c0a7d303a12 363-366
+tests/test_manual.py
+  s_4f004cb220f90c::t_e986c62522d97b 1266-1275
+manual.py
+  s_4f004cb220f90c::t_f324aafc08b95e 371,378-380
+  s_4f004cb220f90c::t_8632148396050d 413
+  s_4f004cb220f90c::t_aff9fd03d5a668 787-792
+resources/mediamanager.py
+  s_4f004cb220f90c::t_8cab0c67f43622 120-132,134-139,141-174,176-177,179-181,184-189,196,199,204
+  s_4f004cb220f90c::t_7f342c43bed19e 133,140,175,178
+tests/test_mediamanager.py
+  s_4f004cb220f90c::t_6217b8de7889e0 481-569
+docs/troubleshooting.md
+  s_4f004cb220f90c::t_6804283ddb7574 507-512
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "16b09f09d5f75a095399ed3bc9f51e2a63cb165a",
+  "prompts": {},
+  "sessions": {
+    "s_4f004cb220f90c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66b5c7d8-0bef-46c6-bd44-70de488cb656",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
