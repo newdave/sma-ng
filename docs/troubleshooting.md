@@ -504,6 +504,12 @@ example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
 - A slow rescan no longer blocks the import: SMA waits up to 5 minutes (polling with backoff), logs the last
   command status (`failed`, `aborted`, `cancelled` and `orphaned` stop the wait early) and then still issues the
   import. The log line `rescan command did not complete; importing anyway` means the rescan was slow or failed
+- `rescan_via_arr: Sonarr could not resolve series for <file> (tvdbId=...)` means none of the three lookups
+  matched: the TVDB/TMDB id the trigger passed (`-tvdb` / `-tmdb`), Sonarr/Radarr's title parser on the file's
+  basename, and the series/movie whose library `path` contains the file. Check that the file sits inside the
+  series folder Sonarr/Radarr knows and that `base.path-mapping` is not needed. When this lookup fails Sonarr/Radarr
+  keeps pointing at the pre-conversion file, deletes nothing on the next quality upgrade and the old converted file
+  stays behind as a duplicate in Plex.
 
 ### Docker: "Read-only file system" errors
 

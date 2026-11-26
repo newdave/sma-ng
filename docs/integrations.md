@@ -360,6 +360,10 @@ sequenceDiagram
   `daemon.routing` rules whose `services` reference it) matches on whole path components: `/media/TV` matches `/media/TV` and `/media/TV/Show`, but no longer `/media/TV-Anime`. Plex refreshes
   use the same rule when comparing a file against library section locations.
 - Sonarr/Radarr API calls time out after 30 seconds (`REQUEST_TIMEOUT` in `resources/mediamanager.py`).
+- After a conversion the post-convert `RescanSeries` / `RescanMovie` resolves the series or movie by the TVDB id
+  (Sonarr) or TMDB id (Radarr) the trigger passed, then by the arr title parser on the basename, then by the
+  series/movie whose library `path` contains the file. The id and path lookups cover titles the parser misreads,
+  such as `Blade Runner 2099 (2026) - S01E01`, which Sonarr parses as "Blade Runner" with year 2099.
 - `rename.py --arr-rename` finds the Sonarr/Radarr file record by exact path, then by the path rewritten through
   the instance `path-mapping`, then by a unique basename. Radarr `RenameFiles` is sent with `movieId` and `files`.
 - Emby/Jellyfin refreshes can also report the pre-conversion path as `Deleted` when the caller supplies it

@@ -1263,3 +1263,13 @@ class TestTriggerRescan:
     result, _, ren, _, _ = self._run([True, False], rename=True)
     ren.assert_not_called()
     assert result is None
+
+  def test_passes_media_ids_to_rescan(self):
+    with (
+      patch("manual.find_arr_instance", return_value=(dict(self.INSTANCE), "sonarr")),
+      patch("resources.mediamanager.rescan_via_arr", return_value=7) as rescan,
+      patch("resources.mediamanager.downloaded_scan_via_arr", return_value=8),
+      patch("resources.mediamanager.wait_for_command", return_value=True),
+    ):
+      triggerRescan("/tv/show/ep.mp4", MagicMock(), tvdbid="424855", tmdbid=1234)
+    assert rescan.call_args.kwargs == {"tvdbid": "424855", "tmdbid": 1234}

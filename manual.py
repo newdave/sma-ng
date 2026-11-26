@@ -368,14 +368,16 @@ def tvInfo(guessData, tmdbid=None, tvdbid=None, imdbid=None, season=None, episod
   return metadata
 
 
-def triggerRescan(filepath, settings):
+def triggerRescan(filepath, settings, tvdbid=None, tmdbid=None):
   """Trigger a rescan + import on the matching Sonarr/Radarr instance.
 
   After in-place conversion the original library file path is gone (extension
   changed and/or basename changed), so two commands are chained:
 
   1. ``RescanSeries`` / ``RescanMovie`` — re-evaluates known episodefile/
-     moviefile records and unlinks the now-missing old path.
+     moviefile records and unlinks the now-missing old path. The series/movie
+     is resolved from ``tvdbid`` (Sonarr) / ``tmdbid`` (Radarr) when the
+     trigger supplied one, so titles the arr parser misreads still rescan.
   2. ``DownloadedEpisodesScan`` / ``DownloadedMoviesScan`` (with the file
      path and ``importMode: Move``) — imports the converted file and links
      it to the existing series/movie. Without this second step the file is
@@ -408,7 +410,7 @@ def triggerRescan(filepath, settings):
     from resources.mediamanager import downloaded_scan_via_arr, rename_via_arr, rescan_via_arr, wait_for_command
 
     log.info("Requesting %s [%s] to rescan library for '%s'." % (arr_type.title(), instance["section"], os.path.basename(filepath)))
-    rescan_id = rescan_via_arr(base_url, headers, arr_type, filepath, log)
+    rescan_id = rescan_via_arr(base_url, headers, arr_type, filepath, log, tvdbid=tvdbid, tmdbid=tmdbid)
 
     # Wait for the rescan to settle before importing — Rescan* unlinks the
     # old file path (gone after in-place conversion), and we need that to
@@ -782,7 +784,12 @@ def processFile(
     addtoProcessedArchive(output_files + [output["input"]] if not output["input_deleted"] else output_files, processedList, processedArchive)
 
     # Trigger rescan on matching Sonarr/Radarr instance; may also rename
-    arr_renamed_path = triggerRescan(output["output"], mp.settings)
+    arr_renamed_path = triggerRescan(
+      output["output"],
+      mp.settings,
+      tvdbid=tvdbid or (tagdata.tvdbid if tagdata else None),
+      tmdbid=tmdbid or (tagdata.tmdbid if tagdata else None),
+    )
     if arr_renamed_path:
       output["output"] = arr_renamed_path
     # Emit a parseable marker so the daemon worker can use the final
