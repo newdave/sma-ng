@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.56](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.55...sma-ng-v3.2.56) (2026-11-26)
+
+
+### Bug Fixes
+
+* resolve Sonarr/Radarr series by id or library path before rescan ([#290](https://github.com/newdave/sma-ng/issues/290)) ([2f9474a](https://github.com/newdave/sma-ng/commit/2f9474a6db7e6db4cd5149912f2b3a2435984191))
+
 ## [3.2.55](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.54...sma-ng-v3.2.55) (2026-11-26)
 
 
