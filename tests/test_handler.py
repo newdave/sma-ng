@@ -240,6 +240,81 @@ class TestCheckAuth:
     assert body["error"] == "Unauthorized"
 
 
+class TestTrustedNetworks:
+  """Clients inside daemon.trusted-networks skip the API key; everyone else still needs it."""
+
+  @staticmethod
+  def _handler(client_ip, networks, **kw):
+    import ipaddress
+
+    h = _make_handler(api_key="secret", **kw)
+    h.server.trusted_networks = [ipaddress.ip_network(n) for n in networks]
+    h.client_address = (client_ip, 51000)
+    return h
+
+  def test_trusted_client_without_key_is_allowed(self):
+    h = self._handler("10.30.10.5", ["10.30.0.0/16"], headers={})
+    assert h.check_auth() is True
+    assert h._response_code is None
+
+  def test_untrusted_client_without_key_gets_401(self):
+    h = self._handler("192.168.1.9", ["10.30.0.0/16"], headers={})
+    assert h.check_auth() is False
+    assert h._response_code == 401
+
+  def test_ipv4_mapped_ipv6_client_matches_ipv4_network(self):
+    h = self._handler("::ffff:10.30.10.5", ["10.30.0.0/16"], headers={})
+    assert h.check_auth() is True
+
+  def test_empty_list_keeps_key_required(self):
+    h = self._handler("127.0.0.1", [], headers={})
+    assert h.check_auth() is False
+    assert h._response_code == 401
+
+  def test_trusted_client_counts_as_authenticated_for_status(self):
+    h = self._handler("10.30.10.5", ["10.30.0.0/16"], headers={})
+    assert h._is_authenticated() is True
+
+  def test_unparseable_client_address_is_not_trusted(self):
+    h = self._handler("not-an-ip", ["10.30.0.0/16"], headers={})
+    assert h.check_auth() is False
+
+  def test_ipv6_client_in_ipv6_network(self):
+    h = self._handler("fd00::1", ["fd00::/8"], headers={})
+    assert h.check_auth() is True
+
+  def test_ipv6_client_does_not_match_ipv4_only_list(self):
+    h = self._handler("fd00::1", ["10.30.0.0/16"], headers={})
+    assert h.check_auth() is False
+
+  def test_trusted_client_with_basic_auth_only_server(self):
+    h = self._handler("10.30.10.5", ["10.30.0.0/16"], headers={})
+    h.server.api_key = None
+    h.server.basic_auth = ("admin", "pw")
+    assert h.check_auth() is True
+
+  def test_trusted_post_with_foreign_origin_is_rejected(self):
+    h = self._handler("10.30.10.5", ["10.30.0.0/16"], method="POST", path="/jobs", headers={"Host": "10.30.10.40:8585", "Origin": "https://evil.example"})
+    assert h.check_auth() is False
+    assert h._response_code == 403
+
+  def test_trusted_post_with_same_origin_is_allowed(self):
+    h = self._handler("10.30.10.5", ["10.30.0.0/16"], method="POST", path="/jobs", headers={"Host": "10.30.10.40:8585", "Origin": "http://10.30.10.40:8585"})
+    assert h.check_auth() is True
+
+  def test_trusted_post_without_origin_is_allowed(self):
+    h = self._handler("10.30.10.5", ["10.30.0.0/16"], method="POST", path="/jobs", headers={"Host": "10.30.10.40:8585"})
+    assert h.check_auth() is True
+
+  def test_trusted_get_with_foreign_origin_is_allowed(self):
+    h = self._handler("10.30.10.5", ["10.30.0.0/16"], method="GET", path="/status", headers={"Host": "10.30.10.40:8585", "Origin": "https://evil.example"})
+    assert h.check_auth() is True
+
+  def test_foreign_origin_with_valid_key_still_allowed(self):
+    h = self._handler("10.30.10.5", ["10.30.0.0/16"], method="POST", path="/jobs", headers={"Host": "h:1", "Origin": "https://evil.example", "X-API-Key": "secret"})
+    assert h.check_auth() is True
+
+
 # ---------------------------------------------------------------------------
 # TestIsPublicEndpoint
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ info:
     HTTP webhook server for media conversion automation.
     Authentication is optional; when an API key is configured all endpoints
     except `/health`, `/status`, `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, and `/docs` require it.
+    Clients whose TCP peer address lies inside `daemon.trusted-networks` are exempt from the key.
   version: "1.0.0"
 
 servers:

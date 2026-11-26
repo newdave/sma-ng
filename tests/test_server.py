@@ -641,6 +641,15 @@ class TestDaemonServerReloadConfig:
       server.reload_config()
     assert server.api_key == "cli-key"
 
+  def test_reload_applies_trusted_networks(self, tmp_path):
+    import ipaddress
+
+    server, pcm, _ = self._make_reloadable_server(tmp_path)
+    pcm.trusted_networks = [ipaddress.ip_network("10.30.0.0/16")]
+    with patch("resources.daemon.server.ScannerThread"), patch("resources.daemon.server.RecycleBinCleanerThread"):
+      server.reload_config()
+    assert server.trusted_networks == [ipaddress.ip_network("10.30.0.0/16")]
+
   def test_reload_ignores_env_api_key_when_no_cli_key(self, tmp_path):
     server, pcm, _ = self._make_reloadable_server(tmp_path)
     server._cli_api_key = None
