@@ -17,6 +17,7 @@ import os
 import signal
 import struct
 import sys
+import time
 
 import guessit
 import tmdbsimple as tmdb
@@ -42,6 +43,8 @@ os.environ["REGEX_DISABLED"] = "1"  # Fixes Toilal/rebulk#20
 # can distinguish a transient capacity refusal from a generic conversion
 # failure (exit 1). Aligns with sysexits EX_TEMPFAIL (75).
 EXIT_INSUFFICIENT_OUTPUT_SPACE = 75
+# Pause before re-issuing a Sonarr/Radarr rescan that failed or timed out.
+RESCAN_RETRY_DELAY = 15
 
 log = getLogger("MANUAL")
 
@@ -415,10 +418,17 @@ def triggerRescan(filepath, settings):
     # complete before DownloadedScan re-imports the new file. Without this
     # chain Sonarr/Radarr leaves the new file orphaned and the episode/
     # movie shows as missing.
-    if rescan_id:
-      if not wait_for_command(base_url, headers, rescan_id, log):
+    if rescan_id and not wait_for_command(base_url, headers, rescan_id, log):
+      # A rescan usually fails because a parallel job on the same series/movie
+      # moved a file mid-scan (Sonarr/Radarr raise FileNotFoundException).
+      # Sonarr/Radarr merge identical queued commands, so one fresh rescan
+      # after a short pause normally lands once the other move has finished.
+      log.info("%s [%s] rescan command did not complete; retrying in %ss." % (arr_type.title(), instance["section"], RESCAN_RETRY_DELAY))
+      time.sleep(RESCAN_RETRY_DELAY)
+      rescan_id = rescan_via_arr(base_url, headers, arr_type, filepath, log)
+      if not rescan_id or not wait_for_command(base_url, headers, rescan_id, log):
         # Still import: skipping leaves the file unlinked and Sonarr/Radarr re-grabs the release.
-        log.warning("%s [%s] rescan command did not complete; importing anyway." % (arr_type.title(), instance["section"]))
+        log.warning("%s [%s] rescan command did not complete after retry; importing anyway." % (arr_type.title(), instance["section"]))
 
     import_id = downloaded_scan_via_arr(base_url, headers, arr_type, filepath, log)
     if import_id and not wait_for_command(base_url, headers, import_id, log):
