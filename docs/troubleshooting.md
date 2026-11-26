@@ -510,6 +510,12 @@ example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
   during the scan. The retry normally succeeds once that move has finished.
 - The log line `rescan command did not complete after retry; importing anyway` means the retry also failed.
   Check the Sonarr/Radarr log for the command's exception. A later rescan usually fixes the library record.
+- `rescan_via_arr: Sonarr could not resolve series for <file> (tvdbId=...)` means none of the three lookups
+  matched: the TVDB/TMDB id the trigger passed (`-tvdb` / `-tmdb`), Sonarr/Radarr's title parser on the file's
+  basename, and the series/movie whose library `path` contains the file. Check that the file sits inside the
+  series folder Sonarr/Radarr knows and that `base.path-mapping` is not needed. When this lookup fails Sonarr/Radarr
+  keeps pointing at the pre-conversion file, deletes nothing on the next quality upgrade and the old converted file
+  stays behind as a duplicate in Plex.
 
 ### Docker: "Read-only file system" errors
 

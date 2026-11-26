@@ -117,39 +117,91 @@ def rescan(base_url, headers, command_name, id_field, media_id, log):
   return wait_for_command(base_url, headers, cmd["id"], log)
 
 
-def rescan_via_arr(base_url, headers, arr_type, file_path, log):
+def _arr_media_by_external_id(base_url, headers, endpoint, params, log):
+  """Return the Sonarr series / Radarr movie id matching an external id query, or None."""
+  resp = requests.get(base_url + "/api/v3/" + endpoint, headers=headers, params=params, timeout=REQUEST_TIMEOUT)
+  data = resp.json()
+  if isinstance(data, dict):
+    data = [data]
+  for item in data or []:
+    if isinstance(item, dict) and item.get("id"):
+      return item["id"]
+  log.debug("rescan_via_arr: no %s matched %s" % (endpoint, params))
+  return None
+
+
+def _arr_media_by_parse(base_url, headers, key, file_path):
+  """Return the id Sonarr/Radarr's title parser maps the file's basename to, or None."""
+  resp = requests.get(base_url + "/api/v3/parse", headers=headers, params={"title": os.path.basename(file_path)}, timeout=REQUEST_TIMEOUT)
+  media = resp.json().get(key) or {}
+  return media.get("id")
+
+
+def _arr_media_by_path(base_url, headers, endpoint, file_path):
+  """Return the id of the series/movie whose library ``path`` contains *file_path*, or None.
+
+  The longest matching path wins so ``/tv/Blade Runner 2099`` beats ``/tv/Blade Runner``.
+  """
+  resp = requests.get(base_url + "/api/v3/" + endpoint, headers=headers, timeout=REQUEST_TIMEOUT)
+  dirpath = os.path.normpath(os.path.dirname(file_path))
+  best_id, best_len = None, -1
+  for item in resp.json() or []:
+    ipath = item.get("path") if isinstance(item, dict) else None
+    if not ipath or not item.get("id"):
+      continue
+    ipath = os.path.normpath(ipath)
+    if path_under(dirpath, ipath) and len(ipath) > best_len:
+      best_id, best_len = item["id"], len(ipath)
+  return best_id
+
+
+def resolve_arr_media_id(base_url, headers, arr_type, file_path, log, tvdbid=None, tmdbid=None):
+  """Resolve the Sonarr series id / Radarr movie id that owns *file_path*.
+
+  Tries, in order: the external id the trigger passed (Sonarr ``tvdbId``, Radarr
+  ``tmdbId``), the title parser on the basename, and finally the series/movie whose
+  library ``path`` contains the file. The parser alone is not enough: Sonarr reads a
+  numeric title such as ``Blade Runner 2099 (2026) - S01E01`` as "Blade Runner" with
+  year 2099 and returns no series, which left converted files unlinked.
+  """
+  if arr_type == "sonarr":
+    endpoint, key, ext_params = "series", "series", ({"tvdbId": tvdbid} if tvdbid else None)
+  else:
+    endpoint, key, ext_params = "movie", "movie", ({"tmdbId": tmdbid} if tmdbid else None)
+  if ext_params:
+    media_id = _arr_media_by_external_id(base_url, headers, endpoint, ext_params, log)
+    if media_id:
+      return media_id
+  media_id = _arr_media_by_parse(base_url, headers, key, file_path)
+  if media_id:
+    return media_id
+  return _arr_media_by_path(base_url, headers, endpoint, file_path)
+
+
+def rescan_via_arr(base_url, headers, arr_type, file_path, log, tvdbid=None, tmdbid=None):
   """Trigger Sonarr/Radarr to re-read an existing library file after in-place conversion.
 
-  Looks up the series/movie ID via ``/api/v3/parse`` (matching on the file's
-  basename), then issues ``RescanSeries`` (Sonarr) or ``RescanMovie`` (Radarr)
-  for that ID. This is the correct command for files already imported into the
-  library — ``DownloadedEpisodesScan`` / ``DownloadedMoviesScan`` are scoped to
-  download-client folders and silently no-op on library paths.
+  Resolves the series/movie id with :func:`resolve_arr_media_id` (external id,
+  then title parse, then library path), then issues ``RescanSeries`` (Sonarr) or
+  ``RescanMovie`` (Radarr) for that id. This is the correct command for files
+  already imported into the library — ``DownloadedEpisodesScan`` /
+  ``DownloadedMoviesScan`` are scoped to download-client folders and silently
+  no-op on library paths.
 
   Returns the command ID on success, or None on lookup failure / API error.
   The caller decides whether to wait for completion (e.g. before issuing a
   follow-up RenameFiles command).
   """
   try:
-    parse_resp = requests.get(
-      base_url + "/api/v3/parse",
-      headers=headers,
-      params={"title": os.path.basename(file_path)},
-      timeout=REQUEST_TIMEOUT,
-    )
-    parse_data = parse_resp.json()
+    media_id = resolve_arr_media_id(base_url, headers, arr_type, file_path, log, tvdbid=tvdbid, tmdbid=tmdbid)
     if arr_type == "sonarr":
-      media = parse_data.get("series") or {}
-      media_id = media.get("id")
       if not media_id:
-        log.warning("rescan_via_arr: Sonarr could not parse series for %s" % file_path)
+        log.warning("rescan_via_arr: Sonarr could not resolve series for %s (tvdbId=%s)" % (file_path, tvdbid))
         return None
       payload = {"name": "RescanSeries", "seriesId": media_id}
     else:
-      media = parse_data.get("movie") or {}
-      media_id = media.get("id")
       if not media_id:
-        log.warning("rescan_via_arr: Radarr could not parse movie for %s" % file_path)
+        log.warning("rescan_via_arr: Radarr could not resolve movie for %s (tmdbId=%s)" % (file_path, tmdbid))
         return None
       payload = {"name": "RescanMovie", "movieId": media_id, "movieIds": [media_id]}
 
