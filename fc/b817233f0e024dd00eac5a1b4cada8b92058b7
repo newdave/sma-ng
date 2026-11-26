@@ -1,0 +1,35 @@
+manual.py
+  s_aa1a424ed9175a::t_179c4c3fc10f84 421-429,431
+  s_aa1a424ed9175a::t_439bce6baffcac 20,46-47
+tests/test_manual.py
+  s_aa1a424ed9175a::t_0c221a9e99f656 1262
+  s_aa1a424ed9175a::t_199026b24aab30 1238,1242,1246,1250,1253-1260,1264-1268,1270-1275,1281
+  s_4f004cb220f90c::t_1d1da8967485ee 1263,1269
+  s_aa1a424ed9175a::t_1410dc5f51f5f1 14,1261
+docs/troubleshooting.md
+  s_aa1a424ed9175a::t_c71787655946b6 506-512
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "fcb817233f0e024dd00eac5a1b4cada8b92058b7",
+  "prompts": {},
+  "sessions": {
+    "s_4f004cb220f90c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66b5c7d8-0bef-46c6-bd44-70de488cb656",
+        "model": "unknown"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    },
+    "s_aa1a424ed9175a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8106a786-1ca6-46bb-9337-7cdffe9ebdf1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
