@@ -75,6 +75,7 @@ image, whose CMD shim maps `SMA_WORKERS` to `--workers` (see [Daemon Mode](daemo
 | `workers` | int | `4` | Concurrent conversions per node. Must be `>= 1`; `0` or negative fails validation |
 | `api-key` | string | unset | API authentication key |
 | `username` / `password` | string | empty | Optional HTTP-basic credentials for the dashboard |
+| `trusted-networks` | list | `[]` | Client networks (CIDR or single address, IPv4 or IPv6) that may call every endpoint without the API key or Basic credentials, judged by the TCP peer address. Lets browsers on a home LAN use the web UI without the key dialog. Empty keeps the key required for everyone; `0.0.0.0/0` disables authentication. See [Daemon Mode](daemon.md#authentication) for the Docker and cross-origin caveats |
 | `db-url` | string | unset | SQLite or PostgreSQL URL for job persistence (cluster mode requires PostgreSQL) |
 | `ffmpeg-dir` | path | unset | Directory holding `ffmpeg`/`ffprobe`, prepended to `PATH` for each conversion |
 | `node-id` | string | auto UUID | Stable cluster identity |

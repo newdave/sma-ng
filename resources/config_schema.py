@@ -17,6 +17,7 @@ ConfigLoader after validation — see brainstorming/2026-04-26-config-restructur
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 from enum import Enum
@@ -949,6 +950,10 @@ class DaemonConfig(_Base):
   node_id: str | None = None
   username: str = ""
   password: str = ""
+  # Client networks (CIDR or single address) that may call every endpoint
+  # without the API key, e.g. a home LAN so the web UI never asks for it.
+  # Empty (default) means every client needs the key when one is configured.
+  trusted_networks: list[str] = Field(default_factory=list)
   job_timeout_seconds: int = 7200
   # Longest shutdown/restart waits for in-flight conversions before killing and
   # requeuing them. Keep it below the compose stop_grace_period (default 2m) so
@@ -1008,6 +1013,24 @@ class DaemonConfig(_Base):
   media_extensions: list[str] = Field(default_factory=lambda: [".mkv", ".m4v", ".avi", ".mov", ".wmv", ".ts", ".flv", ".webm"])
   config_watch: ConfigWatchSettings = Field(default_factory=ConfigWatchSettings)
   audit: AuditSettings = Field(default_factory=AuditSettings)
+
+  @field_validator("trusted_networks", mode="before")
+  @classmethod
+  def _validate_trusted_networks(cls, value: Any) -> list[str]:
+    """Normalise each entry to CIDR form; a bare address becomes a /32 or /128. A scalar is one entry."""
+    if value is None:
+      return []
+    if isinstance(value, str):
+      value = [value]
+    if not isinstance(value, (list, tuple)):
+      raise ValueError("trusted-networks must be a list of IP networks or addresses")
+    out = []
+    for raw in value:
+      try:
+        out.append(str(ipaddress.ip_network(str(raw).strip(), strict=False)))
+      except ValueError as e:
+        raise ValueError("trusted-networks entry %r is not an IP network or address: %s" % (raw, e)) from e
+    return out
 
 
 # ---------------------------------------------------------------------------

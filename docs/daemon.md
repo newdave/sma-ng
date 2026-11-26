@@ -267,14 +267,43 @@ curl -H "X-API-Key: SECRET" ...
 curl -H "Authorization: Bearer SECRET" ...
 ```
 
-Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`, `/favicon.png`
+Public endpoints (no auth required): `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, `/health`, `/status`,
+`/docs`, `/favicon.png`
+
+Trusted networks: `daemon.trusted-networks` lists client networks (CIDR or single address, IPv4 or IPv6) whose
+requests pass authentication without a key or Basic credentials. The check uses the TCP peer address only;
+`X-Forwarded-For` is ignored, so put a reverse proxy outside the trusted range or terminate auth at the proxy. With
+the LAN listed, the web UI never shows the API key dialog on that LAN and `/status` returns the full payload.
+Everyone outside the list still needs the key. The default is an empty list. Write IPv4 ranges in IPv4 form; an
+IPv4 client is matched against IPv4 entries only.
+
+```yaml
+daemon:
+  api-key: SECRET            # still required from the internet / other networks
+  trusted-networks:
+    - 10.30.0.0/16           # home LAN
+```
+
+Trust comes with three caveats:
+
+- A browser on a trusted network could be driven by a hostile page. Requests that are allowed only because of the
+  network therefore must be same-origin: a `POST`, `PUT`, `PATCH` or `DELETE` whose `Origin` header names another
+  host gets `403 Cross-origin request rejected`. Requests that carry the key are not subject to this check, and
+  non-browser clients send no `Origin`.
+- Inside Docker with `ports:` publishing (the bundled compose file), connections that pass through docker-proxy,
+  such as host-loopback and IPv6 clients when the daemon binds IPv4, arrive with the bridge gateway (for example
+  `172.17.0.1`) as the peer address. Trusting that address or `172.16.0.0/12` trusts every such client, and
+  `127.0.0.1` never matches. List real LAN ranges only, or run with `network_mode: host`.
+- `0.0.0.0/0` or `::/0` turns authentication off for everyone. The daemon start log shows how many trusted
+  networks are exempt.
 
 The dashboard, admin, and metrics pages are only HTML shells. The API key is never written into the page: when the
 daemon has an API key configured, the first `401` opens one in-page dialog asking for it (`daemon.api-key` in
 `sma-ng.yml`). The key is kept in the browser's `localStorage` for this daemon's address, so reloads and other pages
 do not ask again, and is sent as `X-API-Key` on every request. A rejected key is forgotten and the dialog asks once
 more. **Cancel** stops asking; an "API key required" button in the corner reopens the dialog. When no key is
-configured the pages work without a dialog. To forget a stored key, clear the site data for the daemon's address.
+configured, or the browser is inside `daemon.trusted-networks`, the pages work without a dialog. To forget a stored
+key, clear the site data for the daemon's address.
 
 `/status` is public but minimal for unauthenticated callers (`status`, `version`, and aggregate `jobs` counts). Node
 ids, hosts, active jobs, and paths are only returned when a valid API key (or Basic credentials) is supplied.
@@ -371,6 +400,7 @@ auto-profile selection happens for one-shot conversions. Pass
 | `host` / `port` / `workers` | HTTP listen address and worker pool size |
 | `api-key` | API authentication key |
 | `username` / `password` | Optional HTTP-basic credentials for the web dashboard |
+| `trusted-networks` | Client networks (CIDR or address) exempt from the API key, by TCP peer address (default: `[]`). See [Authentication](#authentication) |
 | `db-url` | SQLite or PostgreSQL URL for daemon job persistence. This value is loaded only from `sma-ng.yml`. |
 | `ffmpeg-dir` | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion |
 | `node-id` | Stable identity in cluster mode (auto-generated UUID on first start; override for human-readable identity) |

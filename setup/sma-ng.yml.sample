@@ -11,6 +11,7 @@ daemon:
   node-id:
   username: ''
   password: ''
+  trusted-networks: []
   job-timeout-seconds: 7200
   shutdown-grace-seconds: 100
   heartbeat-interval: 30

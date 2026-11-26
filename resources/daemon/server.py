@@ -122,6 +122,7 @@ class DaemonServer(ThreadingHTTPServer):
     self.worker_count = worker_count
     self.api_key = api_key
     self.basic_auth = basic_auth  # (username, password) tuple or None
+    self.trusted_networks = list(getattr(path_config_manager, "trusted_networks", None) or [])
     self.stale_seconds = stale_seconds
     self.node_id = resolve_node_id()
     self.detected_hwaccel: str = ""
@@ -458,6 +459,7 @@ class DaemonServer(ThreadingHTTPServer):
     # Re-apply runtime settings from CLI/config only.
     self.api_key = self._cli_api_key or self.path_config_manager.api_key
     self.basic_auth = self._cli_basic_auth or self.path_config_manager.basic_auth
+    self.trusted_networks = list(self.path_config_manager.trusted_networks or [])
     new_ffmpeg_dir = self._cli_ffmpeg_dir or self.path_config_manager.ffmpeg_dir
     for worker in self.worker_pool._workers:
       worker.ffmpeg_dir = new_ffmpeg_dir

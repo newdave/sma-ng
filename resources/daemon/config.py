@@ -1,4 +1,5 @@
 import copy
+import ipaddress
 import logging
 import os
 import shlex
@@ -295,6 +296,7 @@ class PathConfigManager:
     self.default_args = []
     self.api_key = None
     self.basic_auth = None
+    self.trusted_networks = []
     self.db_url = None
     self.ffmpeg_dir = None
     self.workers = 1
@@ -403,6 +405,7 @@ class PathConfigManager:
     self.default_config = config_file
     self.api_key = d.api_key
     self.basic_auth = (d.username, d.password) if d.username and d.password else None
+    self.trusted_networks = [ipaddress.ip_network(n, strict=False) for n in d.trusted_networks]
     self.db_url = d.db_url
     self.ffmpeg_dir = d.ffmpeg_dir
     self.workers = d.workers
