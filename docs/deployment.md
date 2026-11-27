@@ -412,9 +412,10 @@ To use PostgreSQL, set `daemon.db_url` in `config/sma-ng.yml`.
 
 Tags:
 
-- `latest` and `main` track the newest `main` commit whose CI passed, as a linux/amd64 image. `sha-<short>` pins one
-  commit.
+- `main` tracks the newest `main` commit whose CI passed, as a linux/amd64 image. `sha-<short>` pins one commit.
 - Each release adds `X.Y.Z`, `X.Y` and `X` for linux/amd64 and linux/arm64.
+- `latest` tracks the newer of the two: the `main` image or the newest release image. Right after a release it is
+  the release image, so `sma upgrade` and `deploy:remote` report the release version.
 
 The runtime image includes `vainfo` and the VAAPI userspace drivers for hardware diagnostics. For Intel QSV, use the
 `intel` or `intel-pg` profile, which maps `/dev/dri` into the container; this matters on SR-IOV guests where the
@@ -466,7 +467,8 @@ therefore reach a host with the next image build.
   the other checks. Nothing is pushed.
 - **Push to `main`:** CI compares with the last `main` commit whose CI passed (or builds when that is unknown). The
   image job runs only after the test and lint jobs pass, then smoke-tests and pushes `latest`, `main` and
-  `sha-<short>`. Because of this order, `latest` never carries code that failed CI.
+  `sha-<short>`. Because of this order, `latest` never carries code that failed CI. The push skips `latest` when it
+  already points at a newer commit, such as the release image of the release commit that follows.
 - **Manual:** dispatch `docker.yml` to rebuild by hand.
 
 Hosts then pick the image up with `mise run deploy:remote`. Trivy findings are report-only and appear in the Security
@@ -518,10 +520,11 @@ footer. Auto-merge uses `gh pr merge --auto` when branch protection with require
 direct squash merge otherwise.
 
 Merging the release PR creates the GitHub release and the `sma-ng-vX.Y.Z` tag. The release workflow then attaches the
-wheel and sdist and builds the release image (`X.Y.Z`, `X.Y`, `X`; amd64 and arm64) by calling `docker.yml` directly,
-because tags created with `GITHUB_TOKEN` start no workflow. When the patch auto-merge merges the PR directly, the same
-run creates the release at once. With branch-protection auto-merge, the next push to `main` creates it. `latest`
-keeps tracking `main`, so `deploy:remote` deploys the `main` head. The daemon's `/health` endpoint reports a version
+wheel and sdist and builds the release image (`X.Y.Z`, `X.Y`, `X` and `latest`; amd64 and arm64) by calling
+`docker.yml` directly, because tags created with `GITHUB_TOKEN` start no workflow. When the patch auto-merge merges
+the PR directly, the same run creates the release at once. With branch-protection auto-merge, the next push to `main`
+creates it. A bot-merged release commit starts no CI run, so the release image is the only image of that commit;
+moving `latest` to it is what lets hosts upgrade to the release. A rebuild of an older release leaves `latest` alone. The daemon's `/health` endpoint reports a version
 baked into the image from the latest tag, and its `commit` field identifies the exact code that is running.
 
 To rebuild a release's wheel, sdist and image, for example after a failed run, dispatch the workflow with the tag:

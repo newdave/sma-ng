@@ -72,7 +72,7 @@ docker run --rm -p 8585:8585 \
   ghcr.io/newdave/sma-ng:latest
 ```
 
-Image tags: `latest` and `main` (the main branch after CI passes), `sha-<commit>`, and `X.Y.Z`, `X.Y` and `X` for each release. Images are built for amd64 and arm64.
+Image tags: `latest` (the newest release or main-branch image), `main` (the main branch after CI passes), `sha-<commit>`, and `X.Y.Z`, `X.Y` and `X` for each release. Images are built for amd64 and arm64.
 
 ## Credits
 
