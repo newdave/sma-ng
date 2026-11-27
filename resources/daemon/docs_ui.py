@@ -30,6 +30,7 @@ DOC_PAGES = [
   ("troubleshooting", "Troubleshooting"),
   ("migration", "Migration Guide"),
   ("architecture", "Architecture"),
+  ("test-coverage", "Test Coverage"),
   ("changelog", "Changelog"),
 ]
 
