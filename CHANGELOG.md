@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.61](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.60...sma-ng-v3.2.61) (2026-11-27)
+
+
+### Features
+
+* serve API reference and mise tasks in dashboard docs ([#286](https://github.com/newdave/sma-ng/issues/286)) ([b9d9390](https://github.com/newdave/sma-ng/commit/b9d9390b3b002e51b0131297913d4a1dda94d866))
+
 ## [3.2.60](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.59...sma-ng-v3.2.60) (2026-11-27)
 
 
