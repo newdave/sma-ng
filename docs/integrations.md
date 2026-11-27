@@ -14,19 +14,51 @@ Two integration methods are available:
    - Method: POST
    - If API key is configured, add header `X-API-Key: YOUR_SECRET_KEY`
 
-SMA-NG extracts `episodeFile.path`, `series.tvdbId`, and episode numbers from the Sonarr payload and queues the job automatically. Test events (from the **Test** button) return a 200 OK without queuing anything.
+SMA-NG reads `episodeFile.path`, `series.tvdbId` and the season and episode numbers from the Sonarr payload and
+queues the job. When `tvdbId` is missing, it falls back to a `{tvdb-12345}` token in the file path, and then to
+`series.imdbId`. Test events (the **Test** button) return `200 OK` without queuing anything. A path outside every
+configured media root is rejected with `403`, and a path that does not exist with `400`.
 Enable any other notification types (On Rename, On Episode File Delete, On Series Delete, ...) to have SMA-NG
-forward them to Autoscan — see [Forwarding other Sonarr/Radarr events](#forwarding-other-sonarrradarr-events).
+forward them to Autoscan. See [Forwarding other Sonarr/Radarr events](#forwarding-other-sonarrradarr-events).
 
-**Custom script:** Suitable when SMA-NG runs locally alongside Sonarr (not in a container).
+**Choose a profile with a tag.** Tag a series in Sonarr with `sma-profile-<name>` (for example `sma-profile-lq`) to
+convert its files with the profile `<name>` instead of the profile that the routing rule selects. Radarr movies
+work the same way.
 
-1. Define a Sonarr instance (`url`, `apikey`) under `services.sonarr.<name>` in `sma-ng.yml`
-2. In Sonarr: **Settings → Connect → Add Custom Script**
+**Custom script:** Suitable when Sonarr cannot reach the daemon over HTTP but can run a script on the same host
+as SMA-NG. The script builds the same payload from Sonarr's environment variables, posts it to
+`/webhook/sonarr`, and waits until the job finishes.
+
+1. In Sonarr: **Settings → Connect → Add Custom Script**
    - On Download/Import: Yes, On Upgrade: Yes
    - Path: `/bin/bash`
    - Arguments: full path to `triggers/media_managers/sonarr.sh`
-3. Export `DAEMON_HOST`, `DAEMON_PORT`, and `DAEMON_API_KEY` for the script if the daemon is not on
-   `127.0.0.1:8585` or requires an API key
+2. Export `DAEMON_HOST`, `DAEMON_PORT` and `DAEMON_API_KEY` (or `DAEMON_USERNAME` and `DAEMON_PASSWORD`) for the
+   script if the daemon is not on `127.0.0.1:8585` or requires authentication. `POLL_INTERVAL` (default 5
+   seconds) and `TIMEOUT` (default 0, no limit) control the wait for the job.
+
+**Instance settings.** The `services.sonarr.<name>` block tells SMA-NG how to reach Sonarr after a conversion:
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `url` | required | Base URL, including any URL base such as `http://host:8989/sonarr` |
+| `apikey` | empty | Sonarr API key; an instance without one is never used |
+| `rescan` | `true` | Ask Sonarr to rescan and import the converted file (see below) |
+| `force-rename` | `false` | After the import, run Sonarr's own `RenameFiles` command |
+
+The full key reference is in [Configuration](configuration.md).
+
+**What happens after a conversion.** When the output file lies under a routed path of a Sonarr or Radarr instance
+and `rescan` is on, `manual.py` (and therefore every daemon job) does the following:
+
+1. Run `RescanSeries` (Sonarr) or `RescanMovie` (Radarr) and wait for it to finish.
+2. Run `DownloadedEpisodesScan` or `DownloadedMoviesScan` for the converted file with `importMode: Move`, so
+   Sonarr or Radarr links the new file instead of leaving it orphaned.
+3. If `force-rename` is on, run `RenameFiles` once the import has completed.
+
+If the rescan does not finish within five minutes or ends in a failed state, SMA-NG logs a warning and imports
+anyway. Skipping the import would leave the file unlinked, and Sonarr or Radarr would then grab the release again.
+If the import itself does not finish, the `RenameFiles` step is skipped.
 
 **Per-instance profile routing:** Add `daemon.routing` rules to `sma-ng.yml`. Each rule has a `match` path prefix,
 an optional `profile`, and a `services` list of instances to notify after conversion. This is useful when Sonarr
@@ -68,17 +100,21 @@ Two integration methods are available:
    - Method: POST
    - If API key is configured, add header `X-API-Key: YOUR_SECRET_KEY`
 
-SMA-NG extracts `movieFile.path` and `movie.tmdbId` (or `imdbId` as fallback) and queues the job. Test events return 200 OK without queuing.
-Other notification types (On Rename, On Movie File Delete, On Movie Delete, ...) are forwarded to Autoscan — see
+SMA-NG reads `movieFile.path` and `movie.tmdbId` and queues the job. When `tmdbId` is missing, it falls back to a
+`{tmdb-12345}` token in the file path, and then to `movie.imdbId`. Test events return `200 OK` without queuing.
+Other notification types (On Rename, On Movie File Delete, On Movie Delete, ...) are forwarded to Autoscan. See
 [Forwarding other Sonarr/Radarr events](#forwarding-other-sonarrradarr-events).
 
-**Custom script:** Suitable when SMA-NG runs locally alongside Radarr.
+**Custom script:** Suitable when Radarr can run a script on the same host as SMA-NG. It works like the Sonarr
+script, including the `DAEMON_*` variables.
 
-1. Define a Radarr instance (`url`, `apikey`) under `services.radarr.<name>` in `sma-ng.yml`
-2. In Radarr: **Settings → Connect → Add Custom Script**
+1. In Radarr: **Settings → Connect → Add Custom Script**
    - On Download/Import: Yes, On Upgrade: Yes
    - Path: `/bin/bash`
    - Arguments: full path to `triggers/media_managers/radarr.sh`
+
+The `services.radarr.<name>` block takes the same keys as the Sonarr block above. The post-conversion rescan and
+import use `RescanMovie` and `DownloadedMoviesScan`.
 
 **Per-instance routing:** Same as Sonarr; choose instances and profiles with `daemon.routing` rules and translate
 paths with `daemon.path-rewrites` in `sma-ng.yml`.
@@ -120,16 +156,20 @@ daemon:
       services: [radarr.4k]
 ```
 
-When `manual.py` processes `/mnt/unionfs/Media/Movies/4K/film.mkv`, the matcher picks the `/mnt/unionfs/Media/Movies/4K` rule (longest prefix) and triggers a rescan on `radarr.4k`.
+When a conversion finishes for `/mnt/unionfs/Media/Movies/4K/film.mkv`, the matcher picks the
+`/mnt/unionfs/Media/Movies/4K` rule (longest prefix) and triggers the rescan on `radarr.4k`.
 
 The deploy tooling stamps these rules automatically: list each instance with `path` + `profile` under `services.sonarr` / `services.radarr` in `setup/local.yml` and `mise run deploy:config` rebuilds `daemon.routing` longest-prefix-first on every roll. See [Deployment](deployment.md).
 
 ### Plex
 
-Configure `services.plex.<name>` in `sma-ng.yml`. SMA-NG refreshes the matching library section after conversion. Use `base.path-mapping` if Plex sees files at different mount points.
+Configure `services.plex.<name>` in `sma-ng.yml`. After each conversion, SMA-NG connects to every Plex instance
+with `refresh: true` and refreshes the library sections whose folders contain the converted file's directory. Use
+the instance's `path-mapping` if Plex sees the files at different mount points.
 
-1. Disable automatic library scanning in Plex to prevent Plex from scanning files mid-conversion
-2. Connect directly to the Plex server using its local hostname or IP on port `32400` (or your custom port) and set `url`, `token`, and `refresh: true` on the `services.plex.<name>` instance:
+1. Disable automatic library scanning in Plex, so that Plex does not scan files in the middle of a conversion.
+2. Connect directly to the Plex server by its local hostname or IP on port `32400` (or your custom port), and set
+   `url`, `token` and `refresh: true` on the `services.plex.<name>` instance:
 
 ```yaml
 services:
@@ -139,7 +179,11 @@ services:
       token: YOUR_PLEX_TOKEN
       refresh: true
       path-mapping: ''   # from=to[,from=to] when Plex sees different mount points
+      ignore-certs: false
+      plexmatch: true    # write .plexmatch files during rename.py runs
 ```
+
+A Plex instance that cannot be reached, or whose token is wrong, logs a warning and never fails the conversion.
 
 #### Optimized versions for 4K content
 
@@ -147,7 +191,7 @@ services:
 movie/episode that doesn't already have an optimized version, defaulting to
 the `Universal TV` profile at 8 Mbps 1080p. Plex writes the result next to
 the original under `Plex Versions/` (a directory the library audit skips by
-default — see `docs/library-audit.md`).
+default; see [Library Audit](library-audit.md)).
 
 ```bash
 PLEX_URL=http://plex.local:32400 PLEX_TOKEN=xxx \
@@ -197,6 +241,9 @@ Authentication uses the per-instance `apikey` via the `X-Emby-Token` header.
 Per-instance failures are logged and swallowed so a transient Emby outage never
 fails the conversion job.
 
+When a conversion replaces the original with a different file (for example `.mkv` to `.mp4` with the original
+deleted), SMA-NG also reports the old path as `Deleted`, so the server drops the stale library entry.
+
 **Path mapping** rewrites the directory sent to Emby when SMA-NG and Emby see
 different mount points. Same `from=to[,from=to]` syntax as `plex.path-mapping`.
 
@@ -227,10 +274,10 @@ routing rule when one converted file should refresh both servers.
 | Symptom | Likely cause |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | 401 returned | Wrong `apikey`, or apikey not granted access in admin |
-| 404 returned | `webroot` mismatch — server is mounted under a path prefix |
-| No POST issued | File's directory isn't a prefix of any `daemon.routing[].match` that lists `emby.<name>` / `jellyfin.<name>`, OR `refresh: false` |
-| Library not updated despite 204 | Path mismatch — the server doesn't recognise the directory; add a `path-mapping` entry |
-| `apikey not configured` warning | The instance is reachable but the apikey field is empty |
+| 404 returned | The server runs under a URL base; include it in `url` (for example `http://host:8096/emby`) |
+| No POST issued | The file's directory is not under any `daemon.routing[].match` that lists `emby.<name>` / `jellyfin.<name>`, or `refresh` is `false`, or `enabled` is `false` |
+| Library not updated despite 204 | Path mismatch: the server does not recognise the directory; add a `path-mapping` entry |
+| `skipped: no apikey configured` warning | The `apikey` field of the instance is empty |
 
 ### Autoscan
 
@@ -323,7 +370,7 @@ is back in place.
 | Symptom | Likely cause |
 | ----------------- | -------------------------------------------------------------------------------------------- |
 | 401 returned | Wrong `username` / `password`, or Autoscan instance has no auth configured |
-| 404 returned | `webroot` mismatch, or Autoscan running on a different path prefix |
+| 404 returned | Autoscan runs under a URL base; include it in `url` |
 | No POST issued | File's directory isn't a prefix of any `daemon.routing[].match` that lists `autoscan.<name>` |
 | Wrong `dir` sent | Add a `path-mapping` entry rewriting SMA's path to Autoscan's |
 | `status: ignored` | Forwarded event's paths don't match any routing rule listing `autoscan.<name>` |
@@ -356,9 +403,10 @@ sequenceDiagram
 
 ### Path matching and request timeouts
 
-- Instance routing (each Sonarr, Radarr, Plex, Emby, Jellyfin and Autoscan instance takes its paths from the
-  `daemon.routing` rules whose `services` reference it) matches on whole path components: `/media/TV` matches `/media/TV` and `/media/TV/Show`, but no longer `/media/TV-Anime`. Plex refreshes
-  use the same rule when comparing a file against library section locations.
+- Instance routing (each Sonarr, Radarr, Emby, Jellyfin and Autoscan instance takes its paths from the
+  `daemon.routing` rules whose `services` reference it) matches on whole path components: `/media/TV` matches
+  `/media/TV` and `/media/TV/Show`, but not `/media/TV-Anime`. Plex refreshes compare the file's directory with
+  the library section folders in the same way.
 - Sonarr/Radarr API calls time out after 30 seconds (`REQUEST_TIMEOUT` in `resources/mediamanager.py`).
 - After a conversion the post-convert `RescanSeries` / `RescanMovie` resolves the series or movie by the TVDB id
   (Sonarr) or TMDB id (Radarr) the trigger passed, then by the arr title parser on the basename, then by the
@@ -366,11 +414,19 @@ sequenceDiagram
   such as `Blade Runner 2099 (2026) - S01E01`, which Sonarr parses as "Blade Runner" with year 2099.
 - `rename.py --arr-rename` finds the Sonarr/Radarr file record by exact path, then by the path rewritten through
   the instance `path-mapping`, then by a unique basename. Radarr `RenameFiles` is sent with `movieId` and `files`.
-- Emby/Jellyfin refreshes can also report the pre-conversion path as `Deleted` when the caller supplies it
-  (`deleted_path`); the current conversion pipeline does not pass it yet.
+- Plex refreshes do not use routing rules. They go to every instance with `refresh: true`, and each refresh
+  covers the library sections whose folders contain the converted file.
 
 ### rename.py behaviour
 
+`rename.py` renames media files with the `base.naming` templates, or with Sonarr and Radarr's own naming when you
+pass `--arr-rename`. Use `--dry-run` to preview. Other options are `--movie`/`--tv`, `--tmdb`/`--tvdb`/`--imdb`,
+`-s`/`-e`, `--no-plexmatch`, `--no-plex`, `-c PATH` and `-v`; `python rename.py -h` lists them all.
+
+- The release source tag (for example `BluRay`, `WEB-DL`, `Remux`) and the video codec token of the release name
+  are kept in the new name. A stream-copied `x265` release therefore stays `x265` instead of becoming `HEVC`.
+- A title that already ends in the release year is not given the year twice: `Movie (2020)` with year 2020 stays
+  `Movie (2020)`. A year that differs from the known year is kept, because it may tell two series apart.
 - `.plexmatch` files are written from the metadata resolved during the rename (skipped when only a media type could
   be guessed, or with `--arr-rename`).
 - With path-based config routing, `.plexmatch` writing and Plex refreshes use each file's own routed settings.
@@ -401,6 +457,9 @@ options such as `BYPASS_CATS` / `BYPASS_LABELS` are documented in [triggers/READ
 `setup/post_process/*_post_process.sh` are alternative standalone submitters that POST `{path, args}` to
 `/webhook/generic` and use the same `DAEMON_*` variables.
 
+To submit files by hand, use `triggers/cli/scan.sh` (add `--wait` to block until the job ends) or
+`sma-webhook.sh submit <path>`. Both accept a file or a directory.
+
 ### Trigger script behaviour
 
 The download-client scripts submit only media files (`mkv mp4 m4v avi mov wmv ts m2ts mpg mpeg flv webm`; override
@@ -408,10 +467,10 @@ with the space-separated `SMA_MEDIA_EXTS` environment variable). They exit non-z
 no media file was submitted: NZBGet exits `94` (error) for failed submissions and `95` (nothing to do) when no media
 was found; SABnzbd, qBittorrent, Deluge and uTorrent exit `1`. Daemon requests use a 10 second connect timeout and
 a 60 second overall timeout. `triggers/media_managers/sonarr.sh` and `radarr.sh` keep the daemon response in a
-per-invocation temporary file, so concurrent imports no longer overwrite each other.
+per-invocation temporary file, so concurrent imports do not overwrite each other.
 
-`sma-webhook.sh` now fails on HTTP errors (non-zero exit) and applies `SMA_CONNECT_TIMEOUT` (default 5) and
-`SMA_MAX_TIME` (default 30) seconds to every request.
+`sma-webhook.sh` exits non-zero on HTTP errors and applies `SMA_CONNECT_TIMEOUT` (default 5) and `SMA_MAX_TIME`
+(default 30) seconds to every request.
 
 ### NZBGet
 

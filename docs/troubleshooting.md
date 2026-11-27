@@ -2,9 +2,11 @@
 
 ## Logs
 
-The daemon writes rotating log files to `logs/daemon.log` and per-config log files in `logs/`. For Docker deployments, container output is available via `docker compose logs`:
+The daemon writes rotating log files to `logs/daemon.log` and per-config log files in `logs/`. Under Docker, the
+container output is also available through `docker compose logs`. Under systemd, follow the journal:
 
 ```bash
+docker compose logs -f sma-intel   # use the service name of your profile, for example sma-software
 journalctl -u sma-daemon -f
 ```
 
@@ -46,11 +48,16 @@ curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/sma-ng?level=ERROR"
 
 ## Common Issues
 
-### "Invalid source, no video stream detected"
+### "File ... is not valid" (a file is skipped as an invalid source)
 
-- File may be corrupt or not a media file
-- Check that `ffprobe` path in `[Converter]` is correct
-- Run `ffprobe /path/to/file` manually to diagnose
+The log shows `File /path/to/file is not valid` at INFO level, and the reason at DEBUG level: `Invalid source, no
+video stream detected`, `no audio stream detected`, `no data returned` or `below minimum size threshold
+[minimum-size]`.
+
+- The file may be corrupt or not a media file.
+- Check that `base.converter.ffprobe` (or `daemon.ffmpeg-dir`) points to a working `ffprobe`.
+- Run `ffprobe /path/to/file` manually to diagnose.
+- For `[minimum-size]`, lower `base.converter.minimum-size` (in MB) or the `-ms` flag.
 
 ### `hevc_qsv` fails mid-encode with `Invalid FrameType:0` / exit 183
 
@@ -73,9 +80,10 @@ base:
 
 `hw_alt` keeps recovery on the iGPU and avoids the 10–20× wall-clock cost
 of falling all the way to libx265 software. See
-[`docs/hardware-acceleration.md`](hardware-acceleration.md#fallback-policy-replaces-the-deprecated-boolean-software-fallback)
+[Hardware Acceleration](hardware-acceleration.md#fallback-policy-replaces-the-deprecated-boolean-software-fallback)
 for the full policy table, and watch for the structured `ffmpeg.attempts`
-log line — successful recovery shows `[{tier: hw, failure_class: ...}, {tier: hw_alt, failure_class: null}]` with `result: ok`.
+log line. A successful recovery shows `[{tier: hw, failure_class: ...}, {tier: hw_alt, failure_class: null}]` with
+`result: ok`.
 
 ### XviD / MPEG-4 ASP source fails immediately with `decoder_init_failed`
 
@@ -86,7 +94,7 @@ the `hw` and `hw_alt` tiers reuse the QSV decoder, so they fail back to back
 `failure_class: decoder_init_failed`, and the job is surfaced as failed under
 `fallback-policy: hw_alt` or `hw_only`.
 
-SMA-NG now auto-recovers this case: a `decoder_init_failed` **or**
+SMA-NG recovers from this case automatically: a `decoder_init_failed` **or**
 `filter_init_failed` under `hw_alt` or `hw_only` triggers one extra
 **software-decode + hardware-encode** retry (`tier: sw_decode_hw_encode`). The
 source is decoded on the CPU while the QSV encoder is kept, so the expensive
@@ -123,8 +131,8 @@ hardware driver, because a software tier may still succeed.
 
 ### 7.1 source fails immediately with `encoder_init_failed` / `audio_channel_layout_mismatch`
 
-A source with a 7.1 (8-channel) audio track re-encoded to `eac3`, `ac3`, or
-`dts` used to die at encoder init in tens of milliseconds. The
+A source with a 7.1 (8-channel) audio track that is re-encoded to `eac3`, `ac3` or
+`dts` would die at encoder init within milliseconds. The
 `ffmpeg.failure_diagnosis` line reports
 `cause: audio_channel_layout_mismatch` with the ffmpeg signal
 `Specified channel layout '7.1' is not supported by the eac3 encoder`.
@@ -132,7 +140,7 @@ The native ffmpeg AC-3/E-AC-3/DTS encoders top out at 5.1 (6 channels), and a
 profile with `max-channels: 0` (unlimited — as `rq`/`hq` use) otherwise passes
 all 8 source channels straight through.
 
-SMA-NG now auto-recovers this case: before the encode it downmixes the output
+SMA-NG recovers from this case automatically: before the encode it downmixes the output
 to the encoder's ceiling (6 channels) and logs
 `Encoder eac3 caps channels at 6; downmixing from 8 [adaptive-audio-channel-cap]`.
 No configuration change is required. Copy passthrough and higher-capacity
@@ -142,8 +150,8 @@ encoder or let the source stream copy through.
 
 ### Source fails immediately with `encoder_init_failed` (profile bit-depth mismatch)
 
-A re-encode used to die at encoder init in ~100 ms when the target profile's
-bit-depth class disagreed with the output surface. The `ffmpeg.failure_diagnosis`
+A re-encode can die at encoder init within about 100 ms when the target profile's
+bit-depth class disagrees with the output surface. The `ffmpeg.failure_diagnosis`
 line reports `failure_class: encoder_init_failed` with a `profile` and an output
 filter that don't agree on bit depth. This happens because the profile fallback
 picks the first entry of `video.profile` whenever the source's own profile name
@@ -159,7 +167,7 @@ never is. Two mismatches result:
 Either way `hevc_qsv`/`hevc_vaapi` (and the H.264 encoders) reject the surface
 at init.
 
-SMA-NG now auto-recovers both cases: before the encode it aligns the profile to
+SMA-NG recovers from both cases automatically: before the encode it aligns the profile to
 the output depth — downgrading (`main10` → `main`, `high10` → `high`) for 8-bit
 output, or upgrading (`main` → `main10`, `high` → `high10`) for 10-bit output —
 and logs e.g. `Profile main10 requires 10-bit input but output is 8-bit;
@@ -178,15 +186,12 @@ to the nearest even value (it is a cap, never rounded up) and the height is
 derived from the source aspect ratio, so the picture is never stretched. The
 fold is logged as
 `Folding operator downscale into vpp_qsv w=W:h=H … [adaptive-qsv-downscale]`.
-Earlier releases floor-aligned both dimensions to a mod-16/mod-32 encoder
-boundary, which shipped slightly stretched output (e.g. a derived 1920x1080
-target as 1920x1072, or an untouched 1920x1080 source scaled to 1920x1088);
-that coercion has been removed — QSV drivers handle surface alignment
-internally without rescaling the picture.
+QSV drivers handle surface alignment internally without rescaling the picture. Output that an older release
+stretched to 1920x1088 or 1920x1072 is handled in the next section.
 
 ### Repairing previously stretched ("hybrid") outputs
 
-Files transcoded before the fix may still carry stretched geometry
+Files that an older release transcoded may still carry stretched geometry
 (1920x1088, 1920x1072, 1920x1056, 3840x2176, 3840x2144, 1280x736, 1280x704).
 Two repair paths exist:
 
@@ -210,7 +215,7 @@ Two repair paths exist:
 
 Detection is signature-based and skips files already carrying a non-square
 pixel aspect ratio, so re-running the repair is safe and idempotent. The one
-exception is files damaged by the remux in releases before this fix: it mapped
+exception is files damaged by the remux in older releases: it mapped
 every stream (`-map 0`) and applied `-aspect` to all video streams, turning
 the cover art into a second real `mp4v` video track. Those files are reported
 with reason `demoted_poster`, and running the lossless repair again removes
@@ -285,8 +290,7 @@ all of these hold:
 
 Otherwise the copy is deleted and the original is untouched. Chapters are compared by count, not by chapter
 track: the MP4 muxer writes a fresh chapter text track from the chapter list, also when the source stored its
-chapters elsewhere (a Nero `chpl` atom, or a `tx3g` track FFprobe reports as a subtitle). Releases before this
-change failed such files with `repaired chapter track count differs from source`.
+chapters elsewhere (a Nero `chpl` atom, or a `tx3g` track FFprobe reports as a subtitle).
 
 A hardlinked original (for example a Sonarr/Radarr import that is still seeding) is not replaced, because that would
 split it from its other links: they would keep the damage and the file would use twice the space. Once the copy
@@ -313,10 +317,14 @@ usually the FFmpeg build lacks the decoder, or the source is damaged and needs r
 
 ### Hardware acceleration not working
 
-- Verify `hwdevices` key matches encoder codec name (e.g., `qsv` for `h265qsv`)
-- Verify `hwaccel-output-format` uses dict format: `qsv:qsv` not just `qsv`
-- Check FFmpeg build supports the hwaccel: `ffmpeg -hwaccels`
-- Check the render device exists: `ls /dev/dri/renderD128`
+- Set `base.video.gpu` (`qsv`, `vaapi`, `nvenc` or `videotoolbox`). It fills `hwaccels`, `hwaccel-decoders`,
+  `hwdevices` and `hwaccel-output-format` for you. If you set those by hand, `hwdevices` and
+  `hwaccel-output-format` are maps keyed by the hwaccel name, for example `hwdevices: {qsv: /dev/dri/renderD128}`
+  and `hwaccel-output-format: {qsv: qsv}`.
+- Check that the FFmpeg build supports the hwaccel: `ffmpeg -hwaccels`
+- Check that the render device exists: `ls /dev/dri/renderD128`
+- Check the startup log for `Hardware encoder '...' does not appear to be available`, and `GET /health` for
+  `gpu_status` (see [Hardware Acceleration](hardware-acceleration.md))
 - On Intel SR-IOV guests, verify the guest exposes the Intel VF as a matching `card*` and `renderD*` pair under `/dev/dri`
 - If `vainfo` still fails, verify the container has both the host `render` and `video` group IDs
 - On Linux, ensure the service user is in the `render` or `video` group: `usermod -aG render <user>`
@@ -330,6 +338,8 @@ usually the FFmpeg build lacks the decoder, or the source is damaged and needs r
   `fallback-policy: hw_only` while you diagnose it.
 
 ### Output written as `name.2.mp4`
+
+SMA-NG never overwrites an existing file. When the output name is taken, the new output gets a number instead.
 
 - A file already existed at the output name, so SMA-NG kept it and numbered the new output
   (`[output-collision]` warning). Remove or rename the old file and re-run if you want the plain name.
@@ -347,6 +357,28 @@ usually the FFmpeg build lacks the decoder, or the source is damaged and needs r
 - Replacement requires tagging on (`tagfile`) and metadata found; otherwise outputs are numbered. Numbering from
   `move-to` and `getOutputFile` is not covered. Existing `name.2.mp4` duplicates from before this behavior are
   not cleaned up automatically; remove them by hand.
+
+### Webhook or API submit rejected with 403 "Path is outside configured media roots"
+
+The daemon accepts a path only when its real location (symlinks and `..` resolved) lies under a configured media
+root: a `daemon.routing[].match` prefix, a `daemon.scan-paths` entry, or either side of a `daemon.path-rewrites`
+rule. Otherwise the request fails with `403`, the log shows `Rejected path outside configured media roots`, and
+nothing is queued. A path that does not exist fails with `400` (`Path does not exist`).
+
+- Add a routing rule or scan path that covers the media directory, or add a `path-rewrites` entry if the caller
+  sends container paths (for example `/tv`) that differ from the daemon's paths.
+- Check for a symlink that leads outside the root: the check uses the target of the link.
+- A daemon with no routing, scan paths or rewrites at all accepts any path.
+
+### Original kept: "Failed to copy original to recycle bin ... keeping original"
+
+When `delete-original` is on and `base.converter.recycle-bin` is set, SMA-NG copies the original to the recycle bin
+before it removes it. If that copy fails (the bin is full, read-only or not mounted), the log shows
+`Failed to copy original to recycle bin <dir>, keeping original: <error>` and then
+`Not deleting <path>: recycle bin copy failed.` The converted output is kept and the original stays in place,
+together with its subtitle files, so no data is lost. Fix the recycle-bin mount or free space, then delete the
+original yourself, or re-run the conversion. A name that already exists in the bin gets a `.2`, `.3`, ... suffix
+instead of being overwritten.
 
 ### Job failed with `[output-verify]` (output does not match the source)
 
@@ -416,7 +448,8 @@ Deaths from other signals (the OOM killer's SIGKILL, a SIGSEGV crash) are not re
 
 ### "Job N completion discarded: job is no longer running on this node"
 
-The job finished, but its row had already been cancelled, requeued by stale-node recovery, or claimed by another
+The same message appears with `failure` or `requeue` in place of `completion`, followed by
+`(cancelled or requeued)`. The job finished, but its row had already been cancelled, requeued by stale-node recovery, or claimed by another
 node, so this node's result was dropped instead of overwriting the newer state. This is expected after a cancel
 or a network partition. A cancelled job's output may still exist on disk if ffmpeg finished before the kill landed.
 
@@ -435,8 +468,8 @@ normal failure path (it fails, or retries with backoff if it has retries left). 
 
 ### "Job N completion write failed after 4 attempts"
 
-The conversion ended, but the database refused the write that records the result (`completion`, `failure` or
-`timeout failure`). The worker retried it with backoff, then parked it and retries it after each job and on every
+The conversion ended, but the database refused the write that records the result (`completion`, `failure`,
+`timeout failure` or `requeue`). The worker retried it with backoff, then parked it and retries it after each job and on every
 loop pass (`Job N pending completion still failing`). Until the write lands the row stays `running`. The job is not
 re-run, and its result is not replaced by the database error: a finished conversion still ends `completed`, and a
 failed one keeps its own failure cause and exit code. Fix the database connection (see the surrounding error).
@@ -472,15 +505,19 @@ appears at the output name meanwhile is left alone. Such a file is not overwritt
 a numbered name instead (for example `name.2.mp4`) and the log line names it. A failed copy run's stderr sidecar is
 removed, because the job still succeeds.
 
+If the copy turns out larger than the re-encode, the re-encode is kept and the copy is removed.
+
 Both outputs pass the `[output-verify]` check. The re-encode is verified first; a re-encode that fails it fails the
 job and no copy run starts. A copy output that fails the check is renamed to `<output name>.failed` and the verified
 larger re-encode is kept. Same-family re-encodes (for
 example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
 
-- Lower the `crf` value (lower CRF = higher quality = larger file; raise it to reduce size)
-- Add a `max-bitrate` cap in `[Video]`
-- Use `bitrate-ratio` to scale based on source codec
-- Use `crf-profiles` for tiered quality based on source bitrate
+To make re-encodes smaller:
+
+- Raise the quality number: `global-quality` on QSV, VAAPI and NVENC. A higher value gives a smaller file.
+- Add a `max-bitrate` cap in `base.video`.
+- Use `bitrate-ratio` to scale the target by source codec.
+- Use `crf-profiles` for tiered targets based on the source bitrate.
 
 ### Subtitles show as "English (MOV_TEXT)" in Plex
 
@@ -496,11 +533,12 @@ example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
   genuinely image-based or corrupt files. Re-queue the affected items to pick
   the subtitles up.
 
-### Sonarr/Radarr not rescanning after manual.py
+### Sonarr/Radarr not rescanning after a conversion
 
-- Verify `path` is set in the `[Sonarr]`/`[Radarr]` section
-- Verify `apikey` is correct and `rescan = true`
-- Verify the output file path starts with the configured `path` prefix
+- Verify that the instance is referenced from a `daemon.routing[].services` rule whose `match` is a parent of the
+  output file's directory (for example `services: [sonarr.main]`)
+- Verify that `apikey` is correct and `rescan` is `true` on the `services.sonarr.<name>` instance
+- Verify that the output file path starts with the `match` prefix of that rule
 - A slow rescan no longer blocks the import: SMA waits up to 5 minutes (polling with backoff), logs the last
   command status (`failed`, `aborted`, `cancelled` and `orphaned` stop the wait early) and then still issues the
   import.
@@ -519,16 +557,19 @@ example HEVC to `hevc_qsv`) are also capped at the source bitrate estimate.
 
 ### Docker: "Read-only file system" errors
 
-- Verify every path FFmpeg writes to (output dir, temp dir, media mounts) is bind-mounted
-  read-write into the `sma` service in `docker/docker-compose.yml`
-- The bundled compose file mounts `/opt/sma/config`, `/opt/sma/logs`, and `/transcode` by
-  default — extend `volumes:` for any additional paths your setup needs
+- Verify that every path FFmpeg writes to (output dir, temp dir, media mounts) is bind-mounted
+  read-write into your SMA service in `docker/docker-compose.yml`
+- The bundled compose file mounts `/opt/sma/config`, `/opt/sma/logs`, `/opt/sma/data`, `/mnt`, `/transcode` and
+  `/recycle` by default. Extend `volumes:` for any additional paths your setup needs.
+- FFmpeg ends with this error on the output side, so the fallback ladder stops at once instead of retrying (see
+  [Hardware Acceleration](hardware-acceleration.md#when-the-ladder-stops)).
 
 ### Daemon doesn't start after restart
 
-- Check `docker compose logs sma --no-color | tail -50` for the error
-- Verify `config/sma-ng.yml` is valid YAML.
-- Verify `config/sma-ng.yml` exists
+- Check `docker compose logs <service> --no-color | tail -50` for the error (the service is `sma-software`,
+  `sma-intel`, `sma-nvidia` or the `-pg` variant of your profile)
+- Verify that `config/sma-ng.yml` exists and is valid YAML
+- Run `python daemon.py --smoke-test` to see which config fails to load
 
 ### "Janitor swept N files" — what does it mean?
 
@@ -555,12 +596,13 @@ directories), set `daemon.storage-janitor-interval-seconds: 0` in
 
 ### Smoke test fails at startup
 
-If `Daemon.smoke_test: true` is set in `sma-ng.yml` or `--smoke-test` is passed:
+If `daemon.smoke-test: true` is set in `sma-ng.yml` (the default) or `--smoke-test` is passed:
 
 - Check `logs/daemon.log` for `[FAIL]` lines showing which config raised an exception
-- Common cause: a boolean field with a typo (e.g. `force-rename = Truee`) — fix the value in the config
-- Run manually to see output: `python daemon.py --smoke-test`
-- Missing configs are skipped with `[SKIP]` — create them with `mise run config:generate` or `mise run deploy:config`
+- Common cause: a value with the wrong type or a typo (for example `force-rename: Truee`). Fix the value in the
+  config.
+- Run manually to see the output: `python daemon.py --smoke-test`
+- Missing configs are skipped with `[SKIP]`. Create them with `mise run config:generate` or `mise run deploy:config`.
 
 ---
 

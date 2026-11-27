@@ -1,41 +1,111 @@
 # Hardware Acceleration
 
-SMA-NG supports hardware-accelerated video encoding via FFmpeg. The `gpu` setting under `base.video` selects the encoder backend. Device and decoder settings (`hwaccels`,
-`hwaccel-decoders`, `hwdevices`, `hwaccel-output-format`) live under `base.converter`; encoder tuning
-(`codec`, `codec-parameters`, and the `qsv:` / `vaapi:` subblocks) lives under `base.video`.
+SMA-NG can encode video on a GPU through FFmpeg. The `gpu` setting under `base.video` selects the backend.
+Everything else is derived from it, so `gpu: qsv` on its own is enough to enable the whole QSV chain.
 
-When a hardware encode fails, the default `fallback-policy: aggressive` ends in a full-software tier: every
-hardware encoder is swapped for its software equivalent (AV1 becomes `libsvtav1`). See
-[Full-software fallback](configuration.md#full-software-fallback) and
-[`fallback-policy`](#fallback-policy-replaces-the-deprecated-boolean-software-fallback) below.
+| Setting | Block | Purpose |
+| --- | --- | --- |
+| `gpu` | `base.video` | Selects the backend: `qsv`, `vaapi`, `nvenc`, `videotoolbox`, or empty for software |
+| `codec`, `codec-parameters`, `preset`, `global-quality` | `base.video` | Encoder choice and tuning |
+| `qsv:` and `vaapi:` subblocks | `base.video` and `base.hdr` | Encoder-specific options, used only by the matching encoder |
+| `hwaccels`, `hwaccel-decoders`, `hwdevices`, `hwaccel-output-format` | `base.converter` | Hardware decode and device settings |
+| `fallback-policy` | `base.converter` | How far a failed hardware encode may fall back; see [below](#fallback-policy-replaces-the-deprecated-boolean-software-fallback) |
+
+When `gpu` is set, SMA-NG fills any of the four `base.converter` hardware settings that you left empty, and it
+maps generic codec names to the encoder of the backend. For example, `codec: [h265]` with `gpu: qsv` becomes
+`[h265qsv, h265]`: the software encoder stays in the list as a stream-copy and fallback entry. A setting that you
+write explicitly always wins over the derived value.
+
+SMA-NG supports Intel QSV, VAAPI, NVIDIA NVENC and Apple VideoToolbox. AMD AMF is not supported; on AMD GPUs use
+VAAPI.
+
+The Docker image builds FFmpeg 8.1.2 (`FFMPEG_VERSION` in `docker/Dockerfile`) with VAAPI and NVENC support, and
+with Intel QSV (oneVPL) on amd64.
+
+When a hardware encode fails, the default `fallback-policy: aggressive` retries along a ladder that ends in a
+software encode, so the job still finishes. See [Full-software fallback](configuration.md#full-software-fallback)
+and [`fallback-policy`](#fallback-policy-replaces-the-deprecated-boolean-software-fallback) below.
 
 ## GPU Auto-Detection
 
-`mise run config:generate` auto-detects the GPU (via `scripts/detect-gpu.sh`) and writes the result to `base.video.gpu` in the generated `sma-ng.yml`:
+`mise run config:generate` copies `setup/sma-ng.yml.sample` to `config/sma-ng.yml` and sets `base.video.gpu` from
+`scripts/detect-gpu.sh`. It does nothing if `config/sma-ng.yml` already exists. Detection checks, in order:
 
-- macOS → `videotoolbox`
-- NVIDIA GPU (detected via `nvidia-smi`) → `nvenc`
-- Intel iGPU (detected via `/sys/module/i915` or `vainfo`) → `qsv`
-- Generic VA-API device (typically `/dev/dri/renderD128`) → `vaapi`
-- Fallback → software
+1. macOS on Apple Silicon: `videotoolbox`
+2. a working `nvidia-smi`: `nvenc`
+3. `vainfo` succeeds and reports an Intel driver: `qsv`
+4. `/dev/dri/renderD128` exists and `vainfo` succeeds: `vaapi`
+5. otherwise: software (`gpu` stays empty)
 
 ```bash
 mise run config:generate              # auto-detect and generate config
 GPU=nvenc mise run config:generate    # force NVIDIA
-GPU=vaapi mise run config:generate    # force VA-API
+GPU=vaapi mise run config:generate    # force VAAPI
 GPU=software mise run config:generate # force software encoding
-mise run config:gpu                   # show detection result without writing config
+mise run config:gpu                   # show the detection result without writing config
 ```
 
 ## Supported Backends
 
-| Value | Hardware | Supported Codecs |
+| `gpu` value | Hardware | Encoder codec names (`python manual.py -cl`) |
 | --- | --- | --- |
-| `qsv` | Intel Quick Sync | h264, h265, av1, vp9 |
-| `vaapi` | Intel / AMD VA-API (Linux) | h264, h265, av1 |
-| `nvenc` | NVIDIA GPU | h264, h265, av1 |
-| `videotoolbox` | Apple Silicon / macOS | h264, h265 |
-| *(empty)* | Software (CPU) | all codecs |
+| `qsv` | Intel Quick Sync | `h264qsv`, `h265qsv` (or `hevc_qsv`), `av1qsv`, `vp9qsv` |
+| `vaapi` | Intel or AMD through VAAPI (Linux) | `h264vaapi`, `h265vaapi` (or `hevc_vaapi`), `av1vaapi` |
+| `nvenc` | NVIDIA GPU | `h264_nvenc`, `h265_nvenc` (or `hevc_nvenc`), `av1nvenc` |
+| `videotoolbox` | Apple Silicon (macOS) | `h264_videotoolbox`, `h265_videotoolbox` |
+| empty | Software (CPU) | `h264`, `h265`, `av1`, `svtav1`, `vp9`, and others |
+
+The first entry of `codec` is the encoder. Later entries are formats that may be stream-copied instead of
+re-encoded.
+
+## Quality Control Without a Bitrate Target
+
+All hardware encoders use constant-quality rate control when no bitrate target applies:
+
+| Encoder family | Flag | Default value |
+| --- | --- | --- |
+| QSV (H.264, HEVC, AV1, VP9) | `-global_quality` (ICQ) | 25 |
+| VAAPI H.264 and HEVC | `-qp` (CQP) | 23 |
+| VAAPI AV1 | `-rc_mode CQP -global_quality` (0 to 255 scale) | 110 |
+| NVENC H.264 and HEVC | `-qp` | 23 |
+| NVENC AV1 | `-qp` (0 to 255 scale) | 110 |
+| VideoToolbox | `-q:v` (Apple Silicon only) | 65 |
+
+`global-quality` sets the value for the QSV encoders and for VAAPI AV1. For VAAPI AV1, the 1 to 51 value is
+converted to the encoder's 0 to 255 scale. The VAAPI H.264 and HEVC encoders and the NVENC encoders ignore
+`global-quality` and start from the default in the table. A `-qp` value in `base.video.codec-parameters` reaches
+`h264_vaapi` and `hevc_vaapi` after that default, and FFmpeg uses the last `-qp` it sees. A bitrate target (VBR) and constant quality are mutually exclusive: if a bitrate target
+is set, `global-quality` is ignored.
+
+When `global-quality` is set, a re-encode that is not driven by bitrate (for example a pixel-format change, a
+profile change or `force-reencode`) drops the computed bitrate target and uses constant quality, so a starved
+source is not re-encoded at its own starved bitrate. Re-encodes driven by `max-bitrate`, a `crf-profiles` match or an analyzer
+bitrate ceiling keep their bitrate target.
+
+When the source bitrate cannot be determined (for example some MKV files without bitrate tags), SMA-NG sets no
+bitrate target and lets constant quality drive the encode:
+
+- Software x264 and x265, and VideoToolbox on Apple Silicon, keep a `max-bitrate` ceiling as a capped CRF.
+- Other encoders drop the VBV `maxrate` and `bufsize` values, because they reject or ignore VBV without a bitrate.
+- Encoders that have no constant-quality mode (for example VideoToolbox on Intel Macs, V4L2 M2M, OMX, and the
+  software `mpeg4`/`divx`, `theora`, `h263` and `flv` encoders) get a conservative target by output height: 20000 kbps for 2160p, 10000 for 1440p, 6000 for 1080p, 3000 for 720p and 1500 below
+  that, never above `max-bitrate`.
+
+## Bit Depth and Profile Matching
+
+SMA-NG keeps the output bit depth compatible with the encoder:
+
+- If the encoder cannot produce the source bit depth, the pixel format is changed to the nearest one that the
+  encoder supports (`Pix-fmt adjusted to ...` in the log).
+- The encoder profile is matched to the output bit depth before FFmpeg starts. A `main10` profile on an 8-bit
+  output is downgraded to `main` (H.264: `high10` to `high`), and a `main` profile on a 10-bit output is upgraded
+  to `main10`. The log line carries the tag `[adaptive-profile-bit-depth]`.
+- A profile that does not belong to the codec family, such as an H.264 profile left over on an HEVC encode, is
+  replaced by the first listed profile that fits (`[adaptive-profile-family]`).
+- If your `profile` list already contains a profile for the output depth, SMA-NG uses that one.
+
+This prevents `encoder_init_failed` errors from the QSV and VAAPI encoders, which refuse a profile whose bit depth
+does not match the surface format.
 
 ---
 
@@ -46,19 +116,68 @@ base:
   video:
     gpu: qsv
     codec: [h265qsv, h265]
-    codec-parameters: '-low_power 1 -async_depth 1 -extbrc 1'
     look-ahead-depth: 16
     b-frames: 3
     ref-frames: 4
 ```
 
-Supported QSV codecs: `h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`
+Supported QSV encoders: `h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`.
 
-`codec-parameters` accepts raw FFmpeg encoder flags. The defaults in `setup/sma-ng.yml.sample` enable QSV low-power mode and extended rate control (`-low_power 1 -async_depth 1 -extbrc 1`). `-extbrc` is QSV-only and is cleared at runtime when `gpu` is not `qsv`; `-low_power` and `-async_depth` are also valid VAAPI encoder options, so they stay on a `gpu: vaapi` encode. On the `hw_alt` QSV to VAAPI fallback the QSV-tuned values are dropped (an unsupported flag would fail the transcode); set `video.vaapi.low-power` / `async-depth` to send them to the VAAPI encoder.
+### Encoder options
+
+Tune the QSV encoder with typed fields in `base.video.qsv` (and `base.hdr.qsv` for HDR sources). A field at its
+default value is not sent to FFmpeg, and `setup/sma-ng.yml.sample` leaves all of them at their defaults.
+
+| Field | FFmpeg flag | Unset value |
+| --- | --- | --- |
+| `low-power` | `-low_power` (shared with VAAPI) | `-1` |
+| `async-depth` | `-async_depth` (shared with VAAPI) | `0` |
+| `extbrc` | `-extbrc` | `-1` |
+| `b-strategy` | `-b_strategy` | `-1` |
+| `adaptive-i` | `-adaptive_i` | `-1` |
+| `adaptive-b` | `-adaptive_b` | `-1` |
+| `p-strategy` | `-p_strategy` | `-1` |
+| `rdo` | `-rdo` | `-1` |
+| `codec-parameters` | raw flags, QSV only | empty |
+
+The `qsv` block also accepts `preset`, `b-frames`, `ref-frames`, `global-quality`, `look-ahead-depth` and
+`extra-hw-frames`, but these fields do not currently override `base.video`: SMA-NG ignores them. Under `gpu: qsv`,
+only the typed flags in the table above, folded into `qsv.codec-parameters`, take effect. Set `preset`,
+`b-frames`, `ref-frames`, `global-quality`, `look-ahead-depth` and `extra-hw-frames` on `base.video` (or
+`base.hdr`) instead.
+
+```yaml
+base:
+  video:
+    gpu: qsv
+    qsv:
+      low-power: 1
+      async-depth: 1
+      extbrc: 1
+```
+
+Details about the flags:
+
+- `-low_power` and `-async_depth` are valid on both the QSV and the VAAPI encoder. They are shared flags, so a raw
+  `-low_power 1` in `base.video.codec-parameters` stays on the command line for `gpu: qsv` and for `gpu: vaapi`.
+- The remaining QSV flags (`-extbrc`, `-b_strategy`, `-adaptive_i`, `-adaptive_b`, `-p_strategy`, `-rdo`,
+  `-look_ahead`, `-look_ahead_depth`) are QSV only. If you write them in `base.video.codec-parameters`, SMA-NG
+  moves them into the `qsv` block when it loads the config, and a VAAPI encoder never receives them.
+- SMA-NG adds `-extbrc 1` automatically for bitrate targets, because it is what makes `-look_ahead_depth` work on
+  `hevc_qsv`.
+- `look-ahead-depth: N` emits `-look_ahead 1 -look_ahead_depth N`. When it is 0, `-look_ahead 0` is sent.
+- An encoder drops flags that belong to the other hardware family and logs one warning for each dropped flag,
+  instead of failing the encode.
 
 ### Auto-populated QSV decoders
 
-Setting `gpu: qsv` (and leaving `base.converter.hwaccel-decoders` empty) auto-populates the hardware decoder list with the safe Intel QSV set: `hevc_qsv`, `h264_qsv`, `vp9_qsv`, `vc1_qsv`. `av1_qsv` is **deliberately omitted** — FFmpeg advertises it on every Intel iGPU, but it only actually works on Arc / Xe2 (DG2 and later); pre-Arc parts (Coffee/Comet/Tiger/Alder/Raptor Lake) crash inside oneVPL when it's selected. Operators on Arc-or-newer hardware can opt in by listing the decoders explicitly:
+With `gpu: qsv` and an empty `base.converter.hwaccel-decoders`, SMA-NG uses the safe Intel decoder set
+`hevc_qsv`, `h264_qsv`, `vp9_qsv` and `vc1_qsv`, together with `hwaccels: [qsv]`, the device
+`/dev/dri/renderD128` and the `qsv` output format.
+
+`av1_qsv` is deliberately omitted. FFmpeg advertises it on every Intel iGPU, but it works only on Arc and Xe2
+(DG2 and later). Older parts (Coffee, Comet, Tiger, Alder and Raptor Lake) crash inside oneVPL when it is
+selected. If you run Arc or newer hardware, opt in by listing the decoders yourself:
 
 ```yaml
 base:
@@ -66,40 +185,49 @@ base:
     hwaccel-decoders: [hevc_qsv, h264_qsv, vp9_qsv, vc1_qsv, av1_qsv]
 ```
 
-The auto-fill only runs when `hwaccel-decoders` is empty — an explicit list always wins.
+An explicit list always wins over the automatic one.
 
-### Tuning QSV HEVC for ICQ + HDR
+### Frame pool (`-extra_hw_frames`)
 
-For best per-frame quality on Intel QSV, prefer ICQ (Intelligent
-Constant Quality) over scene-blind VBR. Recommended tuning:
+QSV needs spare hardware frames for look-ahead. SMA-NG passes `-extra_hw_frames` at input scope, using
+`max(20, look-ahead-depth + 4)`, capped at 100. Set `extra-hw-frames` on `base.video` (or `base.hdr`) to choose a
+value yourself; an explicit value is capped at 100 as well. The pool is computed from `base.video` and `base.hdr`
+only, so `qsv.extra-hw-frames` has no effect.
+
+### Tuning QSV HEVC for ICQ and HDR
+
+Intelligent Constant Quality (ICQ) gives better per-frame quality than VBR that ignores scene content:
 
 ```yaml
 base:
   video:
     gpu: qsv
     codec: [h265qsv, h265]
-    preset: slower            # QSV presets cost little speed; veryslow if headroom
-    look-ahead-depth: 40      # SMA-NG bumps -extra_hw_frames automatically
-    global-quality: 23        # ICQ target; 21–25 typical for 1080p HEVC
-    crf-profiles: ''          # clear bitrate matching to enable ICQ
-    crf-profiles-hd: ''       # same for HD
+    preset: slower            # QSV presets cost little speed; veryslow if you have headroom
+    look-ahead-depth: 40      # SMA-NG raises -extra_hw_frames to 44 automatically
+    global-quality: 23        # ICQ target; 21 to 25 is typical for 1080p HEVC
+    crf-profiles: ''          # no bitrate ladder, so quality drives the encode
+    crf-profiles-hd: ''
   hdr:
-    pix-fmt: [p010le]         # required for 10-bit HDR passthrough
+    pix-fmt: [p010le]         # keep 10-bit for HDR
     primaries: [bt2020]
     transfer: [smpte2084]     # PQ; use [arib-std-b67] for HLG sources
     space: [bt2020nc]
 ```
 
-- **`preset: slower`** — earlier releases silently dropped QSV presets; SMA-NG now passes them through. `slower` improves quality for a small speed cost on Intel iGPUs.
-- **`look-ahead-depth: 40`** — deeper look-ahead helps in ICQ mode. SMA-NG automatically emits `-extra_hw_frames 44` so the device frame pool doesn't run dry.
-- **`global-quality: 23`** — direct knob for `-global_quality`. Lower values raise quality; the typical 1080p HEVC sweet spot is 21–25. Ignored when `crf-profiles` or `max-bitrate` set a bitrate target (ICQ and VBR are mutually exclusive).
-- **`hdr.pix-fmt: [p010le]`** — required to keep 10-bit HDR passthrough; without it the pipeline truncates to 8-bit.
-- **HDR color tags** — when the output is HDR, SMA-NG emits `-color_primaries`, `-color_trc`, and `-colorspace` from `hdr.primaries[0]`, `hdr.transfer[0]`, `hdr.space[0]`. Use `transfer: [arib-std-b67]` for HLG sources so players don't render PQ as washed-out.
-- **MKV vs MP4 subtitles** — `mov_text` is MP4-only. If you switch `converter.output-format` to `mkv`, leave `subtitle.codec` at the default and SMA-NG auto-substitutes `[srt]` at startup with a WARNING; set it explicitly to take control.
+- `preset: slower` is passed through to the QSV encoder (`veryfast` to `veryslow`).
+- `look-ahead-depth: 40` helps most in ICQ mode.
+- `global-quality: 23` is a direct `-global_quality` value. Lower values give higher quality.
+- `hdr.pix-fmt: [p010le]` keeps 10-bit HDR; without it the pipeline can fall back to 8-bit.
+- For HDR output, SMA-NG sets `-color_primaries`, `-color_trc` and `-colorspace` from the first entry of
+  `hdr.primaries`, `hdr.transfer` and `hdr.space`. Use `transfer: [arib-std-b67]` for HLG sources.
+- `mov_text` subtitles work only in MP4. If you set `converter.output-format: mkv` and leave `subtitle.codec`
+  at its default, SMA-NG substitutes `[srt]` at startup and logs a warning. Set the codec explicitly to avoid the
+  warning.
 
 ---
 
-## Intel / AMD VAAPI
+## Intel and AMD VAAPI
 
 ```yaml
 base:
@@ -108,7 +236,26 @@ base:
     codec: [h265vaapi, h265]
 ```
 
-Supported VAAPI codecs: `h264vaapi`, `h265vaapi`, `av1vaapi`
+Supported VAAPI encoders: `h264vaapi`, `h265vaapi`, `av1vaapi`. With `gpu: vaapi`, SMA-NG uses the decoders
+`hevc_vaapi` and `h264_vaapi` and the device `/dev/dri/renderD128`.
+
+Tune the encoder with `base.video.vaapi` (and `base.hdr.vaapi`):
+
+| Field | FFmpeg flag | Unset value |
+| --- | --- | --- |
+| `low-power` | `-low_power` (shared with QSV) | `-1` |
+| `async-depth` | `-async_depth` (shared with QSV) | `0` |
+| `codec-parameters` | raw flags, VAAPI only | empty |
+
+Under `gpu: vaapi`, only `low-power`, `async-depth` and `codec-parameters` of the `vaapi` block take effect.
+The block also accepts `rc-mode` and `compression-level`, but SMA-NG never sends them to FFmpeg. To set
+`-rc_mode` or `-compression_level`, write them in `vaapi.codec-parameters`, for example
+`codec-parameters: '-rc_mode VBR'`. The `max-level` field is not read at all. The fields `preset`, `b-frames`,
+`ref-frames`, `global-quality` and `look-ahead-depth` of the `vaapi` block apply only in the `hw_alt` fallback tier
+described below.
+
+SMA-NG reads the `vaapi` block only when the encoder that runs is a VAAPI encoder. A `vaapi:` block under
+`gpu: qsv` therefore has no effect until the `hw_alt` fallback tier swaps the encoder.
 
 ---
 
@@ -121,7 +268,14 @@ base:
     codec: [h265_nvenc, h265]
 ```
 
-Supported NVENC codecs: `h264_nvenc`, `h265_nvenc`, `av1_nvenc`
+Supported NVENC encoders: `h264_nvenc`, `h265_nvenc`, `av1nvenc`. With `gpu: nvenc`, SMA-NG uses the `cuda`
+hwaccel and the `cuvid` decoders (`hevc_cuvid`, `h264_cuvid`, `vp9_cuvid`, `av1_cuvid`, `vc1_cuvid`).
+`h264_nvenc_cuda` and `h265_nvenc_cuda` are variants that scale with `scale_cuda` instead of `scale_npp`.
+NVENC takes constant quality through `-qp`. It has no `qsv:` or `vaapi:` subblock. The NVENC encoders never emit
+`codec-parameters`, so raw FFmpeg flags that you put there are silently dropped for NVENC.
+
+With `gpu: nvenc`, the generic codec name `av1` currently fails, because it maps to an encoder name that SMA-NG
+does not register. Use `av1nvenc` explicitly: `codec: [av1nvenc]`.
 
 ---
 
@@ -134,33 +288,44 @@ base:
     codec: [h265_videotoolbox, h265]
 ```
 
-No `hwaccels` or `hwdevices` needed — VideoToolbox is built into macOS.
+Supported encoders: `h264_videotoolbox`, `h265_videotoolbox`. VideoToolbox is built into macOS, so no `hwdevices`
+setting is needed. On Apple Silicon, the encoder runs in constant-quality mode (`-q:v 65`) when there is no
+bitrate target. On Intel Macs FFmpeg does not support `-q:v`, so SMA-NG always sets a bitrate target there.
 
 ---
 
 ## Configuration Rules
 
-- The codec list's first entry is used for encoding; subsequent entries allow stream copying without re-encoding
-- CRF is mapped to `-global_quality` for QSV and `-qp` for VAAPI automatically
+- The first entry of `codec` is the encoder; later entries allow stream copy without re-encoding.
+- Generic names (`h265`, `hevc`, `h264`, `av1`) are mapped to the encoder of the selected backend, and the
+  original name stays in the list. The one exception that does not work today is `av1` under `gpu: nvenc` (see
+  the NVENC section).
+- Hardware decode is used only when the decoder is in `hwaccel-decoders` and supports the source bit depth.
 
 ---
 
 ## Startup Validation
 
-At daemon startup, SMA-NG probes each unique config's hardware encoder to verify it's available. If a probe fails, a warning is logged but startup continues:
+The daemon is designed to run a short test encode for each hardware backend that a loaded config uses (the H.264
+encoder of that backend). A failed test logs a warning, and startup continues. This check does not currently run
+for configs written in YAML, so you will not see these lines today; use `GET /health` and the capability probe
+below to check the hardware instead. The messages are:
 
 ```text
-[DAEMON] Hardware encoder 'hevc_nvenc' validated OK
-[DAEMON] WARNING: Hardware encoder 'hevc_qsv' does not appear to be available
+Hardware encoder 'h264_qsv' validated OK
+Hardware encoder 'h264_qsv' (from config sma-ng.yml) does not appear to be available. Conversions may fail. Check driver/SDK installation.
 ```
 
-This runs in the background and does not delay accepting connections.
+When it does run, the check is synchronous: it starts after the daemon logs that it is ready to accept
+connections and before the server begins serving, with a timeout of 15 seconds per probe, so it can delay the
+first request.
 
-Use `python daemon.py --smoke-test` to verify that all configured `sma-ng.yml` files load cleanly before starting the server.
+Use `python daemon.py --smoke-test` to verify that every configured `sma-ng.yml` loads and generates options
+before you start the server.
 
 ## Docker Intel/VAAPI Troubleshooting
 
-If you see errors like:
+If you see errors like these:
 
 ```text
 [VAAPI] No VA display found for device /dev/dri/renderD128
@@ -170,75 +335,70 @@ Error parsing global options: Invalid argument
 
 check the following:
 
-1. Start an Intel profile so `/dev/dri` is mounted:
+1. Start an Intel profile so that `/dev/dri` is mounted:
 
-```bash
-docker compose --profile intel up -d
-# or, with an external PostgreSQL (daemon.db-url):
-docker compose --profile intel-pg up -d
-```
+   ```bash
+   docker compose --profile intel up -d
+   # or, with an external PostgreSQL (daemon.db-url):
+   docker compose --profile intel-pg up -d
+   ```
 
-1. Verify VAAPI visibility inside the container:
+2. Verify VAAPI visibility inside the container:
 
-```bash
-docker compose exec sma-intel vainfo
-```
+   ```bash
+   docker compose exec sma-intel vainfo
+   ```
 
-1. Ensure the container uses Intel's VAAPI driver (`iHD`):
+3. Make sure the container uses Intel's VAAPI driver (`iHD`):
 
-```yaml
-environment:
-  - LIBVA_DRIVER_NAME=iHD
-```
+   ```yaml
+   environment:
+     - LIBVA_DRIVER_NAME=iHD
+   ```
 
-1. Confirm your config/backend alignment:
+4. Confirm that the backend and the codecs match:
+   - `base.video.gpu: qsv` needs QSV codecs (`h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`).
+   - `base.video.gpu: vaapi` needs VAAPI codecs (`h264vaapi`, `h265vaapi`, `av1vaapi`).
 
-- `base.video.gpu: qsv` should use QSV codecs (`h264qsv`, `h265qsv`, `av1qsv`, `vp9qsv`)
-- `base.video.gpu: vaapi` should use VAAPI codecs (`h264vaapi`, `h265vaapi`, `av1vaapi`)
+5. On KVM or Proxmox guests that use Intel SR-IOV, verify the DRI topology that the guest sees. The usable virtual
+   function can appear as `card1` with `renderD128`, or as higher-numbered render nodes, depending on the guest.
+   Validate with `ls -l /dev/dri` in the guest, then `docker compose exec sma-intel vainfo` in the container.
 
-1. On KVM or Proxmox guests using Intel SR-IOV, verify the guest-visible DRI topology.
+The Intel Compose profiles mount the whole `/dev/dri` tree, so FFmpeg and VAAPI see the matching `card*` and
+`renderD*` nodes together. The container's runtime user joins the host's `video` and `render` groups through
+`group_add: [video, render, 992]` in `docker/docker-compose.yml`; the numeric GID 992 is a fallback for hosts where
+neither group name resolves. If you run the image with plain `docker run` on a host with a different render GID,
+set `SMA_ENTRYPOINT_FIX_GIDS=1`. The entrypoint then reads the group of each mapped `/dev/dri/*` node and adds the
+runtime user to it before it drops privileges.
 
-- The usable Intel VF may appear as `card1` with `renderD128`, or as higher-numbered render nodes, depending on the guest.
-- The Intel Docker Compose profiles mount the whole `/dev/dri` tree so FFmpeg and VAAPI can see the matching `card*` and `renderD*` nodes together.
-- The container's `ubuntu` runtime user joins the host's `video` and `render` groups declaratively via `docker-compose.yml`'s `group_add: [video, render, 992]` stanza. The image's baked-in numeric 992 render GID serves as a fallback for hosts where neither group name resolves.
-- Bare-`docker run` users on hosts with non-standard render GIDs can opt back in to the legacy entrypoint behaviour by setting `SMA_ENTRYPOINT_FIX_GIDS=1`. The entrypoint will then stat the mapped `/dev/dri/*` device nodes and add the runtime user to whatever groups own them before dropping privileges via `setpriv`.
-- Validate inside the guest first with `ls -l /dev/dri`, then inside the container with `docker compose exec sma-intel vainfo`.
-
-The official Docker image now includes `vainfo` and VAAPI userspace drivers to simplify diagnostics.
+The Docker image includes `vainfo` and the VAAPI userspace drivers for diagnostics.
 
 ---
 
 ## Phase 1 observability: `/health`, fallback policy, capability probe
 
-SMA-NG 2.4+ surfaces hardware status as structured fields on the daemon's
-`/health` endpoint so operators can answer "is QSV/NVENC actually working
-on this node?" from a single `curl`, without grepping daemon logs.
+The daemon reports hardware status on `GET /health`, so you can check whether QSV or NVENC works on a node with a
+single `curl` instead of reading logs.
 
 ### Capability probe
 
-At daemon startup, `scripts/probe-hw.py` shells out to `vainfo`,
-`ffmpeg -hwaccels`, `ffmpeg -encoders`, `ffmpeg -decoders`,
-`nvidia-smi -L`, and the `/dev/dri/renderD*` node list, then writes a
-typed JSON snapshot to `<config_dir>/cache/hw_capabilities.json`. The
-probe is **fail-open** — any subprocess error yields
-`gpu_status: unknown` so daemon startup never blocks on it.
+At daemon start, `scripts/probe-hw.py` runs `vainfo`, `ffmpeg -hwaccels`, `ffmpeg -encoders`,
+`ffmpeg -decoders` and `nvidia-smi -L`, lists the `/dev/dri/renderD*` nodes, and writes a JSON snapshot to
+`<config_dir>/cache/hw_capabilities.json`. The probe is limited to 15 seconds. If it fails or times out, the
+daemon still starts and `gpu_status` is `unknown`.
 
-The snapshot is regenerated when the cache file predates the current
-daemon start time (e.g. after a host kernel or driver upgrade).
+### `/health` fields
 
-### `/health` schema additions
-
-`GET /health` returns three additive top-level fields on top of the
-existing payload, in the authenticated view only (unauthenticated callers on an auth-enabled daemon get a minimal
-liveness view without them; consumers MUST ignore unknown keys per
-`docs/daemon.md`):
+Authenticated callers get four additional top-level fields: `gpu_status`, `selected_backend`, `capabilities` and
+`fallback`. Callers without credentials on an auth-enabled daemon get a minimal liveness view without them.
+Clients must ignore unknown keys (see [Daemon Mode](daemon.md)).
 
 ```json
 {
   "status": "ok",
   "node": "sma-master",
-  "gpu_status": "ok",                       // ok | degraded | unreachable | unknown
-  "selected_backend": "qsv",                // qsv | nvenc | vaapi | videotoolbox | software
+  "gpu_status": "ok",
+  "selected_backend": "qsv",
   "capabilities": {
     "hwaccels": ["qsv", "vaapi"],
     "encoders": {"h264_qsv": true, "hevc_qsv": true},
@@ -255,80 +415,118 @@ liveness view without them; consumers MUST ignore unknown keys per
 }
 ```
 
-`fallback` accumulates per-tier transition counters keyed by
-`(from_tier, to_tier, failure_class)`. Counters populate as worker
-subprocesses emit the `ffmpeg.attempts` structured log line (single-line
-JSON, picked up by the worker stdout parser).
+- `gpu_status` is `ok`, `degraded` (FFmpeg works but `vainfo` or `nvidia-smi` reported a problem),
+  `unreachable` (FFmpeg did not respond) or `unknown` (the probe did not run).
+- `selected_backend` is `qsv`, `nvenc`, `vaapi`, `videotoolbox` or `software`.
+- `fallback` counts tier transitions, keyed by source tier, target tier and failure class. The counters fill as
+  worker processes emit the `ffmpeg.attempts` log line (one line of JSON).
 
 The first attempt in `ffmpeg.attempts` is labelled `copy` for a stream-copy video remux, `sw` for a software video
-encoder with no hardware decode, and `hw` otherwise. `copy` and `sw` are labels only, not fallbacks; later tiers
-are `hw_alt`, `sw_decode_hw_encode`, `sw_decode` and `full_sw`.
+encoder with no hardware decode, and `hw` otherwise. `copy` and `sw` are labels, not fallbacks. Later tiers are
+`hw_alt`, `sw_decode_hw_encode`, `sw_decode` and `full_sw`.
 
-A job that uses the output-larger-than-input copy fallback (see the troubleshooting guide) emits two
-`ffmpeg.attempts` lines: one for the re-encode and one for the copy run, which carries `"copy_fallback": true`. The
-copy run's line counts toward the `fallback` counters, but a failed copy run never sets the job's failure cause,
-because the job keeps the re-encode and succeeds.
+A job that uses the output-larger-than-input copy fallback (see the [troubleshooting guide](troubleshooting.md))
+emits two `ffmpeg.attempts` lines: one for the re-encode and one for the copy run, which carries
+`"copy_fallback": true`. The copy run counts toward the `fallback` counters, but a failed copy run never sets the
+job's failure cause, because the job keeps the re-encode and succeeds.
 
 ### `fallback-policy` (replaces the deprecated boolean `software-fallback`)
 
-`base.converter.fallback-policy` selects how far the hardware → software
-fallback ladder is allowed to descend on failure. The full 4-tier
-`aggressive` ladder is `hw → hw_alt → sw_decode → full_sw`. The `hw_alt`
-tier swaps a failing QSV encoder for the same-vendor VAAPI encoder while
-preserving the (working) QSV decoder via a zero-copy `hwmap=derive_device=vaapi`
-bridge — operators get a same-iGPU recovery for transient `hevc_qsv`
-mid-encode failures (e.g. `Invalid FrameType:0` on Main10 with
-`bf=8 + adaptive_b`) instead of falling all the way to libx265 software.
+`base.converter.fallback-policy` selects how far a failed hardware encode may fall back. The full ladder, used by
+`aggressive`, has four tiers:
+
+1. `hw`: the configured hardware decode and encode.
+2. `hw_alt`: for a QSV encode only, swap the encoder to the VAAPI encoder of the same GPU and keep the QSV decoder.
+3. `sw_decode`: remove the hardware decoder and keep the hardware encoder.
+4. `full_sw`: swap the encoder to software and remove every hardware filter and option.
 
 ```yaml
 base:
   converter:
-    fallback-policy: aggressive   # try hw → hw_alt → sw_decode → full_sw (default)
-    # fallback-policy: sw_decode_only   # try hw → hw_alt → sw_decode; never swap encoder to software
-    # fallback-policy: hw_alt           # try hw → hw_alt; stop before any software encode
-    # fallback-policy: hw_only          # surface hw failures immediately; no retries
+    fallback-policy: aggressive        # hw, hw_alt, sw_decode, full_sw (default)
+    # fallback-policy: sw_decode_only  # hw, hw_alt, sw_decode; never a software encode
+    # fallback-policy: hw_alt          # hw, hw_alt; stop before any software encode
+    # fallback-policy: hw_only         # surface hardware failures immediately; no retries
 ```
 
 | Policy | Ladder | When to use |
-| ----------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hw_only` | hw | Production nodes that should fail loudly on hardware errors (lost `/dev/dri`, missing oneVPL runtime, kernel-driver mismatch). No silent CPU fallback masks the problem. |
-| `hw_alt` | hw → hw_alt | Stay on the iGPU: recover from transient QSV encoder bugs via VAAPI without ever paying the 10–20x wall-clock cost of libx265 software encode. Recommended starting point on iGPU-only nodes. |
-| `sw_decode_only` | hw → hw_alt → sw_decode | Allow a software decoder swap if both hardware encoders fail, but never swap the encoder to software (preserves throughput on encoder bugs that ride on top of a hardware decode pipeline). |
-| `aggressive` | hw → hw_alt → sw_decode → full_sw | Default. Maximises "actively try to not fail to transcode". Legacy `software-fallback: true` maps here. |
+| --- | --- | --- |
+| `hw_only` | hw | Production nodes that must fail loudly on hardware errors such as a lost `/dev/dri`, a missing oneVPL runtime or a kernel and driver mismatch |
+| `hw_alt` | hw, hw_alt | Stay on the iGPU: recover from transient QSV encoder bugs through VAAPI without the 10 to 20 times longer software encode |
+| `sw_decode_only` | hw, hw_alt, sw_decode | Allow a software decoder if both hardware encoders fail, but never a software encoder |
+| `aggressive` | hw, hw_alt, sw_decode, full_sw | Default. Tries as hard as possible to finish the job |
 
-The deprecated boolean form continues to work for one minor release:
+Some rungs behave in special ways:
 
-| Legacy YAML | Equivalent new policy |
-| --------------------------- | --------------------- |
+- `hw_alt` is meant for QSV encoders (`h264qsv`, `h265qsv`, `av1qsv`), and `vp9qsv` has no VAAPI counterpart. It
+  currently works only for HEVC (`h265qsv`): for `h264qsv` and `av1qsv` the swap maps to an encoder name that SMA-NG
+  does not register, and the attempt fails before FFmpeg runs. The QSV decoder is kept, and its frames reach the VAAPI encoder through a zero-copy `hwmap=derive_device=vaapi`
+  bridge. This recovers from errors such as `Invalid FrameType:0` on Main10 sources without a software encode.
+  For other encoders the rung is skipped.
+- A decode-side failure (`decoder_init_failed`) or a hardware filter failure (`filter_init_failed`) is also
+  rescued under `hw_only` and `hw_alt`. SMA-NG retries with software decode and the hardware encoder
+  (`[decode-side-rescue]`), which keeps the expensive encode on the GPU.
+- When no hardware decoder is in use, `sw_decode` would repeat the identical command. The ladder then goes
+  straight from the failed hardware tier to `full_sw`, or stops under `sw_decode_only`.
+
+#### What the `hw_alt` swap changes
+
+The VAAPI encoder rejects some QSV options, so the swap rewrites the encoder settings:
+
+- QSV-only flags are removed from `codec-parameters`: `-extbrc`, `-b_strategy`, `-look_ahead`,
+  `-look_ahead_depth`, `-adaptive_i`, `-adaptive_b`, `-p_strategy` and `-rdo`.
+- The shared flags `-global_quality`, `-low_power` and `-async_depth` are removed too. Their values were tuned for
+  QSV, and `hw_alt` has no later VAAPI fallback, so an unsupported value would fail the job.
+- Only the `vaapi` block can set them again. To keep `-low_power` or `-async_depth` on the VAAPI encode, set
+  `base.video.vaapi.low-power` and `base.video.vaapi.async-depth`. The `preset`, `b-frames`, `ref-frames`,
+  `look-ahead-depth`, `global-quality` and `codec-parameters` values of the `vaapi` block are applied as well.
+- A QSV `global-quality` becomes `-rc_mode CQP -qp N`. For AV1 the intended result is `-rc_mode CQP
+  -global_quality` on the 0 to 255 scale, but the AV1 swap does not currently work (see above). This does not happen when a bitrate target is set or `-rc_mode` is already given.
+
+#### When the ladder stops
+
+The ladder stops at once, with no further tier, when another attempt cannot succeed:
+
+- FFmpeg was ended by a signal: `SIGHUP`, `SIGINT`, `SIGKILL` or `SIGTERM`. This includes exit codes 129, 130,
+  137 and 143, and the `received signal N` exit of FFmpeg itself. Crash signals such as `SIGSEGV` or `SIGABRT`
+  do not stop the ladder, because a software tier can survive a driver crash.
+- The output side failed. `No space left on device`, `Disk quota exceeded` and `Read-only file system` stop the
+  ladder wherever they appear in the error output. `Permission denied` and `Input/output error` stop it only on a
+  line that names the output file or a write, muxing or trailer step; on a hardware-device line they do not,
+  because software tiers drop the device.
+
+The log then shows `[attempt-ladder] stop: <reason>; no further tiers`.
+
+The deprecated boolean form still works. It logs a deprecation warning every time a job loads the config, not
+only once per daemon start. It will be removed in a future release:
+
+| Legacy YAML | Equivalent policy |
+| --- | --- |
 | `software-fallback: true` | `fallback-policy: aggressive` |
 | `software-fallback: false` | `fallback-policy: hw_only` |
 
-Loading a config with the deprecated key emits one `WARNING` log per
-daemon startup pointing operators at the new field.
+If both keys are present, `fallback-policy` wins.
 
 ### Why `hw_only` matters
 
-Operators running production QSV nodes typically want hardware failures
-to surface **immediately** — a silent CPU fallback masks real
-infrastructure problems (lost `/dev/dri` permissions, missing oneVPL
-runtime, kernel-driver mismatch). Set `fallback-policy: hw_only` to
-fail loudly; the structured log line and `/health` counter still record
-the failure class so the alert path is observable.
+On production QSV nodes, you usually want hardware failures to surface immediately. A silent CPU fallback hides
+real infrastructure problems such as lost `/dev/dri` permissions, a missing oneVPL runtime or a kernel and driver
+mismatch. Set `fallback-policy: hw_only` to fail loudly. The `ffmpeg.attempts` log line and the `/health`
+counters still record the failure class, so alerting keeps working.
 
 ### Failure-class taxonomy
 
-`/health` and the structured log line classify ffmpeg stderr tails into
-six stable buckets (the values are pinned by a regression test; external
-dashboards can rely on them):
+`/health` and the `ffmpeg.attempts` line sort FFmpeg errors into six stable classes. Dashboards can rely on these
+values:
 
 | Class | Typical cause |
-| -------------------- | -------------------------------------------------- |
-| `device_open_failed` | `/dev/dri` permissions, missing libva/oneVPL runtime |
-| `decoder_init_failed` | HW decoder rejects this codec/profile (e.g. AV1 on pre-Arc) |
-| `encoder_init_failed` | HW encoder rejects pix_fmt / profile / level |
-| `filter_init_failed` | Filter graph build (e.g. `scale_qsv` unavailable) |
-| `runtime_error` | ffmpeg started OK then failed mid-encode |
-| `other` | Unrecognised stderr (drift in upstream ffmpeg messages) |
+| --- | --- |
+| `device_open_failed` | `/dev/dri` permissions, missing libva or oneVPL runtime |
+| `decoder_init_failed` | The hardware decoder rejects this codec or profile (for example AV1 on pre-Arc) |
+| `encoder_init_failed` | The hardware encoder rejects the pixel format, profile or level |
+| `filter_init_failed` | The filter graph cannot be built (for example `scale_qsv` is unavailable) |
+| `runtime_error` | FFmpeg started and then failed mid-encode |
+| `other` | Unrecognised error output |
 
-A spike in `other` is the signal to update the classifier in
+A rise in `other` means that FFmpeg's messages changed. Update the classifier in
 `resources/processor/failures.py`.
