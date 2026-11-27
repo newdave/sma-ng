@@ -625,6 +625,7 @@ class ConversionWorker(threading.Thread):
             **self._owner_kwargs(),
             telemetry=self._job_telemetry,
             source_duration_seconds=source_duration_secs,
+            input_size=input_size,
           ),
         )
         self._log_discarded(job_id, updated, "timeout failure")
@@ -699,6 +700,7 @@ class ConversionWorker(threading.Thread):
               **self._owner_kwargs(),
               telemetry=self._job_telemetry,
               source_duration_seconds=source_duration_secs,
+              input_size=input_size,
             ),
           )
           self._log_discarded(job_id, updated, "failure")

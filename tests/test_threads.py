@@ -50,6 +50,30 @@ def _make_scanner(scan_paths, job_db=None, path_config_manager=None):
 # ---------------------------------------------------------------------------
 
 
+class TestRecycleBinInterval:
+  def test_default_interval_is_five_minutes(self):
+    assert _make_cleaner().interval_seconds == 300
+
+  def test_run_waits_configured_interval(self):
+    cleaner = RecycleBinCleanerThread(
+      path_config_manager=_make_cleaner().path_config_manager,
+      max_age_days=30,
+      min_free_gb=0,
+      logger=logging.getLogger("test.cleaner"),
+      interval_seconds=120,
+    )
+    waits = []
+
+    def fake_wait(timeout=None):
+      waits.append(timeout)
+      cleaner.running = False
+      return True
+
+    cleaner._stop_event.wait = fake_wait
+    cleaner.run()
+    assert waits == [120]
+
+
 class TestRecycleBinFreeGb:
   def test_returns_free_space_in_gib(self, tmp_path):
     cleaner = _make_cleaner()

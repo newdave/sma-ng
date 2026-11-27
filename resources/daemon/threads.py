@@ -375,10 +375,11 @@ class RecycleBinCleanerThread(_StoppableThread):
   picks up changes without a restart.
   """
 
-  CHECK_INTERVAL = 3600  # seconds between sweeps
+  CHECK_INTERVAL = 300  # default seconds between sweeps (daemon.recycle-bin-interval-seconds)
 
-  def __init__(self, path_config_manager, max_age_days, min_free_gb, logger):
+  def __init__(self, path_config_manager, max_age_days, min_free_gb, logger, interval_seconds=None):
     super().__init__()
+    self.interval_seconds = int(interval_seconds or self.CHECK_INTERVAL)
     self.path_config_manager = path_config_manager
     self.max_age_days = max_age_days
     self.min_free_gb = min_free_gb
@@ -467,7 +468,10 @@ class RecycleBinCleanerThread(_StoppableThread):
     if not self.max_age_days and not self.min_free_gb:
       self.log.debug("RecycleCleaner: disabled (max_age_days=0, min_free_gb=0)")
       return
-    self.log.info("RecycleCleaner started (max_age_days=%s, min_free_gb=%s)" % (self.max_age_days if self.max_age_days else "disabled", self.min_free_gb if self.min_free_gb else "disabled"))
+    self.log.info(
+      "RecycleCleaner started (max_age_days=%s, min_free_gb=%s, interval=%ss)"
+      % (self.max_age_days if self.max_age_days else "disabled", self.min_free_gb if self.min_free_gb else "disabled", self.interval_seconds)
+    )
     while self.running:
       recycle_bins = [b for b in (self.path_config_manager.get_recycle_bin(c) for c in self.path_config_manager.get_all_configs()) if b]
       for directory in set(recycle_bins):
@@ -479,7 +483,7 @@ class RecycleBinCleanerThread(_StoppableThread):
             self.log.debug("RecycleCleaner: nothing to remove in %s" % directory)
         except Exception:
           self.log.exception("RecycleCleaner: error cleaning %s" % directory)
-      self._stop_event.wait(timeout=self.CHECK_INTERVAL)
+      self._stop_event.wait(timeout=self.interval_seconds)
 
 
 class ConfigWatcherThread(_StoppableThread):

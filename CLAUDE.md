@@ -235,6 +235,8 @@ Multi-provider sessions run through omnigent (`omni`):
 
 Prefer the installed skills and subagents over ad-hoc reasoning. Route by trigger, not by habit.
 If a row matches the current request, invoke the listed tool before (or instead of) writing code directly.
+Subagent briefs: one bounded task, named paths, acceptance criteria, and a stop after about 50 requests.
+Subagents report findings only (`file:line` plus one sentence each), never file dumps.
 
 | Trigger / signal in the request                                          | Tool to invoke                          |
 | ------------------------------------------------------------------------ | --------------------------------------- |

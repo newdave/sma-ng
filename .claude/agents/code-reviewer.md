@@ -2,6 +2,7 @@
 name: code-reviewer
 description: Reviews SMA-NG Python/FFmpeg changes for correctness, regressions, and missing tests.
 tools: Read, Glob, Grep, LS, Bash
+model: sonnet
 color: yellow
 ---
 

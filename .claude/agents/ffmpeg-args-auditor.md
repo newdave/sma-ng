@@ -2,6 +2,7 @@
 name: ffmpeg-args-auditor
 description: Audits FFmpeg argument generation, codec/container compatibility, and hwaccel pipelines for transcoding regressions.
 tools: Read, Glob, Grep, LS, Bash
+model: sonnet
 color: cyan
 ---
 

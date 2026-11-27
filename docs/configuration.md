@@ -75,6 +75,7 @@ image, whose CMD shim maps `SMA_WORKERS` to `--workers` (see [Daemon Mode](daemo
 | `workers` | int | `4` | Concurrent conversions per node. Must be `>= 1`; `0` or negative fails validation |
 | `api-key` | string | unset | API authentication key |
 | `username` / `password` | string | empty | Optional HTTP-basic credentials for the dashboard |
+| `trusted-networks` | list | `[]` | Client networks (CIDR or single address, IPv4 or IPv6) that may call every endpoint without the API key or Basic credentials, judged by the TCP peer address. Lets browsers on a home LAN use the web UI without the key dialog. Empty keeps the key required for everyone; `0.0.0.0/0` disables authentication. See [Daemon Mode](daemon.md#authentication) for the Docker and cross-origin caveats |
 | `db-url` | string | unset | SQLite or PostgreSQL URL for job persistence (cluster mode requires PostgreSQL) |
 | `ffmpeg-dir` | path | unset | Directory holding `ffmpeg`/`ffprobe`, prepended to `PATH` for each conversion |
 | `node-id` | string | auto UUID | Stable cluster identity |
@@ -86,6 +87,7 @@ image, whose CMD shim maps `SMA_WORKERS` to `--workers` (see [Daemon Mode](daemo
 | `smoke-test` | bool | `true` | Dry-run option generation against the loaded config at startup; exits `1` on failure |
 | `recycle-bin-max-age-days` | int | `30` | Delete recycle-bin media older than this many days (`0` = disabled) |
 | `recycle-bin-min-free-gb` | int | `50` | Delete oldest recycle-bin media when free space drops below this many GiB (`0` = disabled) |
+| `recycle-bin-interval-seconds` | int | `300` | Seconds between recycle-bin cleanup sweeps (minimum `60`) |
 | `job-dedupe-window-seconds` | int | `21600` | Skip a path whose job completed within this many seconds (`0` = disabled); pending and running duplicates are always skipped |
 | `job-retention-days` | int | `0` | Opt-in: delete finished jobs older than this many days, checked hourly. `0` (the default) keeps job history forever. A positive value permanently deletes job rows, but the lifetime job totals reported by `/stats` are kept; jobs inside the dedupe window are never deleted |
 | `log-ttl-days` | int | `30` | Cluster mode: retention of log rows in PostgreSQL (`0` = never clean up) |

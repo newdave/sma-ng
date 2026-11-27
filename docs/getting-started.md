@@ -11,12 +11,12 @@ It focuses on the minimum you need to understand to get a successful first run. 
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.12 or newer (`mise install` provides 3.12)
 - FFmpeg and FFprobe (system install, or set `daemon.ffmpeg-dir` / `base.converter.ffmpeg`)
-- Python packages: declared in `pyproject.toml` (the source of truth). `mise run setup:deps` installs them into
-  `venv/`; without mise run `pip install .`.
+- Python packages: `pyproject.toml` declares them. `mise run setup:deps` creates `venv/` and installs
+  `setup/requirements.txt`; without mise, run `pip install -r setup/requirements.txt` inside your own virtualenv.
 
-Optional extras (`pip install ".[extra]"`, or `mise run setup:deps:all` for everything):
+Optional extras (`pip install ".[extra]"`, or `mise run setup:deps:all` for the dev, postgres and openvino extras):
 
 | Extra | Adds |
 | ---------- | ------------------------------------------------------------------------ |
@@ -24,8 +24,8 @@ Optional extras (`pip install ".[extra]"`, or `mise run setup:deps:all` for ever
 | `openvino` | OpenVINO runtime for the analyzer |
 | `dev` | pytest, ruff, pre-commit, and other lint/test tooling (`setup:deps:dev`) |
 
-`setup/requirements*.txt` still exist for `pip install -r` workflows; `setup/requirements.txt` mirrors the base
-dependencies plus the `postgres` extra and is kept in sync by a test.
+`setup/requirements.txt` mirrors the base dependencies plus the `postgres` extra, and a test keeps it in sync with
+`pyproject.toml`.
 
 ## What SMA-NG Does
 
@@ -82,15 +82,18 @@ If you do not know the answers yet, start with:
 
 ## Quality Profiles
 
-`mise run config:generate` creates one base YAML config with named quality profiles:
+`mise run config:generate` copies `setup/sma-ng.yml.sample` to `config/sma-ng.yml`. The file has one `base:` block
+with the defaults and three named profiles that override it:
 
 | Profile | Video | Audio |
-| ------- | -------------------------------------- | ----------------- |
-| base | Regular-quality defaults | EAC3, 128 kbps/ch |
-| `rq` | Explicit regular-quality override | EAC3/AAC |
-| `lq` | Lower bitrate, stereo-focused override | AAC, stereo |
+| ------- | ----------------------------------------------- | -------------------------------- |
+| base | HEVC (`h265`), no bitrate cap | AC3, 128 kbps per channel |
+| `rq` | HEVC, capped at 8000 kbps | AC3, then AAC |
+| `lq` | H.264, capped at 3000 kbps, `fast` preset | AAC, stereo |
+| `hq` | HEVC, capped at 18000 kbps, `slow` preset, one job at a time | E-AC3, then AC3, up to 8 channels |
 
-Use the `lq` profile for bandwidth-limited destinations. Route files to it via `daemon.routing` in `sma-ng.yml`:
+Use the `lq` profile for bandwidth-limited destinations. Route files to it through `daemon.routing` in `sma-ng.yml`,
+or choose it for a single run with `--profile lq`:
 
 ```yaml
 daemon:
@@ -158,10 +161,10 @@ git clone https://github.com/newdave/sma-ng && cd sma-ng
 python3 -m venv venv && source venv/bin/activate
 pip install -r setup/requirements.txt
 
-# Generate config with GPU auto-detection
-mise run config:generate
+# Create the config from the sample, with GPU auto-detection
+./scripts/generate-configs.sh
 
-# Or copy sample and edit manually
+# Or copy the sample and edit it manually
 cp setup/sma-ng.yml.sample config/sma-ng.yml
 $EDITOR config/sma-ng.yml
 
@@ -175,7 +178,8 @@ python daemon.py --host 0.0.0.0 --port 8585
 If FFmpeg is not on `PATH`, either:
 
 - install it system-wide, or
-- point `ffmpeg` and `ffprobe` in `config/sma-ng.yml` to the correct binaries
+- point `base.converter.ffmpeg` and `base.converter.ffprobe` in `config/sma-ng.yml` (or `daemon.ffmpeg-dir`) to the
+  correct binaries
 
 ### With Docker Compose
 
@@ -220,7 +224,9 @@ This is the safest first functional test because it exercises:
 
 without writing output.
 
-If you enable the analyzer, the preview JSON includes an `analyzer` section showing any bounded recommendations. For OpenVINO, you can target `CPU`, `GPU`, `NPU`, or composite selectors such as `AUTO:NPU,CPU`. Today the backend primarily validates runtime/device availability and planner wiring; richer model-backed inference is reserved for later expansion.
+If you enable the analyzer, the preview JSON includes an `analyzer` section showing any bounded recommendations. For
+OpenVINO, you can target `CPU`, `GPU`, `NPU`, or composite selectors such as `AUTO:NPU,CPU`. See
+[Configuration](configuration.md) for the analyzer settings.
 
 ### 4. Test a real conversion
 
@@ -238,7 +244,9 @@ Run:
 mise run config:gpu
 ```
 
-This runs the detection script. Compare the result with your chosen `base.video.gpu` and `base.video.codec` settings. If GPU detection or encoder availability is uncertain, switch to software first and get a clean baseline run before troubleshooting hardware acceleration.
+This runs the detection script. Compare the result with your chosen `base.video.gpu` and `base.video.codec` settings.
+If GPU detection or encoder availability is uncertain, switch to software first (leave `gpu` empty) and get a clean
+baseline run before you troubleshoot hardware acceleration.
 
 ---
 
@@ -249,11 +257,10 @@ The normal bootstrap path generates these files:
 | File | Purpose |
 | ------------------- | ----------------------------------------------------- |
 | `config/sma-ng.yml` | Main conversion config, profiles, and daemon settings |
-| `config/daemon.env` | Optional daemon environment variables |
 
-You can operate successfully with only:
-
-- `config/sma-ng.yml`
+`config:generate` skips the file if it already exists; delete it first to regenerate. That one file is all you need.
+Docker deployments can additionally use `config/daemon.env`, copied from `setup/daemon.env.sample`. Compose loads
+it for container-level settings only, such as `SMA_WORKERS`, `RENDER_GID` and `LIBVA_DRIVER_NAME`.
 
 Use the `daemon:` block in `config/sma-ng.yml` when routing different paths (`daemon.routing`), enabling
 PostgreSQL-backed clustered mode (`daemon.db-url`), rewriting paths (`daemon.path-rewrites`), or scheduling
@@ -274,7 +281,7 @@ Check:
 - `output-format`
 - `copy-to`
 - `move-to`
-- `delete-original`
+- `delete-original` and `recycle-bin`
 - `post-process`
 
 This section determines where the file goes and whether the original is retained.
@@ -288,8 +295,10 @@ Check:
 - `max-bitrate`
 - `crf-profiles`
 - `preset`
+- `global-quality`
 
-This section determines whether you are doing software encode, QSV, VAAPI, or NVENC, and what quality/bitrate model is used.
+This section determines whether you are doing a software encode, QSV, VAAPI, NVENC or VideoToolbox, and which
+quality and bitrate model is used.
 
 ### `base.analyzer`
 
@@ -325,7 +334,7 @@ Check:
 - `languages`
 - `burn-subtitles`
 - `embed-subs`
-- subtitle download settings if you use Subliminal
+- subtitle download settings (`subliminal`) if you use them
 
 ### `base.metadata`
 
@@ -334,10 +343,11 @@ Check:
 - tagging enabled/disabled
 - language for metadata
 
-### `services.sonarr`, `services.radarr`, `services.plex`
+### `services.*`
 
-These are named instances (for example `services.sonarr.main` with `url` and `apikey`).
-Only configure them once the core conversion path already works.
+These are named instances (for example `services.sonarr.main` with `url` and `apikey`) for Sonarr, Radarr, Plex,
+Emby, Jellyfin and Autoscan. Only configure them once the core conversion path already works. See
+[Integrations](integrations.md).
 
 Do not debug media-manager callbacks and FFmpeg problems at the same time if you can avoid it.
 
@@ -408,7 +418,9 @@ python manual.py -i /path/to/file.mp4 -to
 python manual.py -i /path/to/file.mkv -a -nm -nc -nd
 ```
 
-After conversion, `manual.py` automatically triggers a rescan on the matching Sonarr/Radarr instance based on the output file's directory path.
+After a conversion, `manual.py` asks the Sonarr or Radarr instance that matches the output file's directory (through
+`daemon.routing`) to rescan and import the file, and refreshes Plex, Emby, Jellyfin and Autoscan when they are
+configured. See [Integrations](integrations.md).
 
 ### Safe First Commands
 
@@ -424,8 +436,8 @@ python manual.py -i /path/to/file.mkv -oo
 # Convert without destructive file operations
 python manual.py -i /path/to/file.mkv -a -nm -nc -nd
 
-# Force software-style baseline testing by using a software codec config
-python manual.py -i /path/to/file.mkv -a -c config/sma-ng.yml
+# Use a named profile from the config (here the lower-bitrate one)
+python manual.py -i /path/to/file.mkv -a -p lq
 ```
 
 ### All Flags
@@ -434,14 +446,15 @@ python manual.py -i /path/to/file.mkv -a -c config/sma-ng.yml
 | ------- | ------------------------- | ------------------------------------------ |
 | `-i` | `--input` | Input file or directory |
 | `-c` | `--config` | Alternate config file |
+| `-p` | `--profile` | Apply a named profile from the config; overrides the profile that `daemon.routing` would pick |
 | `-a` | `--auto` | Auto mode (no prompts, guesses metadata) |
 | `-s` | `--season` | Season number |
-| `-e` | `--episode` | Episode number |
+| `-e` | `--episode` | Episode number (repeat for a multi-episode file, for example `-e 1 -e 2`) |
 | `-tvdb` | `--tvdbid` | TVDB ID |
 | `-imdb` | `--imdbid` | IMDB ID |
 | `-tmdb` | `--tmdbid` | TMDB ID |
-| `-nm` | `--nomove` | Disable move-to and output-directory |
-| `-nc` | `--nocopy` | Disable copy-to |
+| `-nm` | `--nomove` | Disable `move-to` and the move out of `output-directory` |
+| `-nc` | `--nocopy` | Disable `copy-to` |
 | `-nd` | `--nodelete` | Disable original file deletion |
 | `-nt` | `--notag` | Disable metadata tagging |
 | `-to` | `--tagonly` | Tag only, no conversion |
@@ -449,18 +462,40 @@ python manual.py -i /path/to/file.mkv -a -c config/sma-ng.yml
 | `-pr` | `--preserverelative` | Preserve relative directory structure |
 | `-pse` | `--processsameextensions` | Reprocess files already in target format |
 | `-fc` | `--forceconvert` | Force conversion + process-same-extensions |
-| `-fr` | `--forcereencode` | Re-encode video (blocks copy) |
+| `-fr` | `--forcereencode` | Re-encode the video even when its codec is already accepted; also enables process-same-extensions |
 | `-m` | `--moveto` | Override move-to path |
+| | `--tv` | Make guessit treat the input as a TV episode |
+| | `--movie` | Make guessit treat the input as a movie |
 | `-oo` | `--optionsonly` | Show conversion options, don't convert |
 | `-cl` | `--codeclist` | List all supported codecs |
 | `-o` | `--original` | Specify original filename for guessing |
 | `-ms` | `--minsize` | Minimum file size in MB |
-| `-pa` | `--processedarchive` | Path to processed files archive JSON |
+| `-pa` | `--processedarchive` | Path to a processed-files archive (JSON); listed files are skipped |
 | | `--job-id` | Daemon job id (set by the daemon worker) |
 | | `--audit` | Audit the input path, print findings |
 | | `--recycle-failed` | With `--audit`: move media that fails ffprobe to the configured recycle-bin |
 | | `--repair-hybrid` | Repair stretched (hybrid-aspect) MP4s: `remux` (default, lossless aspect fix) or `reencode` (rebuild at true dims); with `--audit`, remuxes hybrid findings during the audit |
 | | `--version` | Print version and exit |
+
+`-nm` and `-m` cannot be combined, and neither can `-nt` and `-to`; `--tv` and `--movie` are mutually exclusive.
+
+### repair.py
+
+`repair.py` fixes stream-level damage by stream copy and never transcodes. It takes one or more files or directories:
+
+```bash
+python repair.py -n /path/to/library       # dry run
+python repair.py /path/to/file.mp4         # repair in place
+```
+
+| Flag | Long | Description |
+| ---- | ------------- | ---------------------------------------------------------- |
+| `-n` | `--dry-run` | Report what would be repaired; change nothing |
+| `-c` | `--config` | Alternate `sma-ng.yml` path (disables routing) |
+| | `--no-plex` | Skip the Plex refresh after repairs |
+| `-v` | `--verbose` | Enable debug logging |
+
+See [Troubleshooting](troubleshooting.md#repairing-damaged-media-without-transcoding) for what it fixes.
 
 ---
 
@@ -479,7 +514,7 @@ input:    The.Matrix.1999.mkv
 subtitle: The.Matrix.1999.eng.srt
 ```
 
-Language rules from `sma-ng.yml` apply — subtitles for non-whitelisted languages are ignored.
+Language rules from `sma-ng.yml` apply: subtitles in languages that are not allowed are ignored.
 
 ---
 
@@ -505,6 +540,10 @@ python daemon.py \
   --logs-dir logs
 ```
 
+Each daemon setting resolves in this order: command-line flag, then `daemon:` in `sma-ng.yml`, then the default.
+Without `--host`, the command line binds to `127.0.0.1`; the sample config binds to `0.0.0.0`. See
+[Daemon Mode](daemon.md) for all flags.
+
 ### Health check
 
 ```bash
@@ -518,6 +557,9 @@ curl -X POST http://localhost:8585/webhook/generic \
   -H "X-API-Key: YOUR_SECRET_KEY" \
   -d "/path/to/file.mkv"
 ```
+
+The path must lie under a configured media root (a `daemon.routing` match, scan path or path rewrite), or the daemon
+answers `403`. See [Troubleshooting](troubleshooting.md).
 
 ### Open the dashboard
 
@@ -568,6 +610,8 @@ Usually caused by:
 - file-operation settings (`move-to`, `copy-to`, delete behavior)
 - permission problems on the output path
 
+SMA-NG never overwrites an existing file. If the output name is taken, the new file is numbered (`name.2.mp4`).
+
 ### Sonarr/Radarr/Plex behavior is confusing
 
 Disable those integrations until the standalone conversion path is proven.
@@ -594,12 +638,12 @@ After you have a first successful run:
 
 Set `post-process: true` under `base.converter`, then create a `post_process/` directory in the SMA-NG install
 directory (next to `manual.py`; it is not shipped in the repository) and place executable hook scripts in it. If the
-directory is absent, no hooks run. Scripts run automatically after each conversion completes, in sorted filename
-order. Files are skipped (never run as hooks) when they:
+directory is absent, no hooks run. Scripts run after each conversion completes, in sorted filename order, and
+`wait-post-process: true` makes SMA-NG wait for each one to finish. A file is skipped (never run as a hook) when it:
 
-- start with `_` (private helpers, for example `_helpers.py`)
-- have an excluded extension (`.txt`, `.log`, `.pyc`, `.md`), or are listed in the excluded file names
-- are directories
+- starts with `_` (private helpers, for example `_helpers.py`)
+- has the extension `.txt`, `.log`, `.pyc` or `.md`, or is named `resources` or `.DS_Store`
+- is a directory
 
 Put shared helper code in `_`-prefixed files. Hooks receive:
 
@@ -619,34 +663,45 @@ and media-manager submitter scripts (`*_post_process.sh`) that POST `{path, args
 
 ## Supported Codecs
 
-Run `python manual.py -cl` for the full list. Key codecs:
+Run `python manual.py -cl` for the full list, including the subtitle codecs (`mov_text`, `srt`, `ass`, `webvtt`,
+and others). Key codecs:
 
 ### Video
 
 | SMA-NG Name | FFmpeg Encoder | Notes |
-| --------------- | -------------- | ----------------- |
+| --------------- | ------------------ | ----------------- |
 | `h264` | libx264 | Software H.264 |
 | `h265` / `hevc` | libx265 | Software HEVC |
-| `h264qsv` | h264_qsv | Intel QSV H.264 |
-| `h265qsv` | hevc_qsv | Intel QSV HEVC |
-| `h264vaapi` | h264_vaapi | Intel VAAPI H.264 |
-| `h265vaapi` | hevc_vaapi | Intel VAAPI HEVC |
-| `av1qsv` | av1_qsv | Intel QSV AV1 |
-| `av1vaapi` | av1_vaapi | Intel VAAPI AV1 |
-| `h265_nvenc` | hevc_nvenc | NVIDIA HEVC |
 | `av1` | libaom-av1 | Software AV1 |
 | `svtav1` | libsvtav1 | SVT-AV1 |
 | `vp9` | libvpx-vp9 | Software VP9 |
+| `h264qsv` | h264_qsv | Intel QSV H.264 |
+| `h265qsv` | hevc_qsv | Intel QSV HEVC |
+| `av1qsv` | av1_qsv | Intel QSV AV1 |
+| `vp9qsv` | vp9_qsv | Intel QSV VP9 |
+| `h264vaapi` | h264_vaapi | VAAPI H.264 |
+| `h265vaapi` | hevc_vaapi | VAAPI HEVC |
+| `av1vaapi` | av1_vaapi | VAAPI AV1 |
+| `h264_nvenc` | h264_nvenc | NVIDIA H.264 |
+| `h265_nvenc` | hevc_nvenc | NVIDIA HEVC |
+| `av1nvenc` | av1_nvenc | NVIDIA AV1 |
+| `h264_videotoolbox` | h264_videotoolbox | Apple H.264 |
+| `h265_videotoolbox` | hevc_videotoolbox | Apple HEVC |
+
+With `base.video.gpu` set, the generic names `h264`, `h265` and `av1` map to the encoder of that backend. See
+[Hardware Acceleration](hardware-acceleration.md).
 
 ### Audio
 
 | SMA-NG Name | FFmpeg Encoder |
-| ----------- | ---------------- |
-| `aac` | aac / libfdk_aac |
+| ----------- | -------------- |
+| `aac` | aac |
+| `libfdk_aac` | libfdk_aac |
 | `ac3` | ac3 |
 | `eac3` | eac3 |
+| `dts` | dts |
 | `flac` | flac |
 | `opus` | libopus |
 | `mp3` | libmp3lame |
-| `dts` | dca |
+| `vorbis` | libvorbis |
 | `truehd` | truehd |

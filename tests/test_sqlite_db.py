@@ -32,6 +32,27 @@ class TestSQLiteJobDatabase:
     assert reopened.get_stats()["total"] == 1
     reopened.close()
 
+  def test_completed_job_keeps_source_and_output_sizes(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/mnt/unionfs/Media/movie.mkv", "/config/sma-ng.yml")
+    db.claim_next_job(worker_id=1, node_id="node-a")
+    db.complete_job(job_id, input_size=1000, output_size=600)
+    listed = db.get_jobs()[0]
+    assert (listed["input_size_bytes"], listed["output_size_bytes"]) == (1000, 600)
+    db.close()
+
+  def test_failed_job_keeps_source_size(self, tmp_path):
+    db = _db(tmp_path)
+    job_id = db.add_job("/mnt/unionfs/Media/bad.mkv", "/config/sma-ng.yml")
+    db.claim_next_job(worker_id=1, node_id="node-a")
+    assert db.fail_job(job_id, "boom", input_size=4321) is True
+    row = db.get_job(job_id)
+    assert row is not None
+    assert row["status"] == STATUS_FAILED
+    assert row["input_size_bytes"] == 4321
+    assert row["output_size_bytes"] is None
+    db.close()
+
   def test_failed_jobs_can_be_requeued_cancelled_and_deleted(self, tmp_path):
     db = _db(tmp_path)
     failed_id = db.add_job("/mnt/unionfs/Media/bad.mkv", "/config/sma-ng.yml")

@@ -1,5 +1,38 @@
 # Changelog
 
+## [3.2.57](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.56...sma-ng-v3.2.57) (2026-11-27)
+
+
+### Documentation
+
+* refresh getting-started, hardware, integrations, library-audit and troubleshooting guides ([#287](https://github.com/newdave/sma-ng/issues/287)) ([69294d6](https://github.com/newdave/sma-ng/commit/69294d63766b272c63111ac632cc5431d33d05e6))
+
+## [3.2.56](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.55...sma-ng-v3.2.56) (2026-11-26)
+
+
+### Bug Fixes
+
+* resolve Sonarr/Radarr series by id or library path before rescan ([#290](https://github.com/newdave/sma-ng/issues/290)) ([2f9474a](https://github.com/newdave/sma-ng/commit/2f9474a6db7e6db4cd5149912f2b3a2435984191))
+
+## [3.2.55](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.54...sma-ng-v3.2.55) (2026-11-26)
+
+
+### Features
+
+* **daemon:** make the recycle-bin cleanup interval configurable ([7e9e569](https://github.com/newdave/sma-ng/commit/7e9e569d28a2c7610b6396c281caab825cd57ee9))
+
+
+### Bug Fixes
+
+* retry a failed Sonarr/Radarr rescan once before importing ([23e1e23](https://github.com/newdave/sma-ng/commit/23e1e233b76b587e02e1989c8cbaeee59779eefa))
+
+## [3.2.54](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.53...sma-ng-v3.2.54) (2026-11-23)
+
+
+### Features
+
+* show source/output file sizes and shrink or growth per job ([f6e1cc1](https://github.com/newdave/sma-ng/commit/f6e1cc1d07c1914d4f2c47cafd4ce947842b8a8a))
+
 ## [3.2.53](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.52...sma-ng-v3.2.53) (2026-11-23)
 
 

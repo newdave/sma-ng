@@ -249,10 +249,12 @@ def main():
     log.debug("Job timeout: %ds" % job_timeout_seconds)
   else:
     log.debug("Job timeout: disabled")
+  trusted = list(getattr(path_config_manager, "trusted_networks", None) or [])
+  exempt = "; %d trusted network(s) exempt" % len(trusted) if trusted else ""
   if api_key:
-    log.info("Authentication: ENABLED (API key required)")
+    log.info("Authentication: ENABLED (API key required%s)" % exempt)
   elif basic_auth:
-    log.info("Authentication: ENABLED (HTTP Basic Auth required)")
+    log.info("Authentication: ENABLED (HTTP Basic Auth required%s)" % exempt)
   else:
     log.info("Authentication: DISABLED (no credentials configured — suitable for use behind a reverse proxy)")
 

@@ -114,6 +114,12 @@ Node admin API route:
 
 - `POST /admin/nodes/<node_id>/<action>` where action is one of `approve`, `reject`, `restart`, `shutdown`, `delete`
 
+**Job file sizes:** convert jobs record the source size (`input_size_bytes`) when they start, and the output size
+(`output_size_bytes`) when they complete. Failed jobs keep the source size. `GET /jobs` and `GET /jobs/<id>` also return
+`size_delta_bytes` (output minus source) and `size_change` (`shrunk`, `grew` or `unchanged`); both are `null` until
+the job has both sizes. Other job kinds (preview, repair, audit, rename) record no sizes. The dashboard job table
+shows both sizes in its Size column, with a green ▼ when the file shrank and a red ▲ when it grew.
+
 **`GET /jobs` response size:** rows use an explicit column list that omits `ffmpeg_stderr` and the captured `output`
 (up to 1 MiB each per job). Read them with `GET /jobs/<id>/ffmpeg-stderr` and `GET /jobs/<id>/output`. `limit`
 values above `500` are clamped to `500`.
@@ -262,14 +268,43 @@ curl -H "X-API-Key: SECRET" ...
 curl -H "Authorization: Bearer SECRET" ...
 ```
 
-Public endpoints (no auth required): `/`, `/dashboard`, `/admin`, `/health`, `/status`, `/docs`, `/favicon.png`
+Public endpoints (no auth required): `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, `/health`, `/status`,
+`/docs`, `/favicon.png`
+
+Trusted networks: `daemon.trusted-networks` lists client networks (CIDR or single address, IPv4 or IPv6) whose
+requests pass authentication without a key or Basic credentials. The check uses the TCP peer address only;
+`X-Forwarded-For` is ignored, so put a reverse proxy outside the trusted range or terminate auth at the proxy. With
+the LAN listed, the web UI never shows the API key dialog on that LAN and `/status` returns the full payload.
+Everyone outside the list still needs the key. The default is an empty list. Write IPv4 ranges in IPv4 form; an
+IPv4 client is matched against IPv4 entries only.
+
+```yaml
+daemon:
+  api-key: SECRET            # still required from the internet / other networks
+  trusted-networks:
+    - 10.30.0.0/16           # home LAN
+```
+
+Trust comes with three caveats:
+
+- A browser on a trusted network could be driven by a hostile page. Requests that are allowed only because of the
+  network therefore must be same-origin: a `POST`, `PUT`, `PATCH` or `DELETE` whose `Origin` header names another
+  host gets `403 Cross-origin request rejected`. Requests that carry the key are not subject to this check, and
+  non-browser clients send no `Origin`.
+- Inside Docker with `ports:` publishing (the bundled compose file), connections that pass through docker-proxy,
+  such as host-loopback and IPv6 clients when the daemon binds IPv4, arrive with the bridge gateway (for example
+  `172.17.0.1`) as the peer address. Trusting that address or `172.16.0.0/12` trusts every such client, and
+  `127.0.0.1` never matches. List real LAN ranges only, or run with `network_mode: host`.
+- `0.0.0.0/0` or `::/0` turns authentication off for everyone. The daemon start log shows how many trusted
+  networks are exempt.
 
 The dashboard, admin, and metrics pages are only HTML shells. The API key is never written into the page: when the
 daemon has an API key configured, the first `401` opens one in-page dialog asking for it (`daemon.api-key` in
 `sma-ng.yml`). The key is kept in the browser's `localStorage` for this daemon's address, so reloads and other pages
 do not ask again, and is sent as `X-API-Key` on every request. A rejected key is forgotten and the dialog asks once
 more. **Cancel** stops asking; an "API key required" button in the corner reopens the dialog. When no key is
-configured the pages work without a dialog. To forget a stored key, clear the site data for the daemon's address.
+configured, or the browser is inside `daemon.trusted-networks`, the pages work without a dialog. To forget a stored
+key, clear the site data for the daemon's address.
 
 `/status` is public but minimal for unauthenticated callers (`status`, `version`, and aggregate `jobs` counts). Node
 ids, hosts, active jobs, and paths are only returned when a valid API key (or Basic credentials) is supplied.
@@ -366,6 +401,7 @@ auto-profile selection happens for one-shot conversions. Pass
 | `host` / `port` / `workers` | HTTP listen address and worker pool size |
 | `api-key` | API authentication key |
 | `username` / `password` | Optional HTTP-basic credentials for the web dashboard |
+| `trusted-networks` | Client networks (CIDR or address) exempt from the API key, by TCP peer address (default: `[]`). See [Authentication](#authentication) |
 | `db-url` | SQLite or PostgreSQL URL for daemon job persistence. This value is loaded only from `sma-ng.yml`. |
 | `ffmpeg-dir` | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion |
 | `node-id` | Stable identity in cluster mode (auto-generated UUID on first start; override for human-readable identity) |
@@ -383,6 +419,7 @@ auto-profile selection happens for one-shot conversions. Pass
 | `progress-log-interval` | Seconds between progress log lines for in-flight conversions |
 | `recycle-bin-max-age-days` | Delete recycle-bin media files older than this many days (default: `30`, `0` = disabled) |
 | `recycle-bin-min-free-gb` | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled) |
+| `recycle-bin-interval-seconds` | Seconds between recycle-bin cleanup sweeps (default: `300`, minimum `60`) |
 | `job-dedupe-window-seconds` | Skip a path whose job completed within this many seconds, for the scanner and webhooks alike (default: `21600`, `0` = disabled). See [Duplicate Suppression](#duplicate-suppression). |
 | `job-retention-days` | Opt-in: delete completed, failed and cancelled jobs older than this many days (default: `0` = keep forever; a positive value permanently deletes job rows; lifetime `/stats` totals are kept) |
 | `log-ttl-days` | Cluster-mode: retention for log entries in PostgreSQL |
@@ -657,7 +694,7 @@ replace an older pending job; only the same normalised path is deduplicated.
 
 ## Recycle Bin Cleanup
 
-The daemon automatically purges old media files from every `recycle-bin` directory configured in any `sma-ng.yml`. Two independent eviction triggers run once per hour:
+The daemon automatically purges old media files from every `recycle-bin` directory configured in any `sma-ng.yml`. Two independent eviction triggers run every `recycle-bin-interval-seconds` (default 5 minutes):
 
 | Trigger | Key | Default | Behaviour |
 | -------------- | -------------------------- | ------- | ------------------------------------------------------------------------------- |
@@ -670,6 +707,7 @@ Set either key to `0` to disable that trigger independently.
 daemon:
   recycle-bin-max-age-days: 30
   recycle-bin-min-free-gb: 50
+  recycle-bin-interval-seconds: 300
 ```
 
 Only recognised media file extensions are deleted (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ts`, `.m4v`, `.m2ts`, `.wmv`, `.flv`, `.webm`). NFO files, artwork, and other non-media files are never touched.

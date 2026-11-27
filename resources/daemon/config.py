@@ -1,4 +1,5 @@
 import copy
+import ipaddress
 import logging
 import os
 import shlex
@@ -295,6 +296,7 @@ class PathConfigManager:
     self.default_args = []
     self.api_key = None
     self.basic_auth = None
+    self.trusted_networks = []
     self.db_url = None
     self.ffmpeg_dir = None
     self.workers = 1
@@ -307,6 +309,7 @@ class PathConfigManager:
     self.job_dedupe_window_seconds = 21600
     self.job_retention_days = 0
     self.recycle_bin_min_free_gb = 50.0
+    self.recycle_bin_interval_seconds = 300
     self.media_extensions = frozenset([".mp4", ".mkv", ".avi", ".mov", ".ts"])
     self.scan_paths = []
     from resources.config_schema import AuditSettings, ConfigWatchSettings
@@ -402,6 +405,7 @@ class PathConfigManager:
     self.default_config = config_file
     self.api_key = d.api_key
     self.basic_auth = (d.username, d.password) if d.username and d.password else None
+    self.trusted_networks = [ipaddress.ip_network(n, strict=False) for n in d.trusted_networks]
     self.db_url = d.db_url
     self.ffmpeg_dir = d.ffmpeg_dir
     self.workers = d.workers
@@ -414,6 +418,7 @@ class PathConfigManager:
     self.job_dedupe_window_seconds = d.job_dedupe_window_seconds
     self.job_retention_days = d.job_retention_days
     self.recycle_bin_min_free_gb = float(d.recycle_bin_min_free_gb)
+    self.recycle_bin_interval_seconds = d.recycle_bin_interval_seconds
     self.media_extensions = frozenset(("." + e.lower().lstrip(".")) for e in (d.media_extensions or []) if e)
     self.default_args = self._parse_args_list(d.default_args)
     self.path_rewrites = sorted(

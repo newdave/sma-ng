@@ -478,3 +478,92 @@ class TestFindArrInstance:
 
   def test_settings_without_instance_lists(self):
     assert find_arr_instance("/media/TV/e.mkv", object()) == (None, None)
+
+
+class TestRescanViaArrLookup:
+  """Series/movie resolution must not depend on Sonarr/Radarr parsing the basename.
+
+  Sonarr parses "Blade Runner 2099 (2026) - S01E01" with year 2099 and no series,
+  so the id passed by the trigger (TVDB/TMDB) or the library path must win.
+  """
+
+  @staticmethod
+  def _get_by_url(routes):
+    def _get(url, headers=None, params=None, timeout=None):
+      for key, data in routes.items():
+        if url.endswith(key):
+          return _make_response(data)
+      raise AssertionError("unexpected GET %s %s" % (url, params))
+
+    return _get
+
+  @patch("resources.mediamanager.requests.post")
+  @patch("resources.mediamanager.requests.get")
+  def test_sonarr_resolves_series_by_tvdbid_before_parse(self, mock_get, mock_post):
+    mock_get.side_effect = self._get_by_url({"/api/v3/series": [{"id": 2116, "tvdbId": 424855, "path": "/tv/Blade Runner 2099 (2026)"}]})
+    mock_post.return_value = _make_response({"id": 5, "status": "queued"})
+    log = MagicMock()
+    cmd_id = rescan_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Blade Runner 2099 (2026)/Season 01/Blade Runner 2099 (2026) - S01E01 - Hades.mp4", log, tvdbid="424855")
+    assert cmd_id == 5
+    assert mock_post.call_args[1]["json"] == {"name": "RescanSeries", "seriesId": 2116}
+    series_call = mock_get.call_args_list[0]
+    assert series_call.args[0].endswith("/api/v3/series")
+    assert series_call.kwargs["params"] == {"tvdbId": "424855"}
+    assert not any(c.args[0].endswith("/api/v3/parse") for c in mock_get.call_args_list)
+
+  @patch("resources.mediamanager.requests.post")
+  @patch("resources.mediamanager.requests.get")
+  def test_sonarr_falls_back_to_series_path_when_parse_fails(self, mock_get, mock_post):
+    mock_get.side_effect = self._get_by_url(
+      {
+        "/api/v3/parse": {"series": None, "episodes": []},
+        "/api/v3/series": [
+          {"id": 1, "path": "/tv/Blade Runner"},
+          {"id": 2116, "path": "/tv/Blade Runner 2099 (2026)"},
+        ],
+      }
+    )
+    mock_post.return_value = _make_response({"id": 6, "status": "queued"})
+    log = MagicMock()
+    cmd_id = rescan_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Blade Runner 2099 (2026)/Season 01/ep.mp4", log)
+    assert cmd_id == 6
+    assert mock_post.call_args[1]["json"] == {"name": "RescanSeries", "seriesId": 2116}
+
+  @patch("resources.mediamanager.requests.post")
+  @patch("resources.mediamanager.requests.get")
+  def test_sonarr_unknown_tvdbid_falls_back_to_parse(self, mock_get, mock_post):
+    mock_get.side_effect = self._get_by_url({"/api/v3/series": [], "/api/v3/parse": {"series": {"id": 10}}})
+    mock_post.return_value = _make_response({"id": 7, "status": "queued"})
+    log = MagicMock()
+    assert rescan_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log, tvdbid="1") == 7
+    assert mock_post.call_args[1]["json"]["seriesId"] == 10
+
+  @patch("resources.mediamanager.requests.post")
+  @patch("resources.mediamanager.requests.get")
+  def test_sonarr_no_match_anywhere_returns_none(self, mock_get, mock_post):
+    mock_get.side_effect = self._get_by_url({"/api/v3/parse": {"series": None}, "/api/v3/series": [{"id": 1, "path": "/tv/Other"}]})
+    log = MagicMock()
+    assert rescan_via_arr("http://localhost:8989", {}, "sonarr", "/tv/Show/S01E01.mp4", log) is None
+    mock_post.assert_not_called()
+    assert "could not resolve series" in log.warning.call_args[0][0]
+
+  @patch("resources.mediamanager.requests.post")
+  @patch("resources.mediamanager.requests.get")
+  def test_radarr_resolves_movie_by_tmdbid_before_parse(self, mock_get, mock_post):
+    mock_get.side_effect = self._get_by_url({"/api/v3/movie": [{"id": 42, "tmdbId": 335984, "path": "/movies/Film (2017)"}]})
+    mock_post.return_value = _make_response({"id": 8, "status": "queued"})
+    log = MagicMock()
+    cmd_id = rescan_via_arr("http://localhost:7878", {}, "radarr", "/movies/Film (2017)/Film.mp4", log, tmdbid=335984)
+    assert cmd_id == 8
+    assert mock_post.call_args[1]["json"] == {"name": "RescanMovie", "movieId": 42, "movieIds": [42]}
+    assert mock_get.call_args_list[0].kwargs["params"] == {"tmdbId": 335984}
+    assert not any(c.args[0].endswith("/api/v3/parse") for c in mock_get.call_args_list)
+
+  @patch("resources.mediamanager.requests.post")
+  @patch("resources.mediamanager.requests.get")
+  def test_radarr_falls_back_to_movie_path_when_parse_fails(self, mock_get, mock_post):
+    mock_get.side_effect = self._get_by_url({"/api/v3/parse": {"movie": None}, "/api/v3/movie": [{"id": 42, "path": "/movies/Film (2017)"}]})
+    mock_post.return_value = _make_response({"id": 9, "status": "queued"})
+    log = MagicMock()
+    assert rescan_via_arr("http://localhost:7878", {}, "radarr", "/movies/Film (2017)/Film.mp4", log) == 9
+    assert mock_post.call_args[1]["json"]["movieIds"] == [42]
