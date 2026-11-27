@@ -35,9 +35,15 @@ This page is the index of the documentation. Each topic has one canonical page; 
 ## Reference
 
 - [Troubleshooting](troubleshooting.md): logs, FFmpeg failure classes and fixes, Docker and cluster problems.
-- [Architecture](architecture.md): component diagram, data flow and module reference.
-- [Test Coverage](test-coverage.md): coverage policy and how to measure it.
-- [`openapi.yaml`](openapi.yaml): the daemon HTTP API as an OpenAPI spec.
+- [Architecture](architecture.md): components, the conversion pipeline and fallback ladder, daemon flow and module
+  reference.
+- [`openapi.yaml`](openapi.yaml): the daemon HTTP API as an OpenAPI spec (published on the wiki as the API
+  Reference page).
+
+## Development
+
+- [Test Coverage](test-coverage.md): the coverage policy (90% global, 70% per module) and how to run it.
+- See [CONTRIBUTING.md](../CONTRIBUTING.md) for the development workflow.
 
 ## License
 

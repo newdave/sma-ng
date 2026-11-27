@@ -2,9 +2,10 @@
 
 ![SMA-NG](../logo.png)
 
-Trigger scripts bridge 3rd-party download clients and media managers to the SMA-NG daemon.
-When a download completes or a file is imported, the relevant trigger script submits it to
-the daemon webhook for conversion.
+Trigger scripts connect download clients and media managers to the SMA-NG daemon. When a download completes or a file
+is imported, the relevant script submits the path to the daemon webhook, and the daemon queues the conversion. The
+scripts only submit work and, where noted, wait for it; the daemon does the conversion. For the daemon side of each
+integration, see [Integrations](../docs/integrations.md).
 
 ## Directory Structure
 
@@ -36,6 +37,8 @@ All scripts read daemon connection settings from environment variables:
 | `DAEMON_HOST` | `127.0.0.1` | Daemon hostname or IP |
 | `DAEMON_PORT` | `8585` | Daemon port |
 | `DAEMON_API_KEY` | _(none)_ | API key if authentication is enabled |
+| `DAEMON_USERNAME`, `DAEMON_PASSWORD` | _(none)_ | HTTP Basic credentials, used when no API key is set |
+| `SMA_MEDIA_EXTS` | `mkv mp4 m4v avi mov wmv ts m2ts mpg mpeg flv webm` | Space-separated extensions treated as media when a script submits a directory |
 
 ---
 
@@ -58,8 +61,8 @@ triggers/cli/scan.sh --wait --tmdb 603 /media/movies/film.mkv
 # Provide TVDB ID with season/episode
 triggers/cli/scan.sh --wait --tvdb 73871 -s 3 -e 10 /media/tv/show/ep.mkv
 
-# Override config
-triggers/cli/scan.sh --wait --config /etc/sma/4k.ini /media/4k/film.mkv
+# Override config (the daemon only accepts its own configured sma-ng.yml path)
+triggers/cli/scan.sh --wait --config /config/sma-ng.yml /media/4k/film.mkv
 
 # Directory — queues all matching files in the tree
 triggers/cli/scan.sh --wait /media/tv/show/season1/
@@ -79,8 +82,8 @@ triggers/cli/scan.sh --wait /media/tv/show/season1/
 | `-t`, `--timeout N` | Max seconds to wait (default: 0 = unlimited) |
 | `-i`, `--interval N` | Polling interval in seconds (default: 5) |
 
-Without `--wait`, the script prints the job ID and exits immediately, making it
-suitable for fire-and-forget or scripted batch submission.
+Without `--wait`, the script prints the job ID and exits immediately, which suits fire-and-forget or scripted batch
+submission.
 
 ---
 
@@ -90,15 +93,18 @@ suitable for fire-and-forget or scripted batch submission.
 
 Configure in Sonarr: Settings → Connect → Custom Script
 
-Enable **On Import** and **On Upgrade** triggers. No arguments needed — Sonarr supplies
-all required data via environment variables (`sonarr_eventtype`, `sonarr_episodefile_path`, etc.).
+Enable the **On Import** and **On Upgrade** triggers. The script needs no arguments, because Sonarr passes the event
+through environment variables (`sonarr_eventtype`, `sonarr_episodefile_path` and so on). It submits the file to
+`/webhook/sonarr` and waits for the job to finish. Optional `POLL_INTERVAL` (default 5) and `TIMEOUT` (default 0,
+unlimited) control the wait.
 
 ### `media_managers/radarr.sh`
 
 Configure in Radarr: Settings → Connect → Custom Script
 
-Enable **On Import** and **On Upgrade** triggers. No arguments needed — Radarr supplies
-all required data via environment variables (`radarr_eventtype`, `radarr_moviefile_path`, etc.).
+Enable the **On Import** and **On Upgrade** triggers. The script needs no arguments, because Radarr passes the event
+through environment variables (`radarr_eventtype`, `radarr_moviefile_path` and so on). It submits the file to
+`/webhook/radarr` and waits for the job to finish, with the same `POLL_INTERVAL` and `TIMEOUT` options.
 
 ---
 
@@ -108,28 +114,31 @@ all required data via environment variables (`radarr_eventtype`, `radarr_moviefi
 
 Configure in NZBGet: Settings → Extension Scripts
 
-Copy the script to your NZBGet scripts directory and enable it. Options are set via
-NZBGet's script settings UI:
+Copy the script to your NZBGet scripts directory and enable it. Set these options in NZBGet's script settings UI:
 
 | Option | Default | Description |
 | --- | --- | --- |
 | `SHOULDCONVERT` | `true` | Enable/disable submission to daemon |
 | `BYPASS_CAT` | `bypass` | Category prefix to skip |
 
+The daemon connection variables above are read from the environment of the NZBGet process.
+
 ### `usenet/sabnzbd.sh`
 
 Configure in SABnzbd: Config → Categories → Script (per category), or
 Config → Switches → Post-Processing Script (global).
 
-SABnzbd passes arguments positionally: `$1`=path, `$5`=category, `$7`=status.
+SABnzbd passes arguments positionally: `$1` is the job directory, `$5` the category and `$7` the status.
 
-Set bypass categories via `BYPASS_CATS` (comma-separated, e.g. `bypass,skip`).
+Set the categories to skip with `BYPASS_CATS`, a comma-separated list of prefixes (default `bypass`, for example
+`bypass,skip`).
 
 ---
 
 ## Torrents
 
-All torrent triggers support bypass labels via `BYPASS_LABELS` (comma-separated).
+All torrent triggers skip torrents whose label starts with one of the comma-separated prefixes in `BYPASS_LABELS`
+(default `bypass`).
 
 ### `torrents/deluge.sh`
 
@@ -139,7 +148,7 @@ Configure in Deluge: Preferences → Execute → Event: TorrentComplete
 /path/to/triggers/torrents/deluge.sh "%T" "%N" "%L" "%I"
 ```
 
-Arguments: torrent name, download path, label, info hash.
+Arguments: torrent name, download path, label and info hash (the info hash is optional).
 
 ### `torrents/qbittorrent.sh`
 
