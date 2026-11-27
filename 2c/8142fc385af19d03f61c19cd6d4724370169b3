@@ -1,0 +1,30 @@
+.github/workflows/docker.yml
+  s_030369c4234dc7::t_8d59942cdb32ef 340-341,353,356-358
+  s_030369c4234dc7::t_b9e62b9f1ed30f 332-334,343-350,354-355
+  s_030369c4234dc7::t_059179a5d2b858 8,10,12-14
+  s_030369c4234dc7::t_ceef1116551090 108
+docs/docker-quickstart.md
+  s_030369c4234dc7::t_7e570ec546b0d7 29-30
+docs/deployment.md
+  s_030369c4234dc7::t_8981d8e2658ce4 470-471
+  s_030369c4234dc7::t_548ace66eab550 415,417-418
+  s_030369c4234dc7::t_de607d3933938f 523-527
+README.md
+  s_030369c4234dc7::t_6d1a907de45876 75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "2c8142fc385af19d03f61c19cd6d4724370169b3",
+  "prompts": {},
+  "sessions": {
+    "s_030369c4234dc7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f75a41d-e191-41d2-9cce-9d9b2bdfa831",
+        "model": "caveman-auto"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
