@@ -1,0 +1,25 @@
+CLAUDE.md
+  s_4999d6e7b1af88::t_1c29a489676db1 238-239
+AGENTS.md
+  s_4999d6e7b1af88::t_85fd79a2f1f083 36-37
+.claude/agents/code-reviewer.md
+  s_4999d6e7b1af88::t_85fd79a2f1f083 5
+.claude/agents/ffmpeg-args-auditor.md
+  s_4999d6e7b1af88::t_85fd79a2f1f083 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "b838a4df7a32812c3edccd866bf1d2b62fb00b44",
+  "prompts": {},
+  "sessions": {
+    "s_4999d6e7b1af88": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "efa5d6b1-dd44-4206-a6c3-3f83a3e3674b",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "David Hill <me@newdave.com>"
+    }
+  }
+}
