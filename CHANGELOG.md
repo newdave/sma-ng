@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.58](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.57...sma-ng-v3.2.58) (2026-11-27)
+
+
+### Documentation
+
+* refresh overview, architecture, contributing, triggers and coverage pages ([#282](https://github.com/newdave/sma-ng/issues/282)) ([91775ff](https://github.com/newdave/sma-ng/commit/91775ffbc7c375e3540ee31ecaff6a6907505023))
+
 ## [3.2.57](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.56...sma-ng-v3.2.57) (2026-11-27)
 
 
