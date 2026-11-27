@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.57](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.56...sma-ng-v3.2.57) (2026-11-27)
+
+
+### Documentation
+
+* refresh getting-started, hardware, integrations, library-audit and troubleshooting guides ([#287](https://github.com/newdave/sma-ng/issues/287)) ([69294d6](https://github.com/newdave/sma-ng/commit/69294d63766b272c63111ac632cc5431d33d05e6))
+
 ## [3.2.56](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.55...sma-ng-v3.2.56) (2026-11-26)
 
 
