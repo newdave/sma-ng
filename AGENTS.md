@@ -33,6 +33,8 @@ Work should protect conversion correctness, daemon reliability, config schema sa
 - Daemon logs must be single-line and must not include secrets.
 - No AI attribution or `Co-Authored-By` lines in commits.
 - Do not create manual `v*` tags.
+- Subagent briefs: one bounded task, named paths, acceptance criteria, and a stop after about 50 requests.
+- Subagents report findings only (`file:line` plus one sentence each), never file dumps.
 
 ## Docs And Commits
 

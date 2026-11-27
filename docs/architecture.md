@@ -1,41 +1,42 @@
 # Architecture
 
-How the SMA-NG components fit together: entry points, the daemon package, the conversion pipeline and a module
-reference. For the decision rules that drive stream selection see
-[Configuration](configuration.md#video-decision-tree); for the daemon internals see [Daemon Mode](daemon.md).
+This page describes how the SMA-NG components fit together: the entry points, the daemon package, the conversion
+pipeline and a module reference. For the rules that drive stream selection, see
+[Configuration](configuration.md#video-decision-tree). For daemon internals, see [Daemon Mode](daemon.md).
 
 ## Components
 
-A single-host install runs the components shown below. In **cluster mode**,
-multiple nodes each run an identical daemon stack (server + worker pool +
-heartbeat) sharing one PostgreSQL `jobs` / `cluster_nodes` / `node_commands`
-table — see [Daemon Mode → Cluster Mode](daemon.md#cluster-mode) for the
-internals and [Cluster Operations](cluster-operations.md) for the operator
-runbooks (bootstrap, roll a config, zero-loss upgrade, drain a node,
-recover from failure).
+SMA-NG has two entry points that share one conversion pipeline. `manual.py` converts files directly from the command
+line. `daemon.py` runs an HTTP server that queues jobs and executes each one in a child process that runs
+`manual.py` (or one of the other tools described below). Trigger scripts and the Sonarr/Radarr webhooks only submit
+paths to the daemon; they never convert anything themselves.
 
 ```mermaid
 graph TD
-    subgraph Entry["Entry Points"]
-        CLI["manual.py\nCLI tool"]
-        D["daemon.py\nHTTP server"]
-        T["triggers/*.sh\nbash scripts"]
+    subgraph Entry["Entry points"]
+        CLI["manual.py\nCLI"]
+        REP["repair.py\nstream-copy repair"]
+        D["daemon.py\nHTTP daemon"]
+        T["triggers/\nshell scripts"]
     end
 
     subgraph DaemonPkg["resources/daemon/"]
         S["server.py\nDaemonServer"]
-        H["handler.py\nWebhookHandler"]
+        H["handler.py, routes.py\nHTTP handlers"]
+        Q["queueing.py\nadmission rules"]
         W["worker.py\nWorkerPool"]
-        DB["db.py\nPostgreSQL"]
-        TH["threads.py\nHeartbeat · Scanner"]
+        TH["threads.py\nheartbeat, scanner, janitors"]
+        DB["db.py\nSQLite or PostgreSQL"]
+        CFG["config.py\npath routing"]
     end
 
     subgraph Resources["resources/"]
-        RS["readsettings.py"]
+        MP["mediaprocessor.py\nMediaProcessor"]
+        RS["readsettings.py\nconfig_schema.py"]
         MD["metadata.py"]
-        PP["postprocess.py"]
         MM["mediamanager.py"]
-        EX["extensions.py"]
+        MR["media_repair.py"]
+        LA["library_audit/"]
     end
 
     subgraph Conv["converter/"]
@@ -44,162 +45,200 @@ graph TD
         FMT["formats.py"]
     end
 
-    MP["mediaprocessor.py\nMediaProcessor"]
-    PX["autoprocess/plex.py"]
-
     CLI --> MP
-    T --> MP
-    D --> S --> H --> W --> MP
-    W --> DB
+    REP --> MR
+    T -->|webhook| H
+    D --> S --> H --> Q --> DB
+    DB --> W
+    W -->|child process| CLI
+    W -->|child process| REP
     S --> TH
+    S --> CFG
     MP --> RS
     MP --> FF
     MP --> MD
-    MP --> PP
     MP --> MM
-    MP --> PX
     FF --> AC
     FF --> FMT
+    CLI --> LA
+    TH --> LA
 ```
 
-## Data Flow
+In cluster mode, several nodes each run the same daemon stack (server, worker pool and heartbeat) against one shared
+PostgreSQL database. See [Daemon Mode](daemon.md#cluster-mode) for the internals and
+[Cluster Operations](cluster-operations.md) for the operator runbooks.
+
+## Conversion Pipeline
+
+`MediaProcessor.fullprocess()` in `resources/mediaprocessor.py` drives one file through these stages:
 
 ```mermaid
 flowchart TD
-    A([Input File]) --> B{FFprobe\nvalidation}
-    B -- invalid --> Z([Skip / Error])
-    B -- valid --> C[Stream analysis\ngenerateOptions]
-    C --> D{Hardware accel\navailable?}
-    D -- yes --> E[FFmpeg encode\nHW accelerated]
-    D -- no --> F[FFmpeg encode\nsoftware]
-    E & F --> G{TMDB metadata\nconfigured?}
-    G -- yes --> H[writeTags\nmutagen MP4]
-    G -- skip --> I[qtfaststart\nmoov atom relocation]
-    H --> I
-    I --> J["replicate\noutput_dir → copy-to / move-to"]
-    J --> K[Post-process scripts]
-    K --> L[Plex / Sonarr / Radarr notify]
+    A([Input file]) --> B{"Probe once\nFFprobe"}
+    B -- invalid --> Z([Skip or error])
+    B -- valid --> C["Decide streams\ngenerateOptions"]
+    C --> E["FFmpeg encode\nfallback ladder"]
+    E --> V{"Output\nverified?"}
+    V -- no --> Z
+    V -- yes --> G["Tag with TMDB metadata\nmutagen"]
+    G --> I["qtfaststart\nmove moov atom"]
+    I --> J["Relocate and replicate\ncopy-to, move-to"]
+    J --> K["Post-process scripts"]
+    K --> L["Notify Plex, Sonarr, Radarr"]
     L --> M([Done])
 ```
 
----
+Key behaviors:
+
+- **Probe once.** The source is probed a single time and the result is reused by every later stage, including each
+  fallback attempt. `FFMpeg.probe(..., framedata=False)` skips the slower per-frame probe when it is not needed.
+- **Stream selection by index.** Every remux or conversion drops cover art and unknown or data streams. The pipeline
+  selects streams with `MediaInfo.cover_art` and `is_unknown_stream()` and maps them by index, never with type maps
+  such as `0:V` or `0:a?`.
+- **Fallback ladder.** `_attempt_ladder()` retries a failed encode according to `fallback-policy`. The full
+  `aggressive` ladder is hardware encode, `hw_alt` (a same-vendor VAAPI encoder behind a QSV decoder), software
+  decode with hardware encode, and finally a full-software re-encode. Other policies stop earlier. The ladder also
+  stops immediately when a retry cannot help, for example when the process was killed by a signal or the output
+  filesystem failed.
+- **Copy fallback.** When a re-encode comes out larger than the source, the pipeline can fall back to a verified
+  stream copy instead.
+- **Verification.** After FFmpeg exits, the output is probed again. A truncated or stream-less file is renamed to
+  `<name>.failed` and the job fails instead of shipping a damaged file.
+- **No overwrites.** An existing output is never overwritten; the new file is numbered instead (for example
+  `name.2.mp4`).
+- **Bounded stderr.** `converter/ffmpeg.py` keeps only a bounded head and tail of FFmpeg's stderr in memory, so a
+  noisy or looping encode cannot exhaust memory. The full text is written to a sidecar file when a conversion fails.
+
+## Daemon Flow
+
+1. A request reaches `handler.py` (for example `POST /webhook/sonarr`, `POST /jobs`, or a scanner pass in
+   `threads.py`).
+2. `queueing.py` applies the shared admission rules to every path, whichever way it was discovered: normalize the
+   path, skip duplicates, skip files that already have the target extension or sit in the recycle bin, and skip files
+   completed within the configured window.
+3. `config.py` routes the path to a config and profile by matching it against the routing rules built from the
+   `services:` section.
+4. The job is stored in the job database. SQLite is used for a single node and PostgreSQL for clusters.
+5. A worker in `worker.py` claims the job and runs the matching tool as a child process, as defined in
+   `job_kinds.py`: `convert` and `preview` and `audit` run `manual.py`, `repair` runs `repair.py` and `rename` runs
+   `rename.py`.
+6. The worker watches the child's output line by line and enforces the job timeout.
+
+### Child-to-daemon events
+
+The child process reports back through its log output, which the worker parses:
+
+- `ffmpeg.attempts` is a single-line JSON event that `MediaProcessor` emits once per conversion. It records each
+  ladder tier, its failure class and its duration, and feeds the daemon's counters and failure classification.
+- `output.verify` is a similar JSON line that reports output verification failures.
+- `SMA_FINAL_OUTPUT: <path>` is a plain marker line that `manual.py` prints when it finishes. The worker still scrapes
+  it with a regular expression to learn the final output path.
+
+### Persistence and totals
+
+The job database stores jobs, cluster nodes, node commands, library-audit findings and (in PostgreSQL mode) cluster
+logs. Large per-job fields, namely captured FFmpeg stderr and job output, are capped at 1 MiB and are only returned by
+`GET /jobs/{id}/ffmpeg-stderr` and `GET /jobs/{id}/output`, not by list queries.
+
+When finished jobs are deleted by retention or cleanup, the deleted rows are counted per status in the
+`job_stats_archive` table in the same transaction. All-time totals in `/stats`, `/health` and
+`/api/metrics?window=all` therefore include jobs whose rows no longer exist. Windowed figures are live-only.
+
+### Path confinement
+
+Paths submitted to the daemon are confined to the configured media roots. The roots are the scan paths, the routing
+match paths and the path-rewrite endpoints. Containment is checked on the `os.path.realpath()` result, so `..`
+segments and symlinks that lead outside every root are rejected. The directory browser applies the same rule. A
+per-job `--config` override is only honored when it resolves to the daemon's own config file.
 
 ## Module Reference
 
-### converter/avcodecs.py
+### Entry points
 
-Codec definitions mapping SMA-NG names to FFmpeg encoders. Each codec class handles its own option parsing and FFmpeg
-flag generation.
+- `manual.py`: the CLI. Converts, previews (`-oo`), lists codecs (`-cl`), and runs the library audit (`--audit`).
+- `daemon.py`: starts the daemon (`--smoke-test` checks imports and config without serving).
+- `repair.py`: stream-copy repair of files with data, unknown or artwork streams or a wrong aspect ratio.
+- `rename.py`: renames already-converted files from templates.
 
-**Video codecs**: H264, H265, AV1, VP9, MPEG-1/2, H263, FLV, Theora + hardware variants (QSV, VAAPI, NVENC,
-VideoToolbox, V4L2M2M, OMX)
+### converter/
 
-**Audio codecs**: AAC, AC3, EAC3, DTS, FLAC, MP3, Vorbis, Opus, PCM variants, TrueHD, ALAC
+- `ffmpeg.py`: FFmpeg and FFprobe wrapper. `MediaInfo`, `MediaStreamInfo` and `MediaFormatInfo` hold parsed probe
+  results. `MediaInfo.cover_art` lists artwork streams, and `is_unknown_stream()` flags streams FFprobe could not
+  classify. `FFMpeg` runs the binaries with bounded stderr capture.
+- `avcodecs.py`: codec definitions that map SMA-NG names to FFmpeg encoders and generate their options. Video
+  (H.264, H.265, AV1, VP9 and others, with QSV, VAAPI, NVENC, VideoToolbox and other hardware variants), audio and
+  subtitle codecs. `python manual.py -cl` lists what is available.
+- `formats.py`: container definitions (MP4, MKV and others) mapped to FFmpeg muxers.
+- `__init__.py`: the `Converter` class, which selects codecs and formats and builds the FFmpeg command.
 
-**Subtitle codecs**: mov_text, SRT, SSA/ASS, WebVTT, PGS, DVDSub, DVBSub, copy
+### resources/mediaprocessor.py and resources/processor/
 
-### converter/ffmpeg.py
-
-FFmpeg/FFprobe wrapper. Key classes:
-
-- **MediaInfo** / **MediaStreamInfo** / **MediaFormatInfo**: Parsed probe results. `MediaInfo.cover_art` lists
-  artwork streams (attached pictures, cover art demoted to an `mp4v` video track, image attachments) and
-  `is_unknown_stream()` flags streams FFprobe could not classify; both feed stream selection and the repair tool.
-- **FFMpeg**: Binary wrapper with `probe(fname, posters_as_video=True, framedata=True)` (`framedata=False` skips the
-  per-frame probe), `convert()`, `thumbnail()`, codec/hwaccel queries
-
-### converter/formats.py
-
-Container format definitions (MP4, MKV, AVI, WebM, etc.) mapping to FFmpeg muxer names.
-
-### converter/\_\_init\_\_.py
-
-**Converter** class: Orchestrates codec/format selection, builds FFmpeg commands, manages conversion with progress
-tracking.
-
-### resources/mediaprocessor.py
-
-**MediaProcessor**: Core pipeline orchestrator. Key methods:
-
-- `isValidSource()`: FFprobe validation
-- `generateOptions()`: Stream analysis to FFmpeg option dict
-- `convert()`: Execute FFmpeg; collision-safe (numbers outputs such as `name.2.mp4`, never overwrites), with a
-  hardware-to-software fallback ladder whose last tier is a full-software re-encode (`fallback-policy: aggressive`)
-- `fullprocess()`: Complete pipeline (validate, convert, tag, relocate, replicate, notify)
-- `setAcceleration()`: Hardware accel configuration with bit-depth checks
-- `estimateVideoBitrate()`: Source bitrate estimation
-- `replicate()`: copy-to / move-to file operations
-
-### resources/media_repair.py
-
-**RepairProcessor**: stream-copy repair used by `repair.py`. `diagnose()` builds a `RepairPlan` (data, unknown, and
-artwork streams to drop; corrective aspect ratio), `build_opts()` produces the `-c copy` options, and `verify()`
-re-probes the copy before it atomically replaces the original.
-
-### resources/library_audit/
-
-Library auditor. `engine.py` (`AuditEngine`) probes one queue unit, upserts findings, and runs optional auto-fix, and
-`run_audit_inline()` backs `manual.py --audit`. `probes.py` holds the per-file checks, including `repair_check()` for
-`stream_damage` and `hybrid_aspect`. `enumerator.py`, `kinds.py`, and `recycler.py` walk roots, define finding kinds,
-and move files to the recycle-bin. See [Library Audit](library-audit.md).
-
-### resources/naming.py and resources/rename_util.py
-
-`naming.py` is the template-based naming engine (data from Sonarr/Radarr, else FFprobe + guessit + TMDB).
-`rename_util.py` backs `rename.py`: it renames already-converted files with those templates, updates `.plexmatch`
-sidecars, and triggers a Plex refresh.
+`MediaProcessor` is the pipeline described above. Important methods are `isValidSource()`, `generateOptions()`,
+`convert()` (including the fallback ladder and collision-safe output naming), `fullprocess()`, `setAcceleration()`
+and `replicate()`. `resources/processor/failures.py` classifies FFmpeg failures from stderr and defines the
+`AttemptRecord` used by the `ffmpeg.attempts` event.
 
 ### resources/daemon/
 
-- `server.py`: `DaemonServer`, the HTTP server and process lifecycle
-- `handler.py`, `routes.py`: request handling and route tables (webhooks, jobs, logs, admin, library)
-- `worker.py`: worker pool, job execution, and the timeout watchdog
-- `threads.py`: heartbeat, scanner, and library-audit worker threads
-- `db.py`: SQLite/PostgreSQL job store, cluster tables, and findings
-- `config.py`: `daemon:` settings resolution (CLI flag, then `sma-ng.yml`, then default)
+- `server.py`: `DaemonServer`, the HTTP server and process lifecycle.
+- `handler.py`, `routes.py`, `webhook_parsing.py`: request handling, route tables and webhook payload parsing.
+- `queueing.py`: shared admission rules for the scanner and the webhook and queue handlers.
+- `worker.py`: `WorkerPool` and `ConversionWorker`, child-process execution, event parsing and the timeout watchdog.
+- `job_kinds.py`: the job kinds (`convert`, `preview`, `audit`, `repair`, `rename`) and their success rules.
+- `threads.py`: heartbeat, scanner, recycle-bin cleaner, config watcher, library-audit and storage-janitor threads.
+- `db.py`: the SQLite and PostgreSQL job store, cluster tables, findings and lifetime totals.
+- `config.py`: `daemon:` settings and path-to-config routing. Settings resolve as CLI flag, then `sma-ng.yml`, then
+  default.
+- `storage.py`: output-directory sweeps and disk-usage helpers.
+- `metrics_prom.py`: Prometheus metrics. See [Cluster Metrics](metrics.md).
+- `docs_ui.py`: serves the pages in `docs/` live at `/docs`.
+- `db_log_handler.py`, `log_archiver.py`, `context.py`, `constants.py`: cluster log storage and archiving, per-job log
+  context and shared constants.
 
-### resources/readsettings.py
+### resources/library_audit/
 
-**ReadSettings**: Parses `sma-ng.yml` (via `config_loader.py` and the pydantic schema in `config_schema.py`) into
-typed attributes, applies profiles, and resolves service instances.
+The library auditor. `engine.py` (`AuditEngine`) probes one queue unit, records findings and runs optional auto-fix,
+and `run_audit_inline()` backs `manual.py --audit`. `probes.py` holds the per-file checks, `enumerator.py` walks the
+roots, `kinds.py` defines finding kinds, `tag_reader.py` reads tags and `recycler.py` moves files to the recycle bin.
+See [Library Audit](library-audit.md).
 
-### resources/metadata.py
+### resources/media_repair.py
 
-**Metadata**: TMDB API client + MP4 tagger (via mutagen). Resolves TMDB/TVDB/IMDB IDs, writes iTunes-compatible tags.
+`RepairProcessor` backs `repair.py`. `diagnose()` builds a plan listing the data, unknown and artwork streams to drop
+and any corrective aspect ratio. `build_opts()` produces the `-c copy` options, and `verify()` re-probes the copy
+before it atomically replaces the original.
 
-### resources/postprocess.py
+### Configuration
 
-**PostProcessor**: Discovers and runs the scripts in `post_process/` with the SMA-NG environment variables. See
-[Post-Process Scripts](getting-started.md#post-process-scripts).
+- `config_schema.py`: the pydantic schema for `sma-ng.yml`.
+- `config_loader.py`, `yamlconfig.py`: YAML loading.
+- `readsettings.py`: `ReadSettings` projects the validated config into typed attributes, applies profiles and
+  resolves service instances.
 
-### resources/log.py
+### Metadata, naming and post-processing
 
-Logging setup with optional INI-based configuration. Core library output goes to stdout/stderr. The daemon writes
-per-config rotating log files in `logs/`.
+- `metadata.py`: TMDB client and MP4 tagger (mutagen). Resolves TMDB, TVDB and IMDB IDs.
+- `naming.py` and `rename_util.py`: the template-based naming engine and the logic behind `rename.py`, which also
+  updates `.plexmatch` sidecars and triggers a Plex refresh.
+- `subtitles.py`: subtitle scanning, downloading, burning and syncing.
+- `postprocess.py`: runs the scripts in `post_process/` with the SMA-NG environment variables. See
+  [Post-Process Scripts](getting-started.md#post-process-scripts).
+- `custom.py`: optional operator hooks loaded from `config/custom.py` (copy `setup/custom.py.sample`).
+- `analyzer.py` and `openvino_analyzer.py`: per-job tuning recommendations and the optional OpenVINO analyzer.
+- `file_ops.py`: shared helpers that apply permissions and move finished files into place atomically.
+- `lang.py`, `log.py`, `extensions.py`: language-code conversion, logging setup and recognised file extensions.
 
-### resources/lang.py
+### Integrations
 
-Language code conversion (ISO 639 alpha2/alpha3) via babelfish.
+- `mediamanager.py`: shared Sonarr and Radarr API helpers. After an in-place conversion the daemon rescans the
+  series or movie (`RescanSeries` or `RescanMovie`) so the old path is unlinked, then imports the converted file
+  (`DownloadedEpisodesScan` or `DownloadedMoviesScan` with `importMode: Move`). Instances with `force-rename: true`
+  also receive a `RenameFiles` command afterwards.
+- `autoprocess/plex.py`: Plex library refresh through PlexAPI, with path mapping.
+- `webhook_client.py`: shared client that the trigger scripts use to submit jobs and poll for completion.
+- `triggers/`: download-client and media-manager scripts. See [triggers/README.md](../triggers/README.md).
 
-### resources/custom.py
+### Docker host CLI
 
-Optional hook points loaded from `config/custom.py` (an untracked operator file; copy `setup/custom.py.sample`, or let
-the Docker entrypoint seed it): `validation()`, `blockVideoCopy()`, `blockAudioCopy()`,
-`skipStream()`, `streamTitle()`.
-
-### autoprocess/plex.py
-
-Plex library refresh via PlexAPI with path mapping support.
-
-### resources/mediamanager.py
-
-Shared Sonarr/Radarr API helpers. After in-place conversion the daemon issues a two-step chain keyed on the
-series/movie ID resolved via `/api/v3/parse`:
-
-1. `RescanSeries` (Sonarr) / `RescanMovie` (Radarr) — re-evaluates known file records and unlinks the now-missing
-   original path (extension and/or basename changed during conversion).
-2. `DownloadedEpisodesScan` (Sonarr) / `DownloadedMoviesScan` (Radarr) with the converted *file* path and
-   `importMode: Move` — imports the new file and links it to the existing series/movie. Without this second step the
-   file is orphaned and the episode/movie shows as missing.
-
-When the instance has `force-rename: true`, a `RenameFiles` command is chained after the import completes.
+`setup/sma-host.sh` (installed as `sma`) and the in-image `resources/cli/` package provide `sma convert`, `repair`
+and `audit` on a Docker host. See [Docker Quick Start](docker-quickstart.md).

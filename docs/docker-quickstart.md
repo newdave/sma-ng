@@ -266,8 +266,9 @@ sma --json repair -n /mnt/media/TV
 {"job_id": 42, "kind": "repair", "path": "/mnt/media/TV", "status": "completed", "error": null}
 ```
 
-Coming from the old `docker exec` version of `sma` or the alias file: `sma manual`, `sma smoke`, `sma logs`,
-`sma status` and the `SMA_CONTAINER` / `SMA_COMPOSE_*` variables are gone. Use `docker logs -f sma-ng` for daemon logs.
+Coming from the old `docker exec` version of `sma` or the alias file: `sma manual`, `sma smoke` and the
+`SMA_CONTAINER` / `SMA_COMPOSE_*` variables are gone. `sma logs` and `sma status` remain as shortcuts for
+`sma daemon logs` and `sma daemon status`.
 
 ### Running the daemon
 
@@ -313,40 +314,30 @@ and recreates it with the compose file's image tag. Mounts and ports then stay i
 
 ## Docker Compose
 
-Run the SMA-NG daemon with Docker Compose. Compose is optional: on a single host,
-`sma daemon up --media /path/to/media` starts the same daemon without it (see
-[Running the daemon](#running-the-daemon)). Use Compose when you want its profiles, override
-files, or the cluster deployment tooling.
+Compose is optional. On a single host, `sma daemon up --media /path/to/media` starts the same daemon without it (see
+[Running the daemon](#running-the-daemon)). Use Compose when you want its profiles, override files or the cluster
+deployment tooling.
 
-The repository ships a compose file at [`docker/docker-compose.yml`](../docker/docker-compose.yml) with six profiles:
+The repository ships [`docker/docker-compose.yml`](../docker/docker-compose.yml) with six profiles: `software`,
+`software-pg`, `intel`, `intel-pg`, `nvidia` and `nvidia-pg`. The non-`-pg` profiles are meant for one node and use
+SQLite at `/data/sma-ng.db`, which is `/opt/sma/data/sma-ng.db` on the host. The `-pg` profiles run the same container
+for nodes that use an external PostgreSQL server, such as cluster members. Compose does not bundle PostgreSQL, and the
+database is chosen only by `daemon.db-url` in `sma-ng.yml`. The
+[profile table](deployment.md#docker-compose-profile-reference) lists the GPU stack of each profile.
 
-- `software`
-- `software-pg`
-- `intel`
-- `intel-pg`
-- `nvidia`
-- `nvidia-pg`
+Each file has one job:
 
-The non-`-pg` profiles are single-node profiles and default to SQLite at `/data/sma-ng.db`, persisted on the
-Docker host under `/opt/sma/data/sma-ng.db`. The `-pg` profiles run the same container for nodes that use an
-external PostgreSQL server, such as cluster members; compose does not bundle PostgreSQL, and the database is
-chosen only by `daemon.db_url` in `sma-ng.yml`.
+| File | Purpose |
+| --- | --- |
+| `/opt/sma/config/sma-ng.yml` | Daemon and conversion settings, including the database URL, API key and node ID |
+| `/opt/sma/config/daemon.env` | Container-only settings such as `SMA_WORKERS`, `LIBVA_DRIVER_NAME` and `NVIDIA_*` |
+| `/opt/sma/docker/.env` | Compose substitution: `IMAGE_TAG`, `PORT` and `STOP_GRACE_PERIOD` |
 
-With the current compose layout, use config files for different jobs:
+### Prepare the host
 
-- `/opt/sma/config/sma-ng.yml` → daemon runtime settings
-- `/opt/sma/config/daemon.env` → container-only settings (`POSTGRES_*`, `LIBVA_DRIVER_NAME`, `NVIDIA_*`)
-- `docker/.env` → Compose interpolation (`IMAGE_TAG`, `PORT`, `STOP_GRACE_PERIOD`)
-
-For clustered Docker deployments, set `daemon.node_id` in
-`/opt/sma/config/sma-ng.yml`.
-
-### Prepare Host Directories
-
-Install the `sma` command first ([Install](#install)); it creates `/opt/sma/config`, `/opt/sma/logs` and
-`/opt/sma/data` and a sample `/opt/sma/config/sma-ng.yml`, and needs no source checkout.
-
-Then fetch the compose file and the container settings file it requires:
+Install the `sma` command first (see [Install](#install)). It creates `/opt/sma/config`, `/opt/sma/logs` and
+`/opt/sma/data` and a sample `/opt/sma/config/sma-ng.yml`, and it needs no source checkout. Then fetch the compose
+file and the container settings file that it requires:
 
 ```bash
 sudo mkdir -p /opt/sma/docker /transcode /recycle
@@ -356,96 +347,97 @@ docker run --rm --entrypoint cat ghcr.io/newdave/sma-ng:latest /app/setup/daemon
   | sudo tee /opt/sma/config/daemon.env >/dev/null
 ```
 
-The default compose mounts are:
+The compose file mounts these host paths into the container:
 
-- `/opt/sma/config` → container `/config`
-- `/opt/sma/logs` → container `/logs`
-- `/opt/sma/data` → container `/data`
-- `/mnt` → container `/mnt`
-- `/transcode` → container `/transcode`
-- `/recycle` → container `/recycle`
+| Host | Container |
+| --- | --- |
+| `/opt/sma/config` | `/config` |
+| `/opt/sma/logs` | `/logs` |
+| `/opt/sma/data` | `/data` |
+| `/mnt` | `/mnt` |
+| `/transcode` | `/transcode` |
+| `/recycle` | `/recycle` |
 
-Adjust the compose file if your host uses different media paths; keep host and container paths identical so
-webhook paths resolve inside the daemon.
+Adjust the file if your media lives elsewhere, and keep host and container paths identical so that webhook paths
+resolve inside the daemon. The `/downloads` mount no longer exists; see [Migrating from the alias file](#migrating-from-the-alias-file).
 
-### Config Files
+The installer writes `sma-ng.yml` only when it does not exist, and existing config is never overwritten. The
+container writes fresh copies of the shipped samples to `/opt/sma/config/defaults/` every time it starts, so you can
+diff your config against them.
 
-The installer writes `/opt/sma/config/sma-ng.yml` only when it does not exist, and `daemon.env` above comes from
-the image's sample. Existing local config is never overwritten. Fresh samples are written to
-`/opt/sma/config/defaults/` each time the container starts, so you can diff your config against them.
+### Configure the daemon
 
-### Edit `sma-ng.yml`
-
-Set the basics in `/opt/sma/config/sma-ng.yml`:
-
-- `ffmpeg = /usr/local/bin/ffmpeg`
-- `ffprobe = /usr/local/bin/ffprobe`
-- your desired codec/container settings
-- Sonarr/Radarr/Plex sections if needed
-
-For hardware encoders, also set the appropriate `gpu =` and codec values. See [Hardware Acceleration](hardware-acceleration.md).
-
-### Edit `Daemon:` section in `sma-ng.yml`
-
-Minimal example:
+Set the basics in `/opt/sma/config/sma-ng.yml`. YAML keys use kebab-case, and the file paths below are paths inside
+the container. See [Configuration](configuration.md) for every key and [Hardware Acceleration](hardware-acceleration.md)
+for the GPU settings.
 
 ```yaml
-Daemon:
-  default_config: /config/sma-ng.yml
-  api_key: change-me
-  db_url: sqlite:////data/sma-ng.db
-  path_configs:
-    - path: /mnt/unionfs/Media/TV
+daemon:
+  api-key: change-me
+  node-id: media-node-a
+  db-url: sqlite:////data/sma-ng.db
+  routing:
+    - match: /mnt/unionfs/Media/TV
       profile: rq
-    - path: /mnt/unionfs/Media/Movies
-      profile: rq
+    - match: /mnt/unionfs/Media/Movies
+      profile: lq
 ```
 
-Notes:
+- Use `sqlite:////data/sma-ng.db` with the non-`-pg` profiles. For a `-pg` profile, use your PostgreSQL URL instead,
+  for example `postgresql://sma:password@db-host:5432/sma`.
+- The daemon reads database URLs only from `sma-ng.yml`. A database URL in `daemon.env` is ignored.
+- `routing` paths must match the container's view of your media. Each rule picks the profile that is applied to files
+  under that path.
+- `node-id` gives the node a stable identity in a cluster. Set a distinct value on every node.
 
-- `/config/...` paths are inside-container paths
-- `/mnt/...` paths must match the container view of your mounted media
-- for non-`-pg` profiles, use `sqlite:////data/sma-ng.db`
-- for `*-pg` profiles, set `db_url` to the PostgreSQL URL
-- database connection details are not read from `daemon.env`
+### Create the Compose `.env` file
 
-### Create a Compose `.env` File
-
-From the repo root:
+Create `/opt/sma/docker/.env` for the values that Compose itself expands from `docker-compose.yml`:
 
 ```bash
-cat > docker/.env <<'EOF'
+sudo tee /opt/sma/docker/.env >/dev/null <<'EOF'
 IMAGE_TAG=latest
 PORT=8585
 EOF
 ```
 
-Use `docker/.env` only for values that Docker Compose itself expands from `docker-compose.yml`, such as:
+`STOP_GRACE_PERIOD` also belongs here when you want to change it (see [Stop grace period](#stop-grace-period)). Put
+daemon and container settings in `config/sma-ng.yml` and `config/daemon.env` instead.
 
-- `IMAGE_TAG`
-- `PORT`
-- `STOP_GRACE_PERIOD`
+### Start a profile
 
-GPU device permissions (`/dev/dri/*`) are reconciled automatically by the container entrypoint — no `RENDER_GID`/`VIDEO_GID` configuration is required.
+Run Compose from `/opt/sma` and pick the profile that matches your hardware:
 
-Put daemon/container settings in `/opt/sma/config/daemon.env` instead.
+```bash
+cd /opt/sma
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile intel up -d
+```
+
+Check the container and the daemon:
+
+```bash
+docker compose --env-file docker/.env -f docker/docker-compose.yml ps
+curl http://localhost:8585/health
+```
+
+Then open the dashboard at `http://localhost:8585/dashboard`.
 
 ### Host command and compose mounts
 
 Every `sma` command runs in its own throwaway container that reads the same `/opt/sma/config/sma-ng.yml` as the
-daemon, so it works alongside a running compose daemon (see [The `sma` host command](#the-sma-host-command) for
-install, commands and mounts). Paths no longer have to sit under the daemon's `/mnt`, `/transcode` and `/recycle`
-mounts.
+daemon, so it works next to a running compose daemon. See [The `sma` host command](#the-sma-host-command) for install,
+commands and mounts. Paths do not have to sit under the daemon's `/mnt`, `/transcode` and `/recycle` mounts.
 
-The daemon itself still uses the compose mounts above: webhook paths must be visible at the same path inside the
-daemon container, so keep media under `/mnt` (or add mounts) for Sonarr, Radarr and other integrations.
+The daemon itself uses the compose mounts above. Webhook paths must be visible at the same path inside the daemon
+container, so keep media under `/mnt` (or add mounts) for Sonarr, Radarr and other integrations.
 
 #### Migrating from the alias file
 
-- The old `sma-*` alias file was removed; delete the `source` line for it from your shell profile and use `sma`.
+- The old `sma-*` alias file was removed. Delete its `source` line from your shell profile and use `sma`.
 - The `/mnt/unionfs/downloads:/downloads` mount was removed from every compose service. Replace `/downloads/...`
   arguments with `/mnt/unionfs/downloads/...`.
-- Webhooks from download clients that still report `/downloads/...` keep working with a path rewrite in `sma-ng.yml`:
+- Webhooks from download clients that still report `/downloads/...` keep working with a path rewrite in
+  `sma-ng.yml`:
 
   ```yaml
   daemon:
@@ -454,208 +446,76 @@ daemon container, so keep media under `/mnt` (or add mounts) for Sonarr, Radarr 
         to: /mnt/unionfs/downloads
   ```
 
-- `sma` runs commands as your own user, so new files are owned by you. Fix old root-owned output once with
-  `sudo chown -R "$USER" <path>` if needed.
+- `sma` runs commands as your own user, so new files are owned by you. If needed, fix old root-owned output once with
+  `sudo chown -R "$USER" <path>`.
 
 ### Stop grace period
 
-Every daemon service sets `stop_grace_period: ${STOP_GRACE_PERIOD:-2m}`. `docker compose stop`, `restart`, and
-`mise run cluster -- stop` / `mise run cluster -- restart` give the daemon that long to drain before Docker sends SIGKILL; jobs still
-running at the deadline are requeued. Raise it for long transcodes by setting `STOP_GRACE_PERIOD=10m` in a `.env` file
-next to `docker-compose.yml` or in the shell running compose (compose substitution; `daemon.env` does not apply).
-The effective drain is the smaller of `daemon.shutdown-grace-seconds` (default `100`) and `STOP_GRACE_PERIOD`: raise
-both together and keep `shutdown-grace-seconds` below `STOP_GRACE_PERIOD`.
+Every daemon service sets `stop_grace_period: ${STOP_GRACE_PERIOD:-2m}`, so `docker compose stop` and `restart` give
+the daemon two minutes to drain before Docker sends SIGKILL. Jobs still running then are requeued. For long
+transcodes, set `STOP_GRACE_PERIOD=10m` in `/opt/sma/docker/.env`. Raise `daemon.shutdown-grace-seconds` (default
+`100`) with it, because the smaller of the two values is the effective drain time. See
+[Graceful stop and restart](deployment.md#graceful-stop-and-restart) for the details.
 
-### Edit `daemon.env`
-
-For single-node non-`-pg` profiles, set `daemon.db_url` in `sma-ng.yml` to:
-
-```yaml
-daemon:
-  db_url: sqlite:////data/sma-ng.db
-```
-
-The SQLite file is stored on the Docker host at `/opt/sma/data/sma-ng.db`.
-Set `daemon.node_id` and `daemon.api_key` in `sma-ng.yml` if you want stable identity and API protection:
-
-```yaml
-daemon:
-  node_id: media-node-a
-  api_key: change-me-too
-```
-
-For the `-pg` profiles (`software-pg`, `intel-pg`, `nvidia-pg`), point the daemon at your PostgreSQL server:
-
-```yaml
-daemon:
-  node_id: media-node-a
-  api_key: change-me-too
-  db_url: postgresql://sma:password@db-host:5432/sma
-```
-
-### Start a Profile
-
-From the repo root:
-
-| Profile | Hardware | Database |
-| ------------- | ----------------- | ----------------------------------- |
-| `software` | CPU only | SQLite (`/opt/sma/data/sma-ng.db`) |
-| `software-pg` | CPU only | external PostgreSQL (`db_url`) |
-| `intel` | Intel QSV / VAAPI | SQLite |
-| `intel-pg` | Intel QSV / VAAPI | external PostgreSQL (`db_url`) |
-| `nvidia` | NVIDIA NVENC | SQLite |
-| `nvidia-pg` | NVIDIA NVENC | external PostgreSQL (`db_url`) |
-
-```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml --profile intel up -d
-```
-
-### Verify
-
-Check the containers:
-
-```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml ps
-```
-
-Check daemon health:
-
-```bash
-curl http://localhost:8585/health
-```
-
-Open the dashboard:
-
-```text
-http://localhost:8585/dashboard
-```
-
-### Hardware-Specific Notes
+### Hardware notes
 
 #### Intel QSV
 
-Requirements:
+The host needs an Intel GPU with `/dev/dri` available. The Intel profiles map the whole `/dev/dri` tree and add the
+container user to the `video` and `render` groups (plus GID `992` as a fallback), so the matching `card*` and
+`renderD*` nodes are visible together. This matters on KVM guests where an SR-IOV virtual function can appear as
+`card1` with `renderD128`; the working render node is sometimes `renderD129` or higher. If your host uses a
+non-standard render group ID, set `SMA_ENTRYPOINT_FIX_GIDS=1` in `config/daemon.env` so that the entrypoint joins the
+group that owns the device.
 
-- host Intel GPU
-- `/dev/dri` available
-- correct render/video group IDs
-
-If the Intel GPU is exposed through SR-IOV, confirm which render node belongs to the VF inside the guest. The working device is often `/dev/dri/renderD129` or higher rather than `/dev/dri/renderD128`.
-The Intel compose profiles now mount the whole `/dev/dri` tree so the container can see the matching `card*` and `renderD*` nodes together, which matters on KVM guests where the VF may show up as `card1` with `renderD128`.
-
-Quick check:
+Check VA-API inside the container (use the service `sma-intel-pg` with the `intel-pg` profile):
 
 ```bash
 docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-intel vainfo
 ```
 
-Use `sma-intel-pg` as the service name with the `intel-pg` profile.
-
 #### NVIDIA
 
-Requirements:
-
-- NVIDIA driver installed on host
-- `nvidia-container-toolkit` installed
-
-Quick check:
+The host needs the NVIDIA driver and `nvidia-container-toolkit`. Check the encoders inside the container (use
+`sma-nvidia-pg` with the `nvidia-pg` profile):
 
 ```bash
 docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-nvidia ffmpeg -hide_banner -encoders
 ```
 
-Or:
+### Submit a test job
 
-```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec sma-nvidia-pg ffmpeg -hide_banner -encoders
-```
-
-### Submitting a Test Job
-
-Plain text webhook:
+Send a plain-text or JSON webhook with a path that is visible inside the container:
 
 ```bash
 curl -X POST http://localhost:8585/webhook/generic \
-  -H "X-API-Key: change-me-too" \
+  -H "X-API-Key: change-me" \
   -d "/mnt/unionfs/Media/Movies/Test Movie (2024)/movie.mkv"
-```
 
-JSON webhook:
-
-```bash
 curl -X POST http://localhost:8585/webhook/generic \
-  -H "X-API-Key: change-me-too" \
+  -H "X-API-Key: change-me" \
   -H "Content-Type: application/json" \
   -d '{"path":"/mnt/unionfs/Media/Movies/Test Movie (2024)/movie.mkv"}'
 ```
 
-### Common Customizations
+### Update
 
-#### Change the published daemon port
-
-In `docker/.env`:
+Pull the image and recreate the container, using the profile you started:
 
 ```bash
-PORT=8686
+cd /opt/sma
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile intel pull
+docker compose --env-file docker/.env -f docker/docker-compose.yml --profile intel up -d
 ```
 
-#### Use an external PostgreSQL instance
-
-Use the matching `-pg` profile and set `daemon.db_url` in `sma-ng.yml`:
-
-```yaml
-daemon:
-  db_url: postgresql://sma:password@db-host:5432/sma
-```
-
-Database URLs in `/opt/sma/config/daemon.env` are ignored.
-
-#### Route different media roots to different profiles
-
-```yaml
-Daemon:
-  default_config: /config/sma-ng.yml
-  path_configs:
-    - path: /mnt/unionfs/Media/TV
-      profile: rq
-    - path: /mnt/unionfs/Media/Movies
-      profile: lq
-```
-
-### Updating
-
-Pull new code and recreate the selected profile:
-
-```bash
-git pull --rebase
-docker compose --env-file docker/.env -f docker/docker-compose.yml --profile software-pg up -d --build
-```
-
-Replace `software-pg` with whichever profile you use.
+`sma daemon upgrade` does the same for a compose-managed daemon (see [Running the daemon](#running-the-daemon)). To
+change the published port, set `PORT` in `/opt/sma/docker/.env`.
 
 ### Compose troubleshooting
 
-#### Daemon starts but jobs fail immediately
-
-- check `/opt/sma/config/sma-ng.yml`
-- verify media paths inside the container
-- verify `ffmpeg` and `ffprobe` paths
-
-#### Jobs are accepted but never run
-
-- check PostgreSQL connectivity for `*-pg` or external DB mode
-- check `/health` and `/status`
-- check `/opt/sma/logs`
-
-#### Intel profile cannot see `/dev/dri`
-
-- verify host device exists (`ls -l /dev/dri` on the host)
-- for SR-IOV guests, verify the guest itself exposes a matching `card*` and `renderD*` pair under `/dev/dri`
-- check container startup logs for `granted ubuntu access to /dev/dri/...` lines confirming the entrypoint added the runtime user to the host render/video groups
-- verify `vainfo` works inside the container
-
-#### NVIDIA profile starts without GPU
-
-- verify `nvidia-container-toolkit`
-- verify host driver installation
-- check `docker info` and container runtime configuration
+| Symptom | Checks |
+| --- | --- |
+| The daemon starts but jobs fail at once | Read `/opt/sma/config/sma-ng.yml`; confirm the media paths exist inside the container and that the `ffmpeg` and `ffprobe` paths are correct |
+| Jobs are accepted but never run | For `-pg` profiles, check PostgreSQL connectivity. Check `/health` and `/status`, and the logs in `/opt/sma/logs`. In a cluster, check that the node is approved |
+| The Intel profile cannot see `/dev/dri` | Run `ls -l /dev/dri` on the host. On SR-IOV guests, confirm that the guest exposes a matching `card*` and `renderD*` pair. Run `vainfo` in the container. With `SMA_ENTRYPOINT_FIX_GIDS=1`, the startup log shows `granted ubuntu access to /dev/dri/...` |
+| The NVIDIA profile starts without a GPU | Verify `nvidia-container-toolkit`, the host driver, and the container runtime configuration in `docker info` |

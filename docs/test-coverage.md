@@ -1,102 +1,61 @@
 # Test Coverage Policy
 
-The Python test suite is gated on **≥90% global line coverage** with a
-**≥70% per-module floor** for production modules of ≥100 statements.
+The Python test suite is gated on two thresholds, and both must pass before a pull request can merge:
 
-Current baseline: **91.53%** (13 679 / 14 945 statements).
+- **90% global line coverage** across `resources/`, `converter/` and `autoprocess/`.
+- **70% per-module floor** for every production module with at least 100 statements. The floor stops a single weak
+  module from hiding behind well-covered ones.
 
-## Running locally
+This page explains the policy and how to run it. It deliberately contains no coverage figures, because they change
+with every commit; run the commands below to see current numbers.
+
+## Running the Gates Locally
 
 ```bash
 mise run test:cov
 ```
 
-This invokes pytest with `--cov-fail-under=${COV_FAIL_UNDER:-90}` and then runs
-`scripts/check-coverage-floor.py --floor ${COV_MODULE_FLOOR:-70}`. The task
-exits non-zero when global coverage drops below 90% or any production module
-of ≥100 statements drops below the floor, and writes:
+The task runs pytest with `--cov-fail-under=${COV_FAIL_UNDER:-90}`, then runs
+`scripts/check-coverage-floor.py --floor ${COV_MODULE_FLOOR:-70}`. It exits non-zero when either gate fails, and it
+writes these reports:
 
-- `htmlcov/index.html` — interactive per-file report (open it after a run)
-- `coverage.xml` — machine-readable for CI / IDEs
-- `cov.json` — JSON used by `scripts/check-coverage-floor.py`
+- `htmlcov/index.html`: an interactive per-file report with uncovered lines highlighted.
+- `coverage.xml`: a machine-readable report for CI and IDEs.
+- `cov.json`: the JSON that `scripts/check-coverage-floor.py` reads.
 
-To re-check the per-module floor against an existing `cov.json`:
-
-```bash
-source venv/bin/activate
-python scripts/check-coverage-floor.py
-# OK: all production modules >= 100 statements clear 70%. Repo-wide: 91.53%.
-```
-
-The floor helper exits non-zero if any module ≥100 statements falls below
-70%. Both gates run in CI; both must pass on a PR before merge.
-
-## Bypassing the gate
-
-Long-running refactors sometimes need to land partial work that
-temporarily dips below the threshold. Set `COV_FAIL_UNDER=0` to disable
-the global gate for a single run:
+To re-check the per-module floor against an existing `cov.json` without running the tests again:
 
 ```bash
-COV_FAIL_UNDER=0 mise run test:cov
+venv/bin/python scripts/check-coverage-floor.py
 ```
 
-The per-module floor helper has no equivalent override on purpose: a
-module that drops below 70% is louder than a global dip and warrants an
-explicit conversation in the PR.
+CI runs the same `mise run test:cov` task in `.github/workflows/ci.yml`.
 
-## Exclusions (`.coveragerc`)
+## Exclusions
 
-One module is excluded from coverage measurement because it requires
-hardware that isn't available in CI:
+Coverage is configured in `.coveragerc`. Test files and virtual environments are omitted, and so is
+`resources/openvino_analyzer.py`, which needs the Intel OpenVINO runtime and a GPU that CI does not have. The daemon
+exercises the fallback path for a missing analyzer, so the integration is still covered.
 
-| Module | Why excluded |
-| --- | --- |
-| `resources/openvino_analyzer.py` | Requires Intel OpenVINO runtime + GPU; the daemon's integration with this module is exercised via the analyzer-not-available fallback path on every dev box, but unit-testing the analyzer itself needs hardware not available in CI. |
+When you add an exclusion, add a comment in `.coveragerc` that explains why. Hardware-bound code is a valid reason;
+code that is merely awkward to test is not.
 
-`resources/library_audit/probes.py` used to be excluded; its probes are now unit-tested against real
-`MediaInfo` objects and it is measured like any other module.
+## When a Gate Fails
 
-When adding a new exclusion, document the reason in this table — a
-one-liner like "covered indirectly via X" is enough.
+1. Run `mise run test:cov` and open `htmlcov/index.html`.
+2. Open the file the report flagged and find the red (uncovered) lines.
+3. Add a test that exercises the missing branch, following the style of the existing tests for that module.
 
-## Module-level standings
+Follow these rules when you fix a failing gate:
 
-The 80% target floor is a stretch goal; the enforced floor is 70%. Every production module of ≥100
-statements now clears 80%. The lowest are:
-
-| Module | Cover % | Statements | Notes |
-| --- | --- | --- | --- |
-| `resources/mediaprocessor.py` | 82.1% | 2 837 | The transcoding pipeline. Remaining misses are scattered across HDR detection edges, audio downmix matrices, subtitle burn-in fallbacks and codec mixing. **Next target.** |
-| `resources/daemon/config.py` | 85.2% | 485 | Path config manager and routing. |
-| `resources/daemon/storage.py` | 86.8% | 114 | Storage janitor sweeps. |
-
-Once `mediaprocessor.py` reaches ≥85%, raise the per-module floor from 70% → 80% via
-`COV_MODULE_FLOOR` in `.mise/tasks/test/cov` (the default lives in `scripts/check-coverage-floor.py`).
-
-## CI
-
-The repo runs both gates in `.github/workflows/ci.yml` through `mise run test:cov`: pytest's own
-`--cov-fail-under=90` flag fails the workflow on a global regression, and the task's follow-up
-`scripts/check-coverage-floor.py` step fails on any module below 70%.
-
-## What to do when the gate fails
-
-1. Run `mise run test:cov && open htmlcov/index.html` (Linux:
-   `xdg-open`).
-2. Click into the file flagged by the report; uncovered lines are
-   highlighted red.
-3. Add a test that exercises the missing branch. Mirror the style
-   of the file's existing tests — every test module documents its
-   pattern in the docstring at the top.
-
-If you genuinely cannot test a branch (hardware bound, or it's a
-defensive `else` after an exhaustive `if/elif`), add a `# pragma: no
-cover` comment and explain why on the same line.
-
-Don't lower the global threshold. Don't add `# pragma: no cover` to
-mask uncovered logic.
+- Do not lower the thresholds.
+- Do not use `# pragma: no cover` to hide logic. It is acceptable only for a branch that cannot be tested, such as a
+  defensive `else` after an exhaustive `if` chain, and the reason must be on the same line.
+- For a temporary dip during a large refactor, `COV_FAIL_UNDER=0 mise run test:cov` disables the global gate for one
+  run. The per-module floor has no override on purpose, because a module that falls below 70% deserves an explicit
+  discussion in the pull request.
 
 ## Related
 
-- Coverage policy summary in [CLAUDE.md](../CLAUDE.md) under *Validation Matrix*.
+- [CONTRIBUTING.md](../CONTRIBUTING.md) describes the full development workflow.
+- The *Validation Matrix* in [CLAUDE.md](../CLAUDE.md) lists the smallest useful test set for each area of the code.

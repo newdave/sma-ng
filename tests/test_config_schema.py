@@ -15,6 +15,27 @@ from resources.daemon.config import _strip_secrets
 from resources.daemon.constants import SECRET_KEYS, SERVICE_SECRET_FIELDS
 
 
+class TestTrustedNetworks:
+  def test_accepts_cidrs_and_hosts_in_kebab_case(self):
+    cfg = SmaConfig.model_validate({"daemon": {"trusted-networks": ["10.30.0.0/16", "192.168.1.20"]}})
+    assert cfg.daemon.trusted_networks == ["10.30.0.0/16", "192.168.1.20/32"]
+
+  def test_host_bits_set_are_normalised(self):
+    cfg = SmaConfig.model_validate({"daemon": {"trusted_networks": ["10.30.10.40/16"]}})
+    assert cfg.daemon.trusted_networks == ["10.30.0.0/16"]
+
+  def test_rejects_invalid_network(self):
+    with pytest.raises(ValidationError, match="trusted-networks"):
+      SmaConfig.model_validate({"daemon": {"trusted-networks": ["10.30.0.0/99"]}})
+
+  def test_default_is_empty(self):
+    assert SmaConfig.model_validate({}).daemon.trusted_networks == []
+
+  def test_scalar_string_becomes_single_entry(self):
+    cfg = SmaConfig.model_validate({"daemon": {"trusted-networks": "10.30.0.0/16"}})
+    assert cfg.daemon.trusted_networks == ["10.30.0.0/16"]
+
+
 class TestSecretRedaction:
   def test_daemon_secrets_redacted(self):
     data = {

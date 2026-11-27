@@ -81,7 +81,7 @@ _METRICS_WINDOW_MAP = {
 # Additive `jobs` columns introduced by the metrics-expansion PRP. Both
 # backends migrate idempotently using their backend-specific helpers; the
 # Postgres type column accepts any text the backend understands.
-# See docs/prps/metrics-expansion.md for the full design rationale.
+# See docs/metrics.md for the operator-facing metrics reference.
 _METRICS_EXPANSION_COLUMNS: tuple[tuple[str, str, str], ...] = (
   # (name,                        sqlite_type, postgres_type)
   ("encoder_backend", "TEXT", "TEXT"),
@@ -134,7 +134,7 @@ def _telemetry_sets(telemetry, placeholder):
   return "".join(", %s = %s" % (c, placeholder) for c in cols), [telemetry[c] for c in cols]
 
 
-# Job kinds and captured tool output (docs/prps/sma-cli-container-runtime.md).
+# Job kinds and captured tool output for the sma CLI container runtime.
 # Kept apart from _METRICS_EXPANSION_COLUMNS, whose tests pin its exact list.
 _JOB_KIND_COLUMNS: tuple[tuple[str, str, str], ...] = (
   # (name,           sqlite_type,              postgres_type)
@@ -988,7 +988,18 @@ class SQLiteJobDatabase:
       rows = conn.execute(sql, params).fetchall()
     return [{"id": r["id"], "claim_token": r["claim_token"]} for r in rows]
 
-  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None, telemetry=None, source_duration_seconds=None, claim_token=None):
+  def fail_job(
+    self,
+    job_id,
+    error=None,
+    failure_category=None,
+    failure_cause=None,
+    node_id=None,
+    telemetry=None,
+    source_duration_seconds=None,
+    claim_token=None,
+    input_size=None,
+  ):
     """Fail (or requeue with backoff) a running job.
 
     Returns False without touching the row when it is no longer running
@@ -1032,6 +1043,9 @@ class SQLiteJobDatabase:
       if source_duration_seconds is not None:
         tel_sql += ", source_duration_seconds = ?"
         tel_params.append(source_duration_seconds)
+      if input_size is not None:
+        tel_sql += ", input_size_bytes = ?"
+        tel_params.append(input_size)
       if tel_sql:
         conn.execute("UPDATE jobs SET " + tel_sql[2:] + " WHERE id = ?", (*tel_params, job_id))
     return True
@@ -2022,7 +2036,18 @@ class PostgreSQLJobDatabase:
         rows = cur.fetchall()
     return [{"id": r["id"], "claim_token": r["claim_token"]} for r in rows]
 
-  def fail_job(self, job_id, error=None, failure_category=None, failure_cause=None, node_id=None, telemetry=None, source_duration_seconds=None, claim_token=None):
+  def fail_job(
+    self,
+    job_id,
+    error=None,
+    failure_category=None,
+    failure_cause=None,
+    node_id=None,
+    telemetry=None,
+    source_duration_seconds=None,
+    claim_token=None,
+    input_size=None,
+  ):
     """Mark a running job as failed, or requeue with exponential backoff if retries remain.
 
     The row is locked and must still be running (and owned by *node_id*
@@ -2068,6 +2093,9 @@ class PostgreSQLJobDatabase:
         if source_duration_seconds is not None:
           tel_sql += ", source_duration_seconds = %s"
           tel_params.append(source_duration_seconds)
+        if input_size is not None:
+          tel_sql += ", input_size_bytes = %s"
+          tel_params.append(input_size)
         if tel_sql:
           cur.execute("UPDATE jobs SET " + tel_sql[2:] + " WHERE id = %s", (*tel_params, job_id))
       if requeued:

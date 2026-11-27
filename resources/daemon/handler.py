@@ -1,4 +1,5 @@
 import hmac
+import ipaddress
 import json
 import os
 import re as _re
@@ -7,7 +8,7 @@ from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 import requests
 
@@ -263,7 +264,25 @@ def _public_job(job):
   for column in (*JOB_OUTPUT_COLUMNS, "ffmpeg_stderr"):
     job.pop(column, None)
   job.pop("claim_token", None)  # internal ownership state
+  _add_size_change(job)
   return job
+
+
+def _add_size_change(job):
+  """Add size_delta_bytes (output minus input) and size_change (shrunk/grew/unchanged).
+
+  Both are None until the job has a source and an output size, so failed,
+  pending and non-convert jobs report no change rather than a guess.
+  """
+  src = job.get("input_size_bytes")
+  dest = job.get("output_size_bytes")
+  if src is None or dest is None:
+    job["size_delta_bytes"] = None
+    job["size_change"] = None
+    return
+  delta = int(dest) - int(src)
+  job["size_delta_bytes"] = delta
+  job["size_change"] = "shrunk" if delta < 0 else "grew" if delta > 0 else "unchanged"
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
@@ -315,6 +334,18 @@ class WebhookHandler(BaseHTTPRequestHandler):
     # Check X-API-Key header
     request_key = self.headers.get("X-API-Key")
 
+    if self._client_is_trusted() and not request_key and not self.headers.get("Authorization"):
+      # Trusted by network only: a browser on that network could be driven by a
+      # hostile page, so state-changing requests must come from this origin.
+      if self.command in ("GET", "HEAD", "OPTIONS") or self._origin_matches_host():
+        return True
+      self.server.logger.warning("Cross-origin %s from trusted client %s rejected (Origin %s)" % (self.command, self.address_string(), self.headers.get("Origin")))
+      self.send_response(403)
+      self.send_header("Content-Type", "application/json")
+      self.end_headers()
+      self.wfile.write(json.dumps({"error": "Forbidden", "message": "Cross-origin request rejected; send the API key instead"}).encode("utf-8"))
+      return False
+
     # Also check Authorization header (Bearer token or Basic auth)
     if not request_key:
       auth_header = self.headers.get("Authorization", "")
@@ -347,9 +378,43 @@ class WebhookHandler(BaseHTTPRequestHandler):
     self.wfile.write(json.dumps({"error": "Unauthorized", "message": "Valid API key required"}).encode("utf-8"))
     return False
 
+  def _client_is_trusted(self):
+    """Return True when the client address lies inside ``daemon.trusted-networks``.
+
+    Uses the TCP peer address only; forwarded-for headers are never consulted, so a
+    reverse proxy inside a trusted network makes every client it forwards trusted.
+    """
+    networks = [n for n in (getattr(self.server, "trusted_networks", None) or []) if isinstance(n, (ipaddress.IPv4Network, ipaddress.IPv6Network))]
+    if not networks:
+      return False
+    try:
+      raw = self.client_address[0].split("%", 1)[0]  # drop IPv6 zone id
+      addr = ipaddress.ip_address(raw)
+    except (ValueError, IndexError, AttributeError, TypeError):
+      return False
+    candidates = [addr]
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+      candidates.append(mapped)
+    return any(c.version == n.version and c in n for c in candidates for n in networks)
+
+  def _origin_matches_host(self):
+    """Return True when the request has no ``Origin`` header (non-browser client) or it names this daemon's ``Host``."""
+    origin = self.headers.get("Origin")
+    if not origin:
+      return True
+    host = (self.headers.get("Host") or "").strip().lower()
+    try:
+      netloc = urlsplit(origin.strip()).netloc.lower()
+    except ValueError:
+      return False
+    return bool(host) and netloc == host
+
   def _is_authenticated(self):
     """Return True if the request carries valid credentials (or none are required). Sends no response."""
     if not self.server.api_key and not self.server.basic_auth:
+      return True
+    if self._client_is_trusted():
       return True
     if not self.headers.get("X-API-Key") and not self.headers.get("Authorization"):
       return False  # keyless probe (Docker HEALTHCHECK): minimal view, no Unauthorized warning
