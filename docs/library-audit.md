@@ -12,14 +12,14 @@ daemon that uses the local SQLite database, the scheduled audit does not run and
 ## Finding kinds
 
 | Kind | Trigger |
-| ------------------- | ---------------------------------------------------------------------------- |
-| `ffprobe_failed`    | FFprobe cannot read the file (corrupt, truncated, empty, or zero-byte).      |
-| `orphan_sidecar`    | A `.srt`/`.sub`/`.idx`/`.ass`/`.ssa`/`.vtt`/`.nfo`/`.jpg`/`.jpeg`/`.png` with no matching parent media file in the same directory. A language suffix such as `Movie.en.srt` still matches `Movie.mkv`. |
-| `leftover_tmp`      | A `.tmp`/`.partial`/`.tag` file or a recycle-bin collision artifact (`*.2.mp4` to `*.5.mp4`) (reason `leftover_artifact`), or in-transit SMA output left by an interrupted conversion or repair: the configured `temp-extension` (`.sma` by default) or a `.smatmp` atomic-copy partial (reason `in_transit_leftover`). In-transit files are only reported once older than `storage-janitor-max-age-seconds` (6 hours by default), so a file still being written is never flagged. |
-| `preconv_original`  | A non-MP4 video file (`.mkv`, `.avi`, `.mov`, `.m4v`, `.ts`, `.m2ts`, `.wmv`, `.flv`, `.webm`) sitting next to a same-stem `.mp4` that probes cleanly. The original was never deleted (for example `delete-original: false`). |
-| `duplicate_id`      | The same TMDB/TVDB id appears at two or more paths within the same audit run. |
-| `stream_damage`     | An `.mp4`/`.m4v`/`.mov`/`.mkv` carrying streams SMA never keeps: data streams (`tmcd`, stray `bin_data`), unknown streams, or artwork (attached pictures, cover art demoted to a real `mp4v` video track, image attachments). The `repair` detail lists the affected stream indexes, as `repair.py -n` reports them. The MP4 chapter track is not damage. |
-| `hybrid_aspect`     | An MP4, M4V, MOV or MKV whose picture was stretched by the former QSV alignment bug (e.g. a 1080p source shipped as 1920x1088, or a max-width downscale as 1920x1072) and that carries no corrective display aspect ratio. Detection matches a fixed signature table (1920x1088/1072/1056, 3840x2176/2144, 1280x736/704) with a square pixel aspect (reason `stretched_dims`), so correctly repaired or genuinely anamorphic files are not flagged. A file that already carries a corrective pixel aspect is still flagged (reason `demoted_poster`) when an older repair remux turned its cover art into a real `mp4v` video track; re-running the repair drops that track. |
+| --- | --- |
+| `ffprobe_failed` | FFprobe cannot read the file (corrupt, truncated, empty, or zero-byte). |
+| `orphan_sidecar` | A `.srt`/`.sub`/`.idx`/`.ass`/`.ssa`/`.vtt`/`.nfo`/`.jpg`/`.jpeg`/`.png` with no matching parent media file in the same directory. A language suffix such as `Movie.en.srt` still matches `Movie.mkv`. |
+| `leftover_tmp` | A `.tmp`/`.partial`/`.tag` file or a recycle-bin collision artifact (`*.2.mp4` to `*.5.mp4`) (reason `leftover_artifact`), or in-transit SMA output left by an interrupted conversion or repair: the configured `temp-extension` (`.sma` by default) or a `.smatmp` atomic-copy partial (reason `in_transit_leftover`). In-transit files are only reported once older than `storage-janitor-max-age-seconds` (6 hours by default), so a file still being written is never flagged. |
+| `preconv_original` | A non-MP4 video file (`.mkv`, `.avi`, `.mov`, `.m4v`, `.ts`, `.m2ts`, `.wmv`, `.flv`, `.webm`) sitting next to a same-stem `.mp4` that probes cleanly. The original was never deleted (for example `delete-original: false`). |
+| `duplicate_id` | The same TMDB/TVDB id appears at two or more paths within the same audit run. |
+| `stream_damage` | An `.mp4`/`.m4v`/`.mov`/`.mkv` carrying streams SMA never keeps: data streams (`tmcd`, stray `bin_data`), unknown streams, or artwork (attached pictures, cover art demoted to a real `mp4v` video track, image attachments). The `repair` detail lists the affected stream indexes, as `repair.py -n` reports them. The MP4 chapter track is not damage. |
+| `hybrid_aspect` | An MP4, M4V, MOV or MKV whose picture was stretched by the former QSV alignment bug (e.g. a 1080p source shipped as 1920x1088, or a max-width downscale as 1920x1072) and that carries no corrective display aspect ratio. Detection matches a fixed signature table (1920x1088/1072/1056, 3840x2176/2144, 1280x736/704) with a square pixel aspect (reason `stretched_dims`), so correctly repaired or genuinely anamorphic files are not flagged. A file that already carries a corrective pixel aspect is still flagged (reason `demoted_poster`) when an older repair remux turned its cover art into a real `mp4v` video track; re-running the repair drops that track. |
 
 ## Configuration (`sma-ng.yml`)
 
@@ -205,7 +205,7 @@ handle it yourself or configure a recycle bin.
 ## Schema
 
 | Table | Purpose |
-| --------------------------- | ------------------------------------------------------ |
+| --- | --- |
 | `library_audit_runs` | One row per audit invocation |
 | `library_audit_queue` | Per-file work units; claim/done/error lifecycle |
 | `library_findings` | Persistent findings with `(kind, path)` uniqueness |

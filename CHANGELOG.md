@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.2.59](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.58...sma-ng-v3.2.59) (2026-11-27)
+
+
+### Documentation
+
+* refresh daemon guide and OpenAPI spec ([#285](https://github.com/newdave/sma-ng/issues/285)) ([de08236](https://github.com/newdave/sma-ng/commit/de08236c500e46ccfec836f012c2d2899b87c449))
+
+## [3.2.58](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.57...sma-ng-v3.2.58) (2026-11-27)
+
+
+### Documentation
+
+* refresh overview, architecture, contributing, triggers and coverage pages ([#282](https://github.com/newdave/sma-ng/issues/282)) ([91775ff](https://github.com/newdave/sma-ng/commit/91775ffbc7c375e3540ee31ecaff6a6907505023))
+
 ## [3.2.57](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.56...sma-ng-v3.2.57) (2026-11-27)
 
 
