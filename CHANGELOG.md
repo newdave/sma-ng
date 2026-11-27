@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.60](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.59...sma-ng-v3.2.60) (2026-11-27)
+
+
+### Documentation
+
+* serve and lint every wiki page ([#283](https://github.com/newdave/sma-ng/issues/283)) ([fe586a8](https://github.com/newdave/sma-ng/commit/fe586a8bc77bb512e6b08221b9b2c81251f9ff13))
+
 ## [3.2.59](https://github.com/newdave/sma-ng/compare/sma-ng-v3.2.58...sma-ng-v3.2.59) (2026-11-27)
 
 
