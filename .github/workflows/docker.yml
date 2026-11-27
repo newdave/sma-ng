@@ -5,11 +5,13 @@ name: Docker
 #                  On a PR: build + smoke test the PR's image (no Trivy scan);
 #                  never pushes. On a push to main, after test and lint pass:
 #                  build, smoke test, push ghcr.io/<repo>:latest, :main and
-#                  :sha-<short> (linux/amd64). latest therefore always tracks
-#                  the newest main image that passed CI.
+#                  :sha-<short> (linux/amd64).
 #   from release.yml (with ref + version) when a release is created: build the
-#                  tag, smoke test, push X.Y.Z, X.Y and X (linux/amd64 +
+#                  tag, smoke test, push X.Y.Z, X.Y, X and latest (linux/amd64 +
 #                  linux/arm64).
+# latest therefore tracks the newest commit built by either path, so it carries
+# the release version once a release is out. The merge job never moves latest
+# back to an older commit.
 # workflow_dispatch builds the current ref and pushes when `push` is checked.
 #
 # Every platform builds on a native runner (arm64 under QEMU exceeds the job
@@ -103,7 +105,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ steps.plan.outputs.channel == 'main' }}
+            type=raw,value=latest,enable=${{ steps.plan.outputs.channel == 'main' || steps.plan.outputs.release == 'true' }}
             type=raw,value=main,enable=${{ steps.plan.outputs.channel == 'main' }}
             type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ steps.plan.outputs.release == 'true' }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ steps.plan.outputs.release == 'true' }}
@@ -327,15 +329,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # latest never moves back to an older commit: the main build of a commit
+      # and the release build of its release commit run at once, and the main
+      # build often finishes last.
       - name: Create multi-arch manifest
         working-directory: ${{ runner.temp }}/digests
         env:
           TAGS: ${{ needs.plan.outputs.tags }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          current=$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{json .Image}}' 2>/dev/null |
+            jq -r 'if has("config") then . else .["linux/amd64"] end
+              | .config.Labels["org.opencontainers.image.revision"] // empty' || true)
+          newer=false
+          if [ -n "$current" ] && [ "$current" != "$SHA" ] &&
+            [ "$(gh api "repos/$GITHUB_REPOSITORY/compare/$SHA...$current" --jq .status 2>/dev/null)" = ahead ]; then
+            newer=true
+          fi
           tag_args=()
           while IFS= read -r tag; do
-            [ -n "$tag" ] && tag_args+=(-t "$tag")
+            [ -n "$tag" ] || continue
+            if [ "$tag" = "$IMAGE:latest" ] && [ "$newer" = true ]; then
+              echo "Skipping $tag: it already points at newer commit $current"
+              continue
+            fi
+            tag_args+=(-t "$tag")
           done <<<"$TAGS"
           sources=()
           for digest in *; do

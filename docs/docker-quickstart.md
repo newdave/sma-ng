@@ -26,8 +26,8 @@ curl -fsSL https://raw.githubusercontent.com/newdave/sma-ng/main/install-smang.s
 
 The installer:
 
-- pulls `ghcr.io/newdave/sma-ng:latest`; on arm64 hosts it picks the latest release instead, because `latest` is
-  published for linux/amd64 only;
+- pulls `ghcr.io/newdave/sma-ng:latest`; on arm64 hosts it picks the latest release instead, because a `main` build
+  publishes `latest` for linux/amd64 only;
 - installs `sma` to `/usr/local/bin` (using `sudo` if needed), or `~/.local/bin` when it cannot;
 - records the image in `~/.config/sma/image`;
 - creates the data directory `SMA_HOME` with `config/`, `logs/` and `data/`, owned by you, plus a sample
