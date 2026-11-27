@@ -1,11 +1,12 @@
 # Daemon Mode
 
-The daemon runs an HTTP server that accepts webhook requests to queue media conversions. Jobs are persisted to a PostgreSQL database, workers process them in the background, and a web dashboard provides real-time status.
+The daemon runs an HTTP server that accepts webhook requests to queue media conversions. Jobs are persisted to a
+SQLite or PostgreSQL database, workers process them in the background, and a web dashboard provides real-time status.
 
 ## Starting
 
 ```bash
-# Basic (default host/port/workers from sma-ng.yml or schema: 0.0.0.0:8585, 4 workers)
+# Basic: listens on 127.0.0.1:8585 with the worker count from sma-ng.yml (default 4)
 python daemon.py
 
 # Production: all interfaces, multiple workers, API key
@@ -19,109 +20,214 @@ python daemon.py \
   --ffmpeg-dir /usr/local/bin
 ```
 
-Most options can also be set in the `daemon:` section of `sma-ng.yml`. Each setting resolves as
-CLI flag > `sma-ng.yml` > built-in default, so an explicit flag (including `--job-timeout 0`) always
-wins. The daemon reads no runtime environment variables — see [Environment Variables](#environment-variables).
+Each setting resolves in this order: CLI flag, then the `daemon:` section of `sma-ng.yml`, then the built-in default.
+An explicit flag always wins, including `--job-timeout 0`. The daemon reads no `SMA_*` environment variables for its
+runtime configuration; see [Environment Variables](#environment-variables). The database URL (`daemon.db-url`) is read
+only from `sma-ng.yml` and has no CLI flag. The daemon refuses to start when no database URL is configured.
 
-**Additional flags:**
+**Command-line flags:**
 
 | Flag | Default | Description |
-| ------------------------ | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `--smoke-test` | | Run a dry-run option-generation check against all configs then exit. Safe pre-flight before the container is marked healthy. |
-| `--job-timeout SECONDS` | `daemon.job-timeout-seconds` (`7200`) | Kill a conversion's process tree after this many seconds and fail the job (0 = no timeout). See [Job timeout](#job-timeout). |
-| `--heartbeat-interval N` | `daemon.heartbeat-interval` (`30`) | Seconds between PostgreSQL cluster heartbeat updates |
-| `--stale-seconds N` | `daemon.stale-seconds` (`120`) | Seconds without a heartbeat before a node is declared stale and its running jobs are requeued |
-| `--version` | | Print `sma-ng <version> (commit <sha>)` and exit |
+| ------------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `--host HOST` | `127.0.0.1` | Address to bind. Use `0.0.0.0` to listen on every interface. Command-line only; see the note below the table. |
+| `--port PORT` | `8585` | TCP port to listen on. Command-line only; see the note below the table. |
+| `--workers N` | `daemon.workers` (`4`) | Number of worker threads, which is also the number of conversions that can run at the same time. |
+| `-d`, `--daemon-config PATH` | `config/sma-ng.yml` | Path to the `sma-ng.yml` file the daemon loads and watches. |
+| `--logs-dir DIR` | `logs/` | Directory for the per-config log files. |
+| `--ffmpeg-dir DIR` | `daemon.ffmpeg-dir` | Directory holding `ffmpeg` and `ffprobe`, prepended to `PATH` for each conversion. |
+| `--api-key KEY` | `daemon.api-key` | API key that clients must send. Without a key (and without Basic credentials) authentication is disabled. |
+| `--job-timeout SECONDS` | `daemon.job-timeout-seconds` (`7200`) | Kill a conversion's process tree after this many seconds and fail the job (`0` = no timeout). See [Job timeout](#job-timeout). |
+| `--heartbeat-interval N` | `daemon.heartbeat-interval` (`30`) | Seconds between PostgreSQL cluster heartbeat updates. |
+| `--stale-seconds N` | `daemon.stale-seconds` (`120`) | Seconds without a heartbeat before a node is declared stale and its running jobs are requeued. |
+| `--smoke-test` | | Run a dry-run option-generation check against the loaded config, then exit with `0` (pass) or `1` (fail). |
+| `--version` | | Print `sma-ng <version> (commit <sha>)` and exit. |
+
+The `daemon.host` and `daemon.port` keys exist in the schema and in `setup/sma-ng.yml.sample`, but `daemon.py` does not
+read them: the listen address always comes from `--host` and `--port`. The Docker image passes
+`--host 0.0.0.0 --port 8585`.
 
 ---
 
-## Web Dashboard
+## Web Interface
 
-Open `http://localhost:8585/` in a browser (redirects to `/dashboard`). Features:
+The daemon serves four browser pages. Each is an HTML shell that loads its data from the authenticated API, so the
+pages themselves are public and never contain the API key. Every page has a light/dark theme toggle that remembers your
+choice in the browser.
 
-- Real-time job statistics and status
-- Active/waiting job panels with per-worker progress
-- Cluster node status (PostgreSQL mode — includes approval state and last command audit details)
-- Config mapping overview
-- Filterable job history table with requeue/cancel actions
-- Submit Job form with path autocomplete (config prefixes, recent jobs, live filesystem browsing)
-- Job priority controls
-- Log viewer: browse, filter, and live-tail per-config log files
-- Admin node controls for approve/reject/restart/shutdown/delete
-- Header shows the running SMA-NG version (hover for the build commit)
+| Page | Path | Purpose |
+| --------- | -------------------- | ------------------------------------------------------------------------------ |
+| Dashboard | `/` or `/dashboard` | Day-to-day view: submit jobs, watch the queue, read logs |
+| Metrics | `/dashboard/metrics` | Cluster job metrics charts (PostgreSQL only) |
+| Admin | `/admin` | Cluster node management, cluster logs, shared base config, destructive actions |
+| Docs | `/docs` | The operator documentation, rendered from the files shipped in the image |
 
-The docs pages at `/docs` are rendered from the operator docs shipped in the
-image, including the release changelog at `/docs/changelog`; the footer of
-every docs page shows the running version.
+Opening `http://localhost:8585/` redirects to `/dashboard`.
+
+### Dashboard
+
+The dashboard refreshes itself every 5 seconds. From top to bottom it shows:
+
+- **Header.** The running SMA-NG version (hover for the build commit), the node name, the uptime, a health indicator,
+  and links to Metrics, Admin and Docs.
+- **Submit Job.** A path field with autocomplete (configured routing and scan prefixes, recent job paths, and live
+  directory and file suggestions from `/browse`), an optional field for extra `manual.py` arguments such as
+  `-tmdb 603`, and toggle buttons for common flags (Force Convert, Force Re-encode, Same Ext, TV, Movie). The form
+  reports the queued job or the reason the daemon refused the path.
+- **Job Statistics.** Lifetime counts for Total, Pending, Running, Completed and Failed. Clicking a status filters the
+  job table. The counts include jobs that retention or an admin action has deleted; see
+  [Lifetime Job Totals](#lifetime-job-totals).
+- **Metrics summary.** Throughput, average duration, failure rate and compression, with a link to the full Metrics
+  page. It appears only when the daemon uses PostgreSQL.
+- **Workers.** A Local tab with the busy workers and the jobs they are converting, plus the jobs queued behind each
+  config. In cluster mode a Cluster tab lists every node with its status, threads, running and pending jobs, uptime and
+  last-seen time, and offers Restart and Shutdown buttons for online nodes.
+- **Configuration.** The loaded config with its default arguments, status and log, and the `daemon.routing` rules
+  (match prefix, profile and notified services).
+- **Recent Jobs.** A paged table (50 per page) with a path search, a profile filter, a sort selector (newest, oldest,
+  queue priority, profile, status) and status filter buttons. Rows show the profile, status, priority, duration and
+  error. Per-row actions raise or lower the priority of a pending job, requeue a failed job, and open that job's log.
+  Check boxes select jobs for the bulk toolbar (Requeue, Cancel, Delete); Delete asks for confirmation.
+  **Requeue All Failed** requeues every failed job.
+- **Log viewer.** A drawer that opens from a job row or from the configuration table. It filters by minimum level and
+  free text, shows only that job's entries when opened from a job row, and has a live mode that polls for new entries
+  every 3 seconds.
+
+### Metrics page
+
+`/dashboard/metrics` shows throughput, average duration, failure rate and compression for a selectable window (24
+hours, 7 days, 30 days or all time), a Jobs Over Time chart, a Status Distribution chart and per-node throughput. It
+reads `GET /api/metrics`. On a SQLite daemon it shows "Cluster Metrics Unavailable" because metrics need PostgreSQL.
+
+### Admin page
+
+`/admin` manages a cluster. Everything except the destructive actions needs a PostgreSQL database.
+
+- **Cluster Nodes.** Each node's host, version, status, approval state, last command and last-seen time, with Approve,
+  Reject, Drain, Pause, Resume, Restart, Shutdown and Delete actions. See [Node Management](#node-management).
+- **Cluster Logs.** A log table aggregated from every node, filterable by node and level and paged newest first.
+- **Cluster Base Config.** Refresh the shared base config, push this node's `sma-ng.yml` to it (Push from this
+  node), or Save an edited copy.
+  See [Centralised Base Config](#centralised-base-config).
+- **Danger zone.** Remove all failed jobs, remove all offline hosts, or wipe the entire job database. Each action asks
+  for confirmation first. The deleted jobs still count toward the lifetime totals.
+
+### API key dialog
+
+The pages never contain the API key. When the daemon has an API key (`daemon.api-key`) and a request returns `401`, the
+page opens a single in-page dialog asking for the key.
+
+- **Saved once.** The key is stored in the browser's `localStorage` under `sma_api_key` for the daemon's address and
+  sent as `X-API-Key` on every request. Reloads and the other pages do not ask again.
+- **Shared between tabs.** A key saved in another tab or page is picked up and reused without asking again.
+- **Rejected keys.** A key that the daemon rejects is forgotten, and the dialog asks once more with a note that the key
+  was rejected.
+- **Cancel.** Cancel (or Escape) stops asking and shows an "API key required: enter key" button in the corner, which
+  reopens the dialog.
+- **No key configured.** When the daemon has no API key, or the browser is inside `daemon.trusted-networks`,
+  the pages work without a dialog.
+
+To forget a stored key, clear the site data for the daemon's address in your browser.
+
+### Documentation pages
+
+`/docs` renders the Markdown files from `docs/` live, so the pages always match the running version. The sidebar lists
+Overview, Getting Started, Docker Quick Start, Configuration, Daemon Mode, Integrations, Hardware Acceleration,
+Library Audit, Deployment, Cluster Operations, Metrics, Troubleshooting, Migration Guide, Architecture and the
+Changelog (`/docs/changelog`). Open a page at `/docs/<slug>`, for example `/docs/daemon`. Code blocks have a Copy
+button, and Mermaid diagrams are drawn in the browser. The footer shows the running version. The docs pages are public
+and need no API key.
 
 ---
 
 ## API Endpoints
 
+The full request and response schemas are in the [API Reference](openapi.yaml). This table lists every route.
+**Auth** says whether credentials are required: `No` means the route is public, `Yes` means it needs the API key (or
+Basic credentials when `daemon.username` and `daemon.password` are set), and `Partly` means the route is public but
+returns more detail when credentials are supplied.
+
 | Method | Path | Auth | Description |
-| ------ | -------------------------------- | ------ | ----------------------------------------------------------------------- |
-| `GET` | `/` | No | Redirects to `/dashboard` |
-| `GET` | `/dashboard` | No | Web dashboard (HTML shell; prompts for the API key) |
+| ------ | --------------------------------- | ------ | ------------------------------------------------------------------------------------ |
+| `GET` | `/` | No | Redirects (301) to `/dashboard` |
+| `GET` | `/dashboard` | No | Web dashboard (HTML shell) |
 | `GET` | `/dashboard/metrics` | No | Metrics page (HTML shell; its data comes from keyed `/api/metrics`) |
-| `GET` | `/admin` | No | Admin panel (destructive actions) |
-| `GET` | `/health` | Partly | Public: minimal liveness. With a key: jobs, GPU capabilities, fallbacks |
-| `GET` | `/status` | Partly | Public: minimal status. With a key: cluster-wide node and job detail |
-| `GET` | `/docs` | No | Rendered documentation (`/docs/<page>`; includes `/docs/changelog`) |
-| `GET` | `/jobs` | Yes | List jobs. Query: `?status=pending&limit=50&offset=0` |
-| `GET` | `/jobs/<id>` | Yes | Get specific job (includes `kind`, and `progress` when running) |
+| `GET` | `/admin` | No | Admin page (HTML shell) |
+| `GET` | `/docs`, `/docs/<page>` | No | Rendered documentation; `/docs/changelog` shows the release changelog |
+| `GET` | `/favicon.png` | No | Logo image |
+| `GET` | `/health` | Partly | Public: `status`, `version`, `uptime_seconds`, job counts. With a key: node, jobs, GPU |
+| `GET` | `/status` | Partly | Public: `status`, `version`, job counts. With a key: cluster-wide node detail |
+| `GET` | `/metrics` | Yes | Prometheus text (`X-API-Key` or Bearer; Basic works when Basic credentials are set) |
+| `GET` | `/api/metrics` | Yes | Metrics JSON. Query: `?window=24h\|7d\|30d\|all` (PostgreSQL only, else `503`) |
+| `GET` | `/stats` | Yes | Lifetime job counts by status (live plus archived; see Job Retention) |
+| `GET` | `/jobs` | Yes | List jobs. Query: `status`, `config`, `search`, `profile`, `sort`, `limit`, `offset` |
+| `GET` | `/jobs/<id>` | Yes | One job (includes `kind`, and `progress` while running) |
 | `GET` | `/jobs/<id>/output` | Yes | Captured tool output as text. Query: `?offset=<bytes>` (see Job Kinds) |
 | `GET` | `/jobs/<id>/ffmpeg-stderr` | Yes | Stored ffmpeg stderr of a failed conversion, as text |
-| `GET` | `/paths` | Yes | Path roots this daemon serves (routing, scan, audit, path-rewrite from) |
-| `GET` | `/configs` | Yes | Config mappings and status |
-| `GET` | `/metrics` | Yes | Prometheus text (`X-API-Key`/Bearer; Basic needs `daemon.basic-auth`) |
-| `GET` | `/api/metrics` | Yes | Metrics JSON. Query: `?window=24h\|7d\|30d\|all` (PostgreSQL required) |
-| `GET` | `/stats` | Yes | Lifetime job counts by status (live plus archived; see Job Retention) |
+| `GET` | `/paths` | Yes | Path roots this daemon serves (routing, scan, audit and path-rewrite sources) |
+| `GET` | `/configs` | Yes | Loaded config, default arguments, routing rules and job status |
+| `GET` | `/browse` | Yes | List directories and media files inside configured roots. Query: `?path=/dir` |
 | `GET` | `/scan` | Yes | Filter unscanned paths. Query: `?path=/a.mkv&path=/b.mkv` |
-| `GET` | `/browse` | Yes | List filesystem dirs/files within configured paths. Query: `?path=/dir` |
-| `GET` | `/logs` | Yes | List all log files with metadata |
-| `GET` | `/logs/<name>` | Yes | Get log content. Query: `?lines=200&level=ERROR&job_id=42&offset=0` |
-| `GET` | `/logs/<name>/tail` | Yes | Poll for new entries after byte offset. Query: `?offset=<bytes>` |
-| `POST` | `/jobs` | Yes | Submit a job of any kind (convert, preview, repair, audit, rename) |
-| `POST` | `/webhook/generic` | Yes | Submit conversion job (file or directory path) |
-| `POST` | `/convert`, `/` | Yes | Aliases of `/webhook/generic` |
-| `POST` | `/webhook/sonarr` | Yes | Native Sonarr webhook; Download queues, other events go to Autoscan |
-| `POST` | `/webhook/radarr` | Yes | Native Radarr webhook; Download queues, other events go to Autoscan |
-| `POST` | `/cleanup` | Yes | Remove old finished jobs now. Query: `?days=N` (required; 400 without it) |
-| `POST` | `/stats/archive` | Yes | Add a baseline to lifetime job totals. Body: `{"completed": N, "failed": M, "cancelled": K}` |
-| `POST` | `/reload` | Yes | Reload `daemon:` section in `sma-ng.yml` without restarting |
-| `POST` | `/restart` | Yes | Graceful restart. Query: `?node=<id>` for remote node (PostgreSQL) |
-| `POST` | `/shutdown` | Yes | Graceful shutdown. Query: `?node=<id>` for remote node (PostgreSQL) |
-| `POST` | `/jobs/<id>/requeue` | Yes | Requeue a specific failed job |
-| `POST` | `/jobs/<id>/cancel` | Yes | Cancel a pending or running job |
-| `POST` | `/jobs/<id>/priority` | Yes | Set job priority. Body: `{"priority": 10}` |
-| `POST` | `/jobs/requeue` | Yes | Requeue all failed jobs. Query: `?config=...` to filter |
-| `POST` | `/scan/filter` | Yes | Filter unscanned paths (large lists). Body: `{"paths": [...]}` |
-| `POST` | `/scan/record` | Yes | Mark paths as scanned. Body: `{"paths": [...]}` |
+| `GET` | `/logs` | Yes | List log files with metadata |
+| `GET` | `/logs/<name>` | Yes | Log content. Query: `lines`, `level`, `job_id`, `offset` |
+| `GET` | `/logs/<name>/tail` | Yes | Entries after a byte offset. Query: `?offset=<bytes>` (required) |
+| `GET` | `/cluster/logs` | Yes | Aggregated cluster logs. Query: `node_id`, `level`, `limit`, `offset` (PostgreSQL only) |
+| `GET` | `/admin/config` | Yes | Shared cluster base config (PostgreSQL only) |
 | `GET` | `/library/audit` | Yes | List recent audit runs. Query: `?limit=50&offset=0` |
-| `GET` | `/library/audit/<id>` | Yes | Get one audit run with per-node progress |
-| `POST` | `/library/audit` | Yes | Trigger an audit. Body: `{"paths": [...]}` (optional) |
-| `GET` | `/library/findings` | Yes | List findings. Query: `?status=open&kind=ffprobe_failed&limit=50` |
-| `GET` | `/library/findings/<id>` | Yes | Get one finding |
+| `GET` | `/library/audit/<id>` | Yes | One audit run with per-node progress |
+| `GET` | `/library/findings` | Yes | List findings. Query: `status`, `kind`, `path`, `limit`, `offset` |
+| `GET` | `/library/findings/<id>` | Yes | One finding |
+| `POST` | `/jobs` | Yes | Submit a job of any kind (convert, preview, repair, audit, rename) |
+| `POST` | `/webhook/generic` | Yes | Submit a conversion job (file or directory path) |
+| `POST` | `/convert`, `/` | Yes | Aliases of `/webhook/generic` |
+| `POST` | `/webhook/sonarr` | Yes | Native Sonarr webhook. `Download` queues; other events go to Autoscan |
+| `POST` | `/webhook/radarr` | Yes | Native Radarr webhook. `Download` queues; other events go to Autoscan |
+| `POST` | `/jobs/<id>/requeue` | Yes | Requeue one failed job |
+| `POST` | `/jobs/<id>/cancel` | Yes | Cancel a pending or running job |
+| `POST` | `/jobs/<id>/priority` | Yes | Set a pending job's priority. Body: `{"priority": 10}` |
+| `POST` | `/jobs/requeue` | Yes | Requeue all failed jobs. Query: `?config=...` to limit to one config |
+| `POST` | `/jobs/bulk` | Yes | Requeue, cancel or delete many jobs. Body: `{"action": "cancel", "ids": [1, 2]}` |
+| `POST` | `/cleanup` | Yes | Delete finished jobs older than `?days=N` (required; `400` without it) |
+| `POST` | `/stats/archive` | Yes | Add a baseline to the lifetime job totals. Body: `{"completed": N, "failed": M, "cancelled": K}` |
+| `POST` | `/reload` | Yes | Reload `sma-ng.yml` without restarting |
+| `POST` | `/restart` | Yes | Graceful restart. Query: `?node=<id>` targets one node (PostgreSQL) |
+| `POST` | `/shutdown` | Yes | Graceful shutdown. Query: `?node=<id>` targets one node (PostgreSQL) |
+| `POST` | `/scan/filter` | Yes | Filter unscanned paths for large lists. Body: `{"paths": [...]}` |
+| `POST` | `/scan/record` | Yes | Mark paths as scanned. Body: `{"paths": [...]}` |
+| `POST` | `/admin/nodes/<node_id>/<action>` | Yes | Node action: `approve`, `reject`, `drain`, `pause`, `resume`, `restart`, `shutdown`, `delete`, `push-config` |
+| `POST` | `/admin/config` | Yes | Store the shared cluster base config (PostgreSQL only) |
+| `POST` | `/admin/delete-failed` | Yes | Delete every failed job |
+| `POST` | `/admin/delete-offline-nodes` | Yes | Delete every node that is not online |
+| `POST` | `/admin/delete-all-jobs` | Yes | Delete every job |
+| `POST` | `/library/audit` | Yes | Trigger an audit. Body: `{"paths": [...]}` (optional; default `daemon.audit.paths`) |
 | `POST` | `/library/findings/<id>/ack` | Yes | Acknowledge a finding |
 | `POST` | `/library/findings/<id>/dismiss` | Yes | Dismiss a finding |
 | `POST` | `/library/findings/<id>/resolve` | Yes | Mark a finding resolved |
 
-See [Library Audit](library-audit.md) for the distributed-workload model,
-finding kinds, configuration knobs, and auto-fix safety semantics.
+Any other path returns `404 {"error": "Not found"}`.
 
-Node admin API route:
+See [Library Audit](library-audit.md) for the distributed-workload model, finding kinds, configuration knobs, and
+auto-fix safety semantics. The library audit endpoints need the PostgreSQL backend: on SQLite the two `GET` list
+endpoints answer `200` with `"available": false`, and the `POST` endpoints answer `409`.
 
-- `POST /admin/nodes/<node_id>/<action>` where action is one of `approve`, `reject`, `restart`, `shutdown`, `delete`
+`POST /library/audit` reads only `paths` from its body. A `dry_run` field is accepted but ignored: whether findings
+are auto-fixed is set by `daemon.audit.dry_run` (default `true`).
+
+The node actions are described under [Node Management](#node-management). The `delete-*` admin routes and
+`/jobs/bulk` count the deleted finished jobs toward the lifetime totals. Node commands and admin writes record the
+caller from the optional `X-Actor` request header (default `admin-ui` or `api`).
+
+**`GET /jobs` parameters:** `status` is one of `pending`, `running`, `completed`, `failed` or `cancelled`. `search`
+matches part of the path; it ignores `offset` and returns at least 200 rows. `profile` (alias `library`) matches the
+routing profile that queued the job. `sort` is `created` (default, newest first), `created_asc`, `priority`, `profile`
+or `status`; an unknown value falls back to `created`. Rows use an explicit column list that omits `ffmpeg_stderr` and
+the captured `output` (up to 1 MiB each per job). Read them with `GET /jobs/<id>/ffmpeg-stderr` and
+`GET /jobs/<id>/output`. `limit` defaults to `100`, and values above `500` are clamped to `500`.
 
 **Job file sizes:** convert jobs record the source size (`input_size_bytes`) when they start, and the output size
 (`output_size_bytes`) when they complete. Failed jobs keep the source size. `GET /jobs` and `GET /jobs/<id>` also return
 `size_delta_bytes` (output minus source) and `size_change` (`shrunk`, `grew` or `unchanged`); both are `null` until
 the job has both sizes. Other job kinds (preview, repair, audit, rename) record no sizes. The dashboard job table
 shows both sizes in its Size column, with a green ▼ when the file shrank and a red ▲ when it grew.
-
-**`GET /jobs` response size:** rows use an explicit column list that omits `ffmpeg_stderr` and the captured `output`
-(up to 1 MiB each per job). Read them with `GET /jobs/<id>/ffmpeg-stderr` and `GET /jobs/<id>/output`. `limit`
-values above `500` are clamped to `500`.
 
 ---
 
@@ -166,10 +272,31 @@ for any of these:
 A rejected request queues nothing; the daemon logs one line without the rejected value.
 
 Submitted paths (`POST /jobs` and every `/webhook/*` endpoint) are resolved with `realpath` and must lie inside a
-configured media root: a `daemon.routing` match, a scan path, or either end of a path rewrite. A path outside every root,
-including one that reaches outside through `..` or a symlink, is refused with `403`
+configured media root: a `daemon.routing` match, a scan path, or either end of a path rewrite. A path outside every
+root, including one that reaches outside through `..` or a symlink, is refused with `403`
 `Path is outside configured media roots` and queues nothing. A daemon with no roots configured accepts any path.
 Symlinks inside a root that point outside it are therefore refused; submit the real path or add its root.
+
+The JSON body may name the path as `path`, `file` or `input`, and may add `max_retries` (an integer). A directory path
+queues one job per media file. An optional `X-SMA-Request-Source` header labels the request in the Prometheus job
+counters; an unrecognised value is recorded as `webhook` (`cli` for `POST /jobs`).
+
+**Responses.** The generic webhook, `/convert` and `POST /jobs` (for `convert`) answer with these status codes:
+
+| Code | Meaning |
+| ---- | ------- |
+| `202` | Queued. A file returns `job_id`, `path`, `config`, `profile`, `log_file`, `config_busy` and `pending_jobs`. A directory returns the `queued`, `duplicates` and `skipped` lists with their counts. |
+| `200` | Not queued: `{"status": "duplicate"}` (already pending or running), `{"status": "skipped", "reason": ...}` (`same_as_output_extension`, `recycle_bin` or `recently_completed`), or `{"status": "empty"}` (a directory without media files). |
+| `400` | Invalid body, a forbidden argument, a path that does not exist or lies in a recycle bin, a `config` that is not the daemon's own, or `reason: no_routing_match` under `strict-routing`. |
+| `401` | Missing or invalid credentials. |
+| `403` | The path is outside every configured media root. |
+| `413` | The request body is larger than 1 MiB. |
+| `500` | An unexpected error, such as a failing routing-profile lookup. Sonarr and Radarr retry on it. |
+
+The native `/webhook/sonarr` and `/webhook/radarr` endpoints use the same codes. They also answer `200` to a `Test`
+event, and they forward every event other than `Download` to the matching `services.autoscan` instances (`200` with
+`status` `forwarded` or `ignored`, or `502` when every forward failed). A series or movie tag named
+`sma-profile-<name>` selects the profile `<name>` for that title.
 
 ---
 
@@ -207,9 +334,9 @@ abbreviations (`--conf`, `--inp=x`, `--job`) and bundles with the tool's own val
 checked per kind: `-ac` for `manual.py` kinds (`convert`, `preview`, `audit`), `-nc`, `-vc` or `-nvc` for `repair`,
 and `-vc` for `rename`. `-nc` stays allowed for `manual.py` kinds, where it is its own option.
 `convert` behaves exactly like `POST /webhook/generic`: default args, the same-extension skip and per-file expansion
-apply only to it. A path and kind that are already pending or running return `200 {"status": "duplicate"}`; a new job returns
-`202 {"status": "queued", "job_id": ..., "kind": ...}`. Jobs on the same config still run one at a time, so a queued
-preview waits for the running job on its config, then goes first.
+apply only to it. A path and kind that are already pending or running return `200 {"status": "duplicate"}`; a new
+job returns `202 {"status": "queued", "job_id": ..., "kind": ...}`. A preview defaults to priority `100`, so it
+starts before other pending jobs as soon as a worker is free.
 
 **Telemetry.** Before converting, `manual.py` logs a single-line `sma.job.summary` JSON event with the source video and
 audio facts and duration; after converting it logs one for the output. The worker stores them on the job as
@@ -244,10 +371,14 @@ it, `POST /jobs` with a kind other than `convert` returns `409` naming the node:
 
 ## Authentication
 
-API key priority order:
+The daemon resolves the API key in this order:
 
-1. `--api-key` CLI argument
-2. `Daemon.api-key` in `sma-ng.yml`
+1. The `--api-key` CLI argument.
+2. `daemon.api-key` in `sma-ng.yml`.
+3. No key: authentication is disabled (suitable behind a reverse proxy).
+
+Alternatively, set `daemon.username` and `daemon.password` to accept HTTP Basic credentials. Basic credentials are
+accepted on every route that accepts the API key. When both are configured, either one authenticates a request.
 
 ```mermaid
 flowchart LR
@@ -267,8 +398,19 @@ curl -H "X-API-Key: SECRET" ...
 curl -H "Authorization: Bearer SECRET" ...
 ```
 
-Public endpoints (no auth required): `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, `/health`, `/status`,
-`/docs`, `/favicon.png`
+Public endpoints (no credentials needed): `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, `/docs` and `/docs/*`,
+`/favicon.png`, `/health` and `/status`. Every other route needs credentials and answers `401` without them. The HTML
+pages are public because they hold no data; see [API key dialog](#api-key-dialog) for how the browser pages ask for the
+key.
+
+`/health` and `/status` are public but minimal for callers without valid credentials. A request with no key, or with a
+wrong key, receives the minimal view and not a `401`, so a Docker `HEALTHCHECK` can probe them keylessly:
+
+- `/health` returns `status`, `version`, `uptime_seconds` and aggregate `jobs` counts.
+- `/status` returns `status`, `version` and aggregate `jobs` counts.
+
+Node ids, hosts, `commit`, worker counts, active and waiting jobs, media paths and hardware details are returned only
+with a valid API key (or Basic credentials). `/metrics` needs the same credentials because its series carry the node id.
 
 Trusted networks: `daemon.trusted-networks` lists client networks (CIDR or single address, IPv4 or IPv6) whose
 requests pass authentication without a key or Basic credentials. The check uses the TCP peer address only;
@@ -297,19 +439,9 @@ Trust comes with three caveats:
 - `0.0.0.0/0` or `::/0` turns authentication off for everyone. The daemon start log shows how many trusted
   networks are exempt.
 
-The dashboard, admin, and metrics pages are only HTML shells. The API key is never written into the page: when the
-daemon has an API key configured, the first `401` opens one in-page dialog asking for it (`daemon.api-key` in
-`sma-ng.yml`). The key is kept in the browser's `localStorage` for this daemon's address, so reloads and other pages
-do not ask again, and is sent as `X-API-Key` on every request. A rejected key is forgotten and the dialog asks once
-more. **Cancel** stops asking; an "API key required" button in the corner reopens the dialog. When no key is
-configured, or the browser is inside `daemon.trusted-networks`, the pages work without a dialog. To forget a stored
-key, clear the site data for the daemon's address.
-
-`/status` is public but minimal for unauthenticated callers (`status`, `version`, and aggregate `jobs` counts). Node
-ids, hosts, active jobs, and paths are only returned when a valid API key (or Basic credentials) is supplied.
-
-`/browse` only lists paths inside the configured routing and scan roots (symlinks are resolved first). Parent
-directories of a root can be listed to navigate down, but show only the entries leading to a root.
+`/browse` only lists paths inside the configured routing and scan roots (symlinks are resolved first). A path outside
+them returns `403`. Parent directories of a root can be listed to navigate down, but show only the entries leading to a
+root.
 
 Request limits: bodies larger than 1 MiB are rejected with `413`; non-integer or negative `limit`, `offset`, `days`,
 `lines`, or `Content-Length` values return `400` with a JSON error.
@@ -395,37 +527,40 @@ auto-profile selection happens for one-shot conversions. Pass
 
 ### Top-Level `daemon` Keys
 
+Every key uses kebab-case in `sma-ng.yml`. Each daemon setting resolves as CLI flag, then `sma-ng.yml`, then the default
+shown here.
+
 | Key | Description |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `host` / `port` / `workers` | HTTP listen address and worker pool size |
-| `api-key` | API authentication key |
-| `username` / `password` | Optional HTTP-basic credentials for the web dashboard |
+| `host` / `port` / `workers` | HTTP listen address and worker pool size. `workers` defaults to `4` and the `--workers` flag overrides it. The daemon does not read `host` and `port`; use `--host` and `--port` (see [Starting](#starting)). |
+| `api-key` | API authentication key (default: none, authentication disabled). The `--api-key` flag overrides it. |
+| `username` / `password` | Optional HTTP Basic credentials, accepted on the same routes as the API key (default: empty). |
+| `db-url` | SQLite (`sqlite:////data/sma-ng.db`) or PostgreSQL URL for job persistence. Required; the daemon refuses to start without it. It is read only from `sma-ng.yml`. |
 | `trusted-networks` | Client networks (CIDR or address) exempt from the API key, by TCP peer address (default: `[]`). See [Authentication](#authentication) |
-| `db-url` | SQLite or PostgreSQL URL for daemon job persistence. This value is loaded only from `sma-ng.yml`. |
 | `ffmpeg-dir` | Directory containing `ffmpeg`/`ffprobe` binaries, prepended to PATH for each conversion |
 | `node-id` | Stable identity in cluster mode (auto-generated UUID on first start; override for human-readable identity) |
-| `media-extensions` | File extensions considered media for directory scanning and `/browse` |
+| `media-extensions` | File extensions treated as media for directory submission, scanning and `/browse` (default: `.mkv`, `.m4v`, `.avi`, `.mov`, `.wmv`, `.ts`, `.flv`, `.webm`) |
 | `path-rewrites` | Prefix substitutions applied to incoming webhook paths before routing; overlapping rewrites are matched longest-prefix-first |
 | `scan-paths` | Directories for scheduled background scanning |
 | `routing` | Path-to-profile / path-to-services mapping (see above) |
 | `strict-routing` | Refuse jobs whose paths don't match any `routing` rule (default `false`; webhook gets HTTP 400, scanner skips the file) |
 | `default-args` | Args prepended to every conversion regardless of which routing rule matched |
-| `smoke-test` | Run option-generation dry-run against the loaded config at startup. Exits 1 on failure. |
+| `smoke-test` | Run an option-generation dry run against the loaded config at startup, then continue (default `true`). The daemon exits with status 1 when it fails. |
 | `job-timeout-seconds` | Maximum seconds a conversion may run before its process tree is killed and the job failed (0 = no timeout). CLI `--job-timeout` overrides. |
 | `shutdown-grace-seconds` | Longest wait for in-flight jobs on shutdown or restart before they are killed and requeued (default `100`; `0` = job timeout + 5 minutes, or 24 hours with no job timeout). Under Docker keep it below `STOP_GRACE_PERIOD` (2m); `docker stop` drains for the smaller of the two. `POST /shutdown`, `POST /restart` and SIGHUP wait the full grace. |
 | `heartbeat-interval` | Seconds between cluster heartbeat updates (PostgreSQL only, default `30`). CLI `--heartbeat-interval` overrides. |
 | `stale-seconds` | Seconds without a heartbeat before a node is declared stale and its running jobs requeued (PostgreSQL only, default `120`). CLI `--stale-seconds` overrides. |
-| `progress-log-interval` | Seconds between progress log lines for in-flight conversions |
+| `progress-log-interval` | Seconds between progress log lines for in-flight conversions (default `30`) |
 | `recycle-bin-max-age-days` | Delete recycle-bin media files older than this many days (default: `30`, `0` = disabled) |
 | `recycle-bin-min-free-gb` | Delete oldest recycle-bin files when free space on the mount drops below this many GiB (default: `50`, `0` = disabled) |
 | `recycle-bin-interval-seconds` | Seconds between recycle-bin cleanup sweeps (default: `300`, minimum `60`) |
 | `job-dedupe-window-seconds` | Skip a path whose job completed within this many seconds, for the scanner and webhooks alike (default: `21600`, `0` = disabled). See [Duplicate Suppression](#duplicate-suppression). |
 | `job-retention-days` | Opt-in: delete completed, failed and cancelled jobs older than this many days (default: `0` = keep forever; a positive value permanently deletes job rows; lifetime `/stats` totals are kept) |
-| `log-ttl-days` | Cluster-mode: retention for log entries in PostgreSQL |
-| `node-expiry-days` | Cluster-mode: hard-delete offline nodes after this many days (`0` = disabled) |
-| `log-archive-dir` | Cluster-mode: directory for gzipped JSONL archive of cluster logs |
-| `log-archive-after-days` | Cluster-mode: move logs older than this many days from DB to `log-archive-dir` |
-| `log-delete-after-days` | Cluster-mode: prune archived log files older than this many days |
+| `log-ttl-days` | Cluster mode: days to keep log entries in PostgreSQL (default `30`, `0` = never delete) |
+| `node-expiry-days` | Cluster mode: hard-delete offline nodes after this many days (default `7`, `0` = disabled) |
+| `log-archive-dir` | Cluster mode: directory for the gzipped JSONL archive of cluster logs (default: empty, archiving disabled) |
+| `log-archive-after-days` | Cluster mode: move logs older than this many days from the database to `log-archive-dir` (default `7`; `0` = disabled) |
+| `log-delete-after-days` | Cluster mode: delete archived log files older than this many days (default `30`; `0` = keep forever) |
 | `concurrency-budget` | Per-node encoder-capacity budget summed over running jobs' `concurrency-cost` (default: `workers`; see [Configuration](configuration.md#profilesnameconcurrency-cost--daemonconcurrency-budget)) |
 | `storage-janitor-interval-seconds` | Seconds between storage-janitor sweeps of leftover `*.sma` / `*.smatmp` / zero-byte `*.mp4` in `output-directory` (default: `900`; `<=0` or `null` disables) |
 | `storage-janitor-max-age-seconds` | Minimum age in seconds before the janitor deletes a leftover file (default: `21600`; `<=0` or `null` disables) |
@@ -461,7 +596,7 @@ Without credentials, `/health` returns only a minimal liveness view: `status`, `
 count and hardware fields need a valid key. When no API key or basic auth is configured every caller is
 authenticated and gets the full view. `/metrics` requires the same credentials because its series carry the node
 id; point Prometheus at it with `authorization` (Bearer) in the scrape config, or `basic_auth` when
-`daemon.basic-auth` is configured (an API-key-only daemon accepts only Bearer or `X-API-Key`).
+`daemon.username` and `daemon.password` are configured (an API-key-only daemon accepts only Bearer or `X-API-Key`).
 
 Both `/health` (with a key) and `/status` report the running build in two top-level fields:
 
@@ -531,7 +666,9 @@ or has no stored stderr (e.g. it failed before ffmpeg ran).
 
 ## Log Viewer API
 
-Log files can be read programmatically via the API or browsed in the dashboard's log viewer drawer.
+Log files can be read programmatically via the API or browsed in the dashboard's log viewer drawer. A log name is
+matched against the `.log` files in the logs directory. An unknown name, or a file that resolves outside the logs
+directory, returns `404 {"error": "Log not found"}`.
 
 ### List log files
 
@@ -597,7 +734,9 @@ instead of only the last lines, so jobs that scrolled out of the tail still retu
 curl -H "X-API-Key: SECRET" "http://localhost:8585/logs/sma-ng/tail?offset=51200"
 ```
 
-Use the `file_size` from each response as the `offset` for the next request. The dashboard log viewer uses this automatically in live mode.
+Use the `file_size` from each response as the `offset` for the next request. The `offset` parameter is required; a
+request without it returns `400`. If the offset is larger than the file (the log rotated), reading restarts at the
+beginning. The dashboard log viewer uses this automatically in live mode.
 
 ---
 
@@ -612,7 +751,8 @@ curl -X POST http://localhost:8585/jobs/42/priority \
   -d '{"priority": 10}'
 ```
 
-Higher numbers = higher priority. Pending jobs only.
+Higher numbers run sooner. Only pending jobs can change priority; any other job returns `409`, and a missing `priority`
+or a non-integer value returns `400`. The dashboard has buttons that raise or lower a pending job's priority.
 
 ---
 
@@ -664,9 +804,10 @@ bash scripts/sma-scan.sh /mnt/unionfs/Media/Movies --dry-run
 
 ## Duplicate Suppression
 
-The scanner and the webhooks (`/webhook`, `/webhook/generic`, `/webhook/sonarr`, `/webhook/radarr`, `/queue`) share
-one queue path, so a file is judged the same way however it arrives. `POST /jobs` only normalises paths and skips
-pending or running duplicates of the same kind; it ignores the completion window and the skip rules below:
+The scanner, the webhooks (`/webhook/generic`, `/convert`, `/webhook/sonarr`, `/webhook/radarr`) and `POST /jobs` with
+kind `convert` share one queue path, so a file is judged the same way however it arrives. `POST /jobs` with another
+kind only normalises the path and skips a pending or running job of the same kind; it ignores the completion window and
+the skip rules below:
 
 - Paths are normalised (repeated separators, `.` and `..` segments, trailing slash) before the duplicate check, so
   `/media//tv/./ep1.mkv` and `/media/tv/ep1.mkv` are the same file.
@@ -735,6 +876,21 @@ Behaviour notes:
   every deferral so capacity pressure is alertable.
 - CLI users (`manual.py`) get a loud failure instead of a deferral: the new `InsufficientOutputSpace` exception exits
   with status `75` (sysexits `EX_TEMPFAIL`).
+
+## Storage management — janitor
+
+While the daemon runs, a storage janitor periodically sweeps `base.converter.output-directory` for leftovers of
+interrupted conversions: files with the configured temporary extension (`.sma`), `*.smatmp` atomic-copy partials and
+zero-byte `*.mp4` files. It deletes only files older than `storage-janitor-max-age-seconds` and logs a single-line
+summary of what it freed.
+
+| Key | Default | Meaning |
+| ---------------------------------- | ------- | ------------------------------------------------------------------ |
+| `storage-janitor-interval-seconds` | `900` | Seconds between sweeps. `0`, a negative number or `null` disables the janitor. |
+| `storage-janitor-max-age-seconds` | `21600` | Minimum file age before deletion. `0`, a negative number or `null` disables the janitor. |
+
+A configuration reload restarts the janitor with the new values. The output-directory capacity gauges are exported
+whether or not the janitor runs; see [Metrics](metrics.md).
 
 ## Storage management — output-directory clear on start
 
@@ -818,12 +974,16 @@ node, or from the admin UI on a different node, stops the local conversion withi
 Jobs are stored in the SQLite or PostgreSQL database configured by `db-url` in the `daemon:` section in `sma-ng.yml`. The database provides restart recovery, job history, cluster coordination, and deduplication across nodes.
 
 ```bash
-curl http://localhost:8585/stats
-# Returns: {"pending": 3, "running": 1, "completed": 150, "failed": 2, "total": 156}
+curl -H "X-API-Key: SECRET" http://localhost:8585/stats
+# Returns: {"pending": 3, "running": 1, "completed": 150, "failed": 2, "cancelled": 0, "total": 156}
 
-curl "http://localhost:8585/jobs?status=pending"
-curl -X POST "http://localhost:8585/cleanup?days=7"
+curl -H "X-API-Key: SECRET" "http://localhost:8585/jobs?status=pending"
+curl -H "X-API-Key: SECRET" -X POST "http://localhost:8585/cleanup?days=7"
 ```
+
+Job rows older than the retention window are not deleted unless you opt in; see [Job Retention](#job-retention).
+A job is identified by its normalised path: submitting the same path again while a job for it is pending or running
+returns the existing job instead of queuing a second one (see [Duplicate Suppression](#duplicate-suppression)).
 
 ### Job Retention
 
@@ -864,13 +1024,17 @@ curl -X POST http://localhost:8585/stats/archive \
 # Returns: {"added": {...}, "stats": {"completed": ..., "total": ...}}
 ```
 
-**Database schema:**
+**Database tables:** the daemon creates and migrates these tables itself.
 
-```sql
-jobs(id, path, config, args, status, priority, worker_id, node_id, error, created_at, started_at, completed_at)
-scanned_files(path, scanned_at)
-job_stats_archive(status, count)
-```
+| Table | Holds |
+| ------------------- | ------------------------------------------------------------------------------------ |
+| `jobs` | Every job with its kind, status, priority, timings, telemetry and captured output |
+| `scanned_files` | Paths the scheduled scanner has handled; never pruned |
+| `job_stats_archive` | Per-status counts of deleted finished jobs (lifetime totals) |
+| `cluster_nodes` | Node registry, approval state and heartbeats (PostgreSQL) |
+| `node_commands` | Audit trail of drain, pause, restart and shutdown commands (PostgreSQL) |
+| `logs` | Cluster-wide log entries (PostgreSQL) |
+| `cluster_config` | Shared base config pushed from the admin page (PostgreSQL) |
 
 ---
 
@@ -899,12 +1063,14 @@ node twice.
 
 **Cluster status:** The authenticated `/status` endpoint returns all nodes with their active jobs, worker count, uptime, and last-seen time. The dashboard shows this as a Cluster Nodes panel.
 
+### Node approval
+
 Node approval is enforced in distributed mode:
 
 - New nodes start as `pending` and do not claim jobs.
-- Admin users can approve or reject nodes from `/admin` (or the node admin API route).
+- Operators can approve or reject nodes from the admin page or with `POST /admin/nodes/<node_id>/approve` and `reject`.
 - Rejected and pending nodes continue heartbeating but cannot process media.
-- Approved nodes can receive queued restart/shutdown commands, recorded with request metadata.
+- Approved nodes can receive queued drain, pause, resume, restart and shutdown commands, recorded with request metadata.
 
 ```mermaid
 graph LR
@@ -945,9 +1111,15 @@ Reload daemon config without restarting the daemon or interrupting active conver
 curl -X POST http://localhost:8585/reload -H "X-API-Key: SECRET"
 ```
 
-Reloaded immediately: `routing`, `path-rewrites`, `scan-paths`, `api-key`, `media-extensions`, `default-args`, `ffmpeg-dir`, `job-timeout-seconds`, `progress-log-interval`.
+The endpoint answers `200 {"status": "reloading"}` at once and reloads in the background.
 
-Not reloaded (require full restart): `--host`, `--port`, `--workers`.
+Reloaded immediately: `routing`, `path-rewrites`, `scan-paths`, `api-key`, `username`, `password`, `media-extensions`,
+`default-args`, `strict-routing`, `ffmpeg-dir`, `job-timeout-seconds`, `progress-log-interval`, the recycle-bin
+settings, the storage janitor settings and the `audit` block. A key that you set with a CLI flag (`--api-key`,
+`--ffmpeg-dir`) keeps the flag's value.
+
+Not reloaded (require a full restart): `--host`, `--port`, `--workers`, `db-url`, and the heartbeat and stale
+intervals.
 
 ### Auto-reload on file change
 
@@ -970,8 +1142,8 @@ it waits up to `shutdown-grace-seconds` (default `100`, deliberately below the c
 `stop_grace_period` of 2 minutes so the requeue happens before Docker's SIGKILL). Set it to `0` to wait up to the
 job timeout plus 5 minutes instead (24 hours when `job-timeout-seconds` is `0`). At that deadline any conversion
 still running is killed and its job is returned to `pending` (no retry used, no failure recorded); `jobs.error`
-keeps the reason, for example `Interrupted by SIGTERM (exit code -15); requeued`. This is a behaviour change:
-in-flight jobs are now cut at the grace period and requeued (`0` restores the old bound). `POST /shutdown`,
+keeps the reason, for example `Interrupted by SIGTERM (exit code -15); requeued`. In-flight jobs are
+therefore cut at the grace period and requeued. `POST /shutdown`,
 `POST /restart` and SIGHUP wait the full grace; under `docker stop` the drain also ends at Docker's
 `STOP_GRACE_PERIOD`, whichever comes first. A conversion that dies from SIGTERM or SIGINT (exit code `-15` or `-2`,
 or `143` or `130` when `manual.py` exits on the signal itself), or ends while the worker is stopping, is requeued
@@ -995,13 +1167,15 @@ curl -X POST http://localhost:8585/restart -H "X-API-Key: SECRET"
 kill -HUP $(pgrep -f "python daemon.py")
 ```
 
-All CLI flags (`--host`, `--port`, `--workers`, etc.) are preserved across restart. No running jobs are reset to pending.
+All CLI flags (`--host`, `--port`, `--workers`, etc.) are preserved across restart. No running jobs are reset to
+pending.
 
 ---
 
 ## Environment Variables
 
-The daemon process itself reads no `SMA_*` environment variables for runtime configuration. Use CLI flags for process-level options and `sma-ng.yml` for persistent daemon settings.
+The daemon process itself reads no `SMA_*` environment variables for runtime configuration. Use CLI flags for
+process-level options and `sma-ng.yml` for persistent daemon settings.
 
 The one exception lives in the Docker image, not the daemon: the image's CMD shim translates `SMA_WORKERS` into the `--workers` flag (see [Concurrency](#concurrency) and `setup/daemon.env.sample`). `SMA_GIT_SHA` is a build-time label only. Everything else is configured in `sma-ng.yml`.
 
@@ -1037,19 +1211,19 @@ the same file simultaneously.
 
 ### Node Management
 
-Open any node's admin UI (`/admin`) and select the **Cluster** tab to manage all nodes from
-a single view.
+Open any node's admin page (`/admin`) to manage all nodes from the Cluster Nodes table.
 
 **Node grid columns:**
 
 | Column | Description |
-| -------------- | ------------------------------------------------------------------------------------- |
-| Hostname | Reported hostname of the node |
-| Hardware accel | Detected GPU backend (`qsv`, `nvenc`, `vaapi`, `videotoolbox`, or blank for software) |
+| ------------ | ------------------------------------------------------------------------------------- |
+| Node | Node name and node id |
+| Host | Address the node reported |
 | Version | Installed `sma-ng` package version |
 | Status | Current node status (see below) |
-| Last heartbeat | Time of the most recent heartbeat |
-| Uptime | Time since the node started |
+| Approval | `pending`, `approved` or `rejected` (see [Node approval](#node-approval)) |
+| Last Command | The most recent command sent to the node |
+| Last Seen | Time of the most recent heartbeat |
 
 **Node status values:**
 
@@ -1076,7 +1250,8 @@ The default heartbeat interval is 30 seconds (`--heartbeat-interval`). Commands 
 and their status (`pending` → `executing` → `done` / `failed`) is recorded in the `node_commands`
 table for auditability.
 
-Remote commands can also be issued via the API:
+Remote commands can also be issued via the API. The `approve`, `reject`, `delete` and `push-config` actions work the
+same way:
 
 ```bash
 # Drain a specific node
@@ -1088,6 +1263,11 @@ curl -X POST "http://localhost:8585/admin/nodes/media-server-2/pause" -H "X-API-
 # Resume a node
 curl -X POST "http://localhost:8585/admin/nodes/media-server-2/resume" -H "X-API-Key: SECRET"
 ```
+
+`approve` and `reject` accept an optional JSON body `{"note": "..."}` and answer `200`. `drain`, `pause`, `resume`,
+`restart` and `shutdown` answer `202` with `{"status": "<action>_requested", "nodes": [...]}`. `delete` answers `200`.
+`push-config` stores this daemon's config as the shared base config and answers `200` (`503` when no config file is
+loaded). An unknown node returns `404` and an unknown action returns `404`.
 
 Or, from your operator workstation, via mise wrappers that target each
 host's local daemon (uses the host key as `node_id`):
@@ -1105,8 +1285,8 @@ zero-loss upgrade, recover a stale node — see
 
 ### Cluster Log Viewer
 
-All nodes write log entries to the shared `logs` PostgreSQL table. The admin UI Cluster tab
-includes a unified log viewer that aggregates entries from every node.
+All nodes write log entries to the shared `logs` PostgreSQL table. The Cluster Logs section of the admin page
+aggregates entries from every node.
 
 Filter controls:
 
@@ -1127,6 +1307,9 @@ curl -H "X-API-Key: SECRET" "http://localhost:8585/cluster/logs?node_id=media-se
 # Paginate
 curl -H "X-API-Key: SECRET" "http://localhost:8585/cluster/logs?limit=50&offset=100"
 ```
+
+The response is `{"logs": [...], "total": N}` with `total` the number of entries returned. `limit` defaults to `100`
+and is capped at `500`. On a SQLite daemon the endpoint answers `503`.
 
 **Log retention:**
 
@@ -1152,9 +1335,9 @@ database so every node uses consistent defaults without duplicating `sma-ng.yml`
 
 **Push from the admin UI:**
 
-Open the **Cluster** tab in the admin UI. Click **Push config from this node** to write the
+Open the Cluster Base Config section of the admin page and click **Push from this node** to write the
 current node's `sma-ng.yml` to the database (secrets stripped). All nodes will pick it up on
-their next config reload or heartbeat tick.
+their next config reload or heartbeat tick. **Refresh** reloads the stored copy and **Save** writes your edits.
 
 **Read/write via API:**
 
@@ -1168,8 +1351,9 @@ curl -X POST -H "X-API-Key: SECRET" -H "Content-Type: application/json" \
   http://localhost:8585/admin/config
 ```
 
-The `GET /admin/config` endpoint returns `{"config": {...}}` as a parsed dict or `null` when
-no cluster config has been stored yet. `POST /admin/config` accepts the same shape.
+`GET /admin/config` returns `{"config": {...}}`, with an empty object when no cluster config has been stored yet.
+`POST /admin/config` accepts the same shape (a bare object is also accepted), strips the secrets and answers
+`{"status": "saved"}`. Both answer `503` on a SQLite daemon.
 
 **Merge semantics:**
 
@@ -1189,9 +1373,9 @@ Configure the expiry threshold in `sma-ng.yml`:
 
 ```yaml
 daemon:
-  # Days after which offline nodes are hard-deleted from the registry.
+  # Days after which offline nodes are hard-deleted from the registry (default 7).
   # Set to 0 to disable automatic node expiry.
-  node-expiry-days: 0
+  node-expiry-days: 7
 ```
 
 When a node's `last_seen` timestamp is older than `node-expiry-days`, the node row and all
@@ -1260,8 +1444,8 @@ Add these fields to the `daemon:` section of `sma-ng.yml`:
 | `daemon.heartbeat-interval` | `30` | Seconds between heartbeat updates. CLI `--heartbeat-interval` overrides. |
 | `daemon.stale-seconds` | `120` | Seconds without a heartbeat before a node is declared stale and its jobs requeued. CLI `--stale-seconds` overrides. |
 | `daemon.log-ttl-days` | `30` | Days to retain cluster log entries in PostgreSQL. Set to `0` to disable TTL cleanup. |
-| `daemon.node-expiry-days` | `0` | Days after which offline nodes are hard-deleted. Set to `0` to disable automatic expiry. |
-| `daemon.log-archive-dir` | `""` (disabled) | Filesystem path for gzipped JSONL log archives. Set to `null` to disable archival. |
+| `daemon.node-expiry-days` | `7` | Days after which offline nodes are hard-deleted. Set to `0` to disable automatic expiry. |
+| `daemon.log-archive-dir` | `""` (disabled) | Filesystem path for gzipped JSONL log archives. Leave it empty to disable archival. |
 | `daemon.log-archive-after-days` | `7` | Move DB log rows older than this many days to `log-archive-dir`. Set to `0` to disable archival. |
 | `daemon.log-delete-after-days` | `30` | Delete archive files older than this many days from `log-archive-dir`. Set to `0` to keep archives indefinitely. |
 
@@ -1274,14 +1458,14 @@ daemon:
   log-ttl-days: 30
   # Days after which offline nodes are hard-deleted from the registry.
   # Set to 0 to disable automatic node expiry.
-  node-expiry-days: 0
+  node-expiry-days: 7
   # Directory for archived cluster log files (gzipped JSONL, one per node per day).
-  # Set to null to disable log archival.
-  log-archive-dir: null
+  # Leave empty to disable log archival.
+  log-archive-dir: ''
   # Move cluster logs older than this many days from DB to log-archive-dir.
   # Set to 0 to disable archival (logs are deleted per log-ttl-days instead).
-  log-archive-after-days: 0
+  log-archive-after-days: 7
   # Delete archived log files older than this many days from log-archive-dir.
   # Set to 0 to disable archive file pruning.
-  log-delete-after-days: 0
+  log-delete-after-days: 30
 ```
