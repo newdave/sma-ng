@@ -617,6 +617,7 @@
                             <th class="pb-2 pr-3 font-medium">Status</th>
                             <th class="pb-2 pr-3 font-medium">Created</th>
                             <th class="pb-2 pr-3 font-medium">Duration</th>
+                            <th class="pb-2 pr-3 font-medium">Size</th>
                             <th class="pb-2 font-medium"></th>
                         </tr>
                     </thead>
@@ -661,6 +662,17 @@
                                 </td>
                                 <td class="py-2 pr-3 text-gray-500 dark:text-gray-500 text-xs" x-text="fmtTime(j.created_at)"></td>
                                 <td class="py-2 pr-3 text-gray-500 dark:text-gray-500 text-xs" x-text="fmtDuration(j)"></td>
+                                <td class="py-2 pr-3 text-xs whitespace-nowrap">
+                                    <span x-show="j.input_size_bytes == null" class="text-gray-400 dark:text-gray-600">—</span>
+                                    <span x-show="j.input_size_bytes != null" class="text-gray-500 dark:text-gray-500"
+                                        :title="'Source: ' + fmtBytes(j.input_size_bytes) + (j.output_size_bytes != null ? '  •  Output: ' + fmtBytes(j.output_size_bytes) : '')"
+                                        x-text="fmtBytes(j.input_size_bytes) + (j.output_size_bytes != null ? ' → ' + fmtBytes(j.output_size_bytes) : '')"></span>
+                                    <span x-show="j.size_change"
+                                        class="ml-1 px-1.5 py-0.5 rounded font-mono"
+                                        :class="{'shrunk':'bg-green-900 text-green-300','grew':'bg-red-900 text-red-300'}[j.size_change] || 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'"
+                                        :title="j.size_change === 'shrunk' ? 'Saved ' + fmtBytes(-j.size_delta_bytes) : j.size_change === 'grew' ? 'Grew by ' + fmtBytes(j.size_delta_bytes) : 'Same size'"
+                                        x-text="fmtSizeChange(j)"></span>
+                                </td>
                                 <td class="py-2 text-xs">
                                     <div class="flex items-center gap-1">
                                         <!-- Priority controls — pending jobs only -->
@@ -690,7 +702,7 @@
                         </template>
                         <template x-if="jobs.length === 0">
                             <tr>
-                                <td colspan="9" class="py-8 text-center text-gray-500 dark:text-gray-500 text-sm"
+                                <td colspan="10" class="py-8 text-center text-gray-500 dark:text-gray-500 text-sm"
                                     x-text="searchQuery.trim() ? 'No jobs match \u201c' + searchQuery.trim() + '\u201d' : 'No jobs found'">
                                 </td>
                             </tr>
@@ -1247,6 +1259,19 @@
                     if (s < 60) return s + 's';
                     if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
                     return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+                },
+                fmtBytes(n) {
+                    if (n == null) return '-';
+                    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+                    let v = Math.abs(n), i = 0;
+                    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+                    return (n < 0 ? '-' : '') + (i === 0 ? v : v.toFixed(v < 10 ? 2 : 1)) + ' ' + units[i];
+                },
+                fmtSizeChange(j) {
+                    if (!j.size_change) return '';
+                    if (j.size_change === 'unchanged' || !j.input_size_bytes) return '=';
+                    const pct = Math.round(j.size_delta_bytes / j.input_size_bytes * 100);
+                    return (j.size_change === 'shrunk' ? '▼ ' : '▲ +') + pct + '%';
                 },
                 fmtUptime(s) {
                     if (s == null) return '';

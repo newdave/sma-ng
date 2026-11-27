@@ -8,7 +8,8 @@ info:
     requires it except the public ones: `/`, `/dashboard`, `/dashboard/metrics`, `/admin`, `/docs` and
     `/docs/{page}`, `/favicon.png`, `/health` and `/status`. `/health` and `/status` answer without credentials
     with a minimal view that hides node ids and job paths. Send the key as `X-API-Key: <key>` or
-    `Authorization: Bearer <key>`.
+    `Authorization: Bearer <key>`. Clients whose TCP peer address lies inside
+    `daemon.trusted-networks` are exempt from the key.
 
     Request bodies larger than 1 MiB are rejected with `413`. A non-integer or negative `limit`, `offset`, `days`
     or `lines` value returns `400`. Any unknown path returns `404`.
@@ -163,6 +164,26 @@ components:
           type: string
           nullable: true
           description: Video encoder (codec name) that produced the output, after any fallback swap
+        input_size_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Source file size in bytes, recorded when a convert job starts (kept on completed and failed jobs)
+        output_size_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Output file size in bytes, recorded when a convert job completes
+        size_delta_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: output_size_bytes minus input_size_bytes; negative when SMA-NG shrank the file. Null until both sizes exist
+        size_change:
+          type: string
+          enum: [shrunk, grew, unchanged]
+          nullable: true
+          description: Whether the output is smaller, larger or the same size as the source. Null until both sizes exist
         source_duration_seconds:
           type: number
           nullable: true
