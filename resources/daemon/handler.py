@@ -18,7 +18,17 @@ from resources.daemon.config import _strip_secrets
 from resources.daemon.constants import MAX_REQUEST_BODY_BYTES, SCRIPT_DIR
 from resources.daemon.context import clear_job_id, set_job_id
 from resources.daemon.db import STATUS_RUNNING, SQLiteJobDatabase, validate_archive_counts
-from resources.daemon.docs_ui import _inline, _load_admin_html, _load_dashboard_html, _load_docs_template, _load_metrics_html, _render_markdown_to_html, doc_file_for_slug
+from resources.daemon.docs_ui import (
+  GENERATED_SLUGS,
+  _inline,
+  _load_admin_html,
+  _load_dashboard_html,
+  _load_docs_template,
+  _load_metrics_html,
+  _render_markdown_to_html,
+  doc_file_for_slug,
+  generated_doc_markdown,
+)
 from resources.daemon.queueing import (
   DUPLICATE,
   NO_ROUTING_MATCH,
@@ -1019,6 +1029,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
     # Sanitise to word chars and hyphens only to prevent path traversal
     raw_slug = path[len("/docs") :].lstrip("/") or "index"
     slug = _re.sub(r"[^\w\-]", "", raw_slug) or "index"
+    if slug in GENERATED_SLUGS:
+      self.send_html_response(200, _load_docs_template(slug, version=self.server.version) % _render_markdown_to_html(generated_doc_markdown(slug)))
+      return
     md_file = doc_file_for_slug(slug)
     if not os.path.abspath(md_file).startswith(os.path.abspath(SCRIPT_DIR) + os.sep):
       self.send_json_response(404, {"error": "Not found"})

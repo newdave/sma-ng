@@ -132,10 +132,12 @@ To forget a stored key, clear the site data for the daemon's address in your bro
 
 `/docs` renders the Markdown files from `docs/` live, so the pages always match the running version. The sidebar lists
 Overview, Getting Started, Docker Quick Start, Configuration, Daemon Mode, Integrations, Hardware Acceleration,
-Library Audit, Deployment, Cluster Operations, Metrics, Troubleshooting, Migration Guide, Architecture and the
-Changelog (`/docs/changelog`). Open a page at `/docs/<slug>`, for example `/docs/daemon`. Code blocks have a Copy
-button, and Mermaid diagrams are drawn in the browser. The footer shows the running version. The docs pages are public
-and need no API key.
+Library Audit, Deployment, Cluster Operations, Metrics, Troubleshooting, Migration Guide, Architecture, Test
+Coverage, API Reference, Mise Tasks and the Changelog (`/docs/changelog`). API Reference (`/docs/api-reference`) is
+generated from `docs/openapi.yaml` and Mise Tasks (`/docs/mise-tasks`) from `.mise/tasks/`; when that source is
+missing from the build, the page says it is not available. Open a page at `/docs/<slug>`, for example
+`/docs/daemon`. Code blocks have a Copy button, and Mermaid diagrams are drawn in the browser. The footer shows the
+running version. The docs pages are public and need no API key.
 
 ---
 
